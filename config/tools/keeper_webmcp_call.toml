@@ -1,8 +1,8 @@
 name = "keeper_webmcp_call"
 description = """
-Execute a WebMCP tool registered on document.modelContext in a target browser page.
+Call a WebMCP tool in a target browser page.
 
-Discover available tools with keeper_webmcp_list first. Requires Chrome \
+The tool must be registered on document.modelContext. Discover available tools with keeper_webmcp_list first. Requires Chrome \
 started with --enable-features=WebMCP and --remote-debugging-port."""
 additional_properties = false
 

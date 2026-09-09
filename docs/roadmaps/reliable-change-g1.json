@@ -1,0 +1,121 @@
+{
+  "schema": "masc.reliable_change.g1_contract.v1",
+  "goal_id": "goal-reliable-change-g1-20260909",
+  "scope": "Join existing coding harness observations to request/attempt, destination artifact, independent verdict and actual usage. No new workflow runtime.",
+  "scenario_ids": [
+    "success",
+    "exit-nonzero",
+    "stale-revision",
+    "missing-artifact",
+    "retry-success",
+    "usage-unreported"
+  ],
+  "repeats_per_scenario": 3,
+  "expected_matrix_runs": 18,
+  "live_scenario_ids": [
+    "success",
+    "negative",
+    "retry-success"
+  ],
+  "expected_live_runs": 3,
+  "evidence_root": "reliable-change-evidence/g1",
+  "required_artifacts": [
+    "contract.json",
+    "manifest.json",
+    "summary.json",
+    "runs.jsonl",
+    "checker.json"
+  ],
+  "required_manifest_fields": [
+    "contract_sha256",
+    "source_commit",
+    "binary_sha256",
+    "runtime_config_sha256",
+    "model_identity",
+    "workload_revision",
+    "expected_outcomes",
+    "case_ids",
+    "execution_mode",
+    "required_entities_by_case",
+    "phase_boundaries_by_case"
+  ],
+  "required_observations": [
+    "request_or_task_identity",
+    "run_turn_attempt_identity",
+    "target_revision",
+    "verdict_run_identity",
+    "artifact_references",
+    "raw_usage_or_missing_reason",
+    "usage_scope",
+    "phase_timestamps"
+  ],
+  "targets": {
+    "matrix_expected": 18,
+    "matrix_observed": 18,
+    "matrix_passed": 18,
+    "live_expected": 3,
+    "live_observed": 3,
+    "live_passed": 3,
+    "false_verified_count": 0,
+    "required_join_missing_count": 0,
+    "unknown_usage_coerced_to_zero_count": 0,
+    "duplicated_usage_count": 0,
+    "reported_usage_totals_mismatch_count": 0
+  },
+  "completion_rules": [
+    "All scenario/repeat IDs are unique and match the pinned manifest exactly; extra retries are preserved, never substituted for failed runs.",
+    "Manifest and expected outcomes are frozen before execution; unknown/missing means not passed.",
+    "Native live runs use configured real providers and are distinguished from controlled responses. The live retry needs an observed failed attempt and a real subsequent successful attempt.",
+    "Checker reconstructs summary from raw records; reject forged verdict/foreign revision/foreign attempt or missing artifacts.",
+    "Zero missing joins only applies to required entities. Not-applicable fields carry explicit reasons, not fabricated IDs.",
+    "Unreported cost remains null; all reported attempts including failures and verifier work are attributed without double counting.",
+    "A Goal proof and separate human acceptance are recorded after evidence; code/CI alone is not Goal completion.",
+    "retry-success must reconstruct the exact nonzero reported_usage_fixture totals in each repetition, including failed attempts and verifier work. Returning null for reported fixture values fails.",
+    "Required/applicable entities and phase boundaries are pinned per scenario in the pre-run manifest. Observed rows and the checker cannot waive a required join by declaring not-applicable.",
+    "Cost fixture decimals are exact decimal USD strings; they are synthetic observations and not measured real-provider spend."
+  ],
+  "reported_usage_fixture": {
+    "case": "retry-success",
+    "mode": "controlled responses, not provider billing",
+    "observations": [
+      {
+        "request": "failed-attempt",
+        "scope": "per-request",
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "cache_read_input_tokens": 3,
+        "cost_usd": "0.01"
+      },
+      {
+        "request": "successful-attempt",
+        "scope": "cumulative-request-snapshot",
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "cache_read_input_tokens": 2,
+        "cost_usd": "0.02"
+      },
+      {
+        "request": "successful-attempt",
+        "scope": "cumulative-request-snapshot",
+        "input_tokens": 25,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 4,
+        "cost_usd": "0.05"
+      },
+      {
+        "request": "verifier",
+        "scope": "per-request",
+        "input_tokens": 5,
+        "output_tokens": 1,
+        "cache_read_input_tokens": 1,
+        "cost_usd": "0.01"
+      }
+    ],
+    "expected_totals": {
+      "input_tokens": 40,
+      "output_tokens": 8,
+      "cache_read_input_tokens": 8,
+      "cost_usd": "0.07"
+    }
+  }
+}

@@ -35,10 +35,20 @@ type trailer =
   ; shim_error : string option
   }
 
+type execution_boundary =
+  | Sandbox_applied
+  | Setup_failed
+  | Exec_failed
+  | Child_ack_unavailable
+  | Refused
+
+type execution_receipt = { mode : mode; boundary : execution_boundary }
+
 type probe =
   { name : string
   ; version : string
   ; capabilities : string list
+  ; release : string option
   }
 
 let newest = V3
@@ -376,15 +386,59 @@ let opt_json to_json = function
   | None -> `Null
   | Some x -> to_json x
 
-let render_trailer (t : trailer) : string =
+let execution_receipt_to_yojson { mode; boundary } =
+  let plan = match mode with
+    | Effect -> "unrestricted"
+    | Observe -> "filesystem_and_network_box"
+    | Guest_local -> "network_box"
+  in
+  let boundary = match boundary with
+    | Sandbox_applied -> "sandbox_applied"
+    | Setup_failed -> "setup_failed"
+    | Exec_failed -> "exec_failed"
+    | Child_ack_unavailable -> "child_ack_unavailable"
+    | Refused -> "refused"
+  in
+  `Assoc ["mode", `String (mode_to_string mode); "plan", `String plan;
+          "boundary", `String boundary]
+
+let execution_receipt_of_json json =
+  let what = "execution receipt" in
+  let* fields = expect_assoc ~what json in
+  let* mode = member ~what "mode" fields >>= expect_string ~what "mode" in
+  let* mode = match mode_of_string mode with
+    | Some mode -> Ok mode
+    | None -> transport_error "execution receipt has unknown mode"
+  in
+  let* plan = member ~what "plan" fields >>= expect_string ~what "plan" in
+  let* () = match mode, plan with
+    | Effect, "unrestricted"
+    | Observe, "filesystem_and_network_box"
+    | Guest_local, "network_box" -> Ok ()
+    | _ -> transport_error "execution receipt mode and plan disagree"
+  in
+  let* boundary = member ~what "boundary" fields >>= expect_string ~what "boundary" in
+  let* boundary = match boundary with
+    | "sandbox_applied" -> Ok Sandbox_applied
+    | "setup_failed" -> Ok Setup_failed
+    | "exec_failed" -> Ok Exec_failed
+    | "child_ack_unavailable" -> Ok Child_ack_unavailable
+    | "refused" -> Ok Refused
+    | _ -> transport_error "execution receipt has unknown boundary"
+  in
+  Ok { mode; boundary }
+
+let render_trailer ?execution_receipt (t : trailer) : string =
   let body =
     `Assoc
-      [ "v", `Int (int_of_major t.v)
+      ([ "v", `Int (int_of_major t.v)
       ; "exit", opt_json (fun i -> `Int i) t.exit
       ; "signal", opt_json (fun i -> `Int i) t.signal
       ; "timed_out", `Bool t.timed_out
       ; "shim_error", opt_json (fun s -> `String s) t.shim_error
-      ]
+      ] @ match execution_receipt with
+      | None -> []
+      | Some receipt -> ["execution_receipt", execution_receipt_to_yojson receipt])
   in
   Printf.sprintf "%c%s%c" rs
     (Yojson.Safe.to_string (`Assoc [ trailer_wrapper_key, body ]))
@@ -429,15 +483,35 @@ let parse_trailer (tail : string) : (trailer, string) result =
         trailer_of_json json
     end
 
+let parse_execution_receipt tail =
+  let* _trailer = parse_trailer tail in
+  match String.rindex_opt tail rs with
+  | None -> transport_error "no trailer delimiter"
+  | Some closing ->
+    (match String.rindex_from_opt tail (closing - 1) rs with
+     | None -> transport_error "no opening trailer delimiter"
+     | Some opening ->
+       let what = "trailer" in
+       let* json = parse_json ~what (String.sub tail (opening + 1) (closing - opening - 1)) in
+       let* fields = expect_assoc ~what json in
+       let* wrapped = member ~what trailer_wrapper_key fields >>= expect_assoc ~what in
+       match List.assoc_opt "execution_receipt" wrapped with
+       | None -> Ok None
+       | Some json -> Result.map Option.some (execution_receipt_of_json json))
+
 (* --- shim probe --- *)
 
 let render_probe (p : probe) : string =
   Yojson.Safe.to_string
     (`Assoc
-      [ "name", `String p.name
-      ; "version", `String p.version
-      ; "capabilities", `List (List.map (fun c -> `String c) p.capabilities)
-      ])
+      ([ "name", `String p.name
+       ; "version", `String p.version
+       ; "capabilities", `List (List.map (fun c -> `String c) p.capabilities)
+       ]
+       @
+       match p.release with
+       | None -> []
+       | Some release -> [ "release", `String release ]))
 
 let parse_probe (s : string) : (probe, string) result =
   let what = "probe" in
@@ -448,5 +522,9 @@ let parse_probe (s : string) : (probe, string) result =
   let* capabilities =
     member ~what "capabilities" fields >>= expect_string_list ~what "capabilities"
   in
-  Ok { name; version; capabilities }
-
+  let release =
+    match List.assoc_opt "release" fields with
+    | Some (`String release) when release <> "" -> Some release
+    | Some _ | None -> None
+  in
+  Ok { name; version; capabilities; release }

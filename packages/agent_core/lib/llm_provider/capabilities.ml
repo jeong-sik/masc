@@ -59,6 +59,14 @@ type assistant_tool_content_format = Capability_vocab.assistant_tool_content_for
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
+  | Chat_max_tokens
+  | Chat_max_completion_tokens
+
+type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
+  | Rich_json_schema
+  | Conformant_subset_required
+
 type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
@@ -131,6 +139,16 @@ type capabilities =
         text. OpenAI-compatible providers disagree here: OpenAI accepts
         [content:null], while GLM's OpenAI-compatible contract keeps
         [content:""]. This is independent from reasoning replay. *)
+  ; chat_output_budget_field : chat_output_budget_field
+    (** Which Chat Completions field carries the output-token budget: the
+        classic [max_tokens] or the reasoning-era [max_completion_tokens]
+        OpenAI's gpt-5 family requires. Emission-side field name only; the
+        #2517 receipt policy (omit/clamp) is unchanged. *)
+  ; tool_schema_conformance : tool_schema_conformance
+    (** Whether this model's provider rejects enum/oneOf/anyOf/allOf inside
+        function parameter schemas. When conformant-only, the request
+        serializer projects tool schemas down to the allowed subset; the
+        dispatcher's [[params]] validation remains the authority. *)
   ; (* ── Thinking / reasoning ──────────────────────────── *)
     supports_reasoning : bool (** Any form of reasoning/thinking *)
   ; supports_extended_thinking : bool (** budget_tokens / reasoning_effort *)
@@ -239,6 +257,8 @@ let default_capabilities =
   ; supports_named_tool_choice = false
   ; supports_parallel_tool_calls = false
   ; assistant_tool_content_format = Assistant_tool_content_null
+  ; chat_output_budget_field = Chat_max_tokens
+  ; tool_schema_conformance = Rich_json_schema
   ; supports_reasoning = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false
@@ -327,6 +347,33 @@ let anthropic_thinking_control_for_model_id model_id =
          anthropic_thinking_control_of_vocab_value
          entry.anthropic_thinking_control
      | None -> manifest_value ())
+;;
+
+(* [anthropic_thinking_control_for_model_id] reads only bare rows: the bare
+   lookup filters out every provider-qualified row (model_catalog.ml filters on
+   [Option.is_none entry.provider_name]). A provider-scoped model — deepseek on
+   the Anthropic-compatible surface is the live case — declares its policy on a
+   provider-qualified row, so the non-exact path never saw it and an explicit
+   enable_thinking then failed with "no catalog-declared policy" while the row
+   carried one. This variant resolves the row the same way the capability path
+   ([for_provider_model_id]) does, by provider label first; callers without a
+   provider label keep the bare-only reading. Found by adversarial review
+   (2026-09-06), F1. *)
+let anthropic_thinking_control_for_provider_model_id
+      ~(provider_label : string)
+      ~(model_id : string)
+  =
+  match Model_catalog.global () with
+  | None -> None
+  | Some catalog ->
+    (match
+       Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id
+     with
+     | Some entry ->
+       Option.map
+         anthropic_thinking_control_of_vocab_value
+         entry.anthropic_thinking_control
+     | None -> None)
 ;;
 
 let anthropic_capabilities =
@@ -826,6 +873,12 @@ let sampling_parameter_to_string = Capability_vocab.sampling_parameter_to_string
 
 let assistant_tool_content_format_of_catalog_string raw =
   Capability_vocab.assistant_tool_content_format_of_string raw
+
+let chat_output_budget_field_of_catalog_string raw =
+  Capability_vocab.chat_output_budget_field_of_string raw
+
+let tool_schema_conformance_of_catalog_string raw =
+  Capability_vocab.tool_schema_conformance_of_string raw
 ;;
 
 let content_inline_reasoning_of_catalog_string raw =
@@ -886,6 +939,8 @@ type declarative_capability_overrides =
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
+  ; chat_output_budget_field : string option
+  ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
   ; supports_reasoning_budget : bool option
@@ -930,6 +985,8 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; supports_named_tool_choice = entry.supports_named_tool_choice
   ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
   ; assistant_tool_content_format = entry.assistant_tool_content_format
+  ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
   ; supports_reasoning_budget = entry.supports_reasoning_budget
@@ -1030,6 +1087,24 @@ let apply_declarative_capability_overrides overrides =
             warn_unknown_capability_value ~field:"assistant_tool_content_format" s;
             base.assistant_tool_content_format)
        | None -> base.assistant_tool_content_format)
+  ; chat_output_budget_field =
+      (match overrides.chat_output_budget_field with
+       | Some s ->
+         (match chat_output_budget_field_of_catalog_string s with
+          | Some field -> field
+          | None ->
+            warn_unknown_capability_value ~field:"chat_output_budget_field" s;
+            base.chat_output_budget_field)
+       | None -> base.chat_output_budget_field)
+  ; tool_schema_conformance =
+      (match overrides.tool_schema_conformance with
+       | Some s ->
+         (match tool_schema_conformance_of_catalog_string s with
+          | Some c -> c
+          | None ->
+            warn_unknown_capability_value ~field:"tool_schema_conformance" s;
+            base.tool_schema_conformance)
+       | None -> base.tool_schema_conformance)
   ; supports_reasoning =
       override_bool base.supports_reasoning overrides.supports_reasoning
   ; supports_extended_thinking =
@@ -1236,6 +1311,8 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_named_tool_choice = entry.supports_named_tool_choice
   ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
   ; assistant_tool_content_format = entry.assistant_tool_content_format
+  ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
   ; supports_reasoning_budget = entry.supports_reasoning_budget
@@ -1497,6 +1574,8 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; supports_named_tool_choice = None
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
+  ; chat_output_budget_field = None
+  ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None
@@ -1546,6 +1625,8 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; supports_named_tool_choice = None
   ; supports_parallel_tool_calls = None
   ; assistant_tool_content_format = None
+  ; chat_output_budget_field = None
+  ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
   ; supports_reasoning_budget = None
@@ -1925,6 +2006,28 @@ let%test "Anthropic thinking policy falls back to manifest when catalog has no r
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
        = Some Anthropic_adaptive_only)
+;;
+
+(* Adversarial F1 (2026-09-06): a provider-qualified row — deepseek on the
+   Anthropic-compatible surface — is invisible to the bare lookup, so the
+   provider-aware variant must be the one that sees its policy, and the bare
+   reading must stay blind to it. *)
+let%test "Anthropic thinking policy on a provider-qualified row resolves by provider label" =
+  Model_catalog.set_global
+    (Model_catalog.of_model_entries
+       [ { (test_catalog_entry "provider-scoped-anthropic-model") with
+           provider_name = Some "deepseek-anthropic";
+           anthropic_thinking_control = Some Capability_vocab.Always_adaptive
+         }
+       ]);
+  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+    anthropic_thinking_control_for_provider_model_id
+      ~provider_label:"deepseek-anthropic"
+      ~model_id:"provider-scoped-anthropic-model"
+    = Some Anthropic_always_adaptive
+    && Option.is_none
+         (anthropic_thinking_control_for_model_id
+            "provider-scoped-anthropic-model"))
 ;;
 
 (* --- emits_usage_tokens / capabilities_for_provider_label --- *)

@@ -19,8 +19,8 @@ val read_fresh_task_status :
   Workspace_utils_backend_setup.config -> task_id:string -> fresh_task_lookup
 
 (** What one agent record says about a task.  [Unreadable] carries the read or
-    decode failure so a caller never reports a store it could not read as a
-    subject that disagrees. *)
+    decode failure; clearing also returns it for failed commit or readback.
+    A failed operation is never reported as a subject that disagrees. *)
 type agent_task_match =
   | Matches
   | Mismatch
@@ -57,8 +57,9 @@ val clear_stale_agent_task :
 
 (** Atomically clear the subject only when its current task exactly matches
     [task_id]. [Matches] is returned only after the record was rewritten and
-    the desynchronization event was emitted; the other variants mean nothing
-    was written. *)
+    commit and readback were verified. The clear event is attempted afterwards.
+    [Unreadable] may follow a failed mirror/readback after a primary commit;
+    callers requiring settlement must retain the error and retry. *)
 val clear_stale_agent_task_if_matching :
   Workspace_utils_backend_setup.config ->
   cause:clear_cause ->
@@ -89,3 +90,15 @@ val clear_stale_agent_task_for_task :
   status:Masc_domain.task_status ->
   module_name:string ->
   unit
+
+(** Typed settlement sweep. Every record is read under its own lock and matching
+    caches are cleared with commit and readback verification. Scan, decode, lock,
+    write and readback failures remain errors for the caller to retry. *)
+val clear_stale_agent_task_for_task_result :
+  Workspace_utils_backend_setup.config -> cause:clear_cause -> task_id:string ->
+  status:Masc_domain.task_status -> module_name:string -> (unit, string list) result
+
+module For_testing : sig
+  (** Deterministic I/O fault after the locked matching read, before commit. *)
+  val with_before_cache_write : (string -> unit) -> (unit -> 'a) -> 'a
+end

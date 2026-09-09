@@ -55,12 +55,8 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
-  (* Pixel size, set once at the moment the bytes are swapped out for their
-     [masc://] reference: after [persisted_attachment] the bytes are gone and
-     the size is no longer derivable, so this field is the only memory of
-     them. [None] is a normal value -- WebP, documents, and rows written
-     before the field existed all read as None and the note shows without a
-     size. *)
+  (* Dimensions are measured before externalization so history pages need
+     only metadata. [data] becomes a canonical marker for retained wire bytes. *)
   width : int option;
   height : int option;
 }
@@ -146,6 +142,7 @@ type approval_lifecycle_phase =
   | Approval_replay_failed
   | Approval_replay_indeterminate
   | Approval_continuation_recorded
+  | Approval_continuation_failed
 
 type approval_lifecycle =
   { approval_id : string
@@ -188,6 +185,7 @@ let approval_lifecycle_phase_to_label = function
   | Approval_replay_failed -> "replay_failed"
   | Approval_replay_indeterminate -> "replay_indeterminate"
   | Approval_continuation_recorded -> "continuation_recorded"
+  | Approval_continuation_failed -> "continuation_failed"
 ;;
 
 let approval_lifecycle_phase_of_label = function
@@ -199,6 +197,7 @@ let approval_lifecycle_phase_of_label = function
   | "replay_failed" -> Some Approval_replay_failed
   | "replay_indeterminate" -> Some Approval_replay_indeterminate
   | "continuation_recorded" -> Some Approval_continuation_recorded
+  | "continuation_failed" -> Some Approval_continuation_failed
   | _ -> None
 ;;
 
@@ -312,17 +311,9 @@ let redaction_for ~base_dir ~keeper_name =
 let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
-let persisted_attachment_ref (att : attachment) =
-  (* SHA-256, not Stdlib.Digest (MD5): this is attachment content identity,
-     not a display checksum (#26720). Nothing reads the digest back out of the
-     URI — [att.id] is the locator — so rows written before this keep working. *)
-  let digest = Digestif.SHA256.(digest_string att.data |> to_hex) in
-  Printf.sprintf "masc://attachment/%s/%s" att.id digest
-
-let persisted_attachment (att : attachment) =
-  (* The last place the bytes exist: the reference that replaces them cannot
-     answer "how big was it", so the pixel size is read here, once, from the
-     same payload the provider request was built from. Gate connectors send
+let persisted_attachment ~base_dir (att : attachment) =
+  (* Measure dimensions before replacing inline data with a durable reference.
+     History pages then carry metadata without fetching image payloads. Gate connectors send
      [data:<mime>;base64,<payload>] URIs and the TUI sends bare base64;
      both decode here, and a payload that decodes to nothing parseable just
      leaves the size unset. *)
@@ -343,7 +334,13 @@ let persisted_attachment (att : attachment) =
     | Some (width, height) -> (Some width, Some height)
     | None -> (att.width, att.height)
   in
-  { att with data = persisted_attachment_ref att; width; height }
+  let reference =
+    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:base_dir)
+      ~bytes:att.data ~mime:"text/plain"
+    |> fun reference -> Tool_output.with_preview reference "attachment payload"
+  in
+  let data = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  { att with data; width; height }
 
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
@@ -671,7 +668,8 @@ let parse_approval_lifecycle ~path = function
                | Approval_requested
                | Approval_resolved_approved
                | Approval_resolved_rejected
-               | Approval_continuation_recorded -> false
+               | Approval_continuation_recorded
+               | Approval_continuation_failed -> false
                | Approval_replay_applied
                | Approval_replay_applied_with_warning
                | Approval_replay_failed
@@ -1321,7 +1319,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       List.map (redact_attachment redaction) user_attachments
     in
     let persisted_user_attachments =
-      List.map persisted_attachment user_attachments
+      List.map (persisted_attachment ~base_dir) user_attachments
     in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
@@ -1397,7 +1395,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
     let redaction = redaction_for ~base_dir ~keeper_name in
     let user_content = Keeper_secret_redaction.redact_text redaction user_content in
     let user_attachments = List.map (redact_attachment redaction) user_attachments in
-    let persisted_user_attachments = List.map persisted_attachment user_attachments in
+    let persisted_user_attachments = List.map (persisted_attachment ~base_dir) user_attachments in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
@@ -1840,7 +1838,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map persisted_attachment attachments in
+    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
@@ -1879,7 +1877,7 @@ let append_user_message_once
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map persisted_attachment attachments in
+    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
@@ -2640,7 +2638,25 @@ let approval_lifecycle_is_replay = function
   | Approval_replay_indeterminate -> true
   | Approval_resolved_approved
   | Approval_resolved_rejected
-  | Approval_continuation_recorded -> false
+  | Approval_continuation_recorded
+  | Approval_continuation_failed -> false
+;;
+
+(* The continuation settles once per approval, at the continuation slot:
+   recorded when the turn that received the replay completed or durably
+   checkpointed, failed when that turn failed after the provider answered.
+   Either one is the settlement the intake reads before re-delivering the
+   approval (#32956). *)
+let approval_lifecycle_is_continuation = function
+  | Approval_continuation_recorded
+  | Approval_continuation_failed -> true
+  | Approval_requested
+  | Approval_resolved_approved
+  | Approval_resolved_rejected
+  | Approval_replay_applied
+  | Approval_replay_applied_with_warning
+  | Approval_replay_failed
+  | Approval_replay_indeterminate -> false
 ;;
 
 let append_approval_lifecycle_at_slot_once
@@ -2716,7 +2732,8 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
     | Approval_replay_applied_with_warning
     | Approval_replay_failed
     | Approval_replay_indeterminate -> Approval_replay
-    | Approval_continuation_recorded -> Approval_continuation
+    | Approval_continuation_recorded
+    | Approval_continuation_failed -> Approval_continuation
   in
   match
     append_approval_lifecycle_at_slot_once
@@ -2727,8 +2744,16 @@ let append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
   with
   | Error _ as error -> error
   | Ok (Approval_lifecycle_exact result) -> Ok result
-  | Ok (Approval_lifecycle_conflict _) ->
-    Error "approval lifecycle provenance exists with conflicting content"
+  | Ok (Approval_lifecycle_conflict existing) ->
+    (* The slot is settled once; say by what, so a caller that reports this
+       as "projection failed" still names the phase already there. *)
+    Error
+      (Printf.sprintf
+         "approval lifecycle provenance exists with conflicting content: \
+          approval %s already holds phase %s where phase %s was to be appended"
+         lifecycle.approval_id
+         (approval_lifecycle_phase_to_label existing.phase)
+         (approval_lifecycle_phase_to_label lifecycle.phase))
 ;;
 
 let existing_approval_lifecycle_at_slot
@@ -2815,6 +2840,16 @@ let approval_lifecycle_phase_present
     match message.approval_lifecycle with
     | Some lifecycle ->
       String.equal lifecycle.approval_id approval_id && lifecycle.phase = phase
+    | None -> false)
+;;
+
+let approval_continuation_settled ~base_dir ~keeper_name ~approval_id =
+  load_all ~base_dir ~keeper_name
+  |> List.exists (fun message ->
+    match message.approval_lifecycle with
+    | Some lifecycle ->
+      String.equal lifecycle.approval_id approval_id
+      && approval_lifecycle_is_continuation lifecycle.phase
     | None -> false)
 ;;
 
@@ -2982,10 +3017,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->
-                     (* The dashboard API carries the size the row was
-                        persisted with -- the [masc://] reference in [data]
-                        cannot be re-measured, and rows that never went
-                        through [persisted_attachment] have none to show. *)
+                     (* History carries dimensions and a small blob marker;
+                        image payloads are fetched only when requested. *)
                      let att_json = List.map (fun (att : attachment) ->
                        `Assoc ([
                          ("id", `String att.id);

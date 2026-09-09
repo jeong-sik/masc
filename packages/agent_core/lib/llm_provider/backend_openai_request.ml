@@ -56,6 +56,42 @@ let warn_dialect_ignored ~model_id ~parameter =
       model_id)
 ;;
 
+(* A clamp is not a drop: the field stays on the wire at the ceiling. It shares
+   the one-shot table and the metrics hook with the drop warning under the
+   "max_tokens:clamp" field, which is what operators and tests key on, but says
+   what happened: the requested value, the ceiling that replaced it, and where
+   the ceiling came from. The old text claimed a capability record reported
+   "supports_max_tokens:clamp = false", which reads as a dropped field and hid
+   a ceiling above the provider's real limit (glm-4.6v, 2026-09-07). *)
+let warn_output_token_clamp ~model_id ~receipt =
+  let field = "max_tokens:clamp" in
+  let key = model_id, field in
+  if not (Hashtbl.mem capability_drop_warned key)
+  then (
+    Hashtbl.replace capability_drop_warned key ();
+    (Metrics.get_global ()).on_capability_drop ~model_id ~field;
+    let show = function
+      | Some n -> string_of_int n
+      | None -> "-"
+    in
+    let source =
+      match Types.output_token_receipt_ceiling_source receipt with
+      | Some Types.Catalog_model -> "catalog model row"
+      | Some Types.Declared_capability_override -> "declared capability override"
+      | Some Types.Provider_default -> "provider default"
+      | None -> "-"
+    in
+    Diag.warn
+      "backend_openai"
+      "clamping max_tokens %s to the output ceiling %s (%s) for model %s: the request \
+       asked above what the capability record admits, and the ceiling is what reaches \
+       the wire."
+      (show (Types.output_token_receipt_requested receipt))
+      (show (Types.output_token_receipt_ceiling receipt))
+      source
+      model_id)
+;;
+
 let add_sampling_field dialect (config : Provider_config.t) parameter value body =
   let field = Capabilities.sampling_parameter_to_string parameter in
   if
@@ -209,7 +245,7 @@ let output_token_receipt ~envelope (config : Provider_config.t) =
   in
   (match Types.output_token_receipt_policy receipt with
    | Types.Explicit_clamped ->
-     warn_capability_drop ~model_id:config.model_id ~field:"max_tokens:clamp"
+     warn_output_token_clamp ~model_id:config.model_id ~receipt
    | Omitted
    | Explicit
    | Required_catalog_fallback
@@ -321,7 +357,18 @@ let build_request_assoc_artifact
   let body = [ "model", `String config.model_id; "messages", `List provider_messages ] in
   let body =
     match Types.output_token_receipt_effective output_token_receipt with
-    | Some mt -> body @ [ "max_tokens", `Int mt ]
+    | Some mt ->
+      (* Model-scoped field name (#3317 family): reasoning-era OpenAI models
+         reject [max_tokens] outright ("Use 'max_completion_tokens' instead",
+         gpt-5.5 live probe 2026-09-07) and count hidden reasoning tokens
+         inside the completion budget. The omit/clamp policy above is
+         unchanged — only which wire field carries the resolved value. *)
+      let field =
+        match caps.Capabilities.chat_output_budget_field with
+        | Capabilities.Chat_max_tokens -> "max_tokens"
+        | Capabilities.Chat_max_completion_tokens -> "max_completion_tokens"
+      in
+      body @ [ field, `Int mt ]
     | None -> body
   in
   let body =
@@ -404,7 +451,16 @@ let build_request_assoc_artifact
     match tools with
     | [] -> body
     | ts ->
-      ("tools", `List (List.map Backend_openai_serialize.build_openai_tool_json ts))
+      ( "tools"
+      , `List
+          (List.map
+             (fun tool ->
+                match caps.Capabilities.tool_schema_conformance with
+                | Capabilities.Rich_json_schema ->
+                  Backend_openai_serialize.build_openai_tool_json tool
+                | Capabilities.Conformant_subset_required ->
+                  Backend_openai_serialize.conformant_tool_json tool)
+             ts) )
       :: body
   in
   let body =

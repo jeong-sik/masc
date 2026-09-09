@@ -551,35 +551,6 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
     ~update_entry:update_entry_unit
 ;;
 
-(* [dedup_key] is the key under which a board wakeup is deduped. RFC-0239 R4
-   keys it on a content fingerprint rather than the raw post_id, so identical
-   re-posts (each with a fresh post_id) collapse into one wake per window. The
-   map is otherwise a generic (key -> last_ts) debounce. *)
-let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
-  (* RFC-0303 Phase 3: the no-progress wake-tombstone gate is removed (the
-     detector that fed it is retired). The per-key debounce (dedup) below is a
-     separate concern and stays: identical re-posts still collapse into one wake
-     per window. *)
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> true
-  | Some entry ->
-    let now_ts = Time_compat.now () in
-    (match StringMap.find_opt dedup_key entry.board_wakeups with
-     | Some last_ts when now_ts -. last_ts < debounce_sec -> false
-     | _ ->
-       (match
-          update_entry ~base_path name (fun e ->
-            { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups })
-        with
-        | Ok () -> ()
-        | Error err ->
-          Log.Keeper.warn
-            "%s: failed to record board wakeup dedupe key: %s"
-            name
-            (registry_entry_validation_error_to_string err));
-       true)
-;;
-
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key (Atomic.get registry) with
@@ -589,8 +560,7 @@ let cleanup_tracking ~base_path name =
          ~base_path
          name
          { entry with
-           board_wakeups = StringMap.empty
-         ; tool_usage = StringMap.empty
+           tool_usage = StringMap.empty
          ; board_cursor_ts = 0.0
          ; board_cursor_post_id = None
          }
@@ -606,8 +576,7 @@ let cleanup_tracking ~base_path name =
 
 let cleanup_tracking_entry current =
   { current with
-    board_wakeups = StringMap.empty
-  ; tool_usage = StringMap.empty
+    tool_usage = StringMap.empty
   ; board_cursor_ts = 0.0
   ; board_cursor_post_id = None
   }
@@ -1216,5 +1185,4 @@ module For_testing = struct
   let record_restart = record_restart
   let set_started_at_for_test = set_started_at_for_test
   let crash_log_of = crash_log_of
-  let board_wakeup_allowed = board_wakeup_allowed
 end

@@ -163,6 +163,52 @@ let test_unknown_block_id_is_malformed_not_dropped () =
       Alcotest.failf "expected Malformed, got %s" (Capture.read_error_to_string error))
 ;;
 
+(* The assembly is a cached prefix, so its order decides what gets re-billed.
+   Two blocks sharing a rank would leave that order to whichever producer ran
+   first, which is the accident the rank exists to remove. *)
+let test_every_block_ranks_apart () =
+  let ranks = List.map Block_id.cache_rank Block_id.all_known in
+  Alcotest.(check int)
+    "every block has a rank of its own"
+    (List.length Block_id.all_known)
+    (List.length (List.sort_uniq Int.compare ranks))
+;;
+
+(* The measured fix: over 386 fixture_worker turns the 51,518 B memory block changed
+   65 times while the 81 B clock line ahead of it changed 306, so every turn
+   re-billed the memory block. Whatever else moves, the rarely-changing blocks
+   stay in front of the two that change nearly every turn. *)
+let test_rarely_changing_blocks_come_first () =
+  let before a b =
+    Alcotest.(check bool)
+      (Printf.sprintf
+         "%s is assembled before %s"
+         (Block_id.to_string a)
+         (Block_id.to_string b))
+      true
+      (Block_id.cache_rank a < Block_id.cache_rank b)
+  in
+  before Block_id.Memory_os_recall Block_id.Dynamic_context;
+  before Block_id.Memory_os_recall Block_id.Temporal_summary;
+  before Block_id.Skill_compositions Block_id.Dynamic_context;
+  before Block_id.Skill_compositions Block_id.Temporal_summary
+;;
+
+(* [Operator_note] is someone speaking mid-turn and the only block that rides a
+   post-tool round; it is the newest thing in the assembly, so it stays last. *)
+let test_the_operator_note_stays_last () =
+  let latest =
+    List.fold_left
+      (fun best block -> max best (Block_id.cache_rank block))
+      min_int
+      Block_id.all_known
+  in
+  Alcotest.(check int)
+    "no block is assembled after an operator note"
+    latest
+    (Block_id.cache_rank Block_id.Operator_note)
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -184,6 +230,14 @@ let () =
             test_invalid_keeper_name_is_refused
         ; Alcotest.test_case "unknown block id is malformed, not dropped" `Quick
             test_unknown_block_id_is_malformed_not_dropped
+        ] )
+    ; ( "assembly order"
+      , [ Alcotest.test_case "every block ranks apart" `Quick
+            test_every_block_ranks_apart
+        ; Alcotest.test_case "rarely changing blocks come first" `Quick
+            test_rarely_changing_blocks_come_first
+        ; Alcotest.test_case "the operator note stays last" `Quick
+            test_the_operator_note_stays_last
         ] )
     ]
 ;;

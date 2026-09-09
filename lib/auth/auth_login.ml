@@ -214,12 +214,13 @@ export %s=%s|}
   "mcpServers": {
     "masc": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "%s"],
+      "args": ["-y", "mcp-remote", "%s", "--header", "Authorization: Bearer ${%s}"],
       "env": { "%s": "%s" }
     }
   }
 }|}
-        report.mcp_url report.mcp_token_env_var report.bearer_token
+        report.mcp_url report.mcp_token_env_var report.mcp_token_env_var
+        report.bearer_token
 
 let render_text report =
   String.concat "\n"

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
 import { isOperating, isTerminated, computeDivergences } from "./keeper-conditions-divergent"
@@ -10,7 +9,6 @@ const allHealthy: KeeperConditions = {
   heartbeat_healthy: true,
   turn_healthy: true,
   context_handoff_needed: false,
-  handoff_active: false,
   operator_paused: false,
   stop_requested: false,
   drain_complete: false,
@@ -116,6 +114,6 @@ describe("computeDivergences", () => {
   it("still detects operator_paused in terminated phase (rule lacks isTerminated guard)", () => {
     const divs = computeDivergences({ ...allHealthy, operator_paused: true }, "Stopped")
     expect(divs).toHaveLength(1)
-    expect(divs[0].field).toBe("operator_paused")
+    expect(divs[0]!.field).toBe("operator_paused")
   })
 })

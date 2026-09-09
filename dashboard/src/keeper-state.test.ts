@@ -1027,8 +1027,11 @@ describe('thread history merge & persistence', () => {
     const atts = entries[0]?.attachments ?? []
     expect(atts).toHaveLength(2)
     // snake_case mime_type -> camelCase mimeType, type narrowed to image/file.
+    // The decode result is byte-backed by construction (KeeperByteAttachment),
+    // so no reference arm can appear here.
     expect(atts[0]).toMatchObject({ id: 'att1', type: 'image', mimeType: 'image/png', data: 'BASE64' })
-    expect(atts[1]?.type).toBe('file')
+    const second = atts[1]
+    expect(second && !second.kind ? second.type : 'reference').toBe('file')
   })
 
   it('drops attachment rows missing id or data (unrenderable)', () => {
@@ -1106,11 +1109,29 @@ describe('thread history merge & persistence', () => {
           phase: 'continuation_recorded',
         },
       },
+      {
+        // #32956: the turn that received the replay failed after the
+        // provider answered; the store settles that approval as failed.
+        role: 'system',
+        content: '',
+        ts: 1_780_000_003,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_02failed' },
+          transcript_slot: { kind: 'approval_continuation' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_02failed',
+          tool_name: 'Execute',
+          phase: 'continuation_failed',
+        },
+      },
     ])
     expect(entries.map(entry => entry.approvalLifecycle?.phase)).toEqual([
       'resolved_approved',
       'replay_applied',
       'continuation_recorded',
+      'continuation_failed',
     ])
     expect(entries[1]?.approvalLifecycle?.artifactSha256).toBe(sha256)
     expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)

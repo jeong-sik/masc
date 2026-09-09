@@ -1,0 +1,31 @@
+name = "masc_file_upload"
+description = """
+Upload an image to the provider Files API and get a file_id back.
+
+The \
+file_id can then be used in a vision request to send the same image many \
+times without re-uploading it, and it allows images larger than the inline \
+size limit. Only images are accepted; the largest allowed file is 64 MiB \
+and files are stored for reuse. Use masc_file_delete when the file is no \
+longer needed."""
+
+# RFC-0430 Phase 3. Fleet data decides defer_loading after the first
+# week of calls; uploading is rare enough that the default (schema on
+# every request) is the wrong side to start on.
+defer_loading = true
+[[params]]
+name = "filename"
+type = "string"
+required = true
+description = "File name to store, e.g. screenshot.png. Max 512 characters."
+
+[[params]]
+name = "content_base64"
+type = "string"
+required = true
+description = "The file's bytes, base64-encoded."
+
+[[params]]
+name = "purpose"
+type = "string"
+description = "Purpose of the file. The API accepts only \"user_data\" today; omit to use it."

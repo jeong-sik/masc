@@ -69,13 +69,20 @@ type composition_skill =
   ; entry : Catalog.entry
   }
 
+(* Each line carries what a call needs and nothing else: the identity, copyable
+   straight into the tool's [identity] argument. It used to carry the whole
+   reference, whose 64-hex content_revision is the larger half of every line and
+   is no longer asked for — the turn's frozen list decides that (RFC-0411 §4.2).
+   The revision comes back only on a refusal, where it is the one thing that can
+   still separate two Skills sharing an identity. *)
 let instruction_skill_description (instruction_skills : instruction_skill list) =
   let listed =
     instruction_skills
     |> List.map (fun (skill : instruction_skill) ->
          Printf.sprintf
            "%s: %s"
-           (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+           (Skill_reference.identity_to_yojson skill.reference.identity
+            |> Yojson.Safe.to_string)
            skill.description)
     |> String.concat "\n"
   in
@@ -1160,6 +1167,37 @@ let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
 ;;
 
+let instruction_skills_of_catalog skill_catalog =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Instruction ->
+             let resource_location =
+               match skill.provenance with
+               | Some
+                   { source_root = Some source_root
+                   ; resource_read_max_bytes = Some resource_read_max_bytes
+                   ; directory
+                   ; _
+                   } ->
+                 Some
+                   { source_root; directory; resource_read_max_bytes }
+               | Some { source_root = None; _ }
+               | Some { resource_read_max_bytes = None; _ }
+               | None ->
+                 None
+             in
+             Some
+               (instruction_skill
+                  ?resource_location
+                  ~reference
+                  ~description:skill.description
+                  ~body:skill.body
+                  ())
+           | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
+             None)
+;;
+
 let instruction_skill_schema_tool
       ~(instruction_skills : instruction_skill list)
   =
@@ -1205,7 +1243,7 @@ let skill_reference_and_resource_path input =
         (fun (field, value) -> if String.equal field "file" then Some value else None)
         fields
     in
-    (match Skill_reference.of_yojson reference_json with
+    (match Skill_reference.request_of_yojson reference_json with
      | Error _ -> Error Invalid_skill_reference
      | Ok reference ->
        (match resource_fields with
@@ -1249,11 +1287,17 @@ let load_instruction_resource location relative_path =
 let make_instruction_skill_tool
       ~(config : Workspace.config)
       ?record_activation
+      ?on_result
       ~instruction_skills
       ()
   =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in
+  let observe handler execution_env input =
+    let result = handler execution_env input in
+    Option.iter (fun callback -> callback ~input result) on_result;
+    result
+  in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
@@ -1261,7 +1305,7 @@ let make_instruction_skill_tool
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
-    (fun execution_env input ->
+    (observe (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
@@ -1299,13 +1343,43 @@ let make_instruction_skill_tool
              ~start_time
              (Skill_resource_path.error_to_string error)
          | Ok (asked, resource_path) ->
+           (* A pinned request is matched whole, as before: a revision the
+              caller spelled out is honoured or refused, never replaced. A
+              request that named the Skill and left the revision open is
+              resolved against this turn's frozen list — the same list the
+              pinned match searches, so nothing new is reachable by dropping
+              the revision.
+
+              Two carried Skills sharing an identity cannot be told apart by
+              name, so that ask is refused rather than answered with a guess;
+              the refusal carries the exact references, which is the one
+              contract that can still separate them. RFC-0411 §4.2, §4.3. *)
            (match
-              List.find_opt
-                (fun (skill : instruction_skill) ->
-                   Skill_reference.equal skill.reference asked)
-                instruction_skills
+              match asked with
+              | Skill_reference.Pinned reference ->
+                List.filter
+                  (fun (skill : instruction_skill) ->
+                     Skill_reference.equal skill.reference reference)
+                  instruction_skills
+              | Skill_reference.By_identity identity ->
+                List.filter
+                  (fun (skill : instruction_skill) ->
+                     Skill_reference.equal_identity
+                       skill.reference.identity
+                       identity)
+                  instruction_skills
             with
-            | Some skill ->
+            | _ :: _ :: _ ->
+              Tool_result.make_err
+                ~tool_name:name
+                ~class_:Tool_result.Workflow_rejection
+                ~start_time
+                (Printf.sprintf
+                   "this keeper carries more than one Skill under that name, so \
+                    the name alone cannot say which; call again with \
+                    content_revision. Carried: %s"
+                   (carried_references_text instruction_skills))
+            | [ skill ] ->
               let reference = skill.reference in
               let skill_tool_use_id =
                 Agent_core.Tool_contract.Invocation.tool_use_id invocation
@@ -1435,13 +1509,22 @@ let make_instruction_skill_tool
                  error and says so with the exact references it does carry,
                  rather than an empty
                  body the model would read as "this skill says nothing". *)
-              None ->
+              [] ->
               Tool_result.make_err ~tool_name:name
                 ~class_:Tool_result.Workflow_rejection ~start_time
                 (Printf.sprintf
-                   "no instruction Skill matches exact reference %s; this keeper carries: %s"
-                   (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
-                   (carried_references_text instruction_skills))))))
+                   "no instruction Skill matches %s; this keeper carries: %s"
+                   (match asked with
+                    | Skill_reference.Pinned reference ->
+                      Printf.sprintf
+                        "exact reference %s"
+                        (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+                    | Skill_reference.By_identity identity ->
+                      Printf.sprintf
+                        "identity %s"
+                        (Skill_reference.identity_to_yojson identity
+                         |> Yojson.Safe.to_string))
+                   (carried_references_text instruction_skills)))))))
 ;;
 
 module For_testing = struct

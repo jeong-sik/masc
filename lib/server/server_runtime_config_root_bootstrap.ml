@@ -157,6 +157,25 @@ let ensure_config_root_scaffold config_root =
   |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
 ;;
 
+(* The roster a fresh root starts with, from [keepers-default/] on disk into
+   [keepers/]. Separate from the loop below because the directory is the one
+   config entry that does not keep its name. *)
+let copy_missing_default_keeper_seed ~src ~dst =
+  let src_dir = Filename.concat src Common.default_keepers_dirname in
+  if existing_directory src_dir
+  then
+    Sys.readdir src_dir
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+      Common.fresh_config_root_keeper_seed_target
+        (Filename.concat Common.default_keepers_dirname name)
+      |> Option.map (fun target -> name, target))
+    |> List.iter (fun (name, target) ->
+      copy_file_if_missing
+        ~src:(Filename.concat src_dir name)
+        ~dst:(Filename.concat dst target))
+;;
+
 (* Explicit base-path workspaces should inherit shared config defaults
    without silently importing repo keeper manifests into the live root. *)
 let copy_missing_config_root_seed ~src ~dst =
@@ -168,7 +187,8 @@ let copy_missing_config_root_seed ~src ~dst =
       copy_missing_tree
         ~src:(Filename.concat src name)
         ~dst:(Filename.concat dst name));
-  Fs_compat.mkdir_p (Filename.concat dst Common.keepers_runtime_dirname)
+  Fs_compat.mkdir_p (Filename.concat dst Common.keepers_runtime_dirname);
+  copy_missing_default_keeper_seed ~src ~dst
 ;;
 
 (* Write the named embedded assets that [dst] does not already hold, and answer
@@ -197,11 +217,40 @@ let write_missing_embedded ~dst rels =
    fresh base path got a scaffold with no runtime.toml and startup died on "no
    runtime config path". Measured 2026-09-05 with the v0.31.0 binary run outside
    its repo. Same distribution/operator split as the filesystem seed above. *)
+(* Like [write_missing_embedded] for assets whose destination name differs from
+   their key in the embedded tree. *)
+let write_missing_embedded_renamed ~dst pairs =
+  List.fold_left
+    (fun written (rel, target_rel) ->
+       let target = Filename.concat dst target_rel in
+       if Sys.file_exists target
+       then written
+       else (
+         match Embedded_config.read rel with
+         | None -> written
+         | Some content ->
+           Fs_compat.mkdir_p (Filename.dirname target);
+           Fs_compat.save_file target content;
+           written + 1))
+    0
+    pairs
+;;
+
 let seed_missing_from_embedded ~dst =
   Fs_compat.mkdir_p dst;
-  Embedded_config.file_list
-  |> List.filter Common.seeds_into_fresh_config_root
-  |> write_missing_embedded ~dst
+  let verbatim =
+    Embedded_config.file_list
+    |> List.filter Common.seeds_into_fresh_config_root
+    |> write_missing_embedded ~dst
+  in
+  let roster =
+    Embedded_config.file_list
+    |> List.filter_map (fun rel ->
+      Common.fresh_config_root_keeper_seed_target rel
+      |> Option.map (fun target -> rel, target))
+    |> write_missing_embedded_renamed ~dst
+  in
+  verbatim + roster
 ;;
 
 (* An existing config root is operator-owned and is deliberately not refilled.
@@ -215,6 +264,49 @@ let backfill_startup_required_from_embedded ~config_root =
   ; agent_core_models_overlay_toml_filename
   ]
   |> write_missing_embedded ~dst:config_root
+;;
+
+(* SKILL.md and its resources form one package. Publish a complete staged
+   directory, never backfill individual resources into an operator's package. *)
+let seed_missing_builtin_skills ~base_path =
+  let root = Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills" in
+  let packages =
+    Embedded_skills.file_list
+    |> List.filter_map (fun path ->
+      match String.split_on_char '/' path with
+      | [ package; "SKILL.md" ] -> Some package
+      | [] | _ :: _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  Fs_compat.mkdir_p root;
+  List.fold_left
+    (fun installed package ->
+       let target = Filename.concat root package in
+       if Sys.file_exists target then installed
+       else
+         let staging =
+           Filename.temp_dir ~temp_dir:(Filename.dirname root) ".skill-seed-" ""
+         in
+         Common.protect ~module_name:"builtin_skills" ~finally_label:"staging"
+           ~finally:(fun () -> Fs_compat.remove_tree staging)
+           (fun () ->
+              let prefix = package ^ "/" in
+              Embedded_skills.file_list
+              |> List.filter (String.starts_with ~prefix)
+              |> List.iter (fun path ->
+                match Embedded_skills.read path with
+                | None -> invalid_arg ("missing embedded Skill asset: " ^ path)
+                | Some content ->
+                  let rel = String.sub path (String.length prefix)
+                      (String.length path - String.length prefix) in
+                  let destination = Filename.concat staging rel in
+                  Fs_compat.mkdir_p (Filename.dirname destination);
+                  Fs_compat.save_file destination content);
+              if Sys.file_exists target then installed
+              else (
+                Fs_compat.rename staging target;
+                installed + 1)))
+    0 packages
 ;;
 
 let bootstrap_base_path_config_root ~base_path =
@@ -303,6 +395,10 @@ let bootstrap_base_path_config_root ~base_path =
             "bootstrapped minimal base-path config root without versioned source \
              and no embedded assets: %s"
             config_root);
+    if mode = `Auto then (
+      let installed = seed_missing_builtin_skills ~base_path in
+      if installed > 0 then
+        Log.Server.info "installed %d builtin Skill package(s)" installed);
     Config_dir_resolver.reset ())
 ;;
 

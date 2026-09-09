@@ -87,27 +87,32 @@ let test_multi_emptied_is_unanswered () =
   Alcotest.(check bool) "empty selection is not an answer" true
     (Ask.response_for d ~question:multi = None)
 
-let test_free_text_slot_absent_for_choices_only () =
-  Alcotest.(check bool) "no editor on a choices-only question" true
-    (Ask.free_text_slot single = None)
+let test_free_text_slot_for_choices_only () =
+  let slot = Ask.free_text_slot single in
+  Alcotest.(check (option string)) "no author hint needed" None (Ask.free_text_hint slot);
+  let draft = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"another route" in
+  match Ask.response_for draft ~question:single with
+  | Some (Ask.Draft_wrote "another route") -> ()
+  | _ -> Alcotest.fail "alternative was not drafted"
 
 let test_free_text_slot_carries_hint () =
-  let q =
-    question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1"
-  in
-  match Ask.free_text_slot q with
-  | None -> Alcotest.fail "expected a slot"
-  | Some slot ->
-      Alcotest.(check (option string)) "hint reaches the editor" (Some "one line")
-        (Ask.free_text_hint slot)
+  let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1" in
+  Alcotest.(check (option string)) "hint reaches the editor" (Some "one line")
+    (Ask.free_text_hint (Ask.free_text_slot q))
+
+let test_alternative_shortcut () =
+  List.iter (fun (count, expected) ->
+    let choices = List.init count (fun i -> choice (string_of_int i) "choice") in
+    let q = question ~choices "q1" in
+    Alcotest.(check (option int)) "unambiguous next digit" expected (Ask.alternative_position q)
+  ) [0, None; 1, Some 2; 4, Some 5; 8, Some 9; 9, None; 12, None]
 
 let text_question_named id =
   question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = None }) ~choices:[] id
 
 let text_question = text_question_named "q1"
 
-let slot_of q =
-  match Ask.free_text_slot q with None -> Alcotest.fail "expected a slot" | Some s -> s
+let slot_of = Ask.free_text_slot
 
 (* The panel draws the caret on a row, and the editor holds a slot rather than
    a row index; without a way back to the question id the surface would have to
@@ -373,8 +378,9 @@ let () =
         ] );
       ( "free text",
         [
-          Alcotest.test_case "absent for choices-only" `Quick
-            test_free_text_slot_absent_for_choices_only;
+          Alcotest.test_case "alternative for choices-only" `Quick
+            test_free_text_slot_for_choices_only;
+          Alcotest.test_case "next digit or t" `Quick test_alternative_shortcut;
           Alcotest.test_case "carries the hint" `Quick test_free_text_slot_carries_hint;
           Alcotest.test_case "names its question" `Quick
             test_free_text_slot_names_its_question;

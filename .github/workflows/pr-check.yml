@@ -71,6 +71,41 @@ jobs:
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
 
+      # Runs before the lints because it answers whether this run is about the
+      # current head at all. The payload carries the sha the run was created
+      # for; a push that lands afterwards leaves that sha behind, and every
+      # verdict below then describes a commit nobody is looking at. It cannot
+      # live in run-lint-suite.sh -- that takes a base sha and knows nothing
+      # about the head branch or the payload.
+      - name: PR run is not stale
+        run: |
+          bash scripts/check-pr-sync.sh \
+            --head-branch "${{ github.event.pull_request.head.ref }}" \
+            --expected-head-sha "${{ github.event.pull_request.head.sha }}" \
+            --pr-number "${{ github.event.pull_request.number }}"
+
+      # These checks use only checked-in text, Bash and Python. Report them
+      # alongside compilation without waiting for an OCaml toolchain.
+      - name: Check doc truth
+        run: scripts/check-doc-truth.sh
+
+      - name: Verify doc truth uses stable checkout inputs
+        run: python3 test/test_doc_truth_stable_inputs.py
+
+      - name: Verify release distribution fixtures
+        run: python3 test/test_release_dashboard_bundle.py -v
+
+      - name: Verify release evidence receipt with private captures
+        run: python3 test/test_release_evidence_report.py -v
+
+      - name: Installer onboarding and removal behavior
+        run: |
+          python3 test/test_installer_dependencies.py -v
+          python3 test/test_installer_wizard.py -v
+          python3 test/test_installer_upgrade.py -v
+          python3 test/test_installer_uninstall.py -v
+          python3 test/test_install_runtime_setup.py -v
+
       - name: Blocking lints
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \
@@ -85,6 +120,15 @@ jobs:
     name: dune build @check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Only the edited-test step below reads it, and it asks the pull
+      # request API which files changed because a three-dot git diff cannot
+      # answer that here: this job checks out at depth 1, so there is no
+      # merge base and the answer would be the whole tree. Scoped to this
+      # job so the lint job, which runs 37 scripts over pull request
+      # content, does not carry it.
+      pull-requests: read
     steps:
       - name: Free disk space
         # Same preinstalled bulk the manual CI removes for the same reason:
@@ -104,10 +148,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          # check-doc-truth.sh compares the release the docs name with the
-          # newest v* tag; a checkout with no tags cannot answer that.
-          fetch-tags: true
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
@@ -134,18 +174,115 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
-      # CONTRIBUTING names this gate and nothing ran it, so the version headers
-      # drifted: the 0.30.0 release updated ROADMAP and left
-      # docs/PRODUCT-OPERATING-PLAN.md and docs/spec/SPEC-INDEX.md on 0.29.1 for
-      # a day. It reads checked-in text only, so it runs before the build and
-      # after the step that installs the rg and jq it calls.
-      - name: Check doc truth
-        run: scripts/check-doc-truth.sh
+      - name: Verify standalone namespace fixtures
+        run: python3 test/test_run_standalone_suites.py --compile-fixtures -v
 
       - name: Build
         env:
           DUNE_JOBS: "4"
         # NO continue-on-error: the build is deterministic and must hard-fail.
+        # @test/stanzas/runtest is the generator-and-diff rule for the coverage
+        # group stanza: a shell script and a diff, nothing linked. It is where a
+        # suite that left the group without leaving coverage_test_names.txt is
+        # caught on its own pull request instead of on the next nightly
+        # (#33922 was caught by #34367 a week later, #34392 the day after).
         run: |
           set -euo pipefail
-          dune build @check
+          dune build @check @test/stanzas/runtest
+
+      # #32511 dropped the nine-job lane and took this ratchet with it: the
+      # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and
+      # this commit no workflow called it. It runs here because it needs the
+      # switch the build above already has, and it fetches its own base commit
+      # because this job checks out at depth 1.
+      # Needs `dune describe`, so it cannot live in the lint job. One of the
+      # nine guards #32511 deleted with the "Meta bug-class gates" step.
+      - name: Env reads below the config floor
+        run: python3 scripts/ci/check_env_reads_below_config.py
+
+      # Two guards #34018 found unwired that the lint job cannot run: this one
+      # compiles a Parsetree checker with ocamlc -I +compiler-libs, and the
+      # sublib gate below reads dune's own dependency graph. Wired here, where
+      # the switch is, rather than into the lint suite, where they would fail
+      # on a missing binary instead of on what they check.
+      - name: Keeper event-queue projection boundary
+        run: bash scripts/check-keeper-event-queue-projection-boundary.sh
+
+      - name: Sublibrary leaf boundary (RFC-0056 G1)
+        run: python3 scripts/audit-sublib-cycle.py
+
+      - name: OCaml boundary ratchet
+        env:
+          OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "$OCAML_BOUNDARY_BASE_REF"
+          bash scripts/ocaml-boundary-ratchet.sh
+
+      # RFC-0428 step one. @check type-checks and links nothing, which is the
+      # right trade for the whole tree and says nothing about whether an
+      # assertion holds. Measured over 2026-09-06: five defects across five
+      # TUI pull requests, @check caught one, and three of the four it missed
+      # broke inside a test file the same pull request was editing.
+      #
+      # So this links only those and runs them. It is not the suite; 344
+      # stanzas is the link cost the design above is buying and this does not
+      # spend it. It runs here rather than in a job of its own because the
+      # build cache it needs is the one the step above just filled.
+      #
+      # continue-on-error until main's red count is known. Gating on an
+      # unknown number stops pull requests that changed nothing to do with it.
+      - name: Run the tests this pull request edits
+        continue-on-error: true
+        # continue-on-error covers a failing step, not a job the runner
+        # cancelled: timeout-minutes above ends the job and reports it
+        # failed whatever a step says. So this bounds itself, and the script
+        # bounds each suite it runs on top of that.
+        timeout-minutes: 12
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DUNE_JOBS: "4"
+        run: |
+          bash scripts/ci/run-edited-tests.sh \
+            "${{ github.event.pull_request.number }}"
+
+
+  # dashboard/ ships a `typecheck` script and no lane calls it.
+  #
+  # ci.yml's header records that its dashboard job was folded away on
+  # 2026-09-02, and pr-check.yml never had one, so nothing type-checks the
+  # 697 test files and 9445 tests under dashboard/. What that cost, measured
+  # on 2026-09-06: #33454 left two TS2352 errors on main and they sat a full
+  # day, found only because a baseline was taken by hand (#33548 repairs them).
+  #
+  # This is the type-check alone, not the suite. `pnpm typecheck` over the
+  # whole dashboard is 8.7s locally. `pnpm test` is 481s in the single-worker
+  # shape package.json pins, or 95s parallel with one test that starves under
+  # load; RFC-0428 carries those numbers and the suite waits on that decision.
+  # The type-check does not need to wait for it.
+  dashboard-types:
+    name: dashboard typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        # The toolchain release.yml builds the SPA with: node 22 + pnpm 10.31.0.
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Type-check
+        working-directory: dashboard
+        # NO continue-on-error: main is green here once #33548 lands, and a
+        # type error is deterministic. Do not merge this before that one.
+        run: pnpm typecheck

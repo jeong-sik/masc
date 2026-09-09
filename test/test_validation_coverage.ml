@@ -239,14 +239,16 @@ let test_task_id_unicode_rejected () =
   | Ok _ -> fail "should reject unicode"
   | Error _ -> ()
 
-let test_agent_id_dot_only () =
+(* RFC-0393: a keeper is written under its keeper_name, and those carry dots
+   (edgar.a.poe), so the shape gate admits them. *)
+let test_agent_id_with_dots_accepted () =
   match Validation.Id_shape.validate "agent.name" with
-  | Ok _ -> fail "should reject dot"
-  | Error _ -> ()
+  | Ok _ -> ()
+  | Error reason -> failf "a dotted name should be accepted: %s" reason
 
 let test_agent_id_single_dot () =
   match Validation.Id_shape.validate "." with
-  | Ok _ -> fail "should reject single dot"
+  | Ok _ -> fail "an identifier starting with a dot should be rejected"
   | Error _ -> ()
 
 let test_agent_id_double_dot () =
@@ -335,8 +337,8 @@ let () =
       test_case "task single char" `Quick test_task_id_single_char;
       test_case "agent unicode rejected" `Quick test_agent_id_unicode_rejected;
       test_case "task unicode rejected" `Quick test_task_id_unicode_rejected;
-      test_case "agent dot only" `Quick test_agent_id_dot_only;
-      test_case "agent single dot" `Quick test_agent_id_single_dot;
+      test_case "agent name with dots" `Quick test_agent_id_with_dots_accepted;
+      test_case "agent only dots" `Quick test_agent_id_single_dot;
       test_case "agent double dot" `Quick test_agent_id_double_dot;
     ];
     "identifier_quotes", [

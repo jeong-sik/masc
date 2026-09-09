@@ -1,0 +1,8 @@
+/* Keep every message in the DOM for search, focus, and selection while the
+   browser skips layout/paint inside offscreen rows. `auto` remembers a row's
+   measured height; 16rem reserves space only until its first visible layout.
+   Day/unread dividers have their real small height, not a message estimate. */
+.chat-transcript-content > :not(.kw-daydiv) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 16rem;
+}

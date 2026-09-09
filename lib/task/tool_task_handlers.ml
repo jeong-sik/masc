@@ -126,17 +126,33 @@ type task_skill_authoring_error =
   | Snapshot_not_registered
   | Snapshot_uninitialized
   | Reference_identity_not_found of Skill_reference.t
+  | Skill_identity_not_in_catalog of Skill_reference.identity
+      (** A Task named a Skill without pinning a revision and the catalogue
+          carries no Skill under that identity. Separate from
+          [Reference_identity_not_found] because there is no revision to build
+          a reference from. *)
   | Reference_revision_mismatch of
       { reference : Skill_reference.t
       ; observed : Skill_reference.content_revision
       }
 
+(* Each item is a request, not yet a reference: it may pin a revision or leave
+   it to the catalogue. Resolution needs the snapshot, which this function does
+   not have — [resolve_task_skills] does. RFC-0411 §4.2. *)
 let parse_task_skills args =
   match Json_util.assoc_member_opt "skills" args with
   | None -> Ok []
-  | Some value ->
-    Skill_reference.list_of_yojson value
-    |> Result.map_error (fun error -> Invalid_reference_payload error)
+  | Some (`List values) ->
+    let rec decode decoded = function
+      | [] -> Ok (List.rev decoded)
+      | value :: rest ->
+        (match Skill_reference.request_of_yojson value with
+         | Error error -> Error (Invalid_reference_payload error)
+         | Ok request -> decode (request :: decoded) rest)
+    in
+    decode [] values
+  | Some _ ->
+    Error (Invalid_reference_payload (Skill_reference.Expected_list { field = "skills" }))
 ;;
 
 let package_id_error_to_yojson = function
@@ -233,6 +249,9 @@ let task_skill_authoring_error_projection = function
   | Reference_identity_not_found reference ->
     ( "skill_reference_identity_not_found"
     , [ "reference", Skill_reference.to_yojson reference ] )
+  | Skill_identity_not_in_catalog identity ->
+    ( "skill_identity_not_in_catalog"
+    , [ "identity", Skill_reference.identity_to_yojson identity ] )
   | Reference_revision_mismatch { reference; observed } ->
     ( "skill_reference_revision_mismatch"
     , [ "reference", Skill_reference.to_yojson reference
@@ -264,8 +283,16 @@ let task_skill_rejection ~tool_name ~start_time error =
     message
 ;;
 
-let resolve_task_skills ~base_path references =
-  match references with
+(* The Task stores exact references, and it still does: what a request left
+   open is filled in here, from the catalogue as it stands at creation, and the
+   Task carries the resolved revision from then on. So the durable record is
+   unchanged — only the asking is. RFC-0411 §4.2, §5.
+
+   A pinned request is still checked against the catalogue and refused on a
+   mismatch, so a revision someone spelled out is never replaced by the one the
+   catalogue happens to hold. *)
+let resolve_task_skills ~base_path requests =
+  match requests with
   | [] -> Ok []
   | _ :: _ ->
     (match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
@@ -275,17 +302,31 @@ let resolve_task_skills ~base_path references =
        (match Skill_catalog_snapshot_service.current ~workspace with
         | None -> Error Snapshot_uninitialized
         | Some snapshot ->
-          let rec resolve = function
-            | [] -> Ok references
-            | reference :: rest ->
+          let rec resolve resolved = function
+            | [] -> Ok (List.rev resolved)
+            | Skill_reference.Pinned reference :: rest ->
               (match Skill_catalog_snapshot.resolve_reference snapshot reference with
-               | Ok _entry -> resolve rest
+               | Ok _entry -> resolve (reference :: resolved) rest
                | Error (Skill_catalog_snapshot.Identity_not_found _) ->
                  Error (Reference_identity_not_found reference)
                | Error (Content_revision_mismatch { observed; _ }) ->
                  Error (Reference_revision_mismatch { reference; observed }))
+            | Skill_reference.By_identity identity :: rest ->
+              (match Skill_catalog_snapshot.find_exact snapshot identity with
+               (* Its own error rather than [Reference_identity_not_found]:
+                  that one carries a reference, and there is no revision to put
+                  in one here. Inventing a placeholder would put a digest that
+                  names no bytes into an error message. *)
+               | None -> Error (Skill_identity_not_in_catalog identity)
+               | Some entry ->
+                 resolve
+                   (Skill_reference.make
+                      ~identity
+                      ~content_revision:entry.Skill_catalog_snapshot.content_revision
+                    :: resolved)
+                   rest)
           in
-          resolve references))
+          resolve [] requests))
 ;;
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
@@ -343,21 +384,6 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
-  else if Option.is_some goal_id
-          && not
-               (* DET-OK: [Option.value ~default:""] is guarded by
-                  the [Option.is_some goal_id] guard above; the
-                  empty default is unreachable.  Refactoring to a
-                  match would split the boolean chain awkwardly. *)
-               (Goal_store.list_goals ctx.config ()
-                |> List.exists (fun (goal : Goal_store.goal) ->
-                       String.equal goal.id (Option.value ~default:"" goal_id)))
-  then
-    Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name ~start_time
-      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
-      (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result, skills_result with
     | Error error, _ ->
@@ -375,7 +401,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
             | Some author -> author
             | None -> ctx.agent_name
           in
-          Workspace.add_task_with_result ?contract
+          Task_goal_assignment.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
             ~skills
@@ -403,7 +429,12 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error err ->
            Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
+             ~failure_class:(match err with
+               | Workspace.Unknown_goal _ | Workspace.Unknown_predecessor _
+               | Workspace.Predecessor_not_terminal _ -> Tool_result.Workflow_rejection
+               | Workspace.Goal_source_unavailable _ | Workspace.Backlog_read_failed _
+               | Workspace.Goal_link_write_failed _ | Workspace.Backlog_write_failed _
+               | Workspace.Unexpected_error _ -> Tool_result.Runtime_failure)
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err)))
@@ -450,7 +481,12 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error err ->
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:(match err with
+            | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _
+            | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
+            | Task_goal_assignment.Goal_source_unavailable _
+            | Task_goal_assignment.Backlog_read_failed _
+            | Task_goal_assignment.Link_write_failed _ -> Tool_result.Runtime_failure)
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -527,7 +563,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
         | Some author -> author
         | None -> ctx.agent_name
       in
-      Workspace.batch_add_tasks_with_contracts_result
+      Task_goal_assignment.batch_add_tasks_with_contracts_result
         ~created_by ctx.config tasks
     in
     (match batch_result with
@@ -545,7 +581,11 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error err ->
        Tool_result.error
-         ~failure_class:Tool_result.Workflow_rejection
+         ~failure_class:(match err with
+           | Workspace.Batch_unknown_goal _ -> Tool_result.Workflow_rejection
+           | Workspace.Batch_goal_source_unavailable _ | Workspace.Batch_backlog_read_failed _
+           | Workspace.Batch_goal_link_write_failed _ | Workspace.Batch_backlog_write_failed _
+           | Workspace.Batch_unexpected_error _ -> Tool_result.Runtime_failure)
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))

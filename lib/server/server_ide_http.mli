@@ -1,15 +1,12 @@
-(** Server IDE HTTP — REST endpoints for observational IDE annotations.
+(** Server IDE HTTP — REST endpoints for the IDE plane.
 
     Routes:
-    - GET  /api/v1/ide/annotations
     - GET  /api/v1/ide/file-activity
-    - POST /api/v1/ide/annotations
-    - DELETE /api/v1/ide/annotations/:id
     - GET  /api/v1/ide/events
     - GET  /api/v1/ide/presence
 
-    Annotation routes use the canonical codebase scope. [file-activity] is not
-    the removed region observation store: it resolves a supplied registered
+    [events] uses the canonical codebase scope. [file-activity] is not the
+    removed region observation store: it resolves a supplied registered
     repository id, or an exact project-base checkout match, then filters the
     durable Keeper tool-call log by that repository address. *)
 

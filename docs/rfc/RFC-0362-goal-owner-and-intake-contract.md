@@ -32,13 +32,13 @@ Work still enters the system, but through one accident:
 
 ```
 tasks/backlog.json     169 tasks
-  kidsnote    121  (74 done, 47 cancelled)   72%
+  exampleorg    121  (74 done, 47 cancelled)   72%
   lane-smith   19
   other 10 actors combined  29
 created per day        07-29: 104 · 07-30: 23 · 08-03: 16 · 08-04: 11 · 08-05: 0
 ```
 
-`kidsnote` is 72% of all intake, and its config is the only one that looks
+`exampleorg` is 72% of all intake, and its config is the only one that looks
 outward (`제품과 프로젝트의 실제 사용 흐름을 점검`, `Github ... deployment
 상태를 확인`). That is a property of one keeper's instructions, not of the
 system's design. When that keeper went quiet, intake went to zero, and 47 of

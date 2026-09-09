@@ -198,7 +198,8 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
      | Some _ | None -> details <> [])
   | ContentBlockDelta { delta = InputJsonDelta s | InputJsonSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = MediaDelta { data; _ }; _ } -> non_empty data
-  | ContentBlockDelta { delta = ThinkingSignatureDelta _; _ } -> false
+  | ContentBlockDelta
+      { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _; _ } -> false
   | MessageStart _
   | ContentBlockStart _
   | ContentBlockStop _
@@ -225,6 +226,7 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   | ContentBlockDelta { delta = MediaDelta { data; _ }; _ } -> non_empty data
   | ContentBlockStart { content_type = "tool_use"; _ } -> true
   | ContentBlockDelta { delta = ThinkingSignatureDelta _; _ }
+  | ContentBlockDelta { delta = RedactedThinkingSnapshot _; _ }
   | ContentBlockDelta { delta = ThinkingDelta _; _ }
   | ContentBlockDelta { delta = ReasoningDetailsDelta _; _ }
   | MessageStart _
@@ -1884,11 +1886,20 @@ let responses_emit_redacted_reasoning_outputs state emit response =
          | Some "reasoning" ->
            (match item |> member "encrypted_content" |> to_string_option with
             | Some encrypted_content when String.trim encrypted_content <> "" ->
-              emit
+              let raw_reasoning = Yojson.Safe.to_string item in
+              if state.thinking_block_started
+                 && state.thinking_block_index = output_index
+              then
+                emit
+                  (ContentBlockDelta
+                     { index = output_index
+                     ; delta = RedactedThinkingSnapshot raw_reasoning
+                     })
+              else emit
                 (ContentBlockStart
                    { index = output_index
                    ; content_type = "redacted_thinking"
-                   ; tool_id = Some (Yojson.Safe.to_string item)
+                   ; tool_id = Some raw_reasoning
                    ; tool_name = None
                    });
               responses_advance_next_block_index state output_index

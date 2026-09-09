@@ -19,33 +19,6 @@
 let all_playgrounds_prefix : string =
   Filename.concat Common.masc_dirname "playground"
 
-(** Strip the [keeper-...-agent] canonical wrapper when present,
-    returning the inner short name.  E.g.
-    ["keeper-example-keeper-agent"] -> ["example-keeper"].
-
-    The MCP session resolver generates canonical names via
-    [keeper_agent_name] in [keeper_types_profile.ml], but playground
-    directories on disk use the short form ([meta.name]).  Without
-    stripping, path lookups produce
-    [.masc/playground/keeper-X-agent/repos/] which does not exist;
-    the actual directory is [.masc/playground/X/repos/].
-
-    A name that does not match the wrapper pattern is returned
-    unchanged.  The function is idempotent:
-    [strip (strip x) = strip x].
-
-    The length guard [nlen > plen + slen] (i.e., > 13) ensures we
-    never produce an empty string from stripping — ["keeper-agent"]
-    (12 chars) passes through unchanged because its inner part would
-    be empty. *)
-(** Sanitize a keeper name into a filesystem-safe component.
-
-    RFC-0393: the keeper name is the only spelling, so no wrapper
-    stripping happens here. Allows [A-Za-z0-9._-] and replaces
-    everything else with [_]. An empty input or the special path
-    components [.] / [..] are replaced with [_], so
-    [sanitize_keeper_name ".."] returns ["__"] rather than returning a
-    traversal segment as a directory name. *)
 (** The [repos] segment inside a keeper's bundle, spelled once. The repo
     tree has a second, unrelated [repos]: the server-side registration
     store under [.masc/repos/<id>] owned by [Config_dir_resolver]. Same
@@ -54,6 +27,14 @@ let all_playgrounds_prefix : string =
     They are two constants. *)
 let bundle_repos_dirname = "repos"
 
+(** Sanitize a keeper name into a filesystem-safe component.
+
+    RFC-0393: the keeper name is the only spelling, so no wrapper
+    stripping happens here. Allows [A-Za-z0-9._-] and replaces
+    everything else with [_]. An empty input or the special path
+    components [.] / [..] are replaced with [_], so
+    [sanitize_keeper_name ".."] returns ["__"] rather than returning a
+    traversal segment as a directory name. *)
 let sanitize_keeper_name (name : string) : string =
   let mapped =
     String.map (fun c ->

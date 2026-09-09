@@ -1,0 +1,22 @@
+build frames=64 mean=4.25ms p50=1.02 p95=2.11 p99=3.07 max=197.99
+  build[keeper-list] frames=18 mean=0.97ms p50=0.92 p95=1.02 p99=1.86 max=1.86
+  build[board-list] frames=16 mean=1.99ms p50=1.97 p95=2.24 p99=3.07 max=3.07
+  build[memory] frames=11 mean=1.05ms p50=1.04 p95=1.24 p99=1.24 max=1.24
+  build[acting] frames=10 mean=0.36ms p50=0.35 p95=0.60 p99=0.60 max=0.60
+  build[overview] frames=9 mean=23.08ms p50=1.09 p95=197.99 p99=197.99 max=197.99
+  worst[0] frame=1 197.99ms tag=overview
+  worst[1] frame=50 3.07ms tag=board-list
+  worst[2] frame=62 2.24ms tag=board-list
+  worst[3] frame=55 2.11ms tag=board-list
+  worst[4] frame=7 2.04ms tag=overview
+present frames=64 mean=0.04ms p50=0.03 p95=0.12 p99=0.13 max=0.15
+  present[keeper-list] frames=18 mean=0.04ms p50=0.04 p95=0.09 p99=0.12 max=0.12
+  present[board-list] frames=16 mean=0.04ms p50=0.04 p95=0.09 p99=0.12 max=0.12
+  present[memory] frames=11 mean=0.04ms p50=0.04 p95=0.10 p99=0.10 max=0.10
+  present[acting] frames=10 mean=0.02ms p50=0.00 p95=0.15 p99=0.15 max=0.15
+  present[overview] frames=9 mean=0.04ms p50=0.02 p95=0.13 p99=0.13 max=0.13
+  worst[0] frame=10 0.15ms tag=acting
+  worst[1] frame=1 0.13ms tag=overview
+  worst[2] frame=2 0.13ms tag=overview
+  worst[3] frame=49 0.12ms tag=board-list
+  worst[4] frame=20 0.12ms tag=keeper-list

@@ -101,20 +101,6 @@ let test_applies_turn_execution_overrides () =
     (Some "90")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
-let test_applies_health_overrides () =
-  let doc =
-    parse_or_fail
-      "[health]\n\
-       durable_queue_stale_sec = 45.5\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied health override count" 1 count;
-  check (option string) "durable queue stale threshold"
-    (Some "45.5")
-    (List.assoc_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" overrides)
-
 (* The whole [wire_capture] table resolves, not just its switch. [enabled] was
    [Toml_and_env] while [retention_days] and [max_bytes] were [Env_only], and
    because [wire_capture] is an owned namespace an unmapped sibling is rejected
@@ -144,31 +130,17 @@ let test_applies_wire_capture_overrides () =
     (Some "536870912")
     (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" overrides)
 
-(* RFC-0297 P0-1: the three lifecycle kill-switches must map TOML ->
-   canonical env instead of being silently dropped. Before the key_to_env
-   mappings existed, [reactive]/[proactive]/[autonomous] enabled were never
-   visited by load_and_apply and vanished. *)
+(* Spontaneous activation has one global setting; requested reactive work
+   retains its independent switch. *)
 let test_applies_lifecycle_enabled_overrides () =
   let doc = parse_or_fail
-    "[reactive]\n\
-     enabled = false\n\
-     [proactive]\n\
-     enabled = false\n\
-     [autonomous]\n\
-     enabled = true\n"
-  in
+    "[reactive]\nenabled = false\n[autonomous]\nenabled = true\n" in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied three lifecycle enabled overrides" 3 count;
-  check (option string) "reactive enabled maps to canonical env"
-    (Some "false")
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc in
+  check int "two distinct lifecycle settings" 2 count;
+  check (option string) "reactive setting" (Some "false")
     (List.assoc_opt "MASC_KEEPER_REACTIVE_ENABLED" overrides);
-  check (option string) "proactive enabled maps to canonical env"
-    (Some "false")
-    (List.assoc_opt "MASC_KEEPER_PROACTIVE_ENABLED" overrides);
-  check (option string) "autonomous enabled maps to canonical env"
-    (Some "true")
+  check (option string) "single autonomy setting" (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
 let test_parse_error_returns_error () =
@@ -717,7 +689,6 @@ let () =
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
-        ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies the whole wire_capture table" `Quick
             test_applies_wire_capture_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides

@@ -10,7 +10,7 @@ describe('normalizeKeeperTurnsResponse', () => {
     schema: 'masc.keeper_turns.v1',
     keepers: [
       {
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         status: 'ok',
         turn: { lane: 'autonomous', started_at_unix: 1787828193.5 },
       },
@@ -44,7 +44,7 @@ describe('normalizeKeeperTurnsResponse', () => {
 
   it('runningTurnFor answers only a definite ok row with a turn', () => {
     const rows = normalizeKeeperTurnsResponse(wire).keepers
-    expect(runningTurnFor(rows, 'kidsnote')?.lane).toBe('autonomous')
+    expect(runningTurnFor(rows, 'exampleorg')?.lane).toBe('autonomous')
     expect(runningTurnFor(rows, 'analyst')).toBeNull()
     expect(runningTurnFor(rows, 'rondo')).toBeNull()
     expect(runningTurnFor(rows, 'nobody')).toBeNull()
@@ -69,25 +69,25 @@ describe('advanceFinishes', () => {
   })
 
   it('running→idle is a finish; unavailable→idle and vanishing are not', () => {
-    const previous = [running('kidsnote'), unavailable('rondo'), running('gone')]
-    const current = [idle('kidsnote'), idle('rondo')]
+    const previous = [running('exampleorg'), unavailable('rondo'), running('gone')]
+    const current = [idle('exampleorg'), idle('rondo')]
     expect(advanceFinishes(1000, previous, current, [])).toEqual([
-      { keeper_name: 'kidsnote', finished_at_ms: 1000 },
+      { keeper_name: 'exampleorg', finished_at_ms: 1000 },
     ])
   })
 
   it('a keeper that starts running again drops its glow', () => {
-    const finishes = [{ keeper_name: 'kidsnote', finished_at_ms: 1000 }]
-    const next = advanceFinishes(2000, [idle('kidsnote')], [running('kidsnote')], finishes)
+    const finishes = [{ keeper_name: 'exampleorg', finished_at_ms: 1000 }]
+    const next = advanceFinishes(2000, [idle('exampleorg')], [running('exampleorg')], finishes)
     expect(next).toEqual([])
   })
 
   it('the glow expires by the reader clock, not the poll', () => {
-    const finishes = [{ keeper_name: 'kidsnote', finished_at_ms: 1000 }]
-    expect(finishGlowFor(finishes, 'kidsnote', 1000 + FINISH_GLOW_TTL_MS)).not.toBeNull()
-    expect(finishGlowFor(finishes, 'kidsnote', 1001 + FINISH_GLOW_TTL_MS)).toBeNull()
+    const finishes = [{ keeper_name: 'exampleorg', finished_at_ms: 1000 }]
+    expect(finishGlowFor(finishes, 'exampleorg', 1000 + FINISH_GLOW_TTL_MS)).not.toBeNull()
+    expect(finishGlowFor(finishes, 'exampleorg', 1001 + FINISH_GLOW_TTL_MS)).toBeNull()
     expect(
-      advanceFinishes(1001 + FINISH_GLOW_TTL_MS, [idle('kidsnote')], [idle('kidsnote')], finishes),
+      advanceFinishes(1001 + FINISH_GLOW_TTL_MS, [idle('exampleorg')], [idle('exampleorg')], finishes),
     ).toEqual([])
   })
 })

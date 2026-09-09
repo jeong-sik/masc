@@ -51,18 +51,18 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int
+  ; max_request_body_bytes : int option
   ; (* #27320: the model-input windowing budget consulted by
-       [budgeted_model_input_projection]. Starts at [max_request_body_bytes]
+       [bounded_model_input_projection]. Starts at [max_request_body_bytes]
        (the runtime's declared wire cap) but is independently shrinkable:
        [run_try_provider_with_context_overflow_shrink] halves it on a typed
        provider context overflow and retries the SAME candidate, while
        [max_request_body_bytes] itself keeps reporting the real declared cap
        to wire-error diagnostics ([observe_request_wire_error],
        [pre_dispatch_serialization_observer]) so those never conflate a
-       voluntary MASC-side reduction with the provider's actual admission
-       limit. *)
-    model_input_capacity_bytes : int
+       voluntary MASC-side reduction with the caller's explicit byte limit.
+       None means no caller byte policy or derived byte window. *)
+    model_input_capacity_bytes : int option
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -74,6 +74,7 @@ type try_provider_ctx =
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
+  ; recovery_view : Keeper_recovery_transmission.t option
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
     (* Bound on the silent wait for the FIRST streaming provider event
@@ -147,7 +148,7 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int ->
+       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -224,7 +225,7 @@ let emit_context_overflow_shrink_manifest
       (`Assoc
         [ "shrink_attempt", `Int shrink_attempt
         ; "model_input_capacity_bytes", `Int capacity_bytes
-        ; "max_request_body_bytes", `Int ctx.max_request_body_bytes
+        ; "max_request_body_bytes", Option.fold ~none:`Null ~some:(fun n -> `Int n) ctx.max_request_body_bytes
         ])
     Keeper_runtime_manifest.Provider_lane_resolved
 ;;
@@ -625,15 +626,16 @@ let plan_and_window_model_input
    window stays ahead of [ctx.model_input_projection] so that projection's
    projected-prefix precondition keeps holding against the list it
    receives. *)
-let budgeted_model_input_projection
+let bounded_model_input_projection
       (ctx : try_provider_ctx)
+      ~capacity_bytes
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
   let reserved_bytes =
     offload_model_input_cpu (fun () ->
       declared_request_reserve_bytes
-        ~capacity_bytes:ctx.model_input_capacity_bytes
+        ~capacity_bytes
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
   in
@@ -732,9 +734,17 @@ let budgeted_model_input_projection
         match
           plan_and_window_model_input
             ~measure_message_bytes
-            ~capacity_bytes:ctx.model_input_capacity_bytes
+            ~capacity_bytes
             ~reserved_bytes
-            ~base_path:ctx.base_path
+            (* #27268 A/B kill-switch: an empty base path makes
+               [plan_and_window_model_input] keep every atom verbatim, so the
+               RFC-0363 demotion effect can be measured on and off in one
+               deployment. Default on preserves current behavior. *)
+            ~base_path:
+              (if
+                 Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+               then ctx.base_path
+               else "")
             ~demote_before
             messages
         with
@@ -776,7 +786,7 @@ let budgeted_model_input_projection
                   Runtime_model_input_tail_window.project_with_drop
                     ~measure_message_bytes:
                       (memoize_message_measurement (message_measurer ()))
-                    ~capacity_bytes:ctx.model_input_capacity_bytes
+                    ~capacity_bytes
                     ~reserved_bytes
                     outcome.Keeper_model_input_demotion.messages)
               with
@@ -803,6 +813,9 @@ let budgeted_model_input_projection
 ;;
 
 let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate =
+  (* Named so the trace attributes runs during the provider attempt (request
+     assembly, streaming, tool loop) to [turn:provider]. *)
+  Eio_guard.with_named_switch "turn:provider" @@ fun () ->
   let resolved_lane =
     match ctx.tools with
     | [] -> "none"
@@ -874,8 +887,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-            (* The serialized request body is the quantity the provider admits
-               against [max_request_body_bytes]. AGENT_CORE's provider-specific
+            (* The serialized request body is measured against an optional
+               caller [max_request_body_bytes] cap. AGENT_CORE's provider-specific
                serialization boundary reports every admitted request; a typed
                [Request_body_too_large] below carries the exact rejected size.
                the canonical checkpoint's bytes cannot stand in
@@ -934,11 +947,15 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
        that does not exist yet would mean measuring something else. *)
     let config =
       { config with
-        Runtime_agent.model_input_projection =
-          Some
-            (budgeted_model_input_projection
-               ctx
-               ~provider_config:config.Runtime_agent.provider_cfg)
+        Runtime_agent.recovery_view =
+          Option.map Keeper_recovery_transmission.runtime_projection ctx.recovery_view;
+        model_input_projection =
+          (match ctx.recovery_view, ctx.model_input_capacity_bytes with
+           | Some _, _ -> ctx.model_input_projection
+           | None, None -> ctx.model_input_projection
+           | None, Some capacity_bytes ->
+             Some (bounded_model_input_projection ctx ~capacity_bytes
+               ~provider_config:config.Runtime_agent.provider_cfg))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
@@ -1216,14 +1233,26 @@ let context_overflow_shrink_sequence
     keeper that has already discovered a working window does not
     rediscover it every turn. A successful attempt updates that memory. *)
 let run_try_provider_with_context_overflow_shrink
+      ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
+  match ctx.recovery_view, ctx.max_request_body_bytes with
+  | Some _, _ ->
+    (* The validated semantic view owns retained source obligations. Retrying
+       the same view with a smaller arbitrary byte window cannot recover it.
+       Final serialized request admission still enforces the explicit cap. *)
+    run_try_provider ?continuation_checkpoint ctx candidate
+  | None, None ->
+    (* No caller byte policy means no invented byte window or shrink seed.
+       Provider context refusals keep their typed result for lane recovery. *)
+    run_try_provider ?continuation_checkpoint ctx candidate
+  | None, Some max_capacity_bytes ->
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name:ctx.keeper_name
       ~runtime_id:ctx.runtime_id
-      ~max_capacity_bytes:ctx.max_request_body_bytes
+      ~max_capacity_bytes
   in
   let checkpoint_after = ref None in
   let success_sample = ref None in
@@ -1256,7 +1285,8 @@ let run_try_provider_with_context_overflow_shrink
       ~attempt:(fun ~capacity_bytes ->
         let attempt_result, attempt_checkpoint_after, attempt_success_sample =
           run_try_provider
-            { ctx with model_input_capacity_bytes = capacity_bytes }
+            ?continuation_checkpoint
+            { ctx with model_input_capacity_bytes = Some capacity_bytes }
             candidate
         in
         checkpoint_after := attempt_checkpoint_after;
@@ -1375,7 +1405,7 @@ let truncation_recovery ~enable_thinking ~result ~checkpoint =
    response, at [After_assistant_collected]; this write, at the same turn
    count, replaces it. The lane's callers do not persist what this function
    returns: the Error branch drops [checkpoint_after], so the durable state
-   would otherwise still hold the refused text. Measured on sangsu,
+   would otherwise still hold the refused text. Measured on one measured Keeper,
    2026-09-05: the same 31 KB collapse sat in the checkpoint four times, one
    copy per rejected turn (#33267). *)
 let persist_dropped_response
@@ -1395,11 +1425,12 @@ let persist_dropped_response
 ;;
 
 let run_try_provider_with_truncation_recovery
+      ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_context_overflow_shrink ctx candidate
+    run_try_provider_with_context_overflow_shrink ?continuation_checkpoint ctx candidate
   in
   match
     truncation_recovery

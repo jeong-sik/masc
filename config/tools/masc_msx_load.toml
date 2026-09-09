@@ -1,0 +1,26 @@
+name = "masc_msx_load"
+description = """
+Power on the workspace MSX machine and load one image.
+
+MSX2, C-BIOS. A cartridge into the slot, or a .dsk floppy into drive A:. \
+Replaces any \
+machine already loaded and starts a new input ledger. Without cart it \
+boots the BIOS alone and lists carts_available, the images in the \
+workspace inventory (.masc/msx/carts/); pass one of those names as cart. Runs the boot ahead 45 frames so the first \
+screen is the BIOS logo; a cartridge game reaches its own title after \
+roughly 300 more frames (masc_msx_step). Returns the same observation as \
+masc_msx_screen."""
+additional_properties = false
+
+# Called once per game session; the schema would otherwise ride every request.
+defer_loading = true
+
+[[params]]
+name = "cart"
+type = "string"
+description = "A name from carts_available (with or without its extension) or a path to an image. A cartridge is a 16/32KB plain cart or a MegaROM (the mapper is guessed from the image, e.g. KOEI 256KB titles); a name ending in .dsk is a raw floppy image and goes into drive A: instead of the slot. Omit to boot the BIOS alone and see the inventory."
+
+[[params]]
+name = "roms_dir"
+type = "string"
+description = "Directory holding the C-BIOS ROMs. Default: the server's MSX_ROMS, else .masc/msx/bios/ when it holds cbios_main_msx2.rom, else no BIOS."

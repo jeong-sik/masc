@@ -1,15 +1,10 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body by its canonical exact reference.\n\n When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
+description = "Read one frozen instruction Skill body. Every row in the Available list below is something this workspace wrote down about work that recurs here — a failure that repeats, a convention and the reason for it, a sequence whose order matters. Open the row whose one-line description names the work you are about to start, before starting it. The common error is not opening one that applied: a body that turns out not to apply costs a single call. A row that also appears as a `keeper_compose_<name>` tool performs its readings in one call — use that tool when the readings are all you need.\n\n Pass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded."
 additional_properties = false
-# 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
-# (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
-# agent-core 5 keeper 의 도구-사용 턴 11,164 개와 표면 67,000 B 기준으로 이 도구는
-# 3,695 B 를 매 요청에 싣고 176 턴(1.6%)에서만 필요했다 — 3.5x 이다.
-#
-# 조회 도구는 이 계산이 유리해도 지연하지 않는다. keeper_capability_search 와
-# keeper_tools_list 는 목록이 길 때 찾는 수단이라, 지연하면 찾는 일 자체가 한 홉
-# 멀어진다. 그 비용은 바이트로 잡히지 않는다. 이 도구는 조회가 아니다.
-defer_loading = true
+# Keep discovery resident: this schema carries the Available Skill list.
+# The shared Keeper prompt also directs task-based selection without a user
+# naming a Skill; bodies and relevant resources are still read on demand.
+defer_loading = false
 
 [[params]]
 name = "identity"
@@ -40,11 +35,23 @@ min_length = 1
 # the handler, whose refusal carries the exact references this keeper does
 # carry. A schema-level gate answered those calls with a generic length
 # error that could not name the catalog (task-828).
+#
+# Optional since RFC-0411 §4.2. Omitted, the turn's frozen Skill list decides
+# which body is read — the same list a spelled-out revision is matched against,
+# so leaving it out reaches nothing new. Spelled out, it is still matched
+# exactly and refused on a mismatch: a revision the caller named is never
+# quietly replaced.
+#
+# It was required because the call was meant to pin what it read. That pin also
+# has to be typed, and nothing hands it to the caller outside this tool's own
+# Available list — of 292 tasks recorded on this workspace, 0 named a Skill,
+# and 126 of those were made through masc_add_task, which has carried a skills
+# parameter all along.
 [[params]]
 name = "content_revision"
 type = "string"
-required = true
-description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes: 64 lowercase hex characters, copied verbatim from the Task skill reference or this tool's Available list."
+required = false
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that identity; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

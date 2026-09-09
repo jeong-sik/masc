@@ -139,6 +139,92 @@ pointer = "/now_iso"
 |}
 ;;
 
+(* The builtin run-and-read skill as it ships: start, wait and read as one
+   plan, the handle handed from start to the two that follow. Its projection
+   was refused on every keeper turn while keeper_spawn's output was opaque
+   (live log 2026-09-08); this pins that the handle is now named. *)
+let run_and_read_document =
+  {|---
+name: run-and-read
+description: Run a command, wait for it to exit, and read its output in one call.
+---
+
+One plan instead of three turns.
+
+```toml composition
+[[compositions]]
+name = "run-and-read"
+description = "Run a command, wait for it to exit, and read its output in one call."
+execution = "inline"
+
+[[compositions.params]]
+name = "command"
+type = "string"
+description = "One shell command line, passed to sh -c."
+
+[[compositions.params]]
+name = "timeout_sec"
+type = "number"
+description = "Seconds to wait for the command to exit before giving up on it."
+
+[[compositions.nodes]]
+id = "start"
+tool = "keeper_spawn"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "argv"
+[compositions.nodes.input.fields.value]
+kind = "array"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "sh"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "-c"
+[[compositions.nodes.input.fields.value.items]]
+kind = "param"
+name = "command"
+
+[[compositions.nodes]]
+id = "settle"
+tool = "keeper_spawn_wait"
+after = ["start"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "handle"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "start"
+pointer = "/handle"
+[[compositions.nodes.input.fields]]
+name = "until"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "exit"
+[[compositions.nodes.input.fields]]
+name = "timeout_sec"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "timeout_sec"
+
+[[compositions.nodes]]
+id = "output"
+tool = "keeper_spawn_read"
+after = ["settle"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "handle"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "start"
+pointer = "/handle"
+```
+|}
+;;
+
 let async_composition_document =
   {|---
 name: quiet-clock
@@ -307,6 +393,24 @@ let test_instruction_skill_parses () =
     "body keeps the markdown"
     true
     (contains ~needle:"# Release checklist" skill.Skill_catalog.body)
+;;
+
+let test_run_and_read_hands_the_spawn_handle_on () =
+  let snapshot = snapshot_of_document ~directory:"run-and-read" run_and_read_document in
+  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
+  (match diagnostics with
+   | [] -> ()
+   | diagnostic :: _ ->
+     fail
+       ("run-and-read was refused: "
+        ^ Skill_catalog.error_to_string diagnostic.Skill_catalog.error));
+  match Skill_catalog.skills catalog with
+  | [ skill ] ->
+    (match skill.Skill_catalog.surface with
+     | Skill_catalog.Composition entry ->
+       check string "tool name" "keeper_compose_run-and-read" (Catalog.tool_name entry)
+     | Skill_catalog.Instruction -> fail "run-and-read projected as an instruction")
+  | skills -> failf "expected one skill, got %d" (List.length skills)
 ;;
 
 let test_composition_skill_materializes_entry () =
@@ -763,6 +867,10 @@ let () =
             "composition skill materializes a catalog entry"
             `Quick
             test_composition_skill_materializes_entry
+        ; test_case
+            "run-and-read hands the spawn handle on"
+            `Quick
+            test_run_and_read_hands_the_spawn_handle_on
         ; test_case
             "directory name mismatch is rejected"
             `Quick

@@ -141,6 +141,29 @@ type finalization_evidence =
   ; completion : completion_receipt
   }
 
+type absent_owner_acknowledgement =
+  { finalization : finalization_evidence
+  ; prior_revision : int
+  ; prior_updated_at : string
+  ; prior_operation_sha256 : string
+  ; actor : string
+  ; reason : string
+  ; acknowledged_at : string
+  ; backlog_version : int
+  }
+
+(* Boot recovery's own observation of a finalized retained-metadata stop
+   whose Keeper owner and metadata are both gone. The owner registry answers
+   [Owner_not_found] on every boot for such a record, so retrying the
+   admission release cannot succeed; the retain contract did not hold, so
+   the record is not settled and reclaimed like a removal either. The
+   finalization is kept exactly as written and [observed_at] is when
+   recovery found the absence. The operator acknowledgement may follow. *)
+type owner_absence =
+  { finalization : finalization_evidence
+  ; observed_at : string
+  }
+
 type supersession =
   | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
@@ -157,6 +180,8 @@ type phase =
   | Cleanup_ready of cleanup_evidence
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
+  | Owner_absent of owner_absence
+  | Operator_absence_acknowledged of absent_owner_acknowledgement
   | Blocked of failure
   | Superseded of supersession
 
@@ -194,6 +219,8 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Invalid_absence_acknowledgement of string
+  | Invalid_owner_absence of string
 
 let schema_version = 8
 
@@ -202,7 +229,9 @@ let requires_admission_fence operation =
   | Finalized { completion = Completion_pending _; _ } -> true
   | Finalized
       { completion = (Completion_not_requested | Completion_delivered _); _ }
-  | Superseded _ -> false
+  | Superseded _
+  | Owner_absent _
+  | Operator_absence_acknowledged _ -> false
   | Prepared
   | Joining_lanes
   | Joined_idle
@@ -284,13 +313,15 @@ let invariant_error_to_string = function
       "shutdown finalized completion mismatch: cleanup_reason=%s, completion=%s"
       (cleanup_reason_label cleanup_reason)
       (completion_receipt_kind completion)
+  | Invalid_absence_acknowledgement detail -> detail
+  | Invalid_owner_absence detail -> detail
   | Superseded_cleanup_reason_mismatch cleanup_reason ->
     Printf.sprintf
       "shutdown supersession requires operator_stop_retain_meta, actual=%s"
       (cleanup_reason_label cleanup_reason)
 ;;
 
-let validate operation =
+let rec validate operation =
   if not (Int.equal operation.schema_version schema_version)
   then
     Error
@@ -300,6 +331,26 @@ let validate operation =
          })
   else
     match operation.phase with
+    | Operator_absence_acknowledged ack ->
+      if operation.cleanup_intent.reason <> Operator_stop_retain_meta
+         || operation.turn_disposition <> No_inflight_turn
+         || ack.finalization.completion <> Completion_not_requested
+         || (match operation.join_evidence with
+             | Some { terminal = Terminal_stopped; cleanup_error = None; _ } -> false
+             | None | Some _ -> true)
+         || List.exists (fun id -> not (List.exists (Keeper_id.Task_id.equal id)
+               ack.finalization.cleanup.settled_task_ids)) operation.owned_task_ids
+         || ack.prior_revision < 0 || operation.revision <> ack.prior_revision + 1
+         || ack.backlog_version < 0
+         || String.trim ack.actor = "" || String.trim ack.reason = ""
+         || ack.prior_updated_at = "" || ack.acknowledged_at <> operation.updated_at
+      then Error (Invalid_absence_acknowledgement "invalid retained absence acknowledgement")
+      else validate { operation with phase = Finalized ack.finalization }
+    | Owner_absent absence ->
+      if operation.cleanup_intent.reason <> Operator_stop_retain_meta
+         || absence.observed_at <> operation.updated_at
+      then Error (Invalid_owner_absence "invalid recorded owner absence")
+      else validate { operation with phase = Finalized absence.finalization }
     | Finalized evidence ->
       let expected_meta_removed =
         match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
@@ -473,7 +524,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ]
 ;;
 
-let cleanup_intent_equal left right =
+let cleanup_intent_equal (left : cleanup_intent) (right : cleanup_intent) =
   cleanup_reason_equal left.reason right.reason
   && Bool.equal left.remove_session right.remove_session
 ;;
@@ -521,6 +572,8 @@ let phase_to_string = function
   | Cleanup_ready _ -> "cleanup_ready"
   | Reconciliation_required _ -> "reconciliation_required"
   | Finalized _ -> "finalized"
+  | Owner_absent _ -> "owner_absent"
+  | Operator_absence_acknowledged _ -> "operator_absence_acknowledged"
   | Blocked _ -> "blocked"
   | Superseded _ -> "superseded"
 ;;

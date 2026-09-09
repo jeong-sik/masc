@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-07T04:44:47.879438+00:00",
+  "service": "masc-searxng",
+  "image": "docker.io/searxng/searxng@sha256:55e1fa15a63ff04e79e213e6aa2837549877b0c6d60757cdb633ae9111cb5fea",
+  "listen": "127.0.0.1:8888",
+  "compose_path": "/Users/dancer/me/.masc/services/searxng/compose.yaml",
+  "compose_sha256": "cee1339752200bb4398b530d7445dbf084eeb488d20af523f7ba7b0a58254db9",
+  "official_install_documentation": "https://docs.searxng.org/admin/installation-docker",
+  "source_probe": "searxng-search-probe.json",
+  "masc_tool_execution_verified": false
+}

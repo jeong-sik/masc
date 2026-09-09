@@ -15,19 +15,6 @@ type t =
   | Open_tui of { binary : string; argv : string list }
       (** hand the process over to [binary] with exactly [argv] *)
 
-val tui_binary_name : string
-(** ["masc-tui"] — the installed name. A source checkout builds
-    [masc_tui.exe] instead, so a dev tree keeps the server it had. *)
-
-val discover_tui :
-  executable_name:string ->
-  path_env:string option ->
-  is_executable:(string -> bool) ->
-  string option
-(** The TUI beside [executable_name] first — the layout install.sh creates —
-    then the first hit walking [path_env]. Empty PATH entries are skipped
-    rather than probed as the current directory. *)
-
 val tui_argv : binary:string -> port:int -> base_path:string option -> string list
 (** argv for the handover, [binary] included as argv[0]. The TUI takes no
     [--host], which is why {!decide} refuses a non-default one. *)

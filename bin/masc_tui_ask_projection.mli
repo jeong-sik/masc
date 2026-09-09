@@ -70,10 +70,12 @@ val toggle_choice :
 
 type free_text_slot
 
-val free_text_slot : Masc.Tui_decode.ask_question -> free_text_slot option
-(** [None] when the question offers choices only. A slot is the only way to
-    reach [set_text], so the editor cannot open on a question whose answer the
-    server would refuse. *)
+val free_text_slot : Masc.Tui_decode.ask_question -> free_text_slot
+(** Every question offers an operator-written alternative. The slot binds the
+    editor to the question id, including questions that only offered choices. *)
+
+val alternative_position : Masc.Tui_decode.ask_question -> int option
+(** The next digit after the choices when it fits in 1-9; otherwise use [t]. *)
 
 val free_text_hint : free_text_slot -> string option
 

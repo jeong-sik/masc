@@ -1,6 +1,110 @@
 # Changelog
 
-## Unreleased
+## [0.35.0] - 2026-09-08
+
+### Fresh state required
+
+Two contract changes after 0.34.0 do not read state written before them. The
+server does not convert old state; it refuses the file and says so in the boot
+log and in the tool result. Delete or rewrite these files before the new
+binary starts.
+
+- Keeper profiles, `<base>/.masc/config/keepers/*.toml` (#34392): `[keeper]`
+  takes `activation_mode = "manual" | "on_demand" | "autonomous"`. A profile
+  that still carries `autoboot_enabled` or `proactive_enabled` is rejected as
+  `unknown keeper TOML keys`; the message now lists the accepted keys. Rewrite
+  the profile, or recreate the Keeper with `masc_keeper_up`.
+- Goal store, `<base>/.masc/goals.json`, `goal_verifications.json`,
+  `goal-verification-runs.jsonl` and their `.last-good` mirrors (#34459):
+  every Goal row needs `criterion_revision`, every verdict needs `request_id`
+  and `criterion`. One row without them makes the whole file undecodable, and
+  `masc_goal_list` returns the decode error with the file path. Delete the
+  files to start with an empty Goal store.
+
+### Installation and setup
+
+- Include the corrected macOS dependency bootstrap, Python executable selection, and loader diagnostics in the same source release as the binaries.
+- Ask for a workspace on terminal installs; preserve explicit paths and existing workspaces. Add program-only uninstall, explicit workspace data removal, and dry-run.
+- Ship a disabled starter Keeper (`imp`) for manual activation after model and sandbox setup.
+- Add explicit llama.cpp, vLLM, Claude Code, Codex, and Antigravity setup choices using operator-supplied model metadata; validate staged configuration before publishing it.
+- Validate runtime default changes with the same workspace capability catalog and overlay used by server startup.
+- Run documentation and installer checks without waiting for OCaml preparation; new global tags no longer invalidate checks on unchanged branches.
+
+### Keeper and operator interfaces
+
+- Add TUI Keeper deletion, connector trigger-policy selection, preset inspection, and clearer fleet state.
+- Add browser development source-context selection and Dashboard goal selection.
+- Surface scheduled wake outcomes, preserve operator prompt overrides, and repair prompt assembly and duplicate owner wake handling.
+- Improve JSONL recovery and subprocess cancellation/foreground process-group cleanup; prevent host environment expansion into sandbox command arguments.
+- Extend MSX disk image loading and playback presentation.
+## [0.34.0] - 2026-09-08
+
+### Installation and distribution
+
+- Update the release-attached `install.sh` with automatic macOS dependency setup and an early binary startup check that exposes loader errors. Interactive first installs can enter the official Homebrew setup. The published 0.34.0 binaries and source tag remain unchanged; installer provenance is recorded in the release notes.
+
+- Ship the browser native host with the server, TUI, preflight tools and matched dashboard.
+- Add Intel macOS release assets and require every advertised platform build to pass.
+- Exercise Linux installation in a fresh Ubuntu 24.04 container as well as native runners.
+- Preserve operator configuration during `--force` upgrades; `--reset-config` explicitly resets seeded configuration.
+- Document prerequisites, installed files, first use, optional integrations and upgrades in `docs/INSTALL.md`.
+
+- Repair interactive provider selection, explicit-provider configuration changes and login-probe reporting. Invalid input can be corrected; unsupported probes remain unverified.
+- Correct Keeper TOML and MCP bearer-header examples, including generated Claude Desktop configuration, and complete source/browser onboarding instructions.
+
+- Route `sandbox-image --runtime nerdctl_kata` to nerdctl rather than Docker, and add release image/tool smoke. Linux Kata work volumes now use idempotent native managed directories with explicit capacity limitations.
+- Document initial prompts, skill discovery and empty/default team rosters; stop assuming fresh Keepers already have GitHub credentials.
+
+- Include source-bound recovery transmission (#34245) and built-in `browser-lanes` Skill packages (#34256) from main. Upgrade seeding preserves operator packages while installing new built-ins.
+
+- Close short-lived HTTP pools before `keeper-create` returns, fixing CLI hangs after responses; verify command exit and a real Docker first-turn path in CI.
+
+### Runtime changes since 0.33.0
+
+- Add Gecko semantic scenes and the TUI `s` scene view with observed control
+  selection/clicks (#34297, #34298). Scene replies remain bound to their browser,
+  tab and document. Live use requires the updated native host and extension 0.3.0;
+  the installer does not upgrade an existing browser extension.
+
+- **The embedded tree is the managed asset set; the hand-written manifest is
+  gone.** `config/{tools,prompts,mcp}/managed-assets.json` listed the files
+  beside it a second time, and five releases running shipped with a file on
+  one side and not the other -- v0.33.0 warned `half-built binary` on every
+  boot over `keeper_lane_status.toml`, which was embedded but unlisted. The
+  sync now computes the managed set from what the binary embeds, refuses an
+  empty set instead of projecting it, and still writes the runtime
+  directory's `managed-assets.json` as the record of what it owns there.
+  Adding a tool, prompt, or MCP file is one file again. (#31283)
+- **The shim names the release it came from, and the server says when they
+  differ.** `masc-exec-shim --probe` now answers with a `release` field taken
+  from `dune-project` through a generated module, so no build step has to
+  remember to stamp it. On every probe the server compares that with its own
+  version and logs `remote_shim_outdated` when they differ, or when the shim is
+  old enough not to name itself; the lane keeps running, because the two sides
+  negotiate the protocol major and tolerate one release apart on purpose. The
+  `keeper_lane_status` tool reports `shim_release` beside `server_release`, so a
+  keeper can read it for its own lane. The repair is the existing
+  `masc-exec-ssh-bootstrap --shim`, which the warning names (RFC-0427 B-3).
+
+- **The observation stage actually runs in the box now.** The gate's
+  pre-judge observation (RFC-0422) dispatched the keeper's effect-built
+  shell IR unchanged: execution reads the dispatch target from the IR, so
+  the "observed" run was the real call with live network, and its exit
+  became the gate's evidence — an `observed_in_box` auto-allow granted a
+  real `gh pr create` (PR #33609) and a review comment before any operator
+  decision on 2026-09-06. `Shell_ir.with_sandbox` rewrites every stage of
+  the IR onto the box's target (a delegated masc-tool stage keeps its own),
+  and the observation stage dispatches the rewritten IR (#33638,
+  task-1375).
+- **The exec shim traces every request and names its build.** On 2026-09-06
+  an `observed_in_box` auto-allow ran with live network (a keeper opened PR
+  #33609 through the observation path), while the same shim binary framed by
+  hand boxed correctly — and no record said what the server had actually
+  framed. The shim now appends one line per request to the guest's
+  `/tmp/masc-shim-requests.log` (framed mode, the plan it got, argv0, build
+  id; best-effort, capped at 4 MiB), and the static build stamps its commit
+  sha into the probe version (`3.0.0+a1b2c3d4`), so two artifacts of one
+  protocol stop looking identical. RFC-0422 diagnosis, task-1375.
 
 ## [0.33.0] - 2026-09-06
 
@@ -2770,7 +2874,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   by a dedicated negative test (`test_jest_vitest_banner_
   required`).  Verifier runtime now covers dune + cargo + pytest
   + go test + jest + vitest, bringing JavaScript-ecosystem
-  runner output (Kidsnote FE repos, most npm projects) into the
+  runner output (ExampleOrg FE repos, most npm projects) into the
   same typed-marker surface the rest of the runtime consumes.
 
 ## [0.12.0] - 2026-04-20

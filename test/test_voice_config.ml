@@ -358,6 +358,40 @@ let test_an_absent_tts_section_is_none () =
     check bool "and stt is untouched" true (Option.is_some config.Vc.stt)
 ;;
 
+(* [send_on_stop] decides whether a spoken sentence is sent without the
+   operator confirming it, so the absent case is the one that matters: a file
+   that never mentions it must not turn that on. *)
+let test_send_on_stop_defaults_to_off () =
+  match Vc.parse_json (config_without []) with
+  | Error message -> fail ("the fixture must parse: " ^ message)
+  | Ok config ->
+    check bool "a section that does not mention it means off" false
+      (stt_of config).Vc.send_on_stop
+;;
+
+let test_send_on_stop_is_read_when_declared () =
+  let json =
+    Yojson.Safe.from_string
+      {|{ "stt": { "default_model": "scribe_v1", "send_on_stop": true,
+                   "endpoints": [ { "id": "elevenlabs-stt",
+                                    "kind": "elevenlabs_direct",
+                                    "api_key_env": "ELEVENLABS_API_KEY",
+                                    "enabled": true } ] } }|}
+  in
+  match Vc.parse_json json with
+  | Error message -> fail ("an stt section declaring it must parse: " ^ message)
+  | Ok config ->
+    check bool "declared true is read" true (stt_of config).Vc.send_on_stop;
+    (* And it reaches the wire, which is the only way the TUI sees it. *)
+    (match
+       Yojson.Safe.Util.(Vc.public_json config |> member "stt" |> member "send_on_stop")
+     with
+     | `Bool true -> ()
+     | other ->
+       failf "stt.send_on_stop must serialise as true; got %s"
+         (Yojson.Safe.to_string other))
+;;
+
 let test_an_absent_stt_section_is_none () =
   match Vc.parse_json (config_without [ "stt" ]) with
   | Error message -> fail ("a config without [stt] must parse: " ^ message)
@@ -937,5 +971,13 @@ let () =
             "absent endpoint voice keeps the workspace default"
             `Quick
             test_endpoint_voice_is_absent_when_not_declared
+        ; test_case
+            "send_on_stop defaults to off"
+            `Quick
+            test_send_on_stop_defaults_to_off
+        ; test_case
+            "send_on_stop is read and reaches the wire"
+            `Quick
+            test_send_on_stop_is_read_when_declared
         ] )
     ]

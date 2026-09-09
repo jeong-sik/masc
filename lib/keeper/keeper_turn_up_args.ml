@@ -12,12 +12,12 @@ open Keeper_types_profile
 type parsed_args = {
   name : string;
   runtime_id_opt : string option;
-  autoboot_enabled_opt : bool option;
+  activation_mode_opt : Keeper_activation_mode.t option;
   mention_targets_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
+  microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
   network_mode_opt : string option;
@@ -218,11 +218,11 @@ let creation_stem =
 let known_turn_up_args =
   [ "name"
   ; "runtime_id"
-  ; "autoboot_enabled"
+  ; "activation_mode"
   ; "mention_targets"
   ; "max_context_override"
-  ; "proactive_enabled"
   ; "sandbox_profile"
+  ; "microvm_backend"
   ; "remote_endpoint"
   ; "network_mode"
   ; "egress_allow"
@@ -265,6 +265,18 @@ let docker_preflight_default ?image ~timeout_sec () =
   Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
 ;;
 
+let parse_microvm_backend_patch args =
+  match Json_util.assoc_member_opt "microvm_backend" args with
+  | None -> Ok None
+  | Some `Null -> Ok (Some None)
+  | Some (`String raw) ->
+    (match Keeper_microvm_backend.of_string raw with
+     | Some backend -> Ok (Some (Some backend))
+     | None -> Error ("microvm_backend_unknown: expected "
+                     ^ String.concat ", " Keeper_microvm_backend.valid_strings))
+  | Some _ -> Error "microvm_backend must be a string or null"
+;;
+
 let parse
     ?(docker_preflight = docker_preflight_default)
     (ctx : _ context)
@@ -293,9 +305,19 @@ let parse
       Ok runtime_id_opt,
       Ok (native_tool_posture_present, native_tool_posture_opt),
       Ok (skill_names_present, skill_names_opt) ->
-    let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
+    let activation_mode_result =
+      match Json_util.assoc_member_opt "activation_mode" args with
+      | None -> Ok None
+      | Some (`String raw) ->
+        (match Keeper_activation_mode.of_string raw with
+         | Some mode -> Ok (Some mode)
+         | None -> Error "activation_mode must be manual, on_demand, or autonomous")
+      | Some _ -> Error "activation_mode must be a string"
+    in
+    match activation_mode_result with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok activation_mode_opt ->
     let max_context_override_res = parse_max_context_override args in
-    let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
@@ -309,6 +331,24 @@ let parse
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
+    match parse_microvm_backend_patch args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok microvm_backend_patch ->
+    let profile_defaults =
+      match microvm_backend_patch with
+      | None -> profile_defaults
+      | Some microvm_backend -> { profile_defaults with microvm_backend }
+    in
+    let effective_profile =
+      match sandbox_profile_opt with
+      | Some raw -> sandbox_profile_of_string raw
+      | None -> profile_defaults.sandbox_profile
+    in
+    match profile_defaults.microvm_backend, effective_profile with
+    | Some _, (None | Some (Docker | Remote_ssh)) ->
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection
+        "microvm_backend_requires_microvm: microvm_backend is only valid with sandbox_profile = microvm; pass null to clear it when changing profiles")
+    | None, _ | Some _, Some Micro_vm ->
     (* An explicit profile must be valid, and one of the call, the keeper TOML,
        or the manifest has to state it. There is no fallback: the arm that used
        to take [None, None, None] resolved to [Local], and the only thing
@@ -459,12 +499,12 @@ let parse
     {
       name;
       runtime_id_opt;
-      autoboot_enabled_opt;
+      activation_mode_opt;
       mention_targets_opt;
       max_context_override_opt;
       max_context_override_present;
-      proactive_enabled_opt;
       sandbox_profile_opt;
+      microvm_backend_patch;
       remote_endpoint_opt;
       remote_endpoint_present;
       network_mode_opt;

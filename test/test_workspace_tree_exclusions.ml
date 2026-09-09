@@ -76,7 +76,7 @@ let find_node nodes p = List.find_opt (fun n -> path_of_node n = p) nodes
 let test_masc_ide_excluded () =
   with_temp_dir (fun base ->
     mkdir_p (Filename.concat base ".masc-ide/by-url/some_slug");
-    touch (Filename.concat base ".masc-ide/by-url/some_slug/annotations.jsonl");
+    touch (Filename.concat base ".masc-ide/by-url/some_slug/tool_events.jsonl");
     touch (Filename.concat base "lib/bar.ml");
     let nodes = W.scan_dir ~base ~depth:0 ~max_depth:3 ~max_nodes:200 [] base in
     let ps = paths nodes in

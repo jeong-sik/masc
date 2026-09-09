@@ -630,7 +630,7 @@ let test_lookup_deepseek_v4_flash () =
       ~model_id:"deepseek-v4-flash"
   with
   | Some c ->
-    check (option int) "context 1M" (Some 1_000_000) c.max_context_tokens;
+    check (option int) "context 1M" (Some 1_048_576) c.max_context_tokens;
     check (option int) "output 384K" (Some 384_000) c.max_output_tokens;
     check bool "tools" true c.supports_tools;
     (* thinking mode (default) 400s on forced tool_choice; auto stays valid *)
@@ -815,7 +815,7 @@ let test_lookup_glm_ocr () =
 
 let test_ollama_cloud_current_catalog_resolves () =
   let cases =
-    [ "deepseek-v4-pro", 524_288, false
+    [ "deepseek-v4-pro", 1_048_576, false
     ; "minimax-m2.1", 204_800, false
     ; "minimax-m2.5", 196_608, false
     ; "qwen3.5:397b", 262_144, true
@@ -836,9 +836,9 @@ let test_ollama_cloud_current_catalog_resolves () =
     ; "deepseek-v3.2", 163_840, false
     ; "mistral-large-3:675b", 262_144, true
     ; "glm-5.1", 202_752, false
-    ; "glm-5.2", 1_000_000, false
+    ; "glm-5.2", 1_048_576, false
     ; "gpt-oss:120b", 131_072, false
-    ; "minimax-m3", 524_288, true
+    ; "minimax-m3", 512_000, true
     ; "ministral-3:3b", 262_144, true
     ; "glm-5", 202_752, false
     ; "qwen3-coder-next", 262_144, false
@@ -917,7 +917,10 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
      transport (closes #28749; see test_ollama_cloud_qwen3_5_397b_has_no_control_wire
      and test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire). *)
   let cases =
-    [ "gemma4:31b", true
+    (* gemma4:31b fenced its json_object replies on the 2026-08-29 probe, so
+       #31798 declared the row false. This list is the per-model contract the
+       comment above describes; it follows the catalog rather than leading it. *)
+    [ "gemma4:31b", false
     ; "nemotron-3-ultra", false
     ; "glm-5.2", false
     ; "gpt-oss:20b", false
@@ -1195,17 +1198,21 @@ let test_ollama_cloud_structured_output_is_disabled_by_provider_contract () =
      Ollama Cloud does not support structured outputs. Keep JSON mode and
      schema enforcement separate: every Cloud row must remain schema-disabled
      even when a historical probe appeared to accept a schema-shaped reply. *)
+  (* (model, schema enforcement, JSON mode). Schema is false for every Cloud row
+     by the provider contract above. JSON mode is per model: mistral-large-3
+     opens with prose and fences the object, which #31798 recorded from the
+     2026-08-29 re-probe, so its row is false while its siblings stay true. *)
   let cases =
-    [ "devstral-2:123b", false
-    ; "devstral-small-2:24b", false
-    ; "ministral-3:14b", false
-    ; "mistral-large-3:675b", false
-    ; "ministral-3:3b", false
-    ; "ministral-3:8b", false
+    [ "devstral-2:123b", false, true
+    ; "devstral-small-2:24b", false, true
+    ; "ministral-3:14b", false, true
+    ; "mistral-large-3:675b", false, false
+    ; "ministral-3:3b", false, true
+    ; "ministral-3:8b", false, true
     ]
   in
   List.iter
-    (fun (model_id, structured_output) ->
+    (fun (model_id, structured_output, json_mode) ->
        match
          Capabilities.for_provider_model_id
            ~wire:None
@@ -1219,7 +1226,7 @@ let test_ollama_cloud_structured_output_is_disabled_by_provider_contract () =
          check
            bool
            (model_id ^ " json response format")
-           true
+           json_mode
            c.supports_response_format_json;
          check
            bool
@@ -1654,8 +1661,11 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
     ; ( "Ollama Cloud Gemma4"
       , Provider_qualified "ollama_cloud"
       , "gemma4:31b"
+      (* JSON mode came off this row in #31798 with the rest of the fencing
+         evidence, so the frontier contract is No_structured_output: neither
+         a schema guarantee nor a parseable json_object reply. *)
       , Extended_thinking
-      , Response_format_json
+      , No_structured_output
       , Replay_not_required
       , Delta_stream "thinking" )
     ; ( "Ollama Cloud Kimi K2.7 Code"

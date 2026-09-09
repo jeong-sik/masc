@@ -3,6 +3,18 @@
     configuration, provider failure, prompt-render failure, and missing or
     malformed tool calls remain typed non-verdict outcomes. *)
 
+(** RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+    image block. The body is a base64 copy read from the snapshot's filed body
+    at assembly time; the hash and size recorded in the snapshot stay the
+    authority the prompt text cites. *)
+type evidence_image =
+  { image_reference : string
+  ; image_sha256 : string
+  ; image_bytes : int
+  ; image_media_type : string
+  ; image_body_base64 : string
+  }
+
 type review_request =
   { task_title : string
   ; task_description : string
@@ -10,6 +22,7 @@ type review_request =
   ; agent_name : string
   ; task_id : string
   ; evidence_refs : string list
+  ; evidence_images : evidence_image list
   }
 
 (** What the evaluator may look at besides the submitted evidence snapshot
@@ -95,6 +108,7 @@ val run
   -> log_info:(string -> unit)
   -> log_warn:(string -> unit)
   -> render_prompt:(unit -> (string, string) result)
+  -> ?goal_blocks:Agent_core.Types.content_block list
   -> lookup:lookup_surface
   -> base_path:string
   -> unit
@@ -106,6 +120,11 @@ val run
 
     [~render_prompt] is called after the slots resolve, so a render failure is
     still reported against the slot that would have run.
+
+    [~goal_blocks], when present, carries attached media (RFC-0436 §4.3): the
+    reviewer runs on these blocks with the rendered prompt as the leading
+    [Text] block. A text-only candidate strips the media it cannot take, which
+    leaves the prompt text intact (§4.4).
 
     Task completion review is {!review}. Goal proof review renders its own
     template and calls this directly: the two lanes judge different things and
@@ -176,6 +195,7 @@ val run_llm_reviewer_fn
       -> ?sw:Eio.Switch.t
       -> evaluator_runtime:string
       -> prompt:string
+      -> ?goal_blocks:Agent_core.Types.content_block list
       -> report_tool_schema:Types_core.tool_schema
       -> lookup:lookup_surface
       -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)

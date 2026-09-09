@@ -1,12 +1,6 @@
-(** Tests for tool_search_files docker routing (RFC-0006 Phase B-3b+).
-
-    Verifies that Docker keepers route SearchFiles ops through
-    docker. The docker process itself is not invoked because the test
-    environment sets
-    [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
-    surface the structured "docker image is not configured" error from
-    [Keeper_sandbox_read_backend] — proof that control reached the docker
-    route. *)
+(** Docker routing and Execute result scenarios. Missing-image cases verify
+    route selection; Docker CLI fixtures execute real subprocesses and verify
+    their outputs. These fixtures do not exercise container isolation. *)
 
 module Workspace = Masc.Workspace
 module Keeper_meta_contract = Masc.Keeper_meta_contract
@@ -1745,6 +1739,174 @@ let test_execute_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
+(* The Docker protocol remains the existing fixture; its exec arm is a real
+   child that drains two independently generated source files. *)
+let fake_docker_file_output_script =
+  {|#!/bin/sh
+if [ "$1" = "exec" ]; then
+  printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+  fixture_dir=${MASC_KEEPER_TEST_DOCKER_LOG%/*}
+  printf x >> "$fixture_dir/exec-count"
+  if [ "${2-}" = "-i" ]; then cat >/dev/null; fi
+  cat "$fixture_dir/source.stdout"
+  cat "$fixture_dir/source.stderr" >&2
+  IFS= read -r exit_code < "$fixture_dir/exit-code"
+  exit "$exit_code"
+fi
+|} ^ fake_docker_echo_script
+;;
+
+module Output_sha = Digestif.SHA256
+
+let write_large_execute_source ~path ~stream ~private_token ~combined =
+  let block = String.make 4095 (if stream = `Stdout then 'a' else 'b') ^ "\n" in
+  let capture_ceiling = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
+  let blocks = 1 + (capture_ceiling / String.length block) in
+  let digest = ref Output_sha.empty in
+  let combined = ref combined in
+  let bytes = ref 0 in
+  let label = if stream = `Stdout then "STDOUT" else "STDERR" in
+  Out_channel.with_open_bin path (fun channel ->
+    let emit actual expected =
+      output_string channel actual;
+      digest := Output_sha.feed_string !digest expected;
+      combined := Output_sha.feed_string !combined expected;
+      bytes := !bytes + String.length expected
+    in
+    let emit_same value = emit value value in
+    emit_same (label ^ "-BEGIN\n");
+    for i = 0 to blocks - 1 do
+      emit_same block;
+      if i = blocks / 2 then
+        match private_token with
+        | None -> emit_same (label ^ "-MIDDLE\n")
+        | Some token ->
+          (* The token crosses a bounded redaction flush within one long
+             record, independently of the process pipe's chunk boundaries. *)
+          let before = String.make 4090 'p' in
+          let after = String.make 5000 'q' ^ "\n" in
+          emit (before ^ token ^ after) (before ^ "[REDACTED]" ^ after)
+    done;
+    emit_same (label ^ "-END\n"));
+  Output_sha.(to_hex (get !digest)), !bytes, !combined
+;;
+
+let execute_artifact raw field =
+  match Tool_output.normalized_artifact_ref_of_json (parse_field raw field) with
+  | Tool_output.Decoded_normalized_artifact_ref artifact -> artifact
+  | Tool_output.Not_normalized_artifact_ref -> Alcotest.fail (field ^ " is not an artifact")
+  | Tool_output.Invalid_normalized_artifact_ref { detail } -> Alcotest.fail detail
+;;
+
+let verify_execute_artifact_pages store (artifact : Tool_output.artifact_ref) ~sha ~bytes =
+  Alcotest.(check string) "artifact addresses the full expected output" sha artifact.sha256;
+  Alcotest.(check int) "artifact includes every output byte" bytes artifact.bytes;
+  let rec pages offset digest =
+    match Tool_blob_store.fetch_range store ~sha256:artifact.sha256 ~offset ~max_bytes:65536 with
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+    | Ok None -> Alcotest.fail "published output artifact is absent"
+    | Ok (Some page) ->
+      Alcotest.(check int) "page reports complete output length" bytes page.total_bytes;
+      if String.length page.content = 0 then (
+        Alcotest.(check int) "EOF follows the tail" bytes offset;
+        Alcotest.(check string) "all pages reproduce the complete output"
+          sha Output_sha.(to_hex (get digest)))
+      else pages (offset + String.length page.content) (Output_sha.feed_string digest page.content)
+  in
+  pages 0 Output_sha.empty
+;;
+
+let test_execute_preserves_large_docker_output ~exit_code ~private_output ~storage_failure () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_file_output_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let stdout_path = Filename.concat config.Workspace.base_path "source.stdout" in
+  let stderr_path = Filename.concat config.Workspace.base_path "source.stderr" in
+  let counter_path = Filename.concat config.Workspace.base_path "exec-count" in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let private_token =
+    if private_output then Some "private-execute-fixture-token-9e320ad6" else None
+  in
+  (match private_token with
+   | None -> ()
+   | Some token ->
+     let path = Filename.concat
+         (Filename.concat
+            (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "secrets")
+            (Workspace_utils.safe_filename meta.name)) "env/GH_TOKEN" in
+     ensure_dir (Filename.dirname path);
+     write_file path (token ^ "\n"));
+  let stdout_sha, stdout_bytes, combined =
+    write_large_execute_source ~path:stdout_path ~stream:`Stdout ~private_token ~combined:Output_sha.empty
+  in
+  let stderr_sha, stderr_bytes, combined =
+    write_large_execute_source ~path:stderr_path ~stream:`Stderr ~private_token ~combined
+  in
+  let store = Tool_blob_store.create ~base_path:config.base_path in
+  if storage_failure then write_file (Tool_blob_store.root_dir store) "not a directory";
+  write_file (Filename.concat config.base_path "exit-code") (string_of_int exit_code ^ "\n");
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let streamed_stdout = ref Output_sha.empty in
+  let streamed_stderr = ref Output_sha.empty in
+  let leaked = ref false in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () ->
+    Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
+      (fun ~keeper_name:_ ~stream:_ _ -> ()));
+  Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
+    (fun ~keeper_name:_ ~stream chunk ->
+      (match private_token with
+       | Some token when String_util.contains_substring chunk token -> leaked := true
+       | Some _ | None -> ());
+      match stream with
+      | `Stdout -> streamed_stdout := Output_sha.feed_string !streamed_stdout chunk
+      | `Stderr -> streamed_stderr := Output_sha.feed_string !streamed_stderr chunk);
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "emit-file-fixture" ~argv:[]) ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check string) "the fake Docker exec really ran exactly once" "x" (read_file counter_path);
+  Alcotest.(check int) "the child's actual exit status is retained" exit_code (parse_status_exit_code raw);
+  Alcotest.(check bool) "private token never reached streaming observers" false !leaked;
+  Alcotest.(check string) "stdout stream is complete and redacted"
+    stdout_sha Output_sha.(to_hex (get !streamed_stdout));
+  Alcotest.(check string) "stderr stream is complete and redacted"
+    stderr_sha Output_sha.(to_hex (get !streamed_stderr));
+  (match private_token with
+   | None -> ()
+   | Some token -> Alcotest.(check bool) "response does not expose the private token" false
+       (String_util.contains_substring raw token));
+  if storage_failure then (
+    Alcotest.(check bool) "storage failure is a failure after an actual execution" true
+      (match outcome.disposition, outcome.failure_effect_disposition with
+       | Tool_result.Failed _, Tool_result.Proven_post_effect -> true
+       | _ -> false);
+    Alcotest.(check (option string)) "storage failure follows the completed process"
+      (Some "execute_output_externalization_failed") (parse_string_field raw "code");
+    List.iter (fun field -> Alcotest.(check bool) "no false artifact is published" true
+      (parse_field raw field = `Null)) [ "stdout_artifact"; "stderr_artifact"; "output_artifact" ])
+  else (
+    Alcotest.(check bool) "a nonzero child is a completed Execute result" true
+      (match outcome.disposition with Tool_result.Completed () -> true | _ -> false);
+    Alcotest.(check (option bool)) "success matches the real exit status"
+      (Some (exit_code = 0)) (parse_bool_field raw "ok");
+    Alcotest.(check (option string)) "the files reached actual EOF"
+      (Some "complete") (parse_string_field raw "output_completeness");
+    Sys.remove stdout_path;
+    Sys.remove stderr_path;
+    verify_execute_artifact_pages store (execute_artifact raw "stdout_artifact")
+      ~sha:stdout_sha ~bytes:stdout_bytes;
+    verify_execute_artifact_pages store (execute_artifact raw "stderr_artifact")
+      ~sha:stderr_sha ~bytes:stderr_bytes;
+    verify_execute_artifact_pages store (execute_artifact raw "output_artifact")
+      ~sha:Output_sha.(to_hex (get combined)) ~bytes:(stdout_bytes + stderr_bytes))
+;;
+
 let test_turn_runtime_projects_keeper_secret_dir () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -2211,6 +2373,18 @@ let () =
           Alcotest.test_case
             "docker Execute executes through fake docker"
             `Quick test_execute_fake_docker_executes;
+          Alcotest.test_case
+            "docker Execute preserves every stdout and stderr byte as paged artifacts"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:0 ~private_output:false ~storage_failure:false);
+          Alcotest.test_case
+            "failed docker Execute preserves complete redacted output without replay"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:17 ~private_output:true ~storage_failure:false);
+          Alcotest.test_case
+            "docker output storage failure retains the executed status without replay"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:17 ~private_output:false ~storage_failure:true);
           Alcotest.test_case
             "docker Execute safe pipe redirect routes through docker"
             `Quick test_execute_allows_validator_safe_pipe_redirect_in_docker_route;

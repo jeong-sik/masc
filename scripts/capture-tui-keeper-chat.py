@@ -524,8 +524,7 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
                 "paused": False,
                 "phase": "running",
                 "keepalive_running": True,
-                "autoboot_enabled": True,
-                "proactive_enabled": True,
+                "activation_mode": "autonomous",
                 "runtime_id": "capture.fixture",
             }
         ],

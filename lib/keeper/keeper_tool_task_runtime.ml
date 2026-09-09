@@ -102,7 +102,7 @@ let validation_error_json message =
    scopes that arg to [masc_add_task]), so [Unknown_predecessor] /
    [Predecessor_not_terminal] cannot be produced through this tool's live
    args today. Exposed (like [validation_error_json] above) so the route
-   split can be tested directly against all six variants without depending
+   split can be tested directly against all variants without depending
    on that unreachable path. *)
 type task_create_failure_route =
   | Task_create_workflow_rejection
@@ -110,25 +110,14 @@ type task_create_failure_route =
 
 let task_create_failure_route : Workspace_task.add_task_error -> task_create_failure_route
   = function
+  | Workspace_task.Unknown_goal _
   | Workspace_task.Unknown_predecessor _
   | Workspace_task.Predecessor_not_terminal _ -> Task_create_workflow_rejection
+  | Workspace_task.Goal_source_unavailable _
   | Workspace_task.Backlog_read_failed _
   | Workspace_task.Goal_link_write_failed _
   | Workspace_task.Backlog_write_failed _
   | Workspace_task.Unexpected_error _ -> Task_create_runtime_failure
-;;
-
-let validate_goal_id config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some _ -> Ok goal_id
-  | None -> Error (Printf.sprintf "unknown goal_id: %s" goal_id)
-;;
-
-let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
-  match Safe_ops.json_string_opt "goal_id" args with
-  | Some s when String.trim s <> "" ->
-      validate_goal_id config (String.trim s) |> Result.map Option.some
-  | _ -> Ok None
 ;;
 
 let no_eligible_exclusion_summary =
@@ -292,14 +281,67 @@ let parse_keeper_task_done_evidence_refs args =
    pass through untouched: the snapshot layer reports those as typed
    unreadable reasons at review time, and restating that taxonomy here would
    drift. *)
+(* Where an evidence artifact lives depends on the producer's sandbox
+   profile, and that policy sits above the store's library. An
+   endpoint-owned tree (microvm, remote-ssh) keeps its files inside the
+   guest's work volume, which only the sandbox backend can read -- the
+   store's direct host read reached the bookkeeping bundle instead and
+   recorded every artifact as unreadable (live capture 2026-09-02 onward,
+   #33745). A shared-mount (Docker) tree stays on the host playground the
+   store already reads, so that keeper keeps the direct read. [None] means
+   "no reader: read the host directly", which is also the store's default. *)
+let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
+  match
+    Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+  with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+      Some
+        (fun ~worker ~relative ->
+           let module Store = Workspace_verification_store in
+           let max_bytes = Store.verification_evidence_max_bytes in
+           match
+             Keeper_sandbox_read_backend.read_file ~config ~meta
+               ~host_path:relative ~max_bytes ~timeout_sec:30. ()
+           with
+           | Error reason ->
+               Error
+                 (Store.Evidence_read_error
+                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))
+           | Ok content -> (
+               (* The reader classifies its bytes with the store's own scan:
+                   text answers as text, and non-text bytes become a binary
+                   payload -- hash, size, format -- instead of being dropped
+                   (RFC-0436 §4.1). *)
+               match Store.scan_utf8 content with
+               | Store.Utf8_valid ->
+                   Ok (Store.Text_payload (content, String.length content, false))
+               | _ ->
+                   let format =
+                     let ext = String.lowercase_ascii (Filename.extension relative) in
+                     if ext = "" then "unknown" else ext
+                   in
+                   let sha256 =
+                     Digestif.SHA256.(digest_string content |> to_hex)
+                   in
+                   Ok
+                     (Store.Binary_payload
+                        { data = content
+                        ; bytes = String.length content
+                        ; sha256
+                        ; format
+                        })))
+  | Keeper_types_profile_sandbox.Shared_mount -> None
+
 let evidence_artifact_total_bytes ~(config : Workspace.config)
       ~(meta : keeper_meta) evidence_refs
   =
   (* [artifact_reference_size] itself resolves the project root from
      [base_path], so no separate normalization is needed here. *)
+  let artifact_read = evidence_artifact_reader ~config ~meta () in
   List.filter_map
     (fun reference ->
        Workspace_verification_store.artifact_reference_size
+         ?artifact_read
          ~base_path:config.base_path
          ~worker:meta.name
          reference)
@@ -627,12 +669,10 @@ let handle_keeper_task_tool_with_outcome
         (validation_error_json
            "description is required. Explain what needs to be done and why.")
     else (
-      match resolve_task_create_goal_id ~config ~meta args with
-      | Error message ->
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Policy_rejection
-          (validation_error_json message)
-      | Ok goal_id ->
+      let goal_id =
+        Safe_ops.json_string_opt "goal_id" args
+        |> Workspace_task_classify.trim_opt
+      in
           (* De-duplicated: this keeper-internal path now shares the canonical
              [Task.Args.parse_task_contract] used by the public
              masc_task_create facade. The previous local copy
@@ -648,7 +688,7 @@ let handle_keeper_task_tool_with_outcome
                (validation_error_json message)
            | Ok contract ->
              (match
-                Workspace_task.add_task_with_result
+                Masc_task_handlers.Task_goal_assignment.add_task_with_result
                   ?contract
                   ?goal_id
                   config
@@ -1039,6 +1079,23 @@ let handle_keeper_task_tool_with_outcome
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
+    (* Preserve the optional handoff note independently of the result summary.
+       A present note, including an empty string, is never replaced. *)
+    let notes =
+      match Json_field.string args "notes" with
+      | Json_field.Found text -> Ok [ "notes", `String text ]
+      | Json_field.Field_absent -> Ok []
+      | Json_field.Wrong_shape { expected; got } ->
+        Error (Printf.sprintf "notes must be %s, got %s" expected got)
+    in
+    (match notes with
+    | Error message ->
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Workflow_rejection
+        (workflow_rejection_error_json
+           ~typed_outcome:(Keeper_tool_outcome.Error { reason = message })
+           message)
+    | Ok notes ->
     if task_id = ""
     then
       Keeper_tool_execution.failure
@@ -1101,13 +1158,12 @@ let handle_keeper_task_tool_with_outcome
         [
           "task_id", `String task_id;
           "action", `String action;
-          "notes", `String result_text;
           ( "handoff_context",
             `Assoc
               [ "summary", `String result_text
               ; "evidence_refs", Json_util.json_string_list evidence_refs
               ] );
-        ]
+        ] @ notes
       in
       let transition_result =
         Task.Tool.handle_transition
@@ -1141,7 +1197,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload)))
+        Keeper_tool_execution.failure ~class_ payload))))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

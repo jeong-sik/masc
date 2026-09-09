@@ -19,27 +19,56 @@
 
 open Masc.Keeper_chat_store
 
+module Message_layout = Masc_tui_message_layout
+
 (* Said once, because it is drawn twice: as the whole line of a
    continuation row, and as the suffix of a folded run that also resumed. *)
 let continuation_wording = "턴 이어서 진행"
 
+(* The turn that received the replay failed after the model answered; the
+   approval is not delivered again (#32956). *)
+let failed_continuation_wording = "이어가던 턴 실패"
+
+(* What happened, then what it happened to.
+
+   The subject used to lead, and the tool name used to lead the subject. Of
+   12,592 Gate rows across the fleet 10,026 name tool_execute, so nearly every
+   row opened with the same cells and the phase -- the only part that differs
+   -- sat at the far right, which is where the pane cuts. On a body of 56
+   cells five different phases all read as one row.
+
+   The tool name now appears only where the summary does not. A summary that
+   is there already names the call: "github/create_pull_request", "discord
+   1467…: …", the shell command itself. Where there is none -- 8,986 of those
+   12,592 rows -- the tool name is what the row has, and it says it. *)
+let news_of_phase : approval_lifecycle_phase -> string = function
+  | Approval_requested -> "판정 중 · 이 호출은 미뤄짐"
+  | Approval_resolved_approved -> "승인됨 · 적용 예정"
+  | Approval_resolved_rejected -> "승인 거절"
+  | Approval_replay_applied -> "미뤘던 호출 적용됨"
+  | Approval_replay_applied_with_warning -> "적용됨 · 경고 있음"
+  | Approval_replay_failed -> "적용 실패"
+  | Approval_replay_indeterminate -> "적용 여부 불명 · 대상을 직접 확인하세요"
+  | Approval_continuation_recorded -> continuation_wording
+  | Approval_continuation_failed -> failed_continuation_wording
+;;
+
+let subject_of ~tool ~summary =
+  match summary with
+  | Some summary when String.trim summary <> "" -> String.trim summary
+  | Some _ | None -> (
+    match tool with None -> "외부 효과" | Some name -> name)
+;;
+
+(* [news] is written out rather than joined by the caller so a folded run that
+   also resumed says both things before the subject, on the same rule as
+   everything else here. *)
+let line ~news ~tool ~summary =
+  String.concat " · " (news @ [ subject_of ~tool ~summary ])
+;;
+
 let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
-  let subject =
-    let tool = match tool with None -> "외부 효과" | Some name -> name in
-    match summary with
-    | Some summary when String.trim summary <> "" -> tool ^ " · " ^ summary
-    | Some _ | None -> tool
-  in
-  match phase with
-  | Approval_requested -> subject ^ " · 판정 중 · 이 호출은 미뤄짐"
-  | Approval_resolved_approved -> subject ^ " · 승인됨 · 적용 예정"
-  | Approval_resolved_rejected -> subject ^ " · 승인 거절"
-  | Approval_replay_applied -> subject ^ " · 미뤘던 호출 적용됨"
-  | Approval_replay_applied_with_warning -> subject ^ " · 적용됨 · 경고 있음"
-  | Approval_replay_failed -> subject ^ " · 적용 실패"
-  | Approval_replay_indeterminate ->
-    subject ^ " · 적용 여부 불명 · 대상을 직접 확인하세요"
-  | Approval_continuation_recorded -> subject ^ " · " ^ continuation_wording
+  line ~news:[ news_of_phase phase ] ~tool ~summary
 ;;
 
 (* One approval's steps as one line.
@@ -58,9 +87,10 @@ let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
    severity instead would have kept showing the phase the correction exists to
    overturn.
 
-   [Approval_continuation_recorded] is the exception to all of it: it says the
-   turn resumed, which no outcome says, so it is not a stage and rides along
-   as a suffix instead of replacing the outcome. *)
+   The two continuation phases are the exception to all of it: they say what
+   the turn that resumed did, which no outcome says, so neither is a stage
+   and the one that is there rides along as a suffix instead of replacing
+   the outcome. *)
 type stage =
   | Waiting
   | Resolved
@@ -78,15 +108,17 @@ let stage_of_phase = function
     Some Replayed
   | Approval_resolved_approved | Approval_resolved_rejected -> Some Resolved
   | Approval_requested -> Some Waiting
-  | Approval_continuation_recorded -> None
+  | Approval_continuation_recorded | Approval_continuation_failed -> None
 ;;
 
-let is_continuation = function
-  | Approval_continuation_recorded -> true
+(* The suffix a continuation phase adds; the stages add none. *)
+let continuation_of_phase = function
+  | Approval_continuation_recorded -> Some continuation_wording
+  | Approval_continuation_failed -> Some failed_continuation_wording
   | Approval_requested | Approval_resolved_approved | Approval_resolved_rejected
   | Approval_replay_applied | Approval_replay_applied_with_warning
   | Approval_replay_failed | Approval_replay_indeterminate ->
-    false
+    None
 ;;
 
 let fold_line ~phases ~tool ~summary =
@@ -107,14 +139,57 @@ let fold_line ~phases ~tool ~summary =
           | None -> Some (stage, phase)))
       None phases
   in
-  let continued = List.exists is_continuation phases in
-  match outcome, continued with
-  (* Every phase is either a stage or the continuation, so a run with neither
+  (* The store settles the continuation once per approval, so at most one
+     of these is there; if the store ever held two, the later step stands,
+     on the same rule as the stages. *)
+  let continuation =
+    List.fold_left
+      (fun held phase ->
+        match continuation_of_phase phase with
+        | None -> held
+        | Some wording -> Some wording)
+      None phases
+  in
+  match outcome, continuation with
+  (* Every phase is either a stage or a continuation, so a run with neither
      is the empty run. *)
-  | None, false -> None
-  | None, true ->
-    Some (lifecycle_line ~phase:Approval_continuation_recorded ~tool ~summary)
-  | Some (_, phase), false -> Some (lifecycle_line ~phase ~tool ~summary)
-  | Some (_, phase), true ->
-    Some (lifecycle_line ~phase ~tool ~summary ^ " · " ^ continuation_wording)
+  | None, None -> None
+  | None, Some wording -> Some (line ~news:[ wording ] ~tool ~summary)
+  | Some (_, phase), None -> Some (lifecycle_line ~phase ~tool ~summary)
+  | Some (_, phase), Some wording ->
+    (* Both in front. Appended after the subject, the second one landed back
+       in the column the pane cuts -- the position this module just moved the
+       first one out of. *)
+    Some (line ~news:[ news_of_phase phase; wording ] ~tool ~summary)
 ;;
+
+(* A Gate row's text carries the argument of the call it gated, and nothing
+   caps it: one base64 argument took eight rows of the pane. Compact keeps
+   what fits on a line and says how much it is holding.
+
+   Counted in cells, not rows. How many rows this becomes is the layout's
+   answer, decided after wrapping at a width this function does not have, so a
+   row count read here would be a guess printed as a fact. Cells are what the
+   text is, whatever the pane does with it.
+
+   Folded, not truncated: Ctrl-D brings the whole argument back. A row that
+   also said so would repeat the footer on every Gate row, which is what
+   pushed the tool names onto a second line before. *)
+type folded_argument =
+  { fa_text : string
+  ; fa_held_cells : int
+  }
+
+let fold_argument ~cap text =
+  let flat =
+    String.concat " " (String.split_on_char '\n' (String.trim text))
+  in
+  let width = Message_layout.display_width flat in
+  if width <= cap then { fa_text = flat; fa_held_cells = 0 }
+  else
+    { fa_text =
+        Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
+          (Message_layout.take_cells flat cap)
+          (width - cap)
+    ; fa_held_cells = width - cap
+    }

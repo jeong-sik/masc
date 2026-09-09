@@ -4,6 +4,7 @@ Get board activity statistics: total posts, comments, votes, active hearths.
 
 Use \
 to understand overall board health and engagement levels."""
+identity_fields = []
 
 
 # Held back from the request until the model asks for it by name.

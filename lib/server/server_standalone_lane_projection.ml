@@ -78,6 +78,24 @@ type retained_run =
   | Task_verification_run of Verification_run_registry.run
   | Goal_verification_run of Goal_verification_run_registry.run
 
+type run_kind = Exact_output | Task_verification | Goal_verification
+
+let run_kind_of_string = function
+  | "exact_output" -> Ok Exact_output
+  | "task_verification" -> Ok Task_verification
+  | "goal_verification" -> Ok Goal_verification
+  | value ->
+    Error (Printf.sprintf
+      "unknown standalone run kind %S; expected exact_output, task_verification, or goal_verification"
+      value)
+;;
+
+let retained_run_kind = function
+  | Exact_run _ -> Exact_output
+  | Task_verification_run _ -> Task_verification
+  | Goal_verification_run _ -> Goal_verification
+;;
+
 type detail_lookup =
   | Detail_found of Yojson.Safe.t
   | Detail_not_found
@@ -183,7 +201,24 @@ let retained_run_skill_evidence_json = function
 
 let retained_run_detail_json run =
   let with_skill_evidence fields =
-    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: fields)
+    let available =
+      Exact_lane_run_registry.availability_to_yojson Exact_lane_run_registry.Available
+    in
+    let verifier_availability has_output =
+      [ "payload_availability", `Assoc
+          [ "input", available; "output", (if has_output then available else `Null) ] ]
+    in
+    let availability =
+      match run with
+      | Exact_run _ -> []
+      | Task_verification_run run ->
+        verifier_availability
+          (match run.Verification_run_registry.status with Running -> false | Completed _ -> true)
+      | Goal_verification_run run ->
+        verifier_availability
+          (match run.Goal_verification_run_registry.status with Running -> false | Completed _ -> true)
+    in
+    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: availability @ fields)
   in
   match run with
   | Exact_run run ->
@@ -224,6 +259,8 @@ let retained_run_detail_json run =
                ~subject_key:"goal_id"
                ~subject_id:run.goal_id
                [ "review_kind", `String "proof"
+               ; "request_id", `String run.request_id
+               ; "criterion", Goal_store.criterion_to_yojson run.criterion
                ; "authority_actor", `String run.authority_actor
                ] ) ]
        @ output)
@@ -263,6 +300,7 @@ let recent_run_page_json_with
       ~limit
       ~before
       ~lane
+      ~run_kind
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs
@@ -271,7 +309,13 @@ let recent_run_page_json_with
   | Some lane_id when not (known_lane lane_id) ->
     Error (Printf.sprintf "unknown standalone lane %S" lane_id)
   | None | Some _ ->
-    let all = retained_runs ~exact_runs ~verification_runs ~goal_verification_runs in
+    let all =
+      retained_runs ~exact_runs ~verification_runs ~goal_verification_runs
+      |> List.filter (fun run ->
+        match run_kind with
+        | None -> true
+        | Some kind -> retained_run_kind run = kind)
+    in
     let relevant =
       match lane with
       | None -> all
@@ -292,11 +336,12 @@ let recent_run_page_json_with
         ])
 ;;
 
-let recent_run_page_json ~limit ~before ~lane =
+let recent_run_page_json ~limit ~before ~lane ~run_kind =
   recent_run_page_json_with
     ~limit
     ~before
     ~lane
+    ~run_kind
     ~exact_runs:
       (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
     ~verification_runs:
@@ -426,12 +471,16 @@ let observed_verification_run (run : Verification_run_registry.run) =
     status
 ;;
 
-let terminal_of_goal_verification_outcome = function
-  | Goal_verification_run_registry.Raised _
-  | Goal_verification_run_registry.Deferred _ -> Failed
-  | Goal_verification_run_registry.Reviewed
-  | Goal_verification_run_registry.Committed -> Succeeded
+let terminal_of_goal_verification_outcome ~evaluated_verdict = function
   | Goal_verification_run_registry.Review_cancelled _ -> Cancelled
+  | Goal_verification_run_registry.Raised _
+  | Goal_verification_run_registry.Deferred _
+  | Goal_verification_run_registry.Reviewed
+  | Goal_verification_run_registry.Committed
+  | Goal_verification_run_registry.Superseded _ ->
+    (* This is judgement production, not application success. Replacing a
+       request, or a later commit failure, cannot change whether it evaluated. *)
+    (match evaluated_verdict with Some _ -> Succeeded | None -> Failed)
 ;;
 
 let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
@@ -439,9 +488,9 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
     match run.status with
     | Goal_verification_run_registry.Running -> Running
     | Goal_verification_run_registry.Completed
-        { outcome; evaluator_runtime; elapsed_s; _ } ->
+        { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; _ } ->
       Terminal
-        { kind = terminal_of_goal_verification_outcome outcome
+        { kind = terminal_of_goal_verification_outcome ~evaluated_verdict outcome
         ; elapsed_s
         ; elapsed_measured = true
         ; selected_slot = evaluator_runtime

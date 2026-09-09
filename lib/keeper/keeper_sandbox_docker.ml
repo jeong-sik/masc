@@ -140,9 +140,7 @@ type docker_shell_result =
    caller-side product-specific timeout. *)
 
 let resolve_sandbox_image (meta : keeper_meta) =
-  match meta.sandbox_image with
-  | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_sandbox.Runtime.docker_image ()
+  (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
 ;;
 
 let docker_cleanup_rm_timeout_sec () =

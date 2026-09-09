@@ -85,6 +85,7 @@ type probe_report =
   | Probe_answered of
       { major : Exec_ssh_protocol.major
       ; capabilities : string list
+      ; release : string option
       }
   | Probe_failed of
       { at : float
@@ -106,6 +107,11 @@ type shared_state =
        this process once asked (RFC-0422). [None] until a probe has run.
        The shim is a host-installed binary, so its answer changes only when
        the operator replaces it, and that comes with a server restart. *)
+  ; probe_release : string option Atomic.t
+    (* The MASC release the endpoint's shim was built from, from the same
+       probe (RFC-0427 B-3). [None] both before a probe has run and from a
+       shim built before the field existed; the two are told apart by
+       [probe_major], which any answered probe sets. *)
   ; probe_major : Exec_ssh_protocol.major option Atomic.t
     (* The protocol major the shim speaks, from the same probe. Every request
        to this endpoint is framed in it, so a shim one release behind or
@@ -136,6 +142,7 @@ let shared_state ~base_path ~name ~max_concurrent_sessions =
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
         ; probe_capabilities = Atomic.make None
+        ; probe_release = Atomic.make None
         ; probe_major = Atomic.make None
         ; last_probe_failure = Atomic.make None
         ; last_dispatch = Atomic.make None
@@ -471,6 +478,41 @@ let log_first_dispatch t =
 
 let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
 
+(* RFC-0427 B-3. The shim names the release it was built from and the server
+   compares it with its own. A difference is what 2026-09-05 looked like from
+   the inside: an endpoint one release behind, found by symptom because
+   nothing on the wire carried the answer.
+
+   This is a WARN and not a refusal. The two sides negotiate the protocol
+   major (#33425) and keep running one release apart on purpose, so a release
+   difference is a thing to repair, not a reason to stop the lane. The line
+   names the repair, because a log line that only says something is wrong is
+   an alarm and not a fix.
+
+   It fires per probe. Two of the three probe sites run once per endpoint per
+   process; the third is the keeper preflight, so an outdated endpoint says so
+   once per keeper boot. *)
+let warn_on_release_skew t release =
+  let repair =
+    Printf.sprintf
+      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <the masc-exec-shim-linux-ARCH asset of %s>"
+      t.name Build_version.current
+  in
+  match release with
+  | Some release when String.equal release Build_version.current -> ()
+  | Some release ->
+    Log.Keeper.warn
+      ~keeper_name:t.keeper_name
+      "remote_shim_outdated: endpoint %s runs the shim from release %s and this server is %s; %s"
+      t.name release Build_version.current repair
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name:t.keeper_name
+      "remote_shim_outdated: endpoint %s runs a shim that does not name its \
+       release (it predates the stamp) and this server is %s; %s"
+      t.name Build_version.current repair
+;;
+
 let run_probe t =
   let status, stdout, stderr =
     Process_eio.run_argv_with_stdin_and_status_split
@@ -491,6 +533,8 @@ let run_probe t =
         | Ok major ->
           Atomic.set t.shared.probe_major (Some major);
           Atomic.set t.shared.probe_capabilities (Some probe.capabilities);
+          Atomic.set t.shared.probe_release probe.release;
+          warn_on_release_skew t probe.release;
           Ok major
         | Error detail ->
           Error
@@ -519,8 +563,11 @@ let run_probe t =
 let report t =
   let probe =
     match Atomic.get t.shared.probe_major, Atomic.get t.shared.probe_capabilities with
-    | Some major, Some capabilities -> Probe_answered { major; capabilities }
-    | Some major, None -> Probe_answered { major; capabilities = [] }
+    | Some major, Some capabilities ->
+      Probe_answered { major; capabilities; release = Atomic.get t.shared.probe_release }
+    | Some major, None ->
+      Probe_answered
+        { major; capabilities = []; release = Atomic.get t.shared.probe_release }
     | None, _ ->
       (match Atomic.get t.shared.last_probe_failure with
        | Some (at, detail) -> Probe_failed { at; detail }
@@ -555,20 +602,52 @@ let wire_major t =
        Exec_ssh_protocol.newest)
 ;;
 
-let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
+type receipt_unavailable =
+  | Request_not_sent
+  | Transport_unavailable
+  | Peer_receipt_missing
+  | Invalid_receipt of string
+
+type execution_observation =
+  | Execution_observed of Exec_ssh_protocol.execution_receipt * Exec_ssh_protocol.trailer
+  | Execution_unavailable of receipt_unavailable
+
+let execution_observation_to_yojson = function
+  | Execution_unavailable reason ->
+    let reason, detail = match reason with
+      | Request_not_sent -> "request_not_sent", []
+      | Transport_unavailable -> "transport_unavailable", []
+      | Peer_receipt_missing -> "peer_receipt_missing", []
+      | Invalid_receipt detail -> "invalid_receipt", ["detail", `String detail]
+    in
+    `Assoc (["status", `String "unavailable"; "reason", `String reason] @ detail)
+  | Execution_observed (receipt, outcome) ->
+    let optional_int = function None -> `Null | Some value -> `Int value in
+    `Assoc
+      ["status", `String "observed";
+       "receipt", Exec_ssh_protocol.execution_receipt_to_yojson receipt;
+       "outcome", `Assoc
+         ["exit", optional_int outcome.exit; "signal", optional_int outcome.signal;
+          "timed_out", `Bool outcome.timed_out;
+          "shim_error", `Bool (Option.is_some outcome.shim_error)]]
+;;
+
+let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
      instead of producing one is [Transport_failed]. Every arm below that
      used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
      old 3-tuple could not tell apart from grep's real exit 1 -- the silent
      failure the read backend then read as "no match". *)
   let ran status stdout stderr =
-    Masc_exec.Sandbox_target.Ran { status; stdout; stderr }
+    Masc_exec.Sandbox_target.Ran { output_files = None; status; stdout; stderr }
   in
   let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
     Masc_exec.Sandbox_target.Transport_failed
-      { reason; stdout; stderr = append_error prefix_stderr reason }
+      { output_files = None; reason; stdout; stderr = append_error prefix_stderr reason }
   in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
+    let observation = ref (Execution_unavailable Request_not_sent) in
+    let result =
     match wire_env t env with
     | Error error -> transport_failed error
     | Ok env ->
@@ -623,6 +702,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                ~remote_root:t.remote_root ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
+           observation := Execution_unavailable Transport_unavailable;
            let status, stdout, raw_stderr =
              Process_eio.run_argv_with_stdin_held_open_and_status_split
                ~timeout_sec:budget
@@ -639,6 +719,16 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in
            let settle record triple =
+             (match record with
+              | Payload_finished _
+              | Dispatch_failed { failure = (Shim_refused | Remote_timeout); _ } ->
+                observation :=
+                  (match Exec_ssh_protocol.parse_trailer raw_stderr,
+                         Exec_ssh_protocol.parse_execution_receipt raw_stderr with
+                   | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
+                   | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
+                   | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
+              | Dispatch_failed _ -> ());
              Atomic.set t.shared.last_dispatch (Some record);
              triple
            in
@@ -706,6 +796,9 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec t =
                    in
                    settle (failed Trailer_disagreement error)
                      (transport_failed ~stdout ~prefix_stderr:payload_stderr error))))))
+    in
+    Option.iter (fun notify -> notify !observation) on_receipt;
+    result
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)

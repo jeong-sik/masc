@@ -221,7 +221,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
@@ -229,10 +229,6 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
-    # RFC-0394 turned the local playground fail-closed; the eval harness is
-    # exactly the dev/test caller that knob exists for. Episodes edit files
-    # only inside run workspaces this script creates and owns.
-    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
@@ -250,7 +246,7 @@ start_live_server() {
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
-    export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
@@ -258,10 +254,6 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
-    # RFC-0394 turned the local playground fail-closed; the eval harness is
-    # exactly the dev/test caller that knob exists for. Episodes edit files
-    # only inside run workspaces this script creates and owns.
-    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"
@@ -727,8 +719,7 @@ run_one() {
       name: $name,
       instructions: $instructions,
       runtime_id: $runtime_id,
-      autoboot_enabled: false,
-      proactive_enabled: false
+      activation_mode: "manual"
     }')"
 
   if ! call_mcp_tool 4000 "masc_keeper_up" "${create_args}" 45; then

@@ -1,8 +1,11 @@
 type review_kind = Proof
 
+type evaluated_verdict = Approved of { reason : string } | Rejected of { reason : string }
+
 type outcome =
   | Reviewed
   | Committed
+  | Superseded of { detail : string }
   | Deferred of
       { detail : string }
   | Raised of { detail : string }
@@ -12,6 +15,7 @@ type run_status =
   | Running
   | Completed of
       { outcome : outcome
+      ; evaluated_verdict : evaluated_verdict option
       ; evaluator_runtime : string option
       ; elapsed_s : float
       ; tools : Verification_run_registry.tool_observation list
@@ -20,6 +24,8 @@ type run_status =
 type run =
   { run_id : string
   ; goal_id : string
+  ; request_id : string
+  ; criterion : Goal_store.criterion
   ; review_kind : review_kind
   ; authority_actor : string
   ; started_at : float
@@ -40,6 +46,7 @@ let review_kind_of_label = function
 let outcome_label = function
   | Reviewed -> "reviewed"
   | Committed -> "committed"
+  | Superseded _ -> "superseded"
   | Deferred _ -> "deferred"
   | Raised _ -> "raised"
   | Review_cancelled _ -> "review_cancelled"
@@ -48,12 +55,15 @@ let outcome_label = function
 module Payload = struct
   type registration =
     { goal_id : string
+    ; request_id : string
+    ; criterion : Goal_store.criterion
     ; review_kind : review_kind
     ; authority_actor : string
     }
 
   type completion =
     { outcome : outcome
+    ; evaluated_verdict : evaluated_verdict option
     ; evaluator_runtime : string option
     ; elapsed_s : float
     ; tools : Verification_run_registry.tool_observation list
@@ -73,6 +83,8 @@ module Payload = struct
   let registration_to_yojson registration =
     `Assoc
       [ "goal_id", `String registration.goal_id
+      ; "request_id", `String registration.request_id
+      ; "criterion", Goal_store.criterion_to_yojson registration.criterion
       ; "review_kind", `String (review_kind_label registration.review_kind)
       ; "authority_actor", `String registration.authority_actor
       ]
@@ -83,29 +95,53 @@ module Payload = struct
     let* fields = Run_registry_core.Json.object_fields json in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:[ "goal_id"; "review_kind"; "authority_actor" ]
+        ~required:[ "goal_id"; "request_id"; "criterion"; "review_kind"; "authority_actor" ]
         fields
     in
     let* goal_id = Run_registry_core.Json.string_field "goal_id" fields in
+    let* request_id = Run_registry_core.Json.string_field "request_id" fields in
+    let* () = if String.trim request_id = "" then Error "request_id is blank" else Ok () in
+    let* criterion = Goal_store.criterion_of_yojson (Yojson.Safe.Util.member "criterion" json) in
     let* review_kind = Run_registry_core.Json.string_field "review_kind" fields in
     let* review_kind = review_kind_of_label review_kind in
     let* authority_actor =
       Run_registry_core.Json.string_field "authority_actor" fields
     in
-    Ok { goal_id; review_kind; authority_actor }
+    Ok { goal_id; request_id; criterion; review_kind; authority_actor }
   ;;
+
+  let evaluated_verdict_to_yojson = function
+    | None -> `Null
+    | Some (Approved { reason }) -> `Assoc [ "decision", `String "approved"; "reason", `String reason ]
+    | Some (Rejected { reason }) -> `Assoc [ "decision", `String "rejected"; "reason", `String reason ]
+
+  let evaluated_verdict_of_yojson = function
+    | `Null -> Ok None
+    | json ->
+      let open Result.Syntax in
+      let* fields = Run_registry_core.Json.object_fields json in
+      let* () = Run_registry_core.Json.exact_fields ~required:[ "decision"; "reason" ] fields in
+      let* reason = Run_registry_core.Json.string_field "reason" fields in
+      let* () = if String.trim reason = "" then Error "evaluated verdict reason is blank" else Ok () in
+      let* decision = Run_registry_core.Json.string_field "decision" fields in
+      match decision with
+      | "approved" -> Ok (Some (Approved { reason }))
+      | "rejected" -> Ok (Some (Rejected { reason }))
+      | other -> Error ("unknown evaluated verdict: " ^ other)
 
   let completion_to_yojson completion =
     let outcome_fields =
       match completion.outcome with
       | Reviewed -> []
       | Committed -> []
+      | Superseded { detail } -> [ "detail", `String detail ]
       | Deferred { detail } -> [ "detail", `String detail ]
       | Raised { detail } -> [ "detail", `String detail ]
       | Review_cancelled { detail } -> [ "detail", `String detail ]
     in
     `Assoc
       ([ "outcome", `String (outcome_label completion.outcome)
+       ; "evaluated_verdict", evaluated_verdict_to_yojson completion.evaluated_verdict
        ; "elapsed_s", `Float completion.elapsed_s
        ; ( "tools"
          , `List
@@ -128,17 +164,20 @@ module Payload = struct
       match outcome_label with
       | "reviewed" -> Ok []
       | "committed" -> Ok []
+      | "superseded" -> Ok [ "detail" ]
       | "deferred" -> Ok [ "detail" ]
       | "raised" -> Ok [ "detail" ]
+      | "review_cancelled" -> Ok [ "detail" ]
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
     let* detail_fields = detail_fields in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:([ "outcome"; "elapsed_s"; "tools" ] @ detail_fields)
+        ~required:([ "outcome"; "evaluated_verdict"; "elapsed_s"; "tools" ] @ detail_fields)
         ~optional:[ "evaluator_runtime" ]
         fields
     in
+    let* evaluated_verdict = evaluated_verdict_of_yojson (Yojson.Safe.Util.member "evaluated_verdict" json) in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
     let* evaluator_runtime =
       Run_registry_core.Json.optional_string_field "evaluator_runtime" fields
@@ -160,6 +199,9 @@ module Payload = struct
       match outcome_label with
       | "reviewed" -> Ok Reviewed
       | "committed" -> Ok Committed
+      | "superseded" ->
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Superseded { detail })
       | "deferred" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Deferred { detail })
@@ -171,9 +213,14 @@ module Payload = struct
         Ok (Review_cancelled { detail })
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
-    Ok { outcome; evaluator_runtime; elapsed_s; tools }
+    let* () = match outcome, evaluated_verdict with
+      | (Reviewed | Committed), None -> Error "reviewed or committed run requires an evaluated verdict"
+      | _ -> Ok () in
+    Ok { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools }
   ;;
 end
+
+let evaluated_verdict_of_yojson = Payload.evaluated_verdict_of_yojson
 
 module Store = Run_registry_core.Make (Payload)
 
@@ -194,17 +241,17 @@ let notify_changed () =
       (Printexc.to_string exn)
 ;;
 
-let register_running t ~run_id ~goal_id ~review_kind ~authority_actor ~started_at =
+let register_running t ~run_id ~goal_id ~request_id ~criterion ~review_kind ~authority_actor ~started_at =
   Store.register
     t
     ~id:run_id
     ~started_at
-    ~registration:{ Payload.goal_id; review_kind; authority_actor };
+    ~registration:{ Payload.goal_id; request_id; criterion; review_kind; authority_actor };
   notify_changed ()
 ;;
 
-let mark_completed t ~run_id ~outcome ~tools ?evaluator_runtime ~elapsed_s () =
-  let completion = { Payload.outcome; evaluator_runtime; elapsed_s; tools } in
+let mark_completed t ~run_id ~outcome ~evaluated_verdict ~tools ?evaluator_runtime ~elapsed_s () =
+  let completion = { Payload.outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools } in
   match Store.complete t ~id:run_id ~completion with
   | `Completed -> notify_changed ()
   | `Unknown -> ()
@@ -218,6 +265,7 @@ let run_of_entry (entry : Store.entry) =
     | Store.Completed completion ->
       Completed
         { outcome = completion.outcome
+        ; evaluated_verdict = completion.evaluated_verdict
         ; evaluator_runtime = completion.evaluator_runtime
         ; elapsed_s = completion.elapsed_s
         ; tools = completion.tools
@@ -225,6 +273,8 @@ let run_of_entry (entry : Store.entry) =
   in
   { run_id = entry.id
   ; goal_id = entry.registration.goal_id
+  ; request_id = entry.registration.request_id
+  ; criterion = entry.registration.criterion
   ; review_kind = entry.registration.review_kind
   ; authority_actor = entry.registration.authority_actor
   ; started_at = entry.started_at
@@ -244,16 +294,18 @@ let run_to_yojson run =
   let completion_fields =
     match run.status with
     | Running -> []
-    | Completed { outcome; evaluator_runtime; elapsed_s; tools } ->
+    | Completed { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools } ->
       let detail_fields =
         match outcome with
         | Reviewed -> []
         | Committed -> []
+      | Superseded { detail } -> [ "detail", `String detail ]
         | Deferred { detail } -> [ "detail", `String detail ]
         | Raised { detail } -> [ "detail", `String detail ]
         | Review_cancelled { detail } -> [ "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s
+      ; "evaluated_verdict", Payload.evaluated_verdict_to_yojson evaluated_verdict
       ; ( "tools"
         , `List
             (List.map
@@ -269,6 +321,8 @@ let run_to_yojson run =
   `Assoc
     ([ "run_id", `String run.run_id
      ; "goal_id", `String run.goal_id
+     ; "request_id", `String run.request_id
+     ; "criterion", Goal_store.criterion_to_yojson run.criterion
      ; "review_kind", `String (review_kind_label run.review_kind)
      ; "authority_actor", `String run.authority_actor
      ; "started_at", `Float run.started_at

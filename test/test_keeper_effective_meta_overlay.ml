@@ -541,7 +541,7 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
     {|[keeper]
 instructions = "Improve MASC autonomously"
 sandbox_profile = "docker"
-proactive_enabled = true
+activation_mode = "autonomous"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -555,7 +555,7 @@ proactive_enabled = true
     {
       persisted with
       instructions = "stale instructions";
-      proactive = { enabled = false };
+      activation_mode = Masc.Keeper_activation_mode.On_demand;
     }
   in
   (match Store.replace_snapshot config stale with
@@ -589,7 +589,7 @@ proactive_enabled = true
   Alcotest.(check bool)
     "returned proactive enabled is TOML canonical"
     true
-    returned.proactive.enabled;
+    (Masc.Keeper_activation_mode.spontaneous returned.activation_mode);
   Alcotest.(check string)
     "returned sandbox_profile is TOML canonical"
     "docker"
@@ -711,10 +711,6 @@ network_mode = "inherit"
 |};
   let config = Workspace.default_config base in
   let raw_meta = seed_runtime_meta config name in
-  Alcotest.(check string)
-    "fixture raw meta starts from persisted/default sandbox"
-    "local"
-    (Profile.sandbox_profile_to_string raw_meta.sandbox_profile);
   let observed_meta =
     {
       raw_meta with
@@ -841,8 +837,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       ; "instructions", `String "durable direct instructions"
       ; "sandbox_profile", `String "docker"
       ; "mention_targets", `List [ `String "operator" ]
-      ; "proactive_enabled", `Bool false
-      ; "autoboot_enabled", `Bool false
+      ; "activation_mode", `String "manual"
       ; "max_context_override", `Int 128_001
       ]
   in
@@ -857,8 +852,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       instructions = "durable direct instructions"
     ; sandbox_profile = Profile.Docker
     ; mention_targets = [ "operator" ]
-    ; proactive = { enabled = false }
-    ; autoboot_enabled = false
+    ; activation_mode = Masc.Keeper_activation_mode.Manual
     ; max_context_override = Some 128_001
     }
   in
@@ -883,18 +877,18 @@ let test_keeper_up_materializes_missing_profile_source () =
     Alcotest.(check (option bool))
       "proactive persisted"
       (Some false)
-      defaults.proactive_enabled;
+      (Option.map Masc.Keeper_activation_mode.spontaneous defaults.activation_mode);
     Alcotest.(check (option bool))
       "autoboot persisted"
       (Some false)
-      defaults.autoboot_enabled;
+      (Option.map Masc.Keeper_activation_mode.restore_owner defaults.activation_mode);
     Alcotest.(check (option int))
       "context override persisted"
       (Some 128_001)
       defaults.max_context_override;
     ()
 
-let test_missing_profile_source_rejects_implicit_local () =
+let test_missing_profile_source_is_rejected () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
   let config = Workspace.default_config base in
@@ -902,13 +896,13 @@ let test_missing_profile_source_rejects_implicit_local () =
   match Store.read_effective_meta config name with
   | Error err ->
     Alcotest.(check bool)
-      "missing declaration cannot silently select the host playground"
+      "the refusal names the missing declaration"
       true
       (String_util.string_contains_substring
-         ~needle:"local playground is off"
+         ~needle:"sandbox_profile is required"
          err)
   | Ok None -> Alcotest.fail "seeded keeper meta disappeared"
-  | Ok (Some _) -> Alcotest.fail "missing profile source admitted implicit local"
+  | Ok (Some _) -> Alcotest.fail "a keeper with no declared profile was admitted"
 
 let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1468,10 +1462,6 @@ let test_turn_profile_and_meta_applies_the_declared_profile () =
     | Ok None -> Alcotest.fail "expected seeded keeper meta"
     | Error err -> Alcotest.failf "read_meta failed: %s" err
   in
-  Alcotest.(check string)
-    "durable meta carries the decoder placeholder, not the declaration"
-    "local"
-    (Profile.sandbox_profile_to_string entry_meta.sandbox_profile);
   match
     Pre_dispatch.turn_profile_and_meta
       ~base_path:config.Workspace.base_path
@@ -1543,8 +1533,8 @@ let () =
           Alcotest.test_case "keeper_up materializes missing profile source" `Quick
             test_keeper_up_materializes_missing_profile_source;
           Alcotest.test_case
-            "missing profile source rejects implicit local"
-            `Quick test_missing_profile_source_rejects_implicit_local;
+            "missing profile source is rejected"
+            `Quick test_missing_profile_source_is_rejected;
           Alcotest.test_case "status tracks TOML overlay edits" `Quick
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"

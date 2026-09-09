@@ -290,13 +290,26 @@ let run_fatal_helper ~settlement root leaf =
     (match !injected_backtrace with
      | None -> 3
      | Some expected ->
-       let expected = Printexc.raw_backtrace_to_string expected in
-       let observed = Printexc.raw_backtrace_to_string observed in
-       if
-         not (String.equal expected "")
-         && String.equal expected observed
+       (* Eio may append re-raise frames, but must not replace or discard
+          any of the original exception's frames. *)
+       let length = Printexc.raw_backtrace_length expected in
+       let rec original_frames_preserved index =
+         index = length
+         || (Printexc.get_raw_backtrace_slot expected index
+             = Printexc.get_raw_backtrace_slot observed index
+             && original_frames_preserved (index + 1))
+       in
+       if length > 0
+          && Printexc.raw_backtrace_length observed >= length
+          && original_frames_preserved 0
        then 0
-       else 4)
+       else (
+         Printf.eprintf
+           "fatal %s lost original backtrace frames\nExpected origin:\n%sObserved:\n%s%!"
+           (if settlement then "settlement" else "callback")
+           (Printexc.raw_backtrace_to_string expected)
+           (Printexc.raw_backtrace_to_string observed);
+         4))
   | _ -> 5
 ;;
 

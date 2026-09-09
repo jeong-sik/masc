@@ -658,6 +658,13 @@ let test_planning_goal_carries_the_judge_verdict () =
     (match proof (decoded_proof ~verification:(verification_json "proof_pending") ()) with
      | Tui_decode.Proof_pending -> true
      | _ -> false);
+  Alcotest.check Alcotest.bool "old approval is historical after a criterion edit" true
+    (match proof (decoded_proof ~verification:(`Assoc [ "completion",
+        `Assoc [ "state", `String "stale_criterion";
+          "historical_completion", `Assoc [ "state", `String "proof_proven";
+            "verdict", proven_verdict "old target reached" ] ] ]) ()) with
+     | Tui_decode.Proof_stale (Some "old target reached") -> true
+     | _ -> false);
   Alcotest.check Alcotest.bool "an idle ledger is idle" true
     (match proof (decoded_proof ~verification:(verification_json "idle") ()) with
      | Tui_decode.Proof_idle -> true
@@ -766,6 +773,27 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ] )
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
+
+let test_goal_store_unavailable_preserves_source_detail () =
+  let detail = "goals.json: criterion_revision is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
+                      "error", `String detail ] in
+  (match Tui_decode.decode_planning_snapshot json with
+   | Error message -> Alcotest.(check string) "planning source failure" detail message
+   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure" detail message
+  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+
+let test_goal_link_source_unavailable_preserves_detail () =
+  let detail = "goal_task_links: primary registry is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
+                      "error", `String detail ] in
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "link source failure is retained" detail message
+  | _ -> Alcotest.fail "link source failure became an empty or successful detail"
 
 let test_decode_planning_snapshot_current_contract () =
   match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
@@ -1674,6 +1702,10 @@ let skill_snapshot_json ?(rejections = []) () =
     ; "rejections", `List rejections
     ]
 
+let skill_usage_coverage_json ?(loaded = 1) ?(unavailable = []) () =
+  `Assoc ["ledgers_loaded", `Int loaded;
+          "unavailable", `List (List.map (fun detail -> `String detail) unavailable)]
+
 let skills_catalog_json ?(usage = true) ?(flow = true) () =
   let usage_json =
     if usage then
@@ -1719,6 +1751,7 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
     ; ("snapshot", skill_snapshot_json ())
     ; ( "surfaces",
         `List
@@ -1742,6 +1775,47 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
 (* The discovery roots ride the same response the surfaces do, and the
    projection dropped them: a Skill that never loaded had nowhere on screen
    to say which root was looked at, or that the root was not there. *)
+let test_decode_skills_catalog_keeps_usage_scope () =
+  let payload ?(usage = true) coverage =
+    match skills_catalog_json ~usage () with
+    | `Assoc fields -> `Assoc (("usage_coverage", coverage) :: List.remove_assoc "usage_coverage" fields)
+    | _ -> Alcotest.fail "invalid catalog fixture" in
+  let read ?(usage = true) coverage =
+    match Tui_decode.decode_skills_catalog (payload ~usage coverage) with
+    | Ok catalog -> catalog
+    | Error error -> Alcotest.fail error in
+  let partial = read (skill_usage_coverage_json ~loaded:19
+      ~unavailable:["bravo: metadata unavailable"; "charlie: invalid_ledger"] ()) in
+  (match partial.sc_usage_coverage with
+   | Some coverage ->
+       Alcotest.(check int) "loaded ledgers are observed" 19 coverage.suc_ledgers_loaded;
+       Alcotest.(check (list string)) "unavailable reasons survive unchanged"
+         ["bravo: metadata unavailable"; "charlie: invalid_ledger"] coverage.suc_unavailable
+   | None -> Alcotest.fail "ready response lost coverage");
+  (match partial.sc_surfaces with
+   | [surface] ->
+       (match surface.scs_usage with
+        | [usage] -> Alcotest.(check int) "known invocation count survives partial coverage" 12 usage.su_invocations
+        | _ -> Alcotest.fail "known usage was dropped")
+   | _ -> Alcotest.fail "known surface was dropped");
+  let no_ledgers = read ~usage:false (skill_usage_coverage_json ~loaded:0
+      ~unavailable:["keeper catalog: unavailable"] ()) in
+  (match no_ledgers.sc_usage_coverage with
+   | Some coverage -> Alcotest.(check int) "zero loaded is explicit" 0 coverage.suc_ledgers_loaded
+   | None -> Alcotest.fail "unavailable ledger inventory disappeared");
+  List.iter (fun bad ->
+      match Tui_decode.decode_skills_catalog (payload bad) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed coverage must not become an observed zero")
+    [ `Null; skill_usage_coverage_json ~loaded:(-1) ();
+      `Assoc ["ledgers_loaded", `Int 1; "unavailable", `List [`Int 1]] ];
+  match skills_catalog_json () with
+  | `Assoc fields ->
+      (match Tui_decode.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing coverage was accepted")
+  | _ -> Alcotest.fail "invalid catalog fixture"
+
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
     `Assoc
@@ -1782,6 +1856,7 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", snapshot
       ; "surfaces", `List []
       ]
@@ -1888,6 +1963,7 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       (`Assoc
          [ ("schema", `String "masc.skill-snapshot/v1")
          ; ("state", `String "ready")
+    ; ("usage_coverage", skill_usage_coverage_json ())
          ; ("snapshot", skill_snapshot_json ())
          ; ("surfaces", `List [ bad_surface ])
          ])
@@ -1902,6 +1978,7 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "surfaces", `List []
       ; ( "snapshot"
         , skill_snapshot_json
@@ -1973,6 +2050,7 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", skill_snapshot_json ~rejections:[ rejection ] ()
       ; "surfaces", `List []
       ]
@@ -2015,6 +2093,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; "snapshot", `Assoc [ "rejections", `List [] ]
        ; "surfaces", `List []
        ]);
@@ -2037,6 +2116,7 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
        ; ( "snapshot"
          , skill_snapshot_json ~rejections:[ missing_nullable_rejection ] () )
        ; "surfaces", `List []
@@ -2997,6 +3077,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       ; ("added", `Int (ordinary_count 2))
       ; ("removed", `Int (ordinary_count 1))
       ; ("snapshot_present", `Bool present)
+      ; ("updated_at", if present then `Float 1700000000. else `Null)
       ; ("librarian_lane_busy", `Int 0)
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -3033,7 +3114,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v3")
+      [ ("schema", `String "keeper.memory_os.current_health.v4")
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ("cadence_counter_entries", `Int 0)
       ; ( "keepers"
@@ -3170,11 +3251,24 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "duplicate keeper identity rejects", duplicate_keeper
     ; "alert target mismatch rejects", wrong_alert_target
     ; "duplicate vision reason rejects", duplicate_vision_reason
+    ; "timestamp without readable snapshot rejects",
+      map_keeper 0 (replace_field "updated_at" (`Float 1700000000.)) json
+    ; "readable snapshot without timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" `Null) json
+    ; "negative snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float (-1.))) json
+    ; "nonfinite snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`Float infinity)) json
+    ; "text snapshot timestamp rejects",
+      map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
     ];
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->
       Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
+      Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
+        [None; Some 1700000000.]
+        (List.map (fun keeper -> keeper.Tui_decode.mkh_updated_at) snapshot.mhs_keepers);
       Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
       Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
       Alcotest.(check int) "source facts total" 2
@@ -3215,7 +3309,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v3")
+    [ ("schema", `String "keeper.memory_os.current_health.v4")
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ("cadence_counter_entries", `Int 0)
     ; ( "keepers"
@@ -3231,6 +3325,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("added", `Int 0)
               ; ("removed", `Int 0)
               ; ("snapshot_present", `Bool false)
+              ; ("updated_at", `Null)
               ; ("librarian_lane_busy", `Int 0)
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
@@ -3625,6 +3720,62 @@ let keeper_lanes_json lanes =
     ; "count", `Int (List.length lanes)
     ; "snapshots", `List lanes
     ]
+
+(* Every phase the state machine has, through the wire and back.
+
+   Decoding and rendering a lane phase are two eight-arm copy-pastes of the
+   same list ([keeper_lane_phase_of_string], [keeper_lane_phase_to_string]).
+   A crossed pair -- "paused" decoded as [Lane_phase_stopped] -- puts a lane
+   on the operator's screen in a state it is not in, and the case below
+   checked exactly one known phase, so seven crossings passed.
+
+   The pairing is written out rather than round-tripped, because a round trip
+   survives a crossing that runs both ways: decode "paused" as
+   [Lane_phase_stopped] and render [Lane_phase_stopped] as "paused" and the
+   string comes back while the constructor every reader matches on is wrong.
+   [all_phases] is the completeness half -- a ninth phase fails the count
+   here rather than arriving untested. *)
+let lane_phase_pairs =
+  [ Keeper_state_machine.Offline, Tui_decode.Lane_phase_offline
+  ; Keeper_state_machine.Running, Tui_decode.Lane_phase_running
+  ; Keeper_state_machine.Failing, Tui_decode.Lane_phase_failing
+  ; Keeper_state_machine.Draining, Tui_decode.Lane_phase_draining
+  ; Keeper_state_machine.Paused, Tui_decode.Lane_phase_paused
+  ; Keeper_state_machine.Stopped, Tui_decode.Lane_phase_stopped
+  ; Keeper_state_machine.Crashed, Tui_decode.Lane_phase_crashed
+  ; Keeper_state_machine.Restarting, Tui_decode.Lane_phase_restarting
+  ]
+
+let decode_one_lane_phase raw =
+  match
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json [ keeper_lane_json ~phase:raw "alpha" ])
+  with
+  | Error err -> Alcotest.failf "%s: decode failed: %s" raw err
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.kls_lanes with
+      | [ lane ] -> lane.Tui_decode.kl_phase
+      | lanes ->
+          Alcotest.failf "%s: one lane in, %d out" raw (List.length lanes))
+
+let test_every_known_phase_decodes_to_its_own_constructor () =
+  Alcotest.(check int)
+    "the table names every phase the state machine has"
+    (List.length Keeper_state_machine.all_phases)
+    (List.length lane_phase_pairs);
+  List.iter
+    (fun (phase, expected) ->
+      let raw = Keeper_state_machine.phase_to_string phase in
+      let decoded = decode_one_lane_phase raw in
+      Alcotest.(check bool)
+        (raw ^ " decodes to its own constructor")
+        true
+        (decoded = expected);
+      Alcotest.(check string)
+        (raw ^ " renders back as itself")
+        raw
+        (Tui_decode.keeper_lane_phase_to_string decoded))
+    lane_phase_pairs
 
 let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
@@ -4037,6 +4188,7 @@ let fusion_run_json ?(status = "completed") ?(topology = "simple")
      ; "preset", `String "trio"
      ; "topology", `String topology
      ; "started_at", `Float 1787557669.715736
+     ; "finished_at", (if status = "running" then `Null else `Float 1787557684.715736)
      ; "status", `String status
      ; "stage", `String stage
      ; "progress", progress
@@ -4110,6 +4262,100 @@ let fusion_recorded_detail_json ?(source = "fusion")
           ] )
     ]
 
+let historical_fusion_reference : Tui_decode.fusion_historical_evidence =
+  { fhe_run_id = "fusion-recorded-501"
+  ; fhe_post_id = "p-fusion-501"
+  ; fhe_title = "Fusion title 501"
+  ; fhe_created_at = 1787557684.
+  }
+
+let historical_fusion_post_json ?(usage = []) ?(cost = []) () =
+  let open Yojson.Safe.Util in
+  let post = fusion_recorded_detail_json () |> member "evidence" |> member "post" in
+  match post with
+  | `Assoc fields ->
+      `Assoc
+        (("author", `String "board-sink-author")
+         :: ("body", `String "# Original Fusion answer\nThe retained original.")
+         :: List.map (function
+             | "meta", `Assoc fields -> "meta", `Assoc (fields @ usage @ cost)
+             | field -> field) fields)
+  | _ -> Alcotest.fail "invalid Fusion fixture"
+
+let test_historical_fusion_original_and_observations () =
+  let post = historical_fusion_post_json
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 9321; "output_tokens", `Int 17721]] () in
+  (match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+           (`Assoc ["post", post]) with
+   | Error error -> Alcotest.fail error
+   | Ok original ->
+       Alcotest.(check string) "Board author is retained without claiming caller"
+         "board-sink-author" original.fhd_author;
+       Alcotest.(check string) "original body is intact"
+         "# Original Fusion answer\nThe retained original." original.fhd_body;
+       Alcotest.(check bool) "observed tokens with unknown price"
+         true (original.fhd_observations = Ok (Some (9321, 17721), None));
+       (match original.fhd_evidence with
+        | Error error -> Alcotest.fail error
+        | Ok evidence ->
+            Alcotest.(check int) "existing panel interpretation retained" 2 (List.length evidence.fe_panel);
+            Alcotest.(check bool) "existing Tool trace interpretation retained" true evidence.fe_tool_trace.ftt_complete));
+  let read ?(usage = []) ?(cost = []) () =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference
+            (historical_fusion_post_json ~usage ~cost ()) with
+    | Ok original -> original
+    | Error error -> Alcotest.fail error in
+  Alcotest.(check bool) "absent usage is unknown" true ((read ()).fhd_observations = Ok (None, None));
+  let zero = read
+      ~usage:["observed_usage", `Assoc ["input_tokens", `Int 0; "output_tokens", `Int 0]]
+      ~cost:["cost_usd", `Int 0] () in
+  Alcotest.(check bool) "measured zero tokens and cost survive"
+    true (zero.fhd_observations = Ok (Some (0, 0), Some 0.))
+
+let test_historical_fusion_exact_identity_and_strict_metadata () =
+  let expect_error label reference post =
+    match Tui_decode.decode_fusion_historical_detail ~reference post with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail label in
+  let post = historical_fusion_post_json () in
+  expect_error "another post cannot supply this original"
+    { historical_fusion_reference with fhe_post_id = "other-post" } post;
+  expect_error "another run cannot supply this original"
+    { historical_fusion_reference with fhe_run_id = "other-run" } post;
+  expect_error "an omitted exact post is not an empty original"
+    historical_fusion_reference (`Assoc ["post", `Null]);
+  let expect_observation_error post =
+    match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference post with
+    | Error error -> Alcotest.failf "usage error hid original: %s" error
+    | Ok original ->
+        Alcotest.(check string) "usage failure preserves original"
+          "# Original Fusion answer\nThe retained original." original.fhd_body;
+        (match original.fhd_observations with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "invalid usage became a measurement") in
+  expect_observation_error
+    (historical_fusion_post_json
+       ~usage:["observed_usage", `Assoc ["input_tokens", `String ""; "output_tokens", `Int 0]] ());
+  expect_observation_error
+    (historical_fusion_post_json ~cost:["cost_usd", `Int (-1)] ());
+  expect_observation_error
+    (match post with
+     | `Assoc fields -> `Assoc (List.remove_assoc "meta" fields)
+     | _ -> Alcotest.fail "invalid Fusion fixture");
+  let malformed = match post with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "meta", `Assoc fields -> "meta", `Assoc (List.remove_assoc "tool_trace" fields)
+        | field -> field) fields)
+    | _ -> Alcotest.fail "invalid Fusion fixture" in
+  match Tui_decode.decode_fusion_historical_detail ~reference:historical_fusion_reference malformed with
+  | Error error -> Alcotest.fail error
+  | Ok original ->
+      Alcotest.(check string) "original survives structured evidence failure"
+        "# Original Fusion answer\nThe retained original." original.fhd_body;
+      (match original.fhd_evidence with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "missing Tool trace cannot masquerade as empty trace")
+
 let test_decode_fusion_list_and_exact_detail () =
   let failed_fields =
     [ "error", `String "panel unavailable"
@@ -4119,6 +4365,8 @@ let test_decode_fusion_list_and_exact_detail () =
   let snapshot_json =
     `Assoc
       [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int 2
       ; ( "runs"
         , `List
@@ -4209,6 +4457,8 @@ let test_decode_fusion_list_and_exact_detail () =
   let unknown_topology =
     `Assoc
       [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int 1
       ; "runs", `List [ fusion_run_json ~topology:"recursive" "fusion-new" ]
       ]
@@ -4386,6 +4636,8 @@ let test_decode_fusion_progress_and_completion_summary () =
   let snapshot runs =
     `Assoc
       [ "generated_at", `String "2026-09-01T00:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
       ; "count", `Int (List.length runs)
       ; "runs", `List runs
       ]
@@ -4393,6 +4645,10 @@ let test_decode_fusion_progress_and_completion_summary () =
   (match Tui_decode.decode_fusion_snapshot (snapshot [ running; completed ]) with
    | Error detail -> Alcotest.fail detail
    | Ok { Tui_decode.fus_runs = [ running; completed ]; _ } ->
+       Alcotest.(check (option (float 0.))) "running has no completion time" None
+         running.fur_finished_at;
+       Alcotest.(check (option (float 0.))) "terminal completion time"
+         (Some 1787557684.715736) completed.fur_finished_at;
        (match running.fur_stage with
         | Tui_decode.Fusion_stage_judge progress ->
             Alcotest.(check int) "answered" 2 progress.frs_answered;
@@ -4403,6 +4659,20 @@ let test_decode_fusion_progress_and_completion_summary () =
        Alcotest.(check (option string)) "summary"
          (Some "Two panels support the change.") completed.fur_summary
    | Ok _ -> Alcotest.fail "expected running and completed rows");
+  List.iter
+    (fun (label, row, timestamp) ->
+      let invalid = match row with
+        | `Assoc fields -> `Assoc (("finished_at", timestamp) :: List.remove_assoc "finished_at" fields)
+        | _ -> Alcotest.fail "fixture run must be an object"
+      in
+      Alcotest.(check bool) label true
+        (Result.is_error (Tui_decode.decode_fusion_snapshot (snapshot [invalid]))))
+    [ "running completion timestamp rejected", running, `Float 1787557684.
+    ; "terminal null completion rejected", completed, `Null
+    ; "negative completion rejected", completed, `Float (-1.)
+    ; "nonfinite completion rejected", completed, `Float infinity
+    ; "text completion rejected", completed, `String "1787557684"
+    ];
   let bad_counts =
     fusion_run_json ~status:"running" ~stage:"computed"
       ~progress:
@@ -5152,6 +5422,10 @@ let picker_default_runtime =
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("effective_max_context", `Int 200000)
+    ; ("max_context_source", `String "override_clamped_by_capability")
+    ; ("max_output_tokens", `Int 8192)
+    ; ("is_local", `Bool false)
     ; ("keeper_dispatchable", `Bool true)
     ; ("keeper_dispatch_blocked_reason", `Null)
     ; ("is_default", `Bool false)
@@ -5170,6 +5444,10 @@ let runtime_resolved_json =
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
               ; ("model", `String "embed")
+              ; ("effective_max_context", `Int 8192)
+              ; ("max_context_source", `String "capability")
+              ; ("max_output_tokens", `Null)
+              ; ("is_local", `Bool true)
               ; ("keeper_dispatchable", `Bool false)
               ; ("keeper_dispatch_blocked_reason", `String "not a keeper model")
               ; ("is_default", `Bool false)
@@ -5210,7 +5488,12 @@ let test_decode_runtime_resolved () =
            Alcotest.(check string) "id" "ollama_cloud.deepseek"
              first.Tui_decode.ro_id;
            Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
-           Alcotest.(check bool) "top-level default" true first.ro_is_default
+           Alcotest.(check bool) "top-level default" true first.ro_is_default;
+           Alcotest.(check int) "effective context" 200000 first.ro_effective_max_context;
+           Alcotest.(check string) "context provenance" "override_clamped_by_capability"
+             (Tui_decode.runtime_context_source_label first.ro_max_context_source);
+           Alcotest.(check (option int)) "max output" (Some 8192) first.ro_max_output_tokens;
+           Alcotest.(check bool) "locality" false first.ro_is_local
        | [] -> Alcotest.fail "no runtimes");
       (match assignments with
        | [ a ] ->
@@ -5220,6 +5503,33 @@ let test_decode_runtime_resolved () =
              (Some "ollama_cloud.deepseek") a.ra_target_id
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
+
+let test_decode_unavailable_runtime_assignment () =
+  let with_resolution resolved =
+    let assignment = `Assoc
+      ["keeper", `String "affected"; "assignment_source", `String "explicit";
+       "resolved", resolved] in
+    match runtime_resolved_json with
+    | `Assoc fields -> `Assoc (("assignments", `List [assignment]) :: List.remove_assoc "assignments" fields)
+    | _ -> Alcotest.fail "runtime fixture is not an object"
+  in
+  let unavailable reason = with_resolution (`Assoc
+    ["kind", `String "unavailable"; "id", `String "fixture.missing"; "reason", reason]) in
+  let reason = `Assoc
+    ["kind", `String "missing_catalog_model"; "message", `String "Capability catalog entry unavailable";
+     "provider_id", `String "fixture"; "provider_label", `String "fixture"; "model_id", `String "missing"] in
+  (match Tui_decode.decode_runtime_resolved (unavailable reason) with
+   | Ok (runtimes, [assignment]) ->
+       Alcotest.(check int) "healthy runtime catalog remains visible" 2 (List.length runtimes);
+       Alcotest.(check (option string)) "configured unavailable identity survives" (Some "fixture.missing") assignment.ra_target_id;
+       Alcotest.(check (option string)) "unavailability is explicit" (Some "Capability catalog entry unavailable") assignment.ra_unavailable_reason
+   | Ok _ -> Alcotest.fail "unavailable assignment lost"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "missing reason cannot claim unavailable certainty" true
+    (Result.is_error (Tui_decode.decode_runtime_resolved (unavailable `Null)));
+  Alcotest.(check bool) "active assignment still requires an existing lane" true
+    (Result.is_error (Tui_decode.decode_runtime_resolved (with_resolution (`Assoc
+      ["kind", `String "lane"; "id", `String "fixture.missing"]))))
 
 let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ?(transport = "http") ?(http_status = `Int 200)
@@ -5250,7 +5560,8 @@ let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
     ]
 
 let runtime_probe_surface_json ?(first_status = "reachable")
-    ?(probe_status = "degraded") ?(first_reachable = `Bool true) () =
+    ?(probe_status = "degraded") ?(first_reachable = `Bool true)
+    ?(source = "runtime.toml") () =
   let providers =
     [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
         "runtime-a"
@@ -5272,7 +5583,7 @@ let runtime_probe_surface_json ?(first_status = "reachable")
     ; "refresh_state", `String "served_stale"
     ; ( "probe"
       , `Assoc
-          [ "source", `String "runtime.toml"
+          [ "source", `String source
           ; "status", `String probe_status
           ; "probe_ok", `Bool false
           ; "checked_at", `String "2026-08-24T10:20:00Z"
@@ -5460,6 +5771,88 @@ let test_runtime_probe_rejects_status_reachability_disagreement () =
   with
   | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
   | Error _ -> ()
+
+(* The server names the file this snapshot was read from and the decoder
+   refuses any other name, so the two have to agree on one string. They now
+   share Config_dir_resolver.runtime_toml_filename; the literal above is the
+   wire value that name has to keep producing, and this is the other
+   direction. *)
+let test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~source:"keeper_runtime.toml" ())
+  with
+  | Ok _ -> Alcotest.fail "a probe naming another file decoded"
+  | Error _ -> ()
+
+let test_runtime_catalog_probe_is_independent_of_dispatch () =
+  let map_field key f = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, (if name = key then f value else value)) fields)
+    | json -> json
+  in
+  let probe_json = runtime_probe_surface_json ()
+    |> map_field "probe" (map_field "providers" (function
+        | `List rows -> `List (List.map (function
+            | `Assoc fields when List.assoc_opt "runtime_id" fields = Some (`String "runtime-c") ->
+                runtime_probe_provider ~status:"endpoint_not_found" ~reachable:(`Bool false)
+                  ~http_status:(`Int 404) ~error:(`String "HTTP 404") "runtime-c"
+            | row -> row) rows)
+        | json -> json))
+  in
+  match Tui_decode.decode_runtime_surface_snapshot ~probe_json
+      ~resolved_json:(runtime_resolved_surface_json ()) with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      let runtime = List.find (fun row -> row.Tui_decode.ro_id = "runtime-c")
+          snapshot.rss_resolved.rrs_runtimes in
+      Alcotest.(check bool) "dispatch remains allowed" true runtime.ro_dispatchable;
+      (match Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id with
+       | None -> Alcotest.fail "catalog lost failed provider observation"
+       | Some probe -> Alcotest.(check string) "failure remains independently visible"
+           "endpoint_not_found" (Tui_decode.runtime_provider_status_to_string probe.rpp_status);
+           Alcotest.(check (option int)) "actual HTTP result" (Some 404) probe.rpp_http_status);
+      Alcotest.(check bool) "missing observation stays absent" true
+        (Option.is_none (Tui_decode.runtime_probe_for_id snapshot ~runtime_id:"runtime-d"))
+
+let test_runtime_limits_reject_unknown_or_invalid_values () =
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | json -> json
+  in
+  let other_runtimes = match runtime_resolved_json with
+    | `Assoc fields -> (match List.assoc "runtimes" fields with
+        | `List (_ :: rest) -> rest | _ -> Alcotest.fail "invalid fixture")
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  (match Tui_decode.decode_runtime_resolved_snapshot runtime_resolved_json with
+   | Ok _ -> () | Error detail -> Alcotest.fail detail);
+  List.iter (fun runtime ->
+    let json = replace "default_runtime" runtime runtime_resolved_json
+      |> replace "runtimes" (`List (runtime :: other_runtimes)) in
+    match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid runtime limit/provenance accepted")
+    [replace "max_context_source" (`String "guessed") picker_default_runtime;
+     replace "effective_max_context" (`Int 0) picker_default_runtime;
+     replace "max_output_tokens" (`Int (-1)) picker_default_runtime]
+
+let test_runtime_default_limits_must_match_listed_row () =
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "invalid runtime fixture"
+  in
+  List.iter (fun (key, value) ->
+    let different_default = replace key value picker_default_runtime in
+    let json = replace "default_runtime" different_default runtime_resolved_json in
+    match Tui_decode.decode_runtime_resolved_snapshot json with
+    | Error detail -> Alcotest.(check string) key
+        "default_runtime disagrees with its resolved runtime row" detail
+    | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
+    ["effective_max_context", `Int 100000;
+     "max_context_source", `String "capability";
+     "max_output_tokens", `Null;
+     "is_local", `Bool true]
 
 let test_runtime_resolved_rejects_half_preference () =
   match
@@ -5806,6 +6199,69 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check (list string)) "template input names"
       [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
 
+(* The field the wire has carried since the registry started quarantining
+   overrides, and the snapshot dropped until 2026-09-07. A held-back key
+   renders from its file, so the reader's only clue that an override exists
+   and is not running comes from here, and the reason is what tells them
+   which variable to take out. *)
+let held_back_payload =
+  `Assoc
+    [ ("prompts", `List [])
+    ; ( "held_back"
+      , `List
+          [ `Assoc
+              [ ("key", `String "test.templated")
+              ; ("bytes", `Int 1240)
+              ; ("reason", `String "Unknown template variables: facts_json")
+              ]
+          ] )
+    ]
+
+let test_decode_prompts_reads_held_back () =
+  match Tui_decode.decode_prompts held_back_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "one held back" 1
+      (List.length snapshot.Tui_decode.ps_held_back);
+    let entry = List.hd snapshot.Tui_decode.ps_held_back in
+    Alcotest.(check string) "key" "test.templated" entry.Tui_decode.hbo_key;
+    Alcotest.(check int) "saved bytes" 1240 entry.Tui_decode.hbo_bytes;
+    Alcotest.(check string) "why it is not in force"
+      "Unknown template variables: facts_json" entry.Tui_decode.hbo_reason
+
+(* An override in force whose default moved is an ordinary override row with
+   one more fact on it. The row without the field is a row nothing moved
+   under. *)
+let test_decode_prompts_reads_a_moved_default () =
+  let row ~moved =
+    `Assoc
+      ([ ("key", `String "keeper")
+       ; ("effective", `String "the operator's prompt")
+       ; ("source", `String "override")
+       ]
+       @ match moved with None -> [] | Some moved -> [ ("override_default_moved", `Bool moved) ])
+  in
+  let decode rows =
+    match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List rows) ]) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot -> List.map (fun r -> r.Tui_decode.pr_override_default_moved) snapshot.Tui_decode.ps_rows
+  in
+  Alcotest.(check (list bool)) "true, false, and absent" [ true; false; false ]
+    (decode [ row ~moved:(Some true); row ~moved:(Some false); row ~moved:None ]);
+  match Tui_decode.decode_prompts (`Assoc [ ("prompts", `List [ `Assoc [ ("key", `String "keeper"); ("source", `String "file"); ("override_default_moved", `String "yes") ] ]) ]) with
+  | Ok _ -> Alcotest.fail "a string where the wire promises a boolean decoded"
+  | Error _ -> ()
+
+(* A server with nothing quarantined omits the field, and so does one that
+   predates it. Neither is an error, and both mean the same thing to a
+   reader. *)
+let test_decode_prompts_absent_held_back_is_empty () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "no held back" 0
+      (List.length snapshot.Tui_decode.ps_held_back)
+
 let test_decode_prompts_reads_runtime_assets () =
   match Tui_decode.decode_prompts prompts_payload with
   | Error detail -> Alcotest.fail detail
@@ -6039,7 +6495,8 @@ let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
 let test_decode_lane_run_page_filters_to_one_lane () =
   let listing =
     `Assoc
-      [ "has_more", `Bool true
+      [ "total", `Int 51
+      ; "has_more", `Bool true
       ; ( "runs"
         , `List
             [ lane_run_summary_json "lib-1"
@@ -6051,6 +6508,8 @@ let test_decode_lane_run_page_filters_to_one_lane () =
   match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
+      Alcotest.(check (option int)) "retained total comes from server"
+        (Some 51) page.Tui_decode.lrpg_total;
       Alcotest.(check (list string)) "only the requested lane"
         [ "lib-1"; "lib-2" ]
         (List.map (fun run -> run.Tui_decode.lrs_run_id) page.Tui_decode.lrpg_runs);
@@ -6157,6 +6616,14 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
           = Tui_decode.Lane_run_decision_rejected)
      | _ -> Alcotest.fail "expected one verifier run")
 
+let lane_payload_availability ~running ~output =
+  let available = `Assoc [ "state", `String "available" ] in
+  `Assoc
+    [ "input", available
+    ; "output", (if running then `Null else if output then available else
+        Exact_lane_run_registry.availability_to_yojson
+          (Exact_lane_run_registry.Unavailable Exact_lane_run_registry.Missing_completion)) ]
+
 let lane_run_detail_json ?(output = true) run_id =
   `Assoc
     [ ( "run"
@@ -6166,6 +6633,7 @@ let lane_run_detail_json ?(output = true) run_id =
            ; "actor", `String "omicron"
            ; "started_at", `Float 100.
            ; "status", `String (if output then "succeeded" else "running")
+           ; "payload_availability", lane_payload_availability ~running:(not output) ~output
            ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
            ; ( "input"
              , `Assoc
@@ -6232,6 +6700,7 @@ let hitl_lane_run_detail_json ?(status = "succeeded") ?(output = true) judgment 
     ; "actor", `String "auto_judge"
     ; "started_at", `Float 100.
     ; "status", `String status
+    ; "payload_availability", lane_payload_availability ~running:(String.equal status "running") ~output
     ; "elapsed_s", `Float 2.
     ; "selected_slot", `String "judge-primary"
     ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
@@ -6287,7 +6756,7 @@ let test_decode_hitl_detail_keeps_advisory_across_persistence_status () =
            "%s must keep the advisory judgment independently"
            status))
 
-let test_decode_hitl_persistence_status_without_output_is_not_reached () =
+let test_decode_hitl_persistence_status_with_unavailable_output () =
   [ "completion_persistence_failed"; "completion_durability_unknown" ]
   |> List.iter (fun status ->
     match
@@ -6296,11 +6765,11 @@ let test_decode_hitl_persistence_status_without_output_is_not_reached () =
     with
     | Error detail -> Alcotest.fail detail
     | Ok detail ->
-      Alcotest.(check bool) "no output was retained" true
+      Alcotest.(check bool) "unavailable output is not fabricated" true
         (Option.is_none detail.Tui_decode.lrd_output);
-      Alcotest.(check bool) "no output means no advisory was reached" true
+      Alcotest.(check bool) "missing evidence does not mean judgment was never reached" true
         (detail.Tui_decode.lrd_gate_judgment
-         = Tui_decode.Lane_run_gate_judgment_not_reached))
+         = Tui_decode.Lane_run_gate_judgment_unavailable))
 
 let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
   let json =
@@ -6311,6 +6780,7 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
             ; "run_kind", `String "task_verification"
             ; "lane", `String Runtime.verifier_exact_lane_id
             ; "subject_id", `String "task-9"
+            ; "payload_availability", lane_payload_availability ~running:false ~output:true
             ; "actor", `String Runtime.verifier_exact_lane_id
             ; "started_at", `Float 100.
             ; "status", `String "approved"
@@ -6358,6 +6828,64 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
        Alcotest.(check (float 0.0)) "typed tool duration" 12.
          tool.lrt_duration_ms
      | _ -> Alcotest.fail "verifier tool evidence must decode to one tool")
+
+let test_lane_detail_distinguishes_null_missing_and_unavailable () =
+  let make ~availability ~output =
+    match lane_run_detail_json "recorded-null" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc
+        (("payload_availability", availability) :: output
+          @ (fields |> List.remove_assoc "payload_availability" |> List.remove_assoc "output")) ]
+    | _ -> assert false
+  in
+  let available = lane_payload_availability ~running:false ~output:true in
+  let decoded =
+    Tui_decode.decode_lane_run_detail (make ~availability:available ~output:[ "output", `Null ])
+    |> Result.get_ok
+  in
+  Alcotest.(check bool) "recorded JSON null is present output" true
+    (decoded.lrd_output = Some `Null);
+  Alcotest.(check bool) "available output requires its field" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (make ~availability:available ~output:[])));
+  let unavailable = Exact_lane_run_registry.Unavailable Exact_lane_run_registry.Missing_completion in
+  let availability = `Assoc
+    [ "input", Exact_lane_run_registry.availability_to_yojson Exact_lane_run_registry.Available
+    ; "output", Exact_lane_run_registry.availability_to_yojson unavailable ] in
+  let decoded = Tui_decode.decode_lane_run_detail (make ~availability ~output:[]) |> Result.get_ok in
+  Alcotest.(check bool) "terminal status survives unreadable payload" true
+    (decoded.lrd_status = Tui_decode.Lane_run_succeeded);
+  Alcotest.(check bool) "unavailable preserves typed reason" true
+    (decoded.lrd_output_availability = Some unavailable);
+  Alcotest.(check bool) "unavailable is not JSON null" true (decoded.lrd_output = None)
+
+let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement () =
+  let make status verdict =
+    match hitl_lane_run_detail_json "approve" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
+      `Assoc [ "run", `Assoc
+        ([ "run_kind", `String "goal_verification";
+           "lane", `String Runtime.verifier_exact_lane_id;
+           "status", `String status;
+           "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
+         @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  List.iter (fun (status, decision, expected) ->
+    let json = make status [ "evaluated_verdict", `Assoc
+      [ "decision", `String decision; "reason", `String "measured original criterion" ] ] in
+    let detail = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "actual evaluator decision is preserved" true (detail.lrd_decision = expected);
+    Alcotest.(check string) "run settlement remains separate" status
+      (Tui_decode.lane_run_status_label detail.lrd_status))
+    [ "committed", "rejected", Tui_decode.Lane_run_decision_rejected;
+      "superseded", "approved", Tui_decode.Lane_run_decision_approved ];
+  List.iter (fun verdict ->
+    Alcotest.(check bool) "committed run cannot omit or invent judgement" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make "committed" verdict))))
+    [ []; [ "evaluated_verdict", `Null ];
+      [ "evaluated_verdict", `Assoc [ "decision", `String "maybe"; "reason", `String "unknown" ] ] ]
+;;
 
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =
@@ -7119,6 +7647,66 @@ let test_decode_runtime_params_reads_current_and_default () =
        Alcotest.(check (option string)) "max" (Some "20") first.rpr_max_json
      | [] -> Alcotest.fail "expected runtime param rows")
 
+(* A param whose values are named carries them, so the editor can offer a
+   picker instead of asking the reader to type one of three spellings. Absent
+   and empty read alike — no closed set — and a malformed entry does not
+   produce a partial set the picker would walk. *)
+let runtime_params_choices_json =
+  `Assoc
+    [ ( "parameters"
+      , `List
+          [ `Assoc
+              [ ("key", `String "discord.trigger_policy")
+              ; ("current", `String "mention_or_thread")
+              ; ("default", `String "mention_or_thread")
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "when the bot answers")
+                    ; ("value_type", `String "enum")
+                    ; ( "choices"
+                      , `List
+                          [ `String "mention_only"
+                          ; `String "mention_or_thread"
+                          ; `String "all"
+                          ] )
+                    ] )
+              ]
+          ; `Assoc
+              [ ("key", `String "keeper.snapshot_sec")
+              ; ("current", `Int 30)
+              ; ("default", `Int 30)
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "snapshot cadence")
+                    ; ("value_type", `String "int")
+                    ] )
+              ]
+          ; `Assoc
+              [ ("key", `String "malformed.choices")
+              ; ("current", `String "x")
+              ; ("default", `String "x")
+              ; ("has_override", `Bool false)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "not a list")
+                    ; ("value_type", `String "enum")
+                    ; ("choices", `String "mention_only")
+                    ] )
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_params_reads_choices () =
+  match Tui_decode.decode_runtime_params runtime_params_choices_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    Alcotest.(check (list (list string)))
+      "a closed set travels; absent and malformed read as no set"
+      [ [ "mention_only"; "mention_or_thread"; "all" ]; []; [] ]
+      (List.map (fun row -> row.Tui_decode.rpr_choices) rows)
+
 let test_decode_runtime_params_takes_an_empty_registry () =
   match
     Tui_decode.decode_runtime_params (`Assoc [ ("parameters", `List []) ])
@@ -7180,6 +7768,20 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
   | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
+
+let test_goal_timeline_missing_source_does_not_invent_gate_failure () =
+  let cases = [
+    "{}";
+    {|{"ok":false,"error":"other source failed"}|};
+    {|{"timeline":null}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"ready","operator_detail":"not an error"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unexpected","operator_detail":"unknown"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unavailable","operator_detail":" "}}|}
+  ] in
+  List.iter (fun source ->
+    match Tui_decode.decode_goal_detail_timeline (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail ("invalid source state became a Gate failure: " ^ source)) cases
 
 let test_goal_timeline_rejects_a_thin_event () =
   let json =
@@ -7748,6 +8350,28 @@ let test_decode_file_change_reads_an_insert () =
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")
 ;;
 
+let test_required_display_renders_numeric_epoch_as_date () =
+  (* A server too old to carry [created_at_iso] sends a bare numeric epoch.
+     The pane must show a date, not the raw number. [Time_codec.rfc3339_of_unix]
+     renders UTC whole seconds, so 1788000000.0 is the exact text a numeric
+     field has to produce here (2026-08-29T10:40:00Z, checked the way the
+     dedicated time-codec tests check their fixed points). *)
+  let epoch = 1788000000.0 in
+  let fixture = `Assoc [ ("created_at", `Float epoch) ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a numeric epoch renders as its UTC date"
+      "2026-08-29T10:40:00Z" rendered
+
+let test_required_display_keeps_rfc3339_string_verbatim () =
+  let fixture = `Assoc [ ("created_at", `String "2026-08-29T10:40:00Z") ] in
+  match Tui_decode.required_display_any_field fixture [ "created_at_iso"; "created_at" ] with
+  | Error detail -> Alcotest.failf "unexpected error: %s" detail
+  | Ok rendered ->
+    Alcotest.(check string) "a present ISO twin is kept verbatim"
+      "2026-08-29T10:40:00Z" rendered
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_verification_evidence",
@@ -7761,6 +8385,8 @@ let () =
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "missing source never invents a Gate failure" `Quick
+          test_goal_timeline_missing_source_does_not_invent_gate_failure
       ; Alcotest.test_case "rejects a thin event" `Quick
           test_goal_timeline_rejects_a_thin_event
       ] );
@@ -7783,6 +8409,14 @@ let () =
           test_runtime_probe_status_round_trips
       ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
           test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "rejects a source that is not the runtime config"
+          `Quick test_runtime_probe_rejects_a_source_that_is_not_the_runtime_config
+      ; Alcotest.test_case "catalog probe is independent of dispatch" `Quick
+          test_runtime_catalog_probe_is_independent_of_dispatch
+      ; Alcotest.test_case "limits reject invalid values" `Quick
+          test_runtime_limits_reject_unknown_or_invalid_values
+      ; Alcotest.test_case "default limits match listed runtime" `Quick
+          test_runtime_default_limits_must_match_listed_row
       ; Alcotest.test_case "rejects half a sticky preference" `Quick
           test_runtime_resolved_rejects_half_preference
       ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
@@ -7790,7 +8424,9 @@ let () =
       ] );
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "carries runtimes and assignments" `Quick
-          test_decode_runtime_resolved
+          test_decode_runtime_resolved;
+        Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
+          test_decode_unavailable_runtime_assignment
       ] );
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
@@ -7902,6 +8538,9 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "every known phase decodes to its own constructor"
+          `Quick
+          test_every_known_phase_decodes_to_its_own_constructor;
       ] );
     ( "decode_standalone_lanes",
       [
@@ -7941,15 +8580,23 @@ let () =
           test_decode_hitl_detail_rejects_unknown_advisory;
         Alcotest.test_case "HITL persistence status keeps advisory" `Quick
           test_decode_hitl_detail_keeps_advisory_across_persistence_status;
-        Alcotest.test_case "HITL persistence status without output is not reached"
-          `Quick test_decode_hitl_persistence_status_without_output_is_not_reached;
+        Alcotest.test_case "HITL persistence status preserves unavailable judgment evidence"
+          `Quick test_decode_hitl_persistence_status_with_unavailable_output;
         Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick
           test_decode_lane_run_detail_requires_the_payload;
+        Alcotest.test_case "Goal evaluated decision is independent of run settlement" `Quick
+          test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
+        Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
+          test_lane_detail_distinguishes_null_missing_and_unavailable;
       ] );
     ( "decode_fusion",
       [
+        Alcotest.test_case "historical original carries exact evidence and measured usage" `Quick
+          test_historical_fusion_original_and_observations;
+        Alcotest.test_case "historical identity and evidence remain strict" `Quick
+          test_historical_fusion_exact_identity_and_strict_metadata;
         Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
           test_decode_fusion_list_and_exact_detail;
         Alcotest.test_case "decodes RFC-0284 judge nodes" `Quick
@@ -8038,6 +8685,10 @@ let () =
       [
         Alcotest.test_case "current contract" `Quick
           test_decode_planning_snapshot_current_contract;
+        Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
+          test_goal_store_unavailable_preserves_source_detail;
+        Alcotest.test_case "Goal link source unavailable retains detail" `Quick
+          test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
         Alcotest.test_case "goal carries the judge verdict" `Quick
@@ -8185,6 +8836,12 @@ let () =
           test_a_json_refusal_shows_its_sentence_not_the_envelope;
         Alcotest.test_case "reads separate read-only runtime assets" `Quick
           test_decode_prompts_reads_runtime_assets;
+        Alcotest.test_case "reads the held-back overrides" `Quick
+          test_decode_prompts_reads_held_back;
+        Alcotest.test_case "reads an override whose default moved" `Quick
+          test_decode_prompts_reads_a_moved_default;
+        Alcotest.test_case "an absent held_back is empty, not an error" `Quick
+          test_decode_prompts_absent_held_back_is_empty;
         Alcotest.test_case "hides assembly fragments by default" `Quick
           test_prompt_rows_hide_fragments_by_default;
         Alcotest.test_case "legacy rows default to primary" `Quick
@@ -8236,6 +8893,8 @@ let () =
           test_decode_runtime_params_takes_an_empty_registry;
         Alcotest.test_case "rejects a row without a key" `Quick
           test_decode_runtime_params_rejects_a_row_without_a_key;
+        Alcotest.test_case "reads a closed set of choices" `Quick
+          test_decode_runtime_params_reads_choices;
       ] );
     ( "keeper_gate_settings",
       [
@@ -8291,7 +8950,8 @@ let () =
           test_decode_gate_row_missing_id_is_an_error;
       ] );
     ( "skills_catalog",
-      [
+      [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
+          test_decode_skills_catalog_keeps_usage_scope;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick
@@ -8334,6 +8994,12 @@ let () =
           test_decode_skill_evidence_rejects_open_gap_and_unbacked_activation
       ; Alcotest.test_case "timestamp ties compare parsed instants" `Quick
           test_decode_skill_evidence_tie_compares_rfc3339_instants
+      ] );
+    ( "decode_timestamp_display",
+      [ Alcotest.test_case "renders a numeric epoch as a date, not a bare number" `Quick
+          test_required_display_renders_numeric_epoch_as_date
+      ; Alcotest.test_case "keeps a present ISO twin verbatim" `Quick
+          test_required_display_keeps_rfc3339_string_verbatim
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert ] );

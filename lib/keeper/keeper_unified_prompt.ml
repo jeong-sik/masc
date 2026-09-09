@@ -116,6 +116,24 @@ let format_fleet_messages
    no argument is cut mid-string. A keeper that needs the arguments of a call
    that succeeded is asking what it did, which is what the board, the task and
    the goal sections answer. *)
+(* The rejected-call digest is rendered ahead of the rows and outside the row
+   budget, so nothing below can trim it. A refused call replays its argument
+   object, and an argument object has no size of its own: five refusals
+   carrying a 4 KB body put 20 KB into the one part of the briefing the budget
+   cannot reach. That is #29676 again -- a briefing past the runtime's whole
+   request cap, and a turn that cannot be assembled at all.
+
+   The digest exists to name the call so it is not repeated, which the tool
+   name and the head of the arguments do. With at most eight digests
+   (Keeper_own_recent_actions.digest_failures), bounding each one is what
+   makes the section's worst case a number: about 2 KB. *)
+let rejected_digest_input_bytes = 240
+
+let rejected_digest_input input =
+  String_util.utf8_safe ~max_bytes:rejected_digest_input_bytes ~suffix:"…" input
+  |> String_util.to_string
+;;
+
 let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =
   let turn_id = string_of_int turn.turn_id in
   turn.calls
@@ -1159,14 +1177,14 @@ let active_goal_summaries_for_task
     | Keeper_world_observation_inputs.Current_task_unavailable _ -> None
   in
   match task_id with
-  | None -> []
+  | None -> Ok []
   | Some task_id ->
     let linked =
       Workspace_goal_index.goals_for_task
         (Workspace_goal_index.build_task_goal_index_for_config config)
         ~task_id
     in
-    List.filter_map
+    Result.map (List.filter_map
       (fun (goal : Goal_store.goal) ->
          if List.exists (String.equal goal.id) linked
             && Goal_phase.admits_self_directed_progress goal.phase
@@ -1177,7 +1195,7 @@ let active_goal_summaries_for_task
              ; summary_phase = Some goal.phase
              }
          else None)
-      (Goal_store.list_goals config ())
+      ) (Goal_store.list_goals_result config ())
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
@@ -1281,7 +1299,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
-    ?(active_goal_summaries : goal_summary list option)
+    ?(active_goal_summaries : (goal_summary list, string) result option)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1377,11 +1395,12 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                in
                let count = string_of_int digest.failure_count in
                let last_turn = string_of_int digest.failure_last_turn in
+               let input = rejected_digest_input digest.failure_input in
                let row =
                  render
                    Prompt_names.keeper_observation_rejected_digest_row
                    [ "tool", digest.failure_tool
-                   ; "input", digest.failure_input
+                   ; "input", input
                    ; "count", count
                    ; "last_turn", last_turn
                    ; "detail_suffix", detail_suffix
@@ -1391,7 +1410,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                         " "
                         [ "-"
                         ; digest.failure_tool
-                        ; digest.failure_input
+                        ; input
                         ; "×" ^ count
                         ; "@" ^ last_turn ^ detail_suffix
                         ])
@@ -1411,28 +1430,23 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
-      let count, body =
-        match active_goal_summaries with
-        | Some summaries -> List.length summaries, format_goal_summaries summaries
-        (* No goals, not every goal. The caller resolves the goals linked to
-           this turn's task ({!active_goal_summaries_for_task}); a Keeper
-           holding no task has none, and that is the answer. Reading
-           [observation.active_goals] here answered with the workspace's whole
-           open-goal list instead -- the same list #32665 took out of the
-           system prompt, back in the turn context for anyone who omits the
-           argument. *)
-        | None -> 0, ""
+      let source =
+        match observation.active_goals, active_goal_summaries with
+        | Error detail, _ | _, Some (Error detail) -> Error detail
+        | Ok _, Some (Ok summaries) -> Ok summaries
+        | Ok _, None -> Ok []
       in
-      if count = 0
-      then None
-      else
-        Some
-          (render_fragment
-             Prompt_names.keeper_world_active_goals_heading
-             [ "count", string_of_int count ]
-           ^ "\n"
-           ^ body
-           ^ "\n\n")
+      (match source with
+       | Error detail ->
+         Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
+                 [ "detail", detail ] ^ "\n\n")
+       | Ok [] -> None
+       | Ok summaries ->
+         Some
+           (render_fragment
+              Prompt_names.keeper_world_active_goals_heading
+              [ "count", string_of_int (List.length summaries) ]
+            ^ "\n" ^ format_goal_summaries summaries ^ "\n\n"))
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

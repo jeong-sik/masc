@@ -1,0 +1,44 @@
+{
+  "at": "2026-09-07T04:56:17.062678+00:00",
+  "elapsed_s": 0.011,
+  "rpc": {
+    "jsonrpc": "2.0",
+    "id": "audit-search-verified",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.33.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "[AuthError] Forbidden: codex-runtime-operator cannot use unregistered tool: masc_web_search",
+            "status": "error",
+            "tool": "masc_web_search"
+          },
+          "trace_id": "\"audit-search-verified\"",
+          "agent_id": "codex-runtime-operator",
+          "tool": "masc_web_search",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-09-07T04:56:17Z",
+          "failure_class": "policy_rejection"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "[AuthError] Forbidden: codex-runtime-operator cannot use unregistered tool: masc_web_search"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "effect_disposition": "proven_pre_effect",
+        "auth_error_code": "insufficient_role"
+      }
+    }
+  }
+}

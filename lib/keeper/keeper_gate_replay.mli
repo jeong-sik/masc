@@ -96,6 +96,12 @@ val append_model_evidence_block :
     This keeps replay evidence live when a multimodal goal uses [goal_blocks]
     instead of the string [goal]. *)
 
+(** Stable canonical input and identity from the durable result. Replay
+    journal disposition is deliberately excluded: recovery is the same input. *)
+val approval_input : model_evidence ->
+  (Keeper_approval_input_admission.identity * Agent_core.Types.message,
+   Keeper_approval_input_admission.error) result
+
 val project_model_input :
   base_path:string ->
   model_evidence ->

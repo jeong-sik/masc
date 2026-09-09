@@ -1266,6 +1266,8 @@
 .wk-bl-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: var(--radius-sm); background: var(--bg-card); border: 1px solid var(--border-soft); }
 .wk-bl-title { font-size: 12.5px; color: var(--text-primary); display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .wk-bl-goal { font-size: var(--fs-10); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-bl-assign { flex: none; font-family: var(--font-mono); font-size: var(--fs-10); padding: 2px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border-soft); background: transparent; color: var(--text-dim); cursor: pointer; max-width: 132px; }
+.wk-bl-assign:hover { color: var(--text-bright); border-color: var(--volt-dim); }
 .wk-bl-prio { flex: none; font-size: var(--fs-10); color: var(--text-dim); }
 
 /* small inline label for jargon keys (room / 세션 / …) */

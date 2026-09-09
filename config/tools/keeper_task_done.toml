@@ -43,9 +43,9 @@ as note:<text> next to an artifact: entry, never on its own."""
 name = "notes"
 type = "string"
 description = """
-Verification handoff notes (>= 20 chars). For contracted tasks: summarise \
-what changed AND mention each contract.required_evidence entry verbatim. \
-Ignored when the task has no contract."""
+Optional verification handoff notes, preserved separately from the result \
+summary. Omit when there are no additional notes. A supplied string is kept \
+verbatim; the result summary does not replace it."""
 
 [help]
 short_description = "Submit your owned task for verification with a result summary and evidence_refs."

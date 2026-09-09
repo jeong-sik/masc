@@ -131,23 +131,26 @@ let meta_tbl = store.meta_tbl
    So the two questions are kept apart. [override_tbl] answers what is in
    force; this answers what the operator saved. The file is written from
    both. *)
-let quarantine_tbl : (string, Prompt_override_persistence.entry) Hashtbl.t =
+let quarantine_tbl
+    : (string, Prompt_override_persistence.entry * string) Hashtbl.t =
   Hashtbl.create 8
 ;;
 
 let with_mutex f = Prompt_registry_store.with_lock store f
 
-(* What the operator saved for a key this process will not apply. Read by the
-   catalog so an operator can see that the file holds a prompt the server is
-   not using -- the state that used to be visible only as one ERROR line at
-   boot. *)
-let quarantined_entries () =
+(* What the operator saved for a key this process will not apply, with the
+   reason it will not. Read by the catalog so an operator can see that the
+   file holds a prompt the server is not using -- the state that used to be
+   visible only as one ERROR line at boot. *)
+let held_back_overrides () =
   with_mutex (fun () ->
       Hashtbl.fold
-        (fun key entry acc ->
-          if Hashtbl.mem override_tbl key then acc else entry :: acc)
+        (fun key held acc ->
+          if Hashtbl.mem override_tbl key then acc else held :: acc)
         quarantine_tbl
         [])
+
+let quarantined_entries () = List.map fst (held_back_overrides ())
 
 let with_override_mutation_lock f =
   Prompt_registry_store.with_override_mutation_lock store f
@@ -649,7 +652,7 @@ let build_resolved_from_snapshot ~key ~override_value ~file_value =
 type prompt_snapshot = {
   snap_key : string;
   snap_meta : prompt_meta;
-  snap_override_value : string option;
+  snap_override : Prompt_override_persistence.entry option;
 }
 
 (* Resolve a single prompt by doing the filesystem read OUTSIDE the
@@ -659,8 +662,31 @@ let resolved_of_snapshot (s : prompt_snapshot) =
   let file_value = file_value_of_key s.snap_key in
   build_resolved_from_snapshot
     ~key:s.snap_key
-    ~override_value:s.snap_override_value
+    ~override_value:
+      (Option.map
+         (fun (entry : Prompt_override_persistence.entry) -> entry.value)
+         s.snap_override)
     ~file_value
+
+let sorted_variables variables = List.sort_uniq String.compare variables
+
+(* Whether the default has moved since the override was written: the body
+   the operator replaced no longer reads the same, or the prompt declares a
+   different variable set than it did then. Neither stops the override from
+   applying; both are worth a look, since the operator's text was a
+   replacement for something that has since changed. *)
+let override_default_moved (meta : prompt_meta) ~file_value
+    (entry : Prompt_override_persistence.entry) =
+  let body_moved =
+    match file_value with
+    | None -> true
+    | Some body ->
+        not
+          (String.equal entry.authored_against
+             (Prompt_override_persistence.default_revision ~body))
+  in
+  body_moved
+  || sorted_variables meta.template_variables <> entry.template_variables
 
 (* [expected = []] means the prompt is never rendered through
    {!render}/{!render_prompt_template} — it is spliced raw via
@@ -681,10 +707,15 @@ let unexpected_template_variables meta template =
 
 (* Variant that takes a pre-computed [resolved] record.  Used by the
    batch listing paths that read files outside the mutex. *)
-let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
+let prompt_item_json_of_resolved ~override_default_moved key (meta : prompt_meta)
+    resolved =
   `Assoc
     [
       ("key", `String key);
+      (* True only with an override in force whose default has changed since
+         it was written. The override still applies; this says the text it
+         replaced is not the text it replaced then. *)
+      ("override_default_moved", `Bool override_default_moved);
       ("category", `String meta.category);
       ( "operator_surface",
         `String (Types.operator_surface_to_string meta.operator_surface) );
@@ -787,7 +818,7 @@ let render_prompt_template key vars =
     them could invalidate the validation decision (e.g. overwrite a
     key's metadata with a different [template_variables] set after
     we validated but before we wrote the override). *)
-let validated_override ?expected_contract_revision key value =
+let admit key value ~bind =
   let trimmed = String.trim value in
   let file_value = file_value_of_key key in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
@@ -798,39 +829,48 @@ let validated_override ?expected_contract_revision key value =
         match Hashtbl.find_opt meta_tbl key with
         | None -> Error "Unknown prompt key"
         | Some meta -> (
-            let contract_body = file_value in
-            match contract_body with
+            match file_value with
             | None -> Error "Prompt contract body is missing"
             | Some body ->
-                let current_contract_revision =
-                  Prompt_override_persistence.contract_revision ~body
-                    ~template_variables:meta.template_variables
-                in
-                (match expected_contract_revision with
-                 | Some persisted_revision
-                   when not
-                          (String.equal persisted_revision
-                             current_contract_revision) ->
-                     Error
-                       (Printf.sprintf
-                          "Prompt contract revision mismatch (persisted=%s, current=%s)"
-                          persisted_revision current_contract_revision)
-                 | None | Some _ ->
-                     let unexpected =
-                       unexpected_template_variables meta trimmed
-                     in
-                     if unexpected <> [] then
-                       Error
-                         (Printf.sprintf "Unknown template variables: %s"
-                            (String.concat ", " unexpected))
-                     else
-                       Ok
-                         Prompt_override_persistence.
-                           {
-                             key;
-                             value = trimmed;
-                             contract_revision = current_contract_revision;
-                           })))
+                let unexpected = unexpected_template_variables meta trimmed in
+                if unexpected <> [] then
+                  Error
+                    (Printf.sprintf "Unknown template variables: %s"
+                       (String.concat ", " unexpected))
+                else Ok (bind ~meta ~body ~trimmed)))
+
+(* An override the operator is writing now: bound to the default it
+   replaces at this moment, so a later listing can say whether that default
+   has moved. *)
+let validated_override key value =
+  admit key value ~bind:(fun ~(meta : prompt_meta) ~body ~trimmed ->
+      Prompt_override_persistence.
+        {
+          key;
+          value = trimmed;
+          authored_against = default_revision ~body;
+          template_variables = sorted_variables meta.template_variables;
+        })
+
+(* An override the operator saved earlier, coming back from disk or from a
+   preset. It is admitted when it still renders under the prompt's current
+   contract, and its binding is kept as written: those fields record what
+   the default was when the operator wrote the text, and rebinding here
+   would erase the only sign that it has moved since. A default body that
+   changed underneath the override is not a reason to refuse it -- the
+   operator replaced that body on purpose, and a release rewriting it must
+   not switch their prompt off. *)
+let admitted_persisted_entry (entry : Prompt_override_persistence.entry) =
+  admit entry.key entry.value ~bind:(fun ~meta:_ ~body:_ ~trimmed ->
+      { entry with Prompt_override_persistence.value = trimmed })
+
+(* The listing needs the same answer for an entry in force, read outside the
+   mutex because the default body comes from disk. *)
+let override_default_moved_now (entry : Prompt_override_persistence.entry) =
+  let file_value = file_value_of_key entry.key in
+  match with_mutex (fun () -> Hashtbl.find_opt meta_tbl entry.key) with
+  | None -> true
+  | Some meta -> override_default_moved meta ~file_value entry
 
 (** Set an override for a prompt *)
 let set_override key value =
@@ -864,11 +904,7 @@ let validate_prompt_templates () =
         (fun key meta acc ->
           { snap_key = key;
             snap_meta = meta;
-            snap_override_value =
-              Hashtbl.find_opt override_tbl key
-              |> Option.map
-                   (fun (entry : Prompt_override_persistence.entry) ->
-                     entry.value);
+            snap_override = Hashtbl.find_opt override_tbl key;
           } :: acc)
         meta_tbl [])
   in
@@ -917,34 +953,38 @@ let list_prompts () =
         (fun key meta acc ->
           { snap_key = key;
             snap_meta = meta;
-            snap_override_value =
-              Hashtbl.find_opt override_tbl key
-              |> Option.map
-                   (fun (entry : Prompt_override_persistence.entry) ->
-                     entry.value);
+            snap_override = Hashtbl.find_opt override_tbl key;
           } :: acc)
         meta_tbl [])
   in
   snapshots
   |> List.map (fun s ->
     let resolved = resolved_of_snapshot s in
-    prompt_item_json_of_resolved s.snap_key s.snap_meta resolved)
+    let override_default_moved =
+      match s.snap_override with
+      | None -> false
+      | Some entry ->
+          override_default_moved s.snap_meta ~file_value:resolved.file_value entry
+    in
+    prompt_item_json_of_resolved ~override_default_moved s.snap_key s.snap_meta
+      resolved)
   |> List.sort compare_prompt_items
 
 (** JSON export of all prompts for API *)
 let prompts_json () =
   `Assoc [
     ("prompts", `List (list_prompts ()));
-    (* Saved, on disk, and not in force. Empty in the ordinary case. *)
+    (* Saved, on disk, and not in force, each with the reason. Empty in the
+       ordinary case. *)
     ( "held_back",
       `List
         (List.map
-           (fun (entry : Prompt_override_persistence.entry) ->
+           (fun ((entry : Prompt_override_persistence.entry), reason) ->
              `Assoc
                [ ("key", `String entry.key);
                  ("bytes", `Int (String.length entry.value));
-                 ("contract_revision", `String entry.contract_revision) ])
-           (quarantined_entries ())) );
+                 ("reason", `String reason) ])
+           (held_back_overrides ())) );
   ]
 
 (** Persist overrides to JSON file *)
@@ -975,7 +1015,7 @@ let persisted_entries () =
   with_mutex (fun () ->
       let live = Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [] in
       Hashtbl.fold
-        (fun key entry acc ->
+        (fun key (entry, _reason) acc ->
           if Hashtbl.mem override_tbl key then acc else entry :: acc)
         quarantine_tbl
         live)
@@ -1001,21 +1041,30 @@ let persist_overrides base_path =
   with_override_mutation_lock (fun () ->
       save_override_entries base_path (persisted_entries ()))
 
-let set_override_persisted ?expected_contract_revision ~base_path key value =
+(* Caller holds the override mutation lock. *)
+let commit_persisted_entry ~base_path (entry : Prompt_override_persistence.entry) =
+  let candidate = upsert_override_entry entry (persisted_entries ()) in
+  match save_override_entries base_path candidate with
+  | Error message -> Error (Persistence_error message)
+  | Ok () ->
+      (* Writing a key answers the question its quarantined version was
+         waiting on, so that copy is superseded rather than kept beside the
+         new one. *)
+      with_mutex (fun () -> Hashtbl.remove quarantine_tbl entry.key);
+      replace_override_entries candidate;
+      Ok ()
+
+let set_override_persisted ~base_path key value =
   with_override_mutation_lock (fun () ->
-      match validated_override ?expected_contract_revision key value with
+      match validated_override key value with
       | Error message -> Error (Validation_error message)
-      | Ok entry ->
-          let candidate = upsert_override_entry entry (persisted_entries ()) in
-          (match save_override_entries base_path candidate with
-           | Error message -> Error (Persistence_error message)
-           | Ok () ->
-               (* Writing a key answers the question its quarantined version
-                  was waiting on, so that copy is superseded rather than
-                  kept beside the new one. *)
-               with_mutex (fun () -> Hashtbl.remove quarantine_tbl key);
-               replace_override_entries candidate;
-               Ok ()))
+      | Ok entry -> commit_persisted_entry ~base_path entry)
+
+let restore_persisted_entry ~base_path entry =
+  with_override_mutation_lock (fun () ->
+      match admitted_persisted_entry entry with
+      | Error message -> Error (Validation_error message)
+      | Ok entry -> commit_persisted_entry ~base_path entry)
 
 (* An explicit clear is an explicit intent, so it reaches the quarantined
    copy too. Nothing else removes one: a write of some other key must not
@@ -1070,16 +1119,12 @@ let restore_overrides base_path =
               List.fold_left
                 (fun (accepted, rejected, held)
                      (entry : Prompt_override_persistence.entry) ->
-                  match
-                    validated_override
-                      ~expected_contract_revision:entry.contract_revision
-                      entry.key entry.value
-                  with
-                  | Ok validated -> (validated :: accepted, rejected, held)
+                  match admitted_persisted_entry entry with
+                  | Ok admitted -> (admitted :: accepted, rejected, held)
                   | Error reason ->
                       ( accepted,
                         (Some entry.key, reason) :: rejected,
-                        entry :: held ))
+                        (entry, reason) :: held ))
                 ([], [], []) entries
       in
       (* Commit the fully validated candidate before invoking observers.  A
@@ -1088,8 +1133,8 @@ let restore_overrides base_path =
       with_mutex (fun () ->
           Hashtbl.clear quarantine_tbl;
           List.iter
-            (fun (entry : Prompt_override_persistence.entry) ->
-              Hashtbl.replace quarantine_tbl entry.key entry)
+            (fun (((entry : Prompt_override_persistence.entry), _) as held) ->
+              Hashtbl.replace quarantine_tbl entry.key held)
             rejected_entries);
       List.iter
         (fun (key, reason) ->
@@ -1101,6 +1146,16 @@ let restore_overrides base_path =
                 reason
           | Some key ->
               Log.Misc.error
-                "prompt override restore: rejected %s, falling back to file value: %s"
+                "prompt override restore: %s cannot render under the current contract, falling back to file value: %s"
                 key reason)
-        failures)
+        failures;
+      (* In force, and written against a default that has since changed.
+         One line per key: the catalog carries the same fact, but the boot
+         log is where an operator looks when a release changed a prompt. *)
+      List.iter
+        (fun (entry : Prompt_override_persistence.entry) ->
+          if override_default_moved_now entry then
+            Log.Misc.warn
+              "prompt override %s applies over a default that changed since it was written"
+              entry.key)
+        candidate)

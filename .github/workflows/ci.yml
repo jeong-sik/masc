@@ -1,7 +1,6 @@
 name: CI
 
-# Manual-dispatch contract is unchanged: this workflow starts only when
-# dispatched. What changed on 2026-09-02 (owner decision) is the shape:
+# Runs on manual dispatch or as the compile component of candidate verification. What changed on 2026-09-02 (owner decision) is the shape:
 # the previous 9-job lane (changes / meta / health / build / lint /
 # dashboard / structure-ratchet / shell-ir-ratchet / ci-gate) is now a
 # single job that builds the tree.
@@ -23,6 +22,13 @@ name: CI
 # Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
 
 on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      candidate_verification:
+        type: boolean
+        default: false
   workflow_dispatch: {}
 
 permissions:
@@ -32,7 +38,7 @@ permissions:
 # One run at a time for the whole repo: a new dispatch cancels the run
 # in flight instead of stacking a second one.
 concurrency:
-  group: ci
+  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
   cancel-in-progress: true
 
 jobs:
@@ -65,10 +71,17 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          # check-doc-truth.sh compares the release the docs name with the
-          # newest v* tag; a checkout with no tags cannot answer that.
-          fetch-tags: true
+
+      - name: Install tools for documentation checks
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y --no-install-recommends ripgrep
+
+      - name: Check doc truth
+        run: scripts/check-doc-truth.sh
+
+      - name: Verify doc truth uses stable checkout inputs
+        run: python3 test/test_doc_truth_stable_inputs.py
 
       - name: Check source text integrity
         run: scripts/ci/check-source-text-integrity.sh
@@ -86,16 +99,6 @@ jobs:
         with:
           install-flags: --with-test
           os-packages: jq ripgrep
-
-      # CONTRIBUTING names this gate and nothing ran it, so the version headers
-      # drifted: the 0.30.0 release updated ROADMAP and left
-      # docs/PRODUCT-OPERATING-PLAN.md and docs/spec/SPEC-INDEX.md on 0.29.1 for
-      # a day. It reads checked-in text only, so it runs before the build and
-      # after the step that installs the rg and jq it calls. This workflow is
-      # dispatch-only, so pr-check.yml carries the same step -- that is the one
-      # a pull request gets an answer from.
-      - name: Check doc truth
-        run: scripts/check-doc-truth.sh
 
       - name: Build
         env:

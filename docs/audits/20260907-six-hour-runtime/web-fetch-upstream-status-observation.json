@@ -1,0 +1,103 @@
+{
+  "original_window_failures": [
+    {
+      "seq": 25984476,
+      "ts": "2026-09-06T21:02:53Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26093530,
+      "ts": "2026-09-07T00:01:14Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26101248,
+      "ts": "2026-09-07T00:26:37Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26158013,
+      "ts": "2026-09-07T00:52:00Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26160359,
+      "ts": "2026-09-07T01:01:29Z",
+      "upstream_http_status": 401,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26160950,
+      "ts": "2026-09-07T01:04:23Z",
+      "upstream_http_status": 401,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26273445,
+      "ts": "2026-09-07T01:43:59Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26329927,
+      "ts": "2026-09-07T02:23:21Z",
+      "upstream_http_status": 401,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26329974,
+      "ts": "2026-09-07T02:23:36Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26330186,
+      "ts": "2026-09-07T02:25:41Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26330193,
+      "ts": "2026-09-07T02:25:47Z",
+      "upstream_http_status": 401,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26332360,
+      "ts": "2026-09-07T02:43:11Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    },
+    {
+      "seq": 26332378,
+      "ts": "2026-09-07T02:43:15Z",
+      "upstream_http_status": 404,
+      "recorded_failure_class": "runtime_failure"
+    }
+  ],
+  "status_counts": {
+    "404": 9,
+    "401": 4
+  },
+  "recent_successful_tool_calls": [
+    {
+      "seq": 26990818,
+      "ts": "2026-09-07T06:36:00Z",
+      "line": 97682,
+      "tool": "WebSearch",
+      "outcome": "ok"
+    },
+    {
+      "seq": 26990890,
+      "ts": "2026-09-07T06:36:37Z",
+      "line": 97754,
+      "tool": "WebFetch",
+      "outcome": "ok"
+    }
+  ],
+  "limitation": "New successes do not prove recovery of the original failed URLs."
+}

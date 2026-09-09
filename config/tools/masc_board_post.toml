@@ -3,6 +3,7 @@ description = """
 Create a post on the MASC internal board. Pass either `body` or `content` (both \
 accepted — `body` wins if both present). `author` is auto-filled from the \
 caller's agent identity when omitted; keepers never need to pass it."""
+identity_fields = ["author"]
 
 [[params]]
 name = "title"

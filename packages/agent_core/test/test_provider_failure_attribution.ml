@@ -600,7 +600,11 @@ let test_request_body_limit_preserves_typed_capacity_evidence () =
       (Error.to_string other)
 ;;
 
-let test_empty_completion_end_turn_stays_provider_unavailable () =
+(* #32497 gave an empty completion its own variant on 2026-09-02; before that
+   it shared ProviderUnavailable's arm. The reason this case exists is that an
+   end_turn empty completion must not be read as a context overflow, and that
+   still holds -- only the arm it lands in has a name of its own now. *)
+let test_empty_completion_end_turn_is_its_own_variant () =
   match
     Attribution.core_error_of_http_error
       (Http.ProviderFailure
@@ -608,9 +612,8 @@ let test_empty_completion_end_turn_stays_provider_unavailable () =
          ; message = "provider returned an empty assistant turn"
          })
   with
-  | Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
-  | other ->
-    Alcotest.failf "expected Provider unavailable, got %s" (Error.to_string other)
+  | Error.Provider (Llm_provider.Error.EmptyCompletion _) -> ()
+  | other -> Alcotest.failf "expected EmptyCompletion, got %s" (Error.to_string other)
 ;;
 
 (* Regression guard: an empty turn whose stop_reason token agent core does not
@@ -776,7 +779,7 @@ let () =
         ; Alcotest.test_case
             "EndTurn stays provider unavailable"
             `Quick
-            test_empty_completion_end_turn_stays_provider_unavailable
+            test_empty_completion_end_turn_is_its_own_variant
         ; Alcotest.test_case
             "unmodeled stop_reason fails loud instead of retrying"
             `Quick

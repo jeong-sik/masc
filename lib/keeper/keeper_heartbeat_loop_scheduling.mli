@@ -8,6 +8,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
+  ?wake:Keeper_world_observation.cycle_wake ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
   meta:Keeper_meta_contract.keeper_meta ->

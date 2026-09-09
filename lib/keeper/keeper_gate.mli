@@ -67,6 +67,14 @@ val replayable_operation : string -> replayable option
     follows this: a "host replays this exact call" promise made over an
     unrecognized operation starves the approved effect silently. *)
 
+type boxed_execution =
+  { run : Keeper_types_profile_sandbox.observation_run
+  ; result : Masc_exec.Exec_dispatch.dispatch_result
+  }
+(** A request that already ran, including the exact result the caller must
+    return. [Observe] reaches this state only on exit 0. [Guest_local] reaches
+    it for every process status: guest writes may already have landed. *)
+
 type authorization_source =
   | One_shot_resolution of string
   | Exact_always_rule of string
@@ -76,16 +84,24 @@ type authorization_source =
       (** The request is a closed-set observation-only argv inside a
           per-keeper disposable guest — docker container or microvm
           ({!Keeper_gate_readonly}); allowed without judgment. *)
-  | Observed_in_box of Keeper_types_profile_sandbox.observation_run
-      (** The request ran once inside the executor's box and exited 0. Under
+  | Local_output
+      (** The operation's effect lands only on the operator's own outputs:
+          a speak ({!voice_speak_gate_operation}) plays on the operator's
+          speakers and is appended to the keeper's own chat. [Auto_judge]
+          allows it without a judge; Manual still parks it for the operator,
+          and the per-keeper and [voice.gate] exemptions still skip the Gate
+          entirely. *)
+  | Observed_in_box of boxed_execution
+      (** The request ran once inside the executor's box. Under
           [Observe] the guest kernel refused every file write outside a
           scratch and every socket (Landlock and seccomp, RFC-0422), so
           nothing it did could have left an effect; under [Guest_local] the
           writes it made landed inside the guest, on the keeper's own tree,
           and the operator chose to let those pass without judgment
           (RFC-0422 §3.4). Either way its output is returned and no judge is
-          asked; the audit row names which box it was. A run that exited
-          otherwise is not this: it goes to the judge as before. *)
+          asked; the audit row names which box it was. A [Guest_local] failure
+          is returned as a failed process result too, without whole-call
+          replay: an arbitrary script may already have changed the tree. *)
 
 type authorization =
   { source : authorization_source
@@ -102,6 +118,14 @@ type unavailable_reason =
   | Queue_storage_unavailable of Keeper_approval_queue.storage_error
   | Approval_grant_unavailable of Keeper_approval_queue.grant_error
   | Approval_grant_consumption_in_progress of string
+
+(** Every reason above says the approval machinery could not act, not that
+    the call was wrong or that the effect half-happened. Callers report
+    {!Unavailable} as [Tool_result.Dependency_unavailable] with
+    [Proven_pre_effect]. Four of the five call sites reported
+    [Runtime_failure] until 2026-09-06, which reaches a model as
+    [Agent_core.Types.Unknown] -- an uncertain outcome, next to a message
+    saying the effect was not executed. *)
 
 type decision =
   | Allow of authorization
@@ -164,20 +188,16 @@ val cycle_grant_of_resolution :
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
     decides when to ask, and what each answer means. *)
 type observation =
-  | Observed_clean of { run : Keeper_types_profile_sandbox.observation_run }
-      (** Exit 0 inside the box named by [run]. Under [Observe] the kernel
-          refused every write outside the scratch and every socket, so
-          nothing this run did is an effect; under [Guest_local] its writes
-          stayed inside the guest. The caller holds its output and returns
-          it as the result. *)
+  | Observed_result of boxed_execution
+      (** Any payload result with an acknowledged enforced box. The result
+          travels with the decision without a second dispatch. Nonzero status
+          is not an effect-permission request or proof of sandbox denial. *)
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
       }
-      (** The box ended the run otherwise: a refused write or socket, a
-          program that exited non-zero, a signal. Not an effect either, but
-          not an answer — the request keeps the judge, and this is what the
-          judge will be shown (RFC-0422 step 3b). *)
+      (** The shim's typed receipt reports setup failure or refusal. A
+          nonzero payload exit alone cannot construct this outcome. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so
@@ -208,9 +228,12 @@ val observed_refusal :
     grant, both Always Allow switches, the exact rules and the observation
     tables have all declined — and only there, so an always-allowed keeper
     never pays a box run and a Manual workspace still sees every request.
-    [Observed_clean] is allowed with source {!Observed_in_box}; the other two
+    [intent=Request_effect] bypasses static/Observe shortcuts in Auto Judge
+    mode, but never bypasses permission or grants permission itself.
+    [Observed_result] is returned through source {!Observed_in_box}; the other two
     answers defer to the judge as the request would have without the box. *)
 val decide :
+  ?intent:Keeper_tool_execute_typed_input.intent ->
   ?cycle_grant:cycle_grant ->
   ?observe:(unit -> observation) ->
   keeper_always_allow:bool ->

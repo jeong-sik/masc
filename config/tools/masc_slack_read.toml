@@ -1,0 +1,27 @@
+name = "masc_slack_read"
+description = """
+Read recent messages collected by the Slack API connector using bot credentials, \
+not browser tabs. With channel_id, return buffered messages newest first; \
+otherwise return a per-channel summary. The in-memory buffer covers collection \
+since startup, not full history or on-demand thread retrieval."""
+additional_properties = false
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["messages"]
+description = "What to read. Default: messages."
+default = "messages"
+
+[[params]]
+name = "channel_id"
+type = "string"
+description = "Slack channel id (C...), as the per-channel summary lists. Omit for the summary."
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max messages to return, newest first."
+minimum = 1
+maximum = 200
+default = 50

@@ -85,7 +85,7 @@ val validate_embedded
     embedded config tree ([Embedded_config.file_list] / [Embedded_config.read],
     passed in so this module stays asset-source agnostic) and returns the
     first one that fails to decode. Files under [mcp/] that are neither
-    [resources.toml], [prompts.toml], nor the [managed-assets.json] manifest
-    are errors too — the file set is fixed and consumed by name. Called once
+    [resources.toml] nor [prompts.toml] are errors too — the file set is
+    fixed and consumed by name, and there is no manifest. Called once
     from server bootstrap, before readiness, so a bad file refuses the boot
     instead of publishing a partial MCP surface. *)

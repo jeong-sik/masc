@@ -101,10 +101,22 @@ type sleep_outcome =
                   update; the caller should dispatch the next cycle. *)
   | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
 
+(** Whether a wakeup may end the sleep before its duration elapses.
+    [Interrupt_on_wakeup] is the heartbeat default. Under
+    [Serve_wakeup_after_duration] a wakeup raised during the sleep is consumed
+    when the duration ends, so the tick happens once per signal, only later;
+    [stop] ends either policy at once. Used for the provider backoff after a
+    rate-limited or exhausted turn, where waking sooner only re-runs the same
+    failing call (#34653). *)
+type wake_policy =
+  | Interrupt_on_wakeup
+  | Serve_wakeup_after_duration
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
   ?cadence_sleeping:bool Atomic.t ->
+  ?wake_policy:wake_policy ->
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->
   wakeup:bool Atomic.t ->
@@ -170,3 +182,8 @@ val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
+
+type periodic_cadence = Initial_due of float | After_periodic of float
+val periodic_remaining : now:float -> interval:float -> periodic_cadence -> float
+val periodic_is_due : now:float -> interval:float -> periodic_cadence -> bool
+val consume_periodic : now:float -> periodic_cadence

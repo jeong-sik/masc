@@ -28,8 +28,8 @@ let subscription_model_rows =
   ; "claude-fable-5", "claude-fable-5"
   ; "claude-sonnet-5", "claude-sonnet-5"
   ; "claude-haiku-4-5-20251001", "claude-haiku-4-5"
-  ; "gpt-5.6-sol", "gpt-5.6"
-  ; "gpt-5.6-terra", "gpt-5.6"
+  ; "gpt-5.6-sol", "gpt-5.6-sol"
+  ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
@@ -70,11 +70,18 @@ let test_subscription_models_resolve_their_own_rows () =
    row under test: a comparison that sources both sides from the catalog passes
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
-  [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
-  ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
-  ; "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
-  ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
+  [ None, "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+    (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
+       for "minimal" -- the message names the model -- and 200 for none, low,
+       medium, high, xhigh and max. The list this replaces came from the
+       2026-06-29 gpt-5.1 reference and was wrong at both ends. These observations
+       belong to the Responses provider, not the separate bare model rows. *)
+  ; Some "openai-responses", "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+  ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
 ;;
 
@@ -84,8 +91,13 @@ let test_subscription_models_admit_their_reasoning_efforts () =
       ~suite:"subscription model efforts"
   in
   List.iter
-    (fun (model_id, expected) ->
-       match Model_catalog.lookup catalog model_id with
+    (fun (provider_name, model_id, expected) ->
+       let entry =
+         match provider_name with
+         | None -> Model_catalog.lookup catalog model_id
+         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+       in
+       match entry with
        | None -> failf "%s resolves to no catalog row" model_id
        | Some (entry : Model_catalog.model_entry) ->
          check
@@ -376,6 +388,90 @@ let test_serving_constraint_partial_group_fails_closed () =
   | Ok _ -> fail "partial serving-constraint declaration must fail closed"
 ;;
 
+(* keeper_analyze_image on glm-coding.glm-4.6v died on HTTP 400 code 1210
+   ("The max_tokens parameter is illegal. [1,32768]") at 2026-09-07T15:24:58Z:
+   the vision tool asked for 65536, the clamp landed on 40960, and 40960 is the
+   glm capabilities_base ceiling, not this model's. A runtime config always
+   carries its provider id, so it resolves through the provider-scoped lookup
+   with bare fallback off -- the path taken here -- and that path never read
+   the bare glm-4.6v row. The provider-scoped rows are what make the model's
+   own ceiling reachable from a runtime. *)
+let test_glm_vision_rows_reach_a_runtime_lookup () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision runtime rows"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun provider_label ->
+        match
+          Capabilities.for_provider_model_id
+            ~wire:(Some Llm_provider.Provider_kind.Glm)
+            ~allow_bare_fallback:false
+            ~provider_label
+            ~model_id:"glm-4.6v"
+        with
+        | Some caps ->
+          check
+            (option int)
+            (provider_label ^ " resolves glm-4.6v to its own output ceiling")
+            (Some 32_768)
+            caps.Capabilities.max_output_tokens;
+          check
+            bool
+            (provider_label ^ " keeps glm-4.6v image-capable")
+            true
+            caps.Capabilities.supports_image_input;
+          (* Z.AI's GLM-4.6V streaming example emits this typed delta field:
+             https://docs.z.ai/guides/vlm/glm-4.6v *)
+          (match (Llm_provider.Reasoning_dialect.of_capabilities caps).streaming with
+           | Delta_field "reasoning_content" -> ()
+           | No_streaming_reasoning | Delta_field _
+           | Delta_reasoning_details | Template_parser ->
+             fail (provider_label ^ " drops GLM-4.6V reasoning deltas"))
+        | None -> fail (provider_label ^ " resolves no capabilities for glm-4.6v"))
+      [ "glm-coding"; "glm" ])
+;;
+
+(* The bare row and its two provider-scoped twins are three catalog keys
+   ((provider_name, id_prefix) is the duplicate check), so nothing in the
+   loader keeps them in step. They describe one Z.AI model; pin the limits
+   and the vision flags to the same values so a later edit to one row cannot
+   leave a runtime on a different ceiling than the bare-id callers see. *)
+let test_glm_vision_rows_agree () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision row agreement"
+  in
+  let rows =
+    List.filter
+      (fun (entry : Model_catalog.model_entry) -> String.equal entry.id_prefix "glm-4.6v")
+      (Model_catalog.model_entries catalog)
+  in
+  check
+    (list (option string))
+    "glm-4.6v has the bare row and its two provider-scoped twins"
+    [ None; Some "glm"; Some "glm-coding" ]
+    (List.sort
+       compare
+       (List.map (fun (entry : Model_catalog.model_entry) -> entry.provider_name) rows));
+  List.iter
+    (fun (entry : Model_catalog.model_entry) ->
+      let label =
+        match entry.provider_name with
+        | Some provider -> provider
+        | None -> "bare"
+      in
+      check (option int) (label ^ " output ceiling") (Some 32_768) entry.max_output_tokens;
+      check (option int) (label ^ " context window") (Some 128_000) entry.max_context_tokens;
+      check (option bool) (label ^ " image input") (Some true) entry.supports_image_input;
+      check
+        (option bool)
+        (label ^ " multimodal inputs")
+        (Some true)
+        entry.supports_multimodal_inputs)
+    rows
+;;
+
 let () =
   run
     "model catalog default"
@@ -425,6 +521,14 @@ let () =
             "subscription models admit their reasoning efforts"
             `Quick
             test_subscription_models_admit_their_reasoning_efforts
+        ; test_case
+            "glm vision rows reach a runtime lookup"
+            `Quick
+            test_glm_vision_rows_reach_a_runtime_lookup
+        ; test_case
+            "glm vision rows agree"
+            `Quick
+            test_glm_vision_rows_agree
         ] )
     ]
 ;;

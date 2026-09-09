@@ -265,16 +265,63 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
             provider.protocol))
 ;;
 
+(* [provider_kind] has no equality in agent core and every variant is
+   constant, so this is a total match rather than [=]: adding a variant makes
+   the compiler ask about it here instead of silently answering false. *)
+let same_provider_kind left right =
+  let open Llm_provider.Provider_config in
+  match (left : provider_kind), (right : provider_kind) with
+  | Anthropic, Anthropic
+  | Kimi, Kimi
+  | OpenAI_compat, OpenAI_compat
+  | Ollama, Ollama
+  | Gemini, Gemini
+  | Glm, Glm -> true
+  | (Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> false
+;;
+
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
     ~base_url =
+  (* The registry carries the catalog [providers] rows verbatim — including
+     their request_path (provider_registry.default registers every
+     Model_catalog provider entry). A provider whose catalog row names a
+     different surface (deepseek-responses -> "/responses") must not have the
+     protocol default stamped over it, so a registry-declared path wins over
+     the Chat-completions default.
+
+     It wins only for the kind that path belongs to. A catalog row can serve
+     more than one surface — ollama_cloud declares
+     [identity_kinds = ["ollama"; "openai_compat"]] — while carrying a single
+     [request_path], and that path names its own kind's surface ("/api/chat",
+     the native Ollama one). A workspace that reaches the same provider over
+     the OpenAI-compatible surface selects [OpenAI_compat] here, and stamping
+     the native path on it built https://ollama.com/v1/api/chat: 794 requests
+     404'd across five keepers on 2026-09-06, two of them 30 cycles deep
+     (#33652). Comparing kinds keeps deepseek-responses working — its catalog
+     row is OpenAI_compat and so is the runtime that names it — without
+     matching on the path text.
+
+     Providers absent from the catalog keep the protocol default exactly as
+     before: no catalog row means no separate surface to name. *)
   let request_path =
-    match provider.api_format, kind with
-    | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
-      Masc_network_defaults.chat_completions_path
+    match registry_entry with
+    | Some entry
+      when same_provider_kind
+             entry.Llm_provider.Provider_registry.defaults.kind
+             kind
+           && not
+                (String.equal
+                   entry.Llm_provider.Provider_registry.defaults.request_path
+                   "") ->
+      entry.Llm_provider.Provider_registry.defaults.request_path
     | _ ->
-      (match registry_entry with
-       | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
-       | None -> Llm_provider.Provider_config.request_path_default_for_kind kind)
+      (match provider.api_format, kind with
+       | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
+         Masc_network_defaults.chat_completions_path
+       | _ ->
+         (match registry_entry with
+          | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+          | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
   in
   match kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
@@ -309,8 +356,9 @@ let agent_core_thinking_control_format = function
 (** A runtime [api-name] is an opaque deployment string, not automatically an
     AGENT_CORE catalog model. When AGENT_CORE has no exact provider/model row, project the
     complete typed runtime declaration into the Provider_config override that
-    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models keep the AGENT_CORE
-    row unchanged; an absent runtime capability block remains absent and is
+    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models preserve
+    the row except for explicit output ceilings and thinking transport declarations;
+    an absent runtime capability block remains absent and is
     rejected later by the normal startup gate. *)
 let model_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
@@ -331,10 +379,12 @@ let model_capabilities_override_of_model_spec
        (match
           runtime_caps.declared_thinking_control_format,
           runtime_caps.declared_supports_reasoning_budget,
-          runtime_caps.reasoning_streaming_format
+          runtime_caps.reasoning_streaming_format,
+          runtime_caps.max_output_tokens
         with
-        | None, None, None -> None
-        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format ->
+        | None, None, None, None -> None
+        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format,
+          max_output_tokens ->
           let effective_reasoning_budget =
             match thinking_control_format with
             (* A concrete transport-control declaration owns the associated
@@ -348,7 +398,11 @@ let model_capabilities_override_of_model_spec
           in
           Some
             { catalog_caps with
-              thinking_control_format =
+              max_output_tokens =
+                (match max_output_tokens with
+                 | Some _ -> max_output_tokens
+                 | None -> catalog_caps.max_output_tokens)
+            ; thinking_control_format =
                 (match thinking_control_format with
                  | Some format -> agent_core_thinking_control_format format
                  | None -> catalog_caps.thinking_control_format)

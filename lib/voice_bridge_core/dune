@@ -13,6 +13,7 @@
   masc.host_config
   masc.masc_exec
   masc.masc_random_id
+  masc.monotonic_deadline
   masc.voice_config
   masc.voice_runtime_overlay
   masc_core

@@ -53,6 +53,24 @@ type run_status =
 
 type run_input = Exact_input of Yojson.Safe.t
 
+type payload_read_error =
+  | Source_unavailable of string
+  | Missing_registration
+  | Missing_completion
+  | Invalid_record of { line : int; detail : string }
+  | Snapshot_changed
+
+type payload_availability =
+  | Available
+  | Not_loaded
+  | Unavailable of payload_read_error
+
+val payload_read_error_to_string : payload_read_error -> string
+val availability_to_yojson : payload_availability -> Yojson.Safe.t
+val availability_of_yojson : Yojson.Safe.t -> (payload_availability, string) result
+(** Availability is independent of payload content: JSON [null] is an available
+    value. [Not_loaded] belongs to list projections, not a detail read. *)
+
 type run =
   { run_id : string
   ; lane : lane
@@ -60,6 +78,10 @@ type run =
   ; started_at : float
   ; input : run_input
   ; status : run_status
+  ; input_availability : payload_availability
+  ; output_availability : payload_availability option
+      (** [None] only while [Running]. Every terminal status states whether
+          its output could be read, without changing the recorded outcome. *)
   }
 
 type t

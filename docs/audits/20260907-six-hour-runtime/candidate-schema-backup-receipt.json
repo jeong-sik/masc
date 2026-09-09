@@ -1,0 +1,22 @@
+{
+  "at": "2026-09-07T05:40:47.674219+00:00",
+  "live_ledgers_changed": false,
+  "files": [
+    {
+      "keeper": "gondolin-probe",
+      "source": "/Users/dancer/me/.masc/board_attention_candidates/gondolin-probe.jsonl",
+      "archive": "/Users/dancer/me/.masc/recovery/20260907-board-candidate-schema-evidence/gondolin-probe.jsonl",
+      "sha256": "b1394c8c42fe5efb3a9442c7acc3a79675bb5a9afaa0ea67206f4180da68f21a",
+      "bytes": 109995,
+      "rows": 11
+    },
+    {
+      "keeper": "k3think-probe",
+      "source": "/Users/dancer/me/.masc/board_attention_candidates/k3think-probe.jsonl",
+      "archive": "/Users/dancer/me/.masc/recovery/20260907-board-candidate-schema-evidence/k3think-probe.jsonl",
+      "sha256": "763ebcd8406f9ca38af1125ee7e128f238cb18655ef7fd920d34d0c88fc29cc1",
+      "bytes": 299544,
+      "rows": 19
+    }
+  ]
+}

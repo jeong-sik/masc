@@ -41,13 +41,16 @@ SINKS='normalizePromptBlock|promptKeys?|system_prompt_blocks'
 
 # Namespaces are derived from the assets themselves, so a JSON response path
 # like prompt.system_prompt_blocks is not mistaken for a prompt key.
+# The dot is required: a namespace on its own is not a key. With it optional,
+# a bare 'eval' or 'fusion' inside a sink's five-line window read as a key that
+# config/prompts does not carry, and the audit failed on a word.
 ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
 # -A5 so a key inside a multi-line promptKeys array is seen. Without it the
 # sink line holds only "promptKeys: [" and every key on a following line would
 # otherwise go unchecked.
 grep -rn -A5 --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
-  | grep -oE "'(${ns})(\.[a-z_.]+)?'" \
+  | grep -oE "'(${ns})\.[a-z_.]+'" \
   | tr -d "'" \
   | sort -u > "$referenced"
 

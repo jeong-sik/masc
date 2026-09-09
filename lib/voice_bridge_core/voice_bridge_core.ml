@@ -27,7 +27,14 @@ let playback_lock_path () =
   let host = Host_config.host () in
   Filename.concat host.run_dir "masc_voice_playback.lock"
 
-type last_playback = { agent_id : string; message_hash : int; finished_at : float }
+(* [dedup_until] rather than the instant playback finished: the window was
+   measured by subtracting the wall clock from the stored instant, so an NTP
+   step either replayed a message or swallowed a fresh one. *)
+type last_playback =
+  { agent_id : string
+  ; message_hash : int
+  ; dedup_until : Monotonic_deadline.t
+  }
 let last_playback_ref : last_playback option Atomic.t = Atomic.make None
 
 let is_dedup_hit ~agent_id ~message =
@@ -36,12 +43,17 @@ let is_dedup_hit ~agent_id ~message =
   | Some prev ->
     prev.agent_id = agent_id
     && prev.message_hash = h
-    && Unix.gettimeofday () -. prev.finished_at < playback_dedup_window_sec
+    && not (Monotonic_deadline.passed prev.dedup_until)
   | None -> false
 
 let record_playback ~agent_id ~message =
   Atomic.set last_playback_ref
-    (Some { agent_id; message_hash = Hashtbl.hash message; finished_at = Unix.gettimeofday () })
+    (Some
+       { agent_id
+       ; message_hash = Hashtbl.hash message
+       ; dedup_until =
+           Monotonic_deadline.after ~seconds:playback_dedup_window_sec
+       })
 
 (** Default agent voices from the voice runtime overlay. *)
 let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()

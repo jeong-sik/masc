@@ -139,7 +139,12 @@ let test_descriptor_resolution_capabilities_for_public_names () =
   check bool "WriteFile is not read-only" false
     (capability_has Tool_capability.Read_only "Write");
   check bool "Execute is not read-only" false
-    (capability_has Tool_capability.Read_only "Execute")
+    (capability_has Tool_capability.Read_only "Execute");
+  List.iter
+    (fun name ->
+      check bool (name ^ " lifecycle is not a read-only capability") false
+        (capability_has Tool_capability.Read_only name))
+    [ "BrowserSession"; "masc_browser_session"; "mcp__masc__BrowserSession" ]
 ;;
 
 let test_full_profile_admission_uses_catalog_direct_call_policy () =

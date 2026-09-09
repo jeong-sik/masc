@@ -1,0 +1,7 @@
+install-smoke: installing v0.0.0-install-smoke (macos-arm64) from file:///var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/tmp.9eUemBNpFl/release/v0.0.0-install-smoke
+install-smoke: installer placed all five executables
+install-smoke: no guest shim in this release dir; installer skipped it as asked
+install-smoke: installer seeded config and left the keeper roster empty
+install-smoke: installed server answered /health ok
+install-smoke: actual installed commit/index and 3 assets match; corruption and missing receipt fail closed
+install-smoke: PASS

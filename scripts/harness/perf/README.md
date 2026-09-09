@@ -1,5 +1,32 @@
 # Performance and soak harnesses
 
+## Response latency across HTTP and MCP
+
+`response_latency_probe.py` attaches to an existing server and records raw
+monotonic HTTP roundtrip samples, response sizes, Server-Timing, freshness,
+status codes, and binary identity before/after the run. It builds and boots
+nothing. The default target remains 0.1 ms; results do not certify the wider
+TUI/browser/server goal. The client speaks HTTP/1.1 and does not exercise
+conditional ETags or HTTP/2.
+
+```bash
+python3 scripts/harness/perf/response_latency_probe.py \
+  --base-url http://127.0.0.1:8935 --samples 30 --output /tmp/latency.json
+```
+
+An existing `MCP_TOKEN` enables authenticated HTTP and MCP initialize/ping;
+only the environment variable name is accepted by `--token-env`, and tokens
+are never written to evidence. Authenticated actors can take a different
+projection path from anonymous requests, so compare like scopes. Use
+`--interval` to space sample rounds if the normal token rate limit is reached.
+429s remain failures in the artifact. MCP JSON and finite SSE responses are
+decoded and their JSON-RPC IDs/results validated. A failed or unauthenticated
+initialize is recorded rather than counted as successful MCP latency.
+
+Percentiles describe valid responses; stale samples are counted separately
+and disqualify the all-samples target flag. A changed runtime identity also
+prevents treating two endpoints of the measurement window as one deployment.
+
 ## Paused-work disposition: exact 10-Keeper 8h soak
 
 `paused_work_disposition_soak.sh` is the release-evidence gate for #25191. It
@@ -169,15 +196,13 @@ that prompt into its ephemeral base path from the explicit root.
    (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the AGENT_CORE catalog
    (the AGENT_CORE embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
    the provider `endpoint` at the local mock.
-2. **The keeper TOML must opt into autoboot.** Declarative keepers are excluded by design unless the
-   `[keeper]` section sets `autoboot_enabled = true` (`keeper_runtime.ml:154`) **and**
-   `proactive_enabled = true` (`keeper_activation_readiness.ml:16`, with `paused` false). A copied
-   live config (e.g. `analyst.toml`, which ships `autoboot_enabled = false`) yields `0 keeper(s) to
-   boot`.
-3. **The keeper TOML must set `sandbox_profile = "docker"`** — boot rejects without it, and the
-   `"local"` playground profile is fail-closed by default (RFC-0394). Dev/test harnesses may lift
-   the gate per process with `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`.
-4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
+2. **The keeper TOML must select autonomous activation.** Set
+   `[keeper] activation_mode = "autonomous"` to restore the owner and produce
+   spontaneous turns. `on_demand` restores the owner for requested work;
+   `manual` waits for an explicit start. Paused keepers remain paused.
+3. **The keeper TOML must set `sandbox_profile`** (`docker`, `microvm`, or `remote_ssh`) — boot
+   rejects without it.
+4. Boot env: `MASC_KEEPER_AUTONOMOUS_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty

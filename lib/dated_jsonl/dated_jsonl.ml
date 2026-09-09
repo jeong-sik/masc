@@ -962,12 +962,44 @@ let filter_map_recent ?(offset=0) t n ~f =
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
            let need = n - !count + !skip in
+           (* [need] lines is enough only when every one of them parses. A
+              malformed row inside the window used to take a row's place and
+              shrink the answer without saying so: read_recent 2 over
+              1, 2, 3 and a trailing unparseable row returned one entry.
+              The .mli splits the two readings -- here [n] counts parsed
+              rows, and read_recent_result is the reader whose limit counts
+              physical rows including malformed ones -- so widen the window
+              and read the file again until it yields [need] parsed rows or
+              runs out of lines. A file with no malformed rows settles on
+              the first round, which is every call this had before. *)
            let parsed_newest_first =
              off_fiber (fun () ->
-               load_tail_lines_inline path ~max_lines:need
-               |> List.rev_map (fun line ->
-                 try Some (Yojson.Safe.from_string line)
-                 with Yojson.Json_error _ -> None))
+               let rec read_widening window =
+                 let lines = load_tail_lines_inline path ~max_lines:window in
+                 let parsed =
+                   List.rev_map
+                     (fun line ->
+                        try Some (Yojson.Safe.from_string line)
+                        with Yojson.Json_error _ -> None)
+                     lines
+                 in
+                 let parsed_count =
+                   List.fold_left
+                     (fun acc entry -> if Option.is_some entry then acc + 1 else acc)
+                     0
+                     parsed
+                 in
+                 (* Fewer lines than asked for means the file is exhausted and
+                    a wider window would read the same thing again. *)
+                 if parsed_count >= need
+                    || List.length lines < window
+                    (* Doubling past this wraps to a negative window, which
+                       reads nothing and never reaches the exhausted test. *)
+                    || window > max_int / 2
+                 then parsed
+                 else read_widening (window * 2)
+               in
+               read_widening need)
            in
            List.iter (fun parsed ->
              if !count >= n then raise_notrace Done;
@@ -1250,7 +1282,7 @@ let iter_all_entries_result t f =
   iter_months (List.rev months)
 ;;
 
-let iter_range_entries_result t ~since ~until f =
+let fold_range_file_paths_result t ~since ~until ~init ~f =
   let ( let* ) = Result.bind in
   match parse_date since, parse_date until with
   | None, _ | _, None -> Error (Invalid_date_range { since; until })
@@ -1270,21 +1302,18 @@ let iter_range_entries_result t ~since ~until f =
          || (String.equal month until_month
              && String.compare day_number until_day > 0))
     in
-    let rec iter_days month month_path = function
-      | [] -> Ok ()
+    let rec iter_days acc month month_path = function
+      | [] -> Ok acc
       | day :: rest ->
-        let* () =
+        let* acc =
           if day_in_range month day
-          then
-            iter_json_file_entries_result
-              (Filename.concat month_path day)
-              f
-          else Ok ()
+          then f acc (Filename.concat month_path day)
+          else Ok acc
         in
-        iter_days month month_path rest
+        iter_days acc month month_path rest
     in
-    let rec iter_months = function
-      | [] -> Ok ()
+    let rec iter_months acc = function
+      | [] -> Ok acc
       | (month, year, month_number) :: rest ->
         let month_path = Filename.concat t.base_dir month in
         let* days =
@@ -1296,8 +1325,8 @@ let iter_range_entries_result t ~since ~until f =
           |> List.filter (day_in_range month)
           |> List.rev
         in
-        let* () = iter_days month month_path selected_days in
-        iter_months rest
+        let* acc = iter_days acc month month_path selected_days in
+        iter_months acc rest
     in
     let* entries =
       list_directory_result ~missing_is_empty:true t.base_dir
@@ -1309,7 +1338,18 @@ let iter_range_entries_result t ~since ~until f =
         Some (month, year, month_number)
       | Some _ | None -> None)
     |> List.rev
-    |> iter_months
+    |> iter_months init
+;;
+
+let range_day_file_paths_result t ~since ~until =
+  fold_range_file_paths_result t ~since ~until ~init:[]
+    ~f:(fun paths path -> Ok (path :: paths))
+  |> Result.map List.rev
+;;
+
+let iter_range_entries_result t ~since ~until f =
+  fold_range_file_paths_result t ~since ~until ~init:()
+    ~f:(fun () path -> iter_json_file_entries_result path f)
 ;;
 
 let iter_range t ~since ~until f =
@@ -1664,6 +1704,142 @@ let fold_range_appended t ~since ~until ~cursors ~init ~f =
        acc, (path, boundary) :: next_cursors)
     (init, [])
     paths
+;;
+
+type append_cursor = (string * Unix.stats * int) list
+
+type 'a appended_read =
+  | Appended of 'a * append_cursor
+  | Cursor_invalidated
+
+let append_snapshot_result t ~since ~until =
+  let ( let* ) = Result.bind in
+  let* paths = range_day_file_paths_result t ~since ~until in
+  let rec inspect acc = function
+    | [] -> Ok (List.rev acc)
+    | path :: rest ->
+      let* stats = inspect_path_result path in
+      (match non_regular_file_kind_of_stats stats with
+       | Some kind -> Error (Non_regular_file { path; kind })
+       | None -> inspect ((path, stats) :: acc) rest)
+  in
+  inspect [] paths
+;;
+
+let append_only_successor previous current =
+  same_file_identity previous current
+  && current.Unix.st_size >= previous.Unix.st_size
+  && (current.Unix.st_size > previous.Unix.st_size
+      || (current.Unix.st_mtime = previous.Unix.st_mtime
+          && current.Unix.st_ctime = previous.Unix.st_ctime))
+;;
+
+let appended_read_changed path =
+  Io_error { operation = Read_file; path;
+             detail = "dated files changed during incremental read" }
+;;
+
+(* Consume only the captured extent of an already verified handle. Keep the
+   boundary before an incomplete last line, even if the writer appends while
+   this read is running. Callback errors are deliberately outside I/O catches. *)
+let fold_captured_lines_result channel ~path ~from ~until ~init ~f =
+  let rec drive acc boundary position fragment =
+    if position >= until then Ok (acc, boundary)
+    else
+      let chunk = Bytes.create (min 65536 (until - position)) in
+      let read =
+        match input channel chunk 0 (Bytes.length chunk) with
+        | 0 -> Error (appended_read_changed path)
+        | length -> Ok length
+        | exception Sys_error detail ->
+          Error (Io_error { operation = Read_file; path; detail })
+      in
+      match read with
+      | Error _ as error -> error
+      | Ok length ->
+        let value = ref acc in
+        let next_boundary = ref boundary in
+        for index = 0 to length - 1 do
+          match Bytes.get chunk index with
+          | '\n' ->
+            let line = Buffer.contents fragment in
+            Buffer.clear fragment;
+            next_boundary := position + index + 1;
+            (match recent_entry_of_line ~path line with
+             | Parsed row -> value := f !value row
+             | Malformed_json _ -> ())
+          | character -> Buffer.add_char fragment character
+        done;
+        drive !value !next_boundary (position + length) fragment
+  in
+  let seek =
+    match seek_in channel from with
+    | () -> Ok ()
+    | exception Sys_error detail ->
+      Error (Io_error { operation = Read_file; path; detail })
+  in
+  match seek with
+  | Error _ as error -> error
+  | Ok () -> drive init from from (Buffer.create 256)
+;;
+
+let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
+  let ( let* ) = Result.bind in
+  let* snapshot = append_snapshot_result t ~since ~until in
+  let previous = match cursor with Some cursor -> cursor | None -> [] in
+  let invalidated =
+    List.exists
+      (fun (path, prior, _) ->
+         match List.assoc_opt path snapshot with
+         | None -> true
+         | Some current -> not (append_only_successor prior current))
+      previous
+  in
+  if invalidated then Ok Cursor_invalidated
+  else
+    let read_file acc (path, captured) =
+      let* channel = open_regular_input_result path in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+        let* opened =
+          match Unix.fstat (Unix.descr_of_in_channel channel) with
+          | stats -> Ok stats
+          | exception Unix.Unix_error (error, _, _) ->
+            Error (Io_error { operation = Inspect; path;
+                              detail = Unix.error_message error })
+        in
+        if not (append_only_successor captured opened)
+        then Error (appended_read_changed path)
+        else
+          let from =
+            match List.find_opt (fun (name, _, _) -> String.equal name path) previous with
+            | Some (_, _, boundary) -> boundary
+            | None -> 0
+          in
+          let* value, boundary =
+            fold_captured_lines_result channel ~path ~from
+              ~until:captured.Unix.st_size ~init:acc ~f
+          in
+          Ok (value, (path, captured, boundary)))
+    in
+    let rec read_all acc cursors = function
+      | [] -> Ok (acc, List.rev cursors)
+      | file :: rest ->
+        let* acc, cursor = read_file acc file in
+        read_all acc (cursor :: cursors) rest
+    in
+    let* value, next = read_all init [] snapshot in
+    let* after = append_snapshot_result t ~since ~until in
+    let stable =
+      List.map fst snapshot = List.map fst after
+      && List.for_all
+           (fun (path, captured) ->
+              match List.assoc_opt path after with
+              | Some current -> append_only_successor captured current
+              | None -> false)
+           snapshot
+    in
+    if stable then Ok (Appended (value, next))
+    else Error (appended_read_changed t.base_dir)
 ;;
 
 (* Like [read_range] but bounded to the [n] most recent entries within

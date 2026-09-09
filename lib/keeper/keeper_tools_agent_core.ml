@@ -33,6 +33,7 @@ type attached_surface =
   { offered : Keeper_identity_tools.offered_tool list
   ; agent_cell : Agent_core.Agent.t option ref
   ; history : Agent_core.Types.message list
+  ; load_receipts : Keeper_tool_load_receipts.restored
   }
 
 type listing_placement =

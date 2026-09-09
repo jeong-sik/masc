@@ -51,10 +51,65 @@ open Alcotest
    keeper_spawn_read brings the surface comfortably below the 80,000 ceiling
    (#29595), leaving 834 bytes of deliberate headroom under the ratchet.
 
+   2026-09-07: 85,000. Targeted CI run 34095215290 measured 84,699 bytes
+   across 99 tools at c2b0243b84372bae88403e29cffde8f1209fa511. The restored
+   keeper_analyze_image reader contributes 1,146 bytes, making stored images
+   readable by text-only Keepers. The preceding surface was therefore
+   83,553 bytes, already over the old ceiling; its Browser, file and Slack
+   tools also had not been recorded in the name inventory below. This
+   ceiling acknowledges that shipped surface and the reader, with 301 bytes
+   of headroom over the measured result.
+
+   2026-09-07: 88,000. masc_msx_load / eject / screen / press / step (RFC-0439
+   §6.1) add 2,626 bytes: 87,626 across 104 tools. What it bought: a Keeper
+   can play the workspace MSX machine through tools. All five declare
+   defer_loading = true, so a Keeper that never names one carries none of
+   them on the wire; this figure counts them because model_visible_schemas
+   reads the descriptor and not the loading declaration. 374 bytes of
+   headroom over the measured result.
+
    The figure is a reading, not a constant. What the ceiling holds is the
    slack, which [test_the_ceiling_still_tracks_the_surface] below bounds;
    the numbers here say where it came from. *)
-let ceiling_bytes = 80_000
+(* Firefox controls: the production TOML loader measured BrowserAct at 1,628
+   bytes, BrowserRead mode growth at 202, and BrowserGoto shrinkage at 18.
+   Preserve the MSX tool surface ceiling's headroom: 88,000 + 1,628 + 202 - 18. *)
+(* Contexts/dialogs/uploads add 862 measured schema bytes (BrowserRead +299,
+   BrowserAct +563 including the Keeper file boundary), preserving the preceding ceiling headroom. *)
+(* Downloads add 117 bytes measured with the production Tool_definition_toml
+   renderer against contexts 21bfcdf89b: BrowserRead is 1493 -> 1610 bytes.
+   No other schema changes in this unit; preserve the base surface headroom. *)
+(* Main adds BrowserInteract: production TOML rendering is 1,394 bytes,
+   or 1,388 with its public name, plus one list separator. BrowserGoto
+   guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
+(* Explicit native client selection adds 1004 measured browser schema bytes. *)
+(* Named MSX checkpoints add 884 schema bytes (literal TOML/golden JSON);
+   preserve existing headroom. CI verifies the production renderer. *)
+(* CI 34231934273 at 4f109263 measured 95,902 bytes across 108 tools,
+   1,801 above the inherited ceiling after adding checkpoints. Account for
+   that already-shipped surface explicitly, without adding headroom.
+   Disk replacement adds 501 literal schema bytes; CI checks the renderer. *)
+(* 2026-09-08: #34409 gave twelve deferred tools a first line that fits the
+   line the model chooses them from. Before it, keeper_ide_annotate offered
+   570 bytes into an 80-byte budget and masc_msx_load 553, so what the model
+   saw of them was a sentence cut mid-word. Each gained a summary sentence
+   and a blank line, and nothing was removed, so the surface grew.
+
+   Argued here rather than in that PR because nothing said so at the time:
+   this suite runs in the nightly lane and not on a pull request, so #34409
+   merged green and the ceiling failed that night. Nightly 34258890189
+   measured 97,067 bytes across 109 tools.
+
+   The figure below is not that one. This pull request's own check measured
+   97,663 across the same 109 tools -- the surface grew another 596 bytes in
+   the merges between the nightly and it -- which is why the reading has to
+   come from the run that is about to land rather than from last night.
+   Set to keep the 501 bytes of headroom the line above accounts for.
+
+   #34506 is the same shape and takes about 195 of that: five MSX tools
+   whose first line was over the budget, the largest at 745 bytes. It fits
+   under this figure, so the headroom it leaves is nearer 306. *)
+let ceiling_bytes = 98_164
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -101,13 +156,21 @@ let measured () =
 
    A tool added or removed still fails here, and now says which one. *)
 let all_surface_golden_names =
-  [ "Edit"
+  [ "BrowserAct"
+  ; "BrowserGoto"
+  ; "BrowserInteract"
+  ; "BrowserRead"
+  ; "BrowserSession"
+  ; "BrowserTabs"
+  ; "Edit"
   ; "Execute"
   ; "Grep"
   ; "Read"
   ; "WebFetch"
   ; "WebSearch"
   ; "Write"
+  (* Unread artifact handles need a model-callable vision reader. *)
+  ; "keeper_analyze_image"
   ; "keeper_artifact_read"
   ; "keeper_broadcast"
   ; "keeper_code_query"
@@ -174,6 +237,9 @@ let all_surface_golden_names =
   ; "masc_board_vote"
   ; "masc_config"
   ; "masc_dashboard"
+  ; "masc_file_delete"
+  ; "masc_file_list"
+  ; "masc_file_upload"
   ; "masc_fusion"
   ; "masc_fusion_status"
   ; "masc_gc"
@@ -186,6 +252,14 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_msx_change_disk"
+  ; "masc_msx_eject"
+  ; "masc_msx_load"
+  ; "masc_msx_press"
+  ; "masc_msx_restore"
+  ; "masc_msx_save"
+  ; "masc_msx_screen"
+  ; "masc_msx_step"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_run_get"
@@ -197,6 +271,7 @@ let all_surface_golden_names =
   ; "masc_schedule_get"
   ; "masc_schedule_list"
   ; "masc_schedule_update"
+  ; "masc_slack_read"
   ; "masc_task_history"
   ; "masc_task_set_goal"
   ]

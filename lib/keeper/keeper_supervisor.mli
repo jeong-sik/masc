@@ -16,6 +16,7 @@ open Keeper_types_profile
 (** {1 Supervised Execution} *)
 
 val supervise_keepalive :
+  ?intent:Keeper_activation_readiness.activation_intent ->
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 (** Start a keeper heartbeat loop inside a supervised fiber.
     Registers in [Keeper_registry] (SSOT) and launches the fiber.
@@ -31,6 +32,21 @@ val pending_hitl_approval_keeper_names :
     approval. Durable queue unavailability remains explicit. Used by
     [sweep_and_recover] to surface otherwise silent chat stalls without
     changing approval/resume behavior. *)
+
+(** A keeper whose pending HITL count differs from the one last announced
+    for it, with the new count; a keeper announced non-zero and now absent
+    from [counts] is reported with [0]. Pure; the sweep keeps the memory.
+    Pending counts are state, so a line per sweep while nothing changed was
+    noise (#34643). *)
+type hitl_announcement =
+  { keeper_name : string
+  ; pending_count : int
+  }
+
+val pending_hitl_announcements :
+  announced:(string * int) list ->
+  counts:(string * int) list ->
+  hitl_announcement list
 
 val sweep_and_recover :
      load_or_materialize_keeper_meta:

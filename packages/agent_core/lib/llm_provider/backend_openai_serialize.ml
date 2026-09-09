@@ -215,18 +215,32 @@ let openai_content_parts_of_blocks blocks =
   |> List.filter_map (function
     | Text s ->
       Some (`Assoc [ "type", `String "text"; "text", `String (Utf8_sanitize.sanitize s) ])
-    | Image { media_type; data; source_type } ->
-      let url =
-        Api_common.base64_media_data_url
-          ~backend:"openai_chat"
-          ~block:"image"
-          ~media_type
-          ~data
-          source_type
-      in
-      Some
-        (`Assoc
-            [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ])
+    | Image { media_type; data; source_type } -> (
+      (* The three carriers the closed media_source_kind names map to the
+         three wire forms the chat surface documents: an inline base64 data
+         URL, an external https URL passed through as the image_url, and a
+         Files API reference as {"type":"file","file_id":…} — file_id and
+         inline data are mutually exclusive on the wire. [data] carries the
+         URL or the file id verbatim for the two reference forms; the
+         base64_data_url below still rejects them, which is what kept these
+         sources dead until the catalog gained a Files surface (RFC-0430). *)
+      match source_type with
+      | Url ->
+        Some (`Assoc [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String data ] ])
+      | File_id ->
+        Some (`Assoc [ "type", `String "file"; "file", `Assoc [ "file_id", `String data ] ])
+      | Base64 ->
+        let url =
+          Api_common.base64_media_data_url
+            ~backend:"openai_chat"
+            ~block:"image"
+            ~media_type
+            ~data
+            source_type
+        in
+        Some
+          (`Assoc
+              [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ]))
     | Document { media_type; data; source_type } ->
       (* agent-core boundary — a document is not an image. This arm used to emit an
          [image_url] part, so a PDF reached the model as a picture and no layer
@@ -963,10 +977,40 @@ let tool_definition_of_json = function
   | _ -> invalid_tool_definition "tool must be a JSON object"
 ;;
 
+(* The chat-completions function schema admits none of these at the top level
+   and answers an unusable 400 for the whole request when one is present:
+   "schema must have type 'object' and not have
+   'oneOf'/'anyOf'/'allOf'/'enum'/'const'/'not' at the top level". Nested uses
+   are fine, so this drops only the top level.
+
+   masc emits one: [config/tools/tool_execute.toml] declares [[one_of]] blocks
+   for "argv or script, not both", which the TOML reader renders as a
+   top-level [oneOf]. Every other provider accepts it. Measured 2026-09-07,
+   openai lanes failed 2,525 times in six hours on this alone, two keepers at
+   204 and 207 consecutive failures.
+
+   What is lost is the model's hint, not the rule. The runtime still refuses a
+   call that names both -- keeper_tool_execute_typed_input.ml:137, "names both
+   script and argv; a call takes one form" -- and refuses one that names
+   neither. So a model that gets it wrong is answered by the tool instead of
+   being told in advance, and no call runs that would not have run before. *)
+let openai_top_level_unsupported =
+  [ "oneOf"; "anyOf"; "allOf"; "enum"; "const"; "not" ]
+;;
+
+let strip_unsupported_top_level_keywords schema =
+  match schema with
+  | `Assoc fields
+    when List.exists (fun (k, _) -> List.mem k openai_top_level_unsupported) fields ->
+    `Assoc
+      (List.filter (fun (k, _) -> not (List.mem k openai_top_level_unsupported)) fields)
+  | other -> other
+;;
+
 let tool_definition_fields definition =
   [ "name", `String definition.name
   ; "description", `String definition.description
-  ; "parameters", definition.parameters
+  ; "parameters", strip_unsupported_top_level_keywords definition.parameters
   ]
   @
   match definition.strict with
@@ -974,8 +1018,83 @@ let tool_definition_fields definition =
   | None -> []
 ;;
 
+(* Provider-compat projection (#34033): OpenAI's function tools reject JSON-Schema
+   combinators (enum, oneOf, anyOf, allOf) inside parameter schemas. The
+   dispatcher's [[params]] validation remains the authority for what a tool
+   accepts, so the wire schema can carry the conformant subset without losing
+   enforcement: enum values fold into the description (the model still sees
+   the vocabulary), and a combinator keeps its first variant's shape (the
+   common nullable-optional pattern degrades to the plain member type). *)
+let conformant_schema_value json =
+  let vocabulary_note values =
+    let vocabulary =
+      List.map
+        (function
+         | `String s -> s
+         | other -> Yojson.Safe.to_string other)
+        values
+    in
+    "one of: " ^ String.concat " | " vocabulary
+  in
+  let rec walk value =
+    match value with
+    | `Assoc fields ->
+      (* Read the vocabulary BEFORE the filter drops it: the note keeps the
+         enum's information in prose, which conformant schemas still allow. *)
+      let enum_note =
+        match List.assoc_opt "enum" fields with
+        | Some (`List values) -> Some (vocabulary_note values)
+        | _ -> None
+      in
+      let fields =
+        List.filter_map
+          (fun (key, v) ->
+             match key with
+             | "enum" | "oneOf" | "anyOf" | "allOf" -> None
+             | _ -> Some (key, walk v))
+          fields
+      in
+      let fields =
+        match enum_note with
+        | Some note ->
+          let description =
+            match List.assoc_opt "description" fields with
+            | Some (`String existing) when existing <> "" -> existing ^ "; " ^ note
+            | _ -> note
+          in
+          (* Replace the annotation: prepending it while retaining the old
+             field emits duplicate JSON keys and rejects the whole request. *)
+          ("description", `String description) :: List.remove_assoc "description" fields
+        | None -> fields
+      in
+      `Assoc fields
+    | `List items -> `List (List.map walk items)
+    | other -> other
+  in
+  walk json
+;;
+
 let build_openai_tool_json tool =
   let definition = tool_definition_of_json tool in
   `Assoc
     [ "type", `String "function"; "function", `Assoc (tool_definition_fields definition) ]
+;;
+let conformant_tool_json tool =
+  match build_openai_tool_json tool with
+  | `Assoc outer -> (
+    (* The wrapper's first field is ("type", "function") — a string — so the
+       function member is found by name, not by the head's shape. *)
+    match List.assoc_opt "function" outer with
+    | Some (`Assoc fields) -> (
+      match List.assoc_opt "parameters" fields with
+      | Some parameters ->
+        `Assoc
+          (( "function"
+           , `Assoc
+               (("parameters", conformant_schema_value parameters)
+                :: List.remove_assoc "parameters" fields) )
+           :: List.remove_assoc "function" outer)
+      | None -> `Assoc outer)
+    | _ -> `Assoc outer)
+  | other -> other
 ;;

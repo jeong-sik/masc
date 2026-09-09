@@ -1061,6 +1061,32 @@ export async function fetchBoardReactionsBatch(
   }))
 }
 
+/** The board-sink post a fusion run wrote, fetched by the run's own id.
+
+    The fusion surface used to find this by scanning the last 500 board posts,
+    which ties how long a run's panel and judge evidence stays readable to how
+    busy the board is. Measured 2026-09-06 on a 2,055-row board: two polisher
+    runs from 09-04 sat 553rd and 1,231st from the end, and their detail could
+    not be opened at all (#33562).
+
+    The server keeps an exact index from the run id to its post
+    (`posts_by_run_id`, RFC-0233 §7) and answers this route from it, so the
+    lookup costs the same whatever the board has done since.
+
+    `null` for a run the registry does not retain, and for one that has not
+    written its post yet -- a deliberation still running has no evidence, and
+    saying so is not the same as failing to find it. */
+export async function fetchFusionRunEvidencePost(postRunId: string): Promise<BoardPost | null> {
+  return timeBoardRequest('fusion_evidence', () => runRequest('fetchFusionRunEvidencePost', async () => {
+    const raw = await get<Record<string, unknown>>(
+      `/api/v1/dashboard/fusion-runs/${encodeURIComponent(postRunId)}`,
+    )
+    const evidence = isRecord(raw.evidence) ? raw.evidence : null
+    if (!evidence) return null
+    return normalizeBoardPost(evidence.post)
+  }))
+}
+
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
   return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({

@@ -73,14 +73,14 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "j/k:scroll  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B:Browser Lane  j/k:scroll  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
@@ -248,7 +248,7 @@ let test_resources_footer_steps_through_detail () =
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  H:recent activity  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
@@ -378,12 +378,81 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
+
+let test_fusion_historical_evidence_is_a_selectable_board_reference () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let response = `Assoc
+    [ "generated_at", `String "2026-09-07T00:00:00Z"
+    ; "count", `Int 0; "runs", `List []
+    ; "replay", `Assoc ["status", `String "complete"; "lines_read", `Int 2;
+                        "malformed_lines", `Int 1; "dropped_running", `Int 1]
+    ; "historical_evidence", `List
+        [ `Assoc ["run_id", `String "past-run"; "post_id", `String "original-post";
+                  "title", `String "Original conclusion"; "created_at", `Float 10.]
+        ]
+    ] in
+  (match Tui_decode.decode_fusion_snapshot response with
+   | Error detail -> Alcotest.fail detail
+   | Ok snapshot -> state.fusion_runs <- Some snapshot);
+  check Alcotest.int "history remains in the selectable list with no retained runs"
+    1 (List.length (fusion_list_entries state));
+  (match selected_fusion_entry state with
+   | Some (Tui_decode.Fusion_historical_evidence evidence) ->
+       check str "selection retains original Board identity" "original-post" evidence.fhe_post_id
+   | Some (Tui_decode.Fusion_retained_run _) | None ->
+       Alcotest.fail "historical evidence disappeared or became an invented run");
+  check Alcotest.int "historical evidence does not inflate Keeper run count"
+    0 (List.length (selected_keeper_runs state))
+
+let test_keeper_runs_selection_survives_a_shorter_list () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let keeper name : Tui_decode.keeper =
+    { k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
+    ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
+    ; k_last_turn_ts = ""; k_last_proactive_outcome = "never"
+    ; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z"
+    }
+  in
+  let run id keeper = `Assoc
+    [ "run_id", `String id; "keeper", `String keeper; "preset", `String "trio"
+    ; "topology", `String "simple"; "started_at", `Float 1.; "finished_at", `Float 2.
+    ; "status", `String "completed"; "stage", `String "completed"; "progress", `Null
+    ]
+  in
+  let load runs =
+    match Tui_decode.decode_fusion_snapshot (`Assoc
+      [ "generated_at", `String "2026-09-07T00:00:00Z"
+      ; "replay", `Assoc ["status", `String "not_replayed"]
+      ; "historical_evidence", `List []
+      ; "count", `Int (List.length runs); "runs", `List runs ]) with
+    | Ok snapshot -> state.fusion_runs <- Some snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  let selected () =
+    Option.map (fun (index, run) -> index, run.Tui_decode.fur_run_id)
+      (selected_keeper_run state)
+  in
+  state.keepers <- [keeper "alpha"; keeper "beta"];
+  load [run "alpha-1" "alpha"; run "alpha-2" "alpha"; run "beta-1" "beta"];
+  state.keeper_run_cursor <- 1;
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "selected alpha run"
+    (Some (1, "alpha-2")) (selected ());
+  state.keeper_cursor <- 1;
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "a shorter Keeper list remains selectable"
+    (Some (0, "beta-1")) (selected ());
+  state.keeper_cursor <- 0;
+  load [run "alpha-1" "alpha"];
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "a refreshed list remains selectable"
+    (Some (0, "alpha-1")) (selected ());
+  load [];
+  check (Alcotest.option (Alcotest.pair Alcotest.int str)) "empty list has no action target"
+    None (selected ())
 
 let test_lanes_run_list_footer_names_the_drill_down () =
   check str "the standalone lane run list names open and back"
-    "j/k:move  Right / Enter:prompt  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  Right / Enter:prompt  ]:older  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_list
 
 (* [compare], not [scroll]: #32270 stacked Input and Output into one list that
@@ -445,6 +514,15 @@ let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
     "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
+
+let test_board_footer_names_reversible_hearth_navigation () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Board)
+  in
+  check Alcotest.bool "both hearth directions" true (List.mem "f / F" keys);
+  check Alcotest.bool "direct hearth chooser" true (List.mem "H" keys)
 
 let test_board_and_planning_explain_their_order () =
   check str "hot formula" "net votes first; newer breaks ties"
@@ -517,12 +595,16 @@ let test_keeper_operations_are_not_top_level_tabs () =
 let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  Alcotest.(check int) "Lanes highlights Runtime"
-    (surface_ring_index Runtime)
-    (surface_ring_index Lanes);
+  (* No ring assertion here on purpose. Runtime left the ring when it moved
+     under Config, so [surface_ring_index Runtime] and [surface_ring_index
+     Lanes] are now the same match arm resolving to Config -- comparing them
+     cannot fail, and would keep passing if Lanes were moved to hang off
+     Resources instead. What Lanes highlights is claimed with teeth in
+     [test_logs_is_an_activity_child], against Config's own index. The label
+     below is what still records whose child Lanes is. *)
   Alcotest.(check bool) "and the help sheet files it under Runtime" true
     (List.exists
-       (fun (label, _) -> String.equal label "Runtime / Lanes")
+       (fun (label, _) -> String.equal label "Config / Runtime / Lanes")
        (Masc_tui_keys.help_sections ()));
   let lanes_keys =
     List.map
@@ -595,6 +677,12 @@ let test_tools_is_a_config_child () =
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
    under [l] instead of holding a Tab stop of its own. *)
 let test_logs_is_an_activity_child () =
+  Alcotest.(check bool) "Runtime is inside Config" false
+    (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
+  List.iter (fun surface ->
+      Alcotest.(check int) "runtime children highlight Config"
+        (surface_ring_index Config) (surface_ring_index surface))
+    [Runtime; Lanes; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
@@ -633,6 +721,27 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
 
+let test_browser_lanes_highlight_config () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Connectors;
+  check Alcotest.int "channel bindings remain under Keepers"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors);
+  List.iter (fun source ->
+      show_browser_lane state;
+      state.browser_lane <- Some
+        (Browser_lane_view.switch_source source (Browser_lane_view.create ()));
+      let index = visible_surface_ring_index state Connectors in
+      check Alcotest.int "Browser reader highlights Config"
+        (visible_surface_ring_index state Config) index;
+      check Alcotest.bool "the selected ring entry is Config, not the fallback"
+        true (fst (List.nth (visible_surface_ring state) index) = Config))
+    [Browser_lane_view.Live; Browser_lane_view.Automation];
+  state.browser_lane <- None;
+  check Alcotest.int "closing the reader restores the Keeper parent"
+    (visible_surface_ring_index state (Keepers Keeper_list))
+    (visible_surface_ring_index state Connectors)
+
 let test_visible_surface_ring_declutter () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
@@ -670,9 +779,9 @@ let test_fleet_total_cost () =
   Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
     (fleet_total_cost_usd state)
 
-let test_config_footer_names_both_hops () =
-  check str "Config names its two off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
+let test_config_footer_names_child_hops () =
+  check str "Config names its three off-ring children"
+    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
@@ -1382,6 +1491,10 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "Fusion history is selectable without a retained run" `Quick
+            test_fusion_historical_evidence_is_a_selectable_board_reference
+        ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
+            test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick
             test_lanes_run_list_footer_names_the_drill_down
         ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
@@ -1394,6 +1507,8 @@ let () =
             `Quick test_every_detail_surface_steps_through_its_list
         ; Alcotest.test_case "Planning carries filter and sort" `Quick
             test_planning_footer_carries_filter_and_sort
+        ; Alcotest.test_case "Board names both hearth directions and chooser"
+            `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
@@ -1412,12 +1527,14 @@ let () =
             test_resources_is_a_config_child
         ; Alcotest.test_case "Tools is a Config child" `Quick
             test_tools_is_a_config_child
-        ; Alcotest.test_case "Config names both hops" `Quick
-            test_config_footer_names_both_hops
+        ; Alcotest.test_case "Config names child hops" `Quick
+            test_config_footer_names_child_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick
             test_metrics_is_an_overview_child
+        ; Alcotest.test_case "Browser reader belongs to Config" `Quick
+            test_browser_lanes_highlight_config
         ; Alcotest.test_case "smart declutter hides empty approvals" `Quick
             test_visible_surface_ring_declutter
         ; Alcotest.test_case "braille sparkline renders levels" `Quick

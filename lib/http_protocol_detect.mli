@@ -1,36 +1,23 @@
-(** Http_protocol_detect — branch a freshly-accepted TCP socket
-    between HTTP/1.1 and HTTP/2 (h2c, prior-knowledge) by peeking
-    the connection preface.
-
-    HTTP/2 clients using prior knowledge open with the 24-byte
-    preface starting [PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n]. The
-    detector reads the first 14 bytes via [Unix.recv MSG_PEEK]
-    so the data stays in the kernel buffer and the chosen
-    backend (httpun-eio or h2-eio) reads it normally afterwards.
-
-    Internal helpers (the [h2_preface_prefix] string constant
-    and the [h2_preface_len] derived integer) are hidden —
-    callers consume only the [protocol] variant and the
-    detector entry point. *)
+(** Select HTTP/1.1 or prior-knowledge HTTP/2 from the initial stream bytes.
+    Detection waits cooperatively for a distinguishing byte or a complete H2
+    prefix. TCP delivery timing and segmentation do not determine the protocol. *)
 
 type protocol =
   | Http1
   | Http2
 
-val detect_from_fd : Unix.file_descr -> (protocol, string) result
-(** [detect_from_fd fd] peeks at the first bytes on [fd] using
-    [Unix.recv MSG_PEEK] and returns the inferred protocol.
-    Test-only surface for direct Unix FD testing. *)
-
 val protocol_to_string : protocol -> string
-(** String representation for logging and test assertions. *)
 
 val detect :
   _ Eio.Net.stream_socket ->
-  (protocol, string) result
-(** Eio adapter around {!detect_from_fd}: extracts the underlying
-    [Unix.file_descr] via [Eio_unix.Resource.fd_opt] and runs the
-    peek under [Eio_unix.Fd.use_exn "protocol_detect"].
+  (protocol * [`Generic] Eio.Net.stream_socket_ty Eio.Resource.t, string) result
+(** Return the selected protocol and a socket that replays every byte consumed
+    during detection before reading directly from the underlying socket.
+    Callers must pass the returned socket to the protocol handler.
 
-    Returns [Error "no Unix FD available on this socket"] when
-    the flow has no Unix FD (e.g. an in-memory transport). *)
+    At most the H2 distinguishing prefix is buffered. Writes, shutdown and
+    close are forwarded to the original socket; its switch retains ownership.
+    No raw FD is exposed by the wrapper, so readers cannot bypass the prefix.
+
+    EOF before a protocol can be selected returns [Error]. Cancellation and
+    other I/O exceptions propagate. *)

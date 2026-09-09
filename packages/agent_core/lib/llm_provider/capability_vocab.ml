@@ -44,6 +44,25 @@ type assistant_tool_content_format =
   | Assistant_tool_content_null
   | Assistant_tool_content_empty_string
 
+(* Which Chat Completions field carries the output-token budget. Classic
+   OpenAI-compatible models take [max_tokens]; OpenAI's reasoning-era models
+   (gpt-5 family onward) reject that field and require
+   [max_completion_tokens] — the budget then also covers the hidden reasoning
+   tokens. This is a model-scoped envelope fact, not a provider brand: groq and
+   the ollama-compat surface stay on the classic field. *)
+type chat_output_budget_field =
+  | Chat_max_tokens
+  | Chat_max_completion_tokens
+
+(* Whether the provider rejects JSON-Schema constructs (enum, oneOf/anyOf/
+   allOf) inside function-parameter schemas — OpenAI's function-tool rule.
+   When set, the request serializer projects each tool schema down to the
+   conformant subset; the dispatcher's own parameter validation (the
+   [[params]] table) stays the authority, so nothing is lost on our side. *)
+type tool_schema_conformance =
+  | Rich_json_schema
+  | Conformant_subset_required
+
 type reasoning_output_format =
   | No_reasoning_output_format
   | Split_reasoning_fields
@@ -455,6 +474,8 @@ let capability_fields =
   ; "supports_named_tool_choice"
   ; "supports_parallel_tool_calls"
   ; "assistant_tool_content_format"
+  ; "chat_output_budget_field"
+  ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "supports_extended_thinking"
   ; "supports_reasoning_budget"
@@ -559,6 +580,38 @@ let assistant_tool_content_format_of_string raw =
   match normalize raw with
   | "" -> Some Assistant_tool_content_null
   | normalized -> List.assoc_opt normalized assistant_tool_content_format_table
+;;
+
+let chat_output_budget_field_table =
+  [ "max_tokens", Chat_max_tokens
+  ; "max_completion_tokens", Chat_max_completion_tokens
+  ]
+;;
+
+let chat_output_budget_field_values =
+  List.map fst chat_output_budget_field_table
+;;
+
+let chat_output_budget_field_of_string raw =
+  match normalize raw with
+  | "" -> Some Chat_max_tokens
+  | normalized -> List.assoc_opt normalized chat_output_budget_field_table
+;;
+
+let tool_schema_conformance_table =
+  [ "rich", Rich_json_schema
+  ; "conformant", Conformant_subset_required
+  ]
+;;
+
+let tool_schema_conformance_values =
+  List.map fst tool_schema_conformance_table
+;;
+
+let tool_schema_conformance_of_string raw =
+  match normalize raw with
+  | "" -> Some Rich_json_schema
+  | normalized -> List.assoc_opt normalized tool_schema_conformance_table
 ;;
 
 let reasoning_output_format_table =

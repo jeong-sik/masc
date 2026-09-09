@@ -57,6 +57,36 @@ let test_non_json_output_keeps_the_byte_hash () =
   check bool "different text: different fingerprint" false
     (String.equal a.P.output_fingerprint c.P.output_fingerprint)
 
+(* [digest_tool_io] answers from a memo (#33765) whose key holds the tool
+   name, the input and the output text. Every case above varies the output
+   under one fixed input, so a key that had dropped [input] would pass all of
+   them: the first call would cache its answer under the output alone and the
+   second would be handed the first call's input fingerprint.
+
+   Sharing the output between two inputs is what asks the question. A memo
+   that answers here with one fingerprint is answering for bytes it was not
+   given. *)
+let input_fingerprints ~input =
+  match
+    P.digest_tool_io ~tool_name:"Execute" ~input
+      ~output_text:"the same answer for both"
+  with
+  | Some io -> io.P.input_fingerprint
+  | None -> fail "digest_tool_io returned no fingerprints"
+
+let test_the_input_reaches_the_answer_through_the_memo () =
+  let a = input_fingerprints ~input:(`Assoc [ ("argv", `List [ `String "gh" ]) ]) in
+  let b = input_fingerprints ~input:(`Assoc [ ("argv", `List [ `String "git" ]) ]) in
+  check bool "different input, shared output: different fingerprint" false
+    (String.equal a b);
+  (* And the repeat is faithful: asking again for the first input gives back
+     what it gave the first time rather than the neighbour it now shares a
+     memo with. *)
+  let a_again =
+    input_fingerprints ~input:(`Assoc [ ("argv", `List [ `String "gh" ]) ])
+  in
+  check string "the repeat answers the same" a a_again
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
@@ -70,5 +100,7 @@ let () =
             test_field_order_does_not_name_identity
         ; test_case "non-JSON output keeps the byte hash" `Quick
             test_non_json_output_keeps_the_byte_hash
+        ; test_case "the input reaches the answer through the memo" `Quick
+            test_the_input_reaches_the_answer_through_the_memo
         ] )
     ]

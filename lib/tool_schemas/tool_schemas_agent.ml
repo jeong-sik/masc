@@ -23,9 +23,23 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
-let schemas : Masc_domain.tool_schema list =
-  [ schema_of_name "masc_agent_fitness"
-  ; schema_of_name "masc_get_metrics"
-  ; schema_of_name "masc_agent_card"
-  ]
+type operation =
+  | Agent_card
+  | Agent_fitness
+  | Get_metrics
+[@@deriving enumerate]
+
+let operations = all_of_operation
+
+let tool_name = function
+  | Agent_card -> "masc_agent_card"
+  | Agent_fitness -> "masc_agent_fitness"
+  | Get_metrics -> "masc_get_metrics"
 ;;
+
+let operation_of_tool_name value =
+  List.find_opt (fun operation -> String.equal value (tool_name operation)) operations
+;;
+
+let schema operation = schema_of_name (tool_name operation)
+let schemas : Masc_domain.tool_schema list = List.map schema operations

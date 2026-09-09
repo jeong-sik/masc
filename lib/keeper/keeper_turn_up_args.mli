@@ -16,12 +16,14 @@ open Keeper_types_profile
 type parsed_args =
   { name : string
   ; runtime_id_opt : string option
-  ; autoboot_enabled_opt : bool option
+  ; activation_mode_opt : Keeper_activation_mode.t option
   ; mention_targets_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
-  ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
+  ; microvm_backend_patch : Keeper_microvm_backend.t option option
+        (** None omits the edit; Some None clears it; Some (Some backend)
+            selects the parsed backend, only for a microvm profile. *)
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
   ; network_mode_opt : string option

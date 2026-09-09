@@ -27,7 +27,7 @@ request_count: 323   requests: 20   request_limit: 20   truncated: true
 counts: cancelled 217, succeeded 95, scheduled 10, expired 1,
         due 0, running 0, failed 0
 fsm: active_count 10, terminal_count 313
-payload_target: keeper:kidsnote 9, keeper:sangsu 4, keeper:edgar.a.poe 4,
+payload_target: keeper:exampleorg 9, keeper:sangsu 4, keeper:edgar.a.poe 4,
                 keeper:analyst 1, keeper:code-reviewer 1, keeper:taskmaster 1
 ```
 

@@ -35,20 +35,44 @@
 # per suite. The first pass gave test_tools_coverage a 180-second deadline it
 # spent compiling; it runs in 7 seconds once built and fails one assertion of
 # forty. A deadline that covers the build measures the build.
+#
+# Re-measured 2026-09-07: every row dispatched alone on main through
+# test.yml's suite input, one run each, run ids on the rows. Four fail alone
+# and four pass.
+#
+# A row that passes alone is not proven stale. The list is keyed to
+# `dune build @runtest` from the root, and a suite can pass by itself and
+# fail in the sweep -- shared fixtures, or a timing window that only closes
+# under load. So the four are candidates, not removals.
+#
+# What settles it is the nightly. It went unsettled from 09-04 to 09-06 -- cut
+# at the 90-minute suite deadline twice for different reasons (#32154, then
+# #33807) -- and a cut produces no failure set, so this ratchet compared
+# nothing and four rows that should have come off sat here.
+#
+# #33809 fixed the hang. The 09-07 run (34148793721, commit 45016f15) finished
+# in 917s of its 5400s deadline and produced a set, and it named those four as
+# passing. They are gone below. The same run also named 102 failing suites this
+# file does not list: 89 under test/, 13 under packages/agent_core/test/,
+# 220 failing cases in all. That number is #33782's to answer; this change is
+# only the four the runner asked for by name.
+#
+# The 09-09 run (34296943348, commit 0b034fae) finished in 1021s and named one
+# more: test_fs_compat_capability_write. #34519 replaced that suite's exact
+# backtrace equality with a prefix assertion earlier the same day. Dispatched
+# alone on main it reports 50 tests run, so the sweep and the alone run agree
+# and the row is gone below. Its two neighbours were dispatched in the same
+# batch and still fail on an assertion -- exact_read on "fatal callback helper
+# exited with code 4", directory_durability on "ordinary observer exception
+# raw backtrace" -- so they stay.
 
 # --- assertions that fail -------------------------------------------------
-test/test_fs_compat                               # save_file_atomic: strict payload cancellation
-test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
-test/test_fs_compat_capability_head               # authority: absent publish
-test/test_fs_compat_capability_write              # publication: replace fatal and cancellation
-test/test_keeper_fs_directory_durability          # durable commit observer: observer exception
-test/test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
-test/test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
-test/test_server_mcp_session_persist              # persistence: save/forget/load round-trip
+test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation [2026-09-07 alone: fails, run 34136506495]
+test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a
 # time with Eio.Path.open_dir and never re-reads the path string. The race has
 # nowhere to enter, because a keeper can only write inside the playground and
 # playground writes skip the gate the injection point sits behind (#29858).
-test/test_keeper_fs_edit_patch
+test/test_keeper_fs_edit_patch                    # [2026-09-07 alone: fails, run 34136523552]

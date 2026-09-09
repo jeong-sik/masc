@@ -114,6 +114,47 @@ val summarize_thinking_blocks :
 (** Summarize thinking block presence for logs/metrics without exposing raw
     thinking content. *)
 
+(** {1 Keeper log lines}
+
+    The per-turn summary and the tool_call receipt, rendered as text. A field
+    the lane did not report is absent, not a placeholder. *)
+
+type turn_log_fields =
+  { turn : int
+  ; total_turns : int
+  ; runtime_lane : string
+  ; tokens : int
+  ; context_window : int option
+  ; wall_tok_s : float option
+  ; prompt_tok_s : float option
+  ; decode_tok_s : float option
+  ; cache_n : int option
+  ; prompt_n : int option
+  ; latency_ms : int option
+  ; thinking : thinking_log_summary
+  }
+
+val turn_log_line : turn_log_fields -> string
+(** [turn=… total_turns=… runtime_lane=… tokens=… thinking_kind=…] with the
+    optional counters only when present; the thinking counters only when
+    [thinking_present], and [redacted_thinking_blocks] only when non-zero. *)
+
+type tool_call_log_fields =
+  { tool : string
+  ; source : string option
+  ; params : string
+  ; input_shape : string
+  ; outcome : string
+  ; out_len : int
+  ; failed_params : string option
+  ; error_preview : string option
+  }
+
+val tool_call_log_line : keeper_name:string -> tool_call_log_fields -> string
+(** [keeper:<name> tool_call tool=… params=[…] input_shape=[…] outcome=…
+    out_len=…], with [source] only for a tool read from a file and
+    [failed_params] / [error_preview] only on the failure path. *)
+
 val runtime_lane_label : string
 (** The neutral runtime lane label used by keeper telemetry where concrete
     provider/model identity should not surface (consumed by many call sites

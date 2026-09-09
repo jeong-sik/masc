@@ -14,7 +14,7 @@ import {
   nonBlankToolCallId,
 } from './tool-call-output-store'
 import type {
-  KeeperConversationAttachment,
+  KeeperByteAttachment,
   KeeperConversationAudioClip,
   KeeperConversationEntry,
   KeeperConversationRole,
@@ -222,6 +222,7 @@ const APPROVAL_LIFECYCLE_PHASES = new Set<KeeperApprovalLifecyclePhase>([
   'replay_failed',
   'replay_indeterminate',
   'continuation_recorded',
+  'continuation_failed',
 ])
 
 function normalizeApprovalLifecycle(raw: unknown): KeeperApprovalLifecycle | null {
@@ -275,7 +276,7 @@ export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | 
  *  mime_type, open `type` string) into the camelCase KeeperConversationAttachment
  *  the chat UI renders. Drops rows missing id/data — a card with no payload is
  *  not renderable. `type` is narrowed to image/file (the renderer's union). */
-function normalizeAttachment(raw: unknown): KeeperConversationAttachment | null {
+function normalizeAttachment(raw: unknown): KeeperByteAttachment | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
   const data = asString(raw.data)
@@ -290,11 +291,11 @@ function normalizeAttachment(raw: unknown): KeeperConversationAttachment | null 
   }
 }
 
-function normalizeAttachments(raw: unknown): KeeperConversationAttachment[] | undefined {
+function normalizeAttachments(raw: unknown): KeeperByteAttachment[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const atts = raw
     .map(normalizeAttachment)
-    .filter((a): a is KeeperConversationAttachment => a !== null)
+    .filter((a): a is KeeperByteAttachment => a !== null)
   return atts.length > 0 ? atts : undefined
 }
 

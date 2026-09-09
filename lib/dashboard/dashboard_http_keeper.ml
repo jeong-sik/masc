@@ -740,7 +740,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("trace_history_count", `Int trace_history_count);
               ( "active_goals_tree",
                 if (not compact) && include_goals then
-                  let all_goals = Goal_store.list_goals config () in
+                  match Goal_store.list_goals_result config () with
+                  | Error detail -> Dashboard_goals.goal_store_unavailable_json detail
+                  | Ok all_goals ->
                   let linked =
                     List.filter
                       (fun (g : Goal_store.goal) ->
@@ -764,10 +766,11 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                           ("nodes", `Null);
                         ]
                   | Ok pending_approvals ->
-                      let forest =
-                        Dashboard_goals.build_forest ~config ~goals:linked
-                          ~tasks ~pending_approvals
-                      in
+                      let verification_for_goal = Dashboard_goals.verification_projection ~config in
+                      match Dashboard_goals.build_forest ~config ~goals:linked
+                          ~tasks ~pending_approvals with
+                      | Error detail -> Dashboard_goals.goal_task_links_unavailable_json detail
+                      | Ok forest ->
                       `Assoc
                         [
                           ( "approval_queue_state",
@@ -777,7 +780,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                           ( "nodes",
                             `List
                               (List.map
-                                 Dashboard_goals.tree_node_to_json
+                                 (Dashboard_goals.tree_node_to_json ~verification_for_goal)
                                  forest) );
                         ])
                 else
@@ -806,7 +809,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("keeper_keepalive_interval_s", `Float keepalive_interval_s);
               ("keeper_snapshot_interval_s", `Float snapshot_interval_s);
               ("heartbeat_stale_after_s", `Float heartbeat_stale_after_s);
-              ("autoboot_enabled", `Bool m.autoboot_enabled);
+              ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
               ( "status",
                 `String
                   (Keeper_status_runtime.keeper_surface_status ~diagnostic) );
@@ -833,8 +836,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ~some:Keeper_usage_resolution.to_json
                   m.runtime.last_usage_resolution );
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
-              ("autoboot_enabled", `Bool m.autoboot_enabled);
-              ("proactive_enabled", `Bool m.proactive.enabled);
+              ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);

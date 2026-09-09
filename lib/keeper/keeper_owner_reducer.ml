@@ -43,11 +43,11 @@ type profile_update =
   { instructions : string
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
+  ; microvm_backend : Keeper_microvm_backend.t option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
-  ; proactive_enabled : bool
   ; max_context_override : int option
-  ; autoboot_enabled : bool
+  ; activation_mode : Keeper_activation_mode.t
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
@@ -68,8 +68,8 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Set_autoboot of
-      { enabled : bool
+  | Set_activation_mode of
+      { mode : Keeper_activation_mode.t
       ; updated_at : string
       }
   | Update_profile of profile_update
@@ -431,8 +431,8 @@ let apply_existing (state : state) meta command =
          ; updated_at
          ; runtime
          })
-  | Set_autoboot { enabled; updated_at } ->
-    Ok (with_meta state { meta with autoboot_enabled = enabled; updated_at })
+  | Set_activation_mode { mode; updated_at } ->
+    Ok (with_meta state { meta with activation_mode = mode; updated_at })
   | Update_profile update ->
     Ok
       (with_meta
@@ -441,11 +441,11 @@ let apply_existing (state : state) meta command =
            instructions = update.instructions
          ; sandbox_profile = update.sandbox_profile
          ; sandbox_image = update.sandbox_image
+         ; microvm_backend = update.microvm_backend
          ; network_mode = update.network_mode
          ; mention_targets = update.mention_targets
-         ; proactive = { enabled = update.proactive_enabled }
          ; max_context_override = update.max_context_override
-         ; autoboot_enabled = update.autoboot_enabled
+         ; activation_mode = update.activation_mode
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow

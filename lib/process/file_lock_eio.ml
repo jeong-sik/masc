@@ -178,7 +178,7 @@ let get_entry path =
 let release_entry entry =
   ignore (Atomic.fetch_and_add entry.active (-1))
 
-let run_blocking_lock_op f = Eio_guard.run_in_systhread f
+let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread
@@ -215,8 +215,8 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->  (* cancel-guard-ok: re-raises below *)
-    (try Unix.close fd with Unix.Unix_error _ -> ());  (* cancel-guard-ok: re-raises below *)
+  with exn ->  (* re-raises below *)
+    (try Unix.close fd with Unix.Unix_error _ -> ());  (* re-raises below *)
     raise exn
 
 (** Fiber-friendly wrapper around [acquire_flock_retry].
@@ -258,7 +258,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       end
   in
   try acquire max_attempts
-  with exn ->  (* cancel-guard-ok: re-raises below *)
+  with exn ->  (* re-raises below *)
     run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 

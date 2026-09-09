@@ -28,37 +28,7 @@ let create_dispatch_intent ~commit_fence ~mark_dispatch_started =
   }
 ;;
 
-let classify_unix_error = function
-  | Unix.ECONNREFUSED | Unix.ECONNRESET -> Connection_refused
-  | Unix.EPIPE -> End_of_file
-  | Unix.ETIMEDOUT -> Timeout
-  | Unix.ENETUNREACH | Unix.EHOSTUNREACH -> Dns_failure
-  | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS | Unix.EADDRNOTAVAIL ->
-    Local_resource_exhaustion
-  | unclassified ->
-    let (_ : Unix.error) = unclassified in
-    Unknown
-;;
-
-let classify_network_exn (exception_ : exn) =
-  match exception_ with
-  | End_of_file -> Some (NetworkError { message = "End_of_file"; kind = End_of_file })
-  | Eio.Time.Timeout ->
-    Some
-      (TimeoutError
-         { message = "exact-output measurement HTTP operation exceeded timeout"
-         ; phase = Http_operation
-         })
-  | Unix.Unix_error (code, _, _) as exn ->
-    Some
-      (NetworkError { message = Printexc.to_string exn; kind = classify_unix_error code })
-  | Eio.Io (_, _) as exn ->
-    Some (NetworkError { message = Printexc.to_string exn; kind = Unknown })
-  | (Tls_eio.Tls_alert _ | Tls_eio.Tls_failure _) as exn ->
-    Some (NetworkError { message = Printexc.to_string exn; kind = Tls_error })
-  | Sys_error _ | Failure _ -> None
-  | _ -> None
-;;
+let classify_network_exn = Http_client.classify_network_exn
 
 type transport_exception_disposition =
   | Reserved_transport_exception
@@ -147,10 +117,10 @@ let resolve_origin net ({ uri; host } : validated_origin) =
     | Some port -> Int.to_string port
     | None -> Uri.scheme uri |> Option.value ~default:"http"
   in
-  let* addr =
+  let* addresses =
     try
       match Eio.Net.getaddrinfo_stream ~service net host with
-      | address :: _ -> Ok address
+      | (_ :: _ as addresses) -> Ok addresses
       | [] ->
         Error
           (NetworkError
@@ -158,12 +128,10 @@ let resolve_origin net ({ uri; host } : validated_origin) =
              ; kind = Dns_failure
              })
     with
-    | Eio.Io (_, _) as exn ->
-      Error (NetworkError { message = Printexc.to_string exn; kind = Unknown })
-    | Unix.Unix_error (code, _, _) as exn ->
-      Error
-        (NetworkError
-           { message = Printexc.to_string exn; kind = classify_unix_error code })
+    | (Eio.Io _ | Unix.Unix_error _) as exn ->
+      (match classify_network_exn exn with
+       | Some error -> Error error
+       | None -> raise exn)
   in
   let* tls_wrap =
     match Uri.scheme uri with
@@ -182,25 +150,29 @@ let resolve_origin net ({ uri; host } : validated_origin) =
       @@ Result.map_error wrap_error (Api_common.make_https_result ())
     | Some "http" | Some _ | None -> Ok None
   in
-  Ok (net, addr, tls_wrap)
+  Ok (net, addresses, tls_wrap)
 ;;
 
 let make_connection ~sw ~net ~origin =
-  let* net, address, tls_wrap = resolve_origin net origin in
+  let* net, addresses, tls_wrap = resolve_origin net origin in
   try
-    let socket = Eio.Net.connect ~sw net address in
+    let socket = Tcp_address_race.connect ~sw ~net addresses in
     let connection : connection =
-      match tls_wrap with
-      | Some wrap -> (wrap origin.uri socket :> connection)
-      | None -> (socket :> connection)
+      try
+        match tls_wrap with
+        | Some wrap -> (wrap origin.uri socket :> connection)
+        | None -> (socket :> connection)
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Resource.close socket;
+        Printexc.raise_with_backtrace exn bt
     in
     Ok connection
   with
-  | Eio.Io (_, _) as exn ->
-    Error (NetworkError { message = Printexc.to_string exn; kind = Unknown })
-  | Unix.Unix_error (code, _, _) as exn ->
-    Error
-      (NetworkError { message = Printexc.to_string exn; kind = classify_unix_error code })
+  | (Eio.Io _ | Unix.Unix_error _) as exn ->
+    (match classify_network_exn exn with
+     | Some error -> Error error
+     | None -> raise exn)
 ;;
 
 let read_response_body response_body =

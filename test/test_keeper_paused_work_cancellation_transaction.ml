@@ -45,7 +45,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused f =
            (`Assoc
               [ "name", `String keeper_name
               ; "trace_id", `String "trace-paused-cancel-owner"
-              ; "autoboot_enabled", `Bool false
+              ; "activation_mode", `String "manual"
               ])
          |> require_ok "parse Keeper metadata fixture"
        in
@@ -267,6 +267,7 @@ let test_reinserted_source_rejects_old_pending_incarnation () =
          { source = request.source
          ; admitted_revision = request.source_incarnation
          ; checkpoint_retentions = 0
+      ; repetition_scope = None
          }
        in
        Persistence.ack_pending_result

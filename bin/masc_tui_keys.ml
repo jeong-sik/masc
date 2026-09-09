@@ -30,11 +30,15 @@ let global =
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+  ; b Meta "&"
+      "the MSX screen: the emulator core over the whole terminal (esc: back; \
+       also `:` go MSX)"
   ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
        on its Changes tab the selected keeper's files (press the header to switch)"
       ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
+  ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"and Esc on the surface it opens comes back here"
@@ -55,6 +59,12 @@ let keeper_actions =
   ; b Act "e" "settings"
   ; b Act "f" "files" ~help:"file changes this keeper wrote"
   ; b Act "a" "new" ~help:"new keeper"
+    (* Offered only for a keeper the roster shows no fiber for, and it takes two
+       presses. "d" on this surface already opens repository changes, so delete
+       takes "x". Listed here because the footer is the surface's inventory of
+       keys; whether the row applies comes from
+       [Masc_tui_keeper_control.available]. *)
+  ; b Act "x" "delete" ~help:"remove a stopped keeper and everything it wrote"
   ]
 
 let for_surface = function
@@ -69,19 +79,25 @@ let for_surface = function
       ]
       @ listing_meta
   | Acting ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "1 / 2" "Events / Logs"
+      ; b Navigate "j/k" "select / scroll"
+      ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      (* One key, one row. Esc closes the evidence pane when one is open
+         (masc_tui.ml guards the close on acting_detail) and otherwise
+         leaves the surface, so two rows read as two bindings. *)
+      ; b Act "Esc" "back"
+          ~help:"close event evidence; from the list, back to Overview"
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
       ; b Act "f" "filter" ~help:"cycle the filter"
-      ; b Act "Esc" "overview"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "1-3" "section"
-          ~help:"1: Engine & Scheduler · 2: Fleet & Velocity · 3: Memory & Gate Safety"
+          ~help:"1: Engine & Scheduler · 2: Work & Outcomes · 3: Memory & Gate Safety"
       ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
       ; b Act "Esc" "overview"
       ; b Meta "r" "refresh"
@@ -133,7 +149,7 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
-      ; b Act "Ctrl-N" "memory detail"
+      ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
              so a help promising "full detail" sends a reader looking for a
@@ -189,8 +205,9 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
-      ; b Search "f" "hearth"
-          ~help:"narrow to one sub-board, busiest first; again for the next"
+      ; b Search "f / F" "next / previous hearth"
+          ~help:"move forward or backward through all hearths"
+      ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
       ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
@@ -216,9 +233,10 @@ let for_surface = function
           ~help:"only when the blocked row is safely rearmable"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "w" "Workspace Gate mode"
+          ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
-          ~help:"cycle manual / auto_judge / always_allow for calls into \
-                 attached outside services"
+          ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
       @ listing_meta
   | Planning ->
@@ -295,9 +313,11 @@ let for_surface = function
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
+      ; b Navigate "K" "calling Keeper"
+      ; b Navigate "B" "Board evidence"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
@@ -318,6 +338,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open the repository tree, or the selected changed file"
+      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
       ; b Act "d" "Git changes"
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
@@ -345,7 +366,11 @@ let for_surface = function
       ]
       @ listing_meta
   | Connectors ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "B" "Browser Lane"
+          ~help:"read browser tabs and page text; select live / automation inside Browser"
+      ; b Act "Ctrl-O" "Browser screenshot"
+          ~help:"inside Browser Lane: preview the selected tab; any key returns"
+      ; b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
@@ -374,6 +399,10 @@ let for_surface = function
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "v" "runtime.toml read status"
+          ~help:"source revision, validation issues, and application/restart details"
+      ; b Navigate "9" "Runtime"
+          ~help:"runtime status, lane routing, probes and connected clients"
       ; b Navigate "s" "resources"
           ~help:"the MCP resource catalog, off the ring under Config"
       ; b Navigate "t" "tools"
@@ -479,7 +508,8 @@ let for_surface = function
       ]
       @ listing_meta
   | System_logs ->
-      [ b Navigate "j/k" "move / scroll"
+      [ b Navigate "1 / 2" "Events / Logs"
+      ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while detail is open, inspect the adjacent visible log entry"
@@ -622,6 +652,7 @@ let footer_hints_lanes_run_list =
   hints_of_bindings
     ([ b Navigate "j/k" "move" ~help:"move the run cursor"
      ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "]" "older" ~help:"load the next retained-run page from the server"
      ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
      ]
      @ listing_meta)
@@ -673,9 +704,6 @@ let footer_hints_memory_facts =
      ]
      @ listing_meta)
 
-let footer_hints_metrics =
-  hints_of_bindings (for_surface Metrics)
-
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
@@ -685,8 +713,8 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Runtime / Lanes", Lanes
-  ; "Runtime / Clients", Clients
+  ; "Config / Runtime / Lanes", Lanes
+  ; "Config / Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals
   ; "Planning / Goals", Planning
@@ -698,7 +726,7 @@ let help_surfaces : (string * surface) list =
   ; "Workspace", Repositories
   ; "Workspace / Code", Code
   ; "Changes", Changes
-  ; "Runtime", Runtime
+  ; "Config / Runtime", Runtime
   ; "Config", Config
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
@@ -808,3 +836,16 @@ let help_sections ?current () =
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
     :: List.map (fun (_, section) -> section) rest
+
+let footer_hints_browser_lane =
+  hints_of_bindings
+    [ b Navigate "b" "browser"
+    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "[ / ]" "tab"
+    ; b Navigate "j/k" "text"
+    ; b Act "Ctrl-O" "screenshot"
+    ; b Act "g" "URL"
+    ; b Act "o / x" "open / close session"
+    ; b Act "r" "refresh"
+    ; b Navigate "Ctrl-^ / Esc" "hide lane"
+    ]

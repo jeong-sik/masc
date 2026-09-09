@@ -20,7 +20,6 @@ val default_runtime_id : unit -> string
     provider/model policy is applied here. *)
 val validate_max_context_override_value : int -> (int, string) result
 
-val default_proactive_enabled : bool
 
 (** Maximum bytes of Keeper instructions included in the rendered prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.
@@ -118,11 +117,6 @@ val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
-
-(** Completed board-attention partitions settled per owner turn before the
-    remainder defers to a continuation wake (see
-    Keeper_board_attention_worker.max_completed_settlements_per_owner_turn). *)
-val keeper_board_attention_settlements_per_turn : unit -> int
 
 val keeper_unified_temperature : unit -> float
 

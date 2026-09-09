@@ -602,18 +602,41 @@ let test_content_parts_cover_modalities () =
     "audio format"
     "wav"
     (member "input_audio" audio |> member "format" |> to_string)
+
+let test_content_parts_reference_carriers () =
+  (* RFC-0430: the two reference carriers stop dying at base64_data_url's
+     unsupported-source rejection and reach their native wire forms — an
+     external URL stays the image_url, a Files API id becomes the [file]
+     part's file_id. *)
+  let parts =
+    Serialize.openai_content_parts_of_blocks
+      [ Image { media_type = "image/png"; data = "https://example.com/a.png"
+              ; source_type = Types.Url }
+      ; Image { media_type = "image/png"; data = "file-api-1"
+              ; source_type = Types.File_id }
+      ]
+  in
+  check_int "reference parts" 2 (List.length parts);
+  let url_part = List.nth parts 0 in
+  check_string "url carrier type" "image_url" (member "type" url_part |> to_string);
+  check_string
+    "url carrier passthrough"
+    "https://example.com/a.png"
+    (member "image_url" url_part |> member "url" |> to_string);
+  let file_part = List.nth parts 1 in
+  check_string "file carrier type" "file" (member "type" file_part |> to_string);
+  check_string
+    "file carrier id"
+    "file-api-1"
+    (member "file" file_part |> member "file_id" |> to_string)
 ;;
 
 let test_non_base64_media_source_fails_closed () =
-  expect_invalid_arg "openai chat image url" (fun () ->
-    Serialize.openai_content_parts_of_blocks
-      [ Image
-          { media_type = "image/png"
-          ; data = "https://example.invalid/image.png"
-          ; source_type = Types.Url
-          }
-      ]
-    |> ignore);
+  (* RFC-0430: the openai-chat image URL carrier no longer fails closed — it
+     passes through as the image_url (see the reference-carriers test). The
+     fail-closed contract that remains is for backends with no native form
+     for the carrier: ollama rejects a URL image, and the responses surface
+     rejects a file_id document. *)
   expect_invalid_arg "ollama image url" (fun () ->
     ollama_messages
       ~supports_image_input:true
@@ -2268,6 +2291,136 @@ let test_responses_tool_choice_respects_capability_gate () =
     (member "tool_choice" (chat_body ~supports:true) |> to_string)
 ;;
 
+(* The chat-completions function schema refuses oneOf/anyOf/allOf/enum/const/not
+   at the top level and answers 400 for the whole request, so masc's Execute
+   schema -- which carries a top-level oneOf for "argv or script, not both" --
+   took every openai lane down with it: 2,525 failures in six hours on
+   2026-09-07, two keepers at 204 and 207 consecutive.
+
+   The keyword is dropped only where it is refused. Nested uses are legal and
+   must survive, and the exclusivity itself is not lost: the runtime refuses a
+   call naming both (keeper_tool_execute_typed_input.ml) and one naming
+   neither. *)
+let test_top_level_unsupported_keywords_are_dropped () =
+  let schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "argv", `Assoc [ "type", `String "array" ]
+            ; "script", `Assoc [ "type", `String "string" ]
+            ; ( "shell"
+              , `Assoc
+                  [ "type", `String "string"
+                  ; "enum", `List [ `String "sh"; `String "bash" ]
+                  ] )
+            ] )
+      ; ( "oneOf"
+        , `List
+            [ `Assoc [ "required", `List [ `String "argv" ] ]
+            ; `Assoc [ "required", `List [ `String "script" ] ]
+            ] )
+      ]
+  in
+  let params =
+    Serialize.build_openai_tool_json
+      (`Assoc
+          [ "name", `String "Execute"
+          ; "description", `String "d"
+          ; "input_schema", schema
+          ])
+    |> member "function"
+    |> member "parameters"
+  in
+  (match params with
+   | `Assoc fields ->
+     List.iter
+       (fun key ->
+         Alcotest.(check bool)
+           (Printf.sprintf "top-level %s is gone" key)
+           false
+           (List.mem_assoc key fields))
+       [ "oneOf"; "anyOf"; "allOf"; "enum"; "const"; "not" ]
+   | _ -> Alcotest.fail "parameters must stay an object");
+  check_string
+    "the schema is otherwise untouched"
+    "object"
+    (params |> member "type" |> to_string);
+  (* Nested enum is legal on this wire and carries the shell ladder. Dropping
+     it would silently widen what the model may pass. *)
+  check_string
+    "a nested enum survives"
+    "sh"
+    (params
+     |> member "properties"
+     |> member "shell"
+     |> member "enum"
+     |> to_list
+     |> List.hd
+     |> to_string)
+;;
+
+(* Exercise the serialized request: Yojson's member lookup alone hides a
+   second description field, while the provider rejects the entire body. *)
+let test_conformant_tool_description_is_unique_on_wire () =
+  let rec check_unique path = function
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      check_int (path ^ " unique object keys")
+        (List.length names) (List.length (List.sort_uniq String.compare names));
+      List.iter (fun (name, value) -> check_unique (path ^ "." ^ name) value) fields
+    | `List values -> List.iteri (fun index value ->
+        check_unique (Printf.sprintf "%s[%d]" path index) value) values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> ()
+    | `Tuple _ | `Variant _ -> Alcotest.fail "request contains non-JSON data"
+  in
+  let shell description =
+    `Assoc ([ "type", `String "string"
+            ; "enum", `List [ `String "sh"; `String "bash" ]
+            ; "default", `String "sh" ] @ description)
+  in
+  let cases =
+    [ "existing", [ "description", `String "Which shell runs script." ],
+      "Which shell runs script.; one of: sh | bash"
+    ; "empty", [ "description", `String "" ], "one of: sh | bash"
+    ; "absent", [], "one of: sh | bash" ]
+  in
+  List.iter (fun (name, description, expected) ->
+    let config =
+      Provider_config.make
+        ~kind:OpenAI_compat ~model_id:"codec-conformant-description"
+        ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+        ~max_tokens:128
+        ~model_capabilities_override:
+          { Capabilities.default_capabilities with
+            tool_schema_conformance = Capabilities.Conformant_subset_required }
+        ()
+    in
+    let tool = `Assoc
+      [ "name", `String "Execute"; "description", `String "Run a command."
+      ; "input_schema", `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc
+              [ "shell", shell description
+              ; "shells", `Assoc
+                  [ "type", `String "array"; "items", shell description ] ] ] ]
+    in
+    let body = Backend_openai_request.build_request ~config
+        ~messages:[msg User [Text "run the command"]] ~tools:[tool] ()
+      |> Yojson.Safe.from_string in
+    check_unique name body;
+    let parameters = body |> member "tools" |> to_list |> List.hd
+      |> member "function" |> member "parameters" in
+    let properties = member "properties" parameters in
+    List.iter (fun schema ->
+      check_string "description preserves instruction and vocabulary"
+        expected (schema |> member "description" |> to_string);
+      check_string "default remains sh" "sh" (schema |> member "default" |> to_string);
+      check_bool "enum projected to vocabulary" true (member "enum" schema = `Null))
+      [member "shell" properties; properties |> member "shells" |> member "items"])
+    cases
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
@@ -2276,6 +2429,10 @@ let () =
             "content parts cover modalities"
             `Quick
             test_content_parts_cover_modalities
+        ; Alcotest.test_case
+            "content parts carry url and file_id reference carriers"
+            `Quick
+            test_content_parts_reference_carriers
         ; Alcotest.test_case
             "openai user text/tool/empty"
             `Quick
@@ -2445,6 +2602,14 @@ let () =
             "tool_choice respects capability gate"
             `Quick
             test_responses_tool_choice_respects_capability_gate
+        ; Alcotest.test_case
+            "conformant request has unique descriptions at every depth"
+            `Quick
+            test_conformant_tool_description_is_unique_on_wire
+        ; Alcotest.test_case
+            "top-level unsupported schema keywords are dropped"
+            `Quick
+            test_top_level_unsupported_keywords_are_dropped
         ] )
     ]
 ;;

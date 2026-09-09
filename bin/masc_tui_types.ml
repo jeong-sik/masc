@@ -2,6 +2,36 @@
 module Tui_decode = Masc.Tui_decode
 module Metrics_tail = Masc_tui_metrics_tail
 
+(* A poll shares the current read; an explicit refresh owns a new one.
+   Only the owning response can settle that source and publish its result. *)
+module Snapshot_read : sig
+  type request
+  type t
+  type intent = Poll | Refresh
+
+  val idle : t
+  val start : intent:intent -> t -> t * request option
+  val settle : t -> request -> t option
+end = struct
+  type request = int
+  type t = { next : int; pending : request option }
+  type intent = Poll | Refresh
+
+  let idle = { next = 0; pending = None }
+
+  let start ~intent state =
+    match intent, state.pending with
+    | Poll, Some _ -> state, None
+    | (Poll | Refresh), _ ->
+      let request = state.next in
+      { next = request + 1; pending = Some request }, Some request
+
+  let settle state request =
+    match state.pending with
+    | Some pending when pending = request -> Some { state with pending = None }
+    | Some _ | None -> None
+end
+
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 
 (** Agent type with status (from Tui_decode) *)
@@ -122,13 +152,23 @@ type log_entry = Tui_decode.log_entry
     Each arm carries the label to draw. The label is a rendering of the fact;
     the constructor is the fact. *)
 type message_author =
-  | Sent_by_operator of string
-      (** The person reading this pane. ["you"], or ["you \xc2\xb7 <surface>"]
-          where the line came in from somewhere other than the dashboard. *)
-  | Sent_by_other of string
+  | Sent_by_operator of { surface : string option }
+      (** The person reading this pane, and the door they came in by when it
+          was not the dashboard -- an operator can write to a keeper from a
+          connector. Apart for the same reason as the arm below, and it was
+          joined here while that one was split: at a ten-cell column
+          ["you \xc2\xb7 broadcast"] was cut to ["yo\xe2\x80\xa6dcast"],
+          losing the speaker to keep the tail of the surface. *)
+  | Sent_by_other of
+      { speaker : string
+      ; surface : string option
+      }
       (** Anyone else: another agent's broadcast, a connector, a second
-          operator. Named as the server named them, with the surface it
-          arrived on. *)
+          operator. Kept apart rather than joined here because the speaker
+          column is narrower than the pair: joined, the fit cuts the middle of
+          one string and the tail it favours is the surface, so the row keeps
+          which door it came in by and loses who came through it. Whoever
+          knows the column decides. *)
 
 type msg_role =
   | Message_user of message_author
@@ -244,16 +284,25 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
     List.filter_map Fun.id
       [ (match memory with
          | Memory_summary -> None
-         | Memory_hidden -> Some "memory:off"
-         | Memory_full -> Some "memory:full")
-      ; (* The clock-free gutter is the resting layout: the speaker mark and
-           label retain who/what, while timestamps and request ids remain one
-           keypress away. Name only the denser projection's added metadata so
-           the header explains what changed instead of describing the default
-           as though something were missing. *)
+         (* Named for the rows it governs, which the pane labels JOURNAL and
+            the footer reaches with Ctrl-N:journal. It read "memory" here and
+            "journal" there, so pressing the key and looking for what moved
+            meant knowing the two words were one axis. *)
+         | Memory_hidden -> Some "journal:off"
+         | Memory_full -> Some "journal:full")
+      ; (* The short clock is the resting layout. It was the bare gutter, on
+           the grounds that a clock on every row was noise -- and it was, back
+           when it drew on every row. It is now drawn only where the minute
+           moved, which over 531 captured rows left it blank on 45% of them,
+           and a gutter that spends seventeen cells without saying when
+           anything happened is the emptier column of the two.
+
+           So the header names the two projections away from it: the bare
+           gutter, because a pane with no clock at all should say that it is
+           the reader's choice, and the full row. *)
         (match origin with
-         | Masc_tui_message_layout.Origin_bare -> None
-         | Masc_tui_message_layout.Origin_inline -> Some "metadata:inline"
+         | Masc_tui_message_layout.Origin_bare -> Some "metadata:off"
+         | Masc_tui_message_layout.Origin_inline -> None
          | Masc_tui_message_layout.Origin_row -> Some "metadata:full")
       ; (match reasoning with
          | Reasoning_hidden -> None
@@ -273,9 +322,11 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start from the resting clock-free gutter, then add a short inline clock,
-   then give the full timestamp and request id a row of their own. One key
-   walks from the densest conversation toward progressively more metadata. *)
+(* One key walks the whole axis, and the walk is unchanged: from the resting
+   short clock to the full timestamp and request id on a row of their own,
+   then to the bare gutter, then back. What moved is where it rests -- see
+   [chat_visibility_summary]. Every stop is still reachable, and the two ends
+   are still one press apart from each other. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -354,6 +405,7 @@ type msg_entry = {
       (** Structural producer position within one request. Inside that request,
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
+  me_image: Masc_tui_image_preview.preview;
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -419,81 +471,67 @@ let fold_memory_summary_runs ~visibility entries =
     go [] [] entries
 ;;
 
-(* A run of Gate rows says one thing: where an external effect ended up. The
-   store keeps a row per phase, which is right -- each is a durable fact -- but
-   drawn one row per phase a single approval took four lines of the pane and
-   repeated the tool name on each.
-
-   Only consecutive rows fold, and only within one approval id. That leaves a
-   request still waiting for an operator on its own line, which is the state
-   worth seeing, and folds the burst of steps that lands when it finally
-   resolves. Two approvals resolving back to back stay two rows.
-
-   The newest row of each approval is the one kept, so the run holds its place
-   in the timeline; its text is recomposed from every phase the run carried. *)
-let fold_gate_runs entries =
-  let close run acc =
-    (* Newest first within the run, and one entry per approval id. Emitting in
-       the order each approval was first seen keeps the rows where the reader
-       last saw them. *)
-    let ids =
-      List.fold_left
-        (fun ids (entry, _) ->
-          match entry.me_gate with
-          | Some gate when not (List.mem gate.gs_approval_id ids) ->
-            gate.gs_approval_id :: ids
-          | Some _ | None -> ids)
-        [] run
-    in
-    List.fold_left
-      (fun acc approval_id ->
-        let steps =
-          List.filter
-            (fun (entry, _) ->
-              match entry.me_gate with
-              | Some gate -> String.equal gate.gs_approval_id approval_id
-              | None -> false)
-            run
+(* Compact folds only a successfully settled approval. Its durable identity
+   survives the continuation's new request id, so prose or a tool block between
+   lifecycle steps cannot make the same approval occupy several status rows.
+   All non-Gate rows keep their original position and text. Problems and
+   unresolved operations remain complete; Full restores every original step. *)
+let project_gate_history ~visibility entries =
+  match visibility with
+  | Tools_full -> entries
+  | Tools_compact ->
+      let module Approvals = Map.Make (struct
+        type t = string * string
+        let compare = Stdlib.compare
+      end) in
+      let key entry =
+        match entry.me_role, entry.me_gate with
+        | Message_status, Some gate
+          when entry.me_keeper_name <> "" && gate.gs_approval_id <> "" ->
+            Some (entry.me_keeper_name, gate.gs_approval_id)
+        | _ -> None
+      in
+      let _, groups = List.fold_left (fun (index, groups) (entry, _) ->
+        let groups = match key entry, entry.me_gate with
+          | Some key, Some gate ->
+              Approvals.update key (fun previous ->
+                Some ((index, gate) :: Option.value ~default:[] previous)) groups
+          | _ -> groups
+        in index + 1, groups) (0, Approvals.empty) entries
+      in
+      let compact = Approvals.map (fun reversed ->
+        let steps = List.rev reversed in
+        let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
+        let has_problem, last_outcome =
+          List.fold_left (fun (problem, last) phase ->
+            let open Masc.Keeper_chat_store in
+            match phase with
+            | Approval_replay_failed | Approval_replay_indeterminate
+            | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
+                true, Some phase
+            | Approval_requested | Approval_resolved_approved
+            | Approval_replay_applied -> problem, Some phase
+            | Approval_continuation_recorded -> problem, last
+            (* The turn that received the replay failed. The run stays open
+               so the row is seen; not an outcome, so [last] holds. *)
+            | Approval_continuation_failed -> true, last)
+            (false, None) phases
         in
-        match steps with
-        | [] -> acc
-        | (newest, extra) :: _ ->
-          (* [steps] was filtered on [me_gate] being a step of this approval,
-             so the map is total over what it keeps. *)
-          let phases =
-            List.rev
-              (List.filter_map
-                 (fun (entry, _) ->
-                   Option.map (fun gate -> gate.gs_phase) entry.me_gate)
-                 steps)
-          in
-          let tool =
-            match newest.me_gate with Some gate -> gate.gs_tool | None -> None
-          in
-          (* The summary is a fact about the approval, so every step row of
-             the run carries the same one; the newest is read first only
-             because it is already in hand. *)
-          let summary =
-            List.find_map
-              (fun (entry, _) ->
-                match entry.me_gate with
-                | Some gate -> gate.gs_summary
-                | None -> None)
-              steps
-          in
-          (match Masc_tui_gate_text.fold_line ~phases ~tool ~summary with
-           | Some text -> ({ newest with me_text = text }, extra) :: acc
-           | None -> (newest, extra) :: acc))
-      acc ids
-  in
-  let rec go acc run = function
-    | [] -> List.rev (close run acc)
-    | ((entry, _) as row) :: rest -> (
-      match entry.me_gate with
-      | Some _ -> go acc (row :: run) rest
-      | None -> go (row :: close run acc) [] rest)
-  in
-  go [] [] entries
+        match reversed, has_problem, last_outcome with
+        | (last_index, newest) :: _ :: _, false,
+          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+            let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
+            Option.map (fun text ->
+              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
+        | _ -> None) groups
+      in
+      List.filter_mapi (fun index ((entry, extra) as row) ->
+        match Option.bind (key entry) (fun key -> Approvals.find_opt key compact) with
+        | Some (Some (last_index, text)) ->
+            if index = last_index then Some ({ entry with me_text = text }, extra)
+            else None
+        | Some None | None -> Some row) entries
 ;;
 
 type chat_turn = {
@@ -828,33 +866,66 @@ type turn_edge =
    reopen it around the interruption -- drawing two turns where the keeper took
    one. The edges are the request's first and last row in this list, not the
    gaps between neighbours. *)
+(* A bracket says everything between the corners is one turn, and the pane has
+   one column to say it in. So a turn can only be bracketed over rows that sit
+   together.
+
+   This used to take each request's first and last row anywhere in the list.
+   When two turns interleaved, both drew their corners into the same column and
+   the claims crossed: on a live pane three [Rail_opens] arrived before any
+   close, and the first turn's bracket ran thirty-one minutes past a date
+   divider with three other turns' rows inside it. Nothing was left to say
+   which turn a [Rail_says] belonged to.
+
+   Rows outside every turn stay transparent. A journal commit or somebody
+   else's broadcast draws a siding meeting the line rather than a piece of it,
+   so a turn's rows are still together across one -- that is increment 2 of
+   RFC-chat-turn-rail-and-side-lanes, and it is why the interruption cases
+   below keep one bracket rather than three.
+
+   What this gives up: two rows of one turn, split by another turn's row, now
+   draw as two lone rows rather than one bracket. That much is what the column
+   can carry -- they are not adjacent, and a corner pair around them would be
+   claiming otherwise. *)
 let mark_turn_edges rows =
-  let first = Hashtbl.create 16 in
-  let last = Hashtbl.create 16 in
-  List.iteri
-    (fun index row ->
-      match chat_row_lane row with
-      | Lane_unowned | Lane_memory -> ()
-      | Lane_turn request_id ->
-          if not (Hashtbl.mem first request_id) then
-            Hashtbl.replace first request_id index;
-          Hashtbl.replace last request_id index)
-    rows;
+  let edges = Hashtbl.create 16 in
+  let close_run = function
+    | [] -> ()
+    | [ only ] -> Hashtbl.replace edges only Turn_alone
+    | opens_at :: rest ->
+        Hashtbl.replace edges opens_at Turn_opens;
+        let rec mark = function
+          | [] -> ()
+          | [ closes_at ] -> Hashtbl.replace edges closes_at Turn_closes
+          | index :: tl ->
+              Hashtbl.replace edges index Turn_continues;
+              mark tl
+        in
+        mark rest
+  in
+  (* [run] holds the rows of the turn being walked, newest first. *)
+  let rec walk running run = function
+    | [] -> close_run (List.rev run)
+    | (index, row) :: tl -> (
+        match chat_row_lane row with
+        | Lane_unowned | Lane_memory -> walk running run tl
+        | Lane_turn request_id ->
+            if
+              match running with
+              | Some current -> String.equal current request_id
+              | None -> false
+            then walk running (index :: run) tl
+            else (
+              close_run (List.rev run);
+              walk (Some request_id) [ index ] tl))
+  in
+  walk None [] (List.mapi (fun index row -> (index, row)) rows);
   List.mapi
     (fun index row ->
-      let edge =
-        match chat_row_lane row with
-        | Lane_unowned | Lane_memory -> Turn_outside
-        | Lane_turn request_id -> (
-            let opens = Hashtbl.find_opt first request_id = Some index in
-            let closes = Hashtbl.find_opt last request_id = Some index in
-            match opens, closes with
-            | true, true -> Turn_alone
-            | true, false -> Turn_opens
-            | false, true -> Turn_closes
-            | false, false -> Turn_continues)
-      in
-      (row, edge))
+      ( row
+      , match Hashtbl.find_opt edges index with
+        | Some edge -> edge
+        | None -> Turn_outside ))
     rows
 ;;
 
@@ -1348,6 +1419,20 @@ type runtime_detail_target =
   | Runtime_lane_candidate of { lane_id : string; runtime_id : string }
   | Runtime_catalog_entry of { runtime_id : string }
 
+type runtime_probe_annotation =
+  | Runtime_probe_note of string
+  | Runtime_probe_failure of string
+
+let runtime_probe_status_label = function
+  | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
+  | status -> Tui_decode.runtime_provider_status_to_string status
+
+let runtime_probe_annotation ~status detail =
+  Option.map (fun detail ->
+    match status with
+    | Tui_decode.Runtime_provider_skipped_cli -> Runtime_probe_note detail
+    | _ -> Runtime_probe_failure detail) detail
+
 (** Planning surface sub-mode *)
 type planning_mode =
   | Planning_list
@@ -1368,6 +1453,7 @@ type lanes_mode =
 type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
+  | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -1448,6 +1534,23 @@ type observer_status =
       at : float;
       events : int;  (** frames the stream delivered before it closed *)
     }
+
+type observer_replay_status =
+  | Observer_replay_unobserved
+  | Observer_replay_scoped of Sse_wire.observer_handshake
+  | Observer_replay_unavailable of string
+
+let observer_replay_description = function
+  | Observer_replay_unobserved -> "Replay: not negotiated"
+  | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
+      "Replay: live from connection; earlier history not loaded"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
+      "Replay: retained window resumed; history completeness unknown"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
+      "Replay reset: server instance changed; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
+      "Replay reset: previous cursor had no instance; disconnected history not recovered"
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
@@ -1684,6 +1787,14 @@ let board_sort_label = function
   | Board_recent -> "recent"
   | Board_updated -> "updated"
   | Board_discussed -> "discussed"
+
+let board_sort_of_string = function
+  | "hot" -> Some Board_hot
+  | "trending" -> Some Board_trending
+  | "recent" -> Some Board_recent
+  | "updated" -> Some Board_updated
+  | "discussed" -> Some Board_discussed
+  | _ -> None
 
 let board_sort_explanation = function
   | Board_hot -> "net votes first; newer breaks ties"
@@ -2011,6 +2122,14 @@ type surface =
   | Tools
   | System_logs
 
+type browser_lane_visibility =
+  | Browser_lane_hidden
+  | Browser_lane_shown of {
+      return_surface : surface;
+      return_search : string option;
+      return_composer_focused : bool;
+    }
+
 (* The Tab cycle and the strip drawn above every surface share this order,
    so the strip cannot disagree with where Tab actually goes. Labels are the
    strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
@@ -2033,7 +2152,6 @@ let surface_ring : (surface * string) list =
     (Planning, "Planning");
     (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Runtime, "Runtime");
     (Config, "Config");
   ]
 
@@ -2056,8 +2174,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -2221,7 +2338,10 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
-let runtime_listing_chrome ~error = listing_chrome ~error + 2
+let runtime_listing_chrome ~error ~action_error ~picker_rows =
+  listing_chrome ~error + 2
+  + (if Option.is_some action_error then 2 else 0)
+  + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
 let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
@@ -2381,6 +2501,20 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+(* Scope and path together name one thing to fetch. The same relative path
+   under two scopes is two different things -- two histories, two directory
+   listings -- so a request and the reply that comes back for it are the same
+   request only when both halves agree.
+
+   The Code pane asks for a directory listing per scope change, and a reply
+   that named only the directory was accepted under whichever scope was
+   current when it landed. Switch scope while one is in flight at the same
+   relative directory and the late reply overwrites the new scope's rows with
+   the old scope's (#33946). *)
+let code_scope_path_equal (left_scope, left_path) (right_scope, right_path) =
+  left_scope = right_scope && String.equal left_path right_path
+;;
+
 (* One row of the file pane's history view. Git owns committed history;
    Keeper file changes are durable tool-call facts. They share only their
    timestamp and exact repository address, which is enough to sort a display
@@ -2427,6 +2561,14 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
+type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
+
+type tools_read_inflight =
+  { tri_generation : int
+  ; tri_keeper : string option
+  ; tri_pending : tools_read_part list
+  }
+
 type runtime_param_edit_mode = Friendly_value | Advanced_json
 
 type runtime_param_edit =
@@ -2435,6 +2577,10 @@ type runtime_param_edit =
   ; rpe_draft : string
   ; rpe_replace_on_type : bool
   ; rpe_mode : runtime_param_edit_mode
+  ; rpe_choices : string list
+    (* Carried on the edit so the key handler can ask what this param accepts
+       without holding the row it came from. Empty means the reader types the
+       value. *)
   }
 
 let runtime_param_type_name value_type =
@@ -2462,6 +2608,7 @@ let runtime_param_edit_of_row ~advanced (row : Tui_decode.runtime_param_row) =
       (if advanced then row.rpr_current_json else runtime_param_friendly_text row)
   ; rpe_replace_on_type = true
   ; rpe_mode = (if advanced then Advanced_json else Friendly_value)
+  ; rpe_choices = row.rpr_choices
   }
 
 let runtime_param_edit_append edit text =
@@ -2490,6 +2637,31 @@ let runtime_param_edit_toggle_bool edit =
   in
   { edit with rpe_draft = next; rpe_replace_on_type = false }
 
+(* Walk a closed set. [step] is +1 or -1; a draft that is not one of the
+   choices — a value typed by hand, or the parameterized form of a partly
+   closed domain — starts the walk at the first choice rather than being
+   silently kept, because the reader pressed a key asking for a different
+   value. *)
+let runtime_param_edit_cycle_choice edit ~step =
+  match edit.rpe_choices with
+  | [] -> edit
+  | choices ->
+    let count = List.length choices in
+    let current = String.trim edit.rpe_draft in
+    let index =
+      let rec find i = function
+        | [] -> None
+        | c :: rest -> if String.equal c current then Some i else find (i + 1) rest
+      in
+      find 0 choices
+    in
+    let next =
+      match index with
+      | None -> 0
+      | Some i -> ((i + step) mod count + count) mod count
+    in
+    { edit with rpe_draft = List.nth choices next; rpe_replace_on_type = false }
+
 let runtime_param_edit_value edit =
   let parse_json () =
     try Ok (Yojson.Safe.from_string edit.rpe_draft) with
@@ -2513,6 +2685,12 @@ let runtime_param_edit_value edit =
         | Some value when Float.is_finite value -> Ok (`Float value)
         | Some _ | None -> Error "Enter a number")
      | "string" -> Ok (`String edit.rpe_draft)
+     | "enum" ->
+       (* A named value is sent as-is: the registry owns the grammar, so a
+          form this picker does not list (a parameterized one, typed by hand)
+          must still reach it and be judged there rather than here. *)
+       let value = String.trim edit.rpe_draft in
+       if String.equal value "" then Error "Choose a value" else Ok (`String value)
      | _ -> parse_json ())
 
 type memory_sort_order =
@@ -2548,12 +2726,55 @@ let memory_category_filter_label = function
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
+type memory_state =
+  | Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+
+let memory_state (k : Tui_decode.memory_keeper_health) =
+  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
+  then Memory_read_error
+  else if
+    (not k.mkh_snapshot_present)
+    && k.mkh_librarian_failures > 0
+    && not k.mkh_source_snapshot_present
+  then Memory_starving
+  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
+  then Memory_source_only
+  else if not k.mkh_snapshot_present
+  then Memory_no_current
+  else if k.mkh_librarian_failures > 0
+  then Memory_degraded
+  else if
+    List.exists
+      (fun alert ->
+        match Tui_decode.memory_alert_severity alert.Tui_decode.ma_code with
+        | `Warn -> true
+        | `Error -> false)
+      k.mkh_alerts
+  then Memory_warning
+  else Memory_ordinary
+
+let memory_state_label = function
+  | Memory_ordinary -> "ok"
+  | Memory_warning -> "warning"
+  | Memory_degraded -> "degraded"
+  | Memory_no_current -> "no-current"
+  | Memory_source_only -> "source-only"
+  | Memory_starving -> "STARVING"
+  | Memory_read_error -> "read-error"
+
 type memory_overview_sort =
   | Mem_overview_facts
   | Mem_overview_size
   | Mem_overview_delta
   | Mem_overview_state
   | Mem_overview_name
+  | Mem_overview_updated
 
 let memory_overview_sort_label = function
   | Mem_overview_facts -> "Facts (Most)"
@@ -2561,13 +2782,15 @@ let memory_overview_sort_label = function
   | Mem_overview_delta -> "Delta (Recent changes)"
   | Mem_overview_state -> "State (Attention first)"
   | Mem_overview_name -> "Name (A-Z)"
+  | Mem_overview_updated -> "Updated (Newest first)"
 
 let next_memory_overview_sort = function
   | Mem_overview_facts -> Mem_overview_size
   | Mem_overview_size -> Mem_overview_delta
   | Mem_overview_delta -> Mem_overview_state
   | Mem_overview_state -> Mem_overview_name
-  | Mem_overview_name -> Mem_overview_facts
+  | Mem_overview_name -> Mem_overview_updated
+  | Mem_overview_updated -> Mem_overview_facts
 
 type metrics_section =
   | Section_fleet
@@ -2586,7 +2809,7 @@ let prev_metrics_section = function
 
 let metrics_section_label = function
   | Section_fleet -> "Engine & Scheduler"
-  | Section_resources -> "Fleet & Velocity"
+  | Section_resources -> "Work & Outcomes"
   | Section_tools -> "Memory & Gate Safety"
 
 (* What the [:] palette is for right now. A jump lists every destination
@@ -2601,6 +2824,386 @@ type palette_mode =
       choice_line : int;  (* 1-based, what the title says *)
     }
 
+(* Browser reads remain separate from connector routing. A request generation
+   belongs to this view instance, so late browser replies cannot replace a
+   different source or tab after the operator moves. *)
+module Browser_lane_view = struct
+  type source = Live | Automation
+  type browser = Firefox | Zen
+  type client = { client_id : string; browser : browser }
+  type discovery = Read_after_discovery | Choose_client
+  type tab = { id : int; title : string; url : string; active : bool }
+  type page = {
+    tab_id : int; title : string; url : string; text : string;
+    chars : int; truncated : bool;
+  }
+  type reading = {
+    tabs : tab list; page : page option; source : source; client_id : string option;
+    elapsed_ms : float;
+  }
+  type screenshot = {
+    source : source; client_id : string option; tab_id : int; title : string; url : string;
+    data : string; elapsed_ms : float;
+  }
+  type scene = { source : source; client_id : string option; tab_id : int;
+    content : Masc.Browser_scene.t; elapsed_ms : float }
+  type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
+    | Scene_read of int
+    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
+    | Viewport_refresh of { tab_id : int; expected_url : string }
+    | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
+  type load = Idle | No_browser | Loading of int * operation | Failed of string
+  type t = {
+    clients : client list; selected_client : client option; client_picker : int option;
+    source : source; selected_tab : int option; scroll : int;
+    reading : reading option; load : load; url_draft : string option;
+    scene : scene option; scene_cursor : int;
+  }
+
+  let source_name = function Live -> "live" | Automation -> "automation"
+  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
+  let client_id t = match t.source, t.selected_client with
+    | Live, Some client -> Some client.client_id
+    | Live, None | Automation, _ -> None
+  let browser_label t = match t.source, t.selected_client with
+    | Automation, _ -> "browser"
+    | Live, Some client -> browser_name client.browser
+    | Live, None -> "choose browser"
+  let context_label t =
+    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
+  let create () =
+    { clients = []; selected_client = None; client_picker = None;
+      source = Live; selected_tab = None; scroll = 0;
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0 }
+  let switch_source source _t = { (create ()) with source }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0 }
+  let fail_action detail t =
+    let url_draft = match t.load with
+      | Loading (_, Goto url) -> Some url
+      | Loading _ | Idle | No_browser | Failed _ -> t.url_draft
+    in
+    { t with load = Failed detail; url_draft }
+  let awaiting_browser t = match t.load with
+    | No_browser -> true
+    | Idle | Loading _ | Failed _ -> false
+  type read_status = Unread | Reading | Operating | Read_ok | Read_failed | Browser_missing
+  let read_status t =
+    match t.load, t.reading with
+    | No_browser, _ -> Browser_missing
+    | Idle, None -> Unread
+    | Idle, Some _ -> Read_ok
+    | Loading (_, Read), _ -> Reading
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
+    | Failed _, _ -> Read_failed
+  let read_status_label = function
+    | Unread -> "HTTP unread"
+    | Reading -> "HTTP reading"
+    | Operating -> "HTTP action"
+    | Read_ok -> "HTTP read ok"
+    | Read_failed -> "Read/action failed"
+    | Browser_missing -> "Browser not connected"
+  let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
+  let request_body t =
+    `Assoc ([ "lane", `String (source_name t.source) ]
+            @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
+            @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
+  let selected_client_available t = match t.source, t.selected_client with
+    | Automation, _ -> true
+    | Live, None -> false
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+  let choose_client client t =
+    { t with selected_client = Some client; selected_tab = None;
+      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None }
+  let accept_clients ~generation result t =
+    match t.load with
+    | Loading (current, Discover purpose) when current = generation ->
+        (match result with
+         | Error detail -> { t with clients = []; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+             scroll = 0; client_picker = Some 0; load = Failed detail }, false
+         | Ok clients ->
+             let next = { t with clients; load = Idle } in
+             match t.selected_client, clients, purpose with
+             | None, [client], Read_after_discovery -> choose_client client next, true
+             | Some _, _, _ when selected_client_available next ->
+                 { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
+                 purpose = Read_after_discovery
+             | _, _, _ ->
+                 let load = match t.selected_client, clients with
+                   | _, [] -> No_browser
+                   | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
+                   | None, _ -> Idle
+                 in
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scroll = 0;
+                   client_picker = Some 0; load }, false)
+    | Loading _ | Idle | No_browser | Failed _ -> t, false
+  let ( let* ) = Result.bind
+  let field name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> Error ("missing " ^ name))
+    | _ -> Error "expected object"
+  let string = function `String s -> Ok s | _ -> Error "expected string"
+  let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
+  let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
+  let parse_source = function
+    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
+    | _ -> Error "unknown browser source"
+  let get parse name json = let* value = field name json in parse value
+  let parse_client json =
+    let* client_id = get string "clientId" json in
+    let* browser = get (function
+      | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
+      | _ -> Error "unknown native browser") "browser" json in
+    if String.trim client_id = "" then Error "empty browser client ID"
+    else Ok { client_id; browser }
+  let decode_clients json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* clients = field "clients" data in
+      match clients with
+      | `List rows ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | row :: rest ->
+                let* client = parse_client row in
+                if List.exists (fun (old : client) -> old.client_id = client.client_id) acc
+                then Error "duplicate browser client ID"
+                else loop (client :: acc) rest
+          in loop [] rows
+      | _ -> Error "expected browser clients array"
+  let parse_client_id source json =
+    let* value = field "clientId" json in
+    match source, value with
+    | Live, `String id when String.trim id <> "" -> Ok (Some id)
+    | Automation, `Null -> Ok None
+    | _ -> Error "browser client ID does not match source"
+  let parse_tab json =
+    let* id = get integer "id" json in
+    let* title = get string "title" json in
+    let* url = get string "url" json in
+    let* active = get boolean "active" json in
+    Ok { id; title; url; active }
+  let parse_page = function
+    | `Null -> Ok None
+    | json ->
+        let* tab_id = get integer "tabId" json in
+        let* title = get string "title" json in
+        let* url = get string "url" json in
+        let* text = get string "text" json in
+        let* chars = get integer "chars" json in
+        let* truncated = get boolean "truncated" json in
+        Ok (Some { tab_id; title; url; text; chars; truncated })
+  let parse_tabs = function
+    | `List tabs ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest -> let* tab = parse_tab json in loop (tab :: acc) rest
+        in loop [] tabs
+    | _ -> Error "expected tabs array"
+  let milliseconds = function
+    | `Float f when Float.is_finite f && f >= 0. -> Ok f
+    | `Int n when n >= 0 -> Ok (float_of_int n)
+    | _ -> Error "expected nonnegative elapsed_ms"
+  let decode json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* tabs = get parse_tabs "tabs" data in
+      let* page = get parse_page "page" data in
+      let* source = get parse_source "source" data in
+      let* client_id = parse_client_id source data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      match page with
+      | Some page when not (List.exists (fun (tab : tab) -> tab.id = page.tab_id) tabs) ->
+          Error "page tab is absent from returned tabs"
+      | _ -> Ok { tabs; page; source; client_id; elapsed_ms }
+  let decode_screenshot json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* value = field "data" json in
+      let* source = get parse_source "source" value in
+      let* client_id = parse_client_id source value in
+      let* tab_id = get integer "tabId" value in
+      let* title = get string "title" value in
+      let* url = get string "url" value in
+      let* mime = get string "mimeType" value in
+      let* data = get string "data" value in
+      let* elapsed_ms = get milliseconds "elapsed_ms" value in
+      if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
+      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
+
+  let decode_scene json =
+    let* ok = get boolean "ok" json in
+    if not ok then let* detail = get string "error" json in Error detail
+    else
+      let* data = field "data" json in
+      let* source = get parse_source "source" data in
+      let* client_id = parse_client_id source data in
+      let* tab_id = get integer "tabId" data in
+      let* elapsed_ms = get milliseconds "elapsed_ms" data in
+      let* content = Masc.Browser_scene.of_json data in
+      Ok {source;client_id;tab_id;content;elapsed_ms}
+
+  let accept_scene ~generation (result : (scene, string) result) t =
+    match t.load with
+    | Loading (current, (Scene_read tab_id | Scene_click {tab_id;_})) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id ->
+             {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
+         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | _ -> t
+
+  let scene_targets t = match t.scene with
+    | None -> []
+    | Some scene ->
+        let _, nodes = List.fold_left (fun (seen, nodes) (node : Masc.Browser_scene.node) ->
+          if List.mem node.node_id seen then seen, nodes
+          else node.node_id :: seen, node :: nodes) ([], []) scene.content.nodes in
+        List.rev nodes
+
+  let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+  let scene_context t =
+    match t.scene, selected_scene_target t with
+    | Some scene, Some node ->
+        let source = match node.source_context with
+          | Masc.Browser_source_context.Unmapped -> `Null
+          | Invalid detail -> `Assoc ["error", `String detail]
+          | Located source -> `Assoc ["file",`String source.file;"line",`Int source.line;
+              "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
+              "sha256",`String source.digest] in
+        Some (Yojson.Safe.pretty_to_string (`Assoc [
+          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "lane",`String (source_name scene.source);
+          "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
+          "tabId",`Int scene.tab_id;"url",`String scene.content.url;
+          "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "tag",`String node.tag;"text",`String node.text;"source",source]))
+    | _ -> None
+
+  let viewport_request ~tab_id ~expected_url ~y t =
+    `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
+       "action", `String "scroll"; "expectedUrl", `String expected_url;
+       "x", `Int 0; "y", `Int y]
+      @ (match client_id t with None -> [] | Some id -> ["clientId", `String id]))
+
+  (* Settle the browser operation even when a later key cancelled opening the
+     image. The caller separately checks image intent before drawing. *)
+  let accept_screenshot ~generation (result : (screenshot, string) result) t =
+    match t.load with
+    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_}))
+      when current = generation ->
+        (match result with
+         | Ok screenshot when screenshot.source = t.source
+                              && screenshot.client_id = client_id t
+                              && screenshot.tab_id = requested_tab
+                              && t.selected_tab = Some requested_tab
+                              && (match t.load with
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_scroll {expected_url;_})) -> screenshot.url = expected_url
+                                  | _ -> true) ->
+             { t with load = Idle }, Some screenshot
+         | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
+         | Error detail -> { t with load = Failed detail }, None)
+    | Loading _ | Idle | No_browser | Failed _ -> t, None
+
+  let accept ~generation (result : (reading, string) result) t =
+    match t.load with
+    | Loading (current, Read) when current = generation ->
+        (match result with
+         | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
+             { t with reading = Some reading; load = Idle;
+               selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
+         | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
+         | Error detail -> { t with load = Failed detail })
+    | Loading _ | Idle | No_browser | Failed _ -> t
+  let select_tab direction t =
+    match t.reading with
+    | None -> t
+    | Some reading ->
+        let count = List.length reading.tabs in
+        if count = 0 then t else
+        let current =
+          let rec find i = function
+            | [] -> 0
+            | (tab : tab) :: rest ->
+                if Some tab.id = t.selected_tab then i else find (i + 1) rest
+          in find 0 reading.tabs
+        in
+        let index = (current + direction + count) mod count in
+        match List.nth_opt reading.tabs index with
+        | None -> t
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
+end
+
+let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+  let wrap text =
+    String.split_on_char '\n'
+      (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
+    |> List.concat_map (fun line -> if line = "" then [""] else
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+  match view.scene with
+  | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
+      let rec index i = function
+        | [] -> None
+        | (candidate : Masc.Browser_scene.node) :: rest ->
+            if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+      let label = match node.kind with
+        | Text -> node.tag | Raster -> "image · Ctrl-O"
+        | Control {disabled=true;_} -> "disabled"
+        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
+      let prefix = match index 0 (Browser_lane_view.scene_targets view) with
+        | None -> ""
+        | Some i -> Printf.sprintf "[%s%d %s] "
+            (if i = view.scene_cursor then ">" else "") (i + 1) label in
+      wrap (prefix ^ node.text)) scene.content.nodes
+  | None -> match view.reading with
+  | None -> []
+  | Some reading ->
+      match reading.page with
+      | None -> []
+      | Some page ->
+          String.split_on_char '\n'
+            (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
+          |> List.concat_map (fun line ->
+              if line = "" then [""] else
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line)
+
+let browser_lane_url_line ~cols draft =
+  let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
+  "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
+
+type workspace_activity_read = {
+  war_at : float;
+  war_hours : float;
+  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
+}
+
+type runtime_config_reading = {
+  rcv_path : string;
+  rcv_rows : (string * string) list list;
+  rcv_metadata : Masc_tui_runtime_config_view.metadata;
+}
+
+(* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
+   RGB plus what to title it. The spectator downsamples the pixels itself. *)
+type msx_menu_mode = Boot_game | Change_disk
+
+type msx_frame = {
+  msx_number : int;
+  msx_width : int;
+  msx_height : int;
+  msx_rgb : string;
+  msx_mode : string;
+  msx_cartridge : string option;
+  msx_disk : string option;
+  msx_players : string list;  (* who pressed within the server's window, newest first *)
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -2610,6 +3213,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
+  mutable task_flow: Masc_tui_task_flow.t option;
   mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
@@ -2632,6 +3236,11 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  (* Whether ^Y ending a voice capture also sends what was heard
+     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     in the draft either way, and that draft is also where a spoken
+     half-sentence waits for typing. *)
+  mutable voice_send_on_stop: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* Cursor over the overlay's actionable rows (running / just finished);
@@ -2642,6 +3251,7 @@ type state = {
      the poll time that saw them finish. Fed by comparing consecutive
      keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
   mutable keeper_turn_finishes: (string * float) list;
+  mutable keeper_turns_observed_at: float option;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -2682,6 +3292,8 @@ type state = {
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* One event-derived projection; live presentation inputs are never cached. *)
+  mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
@@ -2718,6 +3330,28 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
+  mutable image_request_generation: int;
+  (* Any new input cancels an outstanding asynchronous image preview. *)
+  (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
+     set the loop draws no frames and every key belongs to the emulator. The
+     machine is [Option] so it exists only once the screen has been opened,
+     and it survives closing -- reopening continues the same frame. *)
+  mutable msx_open: bool;
+  (* RFC-0439 §3.7: the TUI no longer owns a machine. The spectator caches
+     the last frame the server handed it and when it last asked. *)
+  mutable msx_frame: msx_frame option;
+  mutable msx_last_poll_ns: int64;
+  (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
+     inventory to plug into the shared machine. It is an overlay on the MSX
+     screen -- while [msx_menu_open] the keyboard drives the picker, not the
+     game, so its keys never reach the emulator. [msx_carts] is the inventory
+     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+  mutable msx_menu_open: bool;
+  mutable msx_notice: string option;
+  mutable msx_menu_mode: msx_menu_mode;
+  mutable msx_carts: string list;
+  mutable msx_menu_index: int;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -2804,7 +3438,9 @@ type state = {
      surfaces read the same file the same way. Plain text is derived where it
      is needed rather than stored beside them: two copies of the same rows
      drift the moment one is rebuilt and the other is not. *)
-  mutable runtime_config_view: (string * (string * string) list list) option;
+  mutable runtime_config_view: runtime_config_reading option;
+  mutable runtime_config_status_open: bool;
+  mutable runtime_config_status_scroll: int;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -2827,6 +3463,7 @@ type state = {
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable keeper_run_cursor: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -2992,6 +3629,7 @@ type state = {
   mutable ask_answer_mode: ask_answer_mode;
   mutable ask_cursor: int;
   mutable ask_question_cursor: int;
+  mutable ask_question_scroll: int;
   (* One answer at a time. The draft carries the ask it belongs to, so moving
      the cursor cannot post an answer under the wrong question. *)
   mutable ask_draft: Masc_tui_ask_projection.draft option;
@@ -3007,6 +3645,10 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* Successful reads of each owning endpoint, independent of roster refresh.
+     A failed refresh keeps both the receipt and the previous rows. *)
+  mutable keeper_tool_approvals_observed: bool;
+  mutable keeper_tool_approvals_read: Snapshot_read.t;
   (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
      Rides the same tick as the approvals above, for the same reason: the
      "answering now" badge is drawn from every surface, so it cannot wait
@@ -3026,10 +3668,14 @@ type state = {
   mutable gate_rules: Tui_decode.gate_rule list;
   mutable gate_rules_unavailable: string option;
   mutable gate_error: string option;
+  mutable gate_snapshot_observed: bool;
+  mutable gate_snapshot_read: Snapshot_read.t;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
+  mutable keeper_tool_modes_observed: bool;
+  mutable keeper_tool_modes_error: string option;
   (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
      somebody singled out are here, so absence means "follows the workspace"
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
@@ -3116,6 +3762,7 @@ type state = {
      arm time and a press on a different row re-arms for that row. *)
   mutable board_vote_armed: (string * bool) option;
   mutable planning: planning_snapshot option;
+  mutable planning_baseline: planning_snapshot option;
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
@@ -3135,6 +3782,7 @@ type state = {
      ok/unknown split so a failed store read never draws as "no schedules". *)
   mutable schedules: schedule_snapshot option;
   mutable schedules_error: string option;
+  mutable schedules_read: Snapshot_read.t;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
@@ -3175,9 +3823,14 @@ type state = {
   mutable lanes_standalone_cursor: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
+  mutable lane_runs_next: (float * string) option;
+  mutable lane_runs_total: int option;
+  mutable lane_runs_loading: bool;
+  mutable lane_runs_generation: int;
   mutable lane_runs_cursor: int;
   mutable lane_runs_scroll: int;
   mutable lane_run_detail: Tui_decode.lane_run_detail option;
+  mutable lane_run_detail_generation: int;
   mutable lane_run_detail_error: string option;
   mutable lane_run_detail_scroll: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
@@ -3190,14 +3843,19 @@ type state = {
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
   mutable tools_inventory: Tui_decode.tool_snapshot option;
+  mutable tools_request_generation: int;
+  mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable skills_catalog: Tui_decode.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
-  mutable tools_async_observation: Yojson.Safe.t option;
+  mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_lane_visibility: browser_lane_visibility;
+  mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -3225,6 +3883,9 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  mutable workspace_activity_repo: string option;
+  mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
+  mutable workspace_activity_cursor: int;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_scroll: int;
@@ -3318,11 +3979,11 @@ type state = {
   mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
-  (* The file pane's notes view: m on an open file (repository scope only --
-     the annotation routes are scoped by the server-minted codebase slug,
-     which only a Repositories row carries) swaps the content for the notes
-     anchored to the file. *)
-  (* The notes anchored to the open file, keyed by its path. *)
+  (* The file pane's notes view: m on an open file swaps the content for
+     the memos written as comments in the file itself. Read off the rows
+     once at load, like the width above: the memos change when the file
+     does, and rebuilding them per frame walks every row of it. *)
+  mutable code_memos: Masc_tui_memo.found list;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
   (* The file pane's blame margin: b on an open file fetches who last touched
@@ -3401,6 +4062,8 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
+  mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -3409,7 +4072,10 @@ type state = {
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
           tools reuse it rather than minting one per attempt. Cleared when
-          the server refuses it. *)
+          the server explicitly reports it missing or conflicting. *)
+  mutable observer_cursor: Sse_wire.observer_cursor option;
+      (** Last applied complete event, scoped to the responding process. *)
+  mutable observer_replay: observer_replay_status;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -3417,6 +4083,9 @@ type state = {
   mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
   mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
   mutable acting_filter: Masc_tui_acting.filter;
+  mutable acting_cursor: int;
+  mutable acting_detail: Masc_tui_acting.entry option;
+  mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -3449,6 +4118,10 @@ type state = {
      message: switching keepers or abandoning the draft must not leave an image
      attached to whatever is typed later. *)
   mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
+  (* Image references staged with :ref (#33728) — a URL the provider fetches
+     or a Files-API id. Same lifecycle as [msg_attachments]: part of the unsent
+     message, consumed by the send that consumes the draft. *)
+  mutable msg_references: Masc_tui_keeper_chat_projection.image_reference list;
   (* Ctrl-O weighs a staged image against a .png the conversation named by
      which is newer, so the batch carries a recency marker: an anchor to the
      history row that was newest when the newest attachment entered the
@@ -3608,7 +4281,72 @@ type state = {
    paint had to draw compact is not showing the field, and the two identity
    fields already refused keys on that ground. Passed in rather than read,
    because this module cannot see a frame. *)
+(* Browser is an operator reader inside Connectors. A retained
+   reader model must not change chrome after the operator leaves its view. *)
+let browser_lane_on_screen (state : state) =
+  match state.view, state.browser_lane_visibility with
+  | Connectors, Browser_lane_shown _ -> state.browser_lane
+  | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
+
+let leave_browser_lane_for_surface state destination =
+  if destination <> state.view then
+    state.browser_lane_visibility <- Browser_lane_hidden
+
+let show_browser_lane state =
+  if Option.is_none (browser_lane_on_screen state) then
+    state.browser_lane_visibility <- Browser_lane_shown {
+      return_surface = state.view;
+      return_search = state.search;
+      return_composer_focused = state.composer_focused;
+    };
+  state.browser_lane <- Some (match state.browser_lane with
+    | Some view -> view
+    | None -> Browser_lane_view.create ());
+  state.view <- Connectors;
+  state.search <- None
+
+let hide_browser_lane state =
+  match state.browser_lane_visibility with
+  | Browser_lane_hidden -> ()
+  | Browser_lane_shown previous ->
+      state.browser_lane_visibility <- Browser_lane_hidden;
+      state.view <- previous.return_surface;
+      state.search <- previous.return_search;
+      state.composer_focused <- previous.return_composer_focused
+
+(* Discard belongs to this capture until it settles. A later stop/keep key
+   must not revive a transcript whose recording the operator abandoned. *)
+let request_voice_stop (state : state) request =
+  match state.voice_stop_requested with
+  | Some Masc.Voice_bridge.Discard -> ()
+  | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
+      state.voice_stop_requested <- Some request
+
+let release_composer_for_browser_reader (state : state) =
+  state.composer_focused <- false;
+  state.voice_continuous <- None;
+  state.voice_floor <- None;
+  state.voice_level_db <- None;
+  (* Keep the occupied capture until its callback, so returning to the
+     composer cannot start a second microphone while this one shuts down. *)
+  if Option.is_some state.voice_capture then
+    request_voice_stop state Masc.Voice_bridge.Discard
+
+(* The transcript may already be in the mailbox when the reader opens.
+   Settle ownership before deciding whether its text can reach the draft. *)
+let settle_voice_transcript (state : state) ~keeper =
+  if state.voice_capture <> Some keeper then None
+  else begin
+    let disposition = Option.value state.voice_stop_requested
+        ~default:Masc.Voice_bridge.Keep_what_was_heard in
+    state.voice_capture <- None;
+    state.voice_level_db <- None;
+    Some disposition
+  end
+
 type text_input_target =
+  | Text_browser_url
+  | Text_ask_answer
   | Text_preset_name
   | Text_runtime_param
   | Text_palette
@@ -3633,8 +4371,14 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if state.view = Approvals && not compact_viewport
+          && not state.context_inspector_open && Option.is_some state.ask_text_entry
+  then Some Text_ask_answer
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
+  else if state.view = Connectors && not compact_viewport
+          && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
+  then Some Text_browser_url
   else if identity_surface && Option.is_some state.identity_app_form then
     Some Text_identity_app_form
   else if identity_surface && Option.is_some state.identity_filter then
@@ -3922,11 +4666,124 @@ let keeper_reading (state : state) (keeper : keeper) :
         keeper.k_name
   }
 
+let acting_flat_entries state =
+  List.filter
+    (fun entry -> Masc_tui_acting.visible state.acting_filter entry.Masc_tui_acting.ae_event)
+    state.acting
+
+let selected_acting_entry state =
+  match state.acting_filter with
+  | Masc_tui_acting.Turns -> None
+  | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
+let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
+  List.map (fun run -> Tui_decode.Fusion_retained_run run) snapshot.fus_runs
+  @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
+      snapshot.fus_historical_evidence
+
+let fusion_list_entries (state : state) =
+  match state.fusion_runs with
+  | None -> []
+  | Some snapshot -> fusion_snapshot_entries snapshot
+
+let fusion_entry_identity = function
+  | Tui_decode.Fusion_retained_run run -> "run:" ^ run.fur_run_id
+  | Tui_decode.Fusion_historical_evidence evidence -> "board:" ^ evidence.fhe_post_id
+
+let selected_fusion_entry state =
+  List.nth_opt (fusion_list_entries state) state.fusion_cursor
+
+let fusion_detail_entry_index state =
+  fusion_list_entries state
+  |> List.find_index (fun entry ->
+      match state.fusion_mode, entry with
+      | Fusion_detail id, Tui_decode.Fusion_retained_run run ->
+          String.equal id run.fur_run_id
+      | Fusion_historical_detail reference, Tui_decode.Fusion_historical_evidence candidate ->
+          String.equal reference.fhe_post_id candidate.fhe_post_id
+          && String.equal reference.fhe_run_id candidate.fhe_run_id
+      | _ -> false)
+
+let selected_keeper_runs (state : state) =
+  match selected_keeper state, state.fusion_runs with
+  | Some keeper, Some snapshot ->
+      List.filter (fun (run : Tui_decode.fusion_run) ->
+          String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
+  | _ -> []
+
+let selected_keeper_run (state : state) =
+  let runs = selected_keeper_runs state in
+  let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
+  Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
+let workspace_activity_rows (state : state) =
+  match state.workspace_activity_repo with
+  | None -> []
+  | Some repo_id ->
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+      | Masc_tui_fetched.Ready reading ->
+          List.concat_map (fun (_, result) -> match result with
+            | Error _ -> []
+            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
+                List.filter_map (fun (change : Tui_decode.file_change) ->
+                  match change.fc_location with
+                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                      Some (change, location.relative_path)
+                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+                  snapshot.fcs_changes) reading.war_keepers
+          |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
+              Float.compare b.fc_at a.fc_at)
+
+let workspace_activity_page_rows ~surface_rows = max 1 (surface_rows - 12)
+
+(* The frame, Enter and a completed refresh share the same visible selection,
+   including when the latest reading contains fewer rows. *)
+let workspace_activity_selection state =
+  let rows = workspace_activity_rows state in
+  let cursor = max 0 (min state.workspace_activity_cursor (List.length rows - 1)) in
+  (rows, cursor, List.nth_opt rows cursor)
+
+let apply_workspace_activity_read state request result =
+  state.workspace_activity <-
+    Masc_tui_fetched.complete ~equal:String.equal state.workspace_activity
+      request result;
+  let _, cursor, _ = workspace_activity_selection state in
+  state.workspace_activity_cursor <- cursor
+
+let enter_keeper_code_file state ~keeper ~path =
+  state.code_scope <- Code_scope_keeper keeper;
+  let parent = Filename.dirname path in
+  state.code_dir <- (if String.equal parent "." then "" else parent);
+  state.code_cursor <- 0;
+  state.code_entries <- [];
+  state.code_entries_error <- None;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_cursor <- 0;
+  state.code_file_scroll <- 0;
+  state.code_file_hscroll <- 0;
+  state.code_file_max_width <- 0;
+  state.code_target_line <- None;
+  state.code_lsp_note <- None;
+  state.code_history <- Masc_tui_fetched.clear state.code_history;
+  state.code_history_open <- false;
+  state.code_history_scroll <- 0;
+  state.code_diff <- Masc_tui_fetched.clear state.code_diff;
+  state.code_diff_open <- false;
+  state.code_diff_scroll <- 0;
+  state.code_memos <- [];
+  state.code_notes_open <- false;
+  state.code_notes_scroll <- 0;
+  state.code_blame <- Masc_tui_fetched.clear state.code_blame;
+  state.code_focus_file <- Right_pane;
+  state.followed_from <- Some (state.view, None);
+  state.view <- Code
+
 let selected_standalone_lane (state : state) =
   match state.standalone_lanes with
   | Some snapshot ->
@@ -3986,13 +4843,23 @@ let composing_for_keeper (state : state) keeper_name =
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
-    turn settles. A retained roster is not enough after a failed refresh:
-    switching is disabled until the roster is readable again. *)
+    turn settles — this pane's own, which is what the pin is for. A request
+    in flight to some other keeper used to disable the switch too, and the
+    pane draws exactly that request as an "(also sending to X …)" row: the
+    row being on screen meant the key that would take the operator to it was
+    refused, which is the one moment it is wanted (#33852). A retained roster
+    is not enough after a failed refresh: switching is disabled until the
+    roster is readable again. *)
 let next_keeper_message_target (state : state) =
+  let this_pane_has_a_request_in_flight =
+    match state.msg_target_keeper_name with
+    | None -> false
+    | Some current -> Option.is_some (inflight_for_keeper state current)
+  in
   if
     Option.is_some state.keepers_error
     || Option.is_some state.msg_live
-    || state.msg_inflight <> []
+    || this_pane_has_a_request_in_flight
   then
     Masc_tui_keeper_selection.No_alternative
   else
@@ -4019,16 +4886,19 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
+  task_flow = None;
   task_focus = Left_pane;
   help_open = false;
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
   keeper_turn_finishes = [];
+  keeper_turns_observed_at = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -4045,6 +4915,7 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
@@ -4059,6 +4930,16 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  browser_viewport = None;
+  image_request_generation = 0;
+  msx_open = false;
+  msx_frame = None;
+  msx_last_poll_ns = 0L;
+  msx_menu_open = false;
+  msx_notice = None;
+  msx_menu_mode = Boot_game;
+  msx_carts = [];
+  msx_menu_index = 0;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -4098,6 +4979,8 @@ let create_state
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
   runtime_config_view = None;
+  runtime_config_status_open = false;
+  runtime_config_status_scroll = 0;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -4105,6 +4988,7 @@ let create_state
   runtime_config_cursor = 0;
   config_scroll = 0;
   detail_tab = Detail_info;
+  keeper_run_cursor = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
@@ -4180,12 +5064,15 @@ let create_state
   ask_answer_mode = Ask_browsing;
   ask_cursor = 0;
   ask_question_cursor = 0;
+  ask_question_scroll = 0;
   ask_draft = None;
   ask_text_entry = None;
   pending_ask_submit = None;
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  keeper_tool_approvals_observed = false;
+  keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
   keeper_turns_error = None;
   gate_pending = [];
@@ -4194,7 +5081,11 @@ let create_state
   gate_rules = [];
   gate_rules_unavailable = None;
   gate_error = None;
+  gate_snapshot_observed = false;
+  gate_snapshot_read = Snapshot_read.idle;
   keeper_yolo_names = [];
+  keeper_tool_modes_observed = false;
+  keeper_tool_modes_error = None;
   runtime_params = [];
   runtime_params_error = None;
   runtime_params_loading = false;
@@ -4229,6 +5120,7 @@ let create_state
   board_post_error = None;
   board_vote_armed = None;
   planning = None;
+  planning_baseline = None;
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
@@ -4240,6 +5132,7 @@ let create_state
   goal_action_error = None;
   schedules = None;
   schedules_error = None;
+  schedules_read = Snapshot_read.idle;
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
@@ -4264,9 +5157,14 @@ let create_state
   lanes_standalone_cursor = 0;
   lane_runs = None;
   lane_runs_error = None;
+  lane_runs_next = None;
+  lane_runs_total = None;
+  lane_runs_loading = false;
+  lane_runs_generation = 0;
   lane_runs_cursor = 0;
   lane_runs_scroll = 0;
   lane_run_detail = None;
+  lane_run_detail_generation = 0;
   lane_run_detail_error = None;
   lane_run_detail_scroll = 0;
   keeper_secrets = [];
@@ -4275,6 +5173,8 @@ let create_state
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
+  tools_request_generation = 0;
+  tools_read_inflight = None;
   tools_error = None;
   skills_catalog = None;
   skills_catalog_error = None;
@@ -4283,6 +5183,9 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  browser_lane = None;
+  browser_lane_visibility = Browser_lane_hidden;
+  browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
@@ -4305,6 +5208,9 @@ let create_state
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  workspace_activity_repo = None;
+  workspace_activity = Masc_tui_fetched.initial;
+  workspace_activity_cursor = 0;
   memory_health = None;
   memory_health_error = None;
   memory_health_scroll = 0;
@@ -4351,6 +5257,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
+  code_memos = [];
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
@@ -4391,8 +5298,12 @@ let create_state
   fusion_detail_error = None;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_historical_detail = None;
+  fusion_historical_inflight = None;
   observer = Observer_off;
   mcp_session = None;
+  observer_cursor = None;
+  observer_replay = Observer_replay_unobserved;
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -4400,6 +5311,9 @@ let create_state
   acting_scroll = 0;
   acting_unseen = 0;
   acting_filter = Masc_tui_acting.Turns;
+  acting_cursor = 0;
+  acting_detail = None;
+  acting_detail_scroll = 0;
   verification = None;
   verification_error = None;
   verification_scroll = 0;
@@ -4416,6 +5330,7 @@ let create_state
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
   msg_attachments = [];
+  msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
@@ -4450,7 +5365,7 @@ let create_state
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
      the typed speaker/kind; Ctrl-F adds inline, then full timestamp/request
      metadata when the operator needs to trace a turn. *)
-  msg_origin_display = Masc_tui_message_layout.Origin_bare;
+  msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
@@ -4702,6 +5617,8 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Acting_selection of int * int
+  | Acting_detail_scroll of int
   | Verification_detail_scroll of int
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
@@ -4725,6 +5642,14 @@ type clamped_scroll =
      end. Same report the diff already makes. *)
   | Resource_scroll of int
   | Approval_detail_scroll of int
+  (* Both modals draw over a surface rather than being one, and both counted
+     their rows the same way the diff does: the patch modal out of the recorded
+     diff, the link preview out of the card the drawing formats. Neither count
+     is knowable at the keypress, which steps by one or jumps to 9999 and lets
+     the frame say where that landed. They wrote the answer back from inside
+     the drawing instead, which is the one thing the renderer must not do. *)
+  | Patch_modal_scroll of int
+  | Link_modal_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -4735,6 +5660,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor
+  | Acting_detail_scroll value -> state.acting_detail_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
@@ -4748,6 +5675,8 @@ let apply_clamped_scroll (state : state) = function
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
+  | Patch_modal_scroll value -> state.patch_modal_scroll <- value
+  | Link_modal_scroll value -> state.link_modal_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -4916,6 +5845,103 @@ let palette_starts_with ~needle haystack =
     (String.lowercase_ascii haystack)
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
+
+let memory_overview_query (state : state) =
+    match state.search with
+    | Some q -> String.lowercase_ascii (String.trim q)
+    | None ->
+        if String.length (String.trim state.search_last) > 0 then
+          String.lowercase_ascii (String.trim state.search_last)
+        else ""
+
+
+let visible_memory_keepers (state : state) =
+  let open Tui_decode in
+  let raw_keepers =
+    match state.memory_health with
+    | None -> []
+    | Some s -> s.mhs_keepers
+  in
+  let sorted_keepers =
+    match state.memory_overview_sort with
+    | Mem_overview_facts ->
+        List.sort
+          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
+            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_size ->
+        List.sort
+          (fun a b ->
+            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
+              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_delta ->
+        List.sort
+          (fun a b ->
+            let da = a.mkh_added + a.mkh_removed in
+            let db = b.mkh_added + b.mkh_removed in
+            if da <> db then Stdlib.compare db da
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_state ->
+        List.sort
+          (fun a b ->
+            let sa = memory_state a in
+            let sb = memory_state b in
+            if sa <> sb then Stdlib.compare sb sa
+            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_updated ->
+        List.sort (fun a b ->
+            let by_time = Stdlib.compare b.mkh_updated_at a.mkh_updated_at in
+            if by_time <> 0 then by_time else String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+    | Mem_overview_name ->
+        List.sort
+          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
+          raw_keepers
+  in
+  let query = memory_overview_query state in
+    if query = "" then sorted_keepers
+    else
+      List.filter
+        (fun k ->
+          palette_contains ~needle:query k.mkh_keeper_id
+          || palette_contains ~needle:query (memory_state_label (memory_state k)))
+        sorted_keepers
+
+
+
+let selected_memory_keeper (state : state) =
+  let rows = visible_memory_keepers state in
+  List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
+
+let memory_overview_scrolled ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let count = List.length keepers in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context_rows =
+    match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
+    | None -> 0
+    | Some keeper ->
+        (* Divider, snapshot, facts, source, Librarian and Vision, then the
+           selected keeper's read errors and server alerts. *)
+        6 + List.length keeper.mkh_alerts
+        + (if Option.is_some keeper.mkh_read_error then 1 else 0)
+        + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+  in
+  { sc_count = count
+  ; sc_chrome =
+      Masc_tui_frame.chrome_rows
+      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
+      + 7 + context_rows
+      + (if memory_overview_query state <> "" then 1 else 0)
+      + (if Option.is_some state.memory_health_error then 2 else 0)
+  ; sc_overflow_takes_row = true
+  ; sc_preview_keep = None
+  }
 
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
@@ -5133,6 +6159,39 @@ let prev_memory_category (current : memory_category_filter)
       in
       before rev
 
+type runtime_picker_projection = {
+  rlp_lane : string;
+  rlp_already : string list;
+  rlp_providers : string list;
+  rlp_choices : Tui_decode.runtime_option list;
+}
+
+let runtime_picker_projection (state : state) =
+  Option.map (fun lane ->
+    let already = match state.runtime_surface with
+      | None -> []
+      | Some snapshot ->
+          snapshot.Tui_decode.rss_resolved.rrs_lanes
+          |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
+          |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
+          |> Option.value ~default:[]
+    in
+    let providers = already |> List.filter_map (fun id ->
+      state.runtime_catalog
+      |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
+      |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
+    let choices = runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog
+      |> List.filteri (fun i _ -> i >= state.runtime_lane_pick_cursor && i < state.runtime_lane_pick_cursor + 3)
+    in
+    { rlp_lane = lane; rlp_already = already; rlp_providers = providers; rlp_choices = choices })
+    state.runtime_lane_pick
+
+let runtime_surface_listing_chrome state =
+  runtime_listing_chrome ~error:state.runtime_surface_error
+    ~action_error:state.runtime_lane_error
+    ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
+      (runtime_picker_projection state))
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some
@@ -5193,13 +6252,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        (* Fleet rows plus the detail panel of the row the cursor names. The
-           panel is one scroll unit: its own height follows the render, and
-           search only needs to land on rows that exist. *)
-        listing ~error:state.memory_health_error
-          (match state.memory_health with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.mhs_keepers + 1)
+        Some (memory_overview_scrolled state)
   | Changes ->
       Some
         { sc_count =
@@ -5217,6 +6270,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.repository_changes with
          | None -> 0
          | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -5235,7 +6289,16 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
                  List.length s.Tui_decode.rss_candidates
              | Some s, Runtime_all ->
                  List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-        ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        ; sc_chrome = runtime_surface_listing_chrome state
+        ; sc_overflow_takes_row = false
+        ; sc_preview_keep = None
+        }
+  | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
+  | Config when state.config_pane = Config_runtime ->
+      Some
+        { sc_count = (match state.runtime_config_view with None -> 0 | Some r -> List.length r.rcv_rows)
+        ; sc_chrome = 7 + (match state.runtime_config_view with None -> 0 | Some r ->
+              List.length (Masc_tui_runtime_config_view.summary_lines r.rcv_metadata))
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
@@ -5257,7 +6320,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          | Config_themes | Config_voice ->
            (match state.runtime_config_view with
             | None -> 0
-            | Some (_, rows) -> List.length rows))
+            | Some reading -> List.length reading.rcv_rows))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
@@ -5319,9 +6382,9 @@ let visible_surface_ring_index (state : state) (view : surface) =
     match view with
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
+    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Lanes -> Runtime
-    | Clients -> Runtime
+    | Runtime | Lanes | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -5479,11 +6542,11 @@ let surface_row_texts (state : state) : surface -> string list option = function
                   rows))
       else
         Option.map
-          (fun s ->
+          (fun _ ->
             List.map (fun k -> k.Tui_decode.mkh_keeper_id)
-              s.Tui_decode.mhs_keepers
-            @ [ "memory detail" ])
+              (visible_memory_keepers state))
           state.memory_health
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       Option.map
         (fun s ->
@@ -5713,11 +6776,27 @@ let keeper_message_support_status_rows state ~status_rows =
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
+type gate_lane = Workspace_gate | External_gate
+
+let gate_lane_label = function
+  | Workspace_gate -> "Workspace"
+  | External_gate -> "Outside services"
+
+let gate_mode_label = function
+  | Masc.Keeper_gate_mode.Manual -> "Ask me for each decision"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Let Auto Judge decide"
+  | Masc.Keeper_gate_mode.Always_allow -> "Allow every call without review"
+
 type palette_action =
+  | Palette_browser_lane
+  | Palette_hide_browser_lane
+  | Palette_msx
   | Palette_goto of surface
   | Palette_config of config_pane
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
+  | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the
      Code pane's cursor line — the K/D candidates ride the palette as
@@ -5799,6 +6878,12 @@ let lsp_question_prefixes =
 
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
+  @ List.concat_map (fun lane ->
+      List.map (fun mode ->
+        ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
+         Palette_gate_mode (lane, mode)))
+        [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
+      [Workspace_gate; External_gate]
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
@@ -5806,6 +6891,11 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  @ (match browser_lane_on_screen state with
+      | None -> []
+      | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
+  @ [ "go Browser Lane", Palette_browser_lane ]
+  @ [ "go MSX", Palette_msx ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]
@@ -5822,6 +6912,10 @@ let palette_entries (state : state) =
   @ List.map
       (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
       state.tasks
+  @ [ "hearth all", Palette_board_hearth None ]
+  @ List.map (fun (name, count) ->
+      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      state.board_hearths
   @ List.map
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))

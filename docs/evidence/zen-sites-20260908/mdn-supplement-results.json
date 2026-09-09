@@ -1,0 +1,53 @@
+[
+  {
+    "repeat": 1,
+    "started_at_unix": 1788797389.2828999,
+    "operation_id": "kmsg-d78a21017c8a113632aeb6e9e532ecf9",
+    "state": "Succeeded",
+    "tab_id": 9,
+    "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference",
+    "title": "WebDriver reference - WebDriver | MDN",
+    "image_sha256": "d28f9f98df87b3deb4fece194df31645444526ad45bfcd9977e301dd83fd50bb",
+    "observed_at_unix": 1788797481.9551911,
+    "tui_exit_code": 0,
+    "tui": {
+      "result": "passed",
+      "clientId": "automation",
+      "script_sha256": "74ba90a35cd6422b570b2f93886971d3e3fb80b03dff68eb3b7ddb0191131b9e",
+      "tui_sha256": "be5a17aa56c8d3e4ea16933e51c87242681fef344b5119e73f6d8b4c750b93bd",
+      "transport": "real pinned MASC HTTP; Keeper-submitted webapp receipt",
+      "terminal": "PTY with Kitty capability response and 140x42 cells",
+      "tty_override_applied": false,
+      "text_verified": [
+        "WebDriver"
+      ],
+      "image": {
+        "path": "zen-through-tui.png",
+        "bytes": 140099,
+        "sha256": "d28f9f98df87b3deb4fece194df31645444526ad45bfcd9977e301dd83fd50bb"
+      },
+      "normal_exit_code": 0,
+      "termios_restoration_measured_here": false
+    },
+    "tui_bytes_equal_http": true,
+    "close_operation_id": "kmsg-feac0e4e013378bcc6ab93057e33e55b",
+    "close_state": "Succeeded",
+    "driver_ready": true,
+    "finished_at_unix": 1788797491.495622
+  },
+  {
+    "repeat": 2,
+    "started_at_unix": 1788797491.495987,
+    "operation_id": "kmsg-382b080bd5b91980497b21eb3b16e7af",
+    "state": "Succeeded",
+    "tab_id": 10,
+    "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference",
+    "title": "WebDriver reference - WebDriver | MDN",
+    "image_sha256": "429006029c58883a2efaf01199685eb8bc3bc5b1241d2e6b09284fdd4827798d",
+    "observed_at_unix": 1788797568.023741,
+    "close_operation_id": "kmsg-b9e6a4b41a4783a0a545a8eea89df941",
+    "close_state": "Succeeded",
+    "driver_ready": true,
+    "finished_at_unix": 1788797574.054395
+  }
+]

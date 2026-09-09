@@ -63,16 +63,22 @@ let replayable_operation operation =
   else None
 ;;
 
+type boxed_execution =
+  { run : Keeper_types_profile_sandbox.observation_run
+  ; result : Masc_exec.Exec_dispatch.dispatch_result
+  }
+
 type authorization_source =
   | One_shot_resolution of string
   | Exact_always_rule of string
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
-  | Observed_in_box of Keeper_types_profile_sandbox.observation_run
+  | Local_output
+  | Observed_in_box of boxed_execution
 
 type observation =
-  | Observed_clean of { run : Keeper_types_profile_sandbox.observation_run }
+  | Observed_result of boxed_execution
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
@@ -275,6 +281,7 @@ let authorization_source_to_string = function
   | Keeper_always_allow -> "keeper_always_allow"
   | Workspace_always_allow -> "workspace_always_allow"
   | Readonly_sandbox -> "readonly_sandbox"
+  | Local_output -> "local_output"
   | Observed_in_box _ -> "observed_in_box"
 ;;
 
@@ -313,7 +320,9 @@ let source_fields = function
     [ "authorization_source", `String "workspace_always_allow" ]
   | Readonly_sandbox ->
     [ "authorization_source", `String "readonly_sandbox" ]
-  | Observed_in_box run ->
+  | Local_output ->
+    [ "authorization_source", `String "local_output" ]
+  | Observed_in_box { run; result = _ } ->
     [ "authorization_source", `String "observed_in_box"
     ; ( "observation_run"
       , `String (Keeper_types_profile_sandbox.observation_run_to_string run) )
@@ -333,7 +342,11 @@ let approval_sse_audit_event = "approval:audit"
 let authorization_subject_id = function
   | One_shot_resolution approval_id -> Some approval_id
   | Exact_always_rule rule_id -> Some rule_id
-  | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box _ ->
+  | Keeper_always_allow
+  | Workspace_always_allow
+  | Readonly_sandbox
+  | Local_output
+  | Observed_in_box _ ->
     None
 ;;
 
@@ -463,6 +476,7 @@ let audit_authorization_source
   | Workspace_always_allow ->
     Keeper_approval_queue_rules_types.Workspace_always_allow
   | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
+  | Local_output -> Keeper_approval_queue_rules_types.Local_output
   | Observed_in_box _ -> Keeper_approval_queue_rules_types.Observed_in_box
 ;;
 
@@ -475,7 +489,11 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
       (match source with
        | One_shot_resolution approval_id -> approval_id
        | Exact_always_rule rule_id -> rule_id
-       | Keeper_always_allow | Workspace_always_allow | Readonly_sandbox | Observed_in_box _ ->
+       | Keeper_always_allow
+       | Workspace_always_allow
+       | Readonly_sandbox
+       | Local_output
+       | Observed_in_box _ ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1978,20 +1996,48 @@ let status_label = function
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
 ;;
 
-(* RFC-0422: the box is asked only here, after every cheaper authority has
-   declined and before the judge is paid. Exit 0 is the whole criterion: the
-   guest kernel refused every write outside the scratch and every socket, so
-   a run that still ended 0 left nothing behind, and its output is the
-   answer. Anything else keeps the judge — the same deferral the request
-   would have had before this stage existed, so a box that cannot be built
-   is a request that is judged, never one that runs unboxed. *)
+(* Sorted before the judge is paid. What the judge answers is whether an
+   effect lands beyond the operator, and a speak lands none: the audio plays
+   on the operator's own speakers (or a dashboard device the operator
+   connected) and the utterance is appended to the keeper's own chat. The
+   text does reach the operator-configured TTS provider first, the way a
+   [web_search] query reaches its provider, which the observation table
+   already admits without a judge. Derived from the replayable vocabulary so
+   a Gate operation added later fails to compile here until someone says
+   where its effect lands. Manual mode never asks this: an operator who
+   asked to see everything sees speech too. *)
+type before_judge =
+  | Local_output_only
+  | Observation of Keeper_gate_readonly.classification
+
+let classify_before_judge (request : request) =
+  match replayable_operation request.operation with
+  | Some Replay_voice_speak -> Local_output_only
+  | Some
+      ( Replay_write
+      | Replay_execute
+      | Replay_network_read
+      | Replay_connector_post
+      | Replay_identity )
+  | None ->
+    Observation
+      (Keeper_gate_readonly.classify_request
+         ~operation:request.operation
+         ~sandbox_profile:request.sandbox_profile
+         ~input:request.input)
+;;
+
+(* The box is asked after every cheaper authority has declined. A completed
+   payload remains its exact restricted result, including nonzero exits.
+   Only setup/refusal or unavailable-box evidence retains the Judge; payload
+   failure alone never requests effect permission or licenses replay. *)
 let decide_after_observation request ~observe =
   match observe with
   | None -> defer request Judge_requested
   | Some run ->
     (match (run () : observation) with
-     | Observed_clean { run } ->
-       let source = Observed_in_box run in
+     | Observed_result execution ->
+       let source = Observed_in_box execution in
        let audit_receipt =
          audit_allow
            request
@@ -2018,9 +2064,11 @@ let decide_after_observation request ~observe =
        defer request Judge_requested)
 ;;
 
-let decide_from_selected_mode ?observe request = function
+let decide_from_selected_mode ~intent ?observe request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
+  | Ok Keeper_gate_mode.Auto_judge when intent = Keeper_tool_execute_typed_input.Request_effect ->
+    defer request Judge_requested
   | Ok Keeper_gate_mode.Auto_judge ->
     (* Observation-only requests have a deterministic safety answer —
        read-only argv dispatched into a disposable guest (the typed
@@ -2031,13 +2079,20 @@ let decide_from_selected_mode ?observe request = function
        paying the judge (or the human queue) for them is how a bare `ls`
        became an approval prompt and a keeper stopped searching. Manual
        mode is untouched: an operator who asked to see everything still
-       sees everything. *)
-    if
-      Keeper_gate_readonly.observation_only_request
-        ~operation:request.operation
-        ~sandbox_profile:request.sandbox_profile
-        ~input:request.input
-    then (
+       sees everything. A speak is sorted the same way before the judge is
+       paid ([classify_before_judge]): its effect lands on the operator's
+       own outputs, so it is allowed as [Local_output]. *)
+    (match classify_before_judge request with
+     | Local_output_only ->
+       let source = Local_output in
+       let audit_receipt =
+         audit_allow
+           request
+           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+           source
+       in
+       allow request source [ audit_receipt ]
+     | Observation Keeper_gate_readonly.Static_observation ->
       let source = Readonly_sandbox in
       let audit_receipt =
         audit_allow
@@ -2045,8 +2100,26 @@ let decide_from_selected_mode ?observe request = function
           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
           source
       in
-      allow request source [ audit_receipt ])
-    else decide_after_observation request ~observe
+      allow request source [ audit_receipt ]
+     | Observation (Keeper_gate_readonly.Needs_observation reason as classification) ->
+       (match reason with
+        | Keeper_gate_readonly.Unproven_request -> ()
+        | Keeper_gate_readonly.Git_configuration_override
+        | Keeper_gate_readonly.Git_command_requires_execution _ ->
+          Log.Keeper.emit
+            Log.Info
+            ~keeper_name:request.keeper_name
+            ~category:Log.Tool
+            ~details:
+              (`Assoc
+                 ([ "operation", `String request.operation
+                  ; "classification", Keeper_gate_readonly.classification_to_yojson classification
+                  ]
+                  @ (match request_turn_id request with
+                     | Some turn_id -> [ "turn_id", `Int turn_id ]
+                     | None -> [])))
+            "Git effects require execution evidence");
+       decide_after_observation request ~observe)
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
     let audit_receipt =
@@ -2058,7 +2131,7 @@ let decide_from_selected_mode ?observe request = function
     allow request source [ audit_receipt ]
 ;;
 
-let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request =
+let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -2098,7 +2171,7 @@ let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request 
         with
         | Error error ->
           observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode ?observe request mode
+          decide_from_selected_mode ~intent ?observe request mode
         | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
           let audit_receipt =
@@ -2111,12 +2184,12 @@ let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request 
           allow request source [ audit_receipt ]
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
-          decide_from_selected_mode ?observe request mode
+          decide_from_selected_mode ~intent ?observe request mode
         | Ok Keeper_approval_queue_rules_types.Rule_match_absent ->
-          decide_from_selected_mode ?observe request mode))
+          decide_from_selected_mode ~intent ?observe request mode))
 ;;
 
-let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
+let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable
@@ -2130,7 +2203,7 @@ let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow reque
     in
     allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request
+    decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -2155,9 +2228,10 @@ let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow reque
     Unavailable reason
 ;;
 
-let decide ?cycle_grant ?observe ~keeper_always_allow request =
+let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?observe ~keeper_always_allow request =
   decide_with_mode
     ~read_mode:Keeper_gate_mode.resolve
+    ~intent
     ?cycle_grant
     ?observe
     ~keeper_always_allow

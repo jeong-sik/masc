@@ -10,11 +10,12 @@
     "required_cell_rows": 8,
     "catalog_validation": "passed",
     "browser": "chromium_full_page",
-    "screenshot_path": "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png",
+    "screenshot_path": null,
     "screenshot_sha256": "074d8f5218204e03eca1f44045e24529ad4ee750d8fa096d83f8be2116d4006e",
     "screenshot_width_px": 1280,
     "screenshot_height_px": 21649,
-    "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence."
+    "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence.",
+    "screenshot_removal_reason": "Organization-specific identifiers were visible in the archived image."
   },
   "implementation": {
     "goal_verifier_worker_pr": 29221,

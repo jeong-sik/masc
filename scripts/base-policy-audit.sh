@@ -105,15 +105,30 @@ count_bin_ml_base_stdlib_shadow() {
 }
 
 # Read a single numeric key from a JSON baseline file.
+# The default handed in by every caller is the count just measured, so an
+# absent file or an absent key makes the baseline equal to the current value
+# and the comparison `current > baseline` can never be true. That is a floor
+# that follows whatever it is meant to hold down, and it is silent about it.
+#
+# Under --fail-on-regression the audit is a gate, and a gate with no recorded
+# baseline is not one. Reporting mode keeps the old behaviour: it prints the
+# counts and says nothing about drift, which is what it is for.
 extract_baseline_value() {
   local file="$1"
   local key="$2"
   local default_value="$3"
   if [ ! -f "$file" ]; then
+    if [ "$FAIL_ON_REGRESSION" -eq 1 ]; then
+      echo "ERROR: --fail-on-regression with no baseline at ${file}." >&2
+      echo "       Without it every count is its own baseline and nothing can regress." >&2
+      exit 2
+    fi
     echo "$default_value"
     return
   fi
-  python3 - "$file" "$key" "$default_value" <<'PY'
+  local value status
+  value="$(
+    python3 - "$file" "$key" "$default_value" <<'PY'
 import json, sys
 path, key, default_value = sys.argv[1], sys.argv[2], int(sys.argv[3])
 try:
@@ -128,14 +143,28 @@ if not isinstance(counts, dict):
     print(f"ERROR: baseline JSON {path} has no object counts field", file=sys.stderr)
     sys.exit(2)
 if key not in counts:
-    print(default_value)
-    sys.exit(0)
+    # Same reason as the absent-file arm above: the default is the current
+    # count. Exit 3 so the caller can tell "no such key" from a read error.
+    sys.exit(3)
 try:
     print(int(counts[key]))
 except Exception as exc:
     print(f"ERROR: baseline key {key} in {path} is not an integer: {exc}", file=sys.stderr)
     sys.exit(2)
 PY
+  )"
+  status=$?
+  if [ "$status" -eq 3 ]; then
+    if [ "$FAIL_ON_REGRESSION" -eq 1 ]; then
+      echo "ERROR: --fail-on-regression and ${file} records no '${key}'." >&2
+      echo "       Without it that count is its own baseline and cannot regress." >&2
+      exit 2
+    fi
+    echo "$default_value"
+    return
+  fi
+  [ "$status" -eq 0 ] || exit "$status"
+  echo "$value"
 }
 
 # Resolve effective baseline file: prefer --baseline-ref over --baseline-file.

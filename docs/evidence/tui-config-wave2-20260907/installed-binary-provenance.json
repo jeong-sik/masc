@@ -1,0 +1,13 @@
+{
+  "binary": "/Users/dancer/.local/bin/masc-tui",
+  "sha256_before": "21c43f4880431de80341498338c6652e5a022253cdd3e1fe0344c4811fdb5357",
+  "sha256_after": "21c43f4880431de80341498338c6652e5a022253cdd3e1fe0344c4811fdb5357",
+  "exit_code": 0,
+  "forced_kill": false,
+  "terminal_rows": 45,
+  "terminal_cols": 150,
+  "ready_after_s": 0.9252671669819392,
+  "duration_s": 12.1532293339842,
+  "termination": "SIGTERM after measured window",
+  "profiler_interval_ms": 1
+}

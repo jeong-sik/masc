@@ -62,7 +62,7 @@ let () =
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env ~cwd =
     runner_calls := (argv, env, cwd, stdin_content) :: !runner_calls;
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 0; stdout = "out"; stderr = "err" }
+      { output_files = None; status = Unix.WEXITED 0; stdout = "out"; stderr = "err" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -116,7 +116,7 @@ let () =
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
+      { output_files = None; status = Unix.WEXITED 0; stdout = "stdout"; stderr = "stderr" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -153,12 +153,12 @@ let () =
     runner_calls := (argv, stdin_content) :: !runner_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None ->
-        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
+        Masc_exec.Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 0; stdout = "typed"; stderr = "" }
     | [ "wc"; "-c" ], Some "typed" ->
-        Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
+        Masc_exec.Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 0; stdout = "5\n"; stderr = "" }
     | _ ->
         Masc_exec.Sandbox_target.Ran
-          { status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
+          { output_files = None; status = Unix.WEXITED 2; stdout = ""; stderr = "unexpected mock runner call" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh ~endpoint:test_endpoint ~runner:mock_runner ()
@@ -186,12 +186,12 @@ let () =
   let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     simple_runner_called := true;
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 3; stdout = ""; stderr = "simple runner should not be used" }
+      { output_files = None; status = Unix.WEXITED 3; stdout = ""; stderr = "simple runner should not be used" }
   in
   let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages =
     pipeline_runner_calls := stages :: !pipeline_runner_calls;
     Masc_exec.Sandbox_target.Ran
-      { status = Unix.WEXITED 0; stdout = "5\n"; stderr = "pipeline-stderr" }
+      { output_files = None; status = Unix.WEXITED 0; stdout = "5\n"; stderr = "pipeline-stderr" }
   in
   let ssh_sandbox =
     Masc_exec.Sandbox_target.ssh

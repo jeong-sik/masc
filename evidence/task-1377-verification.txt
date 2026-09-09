@@ -1,0 +1,41 @@
+=== task-1377 Verification Evidence ===
+Task: [polish] MCP 매트릭스 board_post 픽스처를 스키마 필드 content로 정렬
+PR: https://github.com/jeong-sik/masc/pull/33675
+Branch: polish/task-1377-mcp-matrix-body-content
+Commit: 29347fd4cff8f21871e074fbdc605b467a8c4b55
+
+=== Contract Item 1: Fixture Alignment (body → content) ===
+Status: ✅ VERIFIED
+Method: verifier_exact direct lookup (2026-09-06T14:18:04Z)
+File: test/test_mcp_tool_matrix_cases.ml
+Lines: 795-804
+Change: [ "body" ] → [ "content" ]
+Confirmation: Verifier confirmed actual file contains [ "content" ] and updated comment
+
+=== Contract Item 2: Build Green (dune build @check + lint) ===
+Status: ✅ VERIFIED
+Method: CI run 34027963605 (2026-09-06T10:38:02Z ~ 10:42:30Z)
+Results:
+  - dune build @check: SUCCESS (job 101472216278, 4m 28s)
+  - lint suite: SUCCESS (job 101472216097, 36s)
+  - dashboard typecheck: SUCCESS (job 101472216146, 36s)
+
+Method 2: Host Gate appr_01a07721 dune build execution
+Result: SUCCESS (exit code 0, 77s execution)
+Output: "Warning: option "-j-std" is deprecated." (deprecation warning only)
+
+=== Contract Item 3: board_post Matrix Test ===
+Status: ❌ NOT EXECUTED (Infrastructure unavailable)
+Reason: Local test execution blocked by lane permission (Eio.Fs.Permission_denied /tmp/masc-runtime/.masc/agents)
+Note: board_post test runs only in CI full Test workflow (not in PR-check @check-only)
+Note: Test case 056_masc_board_post previously failed on main (run 34015577707) with:
+      "unsupported field(s): body; accepted: title, content, hearth..."
+      (This error should now pass with body→content fix applied)
+
+=== Conclusion ===
+Contract Items 1–2: ✅ Satisfied
+Contract Item 3: ⚠️ Blocked by infrastructure (not lane-specific defect)
+
+Fixture modification verified.
+Build toolchain green verified (2 methods: CI + gate).
+Test case 3 requires full Test workflow dispatch on branch (PR-check insufficient).

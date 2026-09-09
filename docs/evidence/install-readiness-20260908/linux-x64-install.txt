@@ -1,0 +1,14 @@
+2026-09-08T02:52:42.1082714Z install-smoke: installing v0.0.0-install-smoke (linux-x64) from file:///tmp/tmp.jO7ZiIQ97M/release/v0.0.0-install-smoke
+2026-09-08T02:52:44.2802515Z install-smoke: installer placed all five executables
+2026-09-08T02:52:44.3410860Z install-smoke: installer placed the guest shim with the release's sha256 beside it
+2026-09-08T02:52:44.3428693Z install-smoke: installer seeded config and left the keeper roster empty
+2026-09-08T02:52:46.3712919Z install-smoke: installed server answered /health ok
+2026-09-08T02:52:46.5608254Z install-smoke: actual installed commit/index and 3 assets match; corruption and missing receipt fail closed
+2026-09-08T02:52:46.5704477Z install-smoke: PASS
+2026-09-08T02:52:59.1816447Z install-smoke: installing v0.0.0-install-smoke (linux-x64) from file:///tmp/tmp.XSlzhx0DqI/release/v0.0.0-install-smoke
+2026-09-08T02:53:01.4403891Z install-smoke: installer placed all five executables
+2026-09-08T02:53:01.5019374Z install-smoke: installer placed the guest shim with the release's sha256 beside it
+2026-09-08T02:53:01.5034645Z install-smoke: installer seeded config and left the keeper roster empty
+2026-09-08T02:53:03.5413227Z install-smoke: installed server answered /health ok
+2026-09-08T02:53:03.7307886Z install-smoke: actual installed commit/index and 3 assets match; corruption and missing receipt fail closed
+2026-09-08T02:53:03.7397546Z install-smoke: PASS

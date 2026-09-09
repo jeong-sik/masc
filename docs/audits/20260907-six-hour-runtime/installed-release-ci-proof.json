@@ -1,0 +1,93 @@
+{
+  "schema": "masc.installed_release_ci_evidence.v1",
+  "source_commit": "3d3695a1f3ac6877b674ad160077c55f78665b66",
+  "scope": "reviewed exact source; different merged/deployed commits are not covered by this result",
+  "focused": {
+    "run_id": 34095776029,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/34095776029",
+    "result": "success",
+    "installed_dashboard_cases": 17,
+    "web_dashboard_cases": 39
+  },
+  "release_validation": {
+    "run_id": 34098251245,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/34098251245",
+    "ref": "refs/heads/verify/installed-dashboard-3d3695",
+    "result": "success",
+    "public_release_job": "skipped",
+    "platforms": [
+      {
+        "arch": "linux-x64",
+        "job_id": 101666604961,
+        "artifact_id": 10009693579,
+        "actual_job_result": "success",
+        "installer_smoke_at": "2026-09-07T08:08:06.2222562Z",
+        "installed_binary_outside_checkout": true,
+        "explicit_assets_environment_removed": true,
+        "served_index_and_referenced_assets_verified": true,
+        "referenced_assets": 3,
+        "corrupt_index_http_503_and_unavailable": true,
+        "missing_receipt_http_503_and_unavailable": true,
+        "exact_artifact_restoration_recovers": true,
+        "downloaded_artifact_verification": {
+          "run_id": 34098251245,
+          "artifact_id": 10009693579,
+          "arch": "linux-x64",
+          "source_commit": "3d3695a1f3ac6877b674ad160077c55f78665b66",
+          "binary_sha256": "ef4b7925c9c79bd143d5a86b53e015d4d7d0b4810965092b9e751e92a8192f81",
+          "receipt_sha256": "ef9046c4b3be82a65749f097a5b582b5b475e1ffc14534c96b1d3e4eb295414e",
+          "verified_dashboard_files": 642,
+          "build_stamp": "2026-09-07T08:03:09.209Z",
+          "verification": "downloaded archive: exact binary/receipt/all declared files; no local binary execution"
+        }
+      },
+      {
+        "arch": "linux-arm64",
+        "job_id": 101666604669,
+        "artifact_id": 10009862933,
+        "actual_job_result": "success",
+        "installer_smoke_at": "2026-09-07T08:13:21.9980957Z",
+        "installed_binary_outside_checkout": true,
+        "explicit_assets_environment_removed": true,
+        "served_index_and_referenced_assets_verified": true,
+        "referenced_assets": 3,
+        "corrupt_index_http_503_and_unavailable": true,
+        "missing_receipt_http_503_and_unavailable": true,
+        "exact_artifact_restoration_recovers": true,
+        "downloaded_artifact_verification": {
+          "status": "not_downloaded",
+          "release_job_package_validation": "passed"
+        }
+      },
+      {
+        "arch": "macos-arm64",
+        "job_id": 101666605197,
+        "artifact_id": 10010109114,
+        "actual_job_result": "success",
+        "installer_smoke_at": "2026-09-07T08:20:41.5681710Z",
+        "installed_binary_outside_checkout": true,
+        "explicit_assets_environment_removed": true,
+        "served_index_and_referenced_assets_verified": true,
+        "referenced_assets": 3,
+        "corrupt_index_http_503_and_unavailable": true,
+        "missing_receipt_http_503_and_unavailable": true,
+        "exact_artifact_restoration_recovers": true,
+        "downloaded_artifact_verification": {
+          "run_id": 34098251245,
+          "artifact_id": 10010109114,
+          "arch": "macos-arm64",
+          "source_commit": "3d3695a1f3ac6877b674ad160077c55f78665b66",
+          "binary_sha256": "331b08aca0a90fea0e1372962447a5bf11445e448434fa36ad1018b8a26df619",
+          "receipt_sha256": "bfc148382a4f0887d8267c11526267cf12e3033f8a19cf47164e06017edc58f3",
+          "verified_dashboard_files": 642,
+          "build_stamp": "2026-09-07T08:16:15.903Z",
+          "verification": "downloaded archive: exact binary/receipt/all declared files; no local binary execution"
+        }
+      }
+    ]
+  },
+  "local_binary_execution": false,
+  "live_installation": false,
+  "live_restart": false,
+  "browser_ui_measurement": false
+}

@@ -76,6 +76,7 @@ type fixture_step =
 let fixture_script
       ?(auth_json = auth_subscription)
       ?(before_initialize_response = [])
+      ?(close_before_user = false)
       steps
   =
   let path = Filename.temp_file "masc-claude-code-" ".sh" in
@@ -149,8 +150,10 @@ let fixture_script
     "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
   output_string output "[ -n \"$request_id\" ] || exit 95\n";
   List.iter write_step before_initialize_response;
+  if close_before_user then output_string output "exec 0<&-\n";
   output_string output
     "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if close_before_user then output_string output "exit 62\n";
   output_string output "IFS= read -r user_message\n";
   List.iter write_step steps;
   output_string output "while IFS= read -r ignored; do :; done\n";
@@ -159,8 +162,8 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?auth_json ?before_initialize_response steps f =
-  let path = fixture_script ?auth_json ?before_initialize_response steps in
+let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps f =
+  let path = fixture_script ?auth_json ?before_initialize_response ?close_before_user steps in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -190,7 +193,8 @@ let window_outlasting_process_start_s = 5.0
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_turn_started_delay_s ?on_stream_event ?(images = []) path =
+    ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent
+    ?(prompt = "Return the fixture marker") ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -223,8 +227,9 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_session_ready
       ?on_turn_started
       ?on_stream_event
+      ?on_prompt_sent
       config
-      ~prompt:"Return the fixture marker"
+      ~prompt
       ~images)
 ;;
 
@@ -266,6 +271,42 @@ let test_subscription_turn_and_env_scrub () =
       check string "subscription" "team" turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
       check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+let test_prompt_transmission_boundary () =
+  let sent = ref 0 in
+  let report () = incr sent in
+  let missing = Filename.temp_file "missing-claude-" ".sh" in
+  Sys.remove missing;
+  check bool "missing client fails" true
+    (Result.is_error (run_fixture ~on_prompt_sent:report missing));
+  check int "spawn failure emits no input" 0 !sent;
+  with_fixture ~close_before_user:true [] (fun path ->
+    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report path with
+     | Error (Runtime_claude_code.Turn_transport_interrupted
+         { stage = "user message write"; _ }) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "incomplete user message completed");
+    check int "incomplete write emits no input" 0 !sent);
+  with_fixture [ Expect_user_message_contains "transmission-marker";
+                 Emit assistant; Emit result ] (fun path ->
+    check bool "complete turn succeeds" true
+      (Result.is_ok (run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path));
+    check int "complete write emits once" 1 !sent);
+  let rejection =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"rejected-turn","result":"fixture rejected","errors":["fixture rejected"]}|}
+  in
+  with_fixture [ Emit rejection ] (fun path ->
+    (match run_fixture ~on_prompt_sent:report path with
+     | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "provider rejection became success");
+    check int "provider rejection keeps transmitted evidence" 2 !sent);
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~on_prompt_sent:(fun () -> failwith "fixture observer failure") path with
+    | Error (Runtime_claude_code.Protocol_error { stage = "prompt sent callback"; _ }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "observation failure silently continued")
 ;;
 
 let test_progress_resets_stream_idle_timeout () =
@@ -781,6 +822,254 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
         incr call_count;
         { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
   }
+;;
+
+(* Producer contract measured in Claude Code 2.1.263: Yct emits the
+   optional envelope boolean from isApiErrorMessage, outside message. *)
+let api_error_assistant =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"}]}}|}
+;;
+
+let api_error_with_native_tool =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-native-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"native-call-1","name":"Read","input":{}}]}}|}
+;;
+
+let api_error_with_mcp_tool =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-mcp-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"mcp-observation-1","name":"mcp__masc__masc_probe","input":{}}]}}|}
+;;
+
+let check_quota_observation ~tool_effect_attempted ~response_emitted = function
+  | Error
+      (Runtime_claude_code.Quota_blocked
+         { api_error_status = Some 429
+         ; rate_limit = Some { status = Rejected; resets_at = Some 1786356000; _ }
+         ; tool_effect_attempted = actual_effect
+         ; response_emitted = actual_response
+         }) ->
+    check bool "tool effect" tool_effect_attempted actual_effect;
+    check bool "response emitted" response_emitted actual_response
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "quota rejection completed the turn"
+;;
+
+let test_api_diagnostic_quota_keeps_failover_safe () =
+  let events = ref [] in
+  with_fixture
+    [ Emit api_error_assistant; Emit rate_limit_rejected; Emit quota_result ]
+    (fun path ->
+       run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+       |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+       check int "diagnostic starts no response stream" 0 (List.length !events))
+;;
+
+let test_api_diagnostic_preserves_prior_text () =
+  let events = ref [] in
+  with_fixture
+    [ Emit assistant
+    ; Emit api_error_assistant
+    ; Emit rate_limit_rejected
+    ; Emit quota_result
+    ]
+    (fun path ->
+       run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+       |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
+       match List.rev !events with
+       | [ Turn_started { model = "claude-fixture"; _ }; Text_delta "MASC_CLAUDE_OK" ] ->
+         ()
+       | _ -> fail "diagnostic changed the real response stream")
+;;
+
+let test_api_diagnostic_preserves_native_effects () =
+  List.iter
+    (fun (frames, expected_stream_starts) ->
+       let events = ref [] in
+       with_fixture
+         (frames @ [ Emit rate_limit_rejected; Emit quota_result ])
+         (fun path ->
+            run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            |> check_quota_observation ~tool_effect_attempted:true ~response_emitted:false;
+            let starts =
+              List.filter
+                (function
+                  | Runtime_claude_code.Turn_started _ -> true
+                  | _ -> false)
+                !events
+            in
+            check
+              int
+              "only real assistant starts stream"
+              expected_stream_starts
+              (List.length starts);
+            let native_events =
+              List.filter
+                (function
+                  | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
+                    true
+                  | Turn_started _ -> false
+                  | Text_delta _
+                  | Dynamic_tool_started _
+                  | Dynamic_tool_finished _
+                  | Turn_finished _ -> fail "native-only turn emitted response content")
+                (List.rev !events)
+            in
+            match native_events with
+            | [ Native_tool_started
+                  { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }
+              ; Native_tool_finished
+                  { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }
+              ] -> ()
+            | _ -> fail "diagnostic lost native tool start or completion"))
+    [ [ Emit native_tool_assistant; Emit native_tool_result; Emit api_error_assistant ], 1
+    ; [ Emit api_error_with_native_tool; Emit native_tool_result ], 0
+    ]
+;;
+
+let test_api_diagnostic_preserves_mcp_effects () =
+  List.iter
+    (fun (diagnostic, expected_wrapper) ->
+       let calls = ref 0 in
+       let events = ref [] in
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_call
+         ; Emit diagnostic
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun path ->
+            run_fixture
+              ~dynamic_tools:[ probe_tool calls ]
+              ~on_stream_event:(fun event -> events := event :: !events)
+              path
+            |> check_quota_observation ~tool_effect_attempted:true ~response_emitted:false;
+            check int "MCP effect ran exactly once" 1 !calls;
+            match List.rev !events with
+            | [ Dynamic_tool_started _; Dynamic_tool_finished _ ] ->
+              check bool "no wrapper observation expected" false expected_wrapper
+            | [ Dynamic_tool_started _
+              ; Dynamic_tool_finished _
+              ; Native_tool_started { origin = Runtime_native_tools.Mcp_wrapper; _ }
+              ] -> check bool "wrapper observation retained" true expected_wrapper
+            | _ -> fail "diagnostic changed MCP observation or emitted text"))
+    [ api_error_assistant, false; api_error_with_mcp_tool, true ]
+;;
+
+let test_api_diagnostic_overflow_keeps_retry_safe () =
+  let events = ref [] in
+  with_fixture [ Emit api_error_assistant; Emit prompt_too_long_result ] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+           { message; tool_effect_attempted = false; response_emitted = false }) ->
+      check int "no diagnostic stream to close" 0 (List.length !events);
+      check
+        bool
+        "terminal detail retained"
+        true
+        (String.ends_with
+           ~suffix:"Prompt is too long · the request is ~250000 tokens (limit 200000)"
+           message)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "diagnostic overflow completed")
+;;
+
+let test_api_diagnostic_preserves_terminal_error_detail () =
+  with_fixture [ Emit api_error_assistant; Emit generic_400_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Turn_failed_with_observation
+           { detail; tool_effect_attempted = false; response_emitted = false }) ->
+      check
+        string
+        "terminal detail retained"
+        "terminal subtype=success api_status=400 reason=none: request rejected; \
+         diagnostic mentioned Prompt is too long without the provider prefix"
+        detail
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "diagnostic generic failure completed")
+;;
+
+let assistant_api_flag flag =
+  match Yojson.Safe.from_string api_error_assistant with
+  | `Assoc fields ->
+    let fields = List.remove_assoc "is_api_error_message" fields in
+    Yojson.Safe.to_string
+      (`Assoc
+          (Option.fold
+             ~none:fields
+             ~some:(fun value -> ("is_api_error_message", value) :: fields)
+             flag))
+  | _ -> fail "invalid assistant fixture"
+;;
+
+let test_real_identical_prose_is_still_response () =
+  List.iter
+    (fun flag ->
+       let events = ref [] in
+       with_fixture
+         [ Emit (assistant_api_flag flag); Emit rate_limit_rejected; Emit quota_result ]
+         (fun path ->
+            run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
+            match List.rev !events with
+            | [ Turn_started _; Text_delta "You've hit your limit" ] -> ()
+            | _ -> fail "ordinary assistant prose was hidden"))
+    [ None; Some (`Bool false) ]
+;;
+
+let test_malformed_api_error_flag_fails_closed () =
+  List.iter
+    (fun value ->
+       let events = ref [] in
+       with_fixture
+         [ Emit (assistant_api_flag (Some value)); Emit result ]
+         (fun path ->
+            match
+              run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            with
+            | Error
+                (Runtime_claude_code.Protocol_error
+                   { stage = "assistant message"; detail }) ->
+              check
+                string
+                "typed field failure"
+                "field \"is_api_error_message\" must be a boolean"
+                detail;
+              check int "malformed frame emits nothing" 0 (List.length !events)
+            | Error error -> fail (Runtime_claude_code.error_to_string error)
+            | Ok _ -> fail "malformed diagnostic flag admitted"))
+    [ `Null; `String "true"; `Int 1; `Assoc []; `List [] ]
+;;
+
+let test_valid_response_after_api_diagnostic () =
+  let events = ref [] in
+  with_fixture [ Emit api_error_assistant; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Ok turn ->
+      check string "measured model" "claude-fixture" turn.model;
+      check string "real response" "MASC_CLAUDE_OK" turn.text;
+      (match List.rev !events with
+       | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
+         ; Text_delta "MASC_CLAUDE_OK"
+         ; Turn_finished { text = "MASC_CLAUDE_OK" }
+         ] -> ()
+       | _ -> fail "diagnostic started or polluted response stream")
+    | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_api_diagnostic_does_not_replace_measured_model_or_text () =
+  let empty_result =
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-after-diagnostic","result":""}|}
+  in
+  with_fixture
+    [ Emit assistant; Emit api_error_assistant; Emit empty_result ]
+    (fun path ->
+       match run_fixture path with
+       | Ok turn ->
+         check string "measured model survives diagnostic" "claude-fixture" turn.model;
+         check string "fallback contains only real text" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
 ;;
 
 let test_tool_call_before_turn_admission_is_rejected () =
@@ -1682,6 +1971,7 @@ let () =
         ] )
     ; ( "admission"
       , [ test_case "validation is process-free" `Quick test_validation_is_process_free
+        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
         ; test_case
             "subscription auth and env scrub"
             `Quick
@@ -1781,6 +2071,48 @@ let () =
             "partial usage does not fail the turn"
             `Quick
             test_partial_result_usage_does_not_fail_the_turn
+        ] )
+    ; ( "API diagnostic origin"
+      , [ test_case
+            "quota remains failover safe"
+            `Quick
+            test_api_diagnostic_quota_keeps_failover_safe
+        ; test_case
+            "prior text remains emitted"
+            `Quick
+            test_api_diagnostic_preserves_prior_text
+        ; test_case
+            "prior and mixed native effects survive"
+            `Quick
+            test_api_diagnostic_preserves_native_effects
+        ; test_case
+            "prior and mixed MCP effects survive"
+            `Quick
+            test_api_diagnostic_preserves_mcp_effects
+        ; test_case
+            "overflow remains retry safe"
+            `Quick
+            test_api_diagnostic_overflow_keeps_retry_safe
+        ; test_case
+            "terminal error detail survives"
+            `Quick
+            test_api_diagnostic_preserves_terminal_error_detail
+        ; test_case
+            "identical ordinary prose remains response"
+            `Quick
+            test_real_identical_prose_is_still_response
+        ; test_case
+            "malformed flag fails closed"
+            `Quick
+            test_malformed_api_error_flag_fails_closed
+        ; test_case
+            "valid response follows diagnostic"
+            `Quick
+            test_valid_response_after_api_diagnostic
+        ; test_case
+            "diagnostic preserves measured model and text"
+            `Quick
+            test_api_diagnostic_does_not_replace_measured_model_or_text
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback

@@ -7,3 +7,5 @@ let next ~current ~census =
       match List.find_index (String.equal current) names with
       | None -> None
       | Some index -> List.nth_opt names (index + 1))
+
+let previous ~current ~census = next ~current ~census:(List.rev census)

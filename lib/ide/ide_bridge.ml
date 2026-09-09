@@ -396,8 +396,8 @@ let ingest_tool_event_from_hook
      file path are both projections of it. Re-deriving the path from
      [input] here is what put absolute host paths, sandbox-rooted
      [repos/<id>/…] paths, and repo-relative paths in one store, none
-     of which a reader can join against the annotation rows
-     the same resolver produced (masc#28582).
+     of which a reader can join against the rows the same resolver
+     produced (masc#28582).
 
      RFC-0378 §5.2: the ide store persists addressed code facts only.
      Pathless and unaddressed tool facts stay on the bus; their durable
@@ -433,9 +433,7 @@ let install_agent_observation_sinks () =
      stalls the fleet under load. Defer that work to the ingestion writer fiber
      via [Ide_ingest_queue.submit]: the hot path only allocates a closure and
      enqueues; the parse+append run off-domain. When no writer is installed
-     (tests, pre-bootstrap) [submit] runs inline, preserving prior behavior.
-     The annotation sink stays synchronous — annotation returns a Result the
-     caller consumes, so it cannot be deferred. *)
+     (tests, pre-bootstrap) [submit] runs inline, preserving prior behavior. *)
   Agent_observation.register_tool_event_sink
     (fun (event : Agent_observation.tool_event) ->
       Ide_ingest_queue.submit (fun () ->
@@ -449,54 +447,7 @@ let install_agent_observation_sinks () =
           ~typed_outcome_str:event.typed_outcome
           ~duration_ms:event.duration_ms
           ~output_text:event.output_text
-          ~input:event.input));
-  Agent_observation.register_annotation_sink
-    (fun ({ base_path
-           ; attribution
-           ; keeper_id
-           ; line_start
-           ; line_end
-           ; kind
-           ; content
-           ; goal_id
-           ; task_id
-           ; references
-           }
-          : Agent_observation.annotation_request) ->
-      match attribution with
-      | Agent_observation.Unaddressed { reason; attempted_path } ->
-        (* RFC-0378 §5.3: an annotation that fails attribution is a typed
-           reject, never an ok:true burial in a directory no codebase-scoped
-           read can see. *)
-        Error
-          (Printf.sprintf
-             "annotation target failed attribution (%s): %s"
-             (Agent_observation.Unattributed.reason_to_string reason)
-             attempted_path)
-      | Agent_observation.Addressed addressed ->
-      match
-        Ide_annotations.create
-          ~base_dir:base_path
-          ~codebase:(codebase_of_addressed addressed)
-          ~keeper_id
-          ~file_path:(file_path_of_addressed addressed)
-          ~line_start
-          ~line_end
-          ~kind
-          ~content
-          ?goal_id
-          ?task_id
-          ~references
-          ()
-      with
-      | Error msg -> Error msg
-      | Ok annotation ->
-        Ok
-          { Agent_observation.id = annotation.id
-          ; file_path = annotation.file_path
-          ; line_start = annotation.line_start
-          ; line_end = annotation.line_end
-          })
+          ~input:event.input))
 ;;
 
 (* Expose the rotation/tail-read internals so tests can drive them with

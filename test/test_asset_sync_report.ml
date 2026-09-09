@@ -3,9 +3,8 @@
     One line carried copies and deletions together and cut the shared sample
     at ten names. That is fine until a version bump, which copies enough
     assets to fill the sample by itself — and then the deleted paths are a
-    count with no names. For the [Tools] domain that count is the only signal
-    an operator gets that a definition they put in the runtime directory is
-    gone, because tool definitions have no runtime edit layer.
+    count with no names. A deletion is a distribution asset retiring, and
+    the name is the only way the operator learns which one.
 
     The first case below is that regression, written so it fails if the two
     budgets are ever merged again. *)
@@ -49,8 +48,10 @@ let test_deletion_line_says_why () =
   let r = result ~removed:[ "tools/operator_own.toml" ] () in
   let removed = line_exn (MAS.removed_line ~label:"tool" r) in
   (* A path name alone reads as a distribution detail. The reason is what
-     tells the operator their file is not coming back. *)
-  check bool "the reason is stated" true (contains ~needle:"manifest" removed)
+     tells the operator the file was the distribution's and has retired,
+     so it is not coming back. *)
+  check bool "the reason is stated" true
+    (contains ~needle:"no longer embedded" removed)
 ;;
 
 let test_nothing_removed_is_no_line () =
@@ -62,6 +63,31 @@ let test_nothing_copied_is_no_line () =
   let r = result ~removed:[ "tools/operator_own.toml" ] () in
   check bool "no distribution line" true (MAS.distribution_line ~label:"tool" r = None)
 ;;
+
+(* An overwrite is an operator's edit being replaced, so the path is the
+   message. Before this the line said "1 overwritten" and the operator had
+   to guess which of 25 prompts, 154 tool definitions or 3 MCP surfaces it
+   was -- the same count-without-names the removed line was fixed for. *)
+let test_distribution_line_names_the_overwritten () =
+  let r = result ~copied:(many 3) ~overwritten:[ path 7 ] () in
+  let line = line_exn (MAS.distribution_line ~label:"prompt" r) in
+  check bool "names the overwritten path" true (contains ~needle:(path 7) line)
+
+(* Copies stay a count. A version bump makes dozens of them and the operator
+   never had those files, so the paths crowd out the one class of entry they
+   would act on. *)
+let test_distribution_line_does_not_name_copies () =
+  let r = result ~copied:[ path 1 ] ~overwritten:[ path 2 ] () in
+  let line = line_exn (MAS.distribution_line ~label:"prompt" r) in
+  check bool "copied path absent" false (contains ~needle:(path 1) line);
+  check bool "overwritten path present" true (contains ~needle:(path 2) line)
+
+(* The same budget the removed line holds: past ten the line says how many
+   it did not print rather than growing without bound. *)
+let test_distribution_line_caps_the_overwritten_sample () =
+  let r = result ~overwritten:(many 14) () in
+  let line = line_exn (MAS.distribution_line ~label:"tool" r) in
+  check bool "says how many it withheld" true (contains ~needle:"and 4 more" line)
 
 let test_distribution_line_counts_both_classes () =
   let r = result ~copied:(many 3) ~overwritten:(many 2) () in
@@ -104,6 +130,18 @@ let () =
             "both classes are counted"
             `Quick
             test_distribution_line_counts_both_classes
+        ; test_case
+            "an overwrite is named"
+            `Quick
+            test_distribution_line_names_the_overwritten
+        ; test_case
+            "a copy is not named"
+            `Quick
+            test_distribution_line_does_not_name_copies
+        ; test_case
+            "the overwritten sample has the same budget"
+            `Quick
+            test_distribution_line_caps_the_overwritten_sample
         ] )
     ]
 ;;

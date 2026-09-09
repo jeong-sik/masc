@@ -158,8 +158,6 @@ output_per_million = 0.0
 # Declare the /v1 truth: inherent reasoning, no wire control ("none" =>
 # No_thinking_control + supports_reasoning=true => admission accepts as
 # declared-inherent). Budget likewise has no /v1 control wire => false.
-# Rows mirror agent_core models.toml verbatim otherwise (kimi-k2.6 @734, minimax-m3
-# @821, deepseek-v4-pro @491). Audit: 2026-07-20 enable_thinking flip-risk.
 [[models]]
 id_prefix = "kimi-k2.6"
 provider_name = "ollama_cloud"
@@ -183,7 +181,9 @@ supports_structured_output = false
 id_prefix = "minimax-m3"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 524288
+# https://ollama.com/api/show, model=minimax-m3, observed 2026-09-08:
+# model_info["minimax-m3.context_length"] = 512000.
+max_context_tokens = 512000
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
@@ -207,7 +207,8 @@ supports_native_streaming = true
 id_prefix = "deepseek-v4-pro"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
-max_context_tokens = 524288
+# /api/show model_info["deepseek4.context_length"] = 1048576 (2026-09-08).
+max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
@@ -229,37 +230,6 @@ supports_structured_output = false
 # post-bump turn. Mirrors agent_core models.toml @476.
 [[models]]
 id_prefix = "deepseek-v4-flash"
-provider_name = "ollama_cloud"
-base = "ollama_cloud"
-max_context_tokens = 1048576
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = false
-# See the runtime.toml capability block for why this is "none" and not
-# "reasoning_effort": the dialect cannot move without a declared effort, or
-# every enable_thinking=true turn is rejected before dispatch.
-thinking_control_format = "none"
-# The ladder the endpoint itself names when it rejects an unknown value
-# (measured 2026-08-24; "minimal" and "xhigh" are refused). Kept declared so
-# whoever supplies an effort does not have to re-probe for the legal set.
-accepted_reasoning_efforts = ["none", "low", "medium", "high", "max"]
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_response_format_json = false
-supports_structured_output = false
-supports_native_streaming = true
-# Mirror repair (task-838): value from the embedded base deepseek family and
-# the declared deepseek-v4-flash:0731 sibling row below.
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-
-# Provider-scoped model lookup is exact, so the tagged runtime model cannot
-# inherit the untagged row above (#31062). Ollama's official registry config for
-# deepseek-v4-flash:0731 reports context_length=1048576 and tools/thinking.
-# The ollama_cloud_v1 provider base remains the wire-specific control authority.
-[[models]]
-id_prefix = "deepseek-v4-flash:0731"
 provider_name = "ollama_cloud"
 base = "ollama_cloud"
 max_context_tokens = 1048576
@@ -506,9 +476,9 @@ model_id = "kimi-for-coding"
 # in the thinking field and content comes back empty. Probed 2026-08-30 on
 # ollama.com/v1: json_object -> {"ok":true} with no fence.
 [[targets]]
-id = "ollama_cloud.deepseek-v4-flash-0731"
+id = "ollama_cloud.deepseek-v4-flash"
 provider_ref = "ollama_cloud"
-model_id = "deepseek-v4-flash:0731"
+model_id = "deepseek-v4-flash"
 enable_thinking = false
 
 # verifier_exact admits its slots through the exact-output registry but
@@ -518,7 +488,7 @@ enable_thinking = false
 # dispatch goes through that runtime, so the settings here never reach the
 # verifier call.
 [[targets]]
-id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
 provider_ref = "ollama_cloud"
-model_id = "deepseek-v4-flash:0731"
+model_id = "deepseek-v4-flash"
 enable_thinking = false

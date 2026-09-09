@@ -36,6 +36,7 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 type goal = {
   id : string;
+  criterion_revision : string;
   title : string;
   metric : string option;
   target_value : string option;
@@ -49,6 +50,18 @@ type goal = {
 }
 (** A single goal entry. [priority] is clamped to [1..5] on every
     write. *)
+
+type criterion = Criterion of {
+  revision : string;
+  title : string;
+  metric : string option;
+  target_value : string option;
+}
+
+val criterion_of_goal : goal -> criterion
+val criterion_equal : criterion -> criterion -> bool
+val criterion_to_yojson : criterion -> Yojson.Safe.t
+val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
 
 val goal_to_yojson : goal -> Yojson.Safe.t
 
@@ -120,6 +133,18 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
+val get_goal_result :
+  Workspace_utils.config -> goal_id:string -> (goal option, string) result
+(** Authoritative primary-only read; recovery does not mask missing or corrupt data. *)
+
+val transact_goal :
+  Workspace_utils.config -> goal_id:string ->
+  (goal -> (goal * 'a, string) result) -> (goal * 'a, string) result
+(** Holds the Goal file lock across an authoritative primary read, callback and
+    conditional write. A callback may acquire the verification ledger lock;
+    it must not acquire this Goal lock again. Errors and unchanged Goals do not
+    write. Recovery snapshots never authorize the callback. *)
+
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t
@@ -165,6 +190,13 @@ val list_goals :
 (** Reads the state, applies optional filters, then sorts
     by [(priority, updated_at desc)]. *)
 
+val list_goals_result :
+  Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->
+  (goal list, string) result
+(** Current primary observation. An unreadable primary or a missing primary
+    with an existing mirror is an error; a fresh store is [Ok []].
+    Does not repair the store or present recovery data as current. *)
+
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->
@@ -192,3 +224,14 @@ val upsert_goal :
       the freshly decoded state, so an undecodable store hits
       the fail-closed persistence error, never this one.
       Updating an existing row is not gated. *)
+
+(** Run a dependent mutation while all referenced Goals exist in the primary
+    store. Lock order: Goal, backlog, goal-task links. The callback must not
+    acquire the Goal lock again. An empty list performs no Goal store access. *)
+type goal_reference_error =
+  | Goal_source_unavailable of string
+  | Goal_missing of string
+
+val with_existing_goals :
+  Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
+  ('a, goal_reference_error) result

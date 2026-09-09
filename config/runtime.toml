@@ -45,16 +45,12 @@ access = "read-write"
 # Fleet default keeper runtime. Moved deepseek-v4-flash -> glm-5.3-flash on the
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
-# It is dispatchable only because its binding now carries max-request-body-bytes.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 # Vision read fleet (RFC-0414). When a keeper's assigned runtime cannot take an
 # image, analyze_image's eager read walks these first. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
-# measured 5+ min per read under load, so it is deliberately not here. The fleet
-# default glm-5.3-flash is left out on purpose: its request-body ceiling is the
-# tight text-dispatch bound (below), too small for a base64 image. gemma4-31b
-# declares image input in [models.*] and carries an image-sized body ceiling in
-# its binding below.
+# measured 5+ min per read under load, so it is deliberately not here.
+# gemma4-31b declares image input and an explicit image payload limit below.
 media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
@@ -62,44 +58,17 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
 # binding for it.
 
-# Existing workspaces are not overwritten by this seed. Copy the required lane
-# declarations into the live runtime.toml before enabling their consumers.
-# Providers and individual provider.model bindings default to `enabled = true`.
-# Set `enabled = false` in either table to keep the catalog example while
-# excluding it from the executable runtime inventory. A disabled runtime cannot
-# remain referenced by [runtime].default, lanes, assignments, or failover lists.
-# 2026-08-30: every lane leads with glm-coding.glm-5.3 (z.ai) and falls over to
-# ollama_cloud.deepseek-v4-flash-0731 (ollama.com). The two slots are on
-# different providers with independent quotas, so one provider's weekly limit
-# does not stall a whole lane -- the failure the kimi coding plan hit on
-# 2026-08-30. Both were probed live: glm-5.3 answers a json_object request on
-# the z.ai coding wire, deepseek-0731 answers one (no fence) on ollama.com.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
 [runtime.exact_output_lanes.board_attention_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 
-# Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
-# calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the other exact-output lanes. Same glm-5.3 primary
-# as the lanes above, but the fallback differs: the completion-authority
-# evaluator walks slots through Runtime.resolve_assignment
-# (keeper_turn_driver), which knows configured runtimes and lanes only — the
-# exact-output catalog id ollama_cloud.deepseek-v4-flash-0731 resolves to
-# nothing there ("not found among configured runtimes", measured repeatedly
-# 2026-08-29 and 2026-09-02 whenever the glm head flapped), so this lane
-# names the configured runtime id instead. No [runtime.lanes] entry shadows
-# that id, so resolution lands on the runtime itself. Admission still runs
-# through the exact-output registry, which knows overlay [[targets]] ids
-# only, so agent-core-models-overlay.toml carries a target row under this
-# same id; without it boot ignores the slot as "absent from the frozen
-# catalog" and the lane runs on its head alone (2026-09-03).
 [runtime.exact_output_lanes.verifier_exact]
-slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -172,7 +141,7 @@ path = "/models"
 
 [providers.glm-coding.credentials]
 type = "env"
-key = "ZAI_API_KEY_SB"
+key = "ZAI_API_KEY"
 
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
@@ -389,6 +358,12 @@ path = "/api/tags"
 # a fresh install does not claim the local CLI is installed or logged in.
 # There is deliberately no credentials table: Claude Code owns its stored
 # claude.ai login, and MASC removes API/token environment fallbacks.
+#
+# Uncommenting this block alone is not enough to pick it in the wizard. It
+# declares two model bindings, and two enabled bindings without a flag is a
+# real choice the wizard refuses to guess -- it fails rather than install a
+# model nobody named. Put `wizard-default = true` under the one you want.
+# A template with a single binding needs no flag.
 # [providers.claude_code]
 # display-name = "Claude Code Subscription"
 # protocol = "claude-code"
@@ -490,10 +465,7 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [models.deepseek-v4-flash]
-# Mirrors the AGENT_CORE catalog window. Kept in step by the
-# repo-runtime-toml-declares-no-clamped-max-context gate: a value above the
-# catalog's is clamped away and only reads as authoritative (#28738).
-max-context = 1000000
+# Context comes from each provider's AGENT_CORE catalog binding.
 api-name = "deepseek-v4-flash"
 tools-support = true
 thinking-support = true
@@ -504,24 +476,6 @@ max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
-# "none" here does not mean "no reasoning". With supports-reasoning it declares
-# an inherent-thinking contract: the model reasons on its own and the wire has
-# no toggle, which is what lets a keeper turn carrying enable_thinking=true
-# through admission at all.
-#
-# 2026-08-25: changing it to "reasoning-effort" rejected every turn on this
-# lane. thinking-support = true makes the runtime seed request
-# enable_thinking=true (runtime_inference.ml), and under that dialect an
-# explicit enable is only encodable when a concrete effort accompanies it, so
-# each request died as AcceptRejected(Enable_not_encodable) before dispatch.
-# Measured live: 10 api_error_invalid_request and 0 successes on
-# ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 within one keeper cycle.
-#
-# The endpoint does honour reasoning_effort -- it names its own ladder when it
-# rejects an unknown value ("high", "medium", "low", "max", or "none") -- so
-# the dialect can move here, but only together with a declared effort. "none"
-# additionally needs thinking-support = false, or the enable and the effort
-# contradict each other.
 thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
@@ -595,25 +549,14 @@ supports-audio-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
-wizard-default = true
-# Keeper application working set, not the provider's 1M-token capability.
-# The exact final JSON body (system/tail + tools + lossless transcript) must
-# remain bounded so durable canonical history cannot become an n,n+1,... wire
-# replay. AGENT_CORE rejects an oversized serialized body locally before POST; the
-# Keeper turn policy owns any subsequent recovery decision.
-max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-pro]
-max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
-max-request-body-bytes = 524288
 
 [glm-coding.glm-4-7-coding]
 wizard-default = true
-# GLM's smaller serving window gets a smaller explicit wire working set.
-max-request-body-bytes = 262144
 
 [models.glm-5-turbo]
 # Mirrors the AGENT_CORE catalog window. Was 203000, above the catalog's
@@ -642,28 +585,6 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-# 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
-# by that model's smaller serving window. This model's window is 200000 tokens
-# and the ceiling has to be read against that: measured on a live
-# 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
-# 73,000 tokens — a third of what the model accepts.
-#
-# The keeper pays for the difference in memory. The window sizes history
-# against this ceiling, so on that same trace the keeper transmitted 14 of
-# 15,413 messages, roughly 7 turns of 7,650.
-#
-# Both candidate values have a recorded failure, and neither is safe by
-# arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
-# 355,286 B, every request was refused, and the turn could not compact its way
-# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
-# bytes over — because the window fills toward whatever ceiling it is given and
-# the envelope is not part of what it measures. What made that catastrophic
-# rather than a retry was the recovery chain, fixed since in #27813.
-#
-# So this is not "524288 is the right size". It is: one value fails on
-# ordinary history, the other fails only on an envelope overshoot the retry
-# path now absorbs.
-max-request-body-bytes = 524288
 
 # GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
 # Mirrors the glm-5-turbo judge row it replaces at the head of each lane. The
@@ -688,9 +609,6 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-3]
-# Working-set ceiling mirrors the glm-5-turbo sibling (same 200000 window); see
-# that binding's note on why 524288 is the chosen value.
-max-request-body-bytes = 524288
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
 # 2026-08-28 swap (json_schema+strict probed live; quota independent of
@@ -714,10 +632,6 @@ supports-structured-output = true
 supports-response-format-json = true
 
 [kimi_coding.kimi-for-coding]
-# 128K-window anchor rule used across this file: max-context 262144 → 524288.
-# Larger than the model max-prompt-bytes (262144) because the body also
-# carries the tool schemas and JSON overhead.
-max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
 # the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and
@@ -727,7 +641,6 @@ max-request-body-bytes = 524288
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
 tools-support = true
 thinking-support = true
 streaming = true
@@ -746,7 +659,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
-max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
 # is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
@@ -774,7 +686,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.kimi-k2-7-code]
-max-request-body-bytes = 524288
 
 # Ollama Cloud canonical model seeds
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
@@ -792,36 +703,6 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-deepseek-v4-flash]
-max-request-body-bytes = 524288
-
-# Ollama Cloud's 2026-07-31 DeepSeek-V4-Flash build. It is a DIFFERENT model
-# from the untagged `deepseek-v4-flash` above, not a newer alias of it:
-# /api/show reports parameter_size 304180418494 for `:0731` against
-# 158000000000 for the untagged tag, both FP8 and both reporting
-# deepseek4.context_length 1048576 with capabilities [completion tools thinking].
-#
-# It gets its own entry instead of retagging an existing block because
-# [models.deepseek-v4-flash] is bound to BOTH providers
-# ([ollama_cloud.deepseek-v4-flash] and [deepseek.deepseek-v4-flash]) and the
-# `:0731` suffix is an Ollama tag convention — api.deepseek.com/models serves
-# only `deepseek-v4-flash` and `deepseek-v4-pro`, so an in-place retag would
-# 404 the direct lane.
-[models.ollama-cloud-deepseek-v4-flash-0731]
-api-name = "deepseek-v4-flash:0731"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = true
-supports-reasoning-budget = false
-thinking-control-format = "none"
 # ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
 # thinking-control-format above is the request axis only; without this line the
 # response axis resolves to reading no field and the reasoning is discarded.
@@ -829,10 +710,8 @@ reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
-# No wizard-default: this adds a selectable lane and deliberately leaves
-# [runtime].default on ollama_cloud.deepseek-v4-flash.
-[ollama_cloud.ollama-cloud-deepseek-v4-flash-0731]
-max-request-body-bytes = 524288
+# No wizard-default: this binding is selectable without changing the fleet default.
+[ollama_cloud.ollama-cloud-deepseek-v4-flash]
 # 2026-08-25: this model collapses into single-token repetition and, with no
 # declared budget, runs the collapse to ollama.com's own 65536-token cap. Wire
 # capture for 2026-08-24..25 caught 11 such generations verbatim -- ~228,000
@@ -853,7 +732,6 @@ max-tokens = 16384
 
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
-max-context = 524288
 tools-support = true
 thinking-support = true
 streaming = true
@@ -867,7 +745,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-gemma4-31b]
 api-name = "gemma4:31b"
@@ -887,8 +764,7 @@ supports-multimodal-inputs = true
 [ollama_cloud.ollama-cloud-gemma4-31b]
 # media_failover vision reader (RFC-0414): the eager read serializes a base64
 # image, so this ceiling is sized for it (max image 10 MB -> ~13 MB base64, plus
-# the prompt). A positive value is also what makes the runtime keeper-dispatchable
-# at all, which media_failover requires.
+# the prompt). This is a caller payload limit for image requests.
 max-request-body-bytes = 20971520
 
 [models.ollama-cloud-glm-5-1]
@@ -907,11 +783,9 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-1]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-glm-5-2]
 api-name = "glm-5.2"
-max-context = 1000000
 tools-support = true
 thinking-support = true
 streaming = true
@@ -925,7 +799,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-2]
-max-request-body-bytes = 524288
 
 # Zhipu GLM-5.3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[completion,thinking,tools], context_length=1048576, arch=glm_dsa_moe.
@@ -948,10 +821,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-glm-5-3]
-# Keeper working-set bound, mirrored from the deepseek-v4-flash sibling on this
-# same ollama_cloud wire. Without a positive value the runtime is admitted but
-# not keeper-dispatchable (boot WARN), so this GLM cannot be selected.
-max-request-body-bytes = 524288
 
 # Zhipu GLM-5.3 Flash. /api/show 2026-08-29:
 # caps=[completion,thinking,tools,vision], context_length=1048576,
@@ -978,9 +847,10 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-glm-5-3-flash]
-# Same working-set bound as the sibling ollama_cloud runtimes; a positive value
-# is what makes this the keeper-dispatchable fleet default (see [runtime].default).
-max-request-body-bytes = 524288
+# The wizard preselects this provider, so pressing Enter has to land on the
+# same model [runtime].default already names. It sat on deepseek-v4-flash,
+# and accepting the preselection quietly changed the default.
+wizard-default = true
 
 [models.ollama-cloud-gpt-oss-20b]
 api-name = "gpt-oss:20b"
@@ -998,7 +868,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-gpt-oss-20b]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-gpt-oss-120b]
 api-name = "gpt-oss:120b"
@@ -1016,7 +885,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-gpt-oss-120b]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-kimi-k2-6]
 api-name = "kimi-k2.6"
@@ -1034,7 +902,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-6]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-kimi-k2-7-code]
 api-name = "kimi-k2.7-code"
@@ -1052,7 +919,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-7-code]
-max-request-body-bytes = 524288
 
 # Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[vision,thinking,completion,tools], context_length=1048576.
@@ -1075,9 +941,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k3]
-# Working-set bound mirrored from the sibling ollama_cloud runtimes so Moonshot
-# Kimi K3 is keeper-dispatchable rather than admitted-but-unusable.
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m2-7]
 api-name = "minimax-m2.7"
@@ -1095,11 +958,9 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-minimax-m2-7]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-minimax-m3]
 api-name = "minimax-m3"
-max-context = 524288
 tools-support = true
 thinking-support = true
 streaming = true
@@ -1116,7 +977,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-minimax-m3]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-mistral-large-3-675b]
 api-name = "mistral-large-3:675b"
@@ -1134,7 +994,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-mistral-large-3-675b]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-nano-30b]
 api-name = "nemotron-3-nano:30b"
@@ -1152,7 +1011,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-super]
 api-name = "nemotron-3-super"
@@ -1170,7 +1028,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-super]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-nemotron-3-ultra]
 api-name = "nemotron-3-ultra"
@@ -1188,7 +1045,6 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-nemotron-3-ultra]
-max-request-body-bytes = 524288
 
 [models.ollama-cloud-qwen3-5-397b]
 api-name = "qwen3.5:397b"
@@ -1215,16 +1071,13 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-qwen3-5-397b]
-max-request-body-bytes = 524288
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
 max-concurrent = 1
-max-request-body-bytes = 524288
 
 [ollama.gemma4-e2b-it-qat]
 max-concurrent = 1
-max-request-body-bytes = 524288
 
 
 # ── Runtime lanes (ordered failover) ─────────────────────────────────
@@ -1272,6 +1125,11 @@ candidates = [
 #   all                — 모든 메시지에 응답
 #   user_only:<snowflake> — 특정 사용자만
 # Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
+#
+# 이 값은 서버가 부팅할 때 한 번 읽는다. TUI 의 Config → params 화면에서
+# discord.trigger_policy 를 고르면 그 선택이 이 파일과 환경변수보다 앞서고,
+# 재시작 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
+# 우선순위: params 화면 선택 > MASC_DISCORD_TRIGGER_POLICY > 이 값 > mention_or_thread
 [discord]
 trigger_policy = "mention_or_thread"
 

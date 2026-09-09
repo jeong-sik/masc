@@ -1,0 +1,185 @@
+{
+  "schema": "masc.browser_slack.capture.v1",
+  "scope": "isolated scratch runtime; public Example Domain and empty Slack only",
+  "api_port": 8958,
+  "script_sha256": "d4fa510bb83725054a09ae25770f5947e114530142f338ace570db18a4136c9d",
+  "tui": {
+    "sha256": "b1fcc25f1a2c9e6c2e3134f1cbe5791fa4222d9449734789723c23a239164ce3",
+    "artifact_source_commit": "a1dcd40acca7b43d34ee761afcf165d35b943c0c"
+  },
+  "measurements": [
+    {
+      "label": "runtime_identity",
+      "path": "/health?full=1",
+      "status": 200,
+      "elapsed_ms": 4.4,
+      "ok": null,
+      "request": {}
+    },
+    {
+      "label": "live_fixture_check",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 10.1,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "live"
+      }
+    },
+    {
+      "label": "automation_open",
+      "path": "/api/v1/dashboard/browser-lane/session",
+      "status": 200,
+      "elapsed_ms": 1377.5,
+      "ok": true,
+      "request": {
+        "action": "open"
+      }
+    },
+    {
+      "label": "automation_navigate",
+      "path": "/api/v1/dashboard/browser-lane/goto",
+      "status": 200,
+      "elapsed_ms": 151.2,
+      "ok": true,
+      "request": {}
+    },
+    {
+      "label": "automation_read_1",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 6.5,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "automation_read_2",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 5.2,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "automation_read_3",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 4.7,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "automation_read_4",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 4.6,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "automation_read_5",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 4.1,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "slack_empty",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 2.9,
+      "ok": true,
+      "request": {
+        "app": "slack",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "closed_session_read",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 400,
+      "elapsed_ms": 1.3,
+      "ok": false,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "recovered_session_read",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "status": 200,
+      "elapsed_ms": 6.5,
+      "ok": true,
+      "request": {
+        "app": "browser",
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "cleanup_close",
+      "path": "/api/v1/dashboard/browser-lane/session",
+      "status": 200,
+      "elapsed_ms": 273.9,
+      "ok": true,
+      "request": {
+        "action": "close"
+      }
+    }
+  ],
+  "screenshots": [
+    "01-browser-native.png",
+    "02-slack-empty.png",
+    "04-session-closed.png",
+    "05-session-recovered.png"
+  ],
+  "display_observations": [
+    {
+      "screenshot": "01-browser-native.png",
+      "full_width": true,
+      "global_disconnected_badge_visible": false
+    },
+    {
+      "screenshot": "02-slack-empty.png",
+      "full_width": true,
+      "global_disconnected_badge_visible": false
+    },
+    {
+      "screenshot": "04-session-closed.png",
+      "full_width": true,
+      "global_disconnected_badge_visible": false
+    },
+    {
+      "screenshot": "05-session-recovered.png",
+      "full_width": true,
+      "global_disconnected_badge_visible": false
+    }
+  ],
+  "authenticated_slack_content_measured": false,
+  "live_native_host_binary_verified": false,
+  "result": "passed",
+  "server": {
+    "release_version": "0.33.0",
+    "binary_commit": "a1dcd40acca7b43d34ee761afcf165d35b943c0c",
+    "binary_commit_source": "embedded",
+    "executable_sha256": "c3298982f9ac9e665e7caee83b7ea64e598ab496073c70e2c1ac35ac2c797843"
+  },
+  "live_fixture": "public_example_only"
+}

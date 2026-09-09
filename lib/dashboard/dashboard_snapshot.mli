@@ -19,6 +19,24 @@
     OCaml 5 [Atomic] holds an immutable record reference; readers see a
     consistent snapshot per call (no torn reads). *)
 
+type tools_projection = private {
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+(** One final tools projection and its HTTP representations, prepared together
+    inside the tools component refresh. No request timing is retained. *)
+
+type tools_result =
+  | Tools_pending of Yojson.Safe.t
+  | Tools_ready of Yojson.Safe.t
+  | Tools_error of Yojson.Safe.t
+(** Readiness supplied by the tools producer from the exact cache payload's
+    origin. Empty computed inventories are ready; seeds and timeouts are not. *)
+
 type t = private {
   generated_at : float;          (** Unix.gettimeofday at publish.  *)
   shell : Yojson.Safe.t;
@@ -28,7 +46,7 @@ type t = private {
       from the snapshot instead of recomputing.  Different shape from
       [shell] (light skips belief/tension and uses the light agent-count /
       runtime projections), hence stored, not derived. *)
-  tools : Yojson.Safe.t;
+  tools : tools_projection;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
@@ -69,7 +87,9 @@ val refresh_loop :
 (** Run forever in the given switch.  Every [interval_sec] seconds,
     publish a fresh {!t} via [Atomic.set]. Lightweight fields refresh each
     cycle; allocation-heavy immutable projections retain their last good value
-    behind bounded 10s/30s/60s component TTLs. If a refresh
+    behind bounded 10s/30s/60s component TTLs. Tools seeds and errors retry on
+    the next cycle while retaining prepared bytes; only a computed Tools
+    response earns the 60s TTL. If a refresh
     raises, the {b previous} snapshot stays live (no torn state) and
     the error is logged.  Cancellation via the switch propagates
     cleanly through {!Eio.Time.sleep}.
@@ -87,6 +107,7 @@ val publish_for_test : t -> unit
 (** Test-only injection.  No production caller may use this. *)
 
 val make_for_test :
+  config:Workspace.config ->
   shell:Yojson.Safe.t ->
   ?shell_light:Yojson.Safe.t ->
   tools:Yojson.Safe.t ->
@@ -107,16 +128,23 @@ val register_dashboard_shell_payload_json :
   (?light:bool -> Workspace.config -> Yojson.Safe.t) ->
   unit
 
-val register_dashboard_tools_http_json : (Workspace.config -> Yojson.Safe.t) -> unit
+val register_dashboard_tools_http_result :
+  (Workspace.config -> tools_result) -> unit
 
 val register_namespace_truth_snapshot :
   (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
 
 module For_testing : sig
   type cache
+  type tools_cache
   type activity_cache
 
   val make_cache : unit -> cache
+
+  val make_tools_cache : unit -> tools_cache
+  val refresh_tools :
+    now:(unit -> float) -> ttl:float -> cache:tools_cache ->
+    config:Workspace.config -> (unit -> tools_result) -> tools_projection
 
   val refresh_projection :
     now:(unit -> float) ->

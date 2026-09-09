@@ -59,9 +59,60 @@ module Runtime = struct
      declared no image is far more likely to be working on something else, and
      handing it an OCaml image it cannot install out of is the worse default.
      `masc sandbox-image` builds what this names. *)
+  let docker_image_env = "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+
   let docker_image () =
-    get_string ~default:Keeper_sandbox_image.default_tag
-      "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+    get_string ~default:Keeper_sandbox_image.default_tag docker_image_env
+
+  type image_source =
+    | Keeper_declared
+    | Workspace_env
+    | Built_in
+
+  type image_choice =
+    { tag : string
+    ; source : image_source
+    }
+
+  let image_source_to_string = function
+    | Keeper_declared -> "keeper_declared"
+    | Workspace_env -> "workspace_env"
+    | Built_in -> "built_in"
+
+  (* [Keeper_microvm_backend]'s shape (#8467): the two places a source has to
+     appear are [all] and [image_source_to_string], and the spellings are
+     derived from them rather than typed again. The TUI keeps a parallel sum
+     because it links no server code, and
+     [test_the_reader_accepts_every_image_source_the_server_can_name] reads
+     this list, so a fourth source cannot be half-registered. *)
+  let image_sources_all = [ Keeper_declared; Workspace_env; Built_in ]
+  let image_source_strings = List.map image_source_to_string image_sources_all
+
+  (* Every path that starts a container asks the same question: the Keeper
+     declared an image, or it did not. Six of them answered it inline and one
+     of the six trimmed the answer while the other five handed the surrounding
+     whitespace to the runtime as part of the tag. One reading of a Keeper's
+     declaration lives here so the next path to ask gets the same answer.
+
+     The answer used to be the tag alone, which lost which of the three
+     things happened. On 2026-09-09 eight of this workspace's twenty-one
+     Keepers had declared no image, so all eight ran on the general one,
+     which carries no opam, dune, node, make or gcc -- and the whole fleet
+     works on MASC. Nothing said so: the tag they ran on was a plain string
+     that read the same whether a Keeper had chosen it or nobody had. The
+     first report was a Keeper saying its tools were gone. The tag is
+     unchanged; the source travels with it now so a surface can say
+     which of the three it is. *)
+  let resolve_image declared =
+    match Option.map String.trim declared with
+    | Some tag when not (String.equal tag "") -> { tag; source = Keeper_declared }
+    | Some _ | None ->
+      let source =
+        match raw_value_opt docker_image_env with
+        | Some _ -> Workspace_env
+        | None -> Built_in
+      in
+      { tag = docker_image (); source }
 
   (* container's guest resolver points at the gateway, and the gateway
      refuses DNS from inside the guest even though the same port answers

@@ -40,11 +40,11 @@ function inventory(): DashboardKeeperWaitingInventory {
     waiting_keeper_count: 1,
     row_count: 1,
     keepers: [{
-      keeper_name: 'kidsnote',
+      keeper_name: 'exampleorg',
       state: 'waiting',
       waiting_count: 1,
       waiting_on: [{
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         source: 'event_queue_pending',
         waiting_on: 'schedule_due',
         what: '예약 실행 시각 도래 · daily-news',
@@ -63,7 +63,7 @@ afterEach(() => {
 describe('KeeperLaneSection', () => {
   it('re-reads only the visible keeper when its WS invalidation arrives', async () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue(inventory())
-    render(html`<${KeeperLaneSection} keeper=${{ name: 'kidsnote', agent_name: 'agent-kidsnote' }} />`)
+    render(html`<${KeeperLaneSection} keeper=${{ name: 'exampleorg', agent_name: 'agent-exampleorg' }} />`)
 
     // Wait on the two things this test is named for -- the push registration and
     // the first read -- rather than on a caption. The previous wait was for the
@@ -77,7 +77,7 @@ describe('KeeperLaneSection', () => {
     mocks.refresh?.('rondo')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
 
-    mocks.refresh?.('kidsnote')
+    mocks.refresh?.('exampleorg')
     await waitFor(() => expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(2))
   })
 })

@@ -289,6 +289,10 @@ val find_post_by_turn_ref : store -> turn_ref:string -> post option
     [None] on miss.  [run_id] is distinct from [turn_ref] (RFC §7.6 guard #5). *)
 val find_post_by_run_id : store -> run_id:string -> post option
 
+val list_posts_by_run_origin : store -> post list
+(** Snapshot the exact run-origin index, newest publication first. Does not
+    scan unrelated Board posts or inspect body text. *)
+
 (** Coalesces [get_post] + [get_comments] under a single
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as

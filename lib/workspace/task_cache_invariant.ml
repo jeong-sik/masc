@@ -107,6 +107,57 @@ let agent_current_task_match config ~agent_name ~task_id =
          | Error detail -> Unreadable detail))
 ;;
 
+let read_agent_record config path =
+  let decode json = agent_of_yojson json |> Result.map Option.some in
+  match config.backend, key_of_path config path with
+  | Memory _, Some key ->
+    (match backend_get config ~key with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok None -> Ok None
+     | Ok (Some content) ->
+       (try decode (Yojson.Safe.from_string content)
+        with Yojson.Json_error message -> Error message))
+  | Memory _, None -> Error "agent path is outside the configured backend"
+  | FileSystem _, _ ->
+    try
+      let channel = Unix.in_channel_of_descr (Unix.openfile path [Unix.O_RDONLY] 0) in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> decode (Yojson.Safe.from_channel channel))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Unix.Unix_error (error, fn, arg) -> Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+    | Sys_error message | Yojson.Json_error message -> Error message
+;;
+
+(* Memory writes commit to the backend before their local mirror. A retry may
+   therefore observe an already-cleared primary. Repair only its projection;
+   never rewrite an unrelated primary Task assignment to settle that mirror. *)
+let settle_agent_mirror config path agent =
+  match config.backend with
+  | FileSystem _ -> Ok ()
+  | Memory _ ->
+    let expected = agent_to_yojson agent in
+    let verify () = match read_json_local_result path with
+      | Ok stored when stored = expected -> Ok ()
+      | Ok _ -> Error "agent mirror readback mismatch"
+      | Error message -> Error message in
+    match verify () with
+    | Ok () -> Ok ()
+    | Error _ ->
+      match write_json_local path expected with
+      | Error _ as error -> error
+      | Ok () -> verify ()
+;;
+
+let before_cache_write = Atomic.make (fun (_path : string) -> ())
+
+module For_testing = struct
+  let with_before_cache_write hook f =
+    let previous = Atomic.get before_cache_write in
+    Fun.protect ~finally:(fun () -> Atomic.set before_cache_write previous)
+      (fun () -> Atomic.set before_cache_write hook; f ())
+end
+
 let clear_stale_agent_task_if_matching
       config
       ~(cause : clear_cause)
@@ -119,22 +170,26 @@ let clear_stale_agent_task_if_matching
     agent_file config agent_name
   in
   let outcome =
-    if not (path_exists config path)
-    then Missing
-    else
-      with_file_lock config path (fun () ->
-        match read_json_result config path with
-        | Error detail -> Unreadable detail
-        | Ok json ->
-          (match agent_of_yojson json with
-           | Ok agent when agent.current_task = Some task_id ->
-             let updated =
-               { agent with status = Masc_domain.Active; current_task = None }
-             in
-             write_json config path (agent_to_yojson updated);
-             Matches
-           | Ok _ -> Mismatch
-           | Error detail -> Unreadable detail))
+    match with_file_lock_r config path (fun () ->
+      match read_agent_record config path with
+      | Error detail -> Unreadable detail
+      | Ok None -> Missing
+      | Ok (Some agent) when agent.current_task = Some task_id ->
+        let updated = { agent with status = Masc_domain.Active; current_task = None } in
+        (Atomic.get before_cache_write) path;
+        (match write_json_commit_result config path (agent_to_yojson updated) with
+         | Error detail -> Unreadable detail
+         | Ok {mirror_error=Some detail} -> Unreadable detail
+         | Ok {mirror_error=None} ->
+           (match read_agent_record config path with
+            | Ok (Some stored) when stored = updated -> Matches
+            | Ok _ -> Unreadable "agent cache write readback mismatch"
+            | Error detail -> Unreadable detail))
+      | Ok (Some agent) ->
+        (match settle_agent_mirror config path agent with
+         | Ok () -> Mismatch | Error detail -> Unreadable detail)) with
+    | Ok result -> result
+    | Error error -> Unreadable (Masc_domain.masc_error_to_string error)
   in
   (match outcome with
    | Matches ->
@@ -212,3 +267,38 @@ let clear_stale_agent_task_for_task
            "task_cache_invariant: unexpected scan error (%s): %s"
            module_name
            (Printexc.to_string exn))
+
+let clear_stale_agent_task_for_task_result config ~cause ~task_id ~status ~module_name =
+  let path = agents_dir config in
+  let files = match config.backend, key_of_path config path with
+    | Memory _, Some prefix ->
+      let prefix = prefix ^ ":" in
+      backend_list_keys config ~prefix
+      |> Result.map_error Backend_types.show_error
+      |> Result.map (List.map (fun key ->
+        String.sub key (String.length prefix) (String.length key - String.length prefix)))
+    | Memory _, None -> Error "agent directory is outside the configured backend"
+    | FileSystem _, _ ->
+      (try
+         let directory = Unix.opendir path in
+         Fun.protect ~finally:(fun () -> Unix.closedir directory) (fun () ->
+           let rec read acc = match Unix.readdir directory with
+             | name -> read (name :: acc)
+             | exception End_of_file -> Ok (List.rev acc) in
+           read [])
+       with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+       | Unix.Unix_error (error, fn, arg) -> Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+  match files with
+  | Error message -> Error [message]
+  | Ok files ->
+    let errors = List.filter_map (fun filename ->
+      if not (Filename.check_suffix filename ".json") then None
+      else
+        let agent_name = Filename.remove_extension filename in
+        match clear_stale_agent_task_if_matching config ~cause ~agent_name ~task_id
+          ~status_label:(Masc_domain.task_status_to_string status) ~module_name with
+        | Matches | Mismatch | Missing -> None
+        | Unreadable detail -> Some (filename ^ ": " ^ detail)) files in
+    match errors with [] -> Ok () | _ -> Error errors
+;;

@@ -6,4 +6,4 @@
 (test
  (name test_run_registry_concurrent_mutation)
  (modules test_run_registry_concurrent_mutation)
- (libraries masc_test_deps eio eio_main yojson))
+ (libraries masc_test_deps masc.fusion_core eio eio_main yojson))

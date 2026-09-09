@@ -14,19 +14,72 @@ set -euo pipefail
 REPO_ROOT="$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
 NO_EIO_DIRS="dashboard_utils|masc_log|types|response|config|tool_schemas|mcp_session|ag_ui|compression|mcp_transport_protocol"
 VIOLATIONS=0
+# Exempt lines are counted, not just honoured. The violation budget is zero and
+# the comment above explains why it stays there, but nothing was counting the
+# way around it: a line carrying cancel-guard-ok is exempt whatever it does, and
+# 23 of them had accumulated with no run reporting the number. A budget makes
+# the twenty-fourth a decision instead of a line nobody sees.
+#
+# It ratchets down, never up. Removing an exemption means lowering this, which
+# is the direction the guard wants; adding one means saying so in a diff.
+EXEMPTIONS=0
+EXEMPTION_BUDGET=18
 while IFS= read -r file; do
   echo "$file" | grep -qE "/(${NO_EIO_DIRS})/" 2>/dev/null && continue
   while IFS=: read -r lineno line; do
     start=$((lineno > 3 ? lineno - 3 : 1))
     context=$(sed -n "${start},${lineno}p" "$file")
-    if ! echo "$context" | grep -q 'Eio\.Cancel\.Cancelled' && ! sed -n "${lineno}p" "$file" | grep -q 'cancel-guard-ok'; then
+    # A handler that binds the exception and re-raises that same value cannot
+    # absorb Cancelled, whatever else it does on the way. Two shapes qualify
+    # and both appear here: `with exn -> ... raise exn`, and the capture form
+    # where the handler stores `(exn, bt)` and a nearby arm ends with
+    # `Printexc.raise_with_backtrace exn bt`. Only `with exn` can do this --
+    # `with _` binds nothing and has no value to re-raise.
+    #
+    # Eight lines of lookahead. The five sites this recognised when it was
+    # written sit 2, 2, 3, 5 and 7 lines from their handler; a re-raise
+    # further away still asks for a marker, which is the safe direction.
+    #
+    # This replaced five cancel-guard-ok markers. An exempt line is exempt
+    # whatever it does; these are safe *because* of what they do, so deleting
+    # the raise now fails the guard instead of passing on an old promise.
+    if echo "$line" | grep -qE 'with[[:space:]]+exn[[:space:]]+->' \
+      && sed -n "${lineno},$((lineno + 8))p" "$file" \
+        | grep -qE '\braise[[:space:]]+exn\b|raise_with_backtrace[[:space:]]+exn\b'; then
+      continue
+    fi
+    if sed -n "${lineno}p" "$file" | grep -q 'cancel-guard-ok'; then
+      # The marker has to say why. Four lines carried it bare, and each one had
+      # its reason in the comment above rather than where the next reader of the
+      # line would meet it -- so the line itself asserted and nothing more. The
+      # reasons are all one of two: the code is outside Eio, or it re-raises.
+      # Both are short enough to write.
+      if ! sed -n "${lineno}p" "$file" | grep -qE 'cancel-guard-ok:[[:space:]]*[^[:space:]*]'; then
+        echo "UNEXPLAINED EXEMPTION: $file:$lineno: $line"
+        VIOLATIONS=$((VIOLATIONS + 1))
+      fi
+      EXEMPTIONS=$((EXEMPTIONS + 1))
+    elif ! echo "$context" | grep -q 'Eio\.Cancel\.Cancelled'; then
       echo "VIOLATION: $file:$lineno: $line"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
   done < <(grep -n -E '(with\s+(_|exn)\s+->|\|\s*exception\s+_\s+->)' "$file" 2>/dev/null || true)
 done < <(find "$REPO_ROOT/lib" -name '*.ml' -type f)
+echo "cancel-guard exemptions: $EXEMPTIONS (budget $EXEMPTION_BUDGET)"
 if [ $VIOLATIONS -gt 0 ]; then
   echo "Found $VIOLATIONS wildcard catch(es) without Eio.Cancel guard."
+  exit 1
+fi
+if [ $EXEMPTIONS -gt $EXEMPTION_BUDGET ]; then
+  echo "A new cancel-guard-ok exemption was added." >&2
+  echo "  An exempt line is exempt whatever it does, so each one is a place" >&2
+  echo "  Cancelled can be absorbed without this guard saying so. If the line" >&2
+  echo "  really is outside Eio or re-raises, say which on the line itself and" >&2
+  echo "  raise EXEMPTION_BUDGET in this script in the same diff." >&2
+  exit 1
+fi
+if [ $EXEMPTIONS -lt $EXEMPTION_BUDGET ]; then
+  echo "An exemption is gone: lower EXEMPTION_BUDGET to $EXEMPTIONS." >&2
   exit 1
 fi
 echo "No wildcard catch violations found."

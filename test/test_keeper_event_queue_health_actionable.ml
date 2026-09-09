@@ -35,7 +35,7 @@ let queue
 ;;
 
 let dimensions input =
-  match Fleet.keeper_event_queue_health_dimensions ~stale_after_sec:600.0 input with
+  match Fleet.keeper_event_queue_health_dimensions input with
   | `Assoc fields -> fields
   | _ -> fail "expected an object"
 ;;

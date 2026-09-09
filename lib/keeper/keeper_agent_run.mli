@@ -64,6 +64,22 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val native_tool_boundary :
+    keeper_name:string ->
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
+    tool_calls:Keeper_agent_result.tool_call_detail list ->
+    assistant_turn_texts:string list ->
+    autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) option ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
+  val tool_boundary_before_repetition :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
+  val official_client_tool_boundary :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    tool_calls:Keeper_agent_result.tool_call_detail list ->
+    (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
     -> (Agent_core.Types.sse_event -> unit) option
@@ -114,6 +130,20 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
+  (** Native AGENT_CORE evaluates these detectors on both Direct and
+      Autonomous tool boundaries, and the official-client tool hook is
+      installed on the same terms: both read the turn accumulator. Without
+      [repetition_execution] that accumulator is seeded from the visible
+      checkpoint transcript; with it, observations belong to the explicit
+      admitted execution scope. Assistant text observations are local to the
+      current dispatch, and only the native boundary reads them.
+
+      Direct turns supply an admitted scope; Autonomous turns do not. The
+      scope ID codec supports autonomous admission UUIDs, but journal
+      admission and resumption are not wired into that lane. An autonomous
+      official-client turn therefore counts repeats across the provider
+      attempts of one dispatch plus whatever the transcript seeds, and an
+      admitted scope adds only its latched observation failure (#34083). *)
   val repeated_exact_tool_call
     :  threshold:int
     -> tool_call_detail list
@@ -141,8 +171,9 @@ module For_testing : sig
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
+    -> checkpoint:Agent_core.Checkpoint.t option
     -> dispatch:
-         (Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
+         (checkpoint:Agent_core.Checkpoint.t option -> Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
     -> ('a, Agent_core.Error.t) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference
@@ -232,6 +263,7 @@ val run_turn
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t
+  -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t

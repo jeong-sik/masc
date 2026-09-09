@@ -3,20 +3,37 @@
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 
 (* A request, a mailbox wait or a loop gap at least this long is written to
-   the TUI log with two clocks (RFC-0429 §3.0): wall time and process CPU
-   time. A request that took ten seconds of wall and none of CPU was waiting
-   on something; the cadence's routine polls stay under this and out of the
-   log. This is measurement, not a fix: the stall it exists to place has
-   not been placed yet. *)
-let slow_report_sec = 1.0
+   the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
+   time. A request that took ten seconds of elapsed and none of CPU was
+   waiting on something. This is measurement, not a fix: the stall it exists
+   to place has been placed since -- #33772 timed it as the main loop's own
+   iteration cost, paid once per step of a reply -- and the fix, which is
+   render and I/O sharing one domain, is not here.
+
+   This threshold was written believing the cadence's routine polls would
+   stay under it and out of the log. They do not. Measured over the live
+   TUI logs on this host, 2026-09-07: 43 of the 72 lines are the three
+   requests that ride every tick -- /gate/keepers 29 (median 2972 ms),
+   /keepers/turns 12 (median 1298 ms), /keepers/tool-approvals 2. Which is
+   the same finding from the other side: the loop is what slows a request,
+   and a poll issued by that loop is slowed by it too. Raising the number
+   would only hide the majority case, so it stays and the premise is
+   written down as measured rather than as assumed.
+
+   Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
+   being chased is around ten seconds, and a wall clock corrected by that
+   much would either invent it or hide it — the one thing this log must not
+   do. [Masc_tui_esc_interrupt] takes the same clock for the same reason. *)
+let slow_report_ns = 1_000_000_000L
+let ms_of_ns ns = Int64.to_float ns /. 1e6
 
 let timed ~verb ~path (run : unit -> (int * string, string) result) =
-  let started_wall = Unix.gettimeofday () and started_cpu = Sys.time () in
+  let started_ns = Mtime_clock.elapsed_ns () and started_cpu = Sys.time () in
   let result = run () in
-  let wall = Unix.gettimeofday () -. started_wall in
-  if wall >= slow_report_sec then
-    Log.Transport.info "http %s %s took %.0f ms wall, %.0f ms cpu: %s" verb path
-      (wall *. 1000.)
+  let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
+  if Int64.compare elapsed_ns slow_report_ns >= 0 then
+    Log.Transport.info "http %s %s took %.0f ms elapsed, %.0f ms cpu: %s" verb
+      path (ms_of_ns elapsed_ns)
       ((Sys.time () -. started_cpu) *. 1000.)
       (match result with
        | Ok (status, _) -> Printf.sprintf "status %d" status
@@ -42,6 +59,11 @@ let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
+let msx_frame_path = "/api/v1/msx/frame"
+let msx_press_path = "/api/v1/msx/press"
+let msx_carts_path = "/api/v1/msx/carts"
+let msx_load_path = "/api/v1/msx/load"
+let msx_tick_path = "/api/v1/msx/tick"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -240,6 +262,15 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
+(* The workspace MSX frame (RFC-0439 §3.7). [None] on any of: transport error,
+   non-object body, [loaded:false], or a payload that does not decode -- the
+   spectator treats all of them as "nothing to watch right now". *)
+let fetch_msx_frame ~(host : string) ~(port : int) :
+    Masc_tui_types.msx_frame option =
+  match get_json ~host ~port ~path:msx_frame_path with
+  | Error _ -> None
+  | Ok json -> Masc_tui_msx_tick.frame_of_json json
+
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
     ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
@@ -254,6 +285,101 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
+   the new frame number on success, or an error string; the caller re-fetches
+   the frame to see the result. Auth rides [post_json]'s operator bearer. *)
+let post_msx_press ~(host : string) ~(port : int) ~(keys : string list) :
+    (int, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("keys", `List (List.map (fun k -> `String k) keys)) ])
+  in
+  match post_json ~host ~port ~path:msx_press_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> ( try Ok (member "frame" json |> to_int) with _ -> Ok 0)
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "press refused"))
+;;
+
+(* The cartridge inventory for the load menu (RFC-0439 §3.7). The empty list on
+   any transport or shape error is the honest answer for the menu: "nothing to
+   pick right now", the same way the frame poll treats a missing frame. *)
+let fetch_msx_carts ~(host : string) ~(port : int) : string list =
+  match get_json ~host ~port ~path:msx_carts_path with
+  | Error _ -> []
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "carts" json with
+    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> [])
+
+(* Plug a cartridge into the shared machine on the human's behalf (RFC-0439
+   §3.7). The server runs the same loader masc_msx_load does; on success the
+   caller re-fetches the frame to start spectating. Auth rides [post_json]'s
+   operator bearer, like a press. *)
+let post_msx_load ~(host : string) ~(port : int) ~(cart : string) :
+    (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [ ("cart", `String cart) ]) in
+  match post_json ~host ~port ~path:msx_load_path ~body with
+  | Error e -> Error e
+  | Ok json -> (
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (
+      match member "message" json with `String m -> Error m | _ -> Error "load refused"))
+;;
+
+let post_msx_change_disk ~host ~port ~disk =
+  let body = Yojson.Safe.to_string (`Assoc ["disk", `String disk]) in
+  match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
+  | Error e -> Error e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (match member "message" json with
+      | `String message -> Error message | _ -> Error "disk change refused")
+;;
+
+let post_msx_checkpoint ~host ~port ~restore ~slot =
+  let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
+  let body = Yojson.Safe.to_string (`Assoc ["slot", `String slot]) in
+  match post_json ~host ~port ~path ~body with
+  | Error e -> Error e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    match member "ok" json with
+    | `Bool true -> Ok ()
+    | _ -> (match member "message" json with
+      | `String message -> Error message | _ -> Error "checkpoint refused")
+;;
+
+(* Advance the shared machine one poll-cadence step and read back the frame it
+   lands on (RFC-0439 §3.2, poll-cadence tick). The spectator poll calls this
+   instead of a plain frame read so a game flows even when no keeper is pressing.
+   The step size is the server's default -- the cadence policy lives there, not
+   here -- so the body carries no frame count. Transport/shape errors remain
+   distinct from [Ok None] (no machine); a lost mutation response must not
+   silently trigger another automatic tick. The operator bearer is captured once.
+   Only validated pixels are retained; every tick supplies fresh metadata. *)
+let msx_tick_cache = Masc_tui_msx_tick.create ()
+
+let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, string) result =
+  let headers = auth_headers () in
+  let request ~body =
+    match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
+        ~host ~port ~path:msx_tick_path ~body with
+    | Error _ as error -> error
+    | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
+  in
+  Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
+;;
+
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -646,30 +772,30 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
   | Ok { Masc_http_client.headers; _ } ->
       Masc_tui_observer.session_id_of_headers headers
 
-(** Read the runtime's event feed until it ends.
+type observer_error =
+  | Transport_failed of string
+  | Http_refused of { status : int; detail : string }
 
-    Blocks on the calling fiber for the life of the stream and hands every
-    body chunk to [on_chunk] as it arrives. The silence bound is the one
-    the keeper chat stream uses: a feed from a runtime with keepers turning
-    that says nothing for that long has gone quiet, and the caller reopens
-    it on its own schedule. [Ok ()] is the server closing the stream; a
-    refusal and a transport failure both come back as [Error]. *)
+(** Stream headers are delivered before body chunks. A transport disconnect
+    and an explicit HTTP refusal remain distinct so a quiet connection does
+    not invalidate an otherwise usable MCP session or scoped replay cursor. *)
 let observe_runtime_events ~clock ~(host : string) ~(port : int)
-    ~(session_id : string) ~(on_chunk : string -> unit) : (unit, string) result
-    =
+    ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
+    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let url = url_of ~host ~port ~path:observer_stream_path in
   let headers =
     ("Accept", "text/event-stream")
     :: ("Mcp-Session-Id", sanitize_header_value session_id)
     :: auth_headers ()
+    @ Sse_wire.observer_cursor_headers cursor
   in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_chunk ()
+      ~url ~headers ~on_response ~on_chunk ()
   with
-  | Error detail -> Error (report_err "observer stream failed" detail)
+  | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
-      Error (Printf.sprintf "observer stream refused with %d: %s" status body)
+      Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** One MCP [tools/call] under an existing session.
@@ -781,19 +907,23 @@ let lane_run_list_limit = 50
    would truncate anyway. *)
 let lane_run_detail_max_body_bytes = 4 * 1024 * 1024
 
-(** Recent run summaries of one standalone lane, newest first. *)
-let fetch_lane_runs ~(host : string) ~(port : int) ~(lane : string) :
-    (Masc.Tui_decode.lane_run_summary list, string) result =
+(** One server-filtered page, with the exact continuation cursor retained. *)
+let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
+    (Masc.Tui_decode.lane_run_page, string) result =
   let open Result.Syntax in
+  let cursor = match before with
+    | None -> ""
+    | Some (started_at, run_id) ->
+      Printf.sprintf "&before_started_at=%.17g&before_run_id=%s"
+        started_at (percent_encode_path_segment run_id) in
   let path =
     Printf.sprintf
-      "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s"
+      "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s%s"
       lane_run_list_limit
-      (percent_encode_path_segment lane)
+      (percent_encode_path_segment lane) cursor
   in
   let* listing = get_json ~host ~port ~path in
-  let* page = Masc.Tui_decode.decode_lane_run_page ~lane listing in
-  Ok page.lrpg_runs
+  Masc.Tui_decode.decode_lane_run_page ~lane listing
 
 (** The full record of one standalone-lane run, including exact prompt/output
     or Verifier request/verdict/tool evidence. *)
@@ -1136,6 +1266,14 @@ let post_keeper_directive ~(host : string) ~(port : int)
   in
   http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
 
+(** POST the keeper purge the web dashboard uses. Not under [/api/v1/keepers/]:
+    the route is a dashboard action and reads the keeper from the body. *)
+let post_keeper_purge ~(host : string) ~(port : int) ~(keeper_name : string)
+    : (int * string, string) result =
+  http_post ~headers:(auth_headers ()) ~host ~port
+    ~path:"/api/v1/dashboard/agents/purge"
+    ~body:(Masc_tui_keeper_control.purge_body keeper_name)
+
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/briefing"
@@ -1324,6 +1462,13 @@ let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
   with
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate external mode" json
+
+let post_dashboard_gate_workspace_mode ~(host : string) ~(port : int)
+    ~(mode : string) : (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [("mode", `String mode)]) in
+  match post_json ~host ~port ~path:"/api/v1/dashboard/gate/mode" ~body with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate workspace mode" json
 
 (** GET /api/v1/dashboard/gate/keeper-settings — durable per-keeper Gate
     settings: which Keepers were held stricter than the workspace, and which
@@ -2165,7 +2310,8 @@ let post_skill_evidence ~host ~port reference =
 ;;
 
 let fetch_async_request_observation ~host ~port =
-  get_json ~host ~port ~path:"/api/v1/async-requests"
+  Result.bind (get_json ~host ~port ~path:"/api/v1/async-requests")
+    Masc.Tui_decode.decode_async_request_observation
 ;;
 
 (** GET /api/v1/prompts — every prompt the registry serves, with the file
@@ -2422,3 +2568,71 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
       Error (Printf.sprintf "another surface answered first: %s" response_body)
   | Ok (status, response_body) ->
       Error (Printf.sprintf "answer returned %d: %s" status response_body)
+
+(** Browser Lane shares the authenticated TUI transport. Reads are POST because
+    selecting the Firefox tab belongs to the request body. *)
+let fetch_browser_lane_clients ~host ~port =
+  let open Masc_tui_types.Browser_lane_view in
+  let* json = get_json ~host ~port ~path:"/api/v1/dashboard/browser-lane/clients" in
+  decode_clients json
+
+let fetch_browser_lane ~host ~port view =
+  (* The server can spend 20s listing tabs and 20s reading the page. *)
+  match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
+          ~path:"/api/v1/dashboard/browser-lane/read"
+          ~body:(Yojson.Safe.to_string (Masc_tui_types.Browser_lane_view.request_body view)) with
+  | Error detail -> Error detail
+  | Ok json -> Masc_tui_types.Browser_lane_view.decode json
+
+let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
+  let open Masc_tui_types.Browser_lane_view in
+  let body = Yojson.Safe.to_string (request_body { view with selected_tab = Some tab_id }) in
+  let* json = post_json_with_timeout ~timeout_sec:45.0 ~host ~port
+      ~path:"/api/v1/dashboard/browser-lane/screenshot" ~body in
+  let* screenshot = decode_screenshot json in
+  match Base64.decode screenshot.data with
+  | Error (`Msg detail) -> Error ("invalid screenshot base64: " ^ detail)
+  | Ok bytes -> Ok (screenshot, bytes)
+
+let scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y =
+  (* The view module carries the [let*] the two neighbours open it for. *)
+  let open Masc_tui_types.Browser_lane_view in
+  let body = viewport_request ~tab_id ~expected_url ~y view |> Yojson.Safe.to_string in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/interact" ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail
+
+let fetch_browser_scene ~host ~port ~view ~tab_id =
+  let open Masc_tui_types.Browser_lane_view in
+  let body = request_body {view with selected_tab = Some tab_id} |> Yojson.Safe.to_string in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/scene" ~body in
+  decode_scene json
+
+let click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url =
+  let open Masc_tui_types.Browser_lane_view in
+  let fields = match request_body {view with selected_tab = Some tab_id} with
+    | `Assoc fields -> fields | _ -> [] in
+  let body = `Assoc (fields @ ["action",`String "click"; "documentId",`String document_id;
+    "nodeId",`String node_id; "expectedUrl",`String expected_url]) |> Yojson.Safe.to_string in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/interact" ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail
+
+let browser_lane_action ~host ~port operation =
+  let open Masc_tui_types.Browser_lane_view in
+  let request = match operation with
+    | Discover _ | Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ -> Error "read/screenshot requires its own browser endpoint"
+    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+  in
+  let* endpoint, json, timeout_sec = request in
+  let body = Yojson.Safe.to_string json in
+  (* Native startup allows 60s; navigation may include Firefox loading. *)
+  let* json = post_json_with_timeout ~timeout_sec ~host ~port
+      ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail

@@ -379,6 +379,83 @@ let test_durable_accept_precedes_delivery_handoff () =
     failf "expected Keeper lane, got connector:%s" connector_id
 ;;
 
+module Gw = Discord_gateway_state
+
+(* -- the params plane above env and TOML -------------------------- *)
+
+(* The gateway publishes what it resolved from env and runtime.toml, and the
+   param answers with that until an operator overrides it from the params
+   surface. This is the layer that lets a policy change take effect without a
+   restart, so what it must hold is: an override wins, and clearing one returns
+   to the configured answer rather than to the hardcoded baseline. *)
+
+let installed_policy () = ps (Runtime_params.get Runtime_settings.discord_trigger_policy)
+
+let set_override policy =
+  match Runtime_params.set Runtime_settings.discord_trigger_policy policy with
+  | Ok () -> ()
+  | Error detail -> fail ("override rejected: " ^ detail)
+;;
+
+let with_clean_override f =
+  Fun.protect
+    ~finally:(fun () -> Runtime_params.clear Runtime_settings.discord_trigger_policy)
+    f
+;;
+
+let test_configured_answers_without_override () =
+  with_clean_override (fun () ->
+    Runtime_params.clear Runtime_settings.discord_trigger_policy;
+    Runtime_settings.set_discord_trigger_policy_configured Gw.All;
+    check string "the configured policy answers when nothing overrides it"
+      (ps Gw.All) (installed_policy ()))
+;;
+
+let test_override_wins_over_configured () =
+  with_clean_override (fun () ->
+    Runtime_settings.set_discord_trigger_policy_configured Gw.All;
+    set_override Gw.Mention_only;
+    check string "an operator override outranks env and TOML"
+      (ps Gw.Mention_only) (installed_policy ()))
+;;
+
+let test_clear_returns_to_configured () =
+  with_clean_override (fun () ->
+    Runtime_settings.set_discord_trigger_policy_configured Gw.Mention_or_thread;
+    set_override Gw.All;
+    Runtime_params.clear Runtime_settings.discord_trigger_policy;
+    check string "clearing returns to what env and TOML said, not the baseline"
+      (ps Gw.Mention_or_thread) (installed_policy ()))
+;;
+
+(* The parameterized form is not offered by the picker but must still round
+   trip, or an operator who types it loses it on the next read. *)
+let test_user_only_round_trips_through_the_param () =
+  with_clean_override (fun () ->
+    set_override (Gw.User_only "123456789");
+    check string "user_only survives serialize and deserialize"
+      (ps (Gw.User_only "123456789")) (installed_policy ()))
+;;
+
+(* The connector surface reads a mirror written at gateway startup. A param
+   set has to carry it along, or the screen an operator just used goes on
+   reporting the policy from boot. *)
+let test_setting_the_param_moves_the_display_mirror () =
+  with_clean_override (fun () ->
+    Channel_gate_discord_state.set_trigger_policy Gw.Mention_or_thread;
+    let key = Runtime_params.key Runtime_settings.discord_trigger_policy in
+    (match
+       Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+         ~base_path:"" ~param_key:key
+         (fun () -> Runtime_params.set_by_key_with_change key (`String "mention_only"))
+     with
+     | Ok ((_ : Runtime_params.json_change), (_ : (string * Yojson.Safe.t) list)) -> ()
+     | Error detail -> fail ("param mutation rejected: " ^ detail));
+    check (option string) "the surface reports what was just set"
+      (Some (ps Gw.Mention_only))
+      (Option.map ps (Channel_gate_discord_state.get_trigger_policy ())))
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "toml_loader"
@@ -411,5 +488,17 @@ let () =
             test_message_people_directory_prefers_global_names
         ; test_case "full channel and member pages" `Quick
             test_full_directory_pages_keep_channels_and_global_people
+        ] )
+    ; ( "params_plane"
+      , [ test_case "configured answers without an override" `Quick
+            test_configured_answers_without_override
+        ; test_case "override wins over configured" `Quick
+            test_override_wins_over_configured
+        ; test_case "clear returns to configured" `Quick
+            test_clear_returns_to_configured
+        ; test_case "user_only round trips" `Quick
+            test_user_only_round_trips_through_the_param
+        ; test_case "a param set moves the display mirror" `Quick
+            test_setting_the_param_moves_the_display_mirror
         ] )
     ]

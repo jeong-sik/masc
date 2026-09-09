@@ -99,7 +99,11 @@ let glyph_text = function
   | Turn_settled -> "\xe2\x96\xa0"
   | Failure -> "\xe2\x9c\x97"
   | Attention -> "?"
-  | Quiet -> "\xc2\xb7"
+  (* A quiet row claims no state, so it draws no mark: a blank first cell.
+     [\xc2\xb6] here read as the roster's idle glyph -- the same character
+     saying two things in one line (#33691). The label beside the cell
+     names the row. *)
+  | Quiet -> " "
 
 type row = {
   at : float;
@@ -342,6 +346,7 @@ type wire_tool = {
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
+  ck_session_turn : int option;
   ck_at : float;  (** newest member's arrival — the chunk's feed position *)
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
@@ -363,7 +368,11 @@ type chunk_member =
       tool_use_id : string option;
       turn : int option;
     }
-  | Member_ledger_tool of { tool : string; duration_ms : float option }
+  | Member_ledger_tool of {
+      tool : string;
+      duration_ms : float option;
+      turn : int option;
+    }
   | Member_settle of Observer.keeper_turn_complete
   | Member_quiet
 
@@ -402,6 +411,7 @@ let member_of_event (event : Observer.event) =
         (Member_ledger_tool
            { tool = c.Observer.kt_tool
            ; duration_ms = c.Observer.kt_duration_ms
+           ; turn = c.Observer.kt_turn
            })
   | Observer.Keeper_turn_complete t -> Some (Member_settle t)
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
@@ -413,6 +423,7 @@ let member_of_event (event : Observer.event) =
 let empty_chunk ~keeper ~turn ~at =
   { ck_keeper = keeper
   ; ck_turn = turn
+  ; ck_session_turn = turn
   ; ck_at = at
   ; ck_wire_tools = []
   ; ck_ledger_tools = []
@@ -422,22 +433,29 @@ let empty_chunk ~keeper ~turn ~at =
   ; ck_calls = None
   }
 
+(* Two planes number the same turn. The turn markers, the agent-core wire
+   and the keeper ledger all number it from the agent session; only the
+   settle numbers it from the keeper's lifetime -- one real turn arrived as
+   1157 on the wire and 719 on its settle (live capture 2026-09-07). A chunk
+   holds both because a member can only be matched against the plane it was
+   written on. [ck_turn] is what a row displays: the settle's number once it
+   has one, the session number before that. Both are first-wins. *)
+let stamp_session_turn chunk turn =
+  let first held = match held with Some _ as t -> t | None -> turn in
+  { chunk with
+    ck_turn = first chunk.ck_turn
+  ; ck_session_turn = first chunk.ck_session_turn
+  }
+
 let apply_member chunk ~at member =
   let chunk = { chunk with ck_at = Float.max chunk.ck_at at } in
   match member with
   | Member_quiet -> chunk
-  | Member_turn_marker turn ->
-      let ck_turn =
-        match chunk.ck_turn with Some _ as t -> t | None -> turn
-      in
-      { chunk with ck_turn }
+  | Member_turn_marker turn -> stamp_session_turn chunk turn
   | Member_wire_call { tool; tool_use_id; turn } ->
-      let ck_turn =
-        match chunk.ck_turn with Some _ as t -> t | None -> turn
-      in
+      let chunk = stamp_session_turn chunk turn in
       { chunk with
-        ck_turn
-      ; ck_wire_tools =
+        ck_wire_tools =
           chunk.ck_wire_tools
           @ [ { wt_id = tool_use_id
               ; wt_started = at
@@ -447,9 +465,7 @@ let apply_member chunk ~at member =
             ]
       }
   | Member_wire_return { tool; tool_use_id; turn } ->
-      let ck_turn =
-        match chunk.ck_turn with Some _ as t -> t | None -> turn
-      in
+      let chunk = stamp_session_turn chunk turn in
       (* Settle the newest still-open call with this id in place; a return
          whose call was never held (the feed opened mid-turn) appends with
          no duration rather than being dropped. *)
@@ -480,8 +496,9 @@ let apply_member chunk ~at member =
               }
             ]
       in
-      { chunk with ck_turn; ck_wire_tools }
-  | Member_ledger_tool { tool; duration_ms } ->
+      { chunk with ck_wire_tools }
+  | Member_ledger_tool { tool; duration_ms; turn } ->
+      let chunk = stamp_session_turn chunk turn in
       { chunk with
         ck_ledger_tools =
           chunk.ck_ledger_tools
@@ -582,23 +599,32 @@ let fold_chunks ~traces entries =
               (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains
       | Some member ->
           let keeper = keeper_of_event ~traces event in
+          (* Which plane this member's number is on decides what it can be
+             matched against; see [stamp_session_turn]. *)
           let turn_of_member =
             match member with
-            | Member_turn_marker turn -> turn
-            | Member_wire_call { turn; _ } | Member_wire_return { turn; _ } ->
-                turn
-            | Member_settle t -> t.Observer.tc_turn
-            | Member_ledger_tool _ | Member_quiet -> None
+            | Member_turn_marker turn -> `Session turn
+            | Member_wire_call { turn; _ } | Member_wire_return { turn; _ }
+            | Member_ledger_tool { turn; _ } -> `Session turn
+            | Member_settle t -> `Keeper t.Observer.tc_turn
+            | Member_quiet -> `Session None
           in
           let existing = Option.value ~default:[] (Hashtbl.find_opt chunks keeper) in
           (* The keeper's chunks are held newest first: a turn-less ledger
              row lands on the most recent one, a numbered member skips past
              mismatching turns to its own. *)
+          let member_fits chunk =
+            let held =
+              match turn_of_member with
+              | `Session _ -> chunk.ck_session_turn
+              | `Keeper _ -> chunk.ck_turn
+            in
+            match ((match turn_of_member with `Session t | `Keeper t -> t), held) with
+            | Some t, Some ct -> t = ct
+            | Some _, None | None, (Some _ | None) -> true
+          in
           let rec attach acc = function
-            | chunk :: rest
-              when (match (turn_of_member, chunk.ck_turn) with
-                   | Some t, Some ct -> t = ct
-                   | Some _, None | None, (Some _ | None) -> true) ->
+            | chunk :: rest when member_fits chunk ->
                 Some
                   (List.rev_append acc (apply_member chunk ~at member :: rest))
             | chunk :: rest -> attach (chunk :: acc) rest
@@ -616,6 +642,26 @@ let fold_chunks ~traces entries =
                        shows nothing else about (live capture 2026-09-01,
                        #32208). *)
                     existing
+                | Member_settle _ when turn_of_member <> `Keeper None ->
+                    (* A numbered settle that finds no chunk with its number
+                       joins the newest still-open chunk: the wire numbered
+                       that turn from the agent session while the settle
+                       numbers it from the keeper's lifetime, so one real
+                       turn arrived as two numbers and drew as two rows --
+                       the open row hoarding the ledger calls, the settled
+                       row holding the tokens (live capture 2026-09-06,
+                       turn 1740 beside turn 3084). A keeper runs one turn
+                       at a time, so the newest open chunk is the turn this
+                       settle ends, and [apply_member] stamps it with the
+                       keeper's own number. With every chunk settled the
+                       settle stands as its own row, as before. *)
+                    (match existing with
+                     | chunk :: rest when not chunk.ck_settled ->
+                         apply_member chunk ~at member :: rest
+                     | _ ->
+                         apply_member (empty_chunk ~keeper ~turn:None ~at) ~at
+                           member
+                         :: existing)
                 | Member_turn_marker _ | Member_wire_call _
                 | Member_wire_return _ | Member_settle _
                 | Member_ledger_tool _ ->
@@ -634,6 +680,26 @@ let chunks ~traces entries =
   let chunks, _plains = fold_chunks ~traces entries in
   Hashtbl.fold (fun _ keeper_chunks acc -> keeper_chunks @ acc) chunks []
   |> List.stable_sort (fun a b -> Float.compare b.ck_at a.ck_at)
+
+type chunk_projection = {
+  source_entries : entry list;
+  source_traces : (string * string) list;
+  projected_chunks : chunk list;
+}
+
+let refresh_projection ~previous ~traces entries =
+  let same_trace (keeper, trace) (other_keeper, other_trace) =
+    String.equal keeper other_keeper && String.equal trace other_trace
+  in
+  match previous with
+  | Some projection
+    when projection.source_entries == entries
+      && List.equal same_trace projection.source_traces traces -> projection
+  | _ ->
+    { source_entries = entries; source_traces = traces;
+      projected_chunks = chunks ~traces entries }
+
+let projection_chunks projection = projection.projected_chunks
 
 let chunk_rows ~traces entries =
   let chunks, plains = fold_chunks ~traces entries in
@@ -676,3 +742,64 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
+
+let evidence_fields (entry : entry) =
+  let field label value = label, value in
+  let some label value = field label (Some value) in
+  let number label value = field label (Option.map string_of_int value) in
+  match entry.ae_event with
+  | Observer.Agent_core e ->
+      let kind = match e.kind with
+        | Tool_called -> "tool_called" | Tool_completed -> "tool_completed"
+        | Turn_started -> "turn_started" | Turn_ready -> "turn_ready"
+        | Turn_completed -> "turn_completed" | Agent_started -> "agent_started"
+        | Agent_completed -> "agent_completed" | Agent_failed -> "agent_failed"
+        | Agent_yielded -> "agent_yielded" | Tool_approval_completed -> "tool_approval_completed"
+        | Telemetry -> "telemetry_event" | Agent_core_other name -> name in
+      [ some "Source" "runtime observer event"
+      ; some "Event kind" kind
+      ; field "Tool name" e.tool
+      ; field "Tool use ID" e.tool_use_id
+      ; field "Execution ID" e.execution_id
+      ; field "Event ID" e.event_id
+      ; field "Run ID" e.run_id
+      ; field "Parent event ID" e.parent
+      ; field "Caused by" e.caused_by
+      ; field "Correlation ID" e.correlation
+      ; field "Runtime agent" e.agent
+      ; field "Task ID" e.task
+      ; number "Turn" e.turn
+      ; field "Batch index / size" (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
+      ; some "Input/output" "not carried by this observer event"
+      ; some "Skill receipt" "not carried by this observer event"
+      ]
+  | Observer.Keeper_tool_call call ->
+      let schedule_fields =
+        match call.kt_schedule with
+        | None -> [ field "Execution schedule" None ]
+        | Some (Error error) -> [ some "Execution schedule error" error ]
+        | Some (Ok schedule) ->
+            [ some "Execution mode"
+                (match schedule.execution_mode with
+                 | Agent_core.Tool_contract.Concurrent -> "concurrent"
+                 | Agent_core.Tool_contract.Serial -> "serial")
+            ; some "Planned index (zero-based)" (string_of_int schedule.planned_index)
+            ; some "Batch index (zero-based) / size"
+                (Printf.sprintf "%d / %d" schedule.batch_index schedule.batch_size)
+            ]
+      in
+      [ some "Source" "keeper_tool_call observer event"
+      ; some "Keeper" call.kt_keeper
+      ; some "Tool name" call.kt_tool
+      ; number "Turn" call.kt_turn
+      ; field "Disposition" call.kt_disposition
+      ; field "Tool use ID" call.kt_tool_use_id
+      ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
+      ] @ schedule_fields
+  | event ->
+      let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+      [ some "Source" "observer event"
+      ; some "Event" row.label
+      ; some "Detail" row.detail
+      ; some "Call evidence" "this event is not an exact tool invocation"
+      ]

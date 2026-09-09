@@ -215,13 +215,12 @@ let string_or_null j key =
   | _ -> fail (key ^ " must be a string or null")
 ;;
 
-(* An LSP process failure is surfaced as a typed overlay-only status, not
-   hidden behind an overlay success (the old 9 handlers) nor a JSON-RPC error
-   (old hover). *)
-let test_overlay_only_status_is_typed () =
-  let j = Lsp.lang_status_json ~lang_id:"ocaml" (Lsp.Overlay_only "spawn failed") in
+(* An LSP process failure is surfaced as a typed unavailable status, not
+   hidden behind an empty answer that reads like a real one, nor a JSON-RPC
+   error (old hover). *)
+let test_unavailable_status_is_typed () =
+  let j = Lsp.lang_status_json ~lang_id:"ocaml" (Lsp.Unavailable "spawn failed") in
   check bool "not connected" false (bool_field j "connected");
-  check bool "overlay_only surfaced" true (bool_field j "overlay_only");
   check
     (option string)
     "last_error surfaced"
@@ -234,12 +233,11 @@ let test_overlay_only_status_is_typed () =
     (string_or_null j "command")
 ;;
 
-(* A connected language reports no degradation — distinct from overlay-only so
-   the dashboard can tell a healthy LSP from a fallback. *)
+(* A connected language reports no degradation — distinct from unavailable so
+   the dashboard can tell a healthy LSP from a language with no server. *)
 let test_connected_status_is_typed () =
   let j = Lsp.lang_status_json ~lang_id:"ocaml" Lsp.Connected in
   check bool "connected" true (bool_field j "connected");
-  check bool "not overlay_only" false (bool_field j "overlay_only");
   check
     (option string)
     "no last_error while connected"
@@ -248,11 +246,27 @@ let test_connected_status_is_typed () =
 ;;
 
 (* A language with no configured LSP reports a null command, still typed as
-   overlay-only rather than pretending to be a full LSP. *)
+   unavailable rather than pretending to be a full LSP. *)
 let test_unmapped_lang_has_null_command () =
-  let j = Lsp.lang_status_json ~lang_id:"cobol" (Lsp.Overlay_only "no server") in
+  let j = Lsp.lang_status_json ~lang_id:"cobol" (Lsp.Unavailable "no server") in
   check (option string) "unmapped lang has null command" None (string_or_null j "command");
-  check bool "still typed overlay_only" true (bool_field j "overlay_only")
+  check bool "still not connected" false (bool_field j "connected")
+;;
+
+(* The health is two states, so the wire says so once: [connected] carries it
+   and [last_error] says why when it is false. The field names and their order
+   are pinned here so a second field saying the same thing a different way
+   cannot be added without this failing; the two tests above pin the values. *)
+let test_status_says_the_health_once () =
+  List.iter
+    (fun health ->
+      match Lsp.lang_status_json ~lang_id:"ocaml" health with
+      | `Assoc fields ->
+        check (list string) "wire fields"
+          [ "lang"; "connected"; "command"; "last_error" ]
+          (List.map fst fields)
+      | _ -> fail "lang status must be an object")
+    [ Lsp.Connected; Lsp.Unavailable "spawn failed" ]
 ;;
 
 (* The snapshot the dashboard receives lists every tracked language, sorted by
@@ -260,7 +274,7 @@ let test_unmapped_lang_has_null_command () =
 let test_status_snapshot_is_sorted_and_complete () =
   let j =
     Lsp.status_snapshot_json
-      [ "python", Lsp.Overlay_only "e"; "ocaml", Lsp.Connected ]
+      [ "python", Lsp.Unavailable "e"; "ocaml", Lsp.Connected ]
   in
   let langs =
     match member "langs" j with
@@ -278,7 +292,7 @@ let test_status_snapshot_is_sorted_and_complete () =
   check (list string) "sorted by lang id" [ "ocaml"; "python" ] (List.map lang_of langs)
 ;;
 
-(* --- task-1692: read-only method allowlist + no overlay write edits --- *)
+(* --- task-1692: read-only method allowlist --- *)
 
 (* Read-only navigation methods that reach the catch-all forwarder are
    proxied to the language server. *)
@@ -431,44 +445,6 @@ let test_unknown_language_is_typed () =
   | Lsp.Known_lang lang -> Alcotest.fail ("unexpected known lang: " ^ lang)
 ;;
 
-let rec json_contains_key key = function
-  | `Assoc fields ->
-    List.exists (fun (k, v) -> String.equal k key || json_contains_key key v) fields
-  | `List items -> List.exists (json_contains_key key) items
-  | _ -> false
-;;
-
-(* Overlay code actions must not carry a WorkspaceEdit/newText that writes the
-   source buffer; the create affordance is offered through a MASC command
-   instead (a separate write lane). *)
-let test_code_actions_have_no_workspace_edit () =
-  (* code_actions reads the annotation cache, which takes an Eio mutex, so it
-     must run inside an Eio context. A fresh temp dir yields no annotations but
-     still exercises the create action that used to carry the edit. *)
-  Eio_main.run (fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let base_dir = Filename.temp_dir "masc-lsp-proxy-" "" in
-    Fun.protect
-      ~finally:(fun () -> try Unix.rmdir base_dir with _ -> ())
-      (fun () ->
-         let actions =
-           Lsp_overlay_provider.code_actions
-             ~base_dir
-             ~codebase:(Some "github.com_other_repo")
-             ~file_path:"a.ml"
-             ~line:0
-             ~diagnostics:[]
-         in
-         let j = `List actions in
-         check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
-         check bool "no newText in code actions" false (json_contains_key "newText" j);
-         check
-           bool
-           "create action offered via a command lane"
-           true
-           (json_contains_key "command" j)))
-;;
-
 let () =
   run
     "server_ide_lsp_proxy"
@@ -491,8 +467,10 @@ let () =
             test_lsp_route_is_ws
         ] )
     ; ( "lsp_degraded_status"
-      , [ test_case "LSP failure is a typed overlay_only status" `Quick
-            test_overlay_only_status_is_typed
+      , [ test_case "LSP failure is a typed unavailable status" `Quick
+            test_unavailable_status_is_typed
+        ; test_case "the status says the health once" `Quick
+            test_status_says_the_health_once
         ; test_case "connected status is typed and distinct" `Quick
             test_connected_status_is_typed
         ; test_case "unmapped language has null command" `Quick
@@ -511,8 +489,6 @@ let () =
         ; test_case "relayed table drives the decision" `Quick
             test_relayed_table_drives_the_decision
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
-        ; test_case "overlay code actions carry no write edit" `Quick
-            test_code_actions_have_no_workspace_edit
         ] )
     ]
 ;;

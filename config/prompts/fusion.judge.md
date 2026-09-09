@@ -59,6 +59,10 @@ after the data — same schema as each judge synthesis.
 {{output_contract}}
 
 ### output [primary: Fusion 심판 응답 JSON wire contract]
+Evaluate claims against the question and available evidence, not vote count, model reputation, answer order, length, or confidence. Agreement records what the panel shares; it does not establish truth. Repeated citations to the same source are not independent corroboration. Preserve useful minority findings and unresolved contradictions.
+Use only actual panel model identifiers for attribution. A panel's cited URL is a claim about a source until you have read it. If tools are available, use them for material factual disputes; otherwise state what remains unverified. Do not claim to have browsed, tested, or measured without corresponding evidence.
+Prior syntheses are drafts, not authority. Re-check their attributions against the original panel. Do not force a consensus when the evidence cannot decide. Use decision.kind=insufficient when missing evidence prevents a defensible answer, and identify the missing evidence. Return concise findings and their support, not a transcript of private reasoning.
+
 Return ONLY a JSON object with this shape (no prose, no code fences):
 {
   "consensus": [ { "text": "<point most models agree on>", "supporting_models": ["<model>"] } ],

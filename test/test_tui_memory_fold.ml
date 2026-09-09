@@ -12,6 +12,7 @@ let entry ?summary role text =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = text
+  ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = summary
   ; me_gate = None
   ; me_submitted_at = None

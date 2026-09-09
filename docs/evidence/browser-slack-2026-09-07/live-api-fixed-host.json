@@ -1,0 +1,30 @@
+{
+  "source_server_tui": "a1dcd40acca7b43d34ee761afcf165d35b943c0c",
+  "source_host": "75157f4786c5ee268e08dfa4ea348364638f44aa",
+  "host_sha256": "a5587b8e6ac9f8d2177b00ddfc5014a310bcd86c1e71e449789a06472a9d0e62",
+  "host_ci_run": 34086992976,
+  "local_native_protocol_tests": {
+    "passed": 9,
+    "elapsed_seconds": 24.029
+  },
+  "measurements": [
+    {
+      "app": "browser",
+      "lane": "live",
+      "status": 200,
+      "elapsed_ms": 16.9,
+      "tab_count": 1,
+      "page_title": "Example Domain",
+      "text_matches_example": true
+    },
+    {
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "elapsed_ms": 2.1,
+      "tab_count": 0,
+      "page_title": null,
+      "text_matches_example": false
+    }
+  ]
+}

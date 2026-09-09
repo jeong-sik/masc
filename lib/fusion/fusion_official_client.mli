@@ -51,6 +51,12 @@ val run_panelist
   -> (string, Fusion_types.panel_failure) result
 (** Execute [prompt] as a single turn on [runtime_id] and return the answer text.
 
+    Typed Claude quota rejections update {!Runtime_quota_window} before error
+    rendering. The scope is captured from the resolved runtime before dispatch,
+    so catalog reloads cannot reattribute an in-flight result. Every official
+    client transport success clears an observed exhaustion before the caller's
+    output validation; provider-stated reset windows remain intact.
+
     [timeout_s] is the preset group's declared deadline. When present it wins
     over the runtime-inferred turn timeout, because it is this request's
     explicit statement while the runtime value is a default shared by every

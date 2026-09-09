@@ -35,10 +35,8 @@ val with_in_turn_liveness_pulse :
 
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
-  consumed_stimulus_count : int;
-  consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue_state.pending_selection option;
-  consumed_selections : Keeper_event_queue_state.pending_selection list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
@@ -78,6 +76,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
+  ?wake:Keeper_world_observation.cycle_wake ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
@@ -125,6 +124,16 @@ val decide_keepalive_cycle_action :
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
+(** What a provider retry route asks of the next sleep. A rate limit or
+    exhausted quota is the provider's state, so the sleep runs to its end
+    ([Serve_wakeup_after_duration], #34653); capacity backpressure also comes
+    from MASC's own slot and client capacity envelopes, which clear on their
+    own, so that sleep stays [Interrupt_on_wakeup]. *)
+type provider_backoff =
+  { retry_after_hint : float
+  ; wake_policy : Keeper_keepalive_signal.wake_policy
+  }
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
@@ -132,13 +141,14 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
-  rate_limited_retry_after : float option;
-      (** [Some retry_after] when the cycle's turn failure routed as a
-          provider rate-limit/capacity retry ([Retry_after_observed] with a
-          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
-          carrying the route's own [Retry-After] hint when the provider sent
-          one. The loop replaces the plain cadence with a capped backoff for
-          such a cycle (#26068); [None] keeps the cadence. *)
+  provider_backoff : provider_backoff option;
+      (** [Some backoff] when the cycle's turn failure routed as a provider
+          retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
+          [Capacity_backpressure] class), carrying the route's own
+          [Retry-After] hint when the provider sent one ([0.0] when it did
+          not) and the wake policy the class implies. The loop replaces the
+          plain cadence with a capped backoff for such a cycle (#26068);
+          [None] keeps the cadence. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -162,21 +172,38 @@ type batch_disposition =
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
 (** The queue action a turn's [cycle_outcome] implies. A completed turn ACKs
-    only when a surface-post receipt addresses the route, or a memory-write
-    receipt proves completion without a direct surface reply. A mismatched
-    surface route, absent terminal receipt, or inapplicable continuation route
-    ACKs already-projected attention-only sources but preserves Connector
-    attention; none is evidence of model intent. Every typed checkpoint
-    (durable stimulus arrived, loop guard, Gate-deferred tool call, queued
-    chat operation) ACKs attention-only sources after preserving the
-    continuation, because each one is produced after a model round ran with
-    the admitted batch projected (the agent-core checkpoint carries it; an
-    official-client vendor session carries it unless that session restarts
-    before the resume); Connector_attention stays pending until an
-    exact reply/ignore settlement exists, and a HITL resolution stays pending
-    until its continuation receipt is recorded. Every failed, cancelled,
-    input-required, or skipped outcome leaves the whole batch pending.
-    Provider/runtime failure is not authority to discard input. *)
+    its whole admitted batch, Connector attention included, whatever its
+    continuation route: the turn projected every row and chose its actions
+    with them in view, and whether it answered is not a reason to deliver
+    the same rows again (#34655). Whether it answered is not durably recorded
+    yet; #34666 tracks that projection. Every typed checkpoint (durable stimulus arrived, loop guard,
+    Gate-deferred tool call, queued chat operation) ACKs attention-only
+    sources after preserving the continuation, because each one is produced
+    after a model round ran with the admitted batch projected (the agent-core
+    checkpoint carries it; an official-client vendor session carries it
+    unless that session restarts before the resume); Connector_attention
+    stays pending until the resumed turn completes, and a HITL resolution
+    stays pending until its continuation receipt is recorded. Every failed,
+    cancelled, input-required, or skipped outcome leaves the whole batch
+    pending. Provider/runtime failure is not authority to discard input. *)
+
+type continuation_settlement =
+  | Continuation_settled_recorded
+  | Continuation_settled_failed of
+      { route : Keeper_runtime_failure_route.route }
+  | Continuation_unsettled
+
+val continuation_settlement_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option -> continuation_settlement
+(** How the turn settles the HITL continuation it was handed.
+    [Continuation_settled_recorded] follows the batch disposition above: a
+    completed or checkpointed turn. [Continuation_settled_failed] is a failed
+    turn whose route satisfies {!Keeper_runtime_failure_route.response_observed}:
+    the provider answered the request that carried the replay evidence, so
+    the evidence is not carried into the next cycle (#32956). Every other
+    failure, and every cancelled, input-required, or skipped outcome, leaves
+    the continuation unsettled. The queue disposition of a failed turn stays
+    [Batch_no_action] either way. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
@@ -198,6 +225,7 @@ val failure_reason_after_turn_status :
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)
 val run_keepalive_unified_turn :
+  wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
@@ -255,6 +283,12 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  (** The production retention pass against the durable queue. Counts are
+      observations only; no pending source is acknowledged by this pass. *)
+  val retain_connector_attention_sources :
+    base_path:string -> keeper_name:string ->
+    Keeper_event_queue_state.pending_selection list -> unit
+
   (** Whether post-turn HITL settlement may project a continuation before its
       queue source is acknowledged. *)
   val batch_disposition_records_continuation : batch_disposition -> bool
@@ -277,6 +311,9 @@ module For_testing : sig
       provider's [Retry-After] hint when above the cadence, falls back to a
       bounded default, and clamps the result to [cap_sec] so a misread header
       can never park the lane. *)
+  val failure_route_rate_limited_backoff_hint :
+    Keeper_unified_turn.turn_failure -> provider_backoff option
+
   val rate_limited_backoff_sec :
     cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
 

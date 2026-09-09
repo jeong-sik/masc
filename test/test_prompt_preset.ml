@@ -185,6 +185,7 @@ let test_capture_save_load_round_trip () =
       (List.hd listing.Preset.presets).Preset.override_keys;
     (* And the whole of a preset is readable without applying it, because
        applying it is the decision being made. *)
+    Alcotest.(check bool) "save/load settings match" true (Preset.same_settings snapshot loaded);
     let shown = Preset.snapshot_to_json loaded in
     let field name =
       match shown with
@@ -200,6 +201,54 @@ let test_capture_save_load_round_trip () =
       (match field "instructions" with
        | Some (`List (_ :: _)) -> true
        | _ -> false))
+;;
+
+let test_saved_settings_ignore_snapshot_metadata () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"first") in
+    let renamed = { snapshot with Preset.name = "evening"; description = "another label";
+                                  created_at = "2026-09-07T22:00:00Z" } in
+    Alcotest.(check bool) "metadata is not a setting" true
+      (Preset.same_settings snapshot renamed);
+    Alcotest.(check bool) "unchanged durable settings match" true
+      (or_fail (Preset.matches_saved_settings ~base_path renamed)))
+;;
+
+let test_saved_settings_report_invalid_keeper_toml () =
+  with_base (fun ~base_path ~keepers ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let broken = Filename.concat keepers "broken.toml" in
+    write_file broken "[keeper\ninvalid TOML";
+    let ordinary = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    Alcotest.(check bool) "ordinary capture keeps its existing partial behavior" true
+      (Preset.same_settings snapshot ordinary);
+    match Preset.matches_saved_settings ~base_path snapshot with
+    | Ok _ -> Alcotest.fail "an unreadable Keeper cannot produce a settings verdict"
+    | Error detail -> Alcotest.(check bool) "comparison names the unreadable TOML" true
+        (contains_substring detail broken))
+;;
+
+let test_saved_settings_read_durable_overrides_without_reloading () =
+  with_base (fun ~base_path ~keepers:_ ~config ->
+    set_override ~base_path "Live original.";
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let live = Prompt_registry.persisted_entries () in
+    let path = Filename.concat (Filename.dirname config) "prompt_overrides.json" in
+    let changed = List.map (fun (entry : Override.entry) ->
+        { entry with value = "Changed directly on disk." }) live in
+    (match Override.save ~path changed with
+     | Ok () -> () | Error error -> Alcotest.fail (Override.error_to_string error));
+    Alcotest.(check bool) "disk drift is visible even while the live registry matches" false
+      (or_fail (Preset.matches_saved_settings ~base_path snapshot));
+    Alcotest.(check bool) "comparison does not reload the live registry" true
+      (Prompt_registry.persisted_entries () = live);
+    write_file path "{invalid json";
+    (match Preset.matches_saved_settings ~base_path snapshot with
+     | Ok _ -> Alcotest.fail "corrupt durable overrides cannot produce a settings verdict"
+     | Error detail -> Alcotest.(check bool) "comparison names the corrupt override file" true
+         (contains_substring detail path));
+    Alcotest.(check bool) "corruption does not clear the live registry" true
+      (Prompt_registry.persisted_entries () = live))
 ;;
 
 let test_invalid_name_is_refused () =
@@ -244,27 +293,65 @@ let test_restore_puts_the_saved_state_back () =
       autosave.Preset.instructions)
 ;;
 
-let test_stale_override_revision_is_skipped () =
+(* A preset saved before a release changed the default is still the
+   operator's prompt. It restores, and it keeps the binding it was captured
+   with, so the catalog can say the default moved under it rather than
+   presenting it as written against today's text. *)
+let test_override_written_against_an_older_default_still_restores () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
     set_override ~base_path "Morning override.";
     let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
-    let stale =
+    let older =
       { morning with
-        Preset.name = "stale"
+        Preset.name = "older"
       ; prompt_overrides =
           List.map
-            (fun (e : Override.entry) -> { e with Override.contract_revision = "0000" })
+            (fun (e : Override.entry) -> { e with Override.authored_against = "0000" })
             morning.Preset.prompt_overrides
       }
     in
-    or_fail (Preset.save ~base_path stale);
+    or_fail (Preset.save ~base_path older);
     set_override ~base_path "Afternoon override.";
-    let report = or_fail (Preset.restore ~base_path "stale") in
-    check (list string) "the stale override is not applied" []
+    let report = or_fail (Preset.restore ~base_path "older") in
+    check (list string) "the override is applied" [ prompt_key ]
       report.Preset.prompt_overrides_result.Preset.applied;
-    check (list string) "it is reported skipped under its key" [ prompt_key ]
+    check (list string) "nothing is skipped" []
       (List.map fst report.Preset.prompt_overrides_result.Preset.skipped);
+    check string "a turn gets the restored text" "Morning override."
+      (Prompt_registry.get_prompt prompt_key);
+    check (list string) "and it still says what it was written against" [ "0000" ]
+      (List.map
+         (fun (e : Override.entry) -> e.Override.authored_against)
+         (Prompt_registry.override_entries ())))
+;;
+
+(* What still refuses a preset entry: it names a variable the prompt does
+   not declare, so it could not render. *)
+let test_override_that_cannot_render_is_skipped_with_the_reason () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    set_override ~base_path "Morning override.";
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    let unrenderable =
+      { morning with
+        Preset.name = "unrenderable"
+      ; prompt_overrides =
+          List.map
+            (fun (e : Override.entry) -> { e with Override.value = "Facts {{facts_json}}" })
+            morning.Preset.prompt_overrides
+      }
+    in
+    or_fail (Preset.save ~base_path unrenderable);
+    set_override ~base_path "Afternoon override.";
+    let report = or_fail (Preset.restore ~base_path "unrenderable") in
+    check (list string) "nothing is applied" []
+      report.Preset.prompt_overrides_result.Preset.applied;
+    (match report.Preset.prompt_overrides_result.Preset.skipped with
+     | [ (key, reason) ] ->
+       check string "skipped under its key" prompt_key key;
+       check bool "with the variable named" true (contains_substring reason "facts_json")
+     | skipped -> fail (Printf.sprintf "expected one skip, found %d" (List.length skipped)));
     check string "the live override is untouched" "Afternoon override."
       (Prompt_registry.get_prompt prompt_key))
 ;;
@@ -328,12 +415,20 @@ let () =
       , [ Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
         ; Alcotest.test_case "an invalid name is refused" `Quick test_invalid_name_is_refused
+        ; Alcotest.test_case "saved-settings comparison ignores snapshot metadata" `Quick
+            test_saved_settings_ignore_snapshot_metadata
+        ; Alcotest.test_case "saved-settings comparison reports invalid Keeper TOML" `Quick
+            test_saved_settings_report_invalid_keeper_toml
+        ; Alcotest.test_case "saved-settings comparison reads disk without reloading" `Quick
+            test_saved_settings_read_durable_overrides_without_reloading
         ; Alcotest.test_case "restore puts the saved state back and autosaves first" `Quick
             test_restore_puts_the_saved_state_back
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick
             test_runtime_text_transform
-        ; Alcotest.test_case "a stale contract revision is skipped, not applied" `Quick
-            test_stale_override_revision_is_skipped
+        ; Alcotest.test_case "an override written against an older default still restores" `Quick
+            test_override_written_against_an_older_default_still_restores
+        ; Alcotest.test_case "an override that cannot render is skipped with the reason" `Quick
+            test_override_that_cannot_render_is_skipped_with_the_reason
         ; Alcotest.test_case "two restores keep two autosaves" `Quick
             test_two_restores_keep_two_autosaves
         ] )

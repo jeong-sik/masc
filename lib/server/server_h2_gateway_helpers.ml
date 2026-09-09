@@ -38,6 +38,19 @@ let h2_respond_json_value ?status ?extra_headers ?compress h2_reqd json =
   h2_respond_json_string ?status ?extra_headers ?compress h2_reqd
     (Yojson.Safe.to_string json)
 
+let h2_respond_json_value_on_cpu ?status ?(extra_headers = []) ?(compress = true)
+    h2_reqd json =
+  let request = H2.Reqd.request h2_reqd in
+  let accept_encoding = H2.Headers.get request.headers "accept-encoding" in
+  let body, compression_headers =
+    Executor_pool_ref.submit_or_inline (fun () ->
+      Http_response_payload.compress_body ~compress ~accept_encoding
+        (Yojson.Safe.to_string json))
+  in
+  h2_respond_body ?status ~compress:false
+    ~extra_headers:(compression_headers @ extra_headers)
+    ~content_type:"application/json; charset=utf-8" h2_reqd body
+
 let h2_respond_text ?(status = `OK) ?(extra_headers = []) h2_reqd body =
   h2_respond_body
     ~status
@@ -66,7 +79,12 @@ let h2_respond_bytes
   h2_respond_body ~status ~extra_headers ~compress ~content_type h2_reqd body
 
 let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
-  let headers = H2.Headers.of_list (("content-length", "0") :: extra_headers) in
+  (* A 304 has no body, but Content-Length: 0 would falsely describe the
+     selected 200 representation. Omit the field on conditional responses. *)
+  let headers = H2.Headers.of_list
+    (if status = `Not_modified then extra_headers
+     else ("content-length", "0") :: extra_headers)
+  in
   let response = H2.Response.create ~headers status in
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   H2.Body.Writer.close writer

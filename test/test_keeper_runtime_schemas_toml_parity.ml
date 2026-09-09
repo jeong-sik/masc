@@ -1,12 +1,5 @@
-(** Byte-identity pins for the keeper runtime tool declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
-
-    The expected values were read off [Keeper_runtime_schemas_toml.schemas]
-    before any file moved, so this suite passing *before* the TOML replaces a
-    literal is what proves the file says the same thing. Written against the
-    published list rather than a loader module, so it holds across the whole
-    migration.
+(** The publication order of [Keeper_runtime_schemas_toml.schemas], and the
+    keeper_artifact_read bounds and keeper_analyze_image enum against their owners.
 
     Two of the four build values from an owner module rather than literals:
     keeper_artifact_read takes its max_bytes bounds and default from
@@ -20,22 +13,18 @@
     readers fold them together. Every tool that emitted one was cleaned in the
     same campaign, and this pin carries the cleaned value.
 
-    Compared as parsed JSON with keys sorted, per RFC §4. *)
+    The descriptions and schemas this suite also pinned were literals read off
+    the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself. Those
+    cases are gone; what stays reads the published value. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
 
-(* name, description, input_schema (keys sorted) *)
+(* name, description, input_schema (keys sorted), in the order
+   Keeper_runtime_schemas_toml.schemas publishes. The three provider Files
+   tools are #33639 (RFC-0430 Phase 3); keeper_analyze_image carries the
+   runtime_id parameter #34561 added. *)
 let expected =
     [ {|keeper_artifact_read|}, {|Restore the content of a [masc:blob ...] ToolResult by its sha256. The marker's bytes= field is the artifact's total size. max_bytes defaults to the 16384 maximum, which is the largest page that never itself becomes an unreadable spilled file; read whole artifacts by paging, not by small slices. If the response has eof=false, continue from next_offset until eof=true. Text pages use UTF-8; arbitrary bytes use base64. The runtime never re-inlines a stored artifact into model history; this tool is the only way to read one.|}, {|{"additionalProperties":false,"properties":{"max_bytes":{"default":16384,"description":"Maximum source bytes in this model-visible page. Defaults to the maximum; lower it only for a deliberate slice, not for paging.","maximum":16384,"minimum":1,"type":"integer"},"offset":{"default":0,"description":"Byte offset to read from. Continue a paged read at the returned next_offset.","minimum":0,"type":"integer"},"sha256":{"description":"Exact sha256 from a [masc:blob ...] ToolResult.","type":"string"}},"required":["sha256"],"type":"object"}|}
     ; {|masc_fusion|}, {|Run an out-of-band panel+judge deliberation.
@@ -44,7 +33,16 @@ A panel of models from the configured preset answers the prompt independently; a
     ; {|masc_fusion_status|}, {|Read the status of out-of-band fusion deliberations started by masc_fusion.
 
 With no argument, lists tracked runs (in-progress and recently completed); with a run_id, returns that single run. Each run reports keeper, preset, started_at (unix seconds), and status (running | completed | failed); failed runs also carry error and failure_code. Prefer waiting for the completion wake over polling this tool — the result reaches you without it. Read-only — does not start a deliberation. In-memory and server-lifetime: runs do not survive a restart.|}, {|{"additionalProperties":false,"properties":{"run_id":{"description":"Optional fusion run id (the run_id returned by masc_fusion). When given, returns that single run's status; when omitted, lists every tracked run (in-progress and recently completed).","type":"string"}},"type":"object"}|}
-    ; {|keeper_analyze_image|}, {|Read a stored image artifact and return a text description or answer. Delegates to a vision model in a sub-call; the image is never added to this conversation. Returns the extracted text, or a typed error (invalid_args | eio_context_unavailable | artifact_load_failed | invalid_timeout | image_too_large | invalid_media_type | invalid_request | no_capable_runtime | empty_extraction | truncated_extraction | timeout | provider_error).|}, {|{"additionalProperties":false,"properties":{"artifact":{"description":"Handle of a stored image artifact (the content-addressed id returned when the image was stored). The raw image is read in a vision sub-call and never enters this conversation.","type":"string"},"media_type":{"description":"Optional image MIME type override (e.g. image/png, image/jpeg). Sniffed from the bytes when omitted.","enum":["image/png","image/jpeg","image/gif","image/webp"],"type":"string"},"query":{"description":"What to ask about the image, e.g. \"describe the chart\" or \"transcribe the text\".","type":"string"}},"required":["artifact","query"],"type":"object"}|}
+    ; {|masc_file_upload|}, {|Upload an image to the provider Files API and get a file_id back.
+
+The file_id can then be used in a vision request to send the same image many times without re-uploading it, and it allows images larger than the inline size limit. Only images are accepted; the largest allowed file is 64 MiB and files are stored for reuse. Use masc_file_delete when the file is no longer needed.|}, {|{"properties":{"content_base64":{"description":"The file's bytes, base64-encoded.","type":"string"},"filename":{"description":"File name to store, e.g. screenshot.png. Max 512 characters.","type":"string"},"purpose":{"description":"Purpose of the file. The API accepts only \"user_data\" today; omit to use it.","type":"string"}},"required":["filename","content_base64"],"type":"object"}|}
+    ; {|masc_file_delete|}, {|Delete an uploaded file from the provider Files API by its file_id.
+
+Deletion is permanent; a vision request that still names the file_id will fail afterwards.|}, {|{"properties":{"file_id":{"description":"The file_id returned by masc_file_upload.","type":"string"}},"required":["file_id"],"type":"object"}|}
+    ; {|masc_file_list|}, {|List the files currently stored in the provider Files API.
+
+Each row carries file_id, name, size, and upload time — enough to find a previously uploaded image to reuse in a vision request.|}, {|{"properties":{},"type":"object"}|}
+    ; {|keeper_analyze_image|}, {|Read a stored image artifact and return a text description or answer. Delegates to a vision model in a sub-call; the image is never added to this conversation. Returns the extracted text, or a typed error (invalid_args | eio_context_unavailable | artifact_load_failed | invalid_timeout | image_too_large | invalid_media_type | invalid_request | no_capable_runtime | empty_extraction | truncated_extraction | timeout | provider_error).|}, {|{"additionalProperties":false,"properties":{"artifact":{"description":"Handle of a stored image artifact (the content-addressed id returned when the image was stored). The raw image is read in a vision sub-call and never enters this conversation.","type":"string"},"media_type":{"description":"Optional image MIME type override (e.g. image/png, image/jpeg). Sniffed from the bytes when omitted.","enum":["image/png","image/jpeg","image/gif","image/webp"],"type":"string"},"query":{"description":"What to ask about the image, e.g. \"describe the chart\" or \"transcribe the text\".","type":"string"},"runtime_id":{"description":"Optional exact configured vision runtime identifier. When supplied, only that capable runtime is called; errors do not fall back to a different reader. Omit for automatic selection and failover. Useful for comparing readings of the same artifact.","type":"string"}},"required":["artifact","query"],"type":"object"}|}
     ];;
 
 let published = Masc.Keeper_runtime_schemas_toml.schemas
@@ -55,24 +53,6 @@ let find name =
   with
   | Some schema -> schema
   | None -> failwith (name ^ " is absent from Keeper_runtime_schemas_toml.schemas")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
 ;;
 
 (* The order is what a model reads the tool list in, so a reordering is a
@@ -141,13 +121,8 @@ let test_analyze_image_enum_matches_its_owner () =
 let () =
   run
     "keeper_runtime_schemas_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "published order" `Quick test_the_published_order_is_unchanged
         ] )
     ; ( "owner_derivation"
       , [ test_case

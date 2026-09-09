@@ -17,14 +17,32 @@ let contains haystack needle =
 let assert_present label needle =
   check bool label true (contains Keeper_sandbox_image.dockerfile needle)
 
+(* The package's own continuation line in the apt list, not its name anywhere
+   in the file. The comments above that list name the packages and say why each
+   is there, so a bare name is carried by the prose whether the package is
+   installed or not -- [gh] is spelled inside [GH_CONFIG_DIR] besides. *)
+let assert_installs package =
+  assert_present (package ^ " in the apt list") (Printf.sprintf "\n       %s \\\n" package)
+
 (* keeper_sandbox_docker.ml runs the turn as [<image> bash -l -s]. *)
-let test_recipe_installs_bash () = assert_present "bash" "bash"
+let test_recipe_installs_bash () = assert_installs "bash"
 
 (* keeper_workspace_read_ops.ml: "rg executable not found; Grep requires rg". *)
-let test_recipe_installs_ripgrep () = assert_present "ripgrep" "ripgrep"
+let test_recipe_installs_ripgrep () = assert_installs "ripgrep"
 
 (* A Keeper reports what it changed out of history and diffs. *)
-let test_recipe_installs_git () = assert_present "git" "git"
+let test_recipe_installs_git () = assert_installs "git"
+
+(* MASC mounts a GitHub CLI config into the guest and points GH_CONFIG_DIR at
+   it, then runs [env GH_CONFIG_DIR=... gh auth status] there as a preflight
+   (keeper_sandbox_remote.ml, error code remote_github_identity_missing).
+   Shipping the credentials without the program that reads them leaves a Keeper
+   able to commit and unable to open a pull request. *)
+let test_recipe_installs_gh () = assert_installs "gh"
+
+(* keeper_sandbox_remote_checkouts.ml runs [python3 -c <probe>] in the guest to
+   read the workspace back. Without it the probe exits 127. *)
+let test_recipe_installs_python3 () = assert_installs "python3"
 
 (* The container runs as the host operator's uid, which the image has no entry
    for. Without a writable HOME a login shell and git both land nowhere. *)
@@ -47,6 +65,34 @@ let test_build_argv_reads_the_recipe_from_stdin () =
     [ "build"; "-t"; "masc-sandbox:general"; "-" ]
     (Keeper_sandbox_image.build_argv ~tag:Keeper_sandbox_image.default_tag)
 
+(* Each microVM runtime keeps its images apart from Docker's, so "build it
+   first" has to name one -- and they do not all take the recipe the same
+   way. These are read off the CLIs rather than assumed from a family
+   resemblance, so the test states what was read. *)
+let test_each_runtime_says_how_it_takes_the_recipe () =
+  let delivery backend =
+    match Masc.Keeper_microvm_backend.recipe_delivery backend with
+    | Masc.Keeper_microvm_backend.On_stdin -> "stdin"
+    | Masc.Keeper_microvm_backend.In_a_context_directory -> "directory"
+    | Masc.Keeper_microvm_backend.Builds_no_images -> "none"
+  in
+  check string "container build takes a context directory, and has no -"
+    "directory"
+    (delivery Masc.Keeper_microvm_backend.Apple_container);
+  check string "msb has pull, load and save and no build" "none"
+    (delivery Masc.Keeper_microvm_backend.Microsandbox);
+  check string "nerdctl speaks Docker's grammar" "stdin"
+    (delivery Masc.Keeper_microvm_backend.Nerdctl_kata)
+
+let test_context_directory_argv_names_the_recipe_and_its_directory () =
+  check
+    (list string)
+    "build -t <tag> -f <dockerfile> <context>"
+    [ "build"; "-t"; "masc-sandbox:general"; "-f"; "/tmp/ctx/Dockerfile"; "/tmp/ctx" ]
+    (Keeper_sandbox_image.context_directory_build_argv
+       ~tag:Keeper_sandbox_image.default_tag ~dockerfile:"/tmp/ctx/Dockerfile"
+       ~context:"/tmp/ctx")
+
 (* A Keeper that names no image gets the general one, under Docker and under
    microVM alike -- both guest paths read this same default
    (keeper_sandbox_factory.resolve_guest). The Keepers that want MASC's own
@@ -64,12 +110,36 @@ let test_runtime_default_is_the_general_image () =
       Keeper_sandbox_image.default_tag
       (Env_config_sandbox.Runtime.docker_image ())
 
+(* The third answer, and the one that went unnoticed on 2026-09-09: eight of a
+   workspace's twenty-one Keepers had declared no image and no override was
+   set, so all eight ran on the general one, which carries no language
+   toolchain, in a fleet that all works on MASC. The tag alone reads the same
+   whether a Keeper chose it or nobody did. Only a host that leaves the name
+   unset can see [Built_in], which is this file rather than
+   test_env_config_sandbox.ml. *)
+let test_nobody_named_the_image_says_so () =
+  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" with
+  | Some override when String.trim override <> "" ->
+    check string "an override names itself"
+      "workspace_env"
+      (Env_config_sandbox.Runtime.image_source_to_string
+         (Env_config_sandbox.Runtime.resolve_image None)
+           .Env_config_sandbox.Runtime.source)
+  | _ ->
+    check string "nobody named it"
+      "built_in"
+      (Env_config_sandbox.Runtime.image_source_to_string
+         (Env_config_sandbox.Runtime.resolve_image None)
+           .Env_config_sandbox.Runtime.source)
+
 let () =
   run "Sandbox image recipe"
     [ ( "dockerfile"
       , [ test_case "installs bash" `Quick test_recipe_installs_bash
         ; test_case "installs ripgrep" `Quick test_recipe_installs_ripgrep
         ; test_case "installs git" `Quick test_recipe_installs_git
+        ; test_case "installs gh" `Quick test_recipe_installs_gh
+        ; test_case "installs python3" `Quick test_recipe_installs_python3
         ; test_case "gives an arbitrary uid a home" `Quick
             test_recipe_gives_an_arbitrary_uid_a_home
         ; test_case "needs no build context" `Quick test_recipe_needs_no_build_context
@@ -78,8 +148,16 @@ let () =
       , [ test_case "reads the recipe from stdin" `Quick
             test_build_argv_reads_the_recipe_from_stdin
         ] )
+    ; ( "runtime store"
+      , [ test_case "each runtime says how it takes the recipe" `Quick
+            test_each_runtime_says_how_it_takes_the_recipe
+        ; test_case "a directory context names the recipe and its directory"
+            `Quick test_context_directory_argv_names_the_recipe_and_its_directory
+        ] )
     ; ( "runtime default"
       , [ test_case "is the general image" `Quick
             test_runtime_default_is_the_general_image
+        ; test_case "says which of the three named it" `Quick
+            test_nobody_named_the_image_says_so
         ] )
     ]

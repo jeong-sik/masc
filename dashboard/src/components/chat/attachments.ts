@@ -111,6 +111,49 @@ export interface CollectAttachmentsResult {
   errors: string[]
 }
 
+// ── Image reference attachments (#33728) ─────────────────────────────────
+// A reference is not bytes this client holds: the provider fetches the URL or
+// resolves the Files-API id. Nothing is downloaded here, so no size cap
+// applies — the server-side carrier parse enforces the http(s) scheme and the
+// provider rejects what it cannot fetch, visibly.
+
+const URL_PREFIXES = ['https://', 'http://'] as const
+
+/** A pasted/typed value that is a whole-token http(s) URL. Only a bare URL is
+ *  converted; URLs embedded in longer text stay text. */
+export function wholeImageUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (!URL_PREFIXES.some((prefix) => trimmed.toLowerCase().startsWith(prefix))) return null
+  if (/\s/.test(trimmed)) return null
+  return trimmed
+}
+
+export function attachmentFromImageReference(
+  raw: string,
+): { attachment: KeeperConversationAttachment } | { error: string } {
+  const trimmed = raw.trim()
+  const url = wholeImageUrl(trimmed)
+  if (url) {
+    return {
+      attachment: {
+        kind: 'url',
+        id: `ref-url-${stableAttachmentId({ name: url, src: url })}`,
+        name: url,
+        url,
+      },
+    }
+  }
+  if (trimmed === '') return { error: '이미지 참조가 비어 있습니다.' }
+  return {
+    attachment: {
+      kind: 'file_id',
+      id: `ref-file-${stableAttachmentId({ name: trimmed, src: trimmed })}`,
+      name: trimmed,
+      fileId: trimmed,
+    },
+  }
+}
+
 export interface StableAttachmentIdentity {
   name: string
   type?: string | null
@@ -182,7 +225,9 @@ export async function collectAttachments(
 ): Promise<CollectAttachmentsResult> {
   const attachments: KeeperConversationAttachment[] = []
   const errors: string[] = []
-  let totalSize = existing.reduce((sum, att) => sum + att.size, 0)
+  // A reference attachment carries no bytes, so it contributes nothing to the
+  // payload cap; only byte-backed chips do.
+  let totalSize = existing.reduce((sum, att) => sum + (att.kind ? 0 : att.size), 0)
 
   for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS - existing.length)) {
     const error = validateFile(file)

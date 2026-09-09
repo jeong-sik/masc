@@ -190,7 +190,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v3"
+    "keeper.memory_os.current_health.v4"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);

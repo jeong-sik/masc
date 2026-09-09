@@ -312,6 +312,46 @@ let test_the_reader_accepts_every_runtime_the_server_can_name () =
     Masc.Keeper_microvm_backend.valid_strings
 ;;
 
+(* Same contract for the image source: the reader's sum is parallel to
+   [Env_config_sandbox.Runtime.image_source] rather than the same type, so a
+   fourth source added on the server arrives here as a spelling the decoder
+   refuses, which blanks the panel. *)
+let test_the_reader_accepts_every_image_source_the_server_can_name () =
+  List.iter
+    (fun wire ->
+      let json =
+        Yojson.Safe.from_string
+          (Printf.sprintf
+             {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image":"example.invalid/i:v1","configured_image_source":%S}}|}
+             wire)
+      in
+      match Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id json with
+      | Ok _ -> ()
+      | Error detail ->
+        Alcotest.failf
+          "the server can name %s and this reader refuses it (%s); add its arm \
+           to the decoder and its label to the renderer"
+          wire
+          detail)
+    Env_config_sandbox.Runtime.image_source_strings
+;;
+
+(* A source the server does not send is refused rather than shown as unknown:
+   a spelling this reader does not carry is a wire the two sides disagree
+   about, and guessing at it is how the pane would say the wrong thing about
+   which image a Keeper runs in. *)
+let test_an_unknown_image_source_is_refused () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image":"example.invalid/i:v1","configured_image_source":"operator_flag"}}|}
+  in
+  match Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id json with
+  | Ok _ -> Alcotest.fail "an unknown image source was accepted by the reader"
+  | Error detail ->
+    Alcotest.(check bool) "the refusal names the value" true
+      (contains detail "operator_flag")
+;;
+
 (* A backend the server does not send is still refused, so the reader is
    strict rather than merely wide. *)
 let test_an_unknown_backend_is_still_refused () =
@@ -345,7 +385,7 @@ let test_actual_container_logs_report_no_instance () =
       |> String.concat "\n"
     in
     Alcotest.(check bool) "no instance is explicit" true
-      (contains rendered "run a sandbox command first")
+      (contains (flattened rendered) "run a sandbox command first")
 ;;
 
 (* A Keeper with no local stream is not a Keeper whose container has not
@@ -424,5 +464,10 @@ let () =
             test_the_reader_accepts_every_runtime_the_server_can_name
         ; Alcotest.test_case "an unknown backend is still refused" `Quick
             test_an_unknown_backend_is_still_refused
+        ; Alcotest.test_case
+            "the reader accepts every image source the server can name" `Quick
+            test_the_reader_accepts_every_image_source_the_server_can_name
+        ; Alcotest.test_case "an unknown image source is refused" `Quick
+            test_an_unknown_image_source_is_refused
         ] )
     ]

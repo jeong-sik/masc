@@ -29,16 +29,15 @@ shim_stale=false
 if [[ ! -x "$shim_artifact" ]]; then
   shim_stale=true
 else
-  for source in \
-    "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
-    "$repo_root/lib/exec_shim/exec_shim.ml" \
-    "$repo_root/lib/exec_shim/prctl_stub.c" \
-    "$repo_root/bin/masc_exec_shim.ml"; do
+  # Asked, not repeated. This list used to name four of the eight sources
+  # the build actually uses, so a change to observe_stub.c or to either
+  # .mli left the fixture exercising the previous binary.
+  while IFS= read -r source; do
     if [[ "$source" -nt "$shim_artifact" ]]; then
       shim_stale=true
       break
     fi
-  done
+  done < <("$repo_root/scripts/build-shim-static.sh" --print-sources)
 fi
 
 if [[ "$shim_stale" == true ]]; then

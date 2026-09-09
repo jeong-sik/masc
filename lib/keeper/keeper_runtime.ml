@@ -147,18 +147,18 @@ let autoboot_exclusion_reason config name =
       (match profile_defaults_result_for_config config name with
        | Error _ -> None
        | Ok defaults ->
-         (match defaults.autoboot_enabled with
-          | Some true -> None
-          | Some false -> Some Declarative_autoboot_disabled
+         (match defaults.activation_mode with
+          | Some (Keeper_activation_mode.On_demand | Autonomous) -> None
+          | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
           | None ->
-            if meta.autoboot_enabled then None else Some Autoboot_disabled))
+            if Keeper_activation_mode.restore_owner meta.activation_mode then None else Some Autoboot_disabled))
   | Ok None ->
     (match profile_defaults_result_for_config config name with
      | Error _ -> None
      | Ok defaults ->
-       (match defaults.autoboot_enabled with
-        | Some false -> Some Declarative_autoboot_disabled
-        | Some true | None -> None))
+       (match defaults.activation_mode with
+        | Some Keeper_activation_mode.Manual -> Some Declarative_autoboot_disabled
+        | Some (Keeper_activation_mode.On_demand | Autonomous) | None -> None))
   | Error _ ->
     (* Preserve existing behavior: corrupt/unreadable meta still enters the
        boot path so load_or_materialize_boot_meta can emit the precise error. *)
@@ -245,9 +245,8 @@ let keeper_meta_overlay_drift_categories
     ~(target : keeper_meta) =
   List.filter_map Fun.id
     [
-      drift_if "proactive" (current.proactive <> target.proactive);
-      drift_if "autoboot_enabled"
-        (current.autoboot_enabled <> target.autoboot_enabled);
+      drift_if "activation_mode"
+        (current.activation_mode <> target.activation_mode);
       drift_if "mention_targets"
         (current.mention_targets <> target.mention_targets);
       drift_if "sandbox_profile"
@@ -297,15 +296,12 @@ let ensure_keeper_meta_with_cause config name =
     | Error error ->
         Error (profile_defaults_boot_error ~keeper_name:meta.name error)
     | Ok defaults ->
-    (* --- Proactive --- *)
-    let target_proactive =
-      apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
     (* --- Keeper instructions --- *)
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
-    let target_autoboot_enabled =
-      apply_default defaults.autoboot_enabled meta.autoboot_enabled in
+    let target_activation_mode =
+      apply_default defaults.activation_mode meta.activation_mode in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
@@ -360,11 +356,8 @@ let ensure_keeper_meta_with_cause config name =
     in
     let overlayed =
       { meta with
-        proactive = {
-          enabled = target_proactive;
-        };
         instructions = target_instructions;
-        autoboot_enabled = target_autoboot_enabled;
+        activation_mode = target_activation_mode;
         mention_targets = target_mention_targets;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
@@ -411,11 +404,11 @@ let ensure_keeper_meta_with_cause config name =
              { instructions = persisted_updated.instructions
              ; sandbox_profile = persisted_updated.sandbox_profile
              ; sandbox_image = persisted_updated.sandbox_image
+             ; microvm_backend = persisted_updated.microvm_backend
              ; network_mode = persisted_updated.network_mode
              ; mention_targets = persisted_updated.mention_targets
-             ; proactive_enabled = persisted_updated.proactive.enabled
              ; max_context_override = persisted_updated.max_context_override
-             ; autoboot_enabled = persisted_updated.autoboot_enabled
+             ; activation_mode = persisted_updated.activation_mode
              ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled
              ; telemetry_feedback_window_hours =
                  persisted_updated.telemetry_feedback_window_hours

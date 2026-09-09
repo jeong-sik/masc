@@ -250,6 +250,46 @@ let test_put_then_fetch () =
               Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
+let test_binary_previews_are_utf8_without_changing_stored_bytes () =
+  with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let unicode = "한글🙂 café" in
+    let payloads =
+      [ unicode
+      ; String.init 256 Char.chr
+      ; "\xc0\xaf\xed\xa0\x80\xff\xe2\x82"
+      ; String.make (B.preview_max - 1) 'a' ^ "🙂"
+      ; String.make (B.preview_max - String.length "🙂") 'a' ^ "🙂tail"
+      ]
+    in
+    List.iter (fun payload ->
+      let path = Filename.concat dir "input.bin" in
+      Out_channel.with_open_bin path (fun channel -> output_string channel payload);
+      let references =
+        [ B.put store ~bytes:payload ~mime:"application/octet-stream" |> stored_ref_exn
+        ; B.put_durable store ~bytes:payload ~mime:"application/octet-stream"
+        ; B.put_file_durable store ~path ~mime:"application/octet-stream"
+        ]
+      in
+      let first = List.hd references in
+      List.iter (fun (reference : O.artifact_ref) ->
+        Alcotest.(check bool) "preview is valid UTF-8" true
+          (String.is_valid_utf_8 reference.preview);
+        Alcotest.(check bool) "preview keeps byte ceiling" true
+          (String.length reference.preview <= B.preview_max);
+        Alcotest.(check string) "file and memory previews agree"
+          first.preview reference.preview;
+        Alcotest.(check bool) "reference serializes as UTF-8 JSON" true
+          (O.normalized_artifact_ref_to_json reference |> Yojson.Safe.to_string
+           |> String.is_valid_utf_8);
+        Alcotest.(check (option string)) "stored binary bytes remain exact"
+          (Some payload) (fetch_ok store ~sha256:reference.sha256);
+        if payload = unicode then
+          Alcotest.(check string) "valid Unicode remains readable"
+            unicode reference.preview)
+        references)
+      payloads)
+
 let test_put_then_fetch_bounded_ranges () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -1299,6 +1339,8 @@ let () =
           Alcotest.test_case "put returns Stored" `Quick
             test_put_returns_stored;
           Alcotest.test_case "put then fetch" `Quick test_put_then_fetch;
+          Alcotest.test_case "binary previews preserve UTF-8 and stored bytes" `Quick
+            test_binary_previews_are_utf8_without_changing_stored_bytes;
           Alcotest.test_case "put then fetch bounded ranges" `Quick
             test_put_then_fetch_bounded_ranges;
           Alcotest.test_case "changed range snapshot revalidates digest" `Quick

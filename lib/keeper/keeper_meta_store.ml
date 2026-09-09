@@ -528,9 +528,9 @@ let declarative_autoboot_enabled_by_default config name =
   with
   | Error _ -> false
   | Ok defaults ->
-    (match defaults.autoboot_enabled with
-     | Some false -> false
-     | Some true | None -> true)
+    (match defaults.activation_mode with
+     | Some Keeper_activation_mode.Manual -> false
+     | Some (On_demand | Autonomous) | None -> true)
 ;;
 
 let effective_autoboot_enabled config name meta =
@@ -541,9 +541,9 @@ let effective_autoboot_enabled config name meta =
   with
   | Error _ -> false
   | Ok defaults ->
-    (match defaults.autoboot_enabled with
-     | Some value -> value
-     | None -> meta.autoboot_enabled)
+    (match defaults.activation_mode with
+     | Some mode -> Keeper_activation_mode.restore_owner mode
+     | None -> Keeper_activation_mode.restore_owner meta.activation_mode)
 ;;
 
 let keepalive_keeper_names config =

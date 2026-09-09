@@ -115,6 +115,7 @@ type config = Runtime_agent_context.config = {
           did not supply a catalog identity, so [name] is used. *)
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
+  recovery_view : Runtime_recovery_projection.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -154,6 +155,13 @@ val default_config :
 type run_result = {
   response : Agent_core.Types.api_response;
   checkpoint : Agent_core.Checkpoint.t option;
+  cooperative_boundary : Agent_core.Agent.Advanced.tool_boundary option;
+  (** Present only for the SDK's returned cooperative yield, preserving its
+      exact turn and checkpoint stage. The tool round and configured sink
+      completed before this boundary; without a sink this is only in-memory
+      evidence. This field does not establish durable publication, external
+      effect reconciliation, or permission to restore older shared history.
+      Official-client outcomes and input-required errors have no SDK witness. *)
   session_id : string;
   session_resumed : bool option;
   turns : int;
@@ -231,8 +239,8 @@ val content_blocks_for_run :
 val input_capabilities_of_runtime :
   Runtime.t -> Llm_provider.Capabilities.capabilities
 (** Effective input capabilities of a materialized runtime: provider caps overlaid
-    with the model's declared media capabilities (the MASC SSOT). Used to score the
-    assigned runtime and reroute candidates. *)
+    with the model's declarations, constrained by the execution transport.
+    Used by reroute, candidate projection, and image delegation. *)
 
 val caps_admit_required_modalities :
   Llm_provider.Capabilities.capabilities -> string list -> bool

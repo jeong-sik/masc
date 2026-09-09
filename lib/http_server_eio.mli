@@ -106,6 +106,12 @@ module Response : sig
   val weak_etag_value : string -> string
   (** Weak ETag value formatted as [W/"<hash>"] derived from the body string. *)
 
+  val client_tag_matches : etag:string -> client_tag:string -> bool
+  (** Shared conditional-request matching for H1 and H2 cached responses. *)
+
+  val json_revalidate_cache_control : string
+  (** Cache policy for JSON carrying a response validator. *)
+
   type json_conditional =
     | Untagged
     | Tagged of string
@@ -170,6 +176,18 @@ module Response : sig
     -> unit
 
   val json_value
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> Yojson.Safe.t
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Serialize, select validators and encode one immutable JSON response on
+      the shared CPU executor. Request selection and socket writes remain on
+      the caller fiber. Falls back inline when no executor is installed. *)
+  val json_value_on_cpu
     :  ?status:Httpun.Status.t
     -> ?compress:bool
     -> ?extra_headers:(string * string) list

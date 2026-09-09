@@ -388,13 +388,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Health & Metrics
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
-          let json =
-            Server_routes_http_runtime.make_health_response_json
+          let body, timing_headers =
+            Server_routes_http_runtime.make_health_response_body
               ~listener:"h2"
               ~request_authority
               httpun_request
           in
-          h2_respond_json_value h2_reqd json ~extra_headers:cors
+          h2_respond_json h2_reqd body ~extra_headers:(cors @ timing_headers)
 
       | `GET, p when String.equal p Server_health_paths.liveness ->
           let json =
@@ -591,6 +591,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           let session_id = context.session_id in
           let auth_token = context.auth_token in
           let protocol_version = context.protocol_version in
+          let auth_started = Mtime_clock.elapsed_ns () in
           let auth_result =
             match profile with
             | Server_mcp_transport_http.Full
@@ -602,6 +603,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 verify_operator_mcp_auth ~base_path httpun_request
                 |> Result.map_error
                      Server_mcp_transport_http_types.auth_failure_of_masc_error
+          in
+          let auth_ms =
+            Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
@@ -703,6 +707,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                        ~cors ~body_str:post_context.body_str
                                        h2_reqd
                                    else
+                                   let timing = Server_timing.create () in
+                                   Server_timing.record_ms timing Mcp_http_auth auth_ms;
                                    let response_json =
                                      let otel_transport_context =
                                        Otel_dispatch_hook.http_transport_context
@@ -714,21 +720,26 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                      Auth_oauth.with_expected_resource
                                        expected_resource
                                        (fun () ->
-                                         let body_with_agent =
-                                           Server_mcp_transport_http.body_with_canonical_http_actor
-                                             ~base_path ~auth_token httpun_request
-                                             post_context.body_str
+                                         let body_with_agent, internal_keeper_runtime =
+                                           Server_timing.measure timing Mcp_identity (fun () ->
+                                             let body_with_agent =
+                                               Server_mcp_transport_http.body_with_canonical_http_actor
+                                                 ~base_path ~auth_token httpun_request
+                                                 post_context.body_str
+                                             in
+                                             let internal_keeper_runtime =
+                                               Server_auth.is_verified_internal_keeper_request
+                                                 ~base_path httpun_request
+                                             in
+                                             body_with_agent, internal_keeper_runtime)
                                          in
-                                         let internal_keeper_runtime =
-                                           Server_auth.is_verified_internal_keeper_request
-                                             ~base_path httpun_request
-                                         in
-                                         Mcp_eio.handle_request ~clock ~sw ~profile
-                                           ~mcp_session_id:session_id ?auth_token
-                                           ~otel_mcp_protocol_version:protocol_version
-                                           ~otel_transport_context
-                                           ~internal_keeper_runtime state
-                                           body_with_agent)
+                                         Server_timing.measure timing Mcp_dispatch (fun () ->
+                                           Mcp_eio.handle_request ~clock ~sw ~profile
+                                             ~mcp_session_id:session_id ?auth_token
+                                             ~otel_mcp_protocol_version:protocol_version
+                                             ~otel_transport_context
+                                             ~internal_keeper_runtime state
+                                             body_with_agent))
                                    in
                                    let otel_transport_context =
                                      Otel_dispatch_hook.http_transport_context
@@ -745,6 +756,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    in
                                    let mcp_hdrs =
                                      mcp_headers session_id protocol_version @ cors
+                                     @ Server_timing.extra_header timing
                                    in
                                    match response_json with
                                    | `Null ->
@@ -960,12 +972,33 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          so the snapshot fast path and exact Keeper projection both apply. *)
       | `GET, "/api/v1/dashboard/tools" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json =
-              Server_dashboard_snapshot_select.select_tools_json
+            let timing = Server_timing.create () in
+            let response =
+              Server_dashboard_snapshot_select.select_tools_response
+                ~timing
                 ?keeper:(Server_utils.query_param httpun_request "keeper")
                 (Mcp_server.workspace_config state)
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            let extra_headers = cors @ Server_timing.extra_header timing in
+            match response with
+            | Server_dashboard_snapshot_select.Tools_json json ->
+              h2_respond_json_value h2_reqd json ~extra_headers
+            | Tools_prepared tools ->
+              let body, headers = Http_response_payload.select_prepared
+                ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding")
+                tools.encoded in
+              let extra_headers = extra_headers @ headers
+                @ [ "etag", tools.etag;
+                    "cache-control", Http_server_eio.Response.json_revalidate_cache_control ] in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag:tools.etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else h2_respond_json h2_reqd body ~compress:false ~extra_headers)
 
       | `GET, "/api/v1/dashboard/skill-activations" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -1006,12 +1039,34 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
-            match dashboard_execution_cached_http_body ~state httpun_request with
-            | Some body ->
-              h2_respond_json h2_reqd body ~compress:false ~extra_headers:cors
+            let respond_cached ~body ~etag ~headers =
+              let extra_headers =
+                cors @ headers
+                @ [ "etag", etag
+                  ; "cache-control", Http_server_eio.Response.json_revalidate_cache_control ]
+              in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else
+                h2_respond_json h2_reqd body ~compress:false ~extra_headers
+            in
+            let context = execution_http_request ~state httpun_request in
+            match dashboard_execution_cached_http_representation context with
+            | Some (body, etag, headers) -> respond_cached ~body ~etag ~headers
             | None ->
-              let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
-              h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors)
+              (match dashboard_execution_http_response ~sw ~clock context with
+               | Execution_json json ->
+                 h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
+               | Execution_payload payload ->
+                 let body, headers = Dashboard_cache.select_http_representation
+                   ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding") payload in
+                 respond_cached ~body ~etag:payload.etag ~headers))
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -1058,7 +1113,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let json =
               dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_respond_json_value_on_cpu h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -1090,6 +1145,25 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               in
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/search-text" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Server_dashboard_task_search_text.read ~config)
+              |> Server_dashboard_task_search_text.response in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/detail" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let task_id = Server_utils.query_param httpun_request "task_id" in
+            let config = Mcp_server.workspace_config state in
+            let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Server_dashboard_task_detail.read ~config ~task_id)
+              |> Server_dashboard_task_detail.response in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/history" ->
           with_h2_public_read h2_reqd (fun state ->

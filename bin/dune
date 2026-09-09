@@ -2,6 +2,13 @@
 ;; Uses h2-eio for unlimited SSE streams per connection (no browser 6-conn limit)
 
 (executable
+ (name masc_browser_host)
+ (modules masc_browser_host)
+ (public_name masc-browser-host)
+ (package masc)
+ (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
+
+(executable
  (name main_eio)
  (modules main_eio)
  (public_name masc)
@@ -141,6 +148,18 @@
   masc.masc_tool_dispatch
   masc.tool_catalog_surfaces
   yojson))
+
+;; Generate the Board identity-field mirror from the production TOML loader.
+;; Tool_name.Board_name, the closed board vocabulary this generator
+;; enumerates, is an unwrapped module of the dispatch library.
+(executable
+ (name gen_board_tool_registry)
+ (modules gen_board_tool_registry)
+ (libraries
+  masc.masc_tool_surface
+  masc.masc_tool_dispatch
+  masc.tool_types
+  masc_types))
 
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
@@ -365,7 +384,7 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc masc_tui_keeper_chat_projection yojson))
+ (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_command)
@@ -378,7 +397,9 @@
  (modules masc_tui_gate_text)
  ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
  ;; phase the store adds fails this compile instead of drawing as unknown.
- (libraries masc))
+ ;; message_layout for terminal cells: folding an argument to fit a line is
+ ;; a question about width, and this module already owns what the row says.
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_preset_text)
@@ -396,7 +417,7 @@
  (name masc_tui_acting)
  (wrapped false)
  (modules masc_tui_acting)
- (libraries masc_tui_observer))
+ (libraries masc_tui_observer agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -409,6 +430,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
   masc.keeper_chat_delivery_identity
@@ -424,6 +446,7 @@
  (modules masc_tui_keeper_chat_transcript)
  (libraries
   masc
+  masc.keeper_tool_name
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -465,15 +488,19 @@
  (libraries masc_tui_types))
 
 (library
- (name masc_tui_mode)
- (wrapped false)
- (modules masc_tui_mode))
-
-(library
  (name masc_tui_esc_interrupt)
  (wrapped false)
  (modules masc_tui_esc_interrupt)
  (libraries masc_tui_keeper_chat_transcript))
+
+;; The process signals that end a session, recorded by the handlers and read
+;; by the loop once per pass. Own library so the rule -- a terminate outranks
+;; a Ctrl-C, a second Ctrl-C quits, a key withdraws the first -- runs under a
+;; test with no terminal and no signal delivery.
+(library
+ (name masc_tui_exit_signals)
+ (wrapped false)
+ (modules masc_tui_exit_signals))
 
 (library
  (name masc_tui_file_icon)
@@ -500,6 +527,7 @@
  (modules masc_tui_theme_catalog)
  (libraries
   masc.config_dir_resolver
+  masc.embedded_config
   masc.fs_compat
   masc.keeper_toml
   masc_tui_terminal_palette))
@@ -508,7 +536,8 @@
  (name masc_tui_theme_choice)
  (wrapped false)
  (modules masc_tui_theme_choice)
- (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme_catalog))
+ (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme
+  masc_tui_theme_catalog))
 
 (library
  (name masc_tui_color)
@@ -740,6 +769,9 @@
  (wrapped false)
  (modules masc_tui_acting_pane)
  (libraries
+  masc ; the health reading is a typed variant: the pane decides what a gone
+       ; keeper's unsettled turn may claim, as masc_tui_keeper_mark already
+       ; reads the same variant for its glyph.
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
@@ -776,6 +808,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
+ (libraries masc_tui_message_layout)
  (modules masc_tui_model_runtime_table))
 
 (library
@@ -810,7 +843,7 @@
  (name masc_tui_memo)
  (wrapped false)
  (modules masc_tui_memo)
- (libraries masc_tui_code_lexer masc.ide_memo))
+ (libraries masc_tui_code_lexer masc.ide_memo masc.lsp_client))
 
 (library
  (name masc_tui_markdown)
@@ -855,6 +888,12 @@
  (name masc_tui_magnitude)
  (wrapped false)
  (modules masc_tui_magnitude))
+
+(library
+ (name masc_tui_board_read_layout)
+ (wrapped false)
+ (modules masc_tui_board_read_layout)
+ (libraries masc_tui_types masc_tui_board_detail))
 
 (library
  (name masc_tui_board_comment_thread)
@@ -935,10 +974,21 @@
 ; fetches for the surface on screen, and the chat pane having no field there
 ; is why it read its history once and never again.
 (library
+ (name masc_tui_task_flow)
+ (wrapped false)
+ (modules masc_tui_task_flow)
+ (libraries masc_types))
+
+(library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.sse_wire
+  masc_tui_task_flow
+  masc_tui_runtime_config_view
+  masc_tui_frame
+  masc_tui_image_preview
   masc
   masc_tui_acting_pane
   masc_tui_gate_text
@@ -957,6 +1007,7 @@
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
+  masc_tui_memo
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff
@@ -1000,6 +1051,12 @@
  (libraries masc_tui_types))
 
 (library
+ (name masc_tui_runtime_config_view)
+ (wrapped false)
+ (modules masc_tui_runtime_config_view)
+ (libraries yojson))
+
+(library
  (name masc_tui_runtime_config_receipt)
  (wrapped false)
  (modules masc_tui_runtime_config_receipt)
@@ -1040,6 +1097,7 @@
  (wrapped false)
  (modules masc_tui_render_metrics)
  (libraries
+  masc_tui_task_flow
   masc
   masc_types
   masc_tui_ansi
@@ -1059,6 +1117,8 @@
   masc_types
   masc_tui_ansi
   masc_tui_context_inspector
+  masc_tui_frame
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1087,6 +1147,12 @@
   masc_tui_terminal_palette
   masc_tui_theme))
 
+(library
+ (name masc_tui_msx_tick)
+ (wrapped false)
+ (modules masc_tui_msx_tick)
+ (libraries masc_tui_types yojson base64 threads))
+
 (executable
  (name masc_tui)
  (modules
@@ -1097,6 +1163,11 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  ;; The CLI reports the build rule's stamp, without a runtime repository probe.
+  masc.build_commit
+  masc.sse_wire
+  masc_tui_task_flow
+  masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
   masc_tui_answering
@@ -1131,11 +1202,15 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_msx
+  masc_tui_msx_tick
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
+  masc_tui_runtime_config_view
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
+  masc_tui_exit_signals
   masc.runtime
   masc.keeper_registry
   masc_skill_reference
@@ -1184,6 +1259,7 @@
   masc_tui_link
   masc_tui_link_label
   masc_tui_link_preview
+  masc_tui_image_mosaic
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1196,6 +1272,7 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_board_read_layout
   masc_tui_fetched
   masc_tui_magnitude
   masc_tui_board_comment_thread
@@ -1246,6 +1323,7 @@
   str
   eio_main
   eio
+  eio.unix
   mtime.clock.os
   httpun
   cohttp
@@ -1311,7 +1389,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64))
 
 (library
  (name masc_tui_link_label)
@@ -1324,3 +1402,37 @@
  (wrapped false)
  (modules masc_tui_link_preview)
  (libraries masc_tui_link_label masc_tui_lru masc_tui_message_layout masc_tui_theme uri))
+
+(library
+ (name masc_tui_image_mosaic)
+ (wrapped false)
+ (modules masc_tui_image_mosaic)
+ (libraries masc_tui_theme))
+(library
+ (name masc_tui_msx)
+;; The MSX spectator screen, over the opam path-pinned ocaml-msx core.
+;; pin: opam pin add ocaml-msx --kind=path <core repo>
+ (modules masc_tui_msx)
+ (libraries
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_graphics
+  masc_tui_image_mosaic))
+
+;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
+;; A request the server answers in milliseconds is logged by the live TUI as
+;; taking seconds; this separates the transport from the loop it runs in.
+(executable
+ (name masc_http_probe)
+ (modules masc_http_probe)
+ (public_name masc-http-probe)
+ (package masc)
+ (libraries
+  masc.http_client
+  masc.masc_eio_context
+  cstruct
+  eio
+  eio.unix
+  eio_main
+  unix
+  mtime.clock.os))

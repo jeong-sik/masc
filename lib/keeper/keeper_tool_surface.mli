@@ -39,6 +39,7 @@ module For_testing : sig
 end
 
 val dispatch_keeper_msg_stream_admitted :
+  operation_id:Keeper_chat_operation.Operation_id.t ->
   admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->

@@ -304,7 +304,7 @@ let default_host = Masc_network_defaults.masc_http_default_host
 
 (** Centralized MASC_HOST reader.
     Reads MASC_HOST env var.
-    Default: {!default_host} ("127.0.0.1"). *)
+    Default: {!default_host}. *)
 let masc_host () =
   match masc_host_opt () with
   | Some host -> host
@@ -541,7 +541,9 @@ let data_dir_env_key = "MASC_DATA_DIR"
 (** SSOT for auth env-var names (issue 8352). *)
 let admin_token_env_key = "MASC_ADMIN_TOKEN"
 
-(** Admin token for privileged endpoints. None = admin auth disabled. *)
+(** Optional startup input for the stored Admin credential. When absent,
+    startup attempts to mint a token; this does not disable HTTP auth.
+    Requests resolve their bearer against the credential store. *)
 let admin_token_opt () =
   raw_value_opt admin_token_env_key |> trim_opt
 
@@ -590,7 +592,9 @@ let pubsub_max_messages () =
     @category Policies @ops_class operator *)
 let default_jsonl_retention_days = 30
 
+let jsonl_retention_days_env_key = "MASC_JSONL_RETENTION_DAYS"
+
 let jsonl_retention_days () =
-  get_int ~default:default_jsonl_retention_days "MASC_JSONL_RETENTION_DAYS"
+  get_int ~default:default_jsonl_retention_days jsonl_retention_days_env_key
 
 (** {1 Keeper Defaults} *)

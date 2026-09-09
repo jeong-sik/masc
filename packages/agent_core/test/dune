@@ -35,6 +35,11 @@
  (libraries agent_core_test_deps llm_provider))
 
 (executable
+ (name capability_resolution_dump)
+ (modules capability_resolution_dump)
+ (libraries agent_core_test_deps llm_provider))
+
+(executable
  (name test_wire_parse_dump)
  (modules test_wire_parse_dump)
  (libraries llm_provider unix))
@@ -584,10 +589,10 @@
     "with_post_stream|?on_response_status|arrow(_,constr(int),constr(unit))"
     --allow-callback-in
     http_client.mli
-    "read_sse|~on_data|arrow(~event_type,constr(option,constr(string)),arrow(_,constr(string),constr(unit)))"
+    "read_sse|~on_data|arrow(~event_type,constr(option,constr(string)),arrow(_,constr(string),constr(stream_continuation)))"
     --allow-callback-in
     http_client.mli
-    "read_ndjson|~on_line|arrow(_,constr(string),constr(unit))"
+    "read_ndjson|~on_line|arrow(_,constr(string),constr(stream_continuation))"
     %{dep:../lib/llm_provider/count_tokens_sync.mli}
     %{dep:../lib/llm_provider/http_client.mli})
    (run
@@ -702,6 +707,30 @@
     --check-exact-transport
     %{dep:fixtures/exact_output_single_surface/exact_transport_legitimate_local_alias.ml.fixture}))))
 
+; A stale allowance used to hide the violations found in the same run: the
+; unused-allowance branch exited before the violations were printed (#34607).
+; Exit code alone cannot tell those two apart, so this fixture compares stderr.
+(rule
+ (alias runtest)
+ (deps
+  fixtures/exact_output_single_surface/public_callback_violation_with_unused_allowance.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_violation_with_unused_allowance.expected)
+ (action
+  (progn
+   (with-accepted-exit-codes
+    1
+    (with-stderr-to
+     public_callback_violation_with_unused_allowance.actual
+     (run
+      %{exe:check_public_mli_callbacks.exe}
+      --allow-callback-in
+      public_callback_violation_with_unused_allowance.mli.fixture
+      "absent|_|arrow(_,constr(unit),constr(unit))"
+      fixtures/exact_output_single_surface/public_callback_violation_with_unused_allowance.mli.fixture)))
+   (diff
+    fixtures/exact_output_single_surface/public_callback_violation_with_unused_allowance.expected
+    public_callback_violation_with_unused_allowance.actual))))
+
 (test
  (name test_complete_http)
  (modules test_complete_http)
@@ -711,6 +740,11 @@
  (name test_http_client_cache)
  (modules test_http_client_cache)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_http_client_addresses)
+ (modules test_http_client_addresses)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main))
 
 ; Own stanza: needs the mock clock/flow to drive deadline arithmetic without
 ; wall-clock sleeping, and runs entirely on Eio_mock.Backend (no real IO).

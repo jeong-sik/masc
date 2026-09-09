@@ -33,8 +33,18 @@
    so its runner is always [Ran]; only the remote lane raises
    [Transport_failed]. *)
 type run_outcome =
-  | Ran of { status : Unix.process_status; stdout : string; stderr : string }
-  | Transport_failed of { reason : string; stdout : string; stderr : string }
+  | Ran of {
+      status : Unix.process_status;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
+  | Transport_failed of {
+      reason : string;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
 
 (* For a consumer that treats a transport failure the same as any command
    failure -- a non-zero status with the error in stderr, which is what the
@@ -45,8 +55,9 @@ type run_outcome =
    as "no match" again) -- it matches the variant directly. *)
 let status_tuple : run_outcome -> Unix.process_status * string * string =
   function
-  | Ran { status; stdout; stderr } -> status, stdout, stderr
-  | Transport_failed { reason = _; stdout; stderr } -> Unix.WEXITED 1, stdout, stderr
+  | Ran { status; stdout; stderr; output_files = _ } -> status, stdout, stderr
+  | Transport_failed { reason = _; stdout; stderr; output_files = _ } ->
+    Unix.WEXITED 1, stdout, stderr
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->

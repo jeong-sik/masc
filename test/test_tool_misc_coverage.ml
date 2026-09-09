@@ -816,6 +816,7 @@ let connector_selection ~event_id ~arrived_at =
       }
   ; admitted_revision = 1L
   ; checkpoint_retentions = 0
+      ; repetition_scope = None
   }
 
 let () =
@@ -829,6 +830,7 @@ let () =
           }
       ; admitted_revision = 1L
       ; checkpoint_retentions = 0
+      ; repetition_scope = None
       }
     in
     let rows =

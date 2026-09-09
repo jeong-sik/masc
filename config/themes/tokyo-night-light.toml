@@ -1,0 +1,20 @@
+name = "tokyo-night-light"
+light = true
+
+[palette]
+base00 = "d5d6db"
+base01 = "cbccd1"
+base02 = "dfe0e5"
+base03 = "9699a3"
+base04 = "4c505e"
+base05 = "343b59"
+base06 = "1a1b26"
+base07 = "1a1b26"
+base08 = "343b58"
+base09 = "965027"
+base0a = "166775"
+base0b = "485e30"
+base0c = "3e6968"
+base0d = "34548a"
+base0e = "5a4a78"
+base0f = "8c4351"

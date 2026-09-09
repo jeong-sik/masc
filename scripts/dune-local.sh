@@ -338,6 +338,47 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- external pin guard ------------------------------------------------
+# A pin added to scripts/opam-pin-external-deps.sh reaches a switch only when
+# someone re-runs that script, and nothing told them to. cohttp-eio was
+# pinned on 2026-09-05 (#33206) to stop a body flow that copies partial
+# deliveries from offset 0 and silently corrupts SSE payloads; two days
+# later the machine this guard was written on still carried the stock build,
+# with every other pin in place. The findlib guard below cannot see it: the
+# library resolves, it is just the wrong build of it.
+#
+# One `opam pin list` under the read lease this script already holds.
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_SKIP_DEPS_CHECK:-0}" != "1" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${_subcommand}" != "clean" ]]; then
+  _pin_script="$(dirname "${script_path}")/opam-pin-external-deps.sh"
+  if [[ -f "${_pin_script}" ]] && command -v opam >/dev/null 2>&1; then
+    # Stderr only: the check writes its "all pins are in place" line to
+    # stdout, and repeating that before every build is noise. What it writes
+    # to stderr is either drift, which stops the build, or a note that a
+    # dependency is linking from a checkout on this machine -- that one has to
+    # reach the screen on a run that passes, or a build of somebody's working
+    # copy is indistinguishable from a build of the commit this repo names.
+    # Kept inside `if !`: this script runs under `set -e`, where a bare
+    # assignment from a failing command substitution exits on the spot -- the
+    # report captured and never printed.
+    _pin_report=""
+    _pin_status=0
+    if ! _pin_report="$(bash "${_pin_script}" --check 2>&1 1>/dev/null)"; then
+      _pin_status=1
+    fi
+    if [[ -n "${_pin_report}" ]]; then
+      printf '%s\n' "${_pin_report}" >&2
+    fi
+    if [[ "${_pin_status}" -ne 0 ]]; then
+      printf '[dune-local] set MASC_SKIP_DEPS_CHECK=1 to bypass this guard\n' >&2
+      exit 1
+    fi
+  fi
+fi
+# -----------------------------------------------------------------------
+
 # --- required findlib libraries guard ----------------------------------
 # Catch absent packages and incompatible package API layouts before Dune
 # emits a wall of cryptic library-resolution or abstract-cmi errors:

@@ -958,6 +958,26 @@ let test_the_rfc_9728_example_is_one_bearer_challenge () =
   check (Alcotest.option str) "and it is the location" (Some rfc_9728_location)
     (Www.resource_metadata_of_headers [ ("WWW-Authenticate", header) ])
 
+let test_a_malformed_header_names_no_location () =
+  (* The policy [location_of_parsed] states: a value the grammar rejects
+     names no location, the same answer an absent header gives. Both callers
+     then take the computed well-known URL. The values below stop the grammar
+     in different places -- empty, a parameter with no scheme before it, an
+     unterminated quoted string, a challenge holding both forms -- so a change
+     to the parser cannot quietly turn one of them into a location. *)
+  List.iter
+    (fun value ->
+      check Alcotest.bool ("the grammar rejects: " ^ value) true
+        (Result.is_error (Www.parse value));
+      check (Alcotest.option str) ("and so it names no location: " ^ value) None
+        (Www.resource_metadata_of_headers [ ("WWW-Authenticate", value) ]))
+    [ "";
+      " , ";
+      {|resource_metadata="https://example.test/x"|};
+      {|Bearer resource_metadata="https://example.test/x|};
+      {|Bearer token68 resource_metadata="https://example.test/x"|}
+    ]
+
 let test_the_rfc_9110_example_is_two_challenges () =
   (* RFC 9110 11.6.1's own example: a quoted-pair inside a value, and a
      second challenge that begins where a bare token follows a comma. *)
@@ -1006,7 +1026,12 @@ let test_where_the_grammar_stops_is_named () =
       ("Bearer realm=\"a\001b\"", Www.Bad_quoted_character 15);
       ({|="x"|}, Www.Expected_token 0);
       ({|Bearer/|}, Www.Expected_delimiter 6);
-      ("Bearer\trealm=x", Www.Expected_delimiter 7) ]
+      ("Bearer\trealm=x", Www.Expected_delimiter 7);
+      (* Byte 15 is where the value would have been whole: "Bearer token68"
+         is a scheme and its token68, and a comma there starts the next
+         challenge. What follows instead is neither, and reading it as a
+         second challenge is what let a malformed header name a location. *)
+      ({|Bearer token68 resource_metadata="x"|}, Www.Expected_delimiter 15) ]
 
 let test_a_terminating_slash_in_the_issuer_is_removed () =
   (* RFC 8414 3.1. Every Google Workspace MCP server names its authorization
@@ -1696,6 +1721,8 @@ let () =
       ( "www-authenticate grammar",
         [ Alcotest.test_case "the RFC 9728 example is one Bearer challenge" `Quick
             test_the_rfc_9728_example_is_one_bearer_challenge;
+          Alcotest.test_case "a malformed header names no location" `Quick
+            test_a_malformed_header_names_no_location;
           Alcotest.test_case "the RFC 9110 example is two challenges" `Quick
             test_the_rfc_9110_example_is_two_challenges;
           Alcotest.test_case "a token68 fills its challenge" `Quick

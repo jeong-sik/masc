@@ -67,6 +67,82 @@ let test_html_metadata_and_article_extraction () =
         (String_util.contains_substring text "[ref](https://example.com/ref)");
       check bool "nav dropped" false (String_util.contains_substring text "drop me"))
 
+(* Title, description and the markdown rendering run as one job on the
+   domain pool when one is installed. The same document must extract to the
+   same fields inline and pooled; two urls keep the response cache out of it. *)
+let test_extraction_matches_on_the_pool () =
+  let html =
+    {|<!doctype html>
+<html>
+  <head>
+    <title>Pooled &amp; Inline</title>
+    <meta property="og:description" content="Same document, two lanes">
+  </head>
+  <body>
+    <nav>drop me</nav>
+    <article>
+      <h1>Heading</h1>
+      <p>Body <b>text</b> with a <a href="https://example.com/ref">ref</a>.</p>
+    </article>
+  </body>
+</html>|}
+  in
+  let fields url =
+    Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+        Ok
+          { Masc.Tool_misc_web_fetch.http_status = Some 200
+          ; final_url = "https://example.com/final"
+          ; redirect_count = 0
+          ; content_type = Some "text/html; charset=utf-8"
+          ; downloaded_bytes = Some (String.length html)
+          ; body = html
+          })
+      (fun () ->
+        let call () =
+          Masc.Tool_misc_web_fetch.handle
+            ~tool_name:"masc_web_fetch"
+            ~start_time:(Unix.gettimeofday ())
+            (`Assoc
+               [ "url", `String url
+               ; "extractMode", `String "markdown"
+               ; "maxChars", `Int 5_000
+               ])
+        in
+        let result =
+          Eio_main.run
+          @@ fun env ->
+          if String.equal url "https://example.com/pooled"
+          then
+            Eio.Switch.run (fun sw ->
+              let pool =
+                Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+              in
+              Domain_pool_ref.set pool;
+              Fun.protect ~finally:Domain_pool_ref.clear_for_tests call)
+          else call ()
+        in
+        let json = success_json result in
+        let open Yojson.Safe.Util in
+        ( json |> member "title" |> to_string
+        , json |> member "description" |> to_string
+        , json |> member "extraction_source" |> to_string
+        , json |> member "text" |> to_string ))
+  in
+  let inline_title, inline_description, inline_source, inline_text =
+    fields "https://example.com/inline"
+  in
+  let pooled_title, pooled_description, pooled_source, pooled_text =
+    fields "https://example.com/pooled"
+  in
+  check string "title" "Pooled & Inline" inline_title;
+  check string "pooled title" inline_title pooled_title;
+  check string "pooled description" inline_description pooled_description;
+  check string "pooled extraction source" inline_source pooled_source;
+  check string "pooled text" inline_text pooled_text;
+  check bool "heading rendered" true (String_util.contains_substring inline_text "# Heading")
+;;
+
 let test_plain_text_preserves_angle_brackets () =
   let body = "Keep <literal> tokens\nand second line." in
   Masc.Tool_misc_web_fetch.with_http_fetch_for_test
@@ -394,6 +470,62 @@ let test_destination_boundary () =
        "https://example.com/next"
      = Ok ())
 
+(* The real handler and model bridge preserve an upstream rejection as a
+   failed call, without leaking its body, adding credentials, or replaying it.
+   A second explicit request can succeed, proving failures were not cached. *)
+let test_upstream_http_failure status guidance =
+  let calls = ref 0 in
+  let url = Printf.sprintf "https://example.com/upstream-failure-%d" status in
+  Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+    (fun ~timeout_sec:_ ~headers ~max_response_bytes:_ requested ->
+      incr calls;
+      check string "requested resource" url requested;
+      check bool "no account credentials attached" false
+        (List.exists
+           (fun (name, _) ->
+             match String.lowercase_ascii name with
+             | "authorization" | "cookie" -> true
+             | _ -> false)
+           headers);
+      Ok
+        { Masc.Tool_misc_web_fetch.http_status =
+            Some (if !calls = 1 then status else 200)
+        ; final_url = url
+        ; redirect_count = 0
+        ; content_type = Some "text/plain"
+        ; downloaded_bytes = None
+        ; body = if !calls = 1 then "upstream-private-body" else "available"
+        })
+    (fun () ->
+      let result = handle url in
+      check int "no automatic replay" 1 !calls;
+      (match result with
+       | Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; metadata; message; _ } ->
+           check bool "status-specific next action" true
+             (String_util.contains_substring message guidance);
+           (match metadata with
+            | Some json ->
+                check int "typed HTTP status" status
+                  Yojson.Safe.Util.(json |> member "upstream_http_status" |> to_int)
+            | None -> fail "upstream status metadata missing")
+       | Tool_result.Failed _ -> fail "upstream response misclassified"
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+           fail "upstream rejection advanced the call");
+      (match Masc.Tool_bridge.to_agent_core_typed_result result with
+       | Ok _ -> fail "model bridge accepted failed fetch"
+       | Error { message; recoverable; _ } ->
+           check bool "no bridge replay authorization" false recoverable;
+           check bool "remote body not exposed" false
+             (String_util.contains_substring message "upstream-private-body");
+           let json = Yojson.Safe.from_string message in
+           check int "status reaches model" status
+             Yojson.Safe.Util.(json |> member "masc.payload"
+               |> member "upstream_http_status" |> to_int));
+      let second = success_json (handle url) in
+      check int "failure not cached" 2 !calls;
+      check string "explicit subsequent success" "available"
+        Yojson.Safe.Util.(second |> member "text" |> to_string))
+
 let () =
   run "tool_misc_web_fetch"
     [
@@ -403,6 +535,8 @@ let () =
             test_html_metadata_and_article_extraction;
           test_case "plain text preserves angle brackets" `Quick
             test_plain_text_preserves_angle_brackets;
+          test_case "extraction matches on the pool" `Quick
+            test_extraction_matches_on_the_pool;
           test_case "invalid redirect class" `Quick
             test_invalid_redirect_is_workflow_rejection;
           test_case "truncation offloads full text" `Quick
@@ -412,5 +546,17 @@ let () =
           test_case "truncation outline maps headings" `Quick
             test_truncation_outline_maps_headings;
           test_case "destination boundary" `Quick test_destination_boundary;
+          test_case "upstream authentication response" `Quick
+            (fun () -> test_upstream_http_failure 401 "valid authentication");
+          test_case "upstream permission response" `Quick
+            (fun () -> test_upstream_http_failure 403 "refused access");
+          test_case "upstream hidden or missing resource" `Quick
+            (fun () -> test_upstream_http_failure 404 "does not prove deletion");
+          test_case "upstream gone resource" `Quick
+            (fun () -> test_upstream_http_failure 410 "authoritative replacement");
+          test_case "upstream quota response" `Quick
+            (fun () -> test_upstream_http_failure 429 "No reset time");
+          test_case "upstream service failure" `Quick
+            (fun () -> test_upstream_http_failure 503 "service's state");
         ] );
     ]

@@ -1,11 +1,9 @@
-(** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol
-    with MASC observational overlays.
+(** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol.
 
     Architecture:
     - WebSocket → JSON-RPC dispatcher
     - Per-language LSP process via Lsp_process_manager
     - Promise-based routing via Lsp_message_router
-    - MASC annotation overlay via Lsp_overlay_provider
     - Per-connection Eio.Switch.run for scoped lifecycle *)
 
 open Server_auth
@@ -66,20 +64,22 @@ type resolved_document_request =
     the upgrade handler cannot block to hold a per-connection switch
     open.  RFC-0281 Phase 2. *)
 (** Per-language LSP health (task-1691). A language is [Connected] once its
-    LSP process is spawned and initialized; it is [Overlay_only] (carrying the
-    last error) when the process could not be started/initialized, so only
-    MASC observational overlays are served for that language. Degradation is
-    per-language — the whole LSP process is unavailable, not one method — so a
-    single state covers every handler. Every degraded handler records this
-    instead of either failing the request (old hover) or silently returning
-    overlays as if the LSP answered (old 9 handlers + diagnostic), so the
+    LSP process is spawned and initialized; it is [Unavailable] (carrying the
+    last error) when the process could not be started or initialized.
+    Degradation is per-language — the whole LSP process is unavailable, not
+    one method — so a single state covers every handler. What a request gets
+    while a language is [Unavailable] depends on the method: the six that go
+    through [relay_or_empty] answer that method's empty result, a relayed
+    method answers a JSON-RPC error, and a document-sync notification is
+    only logged. Every one of them records the state first, so the
     [masc/lspStatus] notification can report the degradation to the dashboard. *)
 type lang_health =
   | Connected
-  | Overlay_only of string
+  | Unavailable of string
 
 (** Typed LSP method variant for the methods handled explicitly by the proxy
-    (lifecycle, MASC status, and overlay-aware textDocument methods).  Using a
+    (lifecycle, MASC status, and the textDocument methods that answer empty
+    while the language server is unavailable).  Using a
     variant removes duplicated wire strings from dispatch and handler sites and
     makes adding a new handled method a compile-time decision. *)
 type lsp_method =
@@ -216,9 +216,9 @@ type conn_state =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
   ; store_scope : Server_ide_scope.ide_scope option
         (* The IDE observation scope declared on this connection's URL, in
-           the same vocabulary the REST routes use. [None] = the client
-           declared none, so this connection addresses no annotation store
-           and gets language-server passthrough only. *)
+           the same vocabulary the REST routes use. When it is declared it
+           fixes the workspace tree document paths are relative to;
+           [None] = the client declared none and [rootUri] decides. *)
   ; workspace_root : string ref
   ; send_queue : ws_send_msg Eio.Stream.t
   ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
@@ -231,39 +231,24 @@ type conn_state =
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
-(* The store directory this connection addresses. Threaded into every
-   overlay read so the reader cannot land in a store the client never
-   named — the defect that had overlay reads served from the orphan
-   directory while keeper writes accumulated under [by-url/<slug>/]. *)
-let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.store_scope
-;;
-
 (* What this connection addresses, read from its URL before the socket is
-   upgraded. Two independent axes: the overlay store directory comes from
-   the IDE scope ([codebase], resolved by the same [Server_ide_scope]
-   the REST routes use, so the two surfaces share one vocabulary), and
-   the workspace tree that document paths are relative to
-   comes from the workspace axis parameters ([repo_id]/[keeper]) resolved
-   by [resolve_workspace_base]. RFC-0378 §5.3b: the scope carries the
-   slug itself — the old full-URL spelling that could name a store
-   without a tree died with that vocabulary. *)
+   upgraded. Two independent axes: the IDE scope ([codebase], resolved by
+   the same [Server_ide_scope] the REST routes use, so the two surfaces
+   share one vocabulary), and the workspace tree that document paths are
+   relative to, which comes from the workspace axis parameters
+   ([repo_id]/[keeper]) resolved by [resolve_workspace_base]. RFC-0378
+   §5.3b: the scope carries the slug itself. *)
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err
   | Ok scope ->
-    (* RFC-0378 §5.3b: the scope names the overlay store; the workspace
-       tree anchor is the separate workspace axis, resolved from its own
-       parameters. The old full-URL scope that could name a store
-       without a tree died with that spelling. *)
     let anchor, _source =
       Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
     in
     Ok (scope, anchor)
 ;;
 
-(* A stored annotation's [file_path] is relative to the workspace tree the
-   client opened, which is also the anchor its document URIs resolve
-   against — not the directory that holds the store. *)
+(* Document URIs resolve against the workspace tree the client opened. *)
 let document_root cs = !(cs.workspace_root)
 ;;
 
@@ -414,23 +399,23 @@ let send_client_notification cs method_ params =
 (* --- LSP health status (task-1691) --- *)
 
 (* Pure projection of one language's health into the [masc/lspStatus] wire
-   shape: [connected] / [overlay_only] / [command] (the configured LSP
-   executable, [null] when none is mapped) / [last_error]. *)
+   shape: [connected] / [command] (the configured LSP executable, [null] when
+   none is mapped) / [last_error]. The health is two states, so [connected]
+   carries it whole and [last_error] says why when it is false. *)
 let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
   let command =
     match Lsp_process_manager.language_of_lang_id lang_id with
     | Some language -> `String (fst (Runtime.lsp_servers () language))
     | None -> `Null
   in
-  let connected, overlay_only, last_error =
+  let connected, last_error =
     match health with
-    | Connected -> (true, false, `Null)
-    | Overlay_only err -> (false, true, `String err)
+    | Connected -> (true, `Null)
+    | Unavailable err -> (false, `String err)
   in
   `Assoc
     [ "lang", `String lang_id
     ; "connected", `Bool connected
-    ; "overlay_only", `Bool overlay_only
     ; "command", command
     ; "last_error", last_error
     ]
@@ -479,19 +464,19 @@ let set_health cs ~lang_id health =
   | None -> ()
 ;;
 
-(* Unified degraded path shared by every overlay handler (task-1691): mark
-   the language overlay-only, log a typed WARN, and notify the client. The
-   caller then serves its MASC overlay, so the request never fails and the
-   keeper cycle is never blocked by an unavailable LSP. *)
-let note_overlay_only cs ~lang_id ~error =
-  Log.Server.warn "LSP overlay-only for %s: %s" lang_id error;
-  set_health cs ~lang_id (Overlay_only error)
+(* Unified degraded path shared by every handler (task-1691): mark the
+   language as having no server, log a typed WARN, and notify the client.
+   The caller then answers empty, so the request never fails and the keeper
+   cycle is never blocked by an unavailable LSP. *)
+let note_unavailable cs ~lang_id ~error =
+  Log.Server.warn "LSP server unavailable for %s: %s" lang_id error;
+  set_health cs ~lang_id (Unavailable error)
 ;;
 
 let note_process_exit cs (proc : Lsp_process_manager.lsp_process) ~reason =
   if remove_process_if_current cs proc.lang_id proc
   then
-    note_overlay_only
+    note_unavailable
       cs
       ~lang_id:proc.lang_id
       ~error:("LSP process exited: " ^ reason)
@@ -764,10 +749,10 @@ let ensure_lsp_process cs lang_id =
 let forward_request cs lang_id method_ params id =
   match ensure_lsp_process cs lang_id with
   | Error msg ->
-    (* No MASC overlay exists for a passthrough method, so this stays a
+    (* A relayed method has no empty answer of its own, so this stays a
        JSON-RPC error — but still record the per-language degradation so
        [masc/lspStatus] reflects it (task-1691). *)
-    note_overlay_only cs ~lang_id ~error:msg;
+    note_unavailable cs ~lang_id ~error:msg;
     send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
   | Ok proc ->
     let promise =
@@ -782,7 +767,7 @@ let forward_request cs lang_id method_ params id =
 let forward_notification cs lang_id method_ params =
   match ensure_lsp_process cs lang_id with
   | Error msg ->
-    note_overlay_only cs ~lang_id ~error:msg;
+    note_unavailable cs ~lang_id ~error:msg;
     Log.Server.warn "Cannot forward %s: %s" method_ msg
   | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
 ;;
@@ -792,12 +777,6 @@ let forward_document_sync_notification cs method_ params =
   match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> ()
   | Ok request ->
-    if method_ = Did_save
-    then
-      Lsp_overlay_provider.invalidate_cache
-        ~base_dir:cs.base_path
-        ~codebase:(overlay_codebase cs)
-        ~file_path:request.relative_path;
     (match request.language with
      | Unknown_lang -> ()
      | Known_lang lang_id -> forward_notification cs lang_id wire_method params)
@@ -806,7 +785,7 @@ let forward_document_sync_notification cs method_ params =
 (* Read-only method allowlist for the catch-all forwarder (task-1692). The
    observation plane must never forward a write-adjacent request — rename,
    any formatting, executeCommand, applyEdit, willSaveWaitUntil — to the
-   language server. The overlay methods handled explicitly above (hover,
+   language server. The methods handled explicitly below (hover,
    codeAction, ...) are all read-only and never reach the catch-all; this
    closes the "forward any other textDocument request" hole.
 
@@ -885,263 +864,34 @@ let classify_forwarded_method method_ =
      | None -> Unknown_forwarded_method method_)
 ;;
 
-(** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
-let handle_codelens cs params id =
+(* The textDocument methods below answer empty instead of erroring while the
+   language server for the file is unavailable or the file has no server: a
+   JSON-RPC error on hover reads to the client as a broken connection, while
+   an empty hover is a quiet line. The degradation is still recorded per
+   language for [masc/lspStatus]. [empty] is the method's own empty result. *)
+let relay_or_empty cs ~method_ ~(empty : Yojson.Safe.t) params id =
   match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
+  | Error _ -> send_response cs id empty
   | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
     (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
+     | Unknown_lang -> send_response cs id empty
      | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router
-            proc
-            ~method_:(lsp_method_to_string CodeLens)
-            ~params
-            ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-let handle_diagnostic cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`Assoc [ "items", `List [] ])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    (match request.language with
-     | Unknown_lang ->
-      let diags =
-        Lsp_overlay_provider.diagnostics
-          ~base_dir:base
-          ~codebase:(overlay_codebase cs)
-          ~file_path:relative
-          ~lsp_diagnostics:[]
-      in
-      send_response cs id (`Assoc [ "items", `List diags ])
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        let diags =
-          Lsp_overlay_provider.diagnostics
-            ~base_dir:base
-            ~codebase:(overlay_codebase cs)
-            ~file_path:relative
-            ~lsp_diagnostics:[]
-        in
-        send_response cs id (`Assoc [ "items", `List diags ])
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router
-            proc
-            ~method_:(lsp_method_to_string Diagnostic)
-            ~params
-            ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`Assoc rfields) ->
-           let existing =
-             match List.assoc_opt "items" rfields with
-             | Some (`List diags) -> diags
-             | _ -> []
-           in
-           let merged =
-             Lsp_overlay_provider.diagnostics
-               ~base_dir:base
-               ~codebase:(overlay_codebase cs)
-               ~file_path:relative
-               ~lsp_diagnostics:existing
-           in
-           send_response cs id (`Assoc [ "items", `List merged ])
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/hover — enrich LSP response with MASC annotations. *)
-let handle_hover cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id `Null
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    (match request.language with
-     | Unknown_lang ->
-      (match request.line with
-       | Some line
-         when Lsp_overlay_provider.has_annotations_at_line
-                ~base_dir:base
-                ~codebase:(overlay_codebase cs)
-                ~file_path:relative
-                ~line ->
-         let enriched =
-           Lsp_overlay_provider.enrich_hover
-             ~base_dir:base
-             ~codebase:(overlay_codebase cs)
-             ~file_path:relative
-             ~line
-             (`Assoc
-                [ ( "contents"
-                  , `Assoc [ ("kind", `String "markdown"); ("value", `String "") ] )
-                ])
-         in
-         send_response cs id enriched
-       | Some _ | None -> send_response cs id `Null)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        (* Unified with the other handlers (task-1691): fall back to the MASC
-           overlay hover instead of the old JSON-RPC Internal_error, which
-           broke the client on an unavailable LSP. Mirrors the unknown-lang
-           branch above. *)
-        note_overlay_only cs ~lang_id ~error:msg;
-        (match request.line with
-         | Some line
-           when Lsp_overlay_provider.has_annotations_at_line
-                  ~base_dir:base
-                  ~codebase:(overlay_codebase cs)
-                  ~file_path:relative
-                  ~line ->
-           send_response cs id
-             (Lsp_overlay_provider.enrich_hover
-                ~base_dir:base
-                ~codebase:(overlay_codebase cs)
-                ~file_path:relative
-                ~line
-                (`Assoc
-                   [ ( "contents"
-                     , `Assoc
-                         [ ("kind", `String "markdown"); ("value", `String "") ] )
-                   ]))
-         | Some _ | None -> send_response cs id `Null)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router
-            proc
-            ~method_:(lsp_method_to_string Hover)
-            ~params
-            ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok result ->
-           (match request.line with
-            | Some line ->
-              send_response cs id
-                (Lsp_overlay_provider.enrich_hover
-                   ~base_dir:base
-                   ~codebase:(overlay_codebase cs)
-                   ~file_path:relative
-                   ~line
-                   result)
-            | None -> send_response cs id result)
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-let handle_completion cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc =
-      match request.line with
-      | Some line ->
-        Lsp_overlay_provider.completion_items ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line
-      | None -> []
-    in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Completion)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/codeAction — inject MASC annotation actions. *)
-let handle_code_action cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc =
-      match request.line with
-      | Some line ->
-        Lsp_overlay_provider.code_actions
-          ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line ~diagnostics:[]
-      | None -> []
-    in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string CodeAction)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-let handle_folding_range cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Folding_range)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+       (match ensure_lsp_process cs lang_id with
+        | Error msg ->
+          note_unavailable cs ~lang_id ~error:msg;
+          send_response cs id empty
+        | Ok proc ->
+          let promise =
+            Lsp_message_router.send_request
+              cs.router
+              proc
+              ~method_:(lsp_method_to_string method_)
+              ~params
+              ~client_id:(req_id_to_int id)
+          in
+          (match Eio.Promise.await promise with
+           | Ok result -> send_response cs id result
+           | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg)))
 ;;
 
 let dispatch_message cs msg =
@@ -1173,12 +923,10 @@ let dispatch_message cs msg =
               | _ -> cs.base_path
             in
             (* A scope declared on the connection URL is authoritative: it
-               already fixed both the store and the tree document paths
-               are relative to. Letting [rootUri] move the anchor afterwards
-               would decouple the two again, which is how document keys came
-               to be expressed against one root and stored against another.
-               Without a declared scope the client's [rootUri] still decides,
-               as before. *)
+               already fixed the tree document paths are relative to.
+               Letting [rootUri] move the anchor afterwards would express
+               document keys against a root the scope never named. Without
+               a declared scope the client's [rootUri] still decides. *)
             (match cs.store_scope with
              | Some _ -> ()
              | None ->
@@ -1189,7 +937,7 @@ let dispatch_message cs msg =
           | Some Shutdown, Some n -> send_response cs n `Null
           | Some Exit, _ -> disconnect cs
           (* Typed LSP health for the dashboard (task-1691): per-language
-             connected / overlay_only / command / last_error. *)
+             connected / command / last_error. *)
           | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
           | Some Masc_lsp_status, None -> ()
           | Some method_, None when is_document_sync_notification method_ ->
@@ -1200,13 +948,15 @@ let dispatch_message cs msg =
               (Printf.sprintf
                  "Document-sync LSP method must be a notification: %s"
                  (lsp_method_to_string method_))
-          (* MASC-overlay-aware handlers *)
-          | Some Hover, Some n -> handle_hover cs params n
-          | Some CodeLens, Some n -> handle_codelens cs params n
-          | Some Diagnostic, Some n -> handle_diagnostic cs params n
-          | Some Completion, Some n -> handle_completion cs params n
-          | Some CodeAction, Some n -> handle_code_action cs params n
-          | Some Folding_range, Some n -> handle_folding_range cs params n
+          (* Methods that answer empty while the language has no server *)
+          | Some Hover, Some n -> relay_or_empty cs ~method_:Hover ~empty:`Null params n
+          | Some CodeLens, Some n -> relay_or_empty cs ~method_:CodeLens ~empty:(`List []) params n
+          | Some Diagnostic, Some n ->
+            relay_or_empty cs ~method_:Diagnostic ~empty:(`Assoc [ "items", `List [] ]) params n
+          | Some Completion, Some n -> relay_or_empty cs ~method_:Completion ~empty:(`List []) params n
+          | Some CodeAction, Some n -> relay_or_empty cs ~method_:CodeAction ~empty:(`List []) params n
+          | Some Folding_range, Some n ->
+            relay_or_empty cs ~method_:Folding_range ~empty:(`List []) params n
           | _ ->
             (match id_opt with
              | Some n ->
@@ -1407,7 +1157,7 @@ module For_testing = struct
   (* task-1691: the LSP health type + its pure wire projection. *)
   type health = lang_health =
     | Connected
-    | Overlay_only of string
+    | Unavailable of string
 
   let lang_status_json = lang_status_json
   let status_snapshot_json = status_snapshot_json

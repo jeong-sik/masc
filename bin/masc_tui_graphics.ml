@@ -3,6 +3,14 @@ type placement = {
   rows : int;
 }
 
+let fit_rows ~cell_pixels ~image_pixels ~columns ~rows =
+  match cell_pixels, image_pixels with
+  | Some (cw, ch), Some (iw, ih) when cw > 0 && ch > 0 && iw > 0 && ih > 0 ->
+      let allowed = float_of_int (max 1 columns) *. float_of_int cw
+        *. float_of_int ih /. float_of_int iw /. float_of_int ch in
+      max 1 (int_of_float (min (float_of_int (max 1 rows)) allowed))
+  | _ -> max 1 rows
+
 type query_reply =
   | Supported
   | Refused of string
@@ -73,7 +81,55 @@ let chunk_bytes = 4096
    composer's already answers. *)
 let payload_media_type = "image/png"
 
-let place ~data { columns; rows } =
+(* Raw pixels, for a caller that holds a frame rather than a file. [f=24] is
+   three bytes per pixel with no container, so the escape has to state the
+   pixel dimensions the PNG header would otherwise carry -- [s=] and [v=] --
+   and the terminal scales that into the cell box like any other image.
+
+   Kept beside [place] rather than folded into it: the two formats need
+   different keys, and a single function taking a format would let a caller
+   send RGB bytes under [f=100], which is exactly the silent drop the comment
+   above warns about. A caller holding a frame reaches for this one because
+   it is the one that asks for the frame's dimensions. *)
+let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
+  let encoded = Base64.encode_string data in
+  let length = String.length encoded in
+  let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
+  let rec emit offset =
+    let remaining = length - offset in
+    let size = min chunk_bytes remaining in
+    let more = if remaining > size then 1 else 0 in
+    if offset = 0
+    then
+      Buffer.add_string out
+        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 pixel_width) (max 1 pixel_height) identity (max 1 rows) more
+           (String.sub encoded offset size)
+           st)
+    else
+      Buffer.add_string out
+        (Printf.sprintf "%sm=%d;%s%s" apc more (String.sub encoded offset size) st);
+    if more = 1 then emit (offset + size)
+  in
+  (* A frame whose bytes do not match its stated dimensions would be drawn as
+     whatever the terminal makes of the mismatch, so refuse instead. *)
+  if length = 0 || String.length data <> pixel_width * pixel_height * 3
+  then ""
+  else begin
+    emit 0;
+    Buffer.contents out
+  end
+;;
+
+let place_rgb = encode_rgb ~identity:""
+
+let replace_rgb ~image_id ~placement_id =
+  encode_rgb ~identity:(Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id)
+
+let delete_image ~image_id =
+  Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st
+
+let place ~data ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -86,8 +142,8 @@ let place ~data { columns; rows } =
        complete and may be drawn. *)
     if offset = 0 then
       Buffer.add_string out
-        (Printf.sprintf "%sf=100,a=T,c=%d,r=%d,q=2,m=%d;%s%s" apc
-           (max 1 columns) (max 1 rows) more
+        (Printf.sprintf "%sf=100,a=T,r=%d,q=2,m=%d;%s%s" apc
+           (max 1 rows) more
            (String.sub encoded offset size)
            st)
     else

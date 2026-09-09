@@ -15,6 +15,41 @@ let require_estimated_cost = function
   | Llm_provider.Pricing.Incomplete _ -> Alcotest.fail "expected an exact cost estimate"
 ;;
 
+let test_multipart_body_shape () =
+  let boundary = "probe-boundary" in
+  let body =
+    Llm_provider.Provider_files.multipart_upload_body ~boundary
+      ~filename:"probe.png" ~purpose:"user_data" ~content:"PNGDATA"
+  in
+  let has needle =
+    let open Stdlib in
+    let rec find haystack_start =
+      if String.length body - haystack_start < String.length needle then false
+      else if String.sub body haystack_start (String.length needle) = needle
+      then true
+      else find (haystack_start + 1)
+    in
+    find 0
+  in
+  Alcotest.(check bool) "file part" true (has "name=\"file\"; filename=\"probe.png\"");
+  Alcotest.(check bool) "purpose part" true (has "name=\"purpose\"");
+  Alcotest.(check bool) "purpose value after blank line" true (has "\r\n\r\nuser_data\r\n");
+  Alcotest.(check bool) "closing boundary" true (has "--probe-boundary--\r\n")
+;;
+
+let test_file_object_decode () =
+  match
+    Llm_provider.Provider_files.file_object_of_yojson
+      (Yojson.Safe.from_string
+         {| {"id":"file-api-1","bytes":137,"created_at":1788676840,"filename":"p.png","purpose":"user_data"} |})
+  with
+  | Ok obj ->
+    Alcotest.(check string) "id" "file-api-1" obj.Llm_provider.Provider_files.id;
+    Alcotest.(check int) "bytes" 137 obj.Llm_provider.Provider_files.bytes;
+    Alcotest.(check string) "filename" "p.png" obj.Llm_provider.Provider_files.filename
+  | Error detail -> Alcotest.failf "expected a decode, got %s" detail
+;;
+
 let test_pricing_sonnet () =
   let p = declared_pricing "claude-sonnet-4-6-20250514" in
   Alcotest.(check (float 0.001)) "input/M" 3.0 p.input_per_million;
@@ -37,18 +72,53 @@ let test_pricing_gpt55 () =
   Alcotest.(check (option (float 0.001))) "cache_read" (Some 0.1) p.cache_read_multiplier
 ;;
 
+(* A model that declares base prices and no cache multipliers stays priced,
+   with the multipliers absent rather than invented.
+
+   Read off the catalog rather than one model id. This named
+   "qwen3.5-35b-a3b" until that row stopped declaring prices, and the failure
+   could not say whether the rule had broken or the row had moved: the id now
+   resolves to the provider-less "qwen3" entry, which declares no prices at
+   all, so [pricing_for_model_opt] answers None and the case fails on a model
+   that was never the subject. 22 rows carry the shape today. *)
 let test_incomplete_cache_pricing_remains_declared () =
+  let catalog =
+    match Llm_provider.Model_catalog.global () with
+    | Some catalog -> catalog
+    | None -> Alcotest.fail "no model catalog is installed"
+  in
+  let declares_base_prices_only (entry : Llm_provider.Model_catalog.model_entry) =
+    (* Provider-less rows only: [pricing_for_model_opt] without a provider id
+       looks at exactly those, so a scoped row would not be reachable here. *)
+    Option.is_none entry.provider_name
+    && Option.is_some entry.input_per_million
+    && Option.is_some entry.output_per_million
+    && Option.is_none entry.cache_write_multiplier
+    && Option.is_none entry.cache_read_multiplier
+  in
+  let entries =
+    List.filter declares_base_prices_only
+      (Llm_provider.Model_catalog.model_entries catalog)
+  in
+  (* Without this the case passes on an empty catalog and pins nothing. *)
   Alcotest.(check bool)
-    "base price remains observable without inventing cache multipliers"
+    "the catalog still declares a model of this shape"
     true
-    (match Llm_provider.Pricing.pricing_for_model_opt "qwen3.5-35b-a3b" with
-     | Some
-         { input_per_million = 0.0
-         ; output_per_million = 0.0
-         ; cache_write_multiplier = None
-         ; cache_read_multiplier = None
-         } -> true
-     | Some _ | None -> false)
+    (entries <> []);
+  List.iter
+    (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+      match Llm_provider.Pricing.pricing_for_model_opt entry.id_prefix with
+      | None ->
+        Alcotest.failf
+          "%s declares base prices and they are not observable"
+          entry.id_prefix
+      | Some (pricing : Llm_provider.Pricing.pricing) ->
+        Alcotest.(check bool)
+          (entry.id_prefix ^ ": no cache multiplier is invented")
+          true
+          (Option.is_none pricing.cache_write_multiplier
+           && Option.is_none pricing.cache_read_multiplier))
+    entries
 ;;
 
 let test_pricing_unknown () =
@@ -132,6 +202,14 @@ let () =
             "model rebind clears parent context"
             `Quick
             test_provider_config_rebinds_model_specific_context
+        ] )
+    ; ( "provider_files"
+      , [ Alcotest.test_case
+            "multipart body carries both form parts and the closing boundary"
+            `Quick test_multipart_body_shape
+        ; Alcotest.test_case
+            "file object decodes id/bytes/filename/purpose"
+            `Quick test_file_object_decode
         ] )
     ]
 ;;

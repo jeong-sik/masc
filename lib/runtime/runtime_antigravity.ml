@@ -757,7 +757,7 @@ let status_to_string = function
   | `Signaled signal -> Printf.sprintf "signal %d" signal
 ;;
 
-let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
+let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -788,7 +788,8 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
       (* A successful prompt write must deliver EOF to the CLI. If the copy
          raises, the failed fiber cancels [sw] and the pipe's switch-owned
          release handler closes [stdin_w]. *)
-      Eio.Flow.close stdin_w);
+      Eio.Flow.close stdin_w;
+      Option.iter (fun callback -> callback ()) on_prompt_sent);
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_settled = ref false in
@@ -879,7 +880,7 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
     status, !state, String.trim !stderr_tail)
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
   let* () =
@@ -897,6 +898,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
         (run_spawned
            ?home_dir
            ?on_spawned
+           ?on_prompt_sent
            ~mgr
            ~clock
            ~cwd

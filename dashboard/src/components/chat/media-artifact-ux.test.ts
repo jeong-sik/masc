@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { act } from 'preact/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import { ChatTranscript } from './primitives'
@@ -127,6 +128,52 @@ describe('media and artifact UX', () => {
     ;(modal!.querySelector('button[aria-label="닫기"]') as HTMLElement).click()
     await flushUi()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('keeps image previews outside contained transcript rows and cleans up dismissal handlers', () => {
+    const container = renderBlocks([{ t: 'image', src: '/img/screen.png', cap: '실행 화면' }])
+    const row = container.querySelector<HTMLElement>('[data-chat-entry-id="b1"]')!
+    row.style.setProperty('content-visibility', 'auto')
+    row.style.setProperty('contain', 'layout paint')
+    const frame = row.querySelector<HTMLElement>('.chat-block-media-frame')!
+    const addListener = vi.spyOn(document, 'addEventListener')
+    const removeListener = vi.spyOn(document, 'removeEventListener')
+
+    try {
+      act(() => frame.click())
+      const modal = document.querySelector<HTMLElement>('[role="dialog"]')!
+      expect(modal).not.toBeNull()
+      expect(modal.parentElement).toBe(document.body)
+      expect(container.contains(modal)).toBe(false)
+      expect(modal.closest('[data-chat-entry-id]')).toBeNull()
+      expect(modal.querySelector('img')?.getAttribute('src')).toBe('/img/screen.png')
+
+      // Clicking preview content must not invoke the backdrop's close action.
+      act(() => modal.querySelector<HTMLElement>('.chat-preview-modal-body')!.click())
+      expect(document.querySelector('[role="dialog"]')).toBe(modal)
+      act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+      act(() => frame.click())
+      act(() => document.querySelector<HTMLElement>('[role="dialog"]')!.click())
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+      act(() => frame.click())
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+      act(() => render(null, container))
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      const keydownHandlers = addListener.mock.calls
+        .filter(([type]) => type === 'keydown')
+        .map(([, handler]) => handler)
+      expect(keydownHandlers.length).toBeGreaterThan(0)
+      for (const handler of keydownHandlers) {
+        expect(removeListener).toHaveBeenCalledWith('keydown', handler)
+      }
+    } finally {
+      act(() => render(null, container))
+      addListener.mockRestore()
+      removeListener.mockRestore()
+    }
   })
 
   it('opens a lightbox when clicking an svg block', async () => {

@@ -57,7 +57,9 @@ val runtime_resolution_json : Workspace.config -> Yojson.Safe.t
     Reached unqualified through the
     [Server_dashboard_http_core] runtime consumer. *)
 
-val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
+val light_runtime_resolution_json :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  Workspace.config -> Yojson.Safe.t
 (** Renders the cheap runtime/fleet subset used by
     [/api/v1/dashboard/shell?light=true].  This keeps the shell health strip
     aligned with [/health] fleet safety without running git probes or other
@@ -137,6 +139,15 @@ val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
 (** Renders the dashboard performance envelope (build
     identity, runtime / workspace commits, system clock
     skew, etc). *)
+
+val dashboard_tools_http_result :
+  ?keeper:string ->
+  ?timing:Server_timing.t ->
+  Workspace.config ->
+  Dashboard_snapshot.tools_result
+(** The final decorated tools response with producer-owned readiness. Its
+    classification travels with the returned cache payload, so a concurrent
+    fill cannot promote an already-returned warming response. *)
 
 val dashboard_tools_http_json :
   ?keeper:string ->

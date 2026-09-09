@@ -132,8 +132,7 @@ readme_subcmds=$(awk '
     }
   }
 ' README.md \
-  | { grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' || true; } \
-  | awk '{print $2}' | sort -u)
+  | python3 "$repo_root/scripts/readme-cli-subcommands.py" | sort -u)
 
 drift=0
 for sub in $readme_subcmds; do

@@ -93,6 +93,9 @@ EXTERNAL_MODULE_PREFIXES = frozenset(
         "Sys",
         "Unix",
         "Uri",
+        # ocaml-msx, an opam dependency: lib/msx_lane calls into it and
+        # names it in its own docs.
+        "Msx",
         "Yojson",
     }
 )
@@ -102,7 +105,11 @@ BINDING_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_']*)",
     re.M,
 )
-RECORD_FIELD_RE = re.compile(r"^\s*([a-z_][A-Za-z0-9_']*)\s*:", re.M)
+# Every field but the first is written `; name : t`, so a pattern anchored on
+# the name alone sees one field per record. {!Exec_ssh_endpoint.t.private_home}
+# is a valid odoc field reference that this reported as undefined for that
+# reason.
+RECORD_FIELD_RE = re.compile(r"^\s*;?\s*([a-z_][A-Za-z0-9_']*)\s*:", re.M)
 VARIANT_ARM_RE = re.compile(r"^\s*\|\s*([A-Za-z_][A-Za-z0-9_']*)", re.M)
 TYPE_NAME_RE = re.compile(r"^\s*type\s+([a-z_][A-Za-z0-9_']*)", re.M)
 DOC_RE = re.compile(r"\(\*\*(.*?)\*\)", re.S)
@@ -132,12 +139,29 @@ DERIVED_SUFFIXES = ("_to_yojson", "_of_yojson")
 DERIVED_PREFIXES = ("show_", "pp_", "equal_", "compare_")
 
 
+def scan_root(name: str) -> Path:
+    """The directory [name] under the repo root, or a stop.
+
+    An absent root used to be skipped. Both scans below are the whole of what
+    this audit looks at, so skipping one means finding no references and no
+    symbols, and the run ends "OK - ... (0 files scanned)". A tree that is not
+    where the audit looks is a broken scope, not an empty one, and the two
+    cannot be told apart from the outside.
+    """
+    root = REPO_ROOT / name
+    if not root.is_dir():
+        raise SystemExit(
+            f"[odoc-refs] {root} is not a directory. This audit's scope is "
+            "wrong, not empty -- it would otherwise report OK having read "
+            "nothing."
+        )
+    return root
+
+
 def source_files() -> list[Path]:
-    roots = [REPO_ROOT / "lib", REPO_ROOT / "test"]
+    roots = [scan_root("lib"), scan_root("test")]
     files: list[Path] = []
     for root in roots:
-        if not root.exists():
-            continue
         for path in root.rglob("*"):
             if path.suffix in (".ml", ".mli") and "_build" not in path.parts:
                 files.append(path)
@@ -166,7 +190,7 @@ def known_symbols(files: list[Path]) -> set[str]:
 
 def absent_references(known: set[str]) -> list[tuple[Path, str]]:
     hits: list[tuple[Path, str]] = []
-    lib = REPO_ROOT / "lib"
+    lib = scan_root("lib")
     for path in sorted(lib.rglob("*.mli")):
         if "_build" in path.parts:
             continue

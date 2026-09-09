@@ -203,14 +203,10 @@ let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
-let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
-  (** [Unix.create_process_env] does not accept a child working directory, and
-      we no longer mutate the parent process CWD with [Sys.chdir].  The public
-      [run_argv*] [?cwd] parameter is documented as ignored on the Unix
-      fallback path; on the Eio path the spawn helper handles CWD correctly in
-      the child via its [~cwd] argument.  This removes the process-wide
-      [Sys.chdir] race documented in the adversarial audit (P0). *)
-  Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd stderr_fd
+let create_process_env owner prog argv env stdin_fd stdout_fd stderr_fd =
+  (* The synchronous fallback preserves its documented no-cwd behavior and
+     libc PATH lookup, but owns the foreground group before exec begins. *)
+  Unix_foreground_process.spawn owner prog argv env stdin_fd stdout_fd stderr_fd
 
 (* Everything the two spawn paths can raise before a child process exists,
    read from the sources rather than guessed:
@@ -242,9 +238,9 @@ let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
    the only calls are [Eio.Process.pipe] twice and [Eio.Process.spawn], so a
    [Failure] seen in the [Spawn] phase is eio's child report and nothing else.
 
-   Unix fallback ([Unix.create_process_env], OCaml 5.5 otherlibs/unix/spawn.c):
+   Unix fallback ([Unix_foreground_process], shared posix_spawn stubs):
    - with [posix_spawnp] (macOS, glibc) every failure is
-     [Unix_error (errno, "create_process", executable)] (spawn.c:80);
+     [Unix_error (errno, "posix_spawnp", executable)];
      [ENOENT] is the program not found, anything else ([EACCES], [E2BIG],
      [ENOEXEC], [ENOMEM], ...) is [Spawn_failed] with that errno.
    - the pipe and stderr capture file are [Unix.pipe] / [Unix.openfile];
@@ -317,7 +313,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
     ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
   let timeout_sec = validate_timeout_sec timeout_sec in
-  let started_at = Unix.gettimeofday () in
+  (* Both readings are taken in this process, so the interval between them is
+     the interval that elapsed. Off the wall clock it was not: a forward NTP
+     step retired this deadline early and killed a running command, and the
+     drain that follows was cut with it, so the tool's output came back
+     truncated under a timeout it never hit. A backward step withheld the
+     deadline and the wait sat. Taken where the wall-clock reading it replaces
+     was, so the budget still covers the spawn and not only the run. *)
+  let deadline =
+    Option.map (fun seconds -> Monotonic_deadline.after ~seconds) timeout_sec
+  in
   match argv with
   | [] ->
     (match on_refusal with
@@ -328,13 +333,14 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
        before that is a refusal; after it the child is running and the error
        is the capture's. *)
     let spawned = ref false in
+    let owner = Unix_foreground_process.create () in
     let stdout_r_ref = ref None in
     let stdout_w_ref = ref None in
     let stderr_fd_ref = ref None in
     let stderr_path_ref = ref None in
     let stdin_r_ref = ref None in
     let stdin_w_ref = ref None in
-    let cleanup () =
+    let cleanup_files () =
       Option.iter close_quietly !stdin_r_ref;
       stdin_r_ref := None;
       Option.iter close_quietly !stdin_w_ref;
@@ -349,6 +355,10 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
         remove_temp_file_quietly
         !stderr_path_ref;
       stderr_path_ref := None
+    in
+    let cleanup () =
+      Fun.protect ~finally:cleanup_files (fun () ->
+        Unix_foreground_process.close owner)
     in
     (try
        let env = default_env env in
@@ -382,8 +392,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          | Some fd -> fd
          | None -> Unix.stdin
        in
-       let pid =
-         try create_process_env prog argv env stdin_fd stdout_w stderr_fd with
+       let () =
+         try create_process_env owner prog argv env stdin_fd stdout_w stderr_fd with
          | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
              raise (Refused_at_spawn (Executable_not_found prog, exn))
        in
@@ -411,27 +421,10 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                trigger (2026-05-19 01:26Z, 13:01Z). The ref is nulled on
                the success path AFTER [close_quietly] below; [close_quietly]
                is idempotent so double-close from cleanup is harmless. *)
-            let rec waitpid_blocking () =
-              try Unix.waitpid [] pid
-              with
-              | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_blocking ()
-              | Unix.Unix_error (Unix.ECHILD, _, _) -> (pid, Unix.WEXITED 127)
-            in
             let kill_and_wait status_ref =
-              (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-              if Option.is_none !status_ref then
-                let (_pid, status) = waitpid_blocking () in
-                status_ref := Some status
+              status_ref := Some (Unix_foreground_process.terminate owner)
             in
-            let waitpid_nohang () =
-              try
-                match Unix.waitpid [ Unix.WNOHANG ] pid with
-                | 0, _ -> None
-                | _, status -> Some status
-              with
-              | Unix.Unix_error (Unix.EINTR, _, _) -> None
-              | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
-            in
+            let waitpid_nohang () = Unix_foreground_process.poll owner in
             let stdout_buf = create_capture () in
             let chunk = Bytes.create 4096 in
             let read_available () =
@@ -450,19 +443,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               in
               loop ()
             in
-            let deadline =
-              Option.map (fun seconds -> started_at +. seconds) timeout_sec
-            in
             let deadline_reached () =
               match deadline with
               | None -> false
-              | Some deadline -> Unix.gettimeofday () >= deadline
+              | Some deadline -> Monotonic_deadline.passed deadline
             in
             let select_wait () =
               match deadline with
               | None -> 0.05
               | Some deadline ->
-                min 0.05 (max 0.0 (deadline -. Unix.gettimeofday ()))
+                min 0.05 (Monotonic_deadline.remaining_seconds deadline)
             in
             let timed_out = ref false in
             let status_ref = ref None in
@@ -499,7 +489,17 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
              | Some _, Some _ | None, None -> ()
              | None, Some _ | Some _, None -> close_stdin ());
             while (not (!stdout_eof && !stdin_closed)) && not !timed_out do
-              if deadline_reached () then begin
+              if Option.is_none !status_ref then
+                status_ref := waitpid_nohang ();
+              if Option.is_some !status_ref then begin
+                close_stdin ();
+                (* The foreground leader is already gone and its group has
+                   been signalled. Preserve bytes it left buffered, then stop
+                   waiting for a descendant's inherited descriptor. *)
+                (* See group cleanup above: EOF and a remaining inherited pipe both end this drain. *)
+                ignore (read_available () : [ `Eof | `Would_block ]);
+                stdout_eof := true
+              end else if deadline_reached () then begin
                 timed_out := true;
                 close_stdin ();
                 kill_and_wait status_ref;
@@ -549,9 +549,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
               else
                 match !status_ref with
                 | Some status -> status
-                | None ->
-                    let (_pid, status) = waitpid_blocking () in
-                    status
+                | None -> Unix_foreground_process.terminate owner
             in
             let stdout = Exec_buffer.render stdout_buf in
             let stderr = captured_stderr_or_empty !stderr_path_ref in
@@ -570,9 +568,8 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
             in
             (match timeout_event with
              | Some timeout_sec ->
-               (* Unix fallback starts the timeout clock after
-                  [create_process_env] returns, so this timeout is always
-                  attributable to the running child. *)
+               (* Spawn returned an owned child; this timeout is reported
+                  against that running command. *)
                observe_process_timeout argv
                  ~timeout_sec
                  ~origin:Timeout_origin.Command
@@ -748,46 +745,29 @@ let rec discard_to_eof r chunk =
   | 0 -> ()
   | _ -> discard_to_eof r chunk
 
-(* The cancellation path's stand-in for awaiting the exit status.
-
-   [Eio.Process.await] is not usable here: the daemon that resolves it lives in
-   the switch being cancelled and is already gone, so the await would never
-   return. Reaping the child directly is not usable either: the switch release
-   hook that follows signals and waitpids the pid it was given, and a pid this
-   side has already reaped is somebody else's by then.
-
-   What this side still holds is the read end of every pipe it gave the child.
-   A write end closes when its holder exits, so EOF on all of them is the
-   child -- and anything it handed the pipe to -- being gone, observed without
-   touching the exit status. That is the wait, bounded by the same grace the
-   ordinary reap gives. A child that was given no pipe (both streams
-   redirected to files) has nothing to observe and gets no wait, as before.
-
-   A source that reached EOF before the cancellation is already closed, which
-   Eio reports as [Invalid_argument]; that is the answer this is waiting for,
-   not a failure. *)
+(* Cancellation has stopped the owning switch's reap daemon. Neither EOF
+   nor absence of capture pipes proves the child exited: it may close its
+   streams before finishing a TERM handler. Keep the existing TERM grace
+   independently of pipe lifetime, without awaiting the cancelled daemon or
+   reaping the PID owned by the switch release hook. Only this cancellation
+   path pays the full grace; an observed successful exit never enters it. *)
 let wait_for_child_to_let_go ~clock sources =
-  match sources with
-  | [] -> ()
-  | sources ->
-    let chunk = Cstruct.create drain_chunk_size in
-    (match
-       Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
-         List.iter
-           (fun (label, r) ->
-              try discard_to_eof r chunk with
-              | Eio.Io _ | Invalid_argument _ ->
-                Log.Misc.debug
-                  "[Process_eio] %s was already gone while waiting out the cancellation grace"
-                  label)
-           sources;
-         Ok ())
-     with
-     | Ok () -> ()
-     | Error `Timeout ->
-       Log.Misc.debug
-         "[Process_eio] child kept its pipes open for %.1fs after SIGTERM; SIGKILL follows"
-         child_exit_grace_seconds)
+  let chunk = Cstruct.create drain_chunk_size in
+  match
+    Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
+      List.iter
+        (fun (label, r) ->
+           try discard_to_eof r chunk with
+           | Eio.Io _ | Invalid_argument _ ->
+             Log.Misc.debug
+               "[Process_eio] %s unavailable during cancellation grace"
+               label)
+        sources;
+      (* EOF releases a stream, not ownership of the child. *)
+      Eio.Fiber.await_cancel ())
+  with
+  | Error `Timeout -> ()
+  | Ok () -> assert false
 
 (* Runs in the [Fun.protect] finalizer of every spawn helper, so it sees three
    states: the child exited and [status] is set; the body raised and the child
@@ -796,15 +776,14 @@ let wait_for_child_to_let_go ~clock sources =
    [sinks] are this side's write ends (stdin) and close first, so a child
    blocked on its input sees EOF before it is asked to stop. [sources] are the
    read ends; on the cancellation path they are what the grace is waited out
-   on, so they close last there. *)
+   on while preserving the full grace, so they close last there. *)
 let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
   (* Two ways to get here with no status. This fiber was cancelled while [sw]
      lives on: the timeout race in [with_explicit_timeout_exn], where the
      daemon that resolves [await] is a fiber of [sw] and still running, so
      the child is reaped the ordinary way. Or [sw] itself is off: a stop
      request, where that daemon is gone, awaiting it would deadlock the switch
-     before its release hook can reap the child, and the child releasing its
-     pipes is the only exit observation left. Reading this fiber's own
+     before its release hook can reap the child, and pipe closure cannot establish that the child exited. Reading this fiber's own
      cancellation as the switch's sent every exec timeout down the second
      path, and a 0.2s budget returned when the child's orphaned grandchild
      closed the pipe two seconds later (#33182). Record the switch's state
@@ -852,20 +831,28 @@ let invoke_output_chunk_callback f s =
    would SIGPIPE a child that is still doing legitimate work and would lose
    both the exit status and the stream tail. [Exec_buffer] discards the
    middle instead, so this loop is O(bytes) in time and O(caps) in space. *)
-let rec drain_into r acc ~on_chunk chunk =
+let rec drain_into ?file_capture r acc ~on_chunk chunk =
   match
     try Eio.Flow.single_read r chunk with
     | End_of_file -> 0
   with
-  | 0 -> Eio.Flow.close r
+  | 0 ->
+      Option.iter
+        (fun (capture, stream) ->
+          Process_output_capture.end_of_stream capture ~stream)
+        file_capture;
+      Eio.Flow.close r
   | n ->
       let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
+      Option.iter
+        (fun (capture, stream) -> Process_output_capture.append capture ~stream s)
+        file_capture;
       invoke_output_chunk_callback on_chunk s;
       Exec_buffer.add_string acc s;
-      drain_into r acc ~on_chunk chunk
+      drain_into ?file_capture r acc ~on_chunk chunk
 
-let drain_to_eof r acc ~on_chunk =
-  drain_into r acc ~on_chunk (Cstruct.create drain_chunk_size)
+let drain_to_eof ?file_capture r acc ~on_chunk =
+  drain_into ?file_capture r acc ~on_chunk (Cstruct.create drain_chunk_size)
 
 let ignore_chunk (_ : string) = ()
 
@@ -880,7 +867,8 @@ let ignore_chunk (_ : string) = ()
 let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       argv
@@ -911,12 +899,13 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
     much of it as its head/tail caps allow. Each buffer has exactly one
     draining fiber, which is what [Exec_buffer]'s single-producer contract
     requires. *)
-let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
+let spawn_and_drain_both ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_source ~clock argv stdout_buf
     stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       ~stderr:stderr_w
@@ -933,19 +922,26 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:ignore_chunk);
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stdout) output_capture)
+            stdout_r stdout_buf ~on_chunk:ignore_chunk)
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stderr) output_capture)
+            stderr_r stderr_buf ~on_chunk:ignore_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
   |> unix_status_of_eio_status
 
-let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
+let spawn_and_drain_both_streaming ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_source ~clock argv
     ~on_stdout_chunk ~on_stderr_chunk stdout_buf stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
       ?stdin:stdin_source
       ~stdout:stdout_w
       ~stderr:stderr_w
@@ -962,8 +958,14 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
       Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stdout) output_capture)
+            stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
+        (fun () ->
+          drain_to_eof
+            ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stderr) output_capture)
+            stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
       let s = Eio.Process.await proc in
       status := Some s;
       s)
@@ -993,7 +995,8 @@ let spawn_and_drain_both_with_stdin_held_open
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
   let proc =
-    Eio.Process.spawn ~sw pm ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w
+    Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w
       ~stderr:stderr_w argv
   in
   Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
@@ -1198,6 +1201,7 @@ let run_argv_with_stdin_and_status_split
     ?timeout_sec
     ?env
     ?cwd
+    ?output_capture
     ?on_stdout_chunk
     ?on_stderr_chunk
     ~(stdin_content : string)
@@ -1205,6 +1209,11 @@ let run_argv_with_stdin_and_status_split
   let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
   let fallback_with_callbacks () =
+    Option.iter
+      (fun capture ->
+        Process_output_capture.unavailable capture
+          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+      output_capture;
     let status, stdout, stderr =
       run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
         ?cwd ~stdin_content argv
@@ -1239,7 +1248,7 @@ let run_argv_with_stdin_and_status_split
                     with_explicit_timeout_exn clk timeout_sec (fun () ->
                         match on_stdout_chunk, on_stderr_chunk with
                         | None, None ->
-                            spawn_and_drain_both ~phase_ref ~sw pm
+                            spawn_and_drain_both ~phase_ref ?output_capture ~sw pm
                               ~cwd:effective_cwd ?env ~stdin_source ~clock:clk argv
                               stdout_buf stderr_buf
                         | _ ->
@@ -1255,6 +1264,7 @@ let run_argv_with_stdin_and_status_split
                             in
                             spawn_and_drain_both_streaming
                               ~phase_ref
+                              ?output_capture
                               ~sw
                               pm
                               ~cwd:effective_cwd
@@ -1478,7 +1488,9 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
            let* err = output_plumbing ~sw ~fs pm stderr in
            let run () =
              let proc =
-               Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
+               Eio.Process.spawn ~sw
+                 (Posix_spawn_process_mgr.foreground_mgr ~clock:clk
+                    ~grace_seconds:child_exit_grace_seconds) ~cwd:effective_cwd ?env
                  ?stdin:stdin_source
                  ~stdout:out.child_flow
                  ~stderr:err.child_flow
@@ -1656,6 +1668,7 @@ let run_argv_with_status_split_streaming
     ?timeout_sec
     ?env
     ?cwd
+    ?output_capture
     ~on_stdout_chunk
     ~on_stderr_chunk
     (argv : string list)
@@ -1664,6 +1677,11 @@ let run_argv_with_status_split_streaming
   let timeout_sec = validate_timeout_sec timeout_sec in
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   let fallback_with_callbacks () =
+    Option.iter
+      (fun capture ->
+        Process_output_capture.unavailable capture
+          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+      output_capture;
     let status, stdout, stderr =
       run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
     in
@@ -1694,6 +1712,7 @@ let run_argv_with_status_split_streaming
                   with_explicit_timeout_exn clk timeout_sec (fun () ->
                       spawn_and_drain_both_streaming
                         ~phase_ref
+                        ?output_capture
                         ~sw
                         pm
                         ~cwd:effective_cwd
@@ -1891,7 +1910,8 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                        let proc =
                          Eio.Process.spawn
                            ~sw
-                           pm
+                           (Posix_spawn_process_mgr.foreground_mgr ~clock:clk
+                              ~grace_seconds:child_exit_grace_seconds)
                            ~cwd:(effective_cwd default_cwd stage.cwd)
                            ?env:stage.env
                            ?stdin

@@ -382,7 +382,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
-    ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -497,23 +497,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     (* [prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
-    (* Reported from [prepared.messages], which is post-carrier-append and
-       post-window: the admission contract runs inside [Host.prepare_turn], so
-       this list is the last shape masc holds before rendering.
-
-       The mode decides whether it is reportable at all. A [Start] renders the
-       whole list into the prompt, so its bytes are attributable. A [Resume]
-       renders only the turn-local carrier and the goal
-       ([prompt_for_turn] above): the accumulated history stays in the
-       conversation the CLI owns and never leaves this process, so there is
-       nothing here to measure. Reporting the local list on a resume attributed
-       history that was not sent, and -- because carrier removal is what
-       [provider_content_of_transmitted] does -- deleted the one message that
-       was. That is masc#32995 with its sign flipped. *)
-    on_transmitted_model_input
-      (if is_resume
-       then Host.Held_by_client_session
-       else Host.Whole_input_transmitted prepared.messages);
+    (* This is the prepared attribution, not transmission evidence. The
+       runtime emits it only after writing the complete prompt to the CLI. *)
+    let report_transmitted_input () =
+      on_transmitted_model_input
+        (if is_resume
+         then Host.Held_by_client_session
+         else Host.Whole_input_transmitted prepared.messages)
+    in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
@@ -549,6 +540,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -653,6 +645,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -717,7 +710,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            |> Result.map (fun released -> session_state := released))
       | Ambiguous | Fatal -> require_recovery detail
     in
-    let process_mgr = Eio.Stdenv.process_mgr env in
+    let process_mgr = Posix_spawn_process_mgr.mgr in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =
@@ -892,6 +885,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                             ~expected
                             ~session_id:conversation_id
                             ~updated_at:(Time_compat.now ())))
+                      ~on_prompt_sent:report_transmitted_input
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))
@@ -917,9 +911,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         | Error error -> Error error
         | Ok (`Stopped stop) ->
           recovery_failure := Session_store.Host_hook_failed;
-          (match !terminal_error with
-           | Some detail -> Error (internal_error detail)
-           | None -> settle_host_stop stop)
+          (match stop, !terminal_error with
+           | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
+           | _, Some detail -> Error (internal_error detail)
+           | _, None -> settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
           (match turn.trajectory_error with
@@ -1031,6 +1027,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             ; trace_ref = None
             ; run_validation = None
             ; runtime_observation = Some runtime_observation
+            ; cooperative_boundary = None
             ; stop_reason = Completed
             }
       with
@@ -1084,6 +1081,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
@@ -1112,7 +1110,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_effect_state
-        ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
         ~event_bus
         ~raw_trace
         ~on_event

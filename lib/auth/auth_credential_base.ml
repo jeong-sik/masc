@@ -55,7 +55,7 @@ let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
    environment as a mutable in-memory channel. *)
 let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
 let internal_keeper_token () = Atomic.get internal_keeper_token_holder
-let run_blocking_io f = Eio_guard.run_in_systhread f
+let run_blocking_io f = Eio_guard.run_in_systhread ~label:"auth-credential-io" f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
 let read_text_file path = Fs_compat.load_file path
 let write_text_file path content = Fs_compat.save_file path content
@@ -226,6 +226,15 @@ let raw_token_file config agent_name =
   Filename.concat (auth_dir config) (Common.safe_filename agent_name ^ ".token")
 ;;
 
+(* Decode an already-read JSON value and retain credential parse diagnostics. *)
+let credential_of_json agent_name json : agent_credential option =
+  match agent_credential_of_yojson json with
+  | Ok cred -> Some cred
+  | Error msg ->
+    Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
+    None
+;;
+
 (** Load agent credential.
 
     Tries an exact filename match first. If that misses and [agent_name]
@@ -244,11 +253,7 @@ let load_credential_from_path_raw config agent_name path : agent_credential opti
     try
       let content = read_text_file path in
       let json = Yojson.Safe.from_string content in
-      match agent_credential_of_yojson json with
-      | Ok cred -> Some cred
-      | Error msg ->
-        Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
-        None
+      credential_of_json agent_name json
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
   else None
@@ -301,8 +306,8 @@ let load_credential config agent_name : agent_credential option =
               load_credential_from_path_raw config agent_name redirect_path
             | None -> None)
          | Some _ -> None
-         | None -> load_credential_from_path_raw config agent_name file)
-      | _ -> load_credential_from_path_raw config agent_name file
+         | None -> credential_of_json agent_name json)
+      | _ -> credential_of_json agent_name json
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
 ;;

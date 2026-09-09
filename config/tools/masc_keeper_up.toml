@@ -36,12 +36,11 @@ enum = ["docker", "microvm", "remote_ssh"]
 description = """
 Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
 execution. \"microvm\" runs each guest as a lightweight VM behind a \
-hypervisor; which runtime supplies it is the keeper TOML's \
-microvm_backend (apple_container, microsandbox, or nerdctl_kata), and the \
-host needs that runtime's CLI and sandbox image already present. Naming a \
-backend is not something this tool does: on a host with no assumed one, a \
-microvm keeper is refused at boot rather than handed a different isolation \
-than it declared. Network defaults to none like docker. \"remote_ssh\" targets the \
+hypervisor; select its runtime with microvm_backend (apple_container, \
+microsandbox, or nerdctl_kata). The host needs that runtime's CLI and \
+sandbox image already present. On a host with no assumed backend, pass \
+microvm_backend explicitly; a missing backend is refused at boot rather \
+than replaced with a different isolation. Network defaults to none like docker. \"remote_ssh\" targets the \
 SSH remote execution lane (Phase 1; requires remote_endpoint in the \
 keeper TOML, runner lands with the lane). There is no host profile: every \
 keeper runs under one of these three. Creating a keeper without this field \
@@ -89,6 +88,14 @@ when it is not. Omit to leave an existing allowlist unchanged; pass an empty \
 array to clear it, which leaves the keeper reaching nothing."""
 
 [[params]]
+name = "microvm_backend"
+type = "string"
+description = """
+MicroVM runtime: apple_container, microsandbox, or nerdctl_kata. Valid only \
+with sandbox_profile = "microvm"; Linux requires an explicit backend. Omit to \
+keep the existing choice; pass null to clear it when changing profiles."""
+
+[[params]]
 name = "remote_endpoint"
 type = "string"
 description = """
@@ -97,10 +104,10 @@ Required with sandbox_profile = "remote_ssh"; pass null to clear it when \
 switching the keeper to another sandbox profile."""
 
 [[params]]
-name = "autoboot_enabled"
-type = "boolean"
-description = """
-If false, persist the keeper but skip auto-start on future server boots."""
+name = "activation_mode"
+type = "string"
+enum = ["manual", "on_demand", "autonomous"]
+description = "Owner activation and initiative: manual starts only on requested work; on_demand restores an owner without spontaneous cycles; autonomous restores an owner and permits spontaneous cycles. Pause and shutdown still apply."
 
 [[params]]
 name = "max_context_override"
@@ -108,12 +115,6 @@ type = "integer"
 description = """
 Optional: absolute context token limit override for this keeper. Use 0 to \
 clear the override."""
-
-[[params]]
-name = "proactive_enabled"
-type = "boolean"
-description = """
-If true, scheduled keeper cycles may produce proactive responses."""
 
 [[params]]
 name = "runtime_id"

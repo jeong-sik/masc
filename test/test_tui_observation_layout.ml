@@ -120,6 +120,22 @@ let test_context_summaries () =
       , "turn record has no provider usage" )
     ; ( Decode.Context_turn_record_trace_mismatch
       , "turn record belongs to a prior trace" )
+      (* The three that carry a number. The pane draws them in the same row
+         as the occupancy reading, and the two differ by an order of
+         magnitude -- an operator read 190k and 2m out of one row and could
+         not tell which was which (#33791). So what each of these has to do
+         is say what its number counts; a bare count in that row is the
+         defect. *)
+    ; ( Decode.Context_conversation_cumulative_usage
+          { raw_input_tokens = Some 2_041_883; context_window = None }
+      , "cumulative usage 2041883 tokens (window unknown); occupancy not \
+         observed" )
+    ; ( Decode.Context_usage_scope_unavailable
+          { raw_input_tokens = Some 190_412; context_window = Some 200_000 }
+      , "usage scope unavailable (input 190412, window 200000)" )
+    ; ( Decode.Context_tokens_exceed_window
+          { raw_input_tokens = 214_000; context_window = 200_000 }
+      , "per-request usage exceeds window: 214000 / 200000 tokens" )
     ]
   in
   List.iter

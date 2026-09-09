@@ -1,5 +1,4 @@
 val default_runtime_id : unit -> string
-val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
@@ -55,9 +54,8 @@ type keeper_profile_defaults =
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
-  autoboot_enabled : bool option;
+  activation_mode : Keeper_activation_mode.t option;
   mention_targets : string list;
-  proactive_enabled : bool option;
   sandbox_profile :
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
@@ -138,4 +136,5 @@ type keeper_toml_discovery =
       }
 
 val keeper_toml_discovery_name : keeper_toml_discovery -> string
+val discover_keepers_toml_with_paths : string -> (string * keeper_toml_discovery) list
 val discover_keepers_toml : string -> keeper_toml_discovery list

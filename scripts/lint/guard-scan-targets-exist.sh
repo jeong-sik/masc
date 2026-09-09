@@ -41,19 +41,47 @@ command -v rg >/dev/null 2>&1 || {
   exit 2
 }
 
-# A scan-scope entry is a whole line holding one quoted repo-relative source
-# path: the shape bash arrays take. Paths appearing mid-line are arguments,
-# globs or prose, and are not scope declarations.
+# A scan-scope entry is a whole line holding one repo-relative source path:
+# the shape bash arrays take. Paths appearing mid-line are arguments, globs or
+# prose, and are not scope declarations.
 #
-# This file's own examples sit in comments, never alone on a line inside
-# quotes, so it does not report itself — but it is skipped anyway rather than
-# rely on that.
+# Both spellings count. Quotes are the common one, but an array literal takes
+# bare words just as happily, and check-checkpoint-installation-legacy-purge.sh
+# writes it that way — for two years its manual-compaction block scanned zero
+# files without saying so, because this guard only looked inside quotes.
+#
+# The bare form has to start the line to be a declaration: that is what keeps
+# prose and comments out, since a `#` can no longer precede the path.
+#
+# An exclusion glob is the third spelling. `-g '!dashboard/src/x.ts'` claims
+# the file is there and deliberately out of scope, which rots exactly the way
+# a scope entry does -- dashboard/src/goal-loop-status.ts was excluded from
+# the normalizePhase check for two releases after it and its type were
+# deleted, so the exclusion was silently narrowing nothing and waiting to
+# re-apply to any future file of that name. Only paths under a source root
+# count: a bare basename in a -g is matched against the scanned tree, not the
+# repo, and this file excludes itself that way.
+#
+# This file's own examples sit in comments, so it does not report itself — but
+# it is skipped anyway rather than rely on that.
 scan_entries() {
   local tree="$1"
   rg --line-number --no-heading \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
     '(^|[[:space:]])"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
+    -r '$2' \
+    "$tree/scripts" 2>/dev/null || true
+  rg --line-number --no-heading \
+    --glob '*.sh' \
+    --glob '!guard-scan-targets-exist.sh' \
+    '^[[:space:]]*((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)[[:space:]]*\\?[[:space:]]*$' \
+    -r '$1' \
+    "$tree/scripts" 2>/dev/null || true
+  rg --line-number --no-heading \
+    --glob '*.sh' \
+    --glob '!guard-scan-targets-exist.sh' \
+    "(-g|--glob)[[:space:]]+'!((lib|dashboard|bin|test)/[A-Za-z0-9/_.-]+\.[a-z]+)'" \
     -r '$2' \
     "$tree/scripts" 2>/dev/null || true
 }
@@ -64,9 +92,14 @@ report() {
     [ -n "$row" ] || continue
     file="${row%%:*}"
     path="${row##*:}"
-    # rg -r keeps whatever preceded the match on the line, so an entry passed as
-    # a continued argument arrives indented.
+    # rg -r replaces the match and keeps the rest of the line, so an entry
+    # arrives with whatever sat around it: indentation before, and for the
+    # exclusion-glob arm a line-continuation after.
     path="${path#"${path%%[![:space:]]*}"}"
+    path="${path%"${path##*[![:space:]\\]}"}"
+    # bin/*.exe is what dune produces, not a file a scanner reads: it is absent
+    # from every clean checkout, so its absence says nothing about scope.
+    case "$path" in *.exe) continue ;; esac
     [ -e "$tree/$path" ] || echo "${file#"$tree/"}|$path"
   done < <(scan_entries "$tree")
 }
@@ -80,15 +113,23 @@ case "$MODE" in
     scratch="$(mktemp -d -t guard-scan-targets.XXXXXX)"
     trap 'rm -rf "$scratch"' EXIT
     mkdir -p "$scratch/scripts" "$scratch/lib"
-    printf 'SCAN_FILES=(\n  "lib/present.ml"\n  "lib/absent.ml"\n)\n' \
+    # Both spellings, so neither arm can be dropped without this failing.
+    printf 'SCAN_FILES=(\n  "lib/present.ml"\n  "lib/absent.ml"\n)\nBARE=(\n  lib/bare_present.ml\n  lib/bare_absent.ml\n)\nrg -n \\\n  -g '"'"'!lib/glob_present.ml'"'"' \\\n  -g '"'"'!lib/glob_absent.ml'"'"' \\\n  pat lib\n' \
       >"$scratch/scripts/probe.sh"
     : >"$scratch/lib/present.ml"
-    got="$(report "$scratch")"
-    if [ "$got" != "scripts/probe.sh|lib/absent.ml" ]; then
-      echo "[guard-scan-targets-exist] self-test: expected the absent entry, got '${got}'" >&2
+    : >"$scratch/lib/bare_present.ml"
+    : >"$scratch/lib/glob_present.ml"
+    want="scripts/probe.sh|lib/absent.ml
+scripts/probe.sh|lib/bare_absent.ml
+scripts/probe.sh|lib/glob_absent.ml"
+    got="$(report "$scratch" | sort)"
+    if [ "$got" != "$want" ]; then
+      echo "[guard-scan-targets-exist] self-test: expected the two absent entries, got '${got}'" >&2
       exit 1
     fi
     : >"$scratch/lib/absent.ml"
+    : >"$scratch/lib/bare_absent.ml"
+    : >"$scratch/lib/glob_absent.ml"
     if [ -n "$(report "$scratch")" ]; then
       echo "[guard-scan-targets-exist] self-test: a present entry was still reported" >&2
       exit 1

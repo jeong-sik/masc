@@ -248,3 +248,34 @@ measurement holds.
 - The bootstrap binary (`masc_exec_ssh_bootstrap`) provisions OpenSSH
   endpoints only. Guest provisioning is the runtime's job (B), not a
   script's.
+
+## Linux Kata storage boundary
+
+The guest-block-disk decision and flat host-descriptor measurements above apply
+specifically to Apple Container. Linux `nerdctl_kata` uses a persistent,
+runtime-managed named directory volume at `/masc-work`. The host playground
+remains bookkeeping only; MASC reads and writes the working tree through the
+same guest shim. Kata's hypervisor, dropped capabilities, read-only rootfs,
+keeper UID and scratch mount remain required.
+
+This is an explicit storage difference: nerdctl stores named volumes in its
+host volume store, not in an Apple-style sized ext4 image. No capacity limit or
+flat host-FD behavior is claimed for this backend. The configured work-volume
+size is reported in the boot log as unsupported (`capacity_enforced=false`);
+the host filesystem determines available capacity. See [nerdctl volume store
+implementation](https://github.com/containerd/nerdctl/blob/main/pkg/mountutil/volumestore/volumestore.go)
+and [Kata storage architecture](https://github.com/kata-containers/kata-containers/blob/main/docs/design/architecture/storage.md).
+
+Provisioning uses idempotent `nerdctl volume create NAME`, then requires a
+successful `volume inspect NAME` with exactly one matching `Name` and an
+absolute `Mountpoint`. The outcome is `Ensured`, not a guessed new/existing
+classification. Listing is not an absence authority: nerdctl can skip unreadable
+individual volume metadata during a successful list. Provisioning never removes
+or replaces a keeper's existing volume, and guest teardown preserves it.
+
+Acceptance requires Linux with Kata/containerd already configured: run
+`scripts/smoke-nerdctl-kata-volume.sh` against a prepared image to measure data
+survival across guest recreation and the UID, capability, read-only-rootfs and
+scratch boundaries. This smoke is independent of MASC and does not itself prove
+shim transport, Keeper model turns, network policy, or long-term FD behavior;
+those require the installed MASC guest lane and separate evidence.

@@ -93,6 +93,29 @@ let register_pool did p =
    | exn -> Stdlib.Mutex.unlock all_pools_mu; raise exn);
   Stdlib.Mutex.unlock all_pools_mu
 
+let unregister_pool p =
+  Stdlib.Mutex.lock all_pools_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock all_pools_mu)
+    (fun () -> all_pools := List.filter (fun (_, candidate) -> candidate != p) !all_pools)
+
+let with_scoped_pool ~sw ~env f =
+  let previous = Domain.DLS.get pool_key in
+  let p = Pool.create ~sw ~env () in
+  Domain.DLS.set pool_key (Some p);
+  register_pool (Domain.self () :> int) p;
+  let closed = ref false in
+  let close () =
+    if not !closed then (
+      closed := true;
+      Domain.DLS.set pool_key previous;
+      unregister_pool p;
+      Pool.shutdown p)
+  in
+  Eio.Switch.on_release sw close;
+  (* on_release alone is too late: Switch.run first joins Piaf's connection
+     fibers. Close these while still inside the callback, including failure. *)
+  Fun.protect ~finally:(fun () -> Eio.Cancel.protect close) f
+
 let with_pool f =
   match Domain.DLS.get pool_key with
   | Some p -> f p
@@ -102,6 +125,11 @@ let with_pool f =
        let p = Pool.create ~sw ~env () in
        Domain.DLS.set pool_key (Some p);
        register_pool (Domain.self () :> int) p;
+       Eio.Switch.on_release sw (fun () ->
+         (match Domain.DLS.get pool_key with
+          | Some current when current == p -> Domain.DLS.set pool_key None
+          | _ -> ());
+         unregister_pool p);
        f p
      | _ -> pool_init_error ())
 
@@ -187,11 +215,11 @@ let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
     contract as {!post_stream}: no wall-clock cap, [idle_timeout_sec] bounds
     silence, and the caller chooses that bound because only it knows how
     long the stream it is reading is allowed to go quiet. *)
-let get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk () =
+let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
   Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`GET ~url
-    ~headers ~on_chunk ()
+    ~headers ?on_response ~on_chunk ()
 
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =

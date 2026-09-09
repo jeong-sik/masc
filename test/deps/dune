@@ -43,8 +43,10 @@
   ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
   (re_export masc.http_client)
   (re_export masc.discovery_cache)
+  (re_export masc.embedded_config)
   (re_export masc.json_field)
   (re_export masc.keeper_hooks_agent_core_types)
+  (re_export masc.keeper_sandbox_image)
   (re_export masc.local_runtime_pool)
   (re_export masc.lockfree_atomic)
   (re_export masc.otel_dispatch_hook)
@@ -89,8 +91,11 @@
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
   (re_export masc.keeper_chat_delivery_identity)
+  (re_export masc.keeper_operation_identity)
   (re_export masc.keeper_chat_operations)
+  (re_export masc.keeper_execution_scope)
   (re_export masc.keeper_contract)
+  (re_export masc.keeper_tool_call_index)
   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
   (re_export masc.attribution)
   ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
@@ -153,6 +158,8 @@
   ;; [Masc_exec_command_gate.Shell_command_gate] directly.
   (re_export masc.masc_exec_command_gate)
   (re_export masc.masc_exec_bash_parser)
+  (re_export masc_tui_msx_tick)
+  (re_export masc_tui_types)
   (re_export masc_workspace)
   ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
   ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.
@@ -184,7 +191,9 @@
   (re_export qcheck-core)
   (re_export re)
   (re_export runtime_events)
+  (re_export sqlite3)
   (re_export str)
+  (re_export threads)
   (re_export time_compat)
   (re_export unix)
   (re_export uri)

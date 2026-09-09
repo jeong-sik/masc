@@ -1,0 +1,41 @@
+{
+  "scope": "Successful invocation counts across public and local cases, including assisted recovery. This is schema-branch coverage, not all task requirements or all websites.",
+  "coverage": {
+    "tools": {
+      "BrowserSession": 20,
+      "BrowserTabs": 17,
+      "BrowserGoto": 10,
+      "BrowserRead": 87,
+      "BrowserInteract": 12,
+      "BrowserAct": 47,
+      "keeper_analyze_image": 9
+    },
+    "read_modes": {
+      "text": 45,
+      "elements": 15,
+      "screenshot": 15,
+      "frames": 6,
+      "dialog": 6
+    },
+    "interact_actions": {
+      "click": 2,
+      "fill": 4,
+      "scroll": 6
+    },
+    "act_actions": {
+      "open_tab": 2,
+      "close_tab": 2,
+      "click": 12,
+      "fill": 2,
+      "press": 4,
+      "select": 4,
+      "scroll": 5,
+      "back": 2,
+      "forward": 2,
+      "reload": 4,
+      "upload": 2,
+      "accept_dialog": 4,
+      "dismiss_dialog": 2
+    }
+  }
+}

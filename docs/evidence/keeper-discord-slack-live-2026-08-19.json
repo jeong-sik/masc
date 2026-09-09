@@ -46,7 +46,7 @@
   "slack": {
     "operations": 9,
     "window": "2026-08-12 17:52 ~ 2026-08-14 10:14 (40.4h)",
-    "keeper": "kidsnote",
+    "keeper": "exampleorg",
     "state": {
       "succeeded": 9
     },
@@ -56,17 +56,17 @@
       "team_id": "T034NS1PP",
       "thread_ts": "1786524720.554309"
     },
-    "screen_binding": "C09TK9L4DV4 → kidsnote",
+    "screen_binding": "C09TK9L4DV4 → exampleorg",
     "note": "thread_ts가 있으므로 스레드 응답 경로가 실제로 돌았다. 다만 최신 왕복이 08-14라 현재 트래픽은 없다 — 커넥터는 CONNECTED이고 화면 last ready 59m ago."
   },
   "browser": {
     "screen": "#connectors?section=connector-status",
     "header": "외부 게이트 4개 · 2 active · gate healthy · binding source persisted",
     "discord": "CONNECTED · bot 1489858300729172039 · PID 3390 · last ready 8m ago · 바인딩 5 전부 sangsu",
-    "slack": "CONNECTED · bot U060QL65V1V · last ready 59m ago · 바인딩 1 (C09TK9L4DV4 → kidsnote)",
+    "slack": "CONNECTED · bot U060QL65V1V · last ready 59m ago · 바인딩 1 (C09TK9L4DV4 → exampleorg)",
     "unconfigured": "iMessage·Telegram은 DOWN·바인딩 0·connector status file not found"
   },
   "verdict": "두 행 모두 live·browser 충족. 화면이 그린 바인딩과 스토어가 기록한 왕복이 같은 채널을 가리킨다.",
   "stale_claim_corrected": "08-19 이전 기록의 'Discord/Slack live·browser는 커넥터 토큰 미구성으로 운영자 프로비저닝 대기' 판정은 더 이상 맞지 않는다. 두 커넥터 모두 CONNECTED이고 bot id와 바인딩이 화면에 있다.",
-  "method_note": "surface.kind는 source_json 안에 있고 테이블은 operations 하나다. Discord 87건은 sangsu 한 keeper에, Slack 9건은 kidsnote 한 keeper에 몰려 있어 keeper별로 나눠 세면 표본이 흩어진다."
+  "method_note": "surface.kind는 source_json 안에 있고 테이블은 operations 하나다. Discord 87건은 sangsu 한 keeper에, Slack 9건은 exampleorg 한 keeper에 몰려 있어 keeper별로 나눠 세면 표본이 흩어진다."
 }

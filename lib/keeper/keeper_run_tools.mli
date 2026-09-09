@@ -21,9 +21,10 @@ open Keeper_agent_prompt_metrics
     and must not perform open-ended I/O while holding that boundary. The
     observer body remains cancellable; only releasing the per-run mutex is an
     exception-safe, non-suspending finalizer. *)
-type hook_accumulator =
+type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
+  ; historical_tool_calls : tool_call_detail list
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -123,6 +124,7 @@ val prepare_agent_setup
        (** Frozen current+held exact selection captured beside the prompt.
            Setup must not reread mutable Workspace task state. *)
   -> trajectory_acc:Trajectory.accumulator option
+  -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t

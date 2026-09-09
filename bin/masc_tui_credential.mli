@@ -74,3 +74,11 @@ val outcome_notice : outcome -> string option
     credential index on a timer, so the first reads after one can still be
     refused, and an operator who is not told will read that as a broken
     credential. *)
+
+val outcome_needs_retry : outcome -> bool
+(** Whether the decision is worth taking again once a server answers at this
+    base path. True only for {!Unavailable}: minting is gated on a workspace
+    that already exists, and on a first install this client runs before any
+    server has made one, so the boot decision is taken against an empty base
+    path. The other outcomes are settled -- a later workspace does not change
+    a bearer already held, already minted, or not required. *)

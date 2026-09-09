@@ -144,7 +144,7 @@ let open_leaf parent_fd leaf =
          "capability exact read parent"
          parent_fd
          (fun raw_parent_fd ->
-            Eio_unix.run_in_systhread (fun () ->
+            Eio_unix.run_in_systhread ~label:"fs-compat-exact-open" (fun () ->
               openat_nofollow_ro_nonblock raw_parent_fd leaf)))
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Missing
@@ -154,7 +154,7 @@ let open_leaf parent_fd leaf =
 let fstat operation fd =
   try
     Ok
-      (Eio_unix.run_in_systhread (fun () ->
+      (Eio_unix.run_in_systhread ~label:"fs-compat-exact-fstat" (fun () ->
          Unix.LargeFile.fstat fd))
   with
   | exn -> Error (error_of_exception operation exn)
@@ -167,7 +167,7 @@ type exact_read =
 let read_exact_and_eof fd bytes =
   try
     Ok
-      (Eio_unix.run_in_systhread (fun () ->
+      (Eio_unix.run_in_systhread ~label:"fs-compat-exact-read" (fun () ->
          let expected = Bytes.length bytes in
          let rec fill offset =
            if offset = expected then
@@ -428,7 +428,15 @@ let read_with_hooks
       let scope =
         Eio_resource_scope.run_resource_only (fun sw ->
            Option.iter
-             (Eio.Switch.on_release sw)
+             (fun settle ->
+               Eio.Switch.on_release sw (fun () ->
+                 match settle () with
+                 | () -> ()
+                 | exception exn ->
+                     (* Switch release-handler failures otherwise enter
+                        [Switch.fail] without their original backtrace. *)
+                     let bt = Printexc.get_raw_backtrace () in
+                     Eio.Switch.fail ~bt sw exn))
              hooks.on_settle_resources;
            match
              try Ok (Eio.Path.open_dir ~sw parent) with

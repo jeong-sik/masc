@@ -33,10 +33,19 @@ extract_ocaml() {
 
 # Comments come off before the bracket scan, not after: a key's trailing
 # comment holds example values ("// Execute: ['git', 'fetch', 'origin']") and
-# the ] inside it would end the list early.
+# the ] inside it would end the list early. awk does the stripping itself
+# rather than reading a sed downstream, because the list ends around line 180
+# of an 11 KB file: awk reaches its [exit] while sed is still writing, sed
+# takes SIGPIPE, and `set -o pipefail` above turns that into exit 141.
+#
+# It is a race, so it passed 20 runs in a row on an idle machine and failed
+# 40 of 40 with eight busy-loops running. A blocking lint that fails when the
+# runner is loaded teaches people to re-run rather than to read.
 extract_ts() {
-  sed 's|//.*||' "$1" \
-    | awk '/^const '"$2"' = \[/{inside=1} inside{print} inside && /\]/{exit}' \
+  awk '{ sub(/\/\/.*/, "") }
+       /^const '"$2"' = \[/{inside=1}
+       inside{print}
+       inside && /\]/{exit}' "$1" \
     | grep -o "'[a-z_]*'" | tr -d "'"
 }
 

@@ -21,7 +21,7 @@ let recording_caller ?(status = Unix.WEXITED 0) ?(prefix = "") () =
        | Some emit -> emit (String.concat " " argv ^ "\n")
        | None -> ());
       Sandbox_target.Ran
-        { status; stdout = prefix ^ String.concat " " argv; stderr = "" }
+        { output_files = None; status; stdout = prefix ^ String.concat " " argv; stderr = "" }
   in
   (runner, calls)
 

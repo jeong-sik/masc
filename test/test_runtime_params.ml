@@ -459,6 +459,32 @@ let () =
           true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
   in
 
+  (* A picker can only offer what the registry declares. If the connector params
+     lost their choices the TUI would fall back to asking the operator to type
+     one of three spellings, and nothing else would notice. *)
+  let test_connector_trigger_params_declare_their_choices () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let choices_of key =
+      match List.find_opt (fun (k, _, _, _, _) -> k = key) entries with
+      | Some (_, _, _, _, Some meta) ->
+          Some (meta.Runtime_params.value_type, meta.Runtime_params.choices)
+      | Some (_, _, _, _, None) -> None
+      | None -> None
+    in
+    List.iter
+      (fun key ->
+        match choices_of key with
+        | None -> Alcotest.fail (key ^ " is not in the registry with metadata")
+        | Some (value_type, choices) ->
+            Alcotest.(check string) (key ^ " value_type") "enum" value_type;
+            Alcotest.(check (list string))
+              (key ^ " choices")
+              [ "mention_only"; "mention_or_thread"; "all" ]
+              choices)
+      [ "discord.trigger_policy"; "slack.trigger_policy" ]
+  in
+
   let test_keeper_params_meta_shape () =
     Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
@@ -583,6 +609,8 @@ let () =
             test_keeper_lifecycle_surface;
           Alcotest.test_case "keeper params meta shape" `Quick
             test_keeper_params_meta_shape;
+          Alcotest.test_case "connector trigger params declare choices" `Quick
+            test_connector_trigger_params_declare_their_choices;
           Alcotest.test_case "keeper param override persist/restore" `Quick
             test_keeper_param_override_persist_restore;
           Alcotest.test_case "keeper_diagnostics surface" `Quick

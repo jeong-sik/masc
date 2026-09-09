@@ -39,18 +39,34 @@ let probe_failed_action =
    changes them."
 ;;
 
+(* RFC-0427 B-3. The lane answered, so the keeper's own work is fine; this
+   tells it not to read a later transport failure as its own doing. *)
+let outdated_shim_action =
+  "The endpoint answers, but its shim came from a different release than this \
+   server. The lane still runs: the two negotiate the protocol and tolerate one \
+   release apart. Nothing you run changes it, and the operator repairs it by \
+   reinstalling the shim from this server's release."
+;;
+
 let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
   let probe, probe_action =
     match r.probe with
     | Keeper_sandbox_remote.Probe_not_asked ->
       `Assoc [ "state", `String "not_asked" ], None
-    | Keeper_sandbox_remote.Probe_answered { major; capabilities } ->
+    | Keeper_sandbox_remote.Probe_answered { major; capabilities; release } ->
       ( `Assoc
           [ "state", `String "answered"
           ; "protocol_major", `Int (Exec_ssh_protocol.int_of_major major)
           ; "capabilities", `List (List.map (fun c -> `String c) capabilities)
+          ; ( "shim_release"
+            , match release with
+              | Some release -> `String release
+              | None -> `Null )
+          ; "server_release", `String Build_version.current
           ]
-      , None )
+      , (match release with
+         | Some release when String.equal release Build_version.current -> None
+         | Some _ | None -> Some outdated_shim_action) )
     | Keeper_sandbox_remote.Probe_failed { at; detail } ->
       ( `Assoc
           [ "state", `String "failed"; "at_unix", `Float at; "detail", `String detail ]

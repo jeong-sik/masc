@@ -119,82 +119,48 @@ let skill_action_lines actions =
 let async_request_observation_lines (state : state) =
   match state.tools_async_observation_error, state.tools_async_observation with
   | Some detail, _ ->
-    [ Theme.bad (), " Async broker — " ^ Terminal_text.single_line detail ]
+    [ Theme.bad (), " Async broker — 읽기 실패: " ^ Terminal_text.single_line detail ]
   | None, None -> [ Theme.warn (), " Async broker — not loaded" ]
-  | None, Some json ->
-    (match json_assoc_member_opt "status" json with
-     | Some (`String "unavailable") ->
-       [ Theme.bad (), " Async broker — durable inventory unavailable" ]
-     | Some (`String "ready") ->
-       let int_field json name =
-         match json_assoc_member_opt name json with
-         | Some (`Int value) -> value
-         | Some _ | None -> 0
-       in
-       let summary_lines =
-         match json_assoc_member_opt "summary" json with
-         | Some (`Assoc _ as summary) ->
-           [ Ansi.bold,
-             Printf.sprintf
-               " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
-               (int_field summary "active")
-               (int_field summary "runtime_owned")
-               (int_field summary "ownership_unknown")
-               (int_field summary "record_errors")
-           ]
-         | Some _ | None -> [ Theme.bad (), " Async broker — summary is malformed" ]
-       in
-       let request_lines =
-         match json_assoc_member_opt "requests" json with
-         | Some (`List requests) ->
-           List.map
-             (fun request ->
-                let string_field name fallback =
-                  match json_assoc_member_opt name request with
-                  | Some (`String value) -> value
-                  | Some _ | None -> fallback
-                in
-                let elapsed =
-                  match json_assoc_member_opt "elapsed_sec" request with
-                  | Some (`Float value) -> Printf.sprintf "%.1fs" value
-                  | Some (`Int value) -> Printf.sprintf "%ds" value
-                  | Some _ | None -> "?s"
-                in
-                let ownership = string_field "worker_ownership" "unknown" in
-                (if String.equal ownership "runtime_owned"
-                 then Theme.ok ()
-                 else Theme.warn ()),
-                Printf.sprintf
-                  "   %s · %s · %s · %s · %s"
-                  (Terminal_text.single_line (string_field "request_id" "?"))
-                  (Terminal_text.single_line (string_field "keeper_name" "?"))
-                  (Terminal_text.single_line (string_field "status" "?"))
-                  elapsed
-                  (Terminal_text.single_line ownership))
-             requests
-         | Some _ | None -> [ Theme.bad (), "   async request rows are malformed" ]
-       in
-       let recovery_lines =
-         match json_assoc_member_opt "startup_recovery" json with
-         | Some (`Assoc _ as recovery) ->
-           [ Ansi.dim,
-             Printf.sprintf
-               "   startup recovery: lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
-               (int_field recovery "lost")
-               (int_field recovery "finalized")
-               (int_field recovery "cleaned")
-               (int_field recovery "unreadable")
-               (int_field recovery "failed")
-               (int_field recovery "staging_files_inspected")
-               (int_field recovery "staging_files_deleted")
-               (int_field recovery "staging_files_preserved")
-           ]
-         | Some `Null | None ->
-           [ Ansi.dim, "   startup recovery: not observed by this process" ]
-         | Some _ -> [ Theme.bad (), "   startup recovery report is malformed" ]
-       in
-       summary_lines @ request_lines @ recovery_lines
-     | Some _ | None -> [ Theme.bad (), " Async broker response is malformed" ])
+  | None, Some (Async_unavailable { kind; reason }) ->
+    [ Theme.bad (), " Async broker — durable inventory unavailable: "
+        ^ Terminal_text.single_line kind
+        ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ Terminal_text.single_line value) reason ]
+  | None, Some (Async_ready { summary; requests; recovery }) ->
+    let summary_lines =
+      [ Ansi.bold,
+        Printf.sprintf
+          " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
+          summary.ars_active summary.ars_runtime_owned
+          summary.ars_ownership_unknown summary.ars_record_errors ]
+    in
+    let request_lines = List.map (fun request ->
+      let tone, ownership = match request.ar_ownership with
+        | Async_runtime_owned -> Theme.ok (), "runtime_owned"
+        | Async_ownership_unknown -> Theme.warn (), "disk_only_ownership_unknown"
+      in
+      let status = match request.ar_phase with
+        | Async_queued -> "queued"
+        | Async_running -> "running"
+        | Async_cancelling -> "cancelling"
+      in
+      let elapsed = Option.fold ~none:"?s"
+        ~some:(Printf.sprintf "%.1fs") request.ar_elapsed_sec in
+      tone, Printf.sprintf "   %s · %s · %s · %s · %s"
+        (Terminal_text.single_line request.ar_request_id)
+        (Terminal_text.single_line request.ar_keeper_name)
+        status elapsed ownership) requests
+    in
+    let recovery_lines = match recovery with
+      | None -> [ Ansi.dim, "   startup recovery: not observed by this process" ]
+      | Some report ->
+        [ Ansi.dim,
+          Printf.sprintf
+            "   startup recovery: lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
+            report.arr_lost report.arr_finalized report.arr_cleaned
+            report.arr_unreadable report.arr_failed report.arr_staging_inspected
+            report.arr_staging_deleted report.arr_staging_preserved ]
+    in
+    summary_lines @ request_lines @ recovery_lines
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
@@ -354,13 +320,13 @@ let tools_pane_strip (state : state) =
     else Ansi.dim ^ " " ^ label ^ Ansi.reset
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Masc_tui_types.Tools_surface "available"
-    ; name Masc_tui_types.Tools_async "async runs"
-    ; name Masc_tui_types.Tools_activations "receipts"
-    ; name Masc_tui_types.Tools_usage "usage"
-    ; name Masc_tui_types.Tools_catalog "all tools"
+    [ name Masc_tui_types.Tools_surface "호출 범위"
+    ; name Masc_tui_types.Tools_async "비동기 작업"
+    ; name Masc_tui_types.Tools_activations "Skill 기록"
+    ; name Masc_tui_types.Tools_usage "사용 집계"
+    ; name Masc_tui_types.Tools_catalog "전체 도구"
     ]
-  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+  ^ Ansi.dim ^ "  p:다음 탭" ^ Ansi.reset
 ;;
 
 let tools_display_lines (state : state) =
@@ -419,11 +385,11 @@ let tools_display_lines (state : state) =
                  });
           _ } ->
         let native = Option.value ~default:"n/a" ets_native_posture in
-        let delivery =
+        let delivery_tone, delivery =
           match ets_tool_delivery with
-          | Masc.Tui_decode.Effective_tools_delivered -> "delivered"
+          | Masc.Tui_decode.Effective_tools_delivered -> Ansi.dim, "지원"
           | Masc.Tui_decode.Effective_tools_suppressed_runtime_unsupported ->
-            "suppressed:runtime_tools_unsupported"
+            Theme.warn (), "미지원으로 제외"
         in
         let resource_bound =
           match ets_skill_resource_read_max_bytes with
@@ -754,10 +720,11 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line ets_keeper_name)
             (List.length ets_tools);
           Ansi.dim,
-          Printf.sprintf "   runtime=%s  client=%s  native=%s  delivery=%s"
+          Printf.sprintf "   runtime=%s  client=%s  native=%s"
             (Terminal_text.single_line ets_runtime_id)
             (Terminal_text.single_line ets_official_client_kind)
-            native (Terminal_text.single_line delivery);
+            native;
+          delivery_tone, "   Runtime 도구 전달: " ^ delivery;
           Ansi.dim,
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
@@ -1103,9 +1070,22 @@ let tools_display_lines (state : state) =
   in
   let usage_matrix_lines =
     lazy begin
+    let error_lines =
+      match state.skills_catalog_error with
+      | None -> []
+      | Some error ->
+          [ Theme.bad (), " Skill catalog read failed: " ^ Terminal_text.single_line error ]
+          @ (match state.skills_catalog with
+             | None -> []
+             | Some _ -> [ Theme.warn (), " Previous catalog reading; refresh failed" ])
+    in
+    let reading_lines =
     match state.skills_catalog with
     | None ->
-        [ Ansi.dim, " Skill Usage — loading workspace catalog…" ]
+        [ Ansi.dim,
+          (match state.skills_catalog_error with
+           | None -> " Skill Usage — loading workspace catalog…"
+           | Some _ -> " Skill Usage — unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode.sc_state; _ }
       when sc_state <> Masc.Tui_decode.Skills_ready ->
         [ Ansi.dim,
@@ -1113,7 +1093,7 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; _ }
+        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; sc_usage_coverage; _ }
       ->
         let used =
           List.filter
@@ -1121,26 +1101,34 @@ let tools_display_lines (state : state) =
                surface.scs_usage <> [])
             sc_surfaces
         in
-        (* A skill no keeper has reached yet was drawn nowhere: the pane
-           listed only the used ones, so a skill that loaded correctly and has
-           never been invoked read exactly like one that failed to load. The
-           catalog total says how many there are to account for. *)
-        let never_used = List.length sc_surfaces - List.length used in
+        let unobserved = List.length sc_surfaces - List.length used in
+        let coverage_lines =
+          match sc_usage_coverage with
+          | None -> [ Theme.warn (), "   Activation ledger coverage: unavailable" ]
+          | Some coverage ->
+              ( Ansi.dim,
+                Printf.sprintf "   Activation ledgers loaded: %d; unavailable: %d"
+                  coverage.suc_ledgers_loaded
+                  (List.length coverage.suc_unavailable) )
+              :: List.map
+                   (fun detail -> Theme.warn (), "   Unavailable: " ^ Terminal_text.single_line detail)
+                   coverage.suc_unavailable
+        in
         let heading =
           skill_source_lines ~config:sc_config ~sources:sc_sources
           @ [ Ansi.bold,
-            Printf.sprintf " Skill Usage — %d of %d loaded skill%s used by a keeper%s"
-              (List.length used)
-              (List.length sc_surfaces)
-              (if List.length sc_surfaces = 1 then "" else "s")
-              (if never_used <= 0 then ""
-               else Printf.sprintf "; %d never invoked" never_used)
+            Printf.sprintf " Skill Usage — %d of %d catalog Skills observed; %d without retained invocation"
+              (List.length used) (List.length sc_surfaces) unobserved
+          ; Ansi.dim, "   Scope: exact Skill revisions in current Keeper sessions"
+          ; Ansi.dim, "   No retained invocation does not establish never used."
+          ]
+          @ coverage_lines
+          @ [ Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           (* One skill's keepers do not fit beside its name -- there can be
              several, joined -- so the rows put them on the line below. The
              header said the two sat side by side and named the second column
              over the first one's trailing spaces; it now stands where each
              reading stands. *)
-          ; Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           ; Ansi.dim,
             Tool_table.skill_usage_keeper_indent
             ^ "KEEPER  inv/delivered/actions \xc2\xb7 last used" ]
@@ -1228,6 +1216,8 @@ let tools_display_lines (state : state) =
                  rejections
         in
         heading @ rows @ rejection_rows
+    in
+    error_lines @ reading_lines
     end
   in
   (* One section at a time. These used to be concatenated, and the first of
@@ -1238,29 +1228,29 @@ let tools_display_lines (state : state) =
   let explanation =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface ->
-        [ Theme.info (), " What this answers — what can this Keeper call now?"
-        ; Ansi.dim, "   Effective runtime delivery plus loaded Skills."
-        ; Ansi.dim, "   Available does not mean used; open usage for evidence."
+        [ Theme.info (), " 선택 Keeper의 도구·Skill 노출 범위입니다."
+        ; Ansi.dim, "   ORIGIN=도구 출처 · 전달 지원과 실제 호출은 별도입니다."
+        ; Ansi.dim, "   사용 증거: Skill 기록 · Tool 호출별 입출력: Acting"
         ]
     | Masc_tui_types.Tools_async ->
-        [ Theme.info (), " What this answers — what is the async composition broker doing?"
-        ; Ansi.dim, "   Live queued, running, and recovery state."
-        ; Ansi.dim, "   This is neither the tool catalog nor usage history."
+        [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
+        ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
+        ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
         ]
     | Masc_tui_types.Tools_activations ->
-        [ Theme.info (), " What this answers — which Skill receipts exist in this Keeper session?"
-        ; Ansi.dim, "   Invocations, delivered bodies/resources, and observed actions."
-        ; Ansi.dim, "   Missing means not retained here; it does not prove never used."
+        [ Theme.info (), " 선택 Keeper의 현재 세션에 보존된 Skill 증거입니다."
+        ; Ansi.dim, "   invoked=호출 · deliveries/handoffs=전달 · actions=이후 Tool 행동"
+        ; Ansi.dim, "   호출·전달·이후 행동은 별도 증거이며, 기록 없음은 미사용 확정이 아닙니다."
         ]
     | Masc_tui_types.Tools_usage ->
-        [ Theme.info (), " What this answers — which Skills were actually used by each Keeper?"
-        ; Ansi.dim, "   Retained invocation/delivery/action totals and last-use time."
-        ; Ansi.dim, "   Skills with no retained use are omitted."
+        [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
+        ; Ansi.dim, "   inv/delivered/actions=호출/전달/이후 행동 · 마지막 사용 시각"
+        ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
     | Masc_tui_types.Tools_catalog ->
-        [ Theme.info (), " What this answers — which tools are registered anywhere in MASC?"
-        ; Ansi.dim, "   Registration is not delivery. Surfaces names reachability."
-        ; Ansi.dim, "   A tool with surfaces=none is currently unreachable."
+        [ Theme.info (), " MASC 전체 등록 도구 목록입니다. 선택 Keeper의 호출 범위는 별도입니다."
+        ; Ansi.dim, "   DIRECT=직접 호출 허용 · SURFACES=도구가 노출되는 경로"
+        ; Ansi.dim, "   surfaces=none은 노출 경로 없음입니다. 등록만으로 사용을 뜻하지 않습니다."
         ]
   in
   let pane_lines =
@@ -1273,4 +1263,3 @@ let tools_display_lines (state : state) =
   in
   explanation @ pane_lines
 ;;
-

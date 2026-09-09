@@ -1,11 +1,11 @@
 name: Setup OCaml Toolchain
-description: Shared OCaml toolchain bootstrap with Linux local-opam pinning and macOS parity.
+description: Shared OCaml toolchain bootstrap, one opam switch per runner OS, cached from main.
 
 inputs:
   ocaml-compiler:
-    description: OCaml compiler version (MASC supports exactly 5.5.0)
+    description: OCaml compiler version (MASC supports exactly 5.5.1)
     required: false
-    default: "5.5.0"
+    default: "5.5.1"
   cache-prefix:
     description: Prefix for the OCaml toolchain cache key
     required: false
@@ -19,48 +19,88 @@ runs:
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
       run: |
-        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.0" ]]; then
-          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.0" >&2
+        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.1" ]]; then
+          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.1" >&2
           exit 1
         fi
 
-    - name: Setup OCaml (macOS)
-      if: runner.os == 'macOS'
-      uses: ocaml/setup-ocaml@v3.6.0
-      with:
-        ocaml-compiler: ${{ inputs.ocaml-compiler }}
+    # One key, computed once, for the two cache steps below.
+    #
+    # runner.arch is in the key because an arm64 runner restoring an x86_64
+    # ~/.opam gets a switch whose ocamlc does not run (run 32332266041).
+    # masc.opam.locked is in the key because it does not match the *.opam
+    # glob, and a lock bump used to restore a switch built from the previous
+    # one (#28543). The OS is spelled out because the two switches are built
+    # for different kernels and must never restore across; "linux" keeps the
+    # key every Linux entry already has.
+    - name: Name the toolchain cache
+      id: opam-toolchain-key
+      shell: bash
+      env:
+        CACHE_KEY: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v3
+        CACHE_PREFIX: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+      run: |
+        {
+          echo "key=${CACHE_KEY}"
+          echo "prefix=${CACHE_PREFIX}"
+        } >> "${GITHUB_OUTPUT}"
 
-    - name: Cache OCaml toolchain (Linux)
+    # The switch is cached after the whole job, so the pins and the opam
+    # install that later steps run are inside it and become no-ops on a hit.
+    #
+    # Two steps for one cache because of who may write it. A pull request
+    # only restores: every branch that saved its own copy of the same key
+    # left the store at 11 GB of a 10 GB limit with eleven per-branch copies
+    # of one Linux switch (2026-09-08), and eviction then threw away
+    # whatever was least recently used, which is how macOS never kept one.
+    # Runs on main (the nightly suite, the weekly browser proof, a dispatch)
+    # restore and save through actions/cache, whose post-job save lands
+    # after the pins and installs. A pull request restores from main's
+    # entry, exact or by prefix.
+    - name: Restore OCaml toolchain (pull request, restore only)
       id: opam-toolchain-cache
-      if: runner.os == 'Linux'
+      if: github.event_name == 'pull_request'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ~/.opam
+          ~/.local/share/opam
+        key: ${{ steps.opam-toolchain-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.opam-toolchain-key.outputs.prefix }}
+
+    - name: Restore and save OCaml toolchain (main-scoped run)
+      id: opam-toolchain-store
+      if: github.event_name != 'pull_request'
       uses: actions/cache@v5
       with:
         path: |
           ~/.opam
           ~/.local/share/opam
-        # runner.arch 가 키에 들어가야 한다. 없으면 arm64 러너가 x86_64 러너의
-        # ~/.opam 을 복원하고, opam switch list 는 switch 가 있다고 답하는데
-        # 그 안의 ocamlc 는 x86_64 ELF 라 실행되지 않는다. 그 결과
-        # `ocamlc -version` 이 빈 문자열이 되어 opam-pin-external-deps.sh 가
-        # "OCaml unknown detected" 로 거부한다 (run 32332266041).
-        # masc.opam.locked has to be in the key: it does not match the *.opam
-        # glob, so bumping the lock left every runner restoring a switch built
-        # from the previous one — the file CI installs from was invisible to
-        # the cache that decides whether to install at all (#28543).
-        key: opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v3
+        key: ${{ steps.opam-toolchain-key.outputs.key }}
         restore-keys: |
-          opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+          ${{ steps.opam-toolchain-key.outputs.prefix }}
 
-    - name: Bootstrap local opam switch (Linux)
-      if: runner.os == 'Linux'
+    # One bootstrap for both runner kinds: the opam release binary for this
+    # OS and architecture, a bare root, one switch. macOS used to go through
+    # ocaml/setup-ocaml instead, which builds the compiler into a switch that
+    # nothing cached, so every macOS run paid the compiler, the pins, and the
+    # dependencies again: 971 s of a 1,221 s job (run 34160247731).
+    - name: Bootstrap local opam switch
       shell: bash
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
         OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
+        OPAM_CACHE_EXACT_HIT_STORE: ${{ steps.opam-toolchain-store.outputs.cache-hit }}
       run: |
         set -euo pipefail
 
-        compiler_pkg="ocaml-base-compiler.5.5.0"
+        # Whichever of the two cache steps ran is the one whose exact-hit
+        # answer the repository refresh below reads; the other was skipped
+        # and its output is empty.
+        OPAM_CACHE_EXACT_HIT="${OPAM_CACHE_EXACT_HIT:-${OPAM_CACHE_EXACT_HIT_STORE:-}}"
+
+        compiler_pkg="ocaml-base-compiler.5.5.1"
 
         switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
 
@@ -95,10 +135,22 @@ runs:
             exit 1
             ;;
         esac
+        case "$(uname -s)" in
+          Linux)
+            opam_os="linux"
+            ;;
+          Darwin)
+            opam_os="macos"
+            ;;
+          *)
+            echo "Unsupported runner OS: $(uname -s)" >&2
+            exit 1
+            ;;
+        esac
 
         opam_version="2.5.0"
         opam_dir="${RUNNER_TEMP}/opam-bin"
-        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-linux"
+        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-${opam_os}"
 
         mkdir -p "${opam_dir}"
         curl -L --fail --retry 3 --retry-delay 5 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"

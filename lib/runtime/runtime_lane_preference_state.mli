@@ -35,3 +35,15 @@ val reorder : observation -> string list -> string list
 val preferred : observation -> (string * float) option
 (** Project the public diagnostics view. Both absence and an expiry observed
     by this call intentionally become [None] at that boundary. *)
+
+type candidate_backpressure =
+  | Unknown_scope_rate_limit of { noted_at : float; retry_after : float option }
+(** The attempted candidate was rate-limited; no model/account/provider
+    ownership was reported. This never describes a credential quota. *)
+val note_rate_limit :
+  noted_at:float -> retry_after:float option ->
+  candidate_backpressure option -> candidate_backpressure option
+val observe_rate_limit :
+  now:float -> candidate_backpressure option -> candidate_backpressure option
+(** A usable provider hint ends the observation after that delay. Without one,
+    only an observed success clears it. No preference TTL supplies a duration. *)

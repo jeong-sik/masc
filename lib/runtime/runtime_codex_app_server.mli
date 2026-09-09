@@ -66,6 +66,20 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
+(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
+   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
+   cached prefix and [output_tokens] already includes reasoning, the same
+   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
+   defaults to 0 on the wire. *)
+type token_usage =
+  { input_tokens : int
+  ; cached_input_tokens : int
+  ; cache_write_input_tokens : int
+  ; output_tokens : int
+  ; reasoning_output_tokens : int
+  ; total_tokens : int
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -75,6 +89,10 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
+  ; usage : token_usage option
+    (* [None] when no thread/tokenUsage/updated for this turn arrived before
+       turn/completed; the host then reports the usage scope as unavailable
+       rather than a count of zero. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -147,6 +165,10 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 type error =
   | Invalid_config of string
   | Spawn_failed of string
+  | Turn_input_write_failed of string
+      (* The client and thread were initialized, but complete turn-input
+         transmission is unconfirmed. Partial delivery must not be replayed
+         as a proven pre-spawn failure. *)
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -211,6 +233,10 @@ val run_turn :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   ?history:history_message list ->
+  ?on_prompt_sent:(unit -> unit) ->
+  (* Called after the complete turn-input message is written to the CLI.
+      This is transport evidence, not provider acceptance. Never called for
+      preparation, spawn, handshake, or incomplete input-write failures. *)
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->

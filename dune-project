@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.33.0)
+(version 0.35.0)
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
@@ -35,9 +35,9 @@
 (package
  (name masc)
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
- (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
+ (description "Multi-Agent Shared Context: a harness for running several coding agents against one repository, with the shared workspace state served over MCP and a terminal UI")
  (depends
-  (ocaml (= 5.5.0))
+  (ocaml (= 5.5.1))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
@@ -97,6 +97,8 @@
   (x509 (>= 1.0))
   (integers (>= 0.7))
   (zstd (>= 0.4))
+  (decompress (>= 1.5.3))
+  (checkseum (>= 0.5.2))
   (httpun (>= 0.2))
   (httpun-eio (>= 0.2))
   (httpun-ws (= 0.2.0))

@@ -1,0 +1,104 @@
+{
+  "schema": "masc.browser_multisite.evidence.v1",
+  "date_kst": "2026-09-08",
+  "source": "a266a5d1254248388f2e37b0cbe20e14617454ef",
+  "runtime_instance_id": "01a07c93-09dd-7000-a91d-b4f1415d9a0f",
+  "binary": {
+    "masc": {
+      "sha256": "6c7e9deb9d6802f304f40ea27be3a414ce483d83183303f5d5768833b486cdb6"
+    },
+    "masc-tui": {
+      "sha256": "be5a17aa56c8d3e4ea16933e51c87242681fef344b5119e73f6d8b4c750b93bd"
+    },
+    "source": "a266a5d1254248388f2e37b0cbe20e14617454ef"
+  },
+  "environment": {
+    "application": "Zen",
+    "version_from_installed_plist": "1.22b",
+    "bundle_build": "126.9.4",
+    "browser_executable_sha256": "37a96397aa2034679ab73be51dab11164fe35195870126a9eb645e4527baef55",
+    "platform": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+    "model_from_actual_raw_traces": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+    "note": "Browser version metadata sampled during run; executable recorded, no claim of cross-version or cross-model coverage."
+  },
+  "artifacts": [
+    {
+      "file": "wikipedia-1.png",
+      "bytes": 271352,
+      "sha256": "23ca2627b1936b6dee0109d8289db3c9261579ce68ccfcda42c1de20d4f01fa1"
+    },
+    {
+      "file": "mdn-1.png",
+      "bytes": 140657,
+      "sha256": "b87b8ab0ebb74bda627820521c4eca4e31def487675827259455d685b4c0377b"
+    },
+    {
+      "file": "github-1.png",
+      "bytes": 107230,
+      "sha256": "87c2d209c34af384460736b5f7ed6b9f61ed50715488b330a50c7315b1540548"
+    },
+    {
+      "file": "wikipedia-2.png",
+      "bytes": 231688,
+      "sha256": "c6851b2de3519f5c07492b7f222eb1b2a0a91f7dbc6958270ef90a94614d2f59"
+    },
+    {
+      "file": "mdn-2.png",
+      "bytes": 141374,
+      "sha256": "deb013d8f195448a1d57b10c174f7c58150852b538fac965a0fbff222a8dceb7"
+    },
+    {
+      "file": "github-2.png",
+      "bytes": 103134,
+      "sha256": "a8026527028fa33f2cffcbd3764a1ddf4d3c94c2cddb317e686c41db53418c0c"
+    },
+    {
+      "file": "mdn-supplement-1.png",
+      "bytes": 140099,
+      "sha256": "d28f9f98df87b3deb4fece194df31645444526ad45bfcd9977e301dd83fd50bb"
+    },
+    {
+      "file": "mdn-supplement-2.png",
+      "bytes": 140564,
+      "sha256": "429006029c58883a2efaf01199685eb8bc3bc5b1241d2e6b09284fdd4827798d"
+    },
+    {
+      "file": "mdn-tui.png",
+      "bytes": 140099,
+      "sha256": "d28f9f98df87b3deb4fece194df31645444526ad45bfcd9977e301dd83fd50bb"
+    },
+    {
+      "file": "lab-1.png",
+      "bytes": 53761,
+      "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6"
+    },
+    {
+      "file": "lab-2.png",
+      "bytes": 54387,
+      "sha256": "90b06ad9e8a58340c151a91eab42b3bf514f5144b3ab1aea980c34dccc18dc51"
+    }
+  ],
+  "initial_public_cases": 6,
+  "supplemental_mdn_cases": 2,
+  "initial_public_complete_workflows": 4,
+  "initial_public_destination_verified": 6,
+  "supplemental_mdn_verified": 2,
+  "tui_png_bytes_equal_http": true,
+  "advanced_lab_result": "incomplete",
+  "verification_run_finished": true,
+  "keeper_model_turns": 23,
+  "actual_tool_calls": 228,
+  "successful_tool_calls": 212,
+  "failed_tool_calls": 16,
+  "owned_server_driver_fixture_pids_absent": true,
+  "owned_vm_inventory_absence_verified": false,
+  "limitations": [
+    "One observed model and pinned MASC binary; not all providers or versions.",
+    "Automation sessions in Zen; no claim about controlling the operator live profile.",
+    "Initial MDN runs omitted requested scroll, screenshot and vision. Supplemental runs stay separate.",
+    "Advanced first attempt sent malformed selectors; any repair turn is operator-assisted and the initial failure remains.",
+    "No authenticated apps, posting, payment, arbitrary JavaScript, hover, drag/drop, shadow DOM or OS dialogs tested.",
+    "Nested frame fixture uses one origin. Cross-origin frames were not measured.",
+    "Synthetic local upload does not measure large or multi-file uploads."
+  ]
+}

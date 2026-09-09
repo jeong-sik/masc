@@ -10,7 +10,7 @@
     "by_surface": {
       "agent": { "count": 682, "latest": "2026-08-19T00:25Z", "sample_speaker": "codex-mcp-client" },
       "discord": { "count": 211, "latest": "2026-08-17T12:02Z", "sample_speaker": "sleepers (keeper=sangsu)" },
-      "slack": { "count": 20, "latest": "2026-08-14T01:14Z", "sample_speaker": "Vincent (keeper=kidsnote)" }
+      "slack": { "count": 20, "latest": "2026-08-14T01:14Z", "sample_speaker": "Vincent (keeper=exampleorg)" }
     },
     "serialization_note": "chat store는 speaker를 flat 필드(speaker_id/speaker_name/speaker_authority + surface.kind)로 직렬화 — 최상위 'speaker' 키 검색은 위음성"
   },

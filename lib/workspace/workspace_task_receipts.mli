@@ -1,7 +1,5 @@
 (** Receipt helpers used by task scheduling. *)
 
-val underscore_name : string -> string
-val hyphen_name : string -> string
 val agent_record_keeper_name : Workspace_utils.config -> agent_name:string -> string option
 val keeper_receipt_candidate_names : Workspace_utils.config -> agent_name:string -> string list
 val directory_exists : string -> bool

@@ -214,7 +214,7 @@ env \
     -u MASC_CONFIG_DIR \
     -u MASC_HOST \
     -u MASC_PORT \
-    MASC_KEEPER_BOOTSTRAP_ENABLED=0 \
+    MASC_KEEPER_AUTONOMOUS_ENABLED=0 \
     bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT"
 ) >"$LOG_FILE" 2>&1 &
 SERVER_PID="$!"

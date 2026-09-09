@@ -24,6 +24,12 @@ type execution_context = Fs_compat.execution_context =
   | Non_eio
 
 val execution_context : unit -> execution_context
+
+val with_named_switch : string -> (unit -> 'a) -> 'a
+(** [with_named_switch name f] runs [f] inside [Eio.Switch.run ~name] when
+    called from an Eio fiber, so a tracer reading the runtime-events ring
+    labels the fiber's runs with [name]; outside Eio it runs [f] directly.
+    The switch owns no fibers; cancellation is unchanged. *)
 val is_eio_fiber : unit -> bool
 
 type mutex_access = Read_write | Read_only
@@ -38,8 +44,12 @@ val with_mutex : Eio.Mutex.t -> (unit -> 'a) -> 'a
 val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
 (** Run [f] in a system thread from an Eio fiber, directly from a non-Eio
-    execution context. *)
-val run_in_systhread : (unit -> 'a) -> 'a
+    execution context.
+
+    [label] reaches the runtime-events ring as the fiber's suspend reason, so
+    a trace can say which call a long run sat between. It is required: an
+    unlabelled call reads as "systhread", which does not identify anything. *)
+val run_in_systhread : label:string -> (unit -> 'a) -> 'a
 
 (** Eio-aware replacement for [Fun.protect].
 

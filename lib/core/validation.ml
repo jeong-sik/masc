@@ -61,6 +61,7 @@ let log_rejection ~validator ~input ~reason =
     where a parser belonged, which cost 208 WARN lines in a day (#31815). *)
 module Id_shape : sig
   type t
+  val parse : string -> (t, string) result
   val validate : string -> (t, string) result
   val to_string : t -> string
   val of_string_unsafe : string -> t  (* For internal use only *)
@@ -88,22 +89,28 @@ end = struct
      previously made unreachable. *)
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$|} |> Re.compile
 
-  let strict s =
+  let parse s =
     if String.length s = 0 then
       Error "identifier cannot be empty"
     else if String.length s > 64 then
       Error (Printf.sprintf "identifier too long: %d chars (max 64)" (String.length s))
     else if String.contains s '/' || String.contains s '\\' then
       Error "identifier cannot contain path separators"
-    else if String.contains s '.' && String.starts_with s ~prefix:".." then
-      Error "identifier cannot contain path traversal"
+    else if String.starts_with s ~prefix:"." then
+      (* Dots inside a name are admitted because names carry them --
+         edgar.a.poe -- but a leading one is never part of a name and is what
+         the path-shaped values start with: "." is the directory an id used
+         as one would sit in, ".." the one above, and ".git" a hidden entry
+         that would collide with a real one. The check this replaces read
+         [starts_with ".."], which caught "..foo" and let "." through. *)
+      Error "identifier cannot start with a dot"
     else if not (Re.execp valid_pattern s) then
       Error "identifier contains characters outside [A-Za-z0-9_:-]"
     else
       Ok s
 
   let validate s =
-    match strict s with
+    match parse s with
     | Ok t -> Ok t
     | Error reason ->
       log_rejection ~validator:"Id_shape" ~input:s ~reason;

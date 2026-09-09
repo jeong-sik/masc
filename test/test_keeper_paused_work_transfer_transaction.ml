@@ -81,7 +81,7 @@ let write_meta config ~keeper_name ~trace_id ~paused =
       (`Assoc
          [ "name", `String keeper_name
          ; "trace_id", `String trace_id
-         ; "autoboot_enabled", `Bool false
+         ; "activation_mode", `String "manual"
          ])
     |> require_ok "parse Keeper metadata fixture"
   in
@@ -674,6 +674,7 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
       { source = request.source
       ; admitted_revision = request.source_incarnation
       ; checkpoint_retentions = 0
+      ; repetition_scope = None
       }
     in
     Persistence.ack_pending_result

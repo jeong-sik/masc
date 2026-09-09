@@ -135,6 +135,16 @@ let state t = t.state
 let config t = t.config
 
 (* Does an event pass the trigger policy and earn an [Emit_event]? *)
+(* The trigger policy is the one field of [config] an operator changes while
+   the gateway runs. The state machine stays pure: the I/O layer hands in the
+   current policy on each step rather than this module reading a setting.
+
+   A [config] whose policy is stale would decide with the boot-time answer and
+   say nothing about it, so the caller that owns the step loop is the one place
+   that must apply this. *)
+let with_trigger_policy t trigger_policy =
+  { t with config = { t.config with trigger_policy } }
+
 let passes_policy (cfg : config) = function
   | Message_create m -> (
       match cfg.trigger_policy with

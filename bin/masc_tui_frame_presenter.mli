@@ -55,27 +55,41 @@ val present :
     [Unchanged] means no bytes were necessary, so semantic input authority
     must remain with the last frame that was actually emitted. *)
 
-type page =
+type scheme =
   { foreground : Masc_tui_terminal_palette.rgb
   ; background : Masc_tui_terminal_palette.rgb
+  ; ansi : Masc_tui_terminal_palette.rgb option array
+        (** One entry per colour code, [Masc_tui_terminal_palette
+            .ansi_slot_count] of them. [None] leaves that slot as the reader
+            has it. A shorter or longer array simply carries fewer or more
+            pairs; the index a colour is sent under is its position. *)
   }
-(** The two colours a terminal draws with when nothing else says otherwise.
-    They travel together because they are only meaningful against each other:
-    either one alone is a contrast ratio against a colour the scheme did not
-    choose. *)
+(** Every colour a terminal draws masc with: the two it uses when nothing says
+    otherwise, and the sixteen a colour code selects.
 
-val sync_page :
-  write:(string -> unit) -> flush:(unit -> unit) -> page option -> unit
-(** Ask the terminal to use these as its own text and page colours, or [None]
-    to put both back.
+    They travel together because they are only meaningful against each other.
+    A colour alone is a contrast ratio against a background the scheme did not
+    choose, and a background alone is the one case that is worse than not
+    applying the scheme at all. *)
 
-    masc draws most of its text without naming a colour, so that text is
-    whatever the terminal's default foreground is. Painting the page and
-    leaving the text alone therefore does not make a scheme half-applied, it
-    makes it unreadable: a light scheme paints the page near-white and the
-    reader's near-white default text stays on it. This is why the pair is one
-    argument rather than two calls.
+val sync_scheme :
+  write:(string -> unit) -> flush:(unit -> unit) -> scheme option -> unit
+(** Ask the terminal to draw with these colours, or [None] to put all of them
+    back.
 
-    A terminal that does not know OSC 10 and 11 ignores them, so this is sent
-    without asking first. {!cleanup} resets on the way out; a caller that
+    Send the whole scheme or none of it. Two ways to get this wrong, both of
+    which masc has shipped:
+
+    - Page without text. masc draws most of its text without naming a colour,
+      so that text is whatever the terminal's default foreground is. A light
+      scheme paints the page near-white and the reader's near-white default
+      text stays on it.
+
+    - Text and page without the sixteen. Everything masc says with colour --
+      Ok, Warn, Bad, Info, who spoke, the tool trail, the receding row -- is
+      drawn by naming a code, not a colour. Leave the codes behind and the
+      scheme reaches the two quietest colours on the screen and nothing else.
+
+    A terminal that does not know OSC 4, 10 and 11 ignores them, so this is
+    sent without asking first. {!cleanup} resets on the way out; a caller that
     changes the scheme mid-session has to send the new colours itself. *)

@@ -20,18 +20,18 @@ let contains needle haystack =
   scan 0
 ;;
 
-let no_booleans : C.booleans = { autoboot = None; proactive = None }
 
 let minimal_flags : C.flags =
   { name = "scout"
   ; instructions = "Search the web."
   ; sandbox_profile = "docker"
   ; network_mode = Some "inherit"
+  ; microvm_backend = None
   ; remote_endpoint = None
   ; mention_targets = []
   ; skills = None
   ; max_context_override = None
-  ; booleans = no_booleans
+  ; activation_mode = None
   }
 ;;
 
@@ -40,11 +40,12 @@ let every_flag : C.flags =
   ; instructions = "Search the web."
   ; sandbox_profile = "remote_ssh"
   ; network_mode = Some "inherit"
+  ; microvm_backend = None
   ; remote_endpoint = Some "gondolin"
   ; mention_targets = [ "scout" ]
   ; skills = Some [ "web-search" ]
   ; max_context_override = Some 120_000
-  ; booleans = { autoboot = Some true; proactive = Some false }
+  ; activation_mode = Some "on_demand"
   }
 ;;
 
@@ -128,6 +129,17 @@ let test_behaviours_cover_every_network_mode () =
 (* A flag the server would reject as [turn_up_arg_unknown]. That drift is what
    put the descriptor and the parser out of step in the first place, so it is
    caught here rather than by an operator. *)
+let test_declaration_carries_explicit_microvm_backend () =
+  let json = declaration_exn "microvm backend"
+      { minimal_flags with sandbox_profile = "microvm";
+                           microvm_backend = Some "nerdctl_kata" } in
+  check (option string) "backend is passed explicitly" (Some "nerdctl_kata")
+    (match field "backend" "microvm_backend" json with
+     | Some (`String value) -> Some value | _ -> None);
+  check bool "backend is a server-owned argument" true
+    (List.mem "microvm_backend" Masc.Keeper_turn_up_args.known_turn_up_args)
+;;
+
 let test_declaration_keys_are_all_known_turn_up_args () =
   let keys = object_keys "every flag" (declaration_exn "every flag" every_flag) in
   List.iter
@@ -160,10 +172,8 @@ let test_every_creation_stem_field_is_reachable_by_flag () =
     stem_keys
 ;;
 
-(* A two-valued flag would settle [autoboot_enabled] by default, and the
-   config writer persists whatever the meta holds — so an operator who named
-   neither spelling would find a decision written for them. *)
-let test_declaration_omits_unset_booleans () =
+(* An omitted mode leaves the declaration unchanged. *)
+let test_declaration_omits_unset_activation_mode () =
   let keys = object_keys "minimal" (declaration_exn "minimal" minimal_flags) in
   List.iter
     (fun key ->
@@ -172,7 +182,7 @@ let test_declaration_omits_unset_booleans () =
          (Printf.sprintf "%s is absent when neither flag was passed" key)
          false
          (List.exists (String.equal key) keys))
-    [ "autoboot_enabled"; "proactive_enabled" ]
+    [ "activation_mode" ]
 ;;
 
 (* A second copy of the profile enum in this command is how the descriptor and
@@ -206,7 +216,7 @@ let created_body =
               ~name:"scout"
               ~trace_id:"trace-fixture"
               ~instructions:"Search the web."
-              ~proactive_enabled:false
+              ~activation_mode:Masc.Keeper_activation_mode.On_demand
               ~max_context_override:None
               ~sandbox_profile:Keeper_types_profile_sandbox.Docker
               ~network_mode:Keeper_types_profile_sandbox.Network_inherit
@@ -359,14 +369,16 @@ let () =
             "every key is a known keeper_up argument"
             `Quick
             test_declaration_keys_are_all_known_turn_up_args
+        ; test_case "explicit backend reaches the declaration" `Quick
+            test_declaration_carries_explicit_microvm_backend
         ; test_case
             "every creation stem field is reachable by flag"
             `Quick
             test_every_creation_stem_field_is_reachable_by_flag
         ; test_case
-            "unset booleans stay out of the declaration"
+            "unset activation mode stays out of the declaration"
             `Quick
-            test_declaration_omits_unset_booleans
+            test_declaration_omits_unset_activation_mode
         ; test_case
             "an unrecognised sandbox profile passes through"
             `Quick

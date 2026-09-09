@@ -181,8 +181,8 @@ type world_observation = {
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
-  active_goals : string list;
-  (** Goal IDs currently assigned to this keeper. *)
+  active_goals : (string list, string) result;
+  (** Primary Goal IDs or the source failure; [Error] never means zero Goals. *)
 
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
@@ -289,6 +289,7 @@ type turn_reason =
 type skip_reason =
   | Keeper_paused
   | Scheduled_autonomous_disabled
+  | No_periodic_or_scheduled_stimulus
   | Reactive_disabled
 
 (** Keeper cycle decision with non-empty reason list (NEL).
@@ -434,6 +435,9 @@ val actionable_signal_present : world_observation -> bool
     A [Schedule_due] work request is actionable but is not Board activity. *)
 val has_pending_board_activity : world_observation -> bool
 
+type cycle_wake = Periodic_tick | Attention_wake
+
 val keeper_cycle_decision :
+  ?wake:cycle_wake ->
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision

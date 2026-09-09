@@ -31,6 +31,8 @@ type entry =
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
   ; assistant_tool_content_format : string option
+  ; chat_output_budget_field : string option
+  ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
   ; supports_reasoning_budget : bool option
@@ -301,6 +303,8 @@ let known_entry_keys =
   ; "supports_named_tool_choice"
   ; "supports_parallel_tool_calls"
   ; "assistant_tool_content_format"
+  ; "chat_output_budget_field"
+  ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "supports_extended_thinking"
   ; "supports_reasoning_budget"
@@ -451,6 +455,18 @@ let parse_entry json =
       ~allowed:Capability_vocab.assistant_tool_content_format_values
       json
   in
+  let* chat_output_budget_field =
+    canonical_choice
+      "chat_output_budget_field"
+      ~allowed:Capability_vocab.chat_output_budget_field_values
+      json
+  in
+  let* tool_schema_conformance =
+    canonical_choice
+      "tool_schema_conformance"
+      ~allowed:Capability_vocab.tool_schema_conformance_values
+      json
+  in
   let* accepted_reasoning_efforts =
     canonical_string_list
       "accepted_reasoning_efforts"
@@ -497,6 +513,8 @@ let parse_entry json =
     ; supports_named_tool_choice
     ; supports_parallel_tool_calls
     ; assistant_tool_content_format
+    ; chat_output_budget_field
+    ; tool_schema_conformance
     ; supports_reasoning
     ; supports_extended_thinking
     ; supports_reasoning_budget

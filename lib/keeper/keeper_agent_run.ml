@@ -295,6 +295,31 @@ let repeated_tool_call_input ~threshold tool_calls =
     else None
 ;;
 
+(* The official-client host calls this after every settled dynamic tool call,
+   on Direct and Autonomous turns alike, and skips its own exact-adjacent
+   counter while it is installed. The observations come from the turn
+   accumulator: the post_tool_use hook fills it on every lane, and setup
+   seeds it from the transcript when no execution scope was admitted -- the
+   same reading [native_tool_boundary] makes for AGENT_CORE. An admitted
+   scope contributes only its latched observation failure; it is not what
+   makes the boundary exist (#34083). *)
+let official_client_tool_boundary ~repetition_execution ~tool_calls =
+  match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+  | Some error ->
+    Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
+  | None ->
+    let repeated =
+      match repeated_exact_tool_call
+              ~threshold:repeated_tool_call_yield_threshold tool_calls with
+      | Some _ as repeated -> repeated
+      | None ->
+        repeated_tool_call_input
+          ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+    in
+    Ok (Option.map (fun (tool_name, repeated_count) ->
+      Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
+;;
+
 let assistant_text_is_blank text =
   String.for_all
     (fun ch -> ch = ' ' || ch = '\t' || ch = '\n' || ch = '\r')
@@ -484,10 +509,20 @@ let provider_transcript_admission messages =
 
 (* [dispatch] receives the admitted history, which is the input list unless an
    interrupted turn's open cycle had to be closed first. *)
-let dispatch_after_provider_transcript_admission ~messages ~dispatch =
+let dispatch_after_provider_transcript_admission ~messages ~checkpoint ~dispatch =
   match provider_transcript_admission messages with
   | Error _ as error -> error
-  | Ok admitted -> dispatch admitted
+  | Ok admitted ->
+    (* Runtime_agent resumes from checkpoint.messages. Repairing only the
+       initial history leaves that resume path replaying the unanswered calls
+       that admission just closed. Preserve every other checkpoint field. *)
+    let checkpoint =
+      Option.map
+        (fun (checkpoint : Agent_core.Checkpoint.t) ->
+          { checkpoint with messages = admitted })
+        checkpoint
+    in
+    dispatch ~checkpoint admitted
 ;;
 
 (* [run_ref.agent_name] is the AGENT_CORE runtime identity, not the Keeper identity.
@@ -535,7 +570,111 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
+let tool_boundary_before_repetition ~repetition_execution state =
+  match terminal_effect_boundary_decision state with
+  | Error _ as error -> error
+  | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+  | Ok Runtime_agent.Continue ->
+    match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+    | Some error ->
+      Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
+    | None -> Ok Runtime_agent.Continue
+;;
+
+(* Native AGENT_CORE installs this boundary for both Direct and Autonomous.
+   An absent explicit execution scope selects transcript-seeded observations;
+   it does not disable repetition detection. *)
+let native_tool_boundary
+      ~keeper_name
+      ~repetition_execution
+      ~terminal_effect_state
+      ~tool_calls
+      ~assistant_turn_texts
+      ~autonomous_yield_requested
+  =
+  (match
+     tool_boundary_before_repetition ~repetition_execution
+       terminal_effect_state
+   with
+   | Error _ as error -> error
+   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+   | Ok Runtime_agent.Continue ->
+     (* Tool axis first: its input+output fingerprints are the
+        stronger no-progress proof and carry the tool name.
+        The text axis runs only when tool fingerprints still
+        move — the observed loop shape, where every turn's tool
+        batch differed but the plan sentence never did. *)
+     let repeated_loop_decision () =
+           (match
+              repeated_exact_tool_call
+                ~threshold:repeated_tool_call_yield_threshold
+                tool_calls
+            with
+            | Some (tool_name, repeated_count) ->
+              Log.Keeper.warn
+                ~keeper_name
+                "yielding repeated exact tool loop tool=%s \
+                 count=%d"
+                tool_name
+                repeated_count;
+              Ok
+                (Runtime_agent.Yield
+                   (Runtime_agent.Repeated_tool_call
+                      { tool_name; repeated_count }))
+            | None ->
+              (match
+                 repeated_tool_call_input
+                   ~threshold:
+                     repeated_tool_call_input_yield_threshold
+                   tool_calls
+               with
+               | Some (tool_name, repeated_count) ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "yielding repeated tool input loop tool=%s \
+                    count=%d"
+                   tool_name
+                   repeated_count;
+                 Ok
+                   (Runtime_agent.Yield
+                      (Runtime_agent.Repeated_tool_call
+                         { tool_name; repeated_count }))
+               | None ->
+              (match
+                 repeated_assistant_text
+                   ~threshold:
+                     repeated_assistant_text_yield_threshold
+                   assistant_turn_texts
+               with
+               | None -> Ok Runtime_agent.Continue
+               | Some repeated_count ->
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "yielding repeated assistant text count=%d"
+                   repeated_count;
+                 Ok
+                   (Runtime_agent.Yield
+                      (Runtime_agent.Repeated_assistant_text
+                         { repeated_count })))))
+     in
+     (match autonomous_yield_requested with
+      | None -> repeated_loop_decision ()
+      | Some requested ->
+        (match requested () with
+         | Ok (Some request) ->
+           Ok (Runtime_agent.Yield (runtime_yield_reason request))
+         | Ok None -> repeated_loop_decision ()
+         | Error detail ->
+           Error
+             (Agent_core.Error.Internal
+                ("keeper cooperative-yield snapshot failed: "
+                 ^ detail)))))
+;;
+
 module For_testing = struct
+  let native_tool_boundary = native_tool_boundary
+  let tool_boundary_before_repetition = tool_boundary_before_repetition
+  let official_client_tool_boundary = official_client_tool_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
@@ -633,6 +772,7 @@ let run_turn
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
+      ?repetition_execution
       ?event_bus
       ?trace_link
       ?continuation_channel
@@ -799,6 +939,7 @@ let run_turn
   in
   let setup =
     Keeper_run_tools.prepare_agent_setup
+      ?repetition_execution
       ~config
       ~meta
       ~profile_defaults
@@ -850,12 +991,44 @@ let run_turn
       | (Some _ as blocks), None -> blocks
       | None, _ -> None
     in
-    let ctx_work =
-      match hitl_resolution with
-      | None -> ctx_work
-      | Some _ ->
-        let user_message = Agent_core.Types.user_msg user_message in
-        Keeper_context_runtime.append ctx_work user_message
+    let admission =
+      (* Explicit block inputs may carry new user media or instructions beyond
+         the stored resolution. Preserve their existing input path until those
+         blocks have their own durable admission identity. *)
+      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence, user_blocks with
+      | Some _, Some evidence, None ->
+        (match Keeper_gate_replay.approval_input evidence with
+         | Error error -> Error (Keeper_approval_input_admission.error_to_string error)
+         | Ok (identity, message) ->
+           let checkpoint = Keeper_context_runtime.checkpoint_of_context ctx_work in
+           let checkpoint = { checkpoint with Agent_core.Checkpoint.session_id = trace_id } in
+           Keeper_approval_input_checkpoint.admit
+             ~session_dir:session.session_dir ~identity ~message checkpoint
+           |> Result.map (fun checkpoint -> Some checkpoint))
+      | _ -> Ok None
+    in
+    match admission with
+    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    | Ok admitted_checkpoint ->
+    let continue_from_checkpoint = Option.is_some admitted_checkpoint in
+    let ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks =
+      match admitted_checkpoint with
+      | Some checkpoint ->
+        ( Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
+        , checkpoint.Agent_core.Checkpoint.messages
+        , Some checkpoint
+        (* Native continuation reads the persisted input without appending
+           this goal. Official vendor sessions still require explicit current
+           input; their resume API does not import this canonical history. *)
+        , user_message
+        , user_blocks )
+      | None ->
+        let ctx_work =
+          match hitl_resolution with
+          | None -> ctx_work
+          | Some _ -> Keeper_context_runtime.append ctx_work (Agent_core.Types.user_msg user_message)
+        in
+        ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks
     in
     let prompt_metrics =
       Keeper_agent_prompt_metrics.build_prompt_metrics
@@ -987,10 +1160,9 @@ let run_turn
       s.Keeper_run_tools.model_input_projection
     in
     let model_input_projection messages =
-      (* [messages] already carries the bounded transmission view: the provider
-         attempt applies it, because its budget is the target's declared
-         request-body cap and that is only resolved per runtime
-         ([Keeper_turn_driver_try_provider.budgeted_model_input_projection]).
+      (* [messages] carries the current provider attempt's transmission view.
+         An explicit request-body cap enables bounded_model_input_projection;
+         without that caller policy the full prepared history reaches here.
          The source projection appends only a bounded typed Gate replay
          reference; exact replay bytes remain in the artifact store. The
          provenance check below compares against the list as received, so its
@@ -1106,6 +1278,10 @@ let run_turn
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        let turn_result =
+         let on_official_client_tool_boundary () =
+           official_client_tool_boundary ~repetition_execution
+             ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+         in
          let cooperative_yield_probe =
            Some
              (fun (_ : Agent_core.Agent.Advanced.tool_boundary) ->
@@ -1114,82 +1290,13 @@ let run_turn
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
-                  (match
-                     terminal_effect_boundary_decision (s.terminal_effect_state ())
-                   with
-                   | Error _ as error -> error
-                   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
-                   | Ok Runtime_agent.Continue ->
-                     (* Tool axis first: its input+output fingerprints are the
-                        stronger no-progress proof and carry the tool name.
-                        The text axis runs only when tool fingerprints still
-                        move — the observed loop shape, where every turn's tool
-                        batch differed but the plan sentence never did. *)
-                     let repeated_loop_decision () =
-                           (match
-                              repeated_exact_tool_call
-                                ~threshold:repeated_tool_call_yield_threshold
-                                s.acc.tool_calls
-                            with
-                            | Some (tool_name, repeated_count) ->
-                              Log.Keeper.warn
-                                ~keeper_name:meta.name
-                                "yielding repeated exact tool loop tool=%s \
-                                 count=%d"
-                                tool_name
-                                repeated_count;
-                              Ok
-                                (Runtime_agent.Yield
-                                   (Runtime_agent.Repeated_tool_call
-                                      { tool_name; repeated_count }))
-                            | None ->
-                              (match
-                                 repeated_tool_call_input
-                                   ~threshold:
-                                     repeated_tool_call_input_yield_threshold
-                                   s.acc.tool_calls
-                               with
-                               | Some (tool_name, repeated_count) ->
-                                 Log.Keeper.warn
-                                   ~keeper_name:meta.name
-                                   "yielding repeated tool input loop tool=%s \
-                                    count=%d"
-                                   tool_name
-                                   repeated_count;
-                                 Ok
-                                   (Runtime_agent.Yield
-                                      (Runtime_agent.Repeated_tool_call
-                                         { tool_name; repeated_count }))
-                               | None ->
-                              (match
-                                 repeated_assistant_text
-                                   ~threshold:
-                                     repeated_assistant_text_yield_threshold
-                                   s.acc.assistant_turn_texts
-                               with
-                               | None -> Ok Runtime_agent.Continue
-                               | Some repeated_count ->
-                                 Log.Keeper.warn
-                                   ~keeper_name:meta.name
-                                   "yielding repeated assistant text count=%d"
-                                   repeated_count;
-                                 Ok
-                                   (Runtime_agent.Yield
-                                      (Runtime_agent.Repeated_assistant_text
-                                         { repeated_count })))))
-                     in
-                     (match autonomous_yield_requested with
-                      | None -> repeated_loop_decision ()
-                      | Some requested ->
-                        (match requested () with
-                         | Ok (Some request) ->
-                           Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                         | Ok None -> repeated_loop_decision ()
-                         | Error detail ->
-                           Error
-                             (Agent_core.Error.Internal
-                                ("keeper cooperative-yield snapshot failed: "
-                                 ^ detail)))))
+                  native_tool_boundary
+                    ~keeper_name:meta.name
+                    ~repetition_execution
+                    ~terminal_effect_state:(s.terminal_effect_state ())
+                    ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                    ~assistant_turn_texts:s.acc.assistant_turn_texts
+                    ~autonomous_yield_requested
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
@@ -1244,12 +1351,14 @@ let run_turn
                    boundaries settle the lane, while usage remains observational. *)
                 dispatch_after_provider_transcript_admission
                   ~messages:initial_messages
-                  ~dispatch:(fun initial_messages ->
+                  ~checkpoint:resume_agent_core_checkpoint
+                  ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
                       ~pre_tool_rejects
+                      ~continue_from_checkpoint
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~session_id:
@@ -1291,7 +1400,8 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
-                      ?agent_core_checkpoint:resume_agent_core_checkpoint
+                      ~on_official_client_tool_boundary
+                      ?agent_core_checkpoint:checkpoint
                       ?event_bus
                       ?trace_link
                       ~on_runtime_attempt:
@@ -1358,6 +1468,12 @@ let run_turn
                                 ~agent_core_turn:acc.current_turn
                                 provider_content
                             | Some (Error _) | None -> ());
+                           (* A preceding bounded candidate may have reported a
+                              window before failover. This exact uncapped request
+                              has no byte window; do not attribute the old cut to it. *)
+                           (match max_request_body_bytes with
+                            | None -> model_input_window_ref := None
+                            | Some _ -> ());
                            Keeper_request_wire_observation.record
                              ~keeper_name:meta.name
                              ~runtime_id

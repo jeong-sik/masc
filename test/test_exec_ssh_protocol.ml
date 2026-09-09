@@ -274,28 +274,112 @@ let major_int p = Result.map Exec_ssh_protocol.int_of_major (Exec_ssh_protocol.m
 
 let test_probe_roundtrip () =
   let p = Exec_ssh_protocol.{ name = "masc-exec-shim"; version = "3.0.0"
-                            ; capabilities = [] } in
+                            ; capabilities = []; release = None } in
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->
     check string "version" p.version p'.version;
     check (result int string) "major read" (Ok 3) (major_int p')
 
+(* RFC-0427 B-3. The shim names the release it was built from, beside the
+   protocol version and without touching it. A shim built before the field
+   existed sends no key, which reads as None rather than as a broken probe:
+   the two sides are one release apart on purpose and have to keep talking. *)
+let test_probe_carries_the_release_it_was_built_from () =
+  let with_release =
+    Exec_ssh_protocol.
+      { name = "masc-exec-shim"
+      ; version = "3.0.0"
+      ; capabilities = [ "observe" ]
+      ; release = Some "0.33.0"
+      }
+  in
+  (match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe with_release) with
+   | Error e -> fail e
+   | Ok p ->
+     check (option string) "release survives" (Some "0.33.0") p.release;
+     check (result int string) "major untouched" (Ok 3) (major_int p));
+  (* The wire of a shim that predates the field. *)
+  (match
+     Exec_ssh_protocol.parse_probe
+       {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[]}|}
+   with
+   | Error e -> fail e
+   | Ok p ->
+     check (option string) "absent key reads as none" None p.release;
+     check (result int string) "still framed" (Ok 3) (major_int p));
+  (* A key this build does not know is ignored, which is what lets a later
+     shim add one without refusing this server. *)
+  (match
+     Exec_ssh_protocol.parse_probe
+       {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[],"kernel":"6.8"}|}
+   with
+   | Error e -> fail e
+   | Ok p -> check (option string) "unknown key ignored" None p.release);
+  (* An empty release is not a release. *)
+  match
+    Exec_ssh_protocol.parse_probe
+      {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[],"release":""}|}
+  with
+  | Error e -> fail e
+  | Ok p -> check (option string) "empty is none" None p.release
+
 (* The probe decides which version the caller frames in: a spoken major is
    that version, anything else is a skew the caller names. *)
 let test_probe_major_is_spoken_or_a_skew () =
-  let probe version = Exec_ssh_protocol.{ name = "masc-exec-shim"; version; capabilities = [] } in
+  let probe version =
+    Exec_ssh_protocol.{ name = "masc-exec-shim"; version; capabilities = []; release = None }
+  in
   check (result int string) "v2 shim" (Ok 2) (major_int (probe "2.4.1"));
   check (result int string) "v3 shim" (Ok 3) (major_int (probe "3.0.0"));
   (match major_int (probe "1.4.2") with
    | Ok _ -> fail "v1 accepted"
    | Error msg -> check bool "names both sides" true (contains "v1" msg && contains "v2, v3" msg));
+  (* A static artifact stamps its build sha after the dotted version
+     ("3.0.0+a1b2c3d4"); the major is still the numeric prefix, so a stamped
+     probe is spoken, never a skew. *)
+  check (result int string) "stamped v3 shim" (Ok 3)
+    (major_int (probe "3.0.0+a1b2c3d4"));
+  check (result int string) "stamped v2 shim" (Ok 2)
+    (major_int (probe "2.4.1+00000000"));
   (match major_int (probe "4.0.0") with
    | Ok _ -> fail "v4 accepted"
    | Error _ -> ());
   match major_int (probe "garbage") with
   | Ok _ -> fail "no major accepted"
   | Error msg -> check bool "says there is no major" true (contains "no numeric major" msg)
+
+let test_execution_receipts_preserve_process_outcome () =
+  let open Exec_ssh_protocol in
+  let trailer = { v = newest; exit = Some 127; signal = None;
+                  timed_out = false; shim_error = None } in
+  List.iter (fun mode ->
+    List.iter (fun boundary ->
+      let execution_receipt = { mode; boundary } in
+      let wire = render_trailer ~execution_receipt trailer in
+      check bool "same response retains exact receipt" true
+        (parse_execution_receipt wire = Ok (Some execution_receipt));
+      check bool "receipt never rewrites the child status" true
+        (parse_trailer wire = Ok trailer))
+      [Sandbox_applied; Setup_failed; Exec_failed; Child_ack_unavailable; Refused])
+    [Effect; Observe; Guest_local];
+  check bool "old peer supplies no receipt, not inferred Effect" true
+    (parse_execution_receipt (render_trailer trailer) = Ok None);
+  let malformed receipt =
+    "\x1e" ^ Yojson.Safe.to_string
+      (`Assoc ["masc_exec_result", `Assoc
+        ["v", `Int (int_of_major newest); "exit", `Int 127; "signal", `Null;
+         "timed_out", `Bool false; "shim_error", `Null; "execution_receipt", receipt]])
+    ^ "\x1e"
+  in
+  List.iter (fun receipt ->
+    let wire = malformed receipt in
+    check bool "malformed receipt does not erase process outcome" true
+      (parse_trailer wire = Ok trailer);
+    check bool "malformed receipt is explicitly rejected" true
+      (Result.is_error (parse_execution_receipt wire)))
+    [`Null; `Assoc []; `Assoc ["mode", `String "observe";
+       "plan", `String "unrestricted"; "boundary", `String "sandbox_applied"]]
 
 let () =
   run "exec ssh protocol"
@@ -308,7 +392,9 @@ let () =
                ; test_case "mode strings are closed" `Quick test_mode_strings_are_closed
                ; test_case "stdin_len mismatch is transport error" `Quick
                    test_frame_stdin_len_mismatch_is_transport_error ]
-    ; "trailer", [ test_case "roundtrip" `Quick test_trailer_roundtrip
+    ; "trailer", [ test_case "execution receipts preserve process outcome" `Quick
+                     test_execution_receipts_preserve_process_outcome
+                 ; test_case "roundtrip" `Quick test_trailer_roundtrip
                  ; test_case "malformed is transport error" `Quick test_trailer_malformed_is_transport_error
                  ; test_case "absent is transport error" `Quick test_trailer_absent_is_transport_error
                  ; test_case "last match wins" `Quick test_trailer_last_match_wins
@@ -325,5 +411,7 @@ let () =
                     ; test_case "the majors are closed" `Quick
                         test_the_majors_are_closed ]
     ; "probe", [ test_case "roundtrip" `Quick test_probe_roundtrip
+               ; test_case "carries the release it was built from" `Quick
+                   test_probe_carries_the_release_it_was_built_from
                ; test_case "major is spoken or a skew" `Quick
                    test_probe_major_is_spoken_or_a_skew ] ]

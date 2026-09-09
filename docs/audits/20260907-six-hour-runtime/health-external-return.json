@@ -1,0 +1,673 @@
+{
+  "status": "ok",
+  "server": "masc",
+  "version": "0.33.0",
+  "release_version": "0.33.0",
+  "build": {
+    "release_version": "0.33.0",
+    "binary_version": "0.33.0",
+    "repo_version": "0.33.0",
+    "commit": "17077da5012f760bff857e9cffba020b466f5c32",
+    "commit_source": "embedded",
+    "binary_commit": "17077da5012f760bff857e9cffba020b466f5c32",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "34a6917baa849aa47f8387cf2abf8ac0a54846db8fc6ac25b17a2c15bad75297",
+    "binary_commit_unix_ts": 1788762320.0,
+    "binary_commit_age_seconds": 693,
+    "repo_head_commit": "17077da501",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788762320.0,
+    "repo_head_commit_age_seconds": 693,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a07a91-9372-7000-9c93-c6aacc8bad89",
+    "started_at": "2026-09-07T06:32:35Z",
+    "uptime_seconds": 257
+  },
+  "health_detail": "full",
+  "protocol": {
+    "default": "2025-11-25",
+    "listener": "http/1.1",
+    "supported": [
+      "2026-07-28",
+      "DRAFT-2026-v1",
+      "2024-11-05",
+      "2025-03-26",
+      "2025-06-18",
+      "2025-11-25"
+    ]
+  },
+  "transport": {
+    "streamable_http_default": true,
+    "http": {
+      "configured": true,
+      "enabled": true,
+      "protocol_capable": true,
+      "auth_policy_present": false,
+      "base_url": "http://127.0.0.1:8935",
+      "mcp_url": "http://127.0.0.1:8935/mcp",
+      "sse_url": "http://127.0.0.1:8935/mcp?sse_kind=observer"
+    },
+    "grpc": {
+      "enabled": false,
+      "configured": false,
+      "listening": false,
+      "reachable": false,
+      "listen_status": "disabled",
+      "port": 8936,
+      "service": "masc.workspace.v1.MascWorkspace",
+      "health_service": "grpc.health.v1.Health"
+    },
+    "websocket": {
+      "enabled": true,
+      "configured": true,
+      "listening": true,
+      "reachable": true,
+      "mode": "same_origin",
+      "discovery_path": "/ws",
+      "upgrade_path": "/ws",
+      "request_host": "127.0.0.1",
+      "session_count": 0,
+      "ws_url": "ws://127.0.0.1:8935/ws",
+      "same_origin_upgrade_enabled": true,
+      "same_origin_upgrade_path": "/ws",
+      "same_origin_ws_url": "ws://127.0.0.1:8935/ws"
+    },
+    "total_sessions": 1,
+    "enabled_protocols": [
+      "json-rpc",
+      "sse",
+      "ws"
+    ]
+  },
+  "http_listener": {
+    "mode": "auto",
+    "status": "listening",
+    "active_connections": 5,
+    "accepted_total": 667,
+    "accept_errors_total": 0,
+    "rate_limit_responses_total": 0,
+    "rate_limit_responses": [
+      {
+        "protocol": "h1",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "sse_connection",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "sse_connection",
+        "total": 0
+      }
+    ],
+    "last_accept_unix": 1788763013.512685,
+    "last_accept_age_seconds": 0.0060329437255859375,
+    "last_error": null
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "current_task_path": "/Users/dancer/me/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me",
+    "env_masc_base_path": "/Users/dancer/me",
+    "resolution_source": "explicit_env"
+  },
+  "internal_mcp_auth": {
+    "schema": "masc.internal_mcp_auth.v1",
+    "status": "ok",
+    "source": "running_process_env_and_auth_hash",
+    "env_key": "MASC_INTERNAL_MCP_TOKEN",
+    "env_token_present": true,
+    "token_hash_file_present": true,
+    "env_token_verifies": true,
+    "keeper_internal_runtime_mcp_ready": true,
+    "missing": [],
+    "operator_action_required": false,
+    "operator_next_action": "none"
+  },
+  "otel": {
+    "enabled": false,
+    "status": "disabled",
+    "endpoint": "http://127.0.0.1:4318",
+    "service_name": "masc",
+    "exporter_active": false,
+    "exporter_degraded": false,
+    "consecutive_failures": 0,
+    "last_successful_export_unix": null,
+    "last_degradation_error": null
+  },
+  "uptime": "4m 17s",
+  "sse_clients": 1,
+  "startup": {
+    "phase": "ready",
+    "state_ready": true,
+    "pending_lazy_tasks": [],
+    "last_error": null,
+    "path_diagnostics": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_env"
+    },
+    "config_resolution": {
+      "status": "ready",
+      "warnings": [],
+      "config_root": {
+        "path": "/Users/dancer/me/.masc/config",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "prompts": {
+        "path": "/Users/dancer/me/.masc/config/prompts",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "keepers": {
+        "path": "/Users/dancer/me/.masc/config/keepers",
+        "exists": true,
+        "source": "local_masc"
+      }
+    },
+    "elapsed_sec": 250.11934995651245,
+    "watchdog_timeout_sec": 240.0,
+    "product": {
+      "lifecycle": "serving",
+      "lazy_tasks": "complete",
+      "readiness": "ready",
+      "last_error": null,
+      "flat_phase": "ready"
+    }
+  },
+  "schedule_runner": {
+    "schema": "masc.schedule.runner_status.v1",
+    "status": "ok",
+    "tick_in_flight": false,
+    "tick_count": 9,
+    "success_count": 9,
+    "failure_count": 0,
+    "crash_count": 0,
+    "last_tick_started_at": 1788763001.059508,
+    "last_tick_finished_at": 1788763001.323305,
+    "last_success_at": 1788763001.323305,
+    "last_error_at": null,
+    "last_error": null,
+    "last_duration_sec": 0.2637968063354492,
+    "last_counts": {
+      "due_changed": 0,
+      "emitted": 0,
+      "rescheduled": 0,
+      "dispatch_succeeded": 0,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 0,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "totals": {
+      "due_changed": 4,
+      "emitted": 4,
+      "rescheduled": 0,
+      "dispatch_succeeded": 4,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 4,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "stale_after_sec": 60.0,
+    "last_tick_age_sec": 12.195372104644775,
+    "last_success_age_sec": 12.195372104644775,
+    "last_error_age_sec": null
+  },
+  "runtime_startup_degradation": {
+    "schema": "masc.runtime_startup_degradation.v1",
+    "status": "ok",
+    "degraded": false,
+    "operator_action_required": false,
+    "terminal_reason": "none",
+    "missing_catalog_model_count": 0,
+    "disabled_runtime_ids": []
+  },
+  "dashboard_surface": {
+    "schema": "masc.dashboard_surface.v1",
+    "status": "stale",
+    "index_present": true,
+    "assets_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets",
+    "dashboard_asset_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard",
+    "dashboard_manifest_root": null,
+    "build_stamp_path": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp",
+    "index_sha256": "8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61",
+    "asset_tree_sha256": null,
+    "asset_file_count": null,
+    "build_input_sha256": null,
+    "build_source_commit": null,
+    "build_head_tree": null,
+    "build_index_tree": null,
+    "build_input_file_count": null,
+    "build_input_matches_head": null,
+    "build_lock_sha256": null,
+    "build_environment_profile_sha256": null,
+    "build_environment_path_identity_sha256": null,
+    "build_environment_path_executable_sha256": null,
+    "build_environment_path_executable_count": null,
+    "build_producer": null,
+    "build_runtime": null,
+    "recovery": {
+      "kind": "build_in_place",
+      "reason": "unbound_assets_stale",
+      "restart_required": false
+    },
+    "build_stamp_at": "2026-09-07T05:11:31Z",
+    "binary_built_at": "2026-09-07T06:32:33Z"
+  },
+  "subsystems": {
+    "discord_presence": {
+      "status": "alive"
+    },
+    "keeper_autoboot": {
+      "status": "alive"
+    },
+    "keeper_shutdown_recovery": {
+      "status": "alive"
+    },
+    "session_cleanup": {
+      "status": "alive"
+    }
+  },
+  "logs": {
+    "status": "active",
+    "capacity": 50000,
+    "total_entries": 51040,
+    "retained_entries": 50000,
+    "recent_window": 200,
+    "recent_errors": 1,
+    "recent_warnings": 6,
+    "latest": {
+      "seq": 26990946,
+      "ts": "2026-09-07T06:36:53Z",
+      "level": "INFO",
+      "source": "structured",
+      "module": "Keeper",
+      "keeper_name": "system",
+      "turn_id": null
+    },
+    "file_sink": {
+      "enabled": true,
+      "dir": "/Users/dancer/me/.masc/logs",
+      "current_date": "2026-09-07"
+    }
+  },
+  "gc": {
+    "compactions": 0,
+    "heap_words": 306289880,
+    "live_words": 296994969,
+    "minor_heap_size": 4194304,
+    "space_overhead": 100,
+    "minor_collections": 780,
+    "major_collections": 141,
+    "forced_major_collections": 0,
+    "minor_words": 3483603557.0,
+    "promoted_words": 261698027.0,
+    "major_words": 2306193994.0
+  },
+  "scheduler": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "samples": 600,
+    "p50_ms": 1.7235419999999946,
+    "p95_ms": 100.38049999999998,
+    "p99_ms": 236.483042,
+    "max_ms": 3192.362708,
+    "mean_ms": 22.300338808333322,
+    "stalls": 1
+  },
+  "feature_flags": {
+    "component": "feature_flags",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "overall_status": "warming",
+  "operator_action_required": false,
+  "operator_action_reasons": [],
+  "keeper_fibers": 0,
+  "fd_observation": {
+    "component": "fd_observation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "fd_accountant": {
+    "component": "fd_accountant",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "disk_observation": {
+    "component": "disk_observation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_fleet_safety": {
+    "component": "keeper_fleet_safety",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_identity_drift": {
+    "schema": "masc.keeper_identity_drift.v1",
+    "status": "warming",
+    "blocking": false,
+    "terminal_reason": "snapshot_not_ready",
+    "operator_action_required": false,
+    "configured_keeper_count": 0,
+    "configured_keeper_names": [],
+    "materializable_configured_keeper_count": 0,
+    "materializable_configured_keeper_names": [],
+    "persisted_meta_names": [],
+    "configured_without_meta_count": 0,
+    "configured_without_meta_names": [],
+    "meta_without_config_count": 0,
+    "meta_without_config_names": [],
+    "next_action": "none",
+    "component_timed_out": false
+  },
+  "publication_recovery_activation": {
+    "component": "publication_recovery_activation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_reaction_ledger": {
+    "component": "keeper_reaction_ledger",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_owner": {
+    "component": "keeper_owner",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_board_event_collection": {
+    "component": "keeper_board_event_collection",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_event_queue": {
+    "schema": "masc.keeper_event_queue.fleet_summary.v4",
+    "status": "warming",
+    "operator_action_required": false,
+    "status_reasons": [],
+    "backlog_clean": false,
+    "storage_integrity": {
+      "schema": "masc.keeper_event_queue.storage_integrity.v1",
+      "status": "warming",
+      "counts_complete": false,
+      "read_error_count": 0,
+      "transition_outbox_count": 0,
+      "operator_action_required": false
+    },
+    "work_liveness": {
+      "schema": "masc.keeper_event_queue.work_liveness.v1",
+      "status": "warming",
+      "state": "unknown",
+      "runnable_backlog_count": 0,
+      "runnable_oldest_age_seconds": null,
+      "stale_after_seconds": 600.0,
+      "operator_action_required": false
+    },
+    "keeper_count": 0,
+    "keeper_names": [],
+    "pending_count": 0,
+    "total_count": 0,
+    "oldest_arrived_at_unix": null,
+    "oldest_age_seconds": null,
+    "runnable_backlog_count": 0,
+    "runnable_oldest_arrived_at_unix": null,
+    "runnable_oldest_age_seconds": null,
+    "runnable_by_keeper": [],
+    "recoverable_backlog_count": 0,
+    "recoverable_oldest_arrived_at_unix": null,
+    "recoverable_oldest_age_seconds": null,
+    "recoverable_by_keeper": [],
+    "retained_disabled_backlog_count": 0,
+    "retained_disabled_oldest_arrived_at_unix": null,
+    "retained_disabled_oldest_age_seconds": null,
+    "retained_disabled_by_keeper": [],
+    "paused_dead_backlog_count": 0,
+    "paused_dead_oldest_arrived_at_unix": null,
+    "paused_dead_oldest_age_seconds": null,
+    "paused_dead_by_keeper": [],
+    "shutdown_fenced_backlog_count": 0,
+    "shutdown_fenced_oldest_arrived_at_unix": null,
+    "shutdown_fenced_oldest_age_seconds": null,
+    "shutdown_fenced_by_keeper": [],
+    "unclassified_count": 0,
+    "unclassified_oldest_arrived_at_unix": null,
+    "unclassified_oldest_age_seconds": null,
+    "unclassified_by_keeper": [],
+    "pending_by_keeper": [],
+    "read_error_count": 0,
+    "read_errors": [],
+    "keepers": [],
+    "component_timed_out": false
+  },
+  "keeper_terminal_effect_policy": [
+    {
+      "effect": "checkpoint_store",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "execution_receipt",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "owner_meta",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "lifecycle_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "metrics_snapshot",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "activity_graph",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "decision_record",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "usage_metrics",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "terminal_fsm_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    }
+  ],
+  "keeper_observability_artifacts": {
+    "schema": "masc.keeper_observability_artifacts.v1",
+    "status": "ok",
+    "command_authority": false,
+    "validation_errors": [],
+    "artifacts": [
+      {
+        "artifact": "execution_receipt",
+        "producer": "Keeper_agent_run_receipt",
+        "authority_source": "exact provider/tool terminal result",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Telemetry_unified",
+          "Dashboard_http_keeper_execution_receipt",
+          "Workspace_task_receipts"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "turn_record",
+        "producer": "Keeper_turn_record_writer",
+        "authority_source": "execution receipt cadence + admitted turn identity",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_api",
+          "Keeper_context_observation_projection",
+          "Keeper_raw_trace_retention"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "runtime_manifest",
+        "producer": "Keeper_runtime_manifest",
+        "authority_source": "turn/provider/checkpoint event writers",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_runtime_manifest_scan",
+          "Server_dashboard_http_keeper_runtime_lens_swimlane"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
+      },
+      {
+        "artifact": "activity_event",
+        "producer": "Activity_graph.emit",
+        "authority_source": "typed terminal/tool/board observations",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_activity_http",
+          "Dashboard_snapshot"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "metrics_snapshot",
+        "producer": "Keeper_unified_metrics_snapshot",
+        "authority_source": "normalized execution outcome + lifecycle projection",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Dashboard_http_keeper_metrics",
+          "Keeper_status_metrics",
+          "Telemetry_unified"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "raw_trace",
+        "producer": "Agent_core.Raw_trace",
+        "authority_source": "exact provider request/event stream",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Turn_record.raw_trace_run_ref",
+          "Keeper_raw_trace_reader"
+        ],
+        "retention_owner": "Keeper_raw_trace_retention",
+        "retention_policy": "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+      }
+    ]
+  },
+  "paused_keepers": {
+    "status": "warming",
+    "count": 0,
+    "names": [],
+    "component_timed_out": false
+  },
+  "keeper_config_error_count": 0,
+  "keeper_config_errors": [],
+  "keeper_config_probe_error": null,
+  "keeper_config_unknown_key_count": 0,
+  "keeper_config_unknown_keys": [],
+  "keeper_config_schema_status": "warming",
+  "keeper_config_schema_blocking": false,
+  "keeper_config_schema_terminal_reason": "snapshot_not_ready",
+  "keeper_config_operator_action_required": false,
+  "lazy_task_boot_guard_fires_total": 0,
+  "full_health_snapshot": {
+    "status": "warming",
+    "snapshot_age_ms": null,
+    "stale_reason": null,
+    "stale_age_ms": null,
+    "computed_at_unix": null,
+    "duration_ms": null,
+    "ttl_ms": 60000,
+    "refresh_in_flight": true,
+    "refresh_requested": true,
+    "refresh_worker_active": true,
+    "refresh_worker_submissions_total": 25,
+    "refresh_worker_joins_total": 1,
+    "invalidation_generation": 65,
+    "refresh_wakeup_coalesce_ms": 100,
+    "refresh_started_at_unix": 1788763012.853401,
+    "refresh_timeout_ms": 20000,
+    "component_timed_out": false,
+    "error": null,
+    "last_good_available": false,
+    "section_timings": [],
+    "stale_since_ts": null
+  }
+}

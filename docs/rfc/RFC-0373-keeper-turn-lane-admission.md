@@ -115,7 +115,7 @@ Per keeper, autonomous cycles scheduled vs. lost:
 | sangsu | 136 | 31 | **18.6%** |
 | rondo | 120 | 8 | 6.2% |
 | analyst | 112 | 4 | 3.4% |
-| kidsnote | 131 | 3 | 2.2% |
+| exampleorg | 131 | 3 | 2.2% |
 | code-reviewer | 104 | 2 | 1.9% |
 | taskmaster | 119 | 1 | 0.8% |
 | lane-smith | 123 | 1 | 0.8% |

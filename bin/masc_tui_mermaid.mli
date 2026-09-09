@@ -54,10 +54,29 @@ type edge = {
   label : string option;
 }
 
+(** A [subgraph … end]. Its members are laid out on their own and the
+    drawing is placed in the enclosing scope as one item, which makes a
+    nested subgraph the same thing one level down. An edge may name a
+    subgraph, and then it joins the box; an edge with one end inside a
+    subgraph and the other outside it is refused, because the box would be
+    drawn around a member the line already left.
+
+    [group_direction] is a [direction] statement inside the subgraph.
+    Mermaid ignores one at the top level, where the header has already
+    said which way the diagram reads, and so do we. *)
+type group = {
+  group_id : string;
+  group_label : string;  (** the title on the box, [group_id] when untitled *)
+  group_direction : direction option;
+  group_nodes : string list;  (** ids declared directly inside, source order *)
+  group_children : group list;
+}
+
 type graph = {
   direction : direction;
-  nodes : node list;  (** in order of first appearance *)
+  nodes : node list;  (** every node of the diagram, in order of first appearance *)
   edges : edge list;  (** in source order, one per source-target pair *)
+  groups : group list;  (** the subgraphs at the top level, source order *)
 }
 
 (** A sequence diagram: participants across the top, one lifeline each,
@@ -114,8 +133,20 @@ type failure =
   | Too_wide of {
       cells : int;
       cols : int;
+      turning_it_fits : direction option;
     }
-      (** the drawing needs [cells] columns and the caller has [cols] *)
+      (** the drawing needs [cells] columns and the caller has [cols].
+
+          [turning_it_fits] is the direction the same graph does fit in, when
+          there is one. A chain drawn across the pane can need several times
+          the columns it needs rows drawn down it, and the reader can only act
+          on that if the refusal says so. [None] when the other axis is no
+          better, and always [None] for a sequence diagram, which has one
+          shape. Nothing is redrawn: which way a graph reads is the author's. *)
+
+val direction_word : direction -> string
+(** The header word for a direction, so a message can name one as the source
+    writes it. [TD] for {!Top_down}, which a header may also spell [TB]. *)
 
 val parse : string -> (diagram, failure) result
 (** The source of one fence, without the fence markers. Blank lines and
@@ -124,9 +155,3 @@ val parse : string -> (diagram, failure) result
 val render : cols:int -> string -> (string list, failure) result
 (** {!parse}, then lay out and draw. Each row is at most [cols] cells and
     carries no trailing spaces; rows are not padded. *)
-
-val render_graph : cols:int -> graph -> (string list, failure) result
-(** The drawing half of {!render}, for a graph already read. *)
-
-val render_sequence : cols:int -> sequence -> (string list, failure) result
-(** The drawing half of {!render}, for a sequence diagram already read. *)

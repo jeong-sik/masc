@@ -10,17 +10,23 @@
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
-#   --base-path DIR    .masc seed target (default: $PWD)
+#   --base-path DIR    Workspace containing .masc (asked in a terminal;
+#                      noninteractive default: $PWD)
 #   --no-seed          Skip writing default config files
-#   --force            Overwrite existing binary / config
+#   --force            Refresh existing binaries; preserve workspace config
+#   --reset-config     Overwrite seeded config and selected team preset files
 #   --dry-run          Print what would happen, do not write
+#   --uninstall        Remove installed executables/releases; stop MASC first
+#   --purge-data       Also remove <base-path>/.masc; requires --uninstall and
+#                      an explicit --base-path. Homebrew dependencies remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
 #   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
 #                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
 #                      host that boots no microvm keeper needs neither
-#   --provider ID      Pre-select a provider for the wizard (e.g. deepseek)
+#   --provider ID      Select a provider, including on an existing workspace
+#                      (e.g. deepseek; incompatible with --no-wizard)
 #   --team PRESET      Seed a keeper team preset (e.g. classic) into the config
 #   --sandbox PROFILE  Set the seeded team keepers' sandbox_profile
 #                        (docker|microvm|remote_ssh; use with --team)
@@ -59,7 +65,12 @@ MASC_PORT="${MASC_PORT:-8935}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
+RESET_CONFIG=0
 DRY_RUN=0
+UNINSTALL=0
+PURGE_DATA=0
+BASE_PATH_EXPLICIT=0
+INSTALL_ACTION_FLAGS=()
 GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
@@ -106,6 +117,10 @@ PROVIDER_INDEX_RESULT=""
 DEFAULT_PROVIDER_INDEX=0
 CATALOG_FILE=""
 PARTIAL_FILES=()
+COMPANION_ARGS=()
+BUNDLE_HELPER=""
+BUNDLE_TRANSACTION_ACTIVE=0
+DASHBOARD_ASSETS_DIR=""
 
 provider_index_by_id() {
   local id="$1" i
@@ -313,7 +328,7 @@ probe_local_reachable() {
 }
 
 # One word describing whether this entry is ready to use right now:
-#   reachable / not running  -- a local server, probed over HTTP
+#   reachable / authentication required / unreachable -- local HTTP endpoint
 #   installed / not installed -- a subscription CLI, checked with command -v
 #   cloud                     -- a remote provider, gated by its API key
 #   local                     -- a local server with no healthcheck path to probe
@@ -344,10 +359,19 @@ provider_availability_label() {
       if endpoint_is_local "${PROVIDER_ENDPOINTS[$idx]}"; then
         if [ -z "${PROVIDER_PING_PATHS[$idx]}" ]; then
           echo "local"
-        elif probe_local_reachable "$idx"; then
-          echo "reachable"
         else
-          echo "not running"
+          local status
+          if status=$(curl -sS --max-time "$MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S" \
+            -o /dev/null -w '%{http_code}' \
+            "${PROVIDER_ENDPOINTS[$idx]%/}${PROVIDER_PING_PATHS[$idx]}" 2>/dev/null); then
+            case "$status" in
+              2??) echo "reachable" ;;
+              401|403) echo "authentication required" ;;
+              *) echo "responding, HTTP $status" ;;
+            esac
+          else
+            echo "unreachable"
+          fi
         fi
       else
         echo "cloud"
@@ -489,11 +513,14 @@ prompt_provider() {
       elif [ -n "${PROVIDER_KEYS[$i]}" ]; then
         printf >&2 ' - needs %s' "${PROVIDER_KEYS[$i]}"
       fi
-      printf >&2 '\n'
+      printf >&2 ' [%s; id: %s]\n' "${PROVIDER_AVAIL[$i]}" "${PROVIDER_IDS[$i]}"
     done
     printf >&2 '> '
     local choice
-    read -r choice || true
+    if ! read -r choice; then
+      warn "input closed; provider selection cancelled"
+      return 1
+    fi
     if [ -z "$choice" ]; then
       echo "$DEFAULT_PROVIDER_INDEX"
       return
@@ -502,13 +529,14 @@ prompt_provider() {
       warn "please enter a number"
       continue
     fi
-    idx=$((choice - 1))
-    if [ "$idx" -lt 0 ] || [ "$idx" -ge "${#PROVIDER_IDS[@]}" ]; then
-      warn "invalid choice"
-      continue
-    fi
-    echo "$idx"
-    return
+    # Match displayed choices, without evaluating unbounded input as arithmetic.
+    for idx in "${!PROVIDER_IDS[@]}"; do
+      if [ "$choice" = "$((idx + 1))" ]; then
+        echo "$idx"
+        return
+      fi
+    done
+    warn "invalid choice"
   done
 }
 
@@ -561,7 +589,10 @@ update_runtime_default() {
 provider_ping_possible() {
   local idx="$1" key="$2" key_var
   key_var=$(provider_key_var "$idx")
-  [ -z "$key_var" ] || [ -n "$key" ]
+  if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
+    return 0
+  fi
+  [ -n "${PROVIDER_PING_PATHS[$idx]}" ] && { [ -z "$key_var" ] || [ -n "$key" ]; }
 }
 
 ping_provider() {
@@ -571,20 +602,22 @@ ping_provider() {
   local key_var
   key_var=$(provider_key_var "$idx")
 
-  # A subscription has no endpoint to reach; the meaningful check is whether its
-  # CLI is on PATH. Being signed in is a deeper, per-CLI probe left to a later
-  # step (RFC-0408) -- here we only confirm the command exists.
+  # CLI presence alone does not prove that the subscription is signed in.
   if [ "${PROVIDER_KINDS[$idx]}" = "subscription" ]; then
     local cli_command="${PROVIDER_COMMANDS[$idx]}"
-    if [ -z "$cli_command" ]; then
-      warn "subscription $(provider_name "$idx") has no CLI command in runtime.toml; skipping check"
-      return 0
+    if [ -z "$cli_command" ] || ! command -v "$cli_command" >/dev/null 2>&1; then
+      warn "$(provider_name "$idx") CLI is not installed; install and sign in before using it"
+      return 1
     fi
-    if command -v "$cli_command" >/dev/null 2>&1; then
-      return 0
-    fi
-    warn "$cli_command not found on PATH; sign in to $(provider_name "$idx") before using it"
-    return 1
+    local probe_status=0
+    "$DEST" runtime-probe --base-path "$BASE_PATH" \
+      "${PROVIDER_DEFAULT_RUNTIME_IDS[$idx]}" >/dev/null 2>&1 || probe_status=$?
+    case "$probe_status" in
+      0) return 0 ;;
+      3) return 3 ;; # runtime-probe explicitly reports unsupported
+      *) warn "$(provider_name "$idx") sign-in check did not pass; authenticate with its CLI"
+         return 1 ;;
+    esac
   fi
 
   if [ -z "$ping_path" ]; then
@@ -624,9 +657,119 @@ ping_provider() {
   return 0
 }
 
+prompt_runtime_source() {
+  local answer
+  printf '\nChoose a model connection (availability is checked separately):\n' >&2
+  printf '  1) Configured API providers / Ollama\n  2) llama.cpp server\n  3) vLLM server\n  4) Claude Code\n  5) Codex\n  6) Antigravity\n  7) Other OpenAI-compatible endpoint\n  8) Configure later\n' >&2
+  while true; do
+    printf '? Model connection [1]: ' >&2
+    IFS= read -r answer || return 1
+    case "$answer" in
+      ''|1) echo configured; return ;;
+      2) echo llama_cpp; return ;;
+      3) echo vllm; return ;;
+      4) echo claude_code; return ;;
+      5) echo codex; return ;;
+      6) echo antigravity; return ;;
+      7) echo openai_compatible; return ;;
+      8) echo later; return ;;
+      *) warn "choose a number from 1 to 8" ;;
+    esac
+  done
+}
+
+runtime_setup_input() {
+  local label="$1" answer
+  printf '? %s: ' "$label" >&2
+  IFS= read -r answer || return 1
+  printf '%s' "$answer"
+}
+
+runtime_setup_integer() {
+  local answer
+  while true; do
+    answer=$(runtime_setup_input "$1") || return 1
+    case "$answer" in
+      ''|*[!0-9]*|0) warn "enter a positive whole number" ;;
+      *) printf '%s' "$answer"; return 0 ;;
+    esac
+  done
+}
+
+runtime_setup_yes_no() {
+  local answer
+  while true; do
+    answer=$(runtime_setup_input "$1") || return 1
+    case "$answer" in
+      y|Y|yes|YES) printf y; return 0 ;;
+      ''|n|N|no|NO) printf n; return 0 ;;
+      *) warn "answer y or n" ;;
+    esac
+  done
+}
+
+configure_runtime_source() {
+  local base_path="$1" source="$2" endpoint="" key_env="" credential="" timeout=""
+  local model context tools streaming helper spec receipt
+  printf '\nConfigure %s. This connects to your server or CLI; it does not install model weights or authenticate an account.\n' "$source" >&2
+  case "$source" in
+    llama_cpp|vllm|openai_compatible)
+      endpoint=$(runtime_setup_input 'Server API base URL, including /v1') || die "runtime setup cancelled"
+      key_env=$(runtime_setup_input 'API key environment variable name (blank for none; do not enter a key)') || die "runtime setup cancelled"
+      ;;
+    antigravity)
+      credential=$(runtime_setup_input 'OAuth credential file path created by Antigravity') || die "runtime setup cancelled"
+      timeout=$(runtime_setup_input 'Antigravity request timeout in seconds') || die "runtime setup cancelled"
+      ;;
+  esac
+  model=$(runtime_setup_input 'Model ID from your server or CLI') || die "runtime setup cancelled"
+  context=$(runtime_setup_integer 'Configured model context window in tokens') || die "runtime setup cancelled"
+  tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
+  streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would configure $source with model $model in $base_path/.masc/config"
+    return 0
+  fi
+  helper=$(mktemp); spec=$(mktemp); receipt=$(mktemp)
+  PARTIAL_FILES+=("$helper" "$spec" "$receipt")
+  fetch_bundle_asset install-runtime-setup.py "$helper"
+  python3 - "$spec" "$source" "$endpoint" "$key_env" "$credential" "$timeout" "$model" "$context" "$tools" "$streaming" <<'PYRUNTIME'
+import json, sys
+path, choice, endpoint, key_env, credential, timeout, model, context, tools, streaming = sys.argv[1:]
+def yes(value):
+    if value.lower() in ('y', 'yes'): return True
+    if value.lower() in ('', 'n', 'no'): return False
+    raise ValueError('answer y or n for tool calling and streaming')
+try:
+    spec = dict(choice=choice, model=model, max_context=int(context), tools=yes(tools), streaming=yes(streaming))
+    if choice in ('llama_cpp', 'vllm', 'openai_compatible'):
+        spec.update(endpoint=endpoint, api_key_env=key_env)
+    elif choice == 'antigravity':
+        spec.update(credential_file=credential, timeout_s=float(timeout))
+    with open(path, 'w') as target: json.dump(spec, target)
+except ValueError as error:
+    sys.exit('runtime setup: ' + str(error))
+PYRUNTIME
+  python3 "$helper" --binary "$DEST" --base-path "$base_path" --spec "$spec" > "$receipt" \
+    || die "runtime configuration rejected; existing configuration was preserved"
+  log "saved $source connection; installation, authentication and a model response are separate checks"
+}
+
 run_wizard() {
   local base_path="$1"
-  local provider_idx key
+  local provider_idx key source
+  if [ -z "$WIZARD_PROVIDER" ] && is_tty; then
+    source=$(prompt_runtime_source) || die "model connection selection cancelled"
+    case "$source" in
+      configured) ;;
+      later) log "model setup deferred; configure a model before starting a Keeper"; return 0 ;;
+      *)
+        configure_runtime_source "$base_path" "$source"
+        [ "$DRY_RUN" -eq 0 ] || return 0
+        WIZARD_PROVIDER="setup_$source"
+        ;;
+    esac
+  fi
   load_provider_catalog "$base_path"
   compute_provider_availability
   report_provider_availability
@@ -639,7 +782,7 @@ run_wizard() {
     # A terminal is here to choose, so move the menu default onto a source that
     # is actually ready and let the operator confirm or change it.
     prefer_available_default
-    provider_idx=$(prompt_provider)
+    provider_idx=$(prompt_provider) || die "provider selection cancelled"
   else
     # No terminal and no --provider. Make the choice only when it is not a
     # choice at all -- exactly one ready source; otherwise leave it to the
@@ -665,7 +808,7 @@ run_wizard() {
     && endpoint_is_local "${PROVIDER_ENDPOINTS[$provider_idx]}" \
     && [ -n "${PROVIDER_PING_PATHS[$provider_idx]}" ] \
     && ! probe_local_reachable "$provider_idx"; then
-    warn "$(provider_name "$provider_idx") is not running at ${PROVIDER_ENDPOINTS[$provider_idx]}; start it before using masc"
+    warn "$(provider_name "$provider_idx") is not ready at ${PROVIDER_ENDPOINTS[$provider_idx]}; check its server and authentication before using masc"
   fi
 
   key=$(wizard_env_key "$provider_idx")
@@ -701,17 +844,21 @@ run_wizard() {
       return 0
     fi
     if ! provider_ping_possible "$provider_idx" "$key"; then
-      log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
-    elif ping_provider "$provider_idx" "$key"; then
-      log "provider connectivity: ok"
+      log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     else
-      warn "provider connectivity check did not pass; masc will retry at first turn"
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider connectivity: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *) warn "provider connectivity check did not pass; masc will retry at first turn" ;;
+      esac
     fi
     return 0
   fi
 
   if ! provider_ping_possible "$provider_idx" "$key"; then
-    log "no key in this environment to reach $(provider_name "$provider_idx") with; skipping the connectivity check"
+    log "missing credential or healthcheck.path for $(provider_name "$provider_idx"); skipping the connectivity check"
     return 0
   fi
 
@@ -722,19 +869,23 @@ run_wizard() {
   case "$answer" in
     [Nn]*) ;;
     *)
-      if ping_provider "$provider_idx" "$key"; then
-        log "provider ping: ok"
-      else
-        echo >&2
-        printf '? Connectivity check failed. [retry/skip/abort] ' >&2
-        local action
-        read -r action || true
-        case "$action" in
-          retry|Retry|r) run_wizard "$base_path" ;;
-          skip|Skip|s) ;;
-          *) die "aborted by user" ;;
-        esac
-      fi
+      local ping_status=0
+      ping_provider "$provider_idx" "$key" || ping_status=$?
+      case "$ping_status" in
+        0) log "provider ping: ok" ;;
+        3) log "login probe unavailable for $(provider_name "$provider_idx"); verify sign-in with its CLI" ;;
+        *)
+          echo >&2
+          printf '? Connectivity check failed. [retry/skip/abort] ' >&2
+          local action
+          read -r action || true
+          case "$action" in
+            retry|Retry|r) run_wizard "$base_path" ;;
+            skip|Skip|s) ;;
+            *) die "aborted by user" ;;
+          esac
+          ;;
+      esac
       ;;
   esac
 }
@@ -748,7 +899,7 @@ maybe_run_wizard() {
   fi
 
   if [ ! -e "$runtime_file" ]; then
-    if [ "$WIZARD" = "1" ]; then
+    if [ "$WIZARD" = "1" ] || [ -n "$WIZARD_PROVIDER" ]; then
       die "runtime.toml not found; cannot run wizard (did you mean to seed config?)"
     fi
     log "runtime.toml not found; skipping first-time setup wizard"
@@ -757,9 +908,9 @@ maybe_run_wizard() {
   fi
 
   # "First-time" means the config root was not already here. A workspace that was
-  # already configured keeps the [runtime].default it has; --wizard or --force
+  # already configured keeps the [runtime].default it has; --wizard or --reset-config
   # asks for the choice again.
-  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$FORCE" -eq 0 ] && [ "$WIZARD" != "1" ]; then
+  if [ "$CONFIG_PREEXISTING" -eq 1 ] && [ "$RESET_CONFIG" -eq 0 ] && [ "$WIZARD" != "1" ] && [ -z "$WIZARD_PROVIDER" ]; then
     log "config root was already here; skipping first-time setup wizard"
     log "run with --wizard to choose a provider again"
     return 0
@@ -772,7 +923,22 @@ maybe_run_wizard() {
   run_wizard "$base_path"
 }
 
-is_tty() { [ -t 0 ] && [ -t 1 ]; }
+# Prompts use stderr; stdout is captured by $(prompt_provider).
+is_tty() { [ -t 0 ] && [ -t 2 ]; }
+
+choose_install_base_path() {
+  [ -z "$BASE_PATH" ] || return 0
+  local suggested="$PWD" answer
+  if [ "$WIZARD" != "0" ] && is_tty; then
+    [ -d "$PWD/.masc/config" ] || suggested="$HOME"
+    printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
+    printf '? Workspace directory [%s]: ' "$suggested" >&2
+    IFS= read -r answer || die "workspace selection cancelled"
+    BASE_PATH="${answer:-$suggested}"
+  else
+    BASE_PATH="$suggested"
+  fi
+}
 
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
@@ -791,12 +957,19 @@ require_flag_value() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --uninstall|--purge-data|--prefix|--base-path|--dry-run|-h|--help) ;;
+    *) INSTALL_ACTION_FLAGS+=("$1") ;;
+  esac
+  case "$1" in
     --version) require_flag_value "$1" "${2-}"; VERSION="$2"; shift 2 ;;
     --prefix)  require_flag_value "$1" "${2-}"; PREFIX="$2";  shift 2 ;;
-    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; shift 2 ;;
+    --base-path) require_flag_value "$1" "${2-}"; BASE_PATH="$2"; BASE_PATH_EXPLICIT=1; shift 2 ;;
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
+    --reset-config) RESET_CONFIG=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --purge-data) PURGE_DATA=1; shift ;;
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
@@ -808,6 +981,52 @@ while [ $# -gt 0 ]; do
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
+
+# Uninstall runs before platform/dependency checks and all downloads. Only the
+# installation's named entries are owned; neither the prefix nor its parent is.
+uninstall_masc() {
+  [ "${#INSTALL_ACTION_FLAGS[@]}" -eq 0 ] ||
+    die "--uninstall cannot be combined with install options: ${INSTALL_ACTION_FLAGS[*]}"
+  if [ "$PURGE_DATA" -eq 1 ] && [ "$BASE_PATH_EXPLICIT" -ne 1 ]; then
+    die "--purge-data requires an explicit --base-path"
+  fi
+  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name
+  case "$uninstall_prefix" in '~') uninstall_prefix="$HOME" ;; '~/'*) uninstall_prefix="$HOME/${uninstall_prefix#\~/}" ;; esac
+  case "$uninstall_base" in '~') uninstall_base="$HOME" ;; '~/'*) uninstall_base="$HOME/${uninstall_base#\~/}" ;; esac
+  case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
+  if [ -e "$uninstall_prefix/.masc-install-transaction" ] || [ -L "$uninstall_prefix/.masc-install-transaction" ]; then
+    die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
+  fi
+  local targets=()
+  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+    target="$uninstall_prefix/$name"
+    [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
+    targets+=("$target")
+  done
+  targets+=("$uninstall_prefix/.masc-releases")
+  if [ "$PURGE_DATA" -eq 1 ]; then
+    case "$uninstall_base" in /*) ;; *) uninstall_base="$PWD/$uninstall_base" ;; esac
+    targets+=("$uninstall_base/.masc")
+  fi
+  log "stop running MASC servers and TUI sessions before uninstalling; no processes will be killed"
+  for target in "${targets[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would remove: $target"
+    else
+      # No trailing slash: rm removes a symlink itself, never its target tree.
+      rm -rf -- "$target" || die "could not remove: $target"
+      log "removed: $target"
+    fi
+  done
+  [ "$PURGE_DATA" -eq 1 ] || log "workspace .masc data preserved (use --purge-data --base-path PATH to remove it)"
+  log "Homebrew and runtime dependencies preserved"
+}
+
+if [ "$UNINSTALL" -eq 1 ]; then
+  uninstall_masc
+  exit 0
+fi
+[ "$PURGE_DATA" -eq 0 ] || die "--purge-data is only valid with --uninstall"
 
 case "$ALLOW_UNVERIFIED" in
   0|1) ;;
@@ -828,7 +1047,130 @@ case "$WIZARD_SANDBOX" in
   *) die "--sandbox must be docker, microvm, or remote_ssh" ;;
 esac
 
-[ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
+if [ "$WIZARD" = "0" ] && [ -n "$WIZARD_PROVIDER" ]; then
+  die "--provider requires the setup wizard; omit --no-wizard (or MASC_WIZARD=0)"
+fi
+if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
+  die "--sandbox requires --team; existing keepers use their own sandbox_profile"
+fi
+
+choose_install_base_path
+
+# --- macOS dependency bootstrap ---
+installer_python_ready() {
+  "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
+}
+
+macos_formula_ready() {
+  local brew_prefix="$1" formula="$2"
+  case "$formula" in
+    openssl@3) [ -r "$brew_prefix/opt/openssl@3/lib/libssl.3.dylib" ] &&
+               [ -r "$brew_prefix/opt/openssl@3/lib/libcrypto.3.dylib" ] ;;
+    gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
+    zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
+    python) command -v python3 >/dev/null 2>&1 &&
+            installer_python_ready python3 >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+activate_macos_python() {
+  local brew_prefix="$1" python_prefix bin_dir
+  # Installing a new executable does not invalidate Bash's cached command path.
+  hash -r
+  macos_formula_ready "$brew_prefix" python && return 0
+  python_prefix=$(brew --prefix python) || return 1
+  # Formula-local commands also work when Homebrew's global links are absent.
+  for bin_dir in "$python_prefix/bin" "$python_prefix/libexec/bin"; do
+    if [ -x "$bin_dir/python3" ] && installer_python_ready "$bin_dir/python3" >/dev/null 2>&1; then
+      PATH="$bin_dir:$PATH"
+      export PATH
+      hash -r
+      return 0
+    fi
+  done
+  return 1
+}
+
+bootstrap_macos_homebrew() (
+  local installer
+  installer=$(mktemp) || die "cannot create Homebrew installer download"
+  trap 'rm -f "$installer"' EXIT
+  curl -fL --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" \
+    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+    -o "$installer" || die "could not download the official Homebrew installer"
+  # Homebrew owns its interactive confirmation and administrator prompt.
+  /bin/bash "$installer"
+)
+
+ensure_macos_dependencies() {
+  [ "$(uname -s)" = Darwin ] || return 0
+  local arch os_version major minimum brew_prefix actual_prefix formula
+  arch=$(uname -m)
+  case "$arch" in
+    arm64) minimum=14; brew_prefix=/opt/homebrew ;;
+    x86_64) minimum=15; brew_prefix=/usr/local ;;
+    *) die "unsupported macOS architecture: $arch" ;;
+  esac
+  os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
+  major=${os_version%%.*}
+  case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
+  [ "$major" -ge "$minimum" ] ||
+    die "macOS $os_version is below the released $arch binary minimum macOS $minimum.0"
+  if ! command -v brew >/dev/null 2>&1; then
+    if [ -x "$brew_prefix/bin/brew" ]; then
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    elif [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install official Homebrew at $brew_prefix, then missing macOS dependencies"
+      return 0
+    elif is_tty; then
+      log "installing Homebrew from its official installer; Homebrew will ask for confirmation and any administrator password"
+      bootstrap_macos_homebrew || die "Homebrew setup failed; see its diagnostic above and https://brew.sh/"
+      [ -x "$brew_prefix/bin/brew" ] || die "Homebrew setup did not provide $brew_prefix/bin/brew"
+      PATH="$brew_prefix/bin:$PATH"
+      export PATH
+    else
+      die "Homebrew is required at $brew_prefix for macOS $arch dependencies. Run this installer in a terminal for guided Homebrew setup, or install it from https://brew.sh/ first."
+    fi
+  fi
+  actual_prefix=$(brew --prefix) || die "cannot determine Homebrew prefix"
+  [ "$actual_prefix" = "$brew_prefix" ] ||
+    die "Homebrew prefix $actual_prefix does not match macOS $arch ($brew_prefix). Use the native architecture Homebrew in PATH and rerun."
+  # Default Homebrew prefixes are part of the published Mach-O load paths.
+  # Inspect installed dylibs directly: a complete offline install needs no
+  # brew update or formula download. Do not alter shell startup files.
+  PATH="$brew_prefix/bin:$PATH"
+  export PATH
+  activate_macos_python "$brew_prefix" || true
+  local missing=()
+  for formula in openssl@3 gmp zstd python; do
+    if ! macos_formula_ready "$brew_prefix" "$formula"; then
+      missing+=("$formula")
+    fi
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    log "macOS dependencies ready ($arch, $brew_prefix)"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would run: brew install ${missing[*]}"
+    return 0
+  fi
+  log "installing missing macOS dependencies: ${missing[*]}"
+  brew install "${missing[@]}" || die "Homebrew dependency installation failed; see its diagnostic above"
+  if ! activate_macos_python "$brew_prefix"; then
+    warn "Python startup failed at $(command -v python3 || printf 'python3 not found'); diagnostic follows"
+    installer_python_ready python3 || true
+    die "installed Python cannot run the installer; see its startup error above"
+  fi
+  for formula in "${missing[@]}"; do
+    macos_formula_ready "$brew_prefix" "$formula" ||
+      die "dependency $formula is still unavailable at $brew_prefix; inspect Homebrew output and repair it with brew reinstall $formula"
+  done
+}
+# --- end macOS dependency bootstrap ---
 
 require() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 require curl
@@ -836,6 +1178,16 @@ require uname
 require chmod
 require mkdir
 require mktemp
+ensure_macos_dependencies
+if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
+  log "[dry-run] remaining installation checks require the planned Python dependency; no files changed"
+  exit 0
+fi
+require python3
+PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
+BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+log "workspace: $BASE_PATH"
+log "configuration and data: $BASE_PATH/.masc"
 
 # --- checksum helpers ---------------------------------------------------------
 has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
@@ -887,7 +1239,7 @@ detect_asset() {
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
-    Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
+    Darwin/x86_64) echo "masc-macos-x64" ;;
     Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
@@ -896,8 +1248,11 @@ detect_asset() {
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
 TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
+BROWSER_HOST_ASSET="masc-browser-host-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
+DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
+BUNDLE_HELPER_ASSET="masc-release-dashboard-bundle-$PLATFORM_SUFFIX.py"
 log "platform: $ASSET"
 
 
@@ -930,6 +1285,10 @@ log "version: $VERSION"
 # --- 2b. fetch release checksums ----------------------------------------------
 CHECKSUMS_FILE="$(mktemp)"
 cleanup_install_temp_files() {
+  if [ "$BUNDLE_TRANSACTION_ACTIVE" -eq 1 ]; then
+    python3 "$BUNDLE_HELPER" rollback --prefix "$PREFIX" \
+      || printf '%s\n' "binary/dashboard rollback failed; inspect $PREFIX/.masc-install-transaction" >&2
+  fi
   rm -f "$CHECKSUMS_FILE"
   [ -z "${CATALOG_FILE:-}" ] || rm -f "$CATALOG_FILE"
   local partial
@@ -969,6 +1328,7 @@ fetch_release_checksums() {
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
 TUI_DEST="$PREFIX/masc-tui"
+BROWSER_HOST_DEST="$PREFIX/masc-browser-host"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
@@ -1060,12 +1420,12 @@ install_release_companion() {
     || die "download failed (asset missing for $VERSION?): $asset"
   verify_checksum "$tmp" "$asset"
   chmod +x "$tmp"
-  mv "$tmp" "$dest"
-  log "installed: $dest"
+  COMPANION_ARGS+=(--companion "${dest##*/}" "$tmp")
+  log "staged: $dest"
 }
 
-# Install and verify the companions before replacing the main binary.
-# A failed companion download must leave the currently installed runtime intact.
+# Stage and verify every companion before publishing any executable.
+# The bundle helper journals companions with the main binary for rollback.
 #
 # A missing asset stops the install rather than skipping the companion. That is
 # the same rule the two preflight companions already follow, and it is why the
@@ -1073,6 +1433,7 @@ install_release_companion() {
 # installer that quietly delivers less than it was built to deliver is worse
 # than one that stops and says which asset was absent.
 install_release_companion "$TUI_ASSET" "$TUI_DEST"
+install_release_companion "$BROWSER_HOST_ASSET" "$BROWSER_HOST_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 
@@ -1085,7 +1446,7 @@ install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 guest_shim_asset() {
   case "$PLATFORM_SUFFIX" in
     macos-arm64|linux-arm64) echo "masc-exec-shim-linux-arm64" ;;
-    linux-x64) echo "masc-exec-shim-linux-amd64" ;;
+    macos-x64|linux-x64) echo "masc-exec-shim-linux-amd64" ;;
     *) die "no guest exec shim asset for platform $PLATFORM_SUFFIX" ;;
   esac
 }
@@ -1137,38 +1498,70 @@ if [ "$GUEST_SHIM" -eq 1 ]; then
   install_guest_shim
 fi
 
-if [ "$SKIP_DL" -ne 1 ]; then
-  log "downloading $URL"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would download to $DEST"
-  else
-    mkdir -p "$PREFIX"
-    tmp="$DEST.partial"
-    PARTIAL_FILES+=("$tmp")
-    fetch_release_checksums
-    curl -fL \
-      --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
-      --retry "$MASC_INSTALL_CURL_RETRIES" \
-      --progress-bar \
-      -o "$tmp" \
-      "$URL" \
-      || die "download failed (asset missing for $VERSION?)"
-    verify_checksum "$tmp" "$ASSET"
-    chmod +x "$tmp"
-    mv "$tmp" "$DEST"
-    log "installed: $DEST"
+# Fetch and verify both halves before publishing the new runtime. The helper
+# installs an immutable release directory and one atomic executable pointer;
+# EXIT rolls it back if later seeding/wizard/smoke fails.
+fetch_bundle_asset() {
+  local asset="$1" target="$2"
+  fetch_release_checksums
+  curl -fL --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" \
+    --retry "$MASC_INSTALL_CURL_RETRIES" --progress-bar \
+    -o "$target" "$RELEASE_BASE_URL/$VERSION/$asset" \
+    || die "download failed (asset missing for $VERSION?): $asset"
+  verify_checksum "$target" "$asset"
+}
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  log "[dry-run] would install verified binary/dashboard bundle at $PREFIX"
+else
+  mkdir -p "$PREFIX"
+  binary_input="$DEST"
+  if [ "$SKIP_DL" -ne 1 ]; then
+    binary_input="$(mktemp "$PREFIX/.masc-download.XXXXXX")"
+    PARTIAL_FILES+=("$binary_input")
+    fetch_bundle_asset "$ASSET" "$binary_input"
   fi
+  # Diagnose the executable itself before fetching the dashboard. This also
+  # exposes dyld/loader stderr when installing an older release bundle helper.
+  if [ "$SKIP_DL" -ne 1 ]; then chmod +x "$binary_input"; fi
+  if ! run_masc_with_install_env "$binary_input" build-commit; then
+    die "downloaded executable cannot start; see loader stderr above (check OS/CPU and native runtime dependencies)"
+  fi
+  BUNDLE_HELPER="$(mktemp)"
+  bundle_archive="$(mktemp)"
+  PARTIAL_FILES+=("$BUNDLE_HELPER" "$bundle_archive")
+  fetch_bundle_asset "$BUNDLE_HELPER_ASSET" "$BUNDLE_HELPER"
+  fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
+  DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
+    --binary "$binary_input" --archive "$bundle_archive" \
+    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"})" \
+    || die "binary/dashboard installation rejected"
+  BUNDLE_TRANSACTION_ACTIVE=1
+  log "installed verified binary/dashboard: $DEST"
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
+# Record existing workspaces even when an overlay is missing or seeding is disabled.
+[ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  # An upgrade keeps the operator's config as it is, files it removed
+  # included, and only installs builtin Skill packages that are missing;
+  # --reset-config is the one way to seed the whole config tree again.
+  if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
     CONFIG_PREEXISTING=1
-    log "config already present at $CONFIG_DIR, skipping seed"
+    log "preserving existing config at $CONFIG_DIR; installing missing builtin Skills"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      log "[dry-run] would install builtin Skills from the binary"
+    else
+      if ! init_summary="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1 | tail -1)"; then
+        die "builtin Skill seed failed: $init_summary"
+      fi
+      log "$init_summary"
+    fi
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
@@ -1181,7 +1574,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
     init_args=(init --base-path "$BASE_PATH")
-    [ "$FORCE" -eq 1 ] && init_args+=(--force)
+    [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_summary"
     fi
@@ -1245,7 +1638,7 @@ seed_team() {
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
     dest="$cfg/$rel"
-    if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
+    if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi
@@ -1321,6 +1714,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
+BUNDLE_TRANSACTION_ACTIVE=0
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,
@@ -1329,7 +1724,7 @@ runtime_events_start_env=""
 if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
   runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
 fi
-start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi
@@ -1338,7 +1733,13 @@ cat <<EOF
 
 ${c_grn}masc ${VERSION} installed.${c_off}
 
-Next:
+Installed:
+  server + TUI + dashboard + browser host + deployment preflight tools
+  workspace: $BASE_PATH
+  provider credentials, Keeper creation and execution backend setup are separate
+  browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
+
+Next (choose the TUI or server-only command):
   ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
   ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
   ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
@@ -1348,27 +1749,28 @@ Next:
 
   ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
   ${c_dim}# the server here when nothing is answering the port${c_off}
-  $start_env $DEST --base-path "$BASE_PATH"
+  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
-  $start_env $DEST start --base-path "$BASE_PATH"
+  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# to change provider or model later, edit:${c_off}
   #   $BASE_PATH/.masc/config/runtime.toml
 
-  ${c_dim}# sanity check${c_off}
+  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
   ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
-  ${c_dim}# no Keepers yet? create your first from the Keepers view (or reinstall with --team)${c_off}
-  $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
+  ${c_dim}# a fresh root seeds one Keeper, imp, with autoboot off: start it from the Keepers view once a model and a sandbox exist (or reinstall with --team)${c_off}
+  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# a Keeper runs each turn inside an image. Build the general one -- bash,${c_off}
-  ${c_dim}# ripgrep and git -- or every turn stops at docker_preflight_failed:${c_off}
-  $DEST sandbox-image
+  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
+  "$DEST" sandbox-image
+  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
+  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

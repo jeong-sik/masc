@@ -20,6 +20,8 @@ let target =
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
+      | Some Tui_types.Text_browser_url -> "browser-url"
+      | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"))
     ( = )
 ;;
@@ -88,6 +90,7 @@ let test_an_inline_setting_claims_over_the_palette () =
       ; rpe_draft = "12"
       ; rpe_replace_on_type = true
       ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
       };
   state.Tui_types.palette_open <- true;
   check target "runtime param first" (Some Tui_types.Text_runtime_param)
@@ -151,11 +154,110 @@ let test_the_palette_claims_over_a_board_draft () =
   check target "palette first" (Some Tui_types.Text_palette) (resolved state)
 ;;
 
+let test_browser_url_input_ownership () =
+  let state = fresh_state () in
+  let open Tui_types.Browser_lane_view in
+  Tui_types.show_browser_lane state;
+  state.Tui_types.browser_lane <- Some
+    { (switch_source Automation (create ())) with url_draft = Some "https://example.org" };
+  check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
+  state.Tui_types.palette_open <- true;
+  check target "palette takes priority" (Some Tui_types.Text_palette) (resolved state);
+  state.Tui_types.palette_open <- false;
+  check target "hidden compact URL does not take input" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "hidden URL does not capture another surface" None (resolved state)
+;;
+
+let test_browser_reader_chrome_scope () =
+  let state = fresh_state () in
+  let module Lane = Tui_types.Browser_lane_view in
+  List.iter (fun source ->
+    Tui_types.show_browser_lane state;
+    state.Tui_types.browser_lane <- Some (Lane.switch_source source (Lane.create ()));
+    check bool "reader owns its context row" true
+      (Option.is_some (Tui_types.browser_lane_on_screen state));
+    check int "reader highlights its Runtime family"
+      (Tui_types.visible_surface_ring_index state Tui_types.Runtime)
+      (Tui_types.visible_surface_ring_index state state.Tui_types.view);
+    state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+    check bool "retained browser does not hide Keeper chrome" true
+      (Option.is_none (Tui_types.browser_lane_on_screen state)))
+    [Lane.Live; Lane.Automation];
+  state.Tui_types.view <- Tui_types.Connectors;
+  state.Tui_types.browser_lane <- None;
+  check bool "connector routing retains Keeper context" true
+    (Option.is_none (Tui_types.browser_lane_on_screen state));
+  check int "connector routing keeps its existing navigation family"
+    (Tui_types.visible_surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
+    (Tui_types.visible_surface_ring_index state Tui_types.Connectors)
+;;
+
+let test_reader_discards_active_and_queued_voice () =
+  let state = fresh_state () in
+  state.Tui_types.composer_focused <- true;
+  state.Tui_types.voice_capture <- Some "analyst";
+  state.Tui_types.voice_continuous <- Some "analyst";
+  state.Tui_types.voice_floor <- Some (-50.);
+  state.Tui_types.voice_level_db <- Some (-20.);
+  Buffer.add_string state.Tui_types.msg_input "reviewed draft";
+  Tui_types.release_composer_for_browser_reader state;
+  check bool "composer releases input" false state.Tui_types.composer_focused;
+  check (option string) "continuous capture stops" None state.Tui_types.voice_continuous;
+  check bool "calibration and meter clear" true
+    (state.Tui_types.voice_floor = None && state.Tui_types.voice_level_db = None);
+  check (option string) "microphone remains occupied until completion"
+    (Some "analyst") state.Tui_types.voice_capture;
+  check bool "recorder receives discard" true
+    (state.Tui_types.voice_stop_requested = Some Masc.Voice_bridge.Discard);
+  (* Returning to the composer and stopping again cannot resurrect a result
+     already queued before the reader was opened. *)
+  Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+  check bool "late transcript is discarded" true
+    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
+     = Some Masc.Voice_bridge.Discard);
+  check (option string) "completion releases microphone" None state.Tui_types.voice_capture;
+  check bool "duplicate completion has no owner" true
+    (Tui_types.settle_voice_transcript state ~keeper:"analyst" = None);
+  check string "existing draft survives reader entry" "reviewed draft"
+    (Buffer.contents state.Tui_types.msg_input);
+  (* A fresh capture explicitly started after returning remains usable. *)
+  state.Tui_types.voice_capture <- Some "analyst";
+  state.Tui_types.voice_stop_requested <- None;
+  check bool "fresh capture delivers" true
+    (Tui_types.settle_voice_transcript state ~keeper:"analyst"
+     = Some Masc.Voice_bridge.Keep_what_was_heard)
+;;
+
+let test_ask_answer_input_ownership () =
+  let state = fresh_state () in
+  let question : Masc.Tui_decode.ask_question =
+    { aq_id = "q1"; aq_header = "Route"; aq_prompt = "Which route?";
+      aq_mode = Masc.Tui_decode.Ask_single;
+      aq_free_text = Masc.Tui_decode.Ask_choices_only;
+      aq_choices = [{ac_id = "route"; ac_label = "Offered route"; ac_description = None}] }
+  in
+  state.Tui_types.view <- Tui_types.Approvals;
+  state.Tui_types.ask_text_entry <- Some
+    { ate_slot = Masc_tui_ask_projection.free_text_slot question; ate_text = "draft" };
+  check target "answer owns typing and paste" (Some Tui_types.Text_ask_answer) (resolved state);
+  check target "compact frame hides answer editor" None (resolved ~compact_viewport:true state);
+  state.Tui_types.context_inspector_open <- true;
+  check target "inspector hides answer editor" None (resolved state);
+  state.Tui_types.context_inspector_open <- false;
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "retained answer cannot capture another surface" None (resolved state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "nothing claims a plain surface" `Quick
+        [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
+          test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
+          test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
+          test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
+          test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;
           test_case "the palette claims while it is open" `Quick
             test_the_palette_claims_while_it_is_open;

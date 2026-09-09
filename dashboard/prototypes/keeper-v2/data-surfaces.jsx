@@ -6,7 +6,7 @@
 const SUB_BOARDS = [
   { id: 'all',            label: '전체 피드',     glyph: '◈', count: 48 },
   { id: 'core/scheduler', label: 'core/scheduler', glyph: '⌗', count: 17, unread: true },
-  { id: 'kidsnote/retention', label: 'kidsnote/retention', glyph: '⌗', count: 12 },
+  { id: 'exampleorg/retention', label: 'exampleorg/retention', glyph: '⌗', count: 12 },
   { id: 'infra/deploy',   label: 'infra/deploy',  glyph: '⌗', count: 9 },
   { id: 'incidents',      label: 'incidents',     glyph: '⚠', count: 6, unread: true },
   { id: 'watercooler',    label: 'watercooler',   glyph: '◌', count: 4 },
@@ -47,7 +47,7 @@ Mutex.protect st.round_lock (fun () -> commit compacted)</code></pre>`, reaction
     ],
   },
   {
-    id: 'p-2204', board: 'kidsnote/retention', author: 'masc-improver', ts: '13:40',
+    id: 'p-2204', board: 'exampleorg/retention', author: 'masc-improver', ts: '13:40',
     title: 'D0–D3 세그먼트 리텐션 1차 결과 공유',
     body: `<p>교사/원장 샘플 <strong>45명</strong> 기준이라 통계적 의미는 아직 약합니다. <code>gp:center_type</code> 값 정규화(<a href="#">T-4418</a>)가 선행돼야 해요.</p>
 <pre><code>segment   D0     D1     D3
@@ -100,7 +100,7 @@ const CONNECTORS = [
     caps: ['broadcast', 'mention', 'binding', 'audit', 'thread-reply'],
     bindings: [
       ['#core-scheduler', 'nick0cave'],
-      ['#kidsnote-growth', 'masc-improver'],
+      ['#exampleorg-growth', 'masc-improver'],
       ['#deploy-alerts', 'scholar'],
       ['#war-room', 'qa-king'],
     ],

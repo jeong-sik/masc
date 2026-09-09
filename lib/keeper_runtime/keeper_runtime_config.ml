@@ -433,8 +433,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
   try
     Result.Ok
       (match row.env_name with
-       | "MASC_KEEPER_BOOTSTRAP_ENABLED" ->
-         display_bool Env_config_keeper.KeeperBootstrap.enabled
        | "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC" ->
          display_float
            Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec
@@ -444,7 +442,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC" ->
          display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec
        | "MASC_KEEPER_REACTIVE_ENABLED"
-       | "MASC_KEEPER_PROACTIVE_ENABLED"
        | "MASC_KEEPER_AUTONOMOUS_ENABLED" ->
          display_bool (Feature_flag_registry.get_bool row.env_name)
        | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ->
@@ -457,8 +454,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_float Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
        | "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC" ->
          display_float Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-       | "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" ->
-         display_float (Env_config_keeper.KeeperHealth.durable_queue_stale_sec ())
        | "MASC_KEEPER_WIRE_CAPTURE" ->
          display_bool (Env_config_keeper.KeeperWireCapture.enabled ())
        | "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" ->

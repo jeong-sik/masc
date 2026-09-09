@@ -112,11 +112,13 @@ val run_named :
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?session_id:string ->
-  ?system_prompt:string ->
+  system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
+  ?tool_requirement:Keeper_required_tools.t ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
+  ?recovery_view:Keeper_recovery_transmission.t ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
@@ -139,12 +141,13 @@ val run_named :
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?on_request_wire_observation:
     (runtime_id:string ->
-     max_request_body_bytes:int ->
+     max_request_body_bytes:int option ->
      body_bytes:int ->
      serialized:Llm_provider.Request_wire_observer.observation option ->
      unit) ->
@@ -153,6 +156,8 @@ val run_named :
      tools:Agent_core.Tool.t list ->
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
+  ?on_official_client_tool_boundary:
+    (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
     (runtime_id:string ->
      invocation:Agent_core.Tool_contract.Invocation.t ->
@@ -227,6 +232,10 @@ module For_testing : sig
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     provider_attempt_outcomes
 
+  val canonical_checkpoint_sink :
+    replay_prefix_projection:Keeper_replay_prefix.projection ->
+    Agent_core.Agent.checkpoint_sink -> Agent_core.Agent.checkpoint_sink
+
   val provider_result :
     provider_attempt_outcomes ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -296,6 +305,9 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    project_images:
+      (mode:Keeper_vision_ingest.mode ->
+       Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
     keeper_name:string ->
     emit_runtime_manifest:
       (?status:string ->
@@ -309,8 +321,8 @@ module For_testing : sig
     Runtime.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
-      when the runtime admits the turn's modalities, otherwise the stripped
-      view plus the degraded manifest row emitted through
+      when the runtime admits the turn's modalities, otherwise image readings/references
+      precede the strip of other unsupported media, with manifest rows through
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 
@@ -331,6 +343,7 @@ module For_testing : sig
     ?on_attempt_error:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
+    ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->

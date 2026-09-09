@@ -15,7 +15,7 @@
 # reached a fresh host and died on "no runtime config path". The seed now comes
 # out of the binary, so the smoke drives it and asserts what landed.
 #
-# Usage: install-smoke.sh <binaries_dir> <arch>
+# Usage: install-smoke.sh <binaries_dir> <arch> [keeper_image]
 #   binaries_dir holds the release-named files:
 #     masc-<arch>, masc-tui-<arch>,
 #     masc-deployment-preflight-helper-<arch>,
@@ -26,6 +26,8 @@ set -euo pipefail
 
 BIN_DIR="${1:?usage: install-smoke.sh <binaries_dir> <arch>}"
 ARCH="${2:?usage: install-smoke.sh <binaries_dir> <arch>}"
+KEEPER_IMAGE="${3:-}"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
@@ -36,8 +38,11 @@ INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 ASSETS=(
   "masc-$ARCH"
   "masc-tui-$ARCH"
+  "masc-browser-host-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
+  "masc-dashboard-$ARCH.tar.gz"
+  "masc-release-dashboard-bundle-$ARCH.py"
 )
 for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
@@ -50,7 +55,7 @@ done
 # which is the flag a host without microvm keepers uses.
 case "$ARCH" in
   macos-arm64|linux-arm64) SHIM_ASSET="masc-exec-shim-linux-arm64" ;;
-  linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
+  macos-x64|linux-x64) SHIM_ASSET="masc-exec-shim-linux-amd64" ;;
   *) SHIM_ASSET="" ;;
 esac
 SHIM_FLAG="--no-guest-shim"
@@ -84,7 +89,7 @@ prefix="$work/bin"
 base="$work/base"
 mkdir -p "$stage" "$prefix" "$base"
 
-# Stage the file:// release: the four assets plus a SHA256SUMS with exactly
+# Stage the file:// release: the release assets plus a SHA256SUMS with exactly
 # the format install.sh's verify_checksum parses ("<hash>  <name>").
 for a in "${ASSETS[@]}"; do
   cp "$BIN_DIR/$a" "$stage/$a"
@@ -101,10 +106,13 @@ MASC_RELEASE_BASE_URL="file://$work/release" \
     --base-path "$base" \
     --no-wizard $SHIM_FLAG
 
-for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all four binaries"
+echo "install-smoke: installer placed all five executables"
+"$prefix/masc-tui" --help > "$work/tui-help.txt"
+"$prefix/masc-browser-host" --help > "$work/browser-host-help.txt"
+
 
 shim_dest="$base/.masc/microvm/shim/masc-exec-shim"
 if [ -z "$SHIM_FLAG" ]; then
@@ -127,18 +135,81 @@ for f in runtime.toml agent-core-models-overlay.toml; do
   [ -f "$base/.masc/config/$f" ] || {
     echo "install-smoke: installer seeded no $f" >&2; exit 1; }
 done
-# The roster is the operator's. A seed that hands over keepers would autoboot
-# them into a sandbox this host does not have.
-if [ -n "$(ls -A "$base/.masc/config/keepers" 2>/dev/null)" ]; then
-  echo "install-smoke: installer seeded keeper manifests into an untouched workspace" >&2
-  ls -A "$base/.masc/config/keepers" >&2
-  exit 1
-fi
-echo "install-smoke: installer seeded config and left the keeper roster empty"
+# A fresh workspace ships one Keeper, but must not start it before the
+# operator configures a model and sandbox. Parse the installed manifest so
+# an absent, misplaced, or non-boolean opt-out cannot pass this check.
+python3 - "$base/.masc/config/keepers" <<'PY_ROSTER'
+from pathlib import Path
+import sys
+import tomllib
+
+roster = Path(sys.argv[1])
+if sorted(path.name for path in roster.iterdir()) != ["imp.toml"]:
+    raise SystemExit("install-smoke: expected exactly the first Keeper manifest imp.toml")
+with (roster / "imp.toml").open("rb") as source:
+    manifest = tomllib.load(source)
+if manifest.get("keeper", {}).get("activation_mode") != "manual":
+    raise SystemExit("install-smoke: first Keeper must wait for manual start (activation_mode must be manual)")
+PY_ROSTER
+for f in SKILL.md references/connection.md references/advanced.md references/verification.md; do
+  [ -f "$base/.masc/skills/browser-lanes/$f" ] || {
+    echo "install-smoke: missing builtin browser Skill file $f" >&2; exit 1; }
+done
+echo "install-smoke: installer seeded config and builtin Skills, and one Keeper waiting for manual start"
+
+# Built-in skill packages come from the verified binary, not a source checkout.
+for file in SKILL.md references/advanced.md references/connection.md references/verification.md; do
+  [ -f "$base/.masc/skills/browser-lanes/$file" ] || {
+    echo "install-smoke: browser-lanes package missing $file" >&2; exit 1;
+  }
+done
+echo "install-smoke: installer seeded the complete browser-lanes Skill package"
+
+[ -f "$base/.masc/skills/evidence-review/SKILL.md" ] || {
+  echo "install-smoke: evidence-review Skill missing" >&2; exit 1;
+}
+
+# Reinstall the actual compiled artifact through the upgrade branch. This
+# proves init --skills-only against real embedded assets, not a fixture CLI.
+# Same-version --force is deliberate: this checks preservation, not migration
+# from an older release's configuration schema.
+runtime_config="$base/.masc/config/runtime.toml"
+operator_file="$base/.masc/config/operator-install-smoke.txt"
+optional_config="$base/.masc/config/themes/tomorrow-night.toml"
+[ -f "$optional_config" ] || { echo "install-smoke: optional theme was not seeded" >&2; exit 1; }
+printf '\n# install-smoke operator setting must survive reinstall\n' >> "$runtime_config"
+printf 'operator-owned install-smoke bytes\n' > "$operator_file"
+cp "$runtime_config" "$work/runtime-before-upgrade.toml"
+cp "$operator_file" "$work/operator-before-upgrade.txt"
+cp -R "$base/.masc/skills/browser-lanes" "$work/browser-skill-before-upgrade"
+rm "$optional_config"
+commit_before="$("$prefix/masc" build-commit)"
+# shellcheck disable=SC2086  # SHIM_FLAG is one optional word, or empty
+MASC_RELEASE_BASE_URL="file://$work/release" \
+  bash "$INSTALL_SH" --version "$VERSION" --prefix "$prefix" \
+    --base-path "$base" --force --no-wizard $SHIM_FLAG
+[ "$("$prefix/masc" build-commit)" = "$commit_before" ] || {
+  echo "install-smoke: reinstall changed the packaged build commit" >&2; exit 1;
+}
+python3 - "$base" "$work" <<'PYUPGRADE'
+import pathlib
+import sys
+base, work = map(pathlib.Path, sys.argv[1:])
+config = base / '.masc/config'
+assert (config / 'runtime.toml').read_bytes() == (work / 'runtime-before-upgrade.toml').read_bytes(), 'operator runtime bytes changed'
+assert (config / 'operator-install-smoke.txt').read_bytes() == (work / 'operator-before-upgrade.txt').read_bytes(), 'operator file changed'
+assert not (config / 'themes/tomorrow-night.toml').exists(), 'upgrade restored deliberately removed optional config'
+def files(root):
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+assert files(base / '.masc/skills/browser-lanes') == files(work / 'browser-skill-before-upgrade'), 'installed builtin Skill package changed'
+PYUPGRADE
+echo "install-smoke: actual-artifact force reinstall preserved config, removed optional theme, and builtin Skills"
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
-MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
+mkdir -p "$work/outside-checkout"
+cd "$work/outside-checkout"
+env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
@@ -156,4 +227,11 @@ case "$health" in
   *) echo "install-smoke: /health did not report ok: ${health:-<no response>}" >&2; cat "$log" >&2; exit 1 ;;
 esac
 
+python3 "$REPO_ROOT/scripts/check-installed-dashboard.py" \
+  --binary "$prefix/masc" --base-url "http://127.0.0.1:$PORT"
+if [ -n "$KEEPER_IMAGE" ]; then
+  python3 "$REPO_ROOT/scripts/keeper-first-turn-smoke.py" \
+    --binary "$prefix/masc" --image "$KEEPER_IMAGE" \
+    --output-dir "$BIN_DIR/first-keeper-turn-$ARCH"
+fi
 echo "install-smoke: PASS"

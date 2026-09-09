@@ -4,6 +4,8 @@ export type BoardLatencyOperation =
   | 'list'
   | 'list_more'
   | 'fusion_list'
+  // one run's evidence, fetched by run id rather than found in the list
+  | 'fusion_evidence'
   | 'detail'
   | 'reaction_summary'
   | 'reaction_toggle'
@@ -22,6 +24,7 @@ const OPERATIONS: BoardLatencyOperation[] = [
   'list',
   'list_more',
   'fusion_list',
+  'fusion_evidence',
   'detail',
   'reaction_summary',
   'reaction_toggle',

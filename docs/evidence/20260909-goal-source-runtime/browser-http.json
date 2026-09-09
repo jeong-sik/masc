@@ -1,0 +1,14 @@
+[
+  {
+    "url": "http://127.0.0.1:58941/api/v1/dashboard/goals",
+    "status": 200,
+    "sha256": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+    "body": "{\"ok\":false,\"error_code\":\"goal_store_unavailable\",\"error\":\"goal_of_yojson: criterion_revision must be a non-blank string\"}"
+  },
+  {
+    "url": "http://127.0.0.1:58941/api/v1/dashboard/planning",
+    "status": 200,
+    "sha256": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+    "body": "{\"ok\":false,\"error_code\":\"goal_store_unavailable\",\"error\":\"goal_of_yojson: criterion_revision must be a non-blank string\"}"
+  }
+]

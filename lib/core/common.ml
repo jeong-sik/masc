@@ -53,14 +53,39 @@ let keepers_runtime_dirname = "keepers"
    not, and on 2026-09-05 that produced four keepers that could not boot on a
    host without Docker and a hand-built sandbox image. [dune] is a build input
    ocaml-crunch swept up with the tree, not runtime config. *)
+let default_keepers_dirname = "keepers-default"
+
+let first_path_segment rel =
+  match String.index_opt rel '/' with
+  | Some i -> String.sub rel 0 i
+  | None -> rel
+
 let seeds_into_fresh_config_root rel =
-  let first_segment =
-    match String.index_opt rel '/' with
-    | Some i -> String.sub rel 0 i
-    | None -> rel
-  in
+  let first_segment = first_path_segment rel in
   (not (String.equal (Filename.basename rel) "dune"))
-  && not (String.equal first_segment keepers_runtime_dirname)
+  && (not (String.equal first_segment keepers_runtime_dirname))
+  && not (String.equal first_segment default_keepers_dirname)
+
+(* The exception the exclusion above leaves room for. An empty roster is not
+   neutral: it gives an operator a running server and nobody to start, and the
+   first thing they must do is author a manifest before they have seen one.
+   [keepers-default/] holds what a fresh workspace does get, and it lands under
+   [keepers_runtime_dirname] rather than copying verbatim -- which is why the
+   directory is excluded above and rewritten here instead.
+
+   Neither reason for excluding the repo's own [keepers/] applies to it. It
+   autoboots nothing, so the 2026-09-05 shape cannot repeat; and one Keeper
+   whose text says to edit it is a starting point rather than someone else's
+   team imported into this workspace.
+
+   Naming a directory instead of a Keeper is deliberate: adding, renaming or
+   removing what ships never edits OCaml source, which
+   [test_ocaml_sources_exclude_declared_concrete_keeper_identities] requires. *)
+let fresh_config_root_keeper_seed_target rel =
+  if String.equal (first_path_segment rel) default_keepers_dirname
+     && Filename.check_suffix rel ".toml"
+  then Some (Filename.concat keepers_runtime_dirname (Filename.basename rel))
+  else None
 
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname

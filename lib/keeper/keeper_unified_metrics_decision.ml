@@ -162,7 +162,15 @@ let append_decision_record
                      (Keeper_world_observation_message_scope.pairs_of_kind
                         Keeper_world_observation_message_scope.Scope
                         observation.pending_messages)) );
-              ("active_goals", `Int (List.length observation.active_goals));
+              ("active_goals", (match observation.active_goals with
+                | Ok ids -> `Int (List.length ids)
+                | Error _ -> `Null));
+              ("active_goals_source", (match observation.active_goals with
+                | Ok _ -> `Assoc [ "status", `String "available" ]
+                | Error detail -> `Assoc
+                    [ "status", `String "unavailable"
+                    ; "error_code", `String "goal_store_unavailable"
+                    ; "error", `String detail ]));
               ("idle_seconds", `Int observation.idle_seconds);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int claimable_task_count);

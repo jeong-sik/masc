@@ -588,7 +588,7 @@ let replay_evidence_effect_to_string = function
   | Evidence_indeterminate -> "indeterminate"
 ;;
 
-let replay_evidence_json evidence =
+let replay_evidence_json ?(include_journal = true) evidence =
   let payload_field =
     match evidence.effect_kind with
     | Evidence_applied -> "untrusted_tool_output_ref"
@@ -596,17 +596,17 @@ let replay_evidence_json evidence =
       "detail_ref"
   in
   `Assoc
-    [ "approval_id", `String evidence.approval_id
+    ([ "approval_id", `String evidence.approval_id
     ; "operation", `String evidence.operation
     ; "effect", `String (replay_evidence_effect_to_string evidence.effect_kind)
-    ; "replay_journal", `String (replay_journal_to_string evidence.journal)
     ; ( payload_field
       , Tool_output.normalized_artifact_ref_to_json evidence.artifact_ref )
-    ]
+    ] @ if include_journal then
+      [ "replay_journal", `String (replay_journal_to_string evidence.journal) ] else [])
   |> Yojson.Safe.to_string
 ;;
 
-let replay_evidence_fragment evidence =
+let replay_evidence_fragment ?(include_journal = true) evidence =
   let key =
     match evidence.effect_kind with
     | Evidence_applied -> Prompt_names.keeper_gate_replay_evidence_applied
@@ -615,9 +615,20 @@ let replay_evidence_fragment evidence =
     | Evidence_failed -> Prompt_names.keeper_gate_replay_evidence_failed
     | Evidence_indeterminate -> Prompt_names.keeper_gate_replay_evidence_indeterminate
   in
-  let evidence_json = replay_evidence_json evidence in
+  let evidence_json = replay_evidence_json ~include_journal evidence in
   render_gate_replay_prompt key [ "evidence_json", evidence_json ] ~fallback:evidence_json
   |> Inference_utils.sanitize_text_utf8
+;;
+
+let approval_input evidence =
+  let stable = replay_evidence_json ~include_journal:false evidence in
+  let fingerprint = Digestif.SHA256.(digest_string stable |> to_hex) in
+  match Keeper_approval_input_admission.identity
+          ~approval_id:evidence.approval_id ~evidence_fingerprint:fingerprint with
+  | Error _ as error -> error
+  | Ok identity ->
+    Ok (identity, Agent_core.Types.user_msg
+          (replay_evidence_fragment ~include_journal:false evidence))
 ;;
 
 let canonical_replay_evidence_fragment evidence =
@@ -720,8 +731,13 @@ let append_model_evidence_block evidence blocks =
 ;;
 
 let project_model_input ~base_path:_ evidence messages =
-  let referenced = replay_evidence_fragment evidence in
-  Ok (messages @ [ Agent_core.Types.user_msg referenced ])
+  match approval_input evidence with
+  | Error error -> Error (Agent_core.Error.Internal
+      (Keeper_approval_input_admission.error_to_string error))
+  | Ok (identity, message) ->
+    if Keeper_approval_input_admission.contains ~identity ~message messages
+    then Ok messages
+    else Ok (messages @ [message])
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

@@ -34,9 +34,8 @@ let init_unified_tool_registry () =
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let fixture_config_keys =
     [ "mention_targets"
-    ; "proactive_enabled"
     ; "always_allow"
-    ; "autoboot_enabled"
+    ; "activation_mode"
     ; "telemetry_feedback_enabled"
     ; "telemetry_feedback_window_hours"
     ]
@@ -148,9 +147,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     let apply_bool_opt key current =
       match bool_opt key with Some _ as v -> v | None -> current
     in
-    let apply_bool key current =
-      match bool_opt key with Some v -> v | None -> current
-    in
     let apply_string_list key current =
       match Safe_ops.json_string_list key fixture_json with
       | [] -> current
@@ -159,12 +155,14 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     Ok
       { meta with
         mention_targets = apply_string_list "mention_targets" meta.mention_targets
-      ; proactive =
-          (match bool_opt "proactive_enabled" with
-           | Some enabled -> { enabled }
-           | None -> meta.proactive)
+      ; activation_mode =
+          (match Safe_ops.json_string_opt "activation_mode" fixture_json with
+           | None -> meta.activation_mode
+           | Some raw ->
+             match Masc.Keeper_activation_mode.of_string raw with
+             | Some mode -> mode
+             | None -> invalid_arg "invalid fixture activation_mode")
       ; always_allow = apply_bool_opt "always_allow" meta.always_allow
-      ; autoboot_enabled = apply_bool "autoboot_enabled" meta.autoboot_enabled
       ; telemetry_feedback_enabled =
           apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
       ; telemetry_feedback_window_hours =
@@ -464,4 +462,52 @@ let fixture_sandbox_profile () =
             (String.concat
                ", "
                Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
+;;
+
+(* The factory a fixture's guest command is dispatched through.
+
+   Typed Shell IR guest dispatch refuses to run without one:
+
+     {"error":"typed Shell IR guest dispatch requires a turn sandbox factory
+       (no factory provided)"}
+
+   Every profile a fixture can name is a guest profile, so a suite whose case
+   must actually run its command wires the same factory the production turn
+   bundle wires. The factory creates its runtime lazily: a case that never
+   dispatches a guest command starts no container. What a case that did
+   dispatch owes at the end is {!teardown_fixture_sandbox}, called from the
+   fixture's own finally. *)
+let fixture_turn_sandbox_factory ~config ~meta =
+  Some (Masc.Keeper_sandbox_factory.create ~config ~meta ())
+;;
+
+(* How long a fixture waits for the daemon to remove one container. *)
+let fixture_sandbox_teardown_timeout_sec = 30.0
+
+(* The persistent container a fixture's keeper started, removed. The factory
+   never removes it: production removes it at keeper teardown, and
+   [Keeper_sandbox_factory.cleanup] only drops the handle. Not an [at_exit]:
+   that cleanup takes an Eio mutex and the docker call goes through
+   Process_eio, and at process exit neither effect has a handler --
+   test_keeper_tool_dispatch_runtime.exe ended in Effect.Unhandled that way
+   on CI (run 34296943348). Call this inside the fixture's Eio context, in the
+   finally that also unregisters the keeper. Only a run allowed the real
+   daemon can have started a container. A removal failure is reported on
+   stderr, not raised, so it cannot stand in for the case's own result. *)
+let teardown_fixture_sandbox
+    ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  if Env_config_core.real_docker_allowed_under_test ()
+  then
+    match
+      Masc.Keeper_sandbox_runtime.remove_persistent_containers
+        ~keeper_name:meta.name
+        ~base_path:config.base_path
+        ~timeout_sec:fixture_sandbox_teardown_timeout_sec
+        ()
+    with
+    | Ok () -> ()
+    | Error detail ->
+      Printf.eprintf "fixture sandbox teardown for %s: %s\n%!" meta.name detail
 ;;

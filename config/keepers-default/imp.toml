@@ -1,0 +1,15 @@
+# The one Keeper a fresh workspace starts with. Edit it — it is a starting
+# point, not a fixed role.
+#
+# autoboot stays off on purpose: a fresh install has no model and no sandbox
+# yet, and a Keeper that boots before those exist just fails on first start.
+# Turn it on, or start this one by hand, once docs/INSTALL.md's model and
+# sandbox steps are done.
+[keeper]
+activation_mode = "manual"
+sandbox_profile = "docker"
+network_mode = "inherit"
+
+instructions = """
+운영자가 요청한 일을 우선 처리하세요. 필요한 도구를 검색하고, 작업이 여러 단계로 나뉘면 Task로 정리하세요. 협업에 필요한 내용은 Board에서 나누세요.
+"""

@@ -27,6 +27,13 @@ type submitted_evidence_item =
       { reference : string
       ; reason : evidence_read_failure
       }
+  | Evidence_artifact_binary of
+      { reference : string
+      ; bytes : int
+      ; sha256 : string
+      ; format : string
+      ; body : string option
+      }
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -116,7 +123,56 @@ val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller
     what to write instead. *)
 
+type artifact_payload =
+  | Text_payload of string * int * bool
+  | Binary_payload of
+      { data : string; bytes : int; sha256 : string; format : string }
+
+type artifact_read_result = (artifact_payload, evidence_read_failure) result
+(** One artifact's read: text as [(content, bytes, truncated)] — [bytes] may
+    exceed the content length when the read was capped — or binary as raw
+    bytes with their hash and format (RFC-0436 §4.1). A reader that cannot
+    answer returns the typed failure instead. *)
+
+type utf8_scan =
+  | Utf8_valid
+  | Utf8_incomplete_at of int
+  | Utf8_invalid
+
+val scan_utf8 : string -> utf8_scan
+(** The text line every artifact read answers under. Exposed so an injected
+    reader classifies its bytes with the same scan the store applies, rather
+    than a second opinion ({#33816}, RFC-0436 §4.1). *)
+
+val image_media_type_of_binary_format : string -> string option
+(** Whether a binary artifact's [format] is an image a runtime accepts as
+    attached input, and as which media type (RFC-0436 §4.3). The format
+    taxonomy stays with the store that produced it. *)
+
+val persist_binary_body :
+  base_path:string ->
+  ?request_id:string ->
+  ?index:int ->
+  string ->
+  string option
+(** File a binary artifact's bytes as the evidence body and answer the
+    masc-dir-relative path recorded on the item (RFC-0436 §4.2). [None] when
+    no request id was given — the hash still stands, the body is simply not
+    filed. Exposed so a test builds a filed item through the same filing the
+    capture path uses. *)
+
+val read_binary_body_base64 :
+  base_path:string -> submitted_evidence_item -> (string, string) result
+(** The filed body of a binary artifact read back as base64 for an attached
+    media block. [Error] when the item is not a binary artifact, filed no
+    body (decoded from persistence, not captured), the body file cannot be
+    read, or the body exceeds the capture ceiling
+    {!verification_evidence_max_bytes} — the judge then rests on the
+    reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
+
 val snapshot_submitted_evidence_json :
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
+  ?request_id:string ->
   base_path:string ->
   worker:string ->
   string list ->
@@ -129,7 +185,11 @@ val snapshot_submitted_evidence_json :
     a payload-free typed invalid-reference item. *)
 
 val artifact_reference_size :
-  base_path:string -> worker:string -> string -> int option
+  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
+  base_path:string ->
+  worker:string ->
+  string ->
+  int option
 (** Real byte size of an artifact reference, measured on the same validated
     descriptor the snapshot reads, without materializing content. [None] for
     non-artifact references, invalid paths, and files that cannot be read —

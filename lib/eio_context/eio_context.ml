@@ -49,6 +49,10 @@ let with_test_env_lock = Eio.Mutex.create ()
    identity is what [with_binding] / [get] use to look up the value. *)
 let sw_key : Eio.Switch.t Eio.Fiber.key = Eio.Fiber.create_key ()
 
+(* [snapshot] is the opaque .mli face of [state_snapshot]: the fields are
+   written by [snapshot_state] and read by [restore_state] only. *)
+type snapshot = state_snapshot
+
 let snapshot_state () =
   {
     net = Atomic.get current_net;
@@ -89,7 +93,7 @@ let set_switch sw =
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
       | Some task ->
-        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain *)
+        (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain. @observe-allowed: the switch is already releasing, so no caller is left to hand a task's failure to *)
         drain ()
       | None -> ()
     in
@@ -98,7 +102,7 @@ let set_switch sw =
     while true do
       let task = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
-        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive *)
+        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive. @observe-allowed: same reason -- what reaches here was already reported by the task, or is teardown *)
     done;
     `Stop_daemon)
 
@@ -147,7 +151,7 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
       try
         let res = f () in
         Eio.Promise.resolve_ok r res
-      with exn ->  (* cancel-guard-ok: not a swallow — the exception, Cancelled included, is re-delivered to the awaiting domain via the promise *)
+      with exn ->  (* not a swallow: the exception, Cancelled included, is re-delivered to the awaiting domain via the promise below *)
         let bt = Printexc.get_raw_backtrace () in
         Eio.Promise.resolve_error r (exn, bt)
     in

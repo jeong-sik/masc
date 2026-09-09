@@ -35,7 +35,24 @@
 
 open Alcotest
 
-let tools_dir = "config/tools"
+(* Resolved against the checkout rather than the working directory. The
+   stanza's [(deps ...)] stage this directory into dune's own runtest action,
+   so a relative path found it there -- and nowhere else. The targeted CI
+   runner executes the binary straight out of [_build/default/test], where
+   every case died on [Sys_error "config/tools: No such file or directory"],
+   which is a report about a working directory wearing the name of a report
+   about tool names.
+
+   [DUNE_SOURCEROOT] is what dune sets to the workspace root, and it is how
+   every other suite that reads source finds it. The deps stay: they are what
+   makes a new tool re-run this test. *)
+let tools_dir =
+  let root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when Sys.file_exists root -> root
+    | Some _ | None -> Sys.getcwd ()
+  in
+  Filename.concat root "config/tools"
 
 (* [tool_] is not a third namespace. These five are the runtime handlers the
    catalog marks hidden from the public MCP schema surface; a Keeper reaches
@@ -48,6 +65,21 @@ let runtime_handler_prefix = "tool_"
 let bare_builtins = [ "Read"; "Write"; "Edit"; "Grep"; "Execute" ]
 
 let allowed_prefixes = [ "keeper_"; "masc_"; runtime_handler_prefix ]
+
+(* The verifier lane's one tool, listed by exact name. It is not on a
+   Keeper's request surface: the measurement above counted the 88 tools that
+   reach a Keeper, and this is not one of them. The judge on the
+   [verifier_exact] lane is handed it alone, its schema read straight out of
+   [config/tools/report_review_verdict.toml] by [Task.Anti_rationalization],
+   and [config/prompts/verification.md] and [config/prompts/goal_verification.md]
+   name it to that judge.
+
+   Neither prefix fits and both would misfile it. [keeper_] says a thing this
+   Keeper does or owns; [masc_] says the shared plane every Keeper reads. A
+   judge's verdict on a lane is neither, which is why this is an exact name
+   and not a third prefix -- a second judge-side tool is then a decision made
+   here rather than a spelling that arrives with a file. *)
+let judge_lane_tools = [ "report_review_verdict" ]
 
 let tool_names () =
   Sys.readdir tools_dir
@@ -75,9 +107,27 @@ let test_prefix_vocabulary_is_closed () =
   let names = tool_names () in
   check bool "the directory has tools" true (List.length names > 100);
   let unclassified =
-    List.filter (fun n -> classify n = None && not (List.mem n bare_builtins)) names
+    List.filter
+      (fun n ->
+         classify n = None
+         && (not (List.mem n bare_builtins))
+         && not (List.mem n judge_lane_tools))
+      names
   in
   check (list string) "no tool outside the vocabulary" [] unclassified
+;;
+
+(* An allowance for a file nobody ships is a sentence about a tool that does
+   not exist. #34367 deleted two callback allowances that had outlived the
+   signatures they covered, and they had sat unread for weeks; this keeps the
+   one above from becoming the same thing. *)
+let test_the_judge_allowance_still_names_a_tool () =
+  let names = tool_names () in
+  check
+    (list string)
+    "every judge-lane allowance names a declared tool"
+    []
+    (List.filter (fun n -> not (List.mem n names)) judge_lane_tools)
 ;;
 
 (* The guard has to fail on the thing it claims to catch. Without this a
@@ -138,6 +188,10 @@ let () =
             "a new spelling would fail"
             `Quick
             test_a_new_spelling_would_fail
+        ; test_case
+            "the judge-lane allowance still names a tool"
+            `Quick
+            test_the_judge_allowance_still_names_a_tool
         ; test_case
             "the declared name matches the file"
             `Quick

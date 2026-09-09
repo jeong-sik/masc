@@ -43,6 +43,37 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Every file the scratch project is built from, repo-relative. One list, so
+# that a caller deciding whether the artifact is stale asks rather than
+# repeats: scripts/test-ssh-fixture.sh kept its own copy naming four of
+# these eight, so a change to observe_stub.c, to either .mli, or to
+# shim_build_id.mli left the fixture exercising the previous binary and
+# reporting it as this one's behaviour.
+shim_sources=(
+  lib/exec_ssh_protocol/exec_ssh_protocol.ml
+  lib/exec_ssh_protocol/exec_ssh_protocol.mli
+  lib/exec_shim/exec_shim.ml
+  lib/exec_shim/exec_shim.mli
+  lib/exec_shim/prctl_stub.c
+  lib/exec_shim/observe_stub.c
+  lib/exec_shim/monotonic_stub.c
+  lib/exec_shim/shim_clock.ml
+  lib/exec_shim/shim_clock.mli
+  lib/exec_shim/shim_build_id.mli
+  bin/masc_exec_shim.ml
+)
+
+# --print-sources answers with absolute paths and builds nothing. Answered
+# before the docker checks below, because a caller asking what the artifact
+# depends on does not need a daemon.
+if [ "${1:-}" = "--print-sources" ]; then
+  for source in "${shim_sources[@]}"; do
+    printf '%s/%s\n' "$repo_root" "$source"
+  done
+  exit 0
+fi
+
 out_path="${1:-"$repo_root/artifacts/masc-exec-shim"}"
 image="${SHIM_BUILD_IMAGE:-ocaml/opam:alpine-3.24-ocaml-5.5}"
 
@@ -60,18 +91,35 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-stage="$(mktemp -d)"
+# Under the repo and not $TMPDIR or /tmp. The docker daemon resolves a bind
+# mount on its own filesystem: on macOS it shares the Mac's /Users but hands
+# out its own /tmp, and $TMPDIR is /var/folders, which it does not share at
+# all. A source path it cannot see is not an error -- it arrives as an empty
+# directory -- so the whole scratch project silently went missing and dune
+# reported that it could not find a project root. dist/ is ignored by git.
+mkdir -p "$repo_root/dist"
+stage="$(mktemp -d "$repo_root/dist/shim-static.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/src" "$stage/out"
 
-cp "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.ml" \
-   "$repo_root/lib/exec_ssh_protocol/exec_ssh_protocol.mli" \
-   "$repo_root/lib/exec_shim/exec_shim.ml" \
-   "$repo_root/lib/exec_shim/exec_shim.mli" \
-   "$repo_root/lib/exec_shim/prctl_stub.c" \
-   "$repo_root/lib/exec_shim/observe_stub.c" \
-   "$repo_root/bin/masc_exec_shim.ml" \
-   "$stage/src/"
+for source in "${shim_sources[@]}"; do
+  cp "$repo_root/$source" "$stage/src/"
+done
+
+# Write the build identity this artifact reports through its probe. In the
+# repo a dune rule generates this module (the release comes from
+# dune-project); this scratch project has no package, so the script writes
+# the same two values itself. git is a build dependency here the way dune is;
+# a build outside a git tree falls back to the date, which still
+# distinguishes two builds of the same day.
+build_id="$(git -C "$repo_root" rev-parse --short=8 HEAD 2>/dev/null \
+  || date -u +%Y%m%d)"
+release="$(sed -n 's/^(version \(.*\))$/\1/p' "$repo_root/dune-project" | head -1)"
+[ -n "$release" ] || { echo "no (version ...) in dune-project" >&2; exit 1; }
+{
+  printf 'let suffix = "+%s"\n' "$build_id"
+  printf 'let release = "%s"\n' "$release"
+} > "$stage/src/shim_build_id.ml"
 
 cat > "$stage/src/dune-project" <<'EOF'
 (lang dune 3.0)
@@ -84,9 +132,17 @@ cat > "$stage/src/dune" <<'EOF'
  (libraries yojson base64))
 
 (library
+ (name shim_clock)
+ (wrapped false)
+ (modules shim_clock)
+ (foreign_stubs
+  (language c)
+  (names monotonic_stub)))
+
+(library
  (name exec_shim)
- (modules exec_shim)
- (libraries exec_ssh_protocol unix)
+ (modules exec_shim shim_build_id)
+ (libraries exec_ssh_protocol shim_clock unix)
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))
@@ -115,6 +171,13 @@ docker run --rm ${platform_args[@]+"${platform_args[@]}"} \
     # The image runs as the unprivileged opam user; / is not writable.
     cp -r /src \"\$HOME/work\"
     cd \"\$HOME/work\"
+    # An unshared bind mount arrives as an empty directory. Say that, rather
+    # than letting dune report that it cannot find the root of a project it
+    # was never given.
+    [ -f dune-project ] || {
+      echo 'build-shim-static: the staged sources did not reach the container; check the docker daemon file sharing for /tmp' >&2
+      exit 1
+    }
     dune build ./masc_exec_shim.exe
     cp _build/default/masc_exec_shim.exe /out/masc-exec-shim
     strip /out/masc-exec-shim 2>/dev/null || true

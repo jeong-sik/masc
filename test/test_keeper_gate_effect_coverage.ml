@@ -574,9 +574,12 @@ let test_keeper_effects_unavailable_without_dispatch () =
            ~args:(`Assoc [ "opaque", `String name ])
            ()
        in
+       (* The approval machinery was unavailable, so the effect provably did
+          not run. That is a missing dependency, not a fault in the call:
+          Runtime_failure would reach the model as an uncertain outcome. *)
        expect_failed
          (name ^ " unavailable")
-         Tool_result.Runtime_failure
+         Tool_result.Dependency_unavailable
          result)
     keeper_effect_names;
   check int "unavailable Gate executes no Keeper effect" 0 (List.length !calls)
@@ -664,7 +667,7 @@ let test_ollama_probe_defer_and_unavailable_do_not_dispatch () =
       ~args:ollama_probe_input
       ()
   in
-  expect_failed "probe unavailable" Tool_result.Runtime_failure unavailable;
+  expect_failed "probe unavailable" Tool_result.Dependency_unavailable unavailable;
   ()
 ;;
 
@@ -804,6 +807,66 @@ let test_voice_effect_defers_without_gating_local_reads () =
     (List.length (pending_entries ()))
 ;;
 
+(* Under Auto_judge a speak is sorted before the judge is paid: its effect
+   lands on the operator's own outputs, so the Gate allows it as
+   [Local_output] with no queue row and no judge turn. Only speak is sorted
+   that way — a connector post from the same keeper under the same mode still
+   goes to the judge lane — and Manual is untouched: the case above parks
+   the same speak. Listen never reaches the Gate at all (also above). *)
+let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
+  with_clean_gate_runtime @@ fun () ->
+  let base_path = temp_dir "voice-gate-local-output" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  select_workspace config Keeper_gate_mode.Auto_judge;
+  ignore (install_exn ~base_path);
+  let request operation =
+    { Keeper_gate.keeper_name = "voice-gate-keeper"
+    ; operation
+    ; input = `Assoc [ "message", `String "gate coverage probe" ]
+    ; call_summary = None
+    ; base_path
+    ; causal_context = None
+    ; task_id = None
+    ; continuation_channel = None
+    ; sandbox_profile = None
+    }
+  in
+  (match
+     Keeper_gate.decide
+       ~keeper_always_allow:false
+       (request Keeper_gate.voice_speak_gate_operation)
+   with
+   | Keeper_gate.Allow { source = Keeper_gate.Local_output; _ } -> ()
+   | Keeper_gate.Allow { source; _ } ->
+     failf
+       "speak was allowed through the wrong source: %s"
+       (Keeper_gate.authorization_source_to_string source)
+   | Keeper_gate.Deferred _ -> fail "speak paid a judge turn under auto_judge"
+   | Keeper_gate.Unavailable _ -> fail "speak made the queue unavailable");
+  (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
+   | Ok [] -> ()
+   | Ok pending ->
+     failf "speak left %d pending approval(s) behind" (List.length pending)
+   | Error error -> fail (Keeper_approval_queue.storage_error_to_string error));
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (request Keeper_gate.connector_post_gate_operation)
+  with
+  | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ }
+  | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
+    fail "a connector post went to the human queue under auto_judge"
+  | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
+    fail ("connector post: mode_state_invalid: " ^ detail)
+  | Keeper_gate.Allow { source; _ } ->
+    failf
+      "a connector post was allowed without a judge through %s"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Unavailable _ -> fail "a connector post made the queue unavailable"
+;;
+
 let () =
   run
     "keeper_gate_effect_coverage"
@@ -884,6 +947,10 @@ let () =
             "external effect defers without gating local reads"
             `Quick
             test_voice_effect_defers_without_gating_local_reads
+        ; test_case
+            "auto_judge allows speak as local output without a judge"
+            `Quick
+            test_auto_judge_allows_speak_as_local_output_without_a_judge
         ] )
     ]
 ;;

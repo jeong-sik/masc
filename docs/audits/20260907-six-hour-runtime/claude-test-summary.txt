@@ -1,0 +1,33 @@
+test suite	Test	2026-09-07T03:16:51.5574270Z [targeted] test_runtime_claude_code: stanza env
+test suite	Test	2026-09-07T03:16:51.5603148Z [targeted] test_runtime_claude_code: start 2026-09-07T03:16:51Z
+test suite	Test	2026-09-07T03:16:53.3225898Z   [OK]          API diagnostic origin                   0   quota remains fai...
+test suite	Test	2026-09-07T03:16:53.3327110Z   [OK]          API diagnostic origin                   1   prior text remain...
+test suite	Test	2026-09-07T03:16:53.3561025Z   [OK]          API diagnostic origin                   2   prior and mixed n...
+test suite	Test	2026-09-07T03:16:53.4798495Z   [OK]          API diagnostic origin                   3   prior and mixed M...
+test suite	Test	2026-09-07T03:16:53.4871398Z   [OK]          API diagnostic origin                   4   overflow remains ...
+test suite	Test	2026-09-07T03:16:53.4958212Z   [OK]          API diagnostic origin                   5   terminal error de...
+test suite	Test	2026-09-07T03:16:53.5142657Z   [OK]          API diagnostic origin                   6   identical ordinar...
+test suite	Test	2026-09-07T03:16:53.5476829Z   [OK]          API diagnostic origin                   7   malformed flag fa...
+test suite	Test	2026-09-07T03:16:53.5567670Z   [OK]          API diagnostic origin                   8   valid response fo...
+test suite	Test	2026-09-07T03:16:53.5657507Z   [OK]          API diagnostic origin                   9   diagnostic preser...
+test suite	Test	2026-09-07T03:16:53.8679541Z Test Successful in 2.296s. 62 tests run.
+test suite	Test	2026-09-07T03:16:53.8716552Z [targeted] test_runtime_claude_code: OK in 2s
+test suite	Test	2026-09-07T03:16:53.8992913Z [targeted] test_keeper_claude_code_runtime: stanza env
+test suite	Test	2026-09-07T03:16:53.9021694Z [targeted] test_keeper_claude_code_runtime: start 2026-09-07T03:16:53Z
+test suite	Test	2026-09-07T03:16:54.0224924Z │ [FAIL]        lifecycle              0   settles and resumes.                │
+test suite	Test	2026-09-07T03:16:54.0236802Z │ [FAIL]        lifecycle              1   Agent Core checkpoint starts of...  │
+test suite	Test	2026-09-07T03:16:54.0249577Z │ [FAIL]        lifecycle              2   shrinks history after statusles...  │
+test suite	Test	2026-09-07T03:16:54.0258785Z │ [FAIL]        lifecycle              3   projects typed tool history and...  │
+test suite	Test	2026-09-07T03:16:54.0267464Z │ [FAIL]        lifecycle              4   projects MASC tool.                 │
+test suite	Test	2026-09-07T03:16:54.0276951Z │ [FAIL]        lifecycle              5   distinguishes native and MASC t...  │
+test suite	Test	2026-09-07T03:16:54.0285444Z │ [FAIL]        lifecycle              6   streams text and tool events.       │
+test suite	Test	2026-09-07T03:16:54.0292649Z │ [FAIL]        lifecycle              7   tools-support false omits MCP b...  │
+test suite	Test	2026-09-07T03:16:54.0299732Z │ [FAIL]        lifecycle              8   post-effect transport enters re...  │
+test suite	Test	2026-09-07T03:16:54.0308271Z │ [FAIL]        lifecycle              9   does not retry context error af...  │
+test suite	Test	2026-09-07T03:16:54.0316737Z │ [FAIL]        lifecycle             11   pre-effect provider rejection k...  │
+test suite	Test	2026-09-07T03:16:54.0323603Z │ [FAIL]        lifecycle             12   quota enters recovery.              │
+test suite	Test	2026-09-07T03:16:54.0331667Z │ [FAIL]        lifecycle             13   quota after tool effect remains...  │
+test suite	Test	2026-09-07T03:16:54.0339889Z │ [FAIL]        lifecycle             14   quota after native tool remains...  │
+test suite	Test	2026-09-07T03:16:54.0346927Z │ [FAIL]        lifecycle             15   spawn failure releases claim.       │
+test suite	Test	2026-09-07T03:16:54.0354476Z 15 failures! in 0.102s. 23 tests run.
+test suite	Test	2026-09-07T03:16:54.0355480Z [targeted] test_keeper_claude_code_runtime: FAIL exit 1 in 1s

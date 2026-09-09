@@ -36,7 +36,7 @@ function row(overrides: Record<string, unknown> = {}) {
   return {
     verification_id: 'vrf-24b43c36',
     task_id: 'task-136',
-    producer: 'keeper-kidsnote-agent',
+    producer: 'keeper-exampleorg-agent',
     authority_kind: 'system_llm_agent',
     authority_actor: 'system-llm-agent-473b608e',
     started_at: 1_754_000_000,
@@ -60,7 +60,7 @@ describe('parseVerificationRunsResponse', () => {
     expect(onlyRun(parsed)).toMatchObject({
       verificationId: 'vrf-24b43c36',
       taskId: 'task-136',
-      producer: 'keeper-kidsnote-agent',
+      producer: 'keeper-exampleorg-agent',
       authorityActor: 'system-llm-agent-473b608e',
       status: 'approved',
       elapsedSeconds: 2.5,
@@ -155,7 +155,7 @@ describe('parseVerificationRunsResponse', () => {
       runs: [{
         verification_id: 'vrf-cancel-claim',
         task_id: 'task-140',
-        producer: 'keeper-kidsnote-agent',
+        producer: 'keeper-exampleorg-agent',
         authority_kind: 'system_llm_agent',
         authority_actor: 'verifier_exact',
         started_at: 1_754_000_000,

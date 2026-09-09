@@ -48,20 +48,20 @@ describe('keeper waiting inventory store', () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue({ keepers: [] })
     const intervalSpy = vi.spyOn(window, 'setInterval')
 
-    const stopLane = subscribeKeeperWaitingInventory('kidsnote')
-    const stopConversation = subscribeKeeperWaitingInventory('kidsnote')
+    const stopLane = subscribeKeeperWaitingInventory('exampleorg')
+    const stopConversation = subscribeKeeperWaitingInventory('exampleorg')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
     expect(intervalSpy).not.toHaveBeenCalled()
 
     mocks.pushRefresh?.('rondo')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
-    mocks.pushRefresh?.('kidsnote')
+    mocks.pushRefresh?.('exampleorg')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
 
     resolveFirst({ keepers: [] })
     await vi.waitFor(() => {
       expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(2)
-      expect(keeperWaitingInventoryState('kidsnote').loading).toBe(false)
+      expect(keeperWaitingInventoryState('exampleorg').loading).toBe(false)
     })
 
     const visibility = vi.spyOn(document, 'visibilityState', 'get')

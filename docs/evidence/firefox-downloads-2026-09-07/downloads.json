@@ -1,0 +1,51 @@
+{
+  "sessionId": "f1561e06-15ef-458e-a3c1-85a72fb821c8",
+  "downloads": [
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "41054acd-ca64-4a79-a192-ecbd66b4e8fb",
+      "context": "72cf4bc7-bf0b-4437-b059-f4e9f09c3288",
+      "url": "http://127.0.0.1:60676/attachment",
+      "status": "completed",
+      "suggestedFilename": "same.bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-leased-final-probe-20260907/downloads/daec50ca0bf1a0424f6f86e78cde4893/same.bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "c089acca-6c73-4cb6-ae4b-88a61a86ba58",
+      "context": "72cf4bc7-bf0b-4437-b059-f4e9f09c3288",
+      "url": "http://127.0.0.1:60676/attachment",
+      "status": "completed",
+      "suggestedFilename": "same(1).bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-leased-final-probe-20260907/downloads/daec50ca0bf1a0424f6f86e78cde4893/same(1).bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "8b8ae2c5-cdef-4aff-b322-5b09ca7ae054",
+      "context": "72cf4bc7-bf0b-4437-b059-f4e9f09c3288",
+      "url": "http://127.0.0.1:60676/plain-download",
+      "status": "completed",
+      "suggestedFilename": "attribute.bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-leased-final-probe-20260907/downloads/daec50ca0bf1a0424f6f86e78cde4893/attribute.bin",
+      "bytes": 40960
+    },
+    {
+      "artifact": { "probe_bytes": 40960 },
+      "downloadId": "24fa517c-ed22-4c4f-b4a8-2c6bf509570d",
+      "context": "36507222017",
+      "url": "http://127.0.0.1:60676/attachment?frame",
+      "status": "completed",
+      "suggestedFilename": "same(2).bin",
+      "file": "available",
+      "path": "/private/tmp/masc-download-leased-final-probe-20260907/downloads/daec50ca0bf1a0424f6f86e78cde4893/same(2).bin",
+      "bytes": 40960
+    }
+  ],
+  "observation": "connected",
+  "reason": null
+}

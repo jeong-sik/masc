@@ -42,6 +42,27 @@ let with_microvm_lifecycle_lock f =
   | Some _ -> Eio.Mutex.use_rw ~protect:true microvm_lifecycle_mutex f
 ;;
 
+let sweep_abandoned_microvm_guests
+      ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
+  (* A CLI exception leaves an inventory to re-read, not a broken in-memory
+     invariant. Release the mutex before re-raising so an optional maintenance
+     failure cannot poison every subsequent boot and teardown. *)
+  match
+    with_microvm_lifecycle_lock (fun () ->
+      try
+        Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
+          ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
+      (* This catch carries the exception out of the lock and the [Error] arm
+         below re-raises it with its backtrace, so cancellation propagates
+         rather than being absorbed. It is
+         caught here only because [use_rw ~protect:true] poisons the mutex for
+         every later boot and teardown if the body raises. *)
+      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* re-raised below *)
+  with
+  | Ok outcomes -> outcomes
+  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+;;
+
 let microvm_identity_snapshot container_name =
   Atomic.get microvm_identity_snapshots |> List.assoc_opt container_name
 ;;
@@ -504,13 +525,14 @@ let run_argv_with_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?output_capture
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     let env = sandbox_environment () in
     let cwd = Config_dir_resolver.current_working_dir () in
-    match on_stdout_chunk, on_stderr_chunk with
-    | None, None ->
+    match on_stdout_chunk, on_stderr_chunk, output_capture with
+    | None, None, None ->
       Process_eio.run_argv_with_status_split
         ?timeout_sec
         ~env
@@ -523,6 +545,7 @@ let run_argv_with_status_split
       let on_stderr_chunk = Option.value on_stderr_chunk ~default:(fun _ -> ()) in
       Process_eio.run_argv_with_status_split_streaming
         ?timeout_sec
+        ?output_capture
         ~env
         ~cwd
         ~on_stdout_chunk
@@ -544,12 +567,14 @@ let run_argv_with_stdin_and_status_split
       ?timeout_sec
       ?on_stdout_chunk
       ?on_stderr_chunk
+      ?output_capture
       ~stdin_content
       argv
   =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     Process_eio.run_argv_with_stdin_and_status_split
       ?timeout_sec
+      ?output_capture
       ~env:(sandbox_environment ())
       ~cwd:(Config_dir_resolver.current_working_dir ())
       ?on_stdout_chunk
@@ -708,9 +733,7 @@ let failed_exec_state_probe_error ~status ~output detail =
 ;;
 
 let resolve_image (t : t) =
-  match t.meta.sandbox_image with
-  | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_sandbox.Runtime.docker_image ()
+  (Env_config_sandbox.Runtime.resolve_image t.meta.sandbox_image).tag
 ;;
 
 (* A microvm guest mounts its work volume, the shim, runtime config, and its
@@ -830,8 +853,9 @@ let stop_and_delete_microvm_container ?timeout_sec ~backend container_name =
          (Keeper_sandbox_runtime.docker_failure_output_for_log delete_out))
 ;;
 
-(** The work volume (RFC-0400): the keeper's working tree, on ext4, where a
-    host descriptor is never pinned by a guest touching a file. Created if
+(** The work volume (RFC-0400): Apple's working tree is on a guest ext4 disk;
+    Linux nerdctl uses a persistent runtime-managed directory, without Apple's
+    capacity or flat host-descriptor guarantee. Created if
     it is not there yet; refusing rather than booting without it follows
     [image_present] in the same lane -- a guest with no work volume has no
     tree, and the remote lane has nowhere to run. *)
@@ -870,7 +894,7 @@ let prepare_microvm_shim_dir (t : t) =
   | exception Unix.Unix_error (code, _, _) ->
     Error
       (Printf.sprintf
-         "microvm_shim_missing: %s (%s); scripts/install.sh places it from the release (asset masc-exec-shim-linux-arm64), or build it with scripts/remote-ssh/build-shim.sh --arch arm64 and install it there"
+         "microvm_shim_missing: %s (%s); rerun the installer for the same MASC release and base path without --no-guest-shim to install the architecture-matched Linux guest shim and SHA256 sidecar"
          binary
          (Unix.error_message code))
   | () ->
@@ -945,7 +969,21 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
     while {!Keeper_sandbox_microvm.work_volume_guest_root} itself may be a
     rootfs directory. *)
 let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_name =
-  match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+  let prepare_volume =
+    match ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name with
+    | Error _ as err -> err
+    | Ok () ->
+      (match Keeper_sandbox_microvm.work_volume_search_argv_for backend ~container_name with
+       | None -> Ok ()
+       | Some argv ->
+         match run_argv_with_status ?timeout_sec argv with
+         | Unix.WEXITED 0, _ -> Ok ()
+         | _, out ->
+           Error
+             ("microvm_work_volume_search_failed: "
+              ^ Keeper_sandbox_runtime.docker_failure_output_for_log out))
+  in
+  match prepare_volume with
   | Error _ as err -> err
   | Ok () ->
   let root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
@@ -2100,6 +2138,7 @@ let run_exec_with_status_split_once
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -2115,39 +2154,43 @@ let run_exec_with_status_split_once
   with
   | Error _ as err -> err
   | Ok argv ->
-    let has_output_callback =
-      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
-    in
-    let st, stdout, stderr =
-      match stdin_content, has_output_callback with
-      | Some content, false ->
-        run_argv_with_stdin_and_status_split
-          ?timeout_sec
-          ~stdin_content:content
-          argv
-      | None, false -> run_argv_with_status_split ?timeout_sec argv
-      | Some content, true ->
+    let run ?output_capture () =
+      match stdin_content with
+      | Some content ->
         run_argv_with_stdin_and_status_split
           ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
+          ?output_capture
           ~stdin_content:content
           argv
-      | None, true ->
+      | None ->
         run_argv_with_status_split
           ?timeout_sec
           ?on_stdout_chunk
           ?on_stderr_chunk
+          ?output_capture
           argv
     in
-    Ok (st, stdout, stderr)
+    let (st, stdout, stderr), files =
+      match capture_dir with
+      | None -> run (), None
+      | Some capture_dir ->
+        let result, files =
+          Process_output_capture.with_capture ~capture_dir (fun output_capture ->
+            run ~output_capture ())
+        in
+        result, Some files
+    in
+    Ok (st, stdout, stderr, files)
 ;;
 
-let run_exec_with_status_split
+let run_exec_with_optional_output_files
       ?stdin_content
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
@@ -2162,12 +2205,13 @@ let run_exec_with_status_split
       ?on_stdout_chunk
       ?on_stderr_chunk
       ?timeout_sec
+      ?capture_dir
       t
       ~cwd
       ~command_argv
   with
   | Error _ as err -> err
-  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr) as failed ->
+  | Ok (((Unix.WEXITED 126 | Unix.WEXITED 127) as status), stdout, stderr, _) as failed ->
     (match failed_exec_recovery ?timeout_sec t with
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
@@ -2178,6 +2222,7 @@ let run_exec_with_status_split
             ?on_stdout_chunk
             ?on_stderr_chunk
             ?timeout_sec
+            ?capture_dir
             t
             ~cwd
             ~command_argv
@@ -2191,6 +2236,25 @@ let run_exec_with_status_split
             ~output:(output_for_status ~stdout ~stderr)
             detail))
   | Ok other -> Ok other
+;;
+
+let run_exec_with_status_split
+      ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+      t ~cwd ~command_argv
+  =
+  run_exec_with_optional_output_files
+    ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+    t ~cwd ~command_argv
+  |> Result.map (fun (status, stdout, stderr, _) -> status, stdout, stderr)
+;;
+
+let run_exec_with_output_files
+      ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+      ~capture_dir t ~cwd ~command_argv
+  =
+  run_exec_with_optional_output_files
+    ?stdin_content ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
+    ~capture_dir t ~cwd ~command_argv
 ;;
 
 let run_exec_with_status

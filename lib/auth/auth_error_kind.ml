@@ -115,10 +115,9 @@ let dashboard_actor_fallback_log_message fb =
       let extra_hint =
         match err_kind with
         | Token_mismatch ->
-            " Remediation: clear the browser's stored dashboard token \
-             (localStorage masc_dashboard_token) or delete \
-             .masc/auth/dashboard.token so a fresh token is minted on \
-             the next dashboard load."
+            " Remediation: clear this dashboard tab's stored credential \
+             (sessionStorage masc_bearer_token and masc_bearer_token_meta), \
+             then reload and authenticate again."
         | Token_expired
         | Unauthorized
         | Forbidden

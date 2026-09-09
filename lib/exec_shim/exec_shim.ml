@@ -376,19 +376,72 @@ let rec remove_tree path =
   | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
   | exception Unix.Unix_error _ -> ()
 
+(* RFC-0422 diagnosis: one line per request on the guest's tmpfs, so the
+   mode a request was framed with and the plan it actually got are readable
+   from the host after the fact. Best-effort by construction -- a trace that
+   could fail a dispatch would measure the trace, not the box. Capped so a
+   guest whose tmpfs hosts the trace can never be filled by it. *)
+let request_trace_path = "/tmp/masc-shim-requests.log"
+
+let request_trace_byte_cap = 4 * 1024 * 1024
+
+let trace_request ~mode ~plan argv =
+  try
+    (* An absent trace has size zero, not an exception -- otherwise the
+       guard would swallow the very first write. *)
+    let size =
+      match Unix.stat request_trace_path with
+      | { Unix.st_size; _ } -> st_size
+      | exception Unix.Unix_error _ -> 0
+    in
+    if size <= request_trace_byte_cap then begin
+      let fd =
+        Unix.openfile request_trace_path
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
+          0o644
+      in
+      let line =
+        Printf.sprintf "%d v=%s mode=%s plan=%s argv0=%s\n"
+          (int_of_float (Unix.time ()))
+          (string_of_int Exec_ssh_protocol.protocol_version ^ Shim_build_id.suffix)
+          (Exec_ssh_protocol.mode_to_string mode) plan
+          (match argv with arg0 :: _ -> arg0 | [] -> "-")
+      in
+      (* fire-and-forget: a short write only shortens one trace line *)
+      ignore (Unix.write_substring fd line 0 (String.length line));
+      Unix.close fd
+    end
+  with Unix.Unix_error _ -> ()
+;;
+
 let scratch_env ~scratch env =
   let upsert (k, v) env = (k, v) :: List.remove_assoc k env in
   env |> upsert ("HOME", scratch) |> upsert ("TMPDIR", scratch)
 
 let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
-  let (stdin_r, stdin_w) = Unix.pipe () in
-  let (stdout_r, stdout_w) = Unix.pipe () in
-  let (stderr_r, stderr_w) = Unix.pipe () in
+  let opened = ref [] in
+  let pipe ?(cloexec = false) () =
+    match Unix.pipe ~cloexec () with
+    | (read_fd, write_fd) as pair ->
+      opened := read_fd :: write_fd :: !opened;
+      pair
+    | exception exn -> List.iter Unix.close !opened; raise exn
+  in
+  let (stdin_r, stdin_w) = pipe () in
+  let (stdout_r, stdout_w) = pipe () in
+  let (stderr_r, stderr_w) = pipe () in
+  let (boundary_r, boundary_w) = pipe ~cloexec:true () in
   match Unix.fork () with
+  | exception exn -> List.iter Unix.close !opened; raise exn
   | 0 ->
     (* Child: own session + process group (pgid = pid), pdeathsig set
        pre-exec, pipes wired to 0/1/2, then exec.  Any failure is reported
        on the child's stderr (which the parent streams) and exits 127. *)
+    Unix.close boundary_r;
+    let sandbox_applied = ref false in
+    let acknowledge byte =
+      try write_all boundary_w byte 0 1 with Unix.Unix_error _ -> ()
+    in
     (try
        ignore (Unix.setsid ());
        set_pdeathsig ();
@@ -407,10 +460,17 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        (* The box goes on last, after every path the shim itself needs is
           resolved, and before the payload has run one instruction. *)
        before_exec ();
+       (* This private pipe carries at most two bytes and never payload text.
+          Only the child can acknowledge applied restrictions. The write end
+          closes on exec; no acknowledgement is not evidence of success. *)
+       acknowledge "A";
+       sandbox_applied := true;
        Unix.execvpe (List.hd argv) (Array.of_list argv)
          (Array.of_list (List.map (fun (k, v) -> k ^ "=" ^ v) env))
      with
      | exn ->
+       acknowledge (if !sandbox_applied then "E" else "S");
+       Unix.close boundary_w;
        (try
           output_string stderr
             ("masc-exec-shim: " ^ Printexc.to_string exn ^ "\n");
@@ -419,16 +479,68 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        | _ -> ());
        exit 127)
   | pid ->
-    Unix.close stdin_r;
-    Unix.close stdout_w;
-    Unix.close stderr_w;
-    Unix.set_nonblock stdout_r;
-    Unix.set_nonblock stderr_r;
-    Unix.set_nonblock stdin_w;
-    (pid, stdin_w, stdout_r, stderr_r)
+    let prepared = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !prepared then
+          (* fork succeeded, so descriptor preparation failure is not proof
+             the child refused to run. Reap before dropping its handles. *)
+          Fun.protect
+            ~finally:(fun () ->
+              List.iter
+                (fun fd -> try Unix.close fd with
+                  | Unix.Unix_error (Unix.EBADF, _, _) -> ())
+                !opened)
+            (fun () ->
+              let kill target =
+                try Unix.kill target Sys.sigkill with
+                | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+              in
+              kill (-pid);
+              kill pid;
+              let rec reap () =
+                match Unix.waitpid [] pid with
+                | _ -> ()
+                | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+              in
+              reap ()))
+      (fun () ->
+        Unix.close boundary_w;
+        Unix.close stdin_r;
+        Unix.close stdout_w;
+        Unix.close stderr_w;
+        Unix.set_nonblock stdout_r;
+        Unix.set_nonblock stderr_r;
+        Unix.set_nonblock stdin_w;
+        Unix.set_nonblock boundary_r;
+        let handles = (pid, stdin_w, stdout_r, stderr_r, boundary_r) in
+        prepared := true;
+        handles)
 
+let child_boundary_of_ack = function
+  | "A" -> Exec_ssh_protocol.Sandbox_applied
+  | "AE" -> Exec_failed
+  | "S" -> Setup_failed
+  | _ -> Child_ack_unavailable
+
+let read_child_boundary fd =
+  let bytes = Bytes.create 3 in
+  let rec read count =
+    if count = Bytes.length bytes then count
+    else
+      match Unix.read fd bytes count (Bytes.length bytes - count) with
+      | 0 -> count
+      | n -> read (count + n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> read count
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> count
+  in
+  child_boundary_of_ack (Bytes.sub_string bytes 0 (read 0))
+
+(* Every instant in this loop is an interval's endpoint -- the timeout, the
+   SIGKILL grace, the post-reap drain -- and none is reported as a time. So
+   they are read off a clock no correction moves; see [Shim_clock]. *)
 let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
-  let deadline = Unix.gettimeofday () +. timeout_sec in
+  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
   let stdin_open = ref (payload_len > 0) in
@@ -475,7 +587,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     then (
       kill_started := true;
       kill_remaining := kill_policy trigger;
-      step_kill (Unix.gettimeofday ())) in
+      step_kill (Shim_clock.elapsed_seconds ())) in
   let poll_child () =
     match !status with
     | Some _ -> ()
@@ -484,7 +596,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
        | 0, _ -> ()
        | _, st ->
          status := Some st;
-         reaped_at := Some (Unix.gettimeofday ())) in
+         reaped_at := Some (Shim_clock.elapsed_seconds ())) in
   (* Forward drained child output to our own stdout/stderr.  If the peer
      went away (EPIPE) keep draining so the child cannot block on a full
      pipe, drop the bytes, and apply the channel-EOF kill policy. *)
@@ -508,7 +620,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       Unix.close pipe_fd;
       false in
   while !status = None || !out_open || !err_open do
-    let now = Unix.gettimeofday () in
+    let now = Shim_clock.elapsed_seconds () in
     if !status = None && (not !kill_started) && now >= deadline
     then (
       (* Only attribute [timed_out] when the deadline is what started the
@@ -614,18 +726,18 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     (kill_policy On_child_exit);
   trailer_of_status ~v ~timed_out:!timed_out st
 
-let emit_trailer_stderr (t : Exec_ssh_protocol.trailer) =
-  let s = Exec_ssh_protocol.render_trailer t in
+let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
+  let s = Exec_ssh_protocol.render_trailer ?execution_receipt t in
   try write_all Unix.stderr s 0 (String.length s) with
   | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
 
 (* [v] is the request's major once a request has been read; before that --
    a frame that did not decode -- there is no caller version to echo, and
    the newest one this build speaks is the only honest answer. *)
-let shim_fail ?(v = Exec_ssh_protocol.newest) msg =
+let shim_fail ?(v = Exec_ssh_protocol.newest) ?execution_receipt msg =
   (* Trailer to our stderr, then exit 1: a shim failure must never be
      indistinguishable from a payload exit 0. *)
-  emit_trailer_stderr
+  emit_trailer_stderr ?execution_receipt
     Exec_ssh_protocol.{ v
                       ; exit = None
                       ; signal = None
@@ -655,7 +767,12 @@ let run () =
   | Error e -> shim_fail e
   | Ok (req, stdin_payload) ->
     let v = req.Exec_ssh_protocol.v in
-    let shim_fail msg = shim_fail ~v msg in
+    let receipt boundary : Exec_ssh_protocol.execution_receipt =
+      { mode = req.Exec_ssh_protocol.mode; boundary }
+    in
+    let shim_fail ?(boundary = Exec_ssh_protocol.Refused) msg =
+      shim_fail ~v ~execution_receipt:(receipt boundary) msg
+    in
     (match load_config () with
      | Error e -> shim_fail e
      | Ok config ->
@@ -678,14 +795,21 @@ let run () =
                    req.Exec_ssh_protocol.mode
                with
                | Refuse_observe_unsupported ->
+                 trace_request
+                   ~mode:req.Exec_ssh_protocol.mode
+                   ~plan:"refused_unsupported"
+                   argv;
                  shim_fail
                    (Printf.sprintf
                       "%s: this host cannot box a payload (Landlock ABI %d); \
                        the request asked for %s"
                       observe_unsupported_code (observe_support_abi ())
                       (Exec_ssh_protocol.mode_to_string req.Exec_ssh_protocol.mode))
-               | Run_effect -> None
+               | Run_effect ->
+                 trace_request ~mode:req.Exec_ssh_protocol.mode ~plan:"effect" argv;
+                 None
                | Run_boxed { deny_fs; deny_net } ->
+                 trace_request ~mode:req.Exec_ssh_protocol.mode ~plan:"boxed" argv;
                  let scratch =
                    match make_scratch ~root:config.scratch_root with
                    | Ok path -> path
@@ -698,18 +822,23 @@ let run () =
                  ( scratch_env ~scratch env
                  , (fun () -> restrict_self scratch deny_fs deny_net)
                  , (fun () -> remove_tree scratch) ) in
-             let (pid, stdin_w, stdout_r, stderr_r) =
+             let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
                try spawn ~before_exec ~argv ~env ~cwd () with
                | exn ->
                  cleanup ();
-                 shim_fail
+                 shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
-             let trailer =
-               supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
-                 ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
-             cleanup ();
-             emit_trailer_stderr trailer;
+             let trailer, boundary =
+               Fun.protect
+                 ~finally:(fun () -> Unix.close boundary_r; cleanup ())
+                 (fun () ->
+                   let trailer =
+                     supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+                       ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
+                   trailer, read_child_boundary boundary_r)
+             in
+             emit_trailer_stderr ~execution_receipt:(receipt boundary) trailer;
              exit 0)))
 
 (* Capabilities are what this host can do, read when asked, so a probe on a
@@ -717,8 +846,10 @@ let run () =
 let probe () =
   Exec_ssh_protocol.
     { name = "masc-exec-shim"
-    ; version = Printf.sprintf "%d.0.0" protocol_version
+    ; version =
+      Printf.sprintf "%d.0.0%s" protocol_version Shim_build_id.suffix
     ; capabilities = (if observe_supported () then [ observe_capability ] else [])
+    ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     }
 
 let main () =

@@ -4,15 +4,15 @@ status: live
 
 # Product Operating Plan
 
-> Current package version: v0.33.0
-> Latest changelog entry: v0.33.0 (2026-09-06)
-> Latest published GitHub release: v0.32.0 (2026-09-05)
-> Updated: 2026-09-06
+> Current package version: v0.35.0
+> Latest changelog entry: v0.35.0 (2026-09-08)
+> Latest published GitHub release: v0.34.0 (2026-09-08)
+> Updated: 2026-09-08
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope
 
-`masc` is a repo-local MCP server for coordinating long-running Keepers, MCP clients, and workspace state inside one repository.
+`masc` is a harness for running several coding agents against one repository: a workspace server over MCP, supervised Keepers, and a terminal UI, in one binary.
 
 Primary user:
 
@@ -20,9 +20,9 @@ Primary user:
 
 Scope stack:
 
-1. Repo workspace collaboration
+1. Repo workspace collaboration, reached through the TUI and MCP
 2. Keeper runtime and supervised delivery
-3. Dashboard and operator visibility
+3. Operator visibility: the TUI first; the dashboard is maintained, not grown
 
 The front-door promise is level 1. Levels 2-3 are supported surfaces.
 
@@ -34,7 +34,8 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces.
 | Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
 | Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts with the runbook |
-| Dashboard core read models | Working | Supporting | — | transport truth and config visibility gaps | harden read truth and config introspection |
+| Terminal UI | Working | Front door | `README.md`, `docs/TUI-GUIDE.md` | surfaces and keys still change on `main` | keep every operator action reachable from the TUI |
+| Dashboard core read models | Working | Maintained | `docs/DASHBOARD-INTEGRATION.md` | transport truth and config visibility gaps | keep it building, type-checked, and truthful; new operator features land in the TUI first |
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
@@ -161,7 +162,7 @@ Each PR should link at least one issue and state which promise it affects:
 
 ### Track A. Product truth and onboarding
 
-- rewrite the README around repo workspace collaboration first
+- keep the README on the TUI-first harness posture: shared workspace, supervised Keepers, terminal front door
 - keep advanced delivery paths visible but clearly secondary
 - align roadmap, changelog, and product review
 - replace stale or ambiguous “what is this product?” prose with one consistent promise

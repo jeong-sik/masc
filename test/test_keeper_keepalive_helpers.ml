@@ -108,6 +108,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
     Workspace.write_backlog config
       {
         Types.tasks = [ make_in_progress_task ~id:task_id ~assignee:agent_name ];
+        pending_completion_rejections = [];
         last_updated = "2026-06-26T00:00:01Z";
         version = 2;
       };
@@ -315,6 +316,74 @@ let test_cadence_handshake_precedes_duration_resolution () =
       (match outcome with
        | KKS.Woken -> true
        | KKS.Stopped | KKS.Timeout -> false))
+;;
+
+(* #34653: the provider backoff sleep is not cut short by a wakeup. Every
+   stimulus that interrupted it re-ran the same rate-limited call (183 failed
+   turns in 41 minutes, median 30 s apart against a declared 600 s). The
+   wakeup is consumed when the duration ends, so the tick still happens once
+   per signal, only later. *)
+let test_backoff_sleep_serves_a_wakeup_only_after_the_duration () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let duration = 0.05 in
+    let started = Eio.Time.now clock in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock
+        ~stop
+        ~wakeup
+        (fun () -> duration)
+    in
+    let elapsed = Eio.Time.now clock -. started in
+    (* Wall-clock reads around a monotonic sleep: allow the sub-microsecond
+       rounding of the sleep deadline (#34663 review). *)
+    check bool "the full duration elapsed before the wakeup was served" true
+      (elapsed >= duration -. 0.001);
+    check bool "the pending wakeup is served as Woken once the sleep ends" true
+      (match outcome with
+       | KKS.Woken -> true
+       | KKS.Stopped | KKS.Timeout -> false);
+    check bool "wake atomic is consumed" false (Atomic.get wakeup))
+;;
+
+let test_backoff_sleep_without_a_wakeup_times_out () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 0.01)
+    in
+    check bool "no wakeup means Timeout" true
+      (match outcome with
+       | KKS.Timeout -> true
+       | KKS.Stopped | KKS.Woken -> false))
+;;
+
+let test_stop_still_cuts_a_backoff_sleep () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make true in
+    let wakeup = Atomic.make true in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 30.0)
+    in
+    check bool "stop ends a backoff sleep at once" true
+      (match outcome with
+       | KKS.Stopped -> true
+       | KKS.Woken | KKS.Timeout -> false))
 ;;
 
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
@@ -1275,6 +1344,12 @@ let () =
             test_rate_limit_backoff_sec_clamps_and_escalates
         ; test_case "sleep distinguishes rate-limited route from cadence" `Quick
             test_sleep_distinguishes_rate_limited_route_from_cadence
+        ; test_case "backoff sleep serves a wakeup only after the duration" `Quick
+            test_backoff_sleep_serves_a_wakeup_only_after_the_duration
+        ; test_case "backoff sleep without a wakeup times out" `Quick
+            test_backoff_sleep_without_a_wakeup_times_out
+        ; test_case "stop still cuts a backoff sleep" `Quick
+            test_stop_still_cuts_a_backoff_sleep
         ] )
     ]
 ;;

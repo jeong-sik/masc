@@ -107,6 +107,16 @@ let unavailable_to_string unavailable =
   public_category unavailable |> public_category_detail
 ;;
 
+(* Written as an exhaustive match rather than a wildcard so a new
+   unavailability has to state its class instead of inheriting this one. *)
+let failure_class = function
+  | Runtime_initializing
+  | Runtime_registry_unavailable _
+  | Runtime_initialization_crashed _
+  | Runtime_non_runtime
+  | Lane_unavailable _ -> Tool_result.Runtime_failure
+;;
+
 let unavailable_to_yojson unavailable =
   let state =
     match unavailable with
@@ -119,7 +129,9 @@ let unavailable_to_yojson unavailable =
   let category = public_category unavailable in
   `Assoc
     [ "error", `String "publication_recovery_unavailable"
-    ; "failure_class", `String "runtime_failure"
+    ; ( "failure_class"
+      , `String
+          (Tool_result.tool_failure_class_to_string (failure_class unavailable)) )
     ; "state", `String state
     ; "category", `String (public_category_to_string category)
     ; "detail", `String (public_category_detail category)

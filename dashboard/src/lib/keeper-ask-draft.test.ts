@@ -49,7 +49,6 @@ const textOnly = question({ freeText: { allowed: true, hint: null }, choices: []
 
 function slotOf(q: AskQuestion) {
   const slot = freeTextSlot(q)
-  if (slot === null) throw new Error('expected a slot')
   return slot
 }
 
@@ -107,8 +106,13 @@ describe('choices', () => {
 })
 
 describe('free text', () => {
-  it('offers no slot on a choices-only question', () => {
-    expect(freeTextSlot(single)).toBeNull()
+  it('lets the operator replace choices with an exact alternative', () => {
+    const slot = freeTextSlot(single)
+    const text = '다른 답변\n  조건을 먼저 확인해주세요  '
+    const chosen = toggleChoice(emptyDraft('a1'), single, yes)
+    const draft = setText(chosen, slot, text)
+    expect(responseFor(draft, single)).toEqual({ kind: 'wrote', text })
+    expect(slot.hint).toBeNull()
   })
 
   it('carries the hint to the editor', () => {

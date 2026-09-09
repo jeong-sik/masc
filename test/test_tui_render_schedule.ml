@@ -277,10 +277,24 @@ let test_overview_rows_share_one_viewport_budget () =
       [ false; true ]
   done
 
-let board_read_frame_rows ~comment_count
+(* The surface is the box, the key footer under it, and -- when the post or
+   the thread has more lines than it can show -- the position line the pane
+   writes above the box bottom. The footer and the position line were left out
+   of the allocation, so the frame ran one or two rows past the terminal and
+   the footer landed on the composer's row. *)
+let board_read_frame_rows ~body_line_count ~comment_count
     (allocation : Schedule.board_read_allocation) =
+  let position_rows =
+    if
+      body_line_count > allocation.body_rows
+      || comment_count > allocation.comment_rows
+    then 1
+    else 0
+  in
   8
   + (if comment_count > 0 then 2 else 0)
+  + 1
+  + position_rows
   + allocation.body_rows
   + allocation.comment_rows
 
@@ -343,28 +357,27 @@ let test_board_read_rows_reserve_comments_and_footer () =
       ~comment_count:5
   in
   check int "14-row board keeps one body row" 1 crowded.body_rows;
-  check int "14-row board fits three comments" 3 crowded.comment_rows;
+  check int "14-row board fits one comment" 1 crowded.comment_rows;
   check int "14-row board frame is exact" 14
-    (board_read_frame_rows ~comment_count:5 crowded);
+    (board_read_frame_rows ~body_line_count:10 ~comment_count:5 crowded);
   let comments_only =
     Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:0
       ~comment_count:5
   in
   check int "empty body consumes no semantic row" 0 comments_only.body_rows;
-  check int "empty body frees a fourth comment row" 4
+  check int "empty body frees a second comment row" 2
     comments_only.comment_rows;
   let no_comments =
     Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
       ~comment_count:0
   in
-  check int "comment-free board uses the full body viewport" 6
+  check int "comment-free board uses the full body viewport" 4
     no_comments.body_rows;
   let full_comments =
     Schedule.allocate_board_read ~terminal_rows:16 ~body_line_count:10
       ~comment_count:5
   in
-  check int "16-row board restores comment cap" 5
-    full_comments.comment_rows;
+  check int "16-row board widens the thread" 3 full_comments.comment_rows;
   (* A tall terminal is where the old flat five hurt: a forty-reply thread got
      the same five rows on an eighty-row screen as on a twenty-row one. The
      share grows with the height, and the post still keeps the larger half. *)
@@ -388,7 +401,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
     Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:10
       ~comment_count:40
   in
-  check int "a short post hands its unused rows to the thread" 40
+  check int "a short post hands its unused rows to the thread" 38
     short_post.comment_rows;
   check int "the body keeps exactly the rows it has" 10 short_post.body_rows;
   for terminal_rows = 14 to 40 do
@@ -398,7 +411,9 @@ let test_board_read_rows_reserve_comments_and_footer () =
           Schedule.allocate_board_read ~terminal_rows ~body_line_count
             ~comment_count
         in
-        let total = board_read_frame_rows ~comment_count allocation in
+        let total =
+          board_read_frame_rows ~body_line_count ~comment_count allocation
+        in
         if total <> terminal_rows then
           failf
             "board-read does not fill viewport: rows=%d body=%d comments=%d total=%d"
@@ -408,7 +423,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
             terminal_rows comment_count;
         let ceiling =
           let chrome = if comment_count > 0 then 2 else 0 in
-          let available = max 0 (terminal_rows - 8 - chrome) in
+          let available = max 0 (terminal_rows - 8 - 1 - chrome) in
           max 5 (max (available - body_line_count) (available / 3))
         in
         if
@@ -451,10 +466,10 @@ let test_board_read_scroll_reaches_hidden_comments () =
       ~body_rows:allocation.body_rows ~comment_count:5
       ~comment_rows:allocation.comment_rows 99
   in
-  check int "overscroll normalizes to the combined maximum" 2
+  check int "overscroll normalizes to the combined maximum" 4
     last.normalized_scroll;
   check int "one-line body remains visible" 0 last.body_offset;
-  check int "last comment becomes visible" 2 last.comment_offset;
+  check int "last comment becomes visible" 4 last.comment_offset;
   let long_body =
     Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
       ~comment_count:5 ~comment_rows:3 10
@@ -621,7 +636,7 @@ let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
 let memory_probe =
   { Schedule.mrow_state = "S"
   ; mrow_name = "N"
-  ; mrow_revision = "R"
+  ; mrow_updated = "R"
   ; mrow_facts = "F"
   ; mrow_size = "Z"
   ; mrow_source = "U"
@@ -633,7 +648,7 @@ let memory_probe =
 let memory_overflowing =
   { Schedule.mrow_state = "read-error-and-then-some"
   ; mrow_name = "pinewood-pr-jira-checker-and-a-longer-tail"
-  ; mrow_revision = "1234567890"
+  ; mrow_updated = "1234567890"
   ; mrow_facts = "9876543"
   ; mrow_size = "1234567.8 MB"
   ; mrow_source = "r32 i8 1.5 KB with more than the cell holds"
@@ -650,10 +665,21 @@ let index_of haystack needle =
   in
   walk 0
 
+(* A column label that is a prefix of another label matches the wrong column
+   and says nothing about it. "ST" is inside "STARTED", so after the Memory
+   table renamed STATE to ST (#33919) the Fusion case read the first column
+   as the state one and reported its offset as 0. A label occurs once in a
+   header row, so more than one occurrence is the question being asked
+   wrongly rather than an answer. *)
 let offset_of needle text =
   match index_of text needle with
-  | Some index -> index
   | None -> failf "%S is not in %S" needle text
+  | Some index ->
+    let rest = String.sub text (index + String.length needle)
+                 (String.length text - index - String.length needle) in
+    (match index_of rest needle with
+     | Some _ -> failf "%S appears more than once in %S" needle text
+     | None -> index)
 
 (* Offsets are asked in display cells, not bytes: the delta column is headed
    with a two-byte glyph that occupies one cell. *)
@@ -697,10 +723,10 @@ let test_memory_header_and_row_share_their_offsets () =
     let columns = Schedule.allocate_memory_columns ~inner_width in
     let header = Schedule.memory_header_row columns in
     let row = Schedule.memory_row columns memory_probe in
-    check_left_cell "STATE" "S" ~header ~row ~inner_width;
+    check_left_cell "ST" "S" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "N" ~header ~row ~inner_width;
-    if columns.Schedule.mcol_show_revision then
-      check_right_cell "REV" "R" ~header ~row ~inner_width;
+    if columns.Schedule.mcol_show_updated then
+      check_right_cell "UPDATED" "R" ~header ~row ~inner_width;
     check_right_cell "FACTS" "F" ~header ~row ~inner_width;
     check_right_cell "SIZE" "Z" ~header ~row ~inner_width;
     if columns.Schedule.mcol_show_source then
@@ -733,7 +759,7 @@ let test_memory_empty_readings_still_hold_their_cells () =
   let blank =
     { Schedule.mrow_state = ""
     ; mrow_name = ""
-    ; mrow_revision = ""
+    ; mrow_updated = ""
     ; mrow_facts = ""
     ; mrow_size = ""
     ; mrow_source = ""
@@ -748,12 +774,12 @@ let test_memory_empty_readings_still_hold_their_cells () =
 let test_memory_columns_drop_from_the_right () =
   let narrow = Schedule.allocate_memory_columns ~inner_width:50 in
   check bool "no source when narrow" false narrow.Schedule.mcol_show_source;
-  check bool "no revision when narrow" false narrow.Schedule.mcol_show_revision;
+  check bool "no revision when narrow" false narrow.Schedule.mcol_show_updated;
   check bool "the name still has cells" true (narrow.Schedule.mcol_name > 0);
   (* Wide enough for the revision beside a keeper name at its widest, which is
      what a returning column now waits for. *)
   let medium = Schedule.allocate_memory_columns ~inner_width:80 in
-  check bool "revision returns first" true medium.Schedule.mcol_show_revision;
+  check bool "revision returns first" true medium.Schedule.mcol_show_updated;
   check bool "source is still out" false medium.Schedule.mcol_show_source;
   let wide = Schedule.allocate_memory_columns ~inner_width:120 in
   check bool "source returns when wide" true wide.Schedule.mcol_show_source
@@ -1065,8 +1091,8 @@ let test_headers_fit_their_columns () =
             ~summary_width:(Schedule.change_summary_width ~inner_width) )
       ; ( "fusion"
         , let keeper_width = 16 in
-          Schedule.fusion_header_row ~keeper_width
-            ~run_width:(Schedule.fusion_run_width ~inner_width ~keeper_width) )
+          Schedule.fusion_header_row
+            (Schedule.allocate_fusion_columns ~inner_width ~keeper_width) )
       ; ( "planning"
         , let phase_width = planning_phase_width in
           Schedule.planning_header_row ~phase_width
@@ -1147,7 +1173,7 @@ let fusion_probe =
   }
 
 let fusion_overflowing =
-  { Schedule.frow_time = "11:08:43.512"
+  { Schedule.frow_time = "2026-09-07 11:08"
   ; frow_age = "1234.5s"
   ; frow_state = "cancelled-by-the-operator"
   ; frow_keeper = "pinewood-pr-jira-checker"
@@ -1158,23 +1184,28 @@ let fusion_overflowing =
 let test_fusion_columns_hold_their_offsets () =
   let keeper_width = 16 in
   for inner_width = 80 to 240 do
-    let run_width = Schedule.fusion_run_width ~inner_width ~keeper_width in
+    let columns = Schedule.allocate_fusion_columns ~inner_width ~keeper_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header = Schedule.fusion_header_row ~keeper_width ~run_width in
+    let header = Schedule.fusion_header_row columns in
     let row =
-      Schedule.fusion_row ~state_style:"" ~keeper_width ~run_width fusion_probe
+      Schedule.fusion_row ~state_style:"" columns fusion_probe
     in
-    check_left_cell "TIME" "A" ~header ~row ~inner_width;
+    check_left_cell "STARTED" "A" ~header ~row ~inner_width;
     check_right_cell "AGE" "B" ~header ~row ~inner_width;
+    (* The Fusion table's state column is still headed STATE. Reading "ST"
+       here found it inside STARTED, the column beside it, and placed the
+       state cell at 0 -- see [offset_of], which now refuses a label that
+       appears twice. *)
     check_left_cell "STATE" "C" ~header ~row ~inner_width;
     check_left_cell "KEEPER" "D" ~header ~row ~inner_width;
-    check_left_cell "PRESET" "E" ~header ~row ~inner_width;
+    if columns.fcol_show_preset then
+      check_left_cell "PRESET" "E" ~header ~row ~inner_width;
     check_left_cell "RUN" "F" ~header ~row ~inner_width;
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)
       (width
-         (Schedule.fusion_row ~state_style:"\027[31m" ~keeper_width ~run_width
+         (Schedule.fusion_row ~state_style:"\027[31m" columns
             fusion_overflowing))
   done
 
@@ -1182,14 +1213,24 @@ let test_fusion_columns_hold_their_offsets () =
    out of the run id rather than out of the frame. *)
 let test_fusion_keeper_growth_comes_out_of_the_run_id () =
   let inner_width = 140 in
-  let narrow = Schedule.fusion_run_width ~inner_width ~keeper_width:16 in
-  let wide = Schedule.fusion_run_width ~inner_width ~keeper_width:26 in
-  check int "ten cells move from the run id to the keeper" (narrow - 10) wide;
+  let narrow = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:16 in
+  let wide = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:26 in
+  check int "ten cells move from the run id to the keeper" (narrow.fcol_run - 10) wide.fcol_run;
   check int "and the row is the same width either way"
     (Masc_tui_message_layout.display_width
-       (Schedule.fusion_header_row ~keeper_width:16 ~run_width:narrow))
+       (Schedule.fusion_header_row narrow))
     (Masc_tui_message_layout.display_width
-       (Schedule.fusion_header_row ~keeper_width:26 ~run_width:wide))
+       (Schedule.fusion_header_row wide));
+  let inner_width = 80 - 6 in
+  let compact = Schedule.allocate_fusion_columns ~inner_width ~keeper_width:26 in
+  let header = Schedule.fusion_header_row compact in
+  let row = Schedule.fusion_row ~state_style:"" compact fusion_overflowing in
+  check bool "80-column terminal keeps a complete table inside its frame" true
+    (Masc_tui_message_layout.display_width header <= inner_width
+     && Masc_tui_message_layout.display_width row <= inner_width);
+  check bool "narrow table gives preset cells to identities" false compact.fcol_show_preset;
+  check bool "the local start date remains whole" true
+    (String.starts_with ~prefix:"2026-09-07 11:08" row)
 
 let test_fusion_sidebar_label_format () =
   let label =

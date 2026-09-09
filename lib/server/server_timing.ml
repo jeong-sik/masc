@@ -17,7 +17,15 @@ type phase =
   | Telemetry_filter
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
+  | Health_build_identity
+  | Health_paths
+  | Health_internal_auth
+  | Health_dashboard_surface
+  | Health_response
   | Json_serialize
+  | Mcp_http_auth
+  | Mcp_identity
+  | Mcp_dispatch
   | Custom of string
 
 (* RFC 8673 §3.2.1 token grammar: ALPHA / DIGIT / "-" / "_" / "." *)
@@ -49,7 +57,15 @@ let phase_token = function
   | Telemetry_filter -> "telemetry_filter"
   | Telemetry_summary_per_keeper -> "telemetry_summary_per_keeper"
   | Telemetry_summary_aggregate -> "telemetry_summary_aggregate"
+  | Health_build_identity -> "health_build_identity"
+  | Health_paths -> "health_paths"
+  | Health_internal_auth -> "health_internal_auth"
+  | Health_dashboard_surface -> "health_dashboard_surface"
+  | Health_response -> "health_response"
   | Json_serialize -> "json_serialize"
+  | Mcp_http_auth -> "mcp_http_auth"
+  | Mcp_identity -> "mcp_identity"
+  | Mcp_dispatch -> "mcp_dispatch"
   | Custom raw -> sanitize_token raw
 ;;
 
@@ -78,9 +94,11 @@ let record_ms t phase ms =
 ;;
 
 let measure t phase f =
-  let started = Unix.gettimeofday () in
+  let started = Mtime_clock.elapsed_ns () in
   let finish () =
-    let elapsed_ms = (Unix.gettimeofday () -. started) *. 1000.0 in
+    let elapsed_ms =
+      Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6
+    in
     record_ms t phase elapsed_ms
   in
   match f () with
@@ -92,11 +110,12 @@ let measure t phase f =
     raise exn
 ;;
 
-(* Round to one decimal place via integer arithmetic so the wire format
-   does not depend on locale or Printf rounding modes. *)
+(* Microsecond resolution in milliseconds: a tenth-millisecond target must
+   not round every smaller measurement to zero. Integer formatting remains
+   independent of locale. *)
 let format_ms ms =
-  let tenths = int_of_float ((ms *. 10.0) +. 0.5) in
-  Printf.sprintf "%d.%d" (tenths / 10) (tenths mod 10)
+  let micros = int_of_float ((ms *. 1000.0) +. 0.5) in
+  Printf.sprintf "%d.%03d" (micros / 1000) (micros mod 1000)
 ;;
 
 let to_header_value t =
@@ -111,5 +130,7 @@ let to_header_value t =
 let extra_header t =
   match to_header_value t with
   | "" -> []
-  | v -> [ "Server-Timing", v ]
+  (* H2 encodes supplied field names unchanged; use a name valid on both
+     transports. Timing values remain local to the request. *)
+  | v -> [ "server-timing", v ]
 ;;

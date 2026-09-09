@@ -187,7 +187,7 @@ let test_ssh_redirect_is_named_and_never_opens_host_file () =
     remove_if_present out;
     let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_
         ~env:_ ~cwd:_ =
-      E.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout = "remote"; stderr = "" }
+      E.Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 0; stdout = "remote"; stderr = "" }
     in
     let endpoint : E.Sandbox_target.ssh_endpoint =
       { name = "fixture"
@@ -383,7 +383,7 @@ let test_sandboxed_stage_writes_a_resolved_target () =
     let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
       ran := true;
       E.Sandbox_target.Ran
-        { status = Unix.WEXITED 0; stdout = "from the container"; stderr = "" }
+        { output_files = None; status = Unix.WEXITED 0; stdout = "from the container"; stderr = "" }
     in
     let s =
       simple

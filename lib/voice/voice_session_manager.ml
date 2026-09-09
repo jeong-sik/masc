@@ -1,4 +1,4 @@
-(** MASC Voice Session Manager - Multi-Agent Session Tracking
+(** MASC Voice Session Manager - one voice session per agent
 
     Implementation of multi-agent voice session management.
     Each agent can have one active voice session at a time.
@@ -76,7 +76,9 @@ let realtime_supported = function
   | Turn_based -> false
   | Realtime_bridge _ -> true
 
-let realtime_bridge_env = "MASC_VOICE_REALTIME_WS_URL"
+let realtime_bridge_env =
+  Env_setting.String_opt_knob.env_name Voice_realtime_ws_url
+;;
 
 let has_prefix ~prefix s =
   let prefix_len = String.length prefix in

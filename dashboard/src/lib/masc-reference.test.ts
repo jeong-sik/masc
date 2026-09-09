@@ -15,7 +15,7 @@ describe('parseMascReference', () => {
     expect(parseMascReference('masc://schedules/sch-1')).toEqual({ kind: 'schedule', id: 'sch-1' })
     expect(parseMascReference('masc://overview/tasks/task-7')).toEqual({ kind: 'task', id: 'task-7' })
     expect(parseMascReference('masc://fusion/run-9')).toEqual({ kind: 'run', id: 'run-9' })
-    expect(parseMascReference('masc://keepers/kidsnote')).toEqual({ kind: 'keeper', id: 'kidsnote' })
+    expect(parseMascReference('masc://keepers/exampleorg')).toEqual({ kind: 'keeper', id: 'exampleorg' })
   })
 
   it('decodes an id that needed escaping', () => {

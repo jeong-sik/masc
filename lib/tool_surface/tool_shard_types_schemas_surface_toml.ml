@@ -9,8 +9,8 @@
 
     All three moved: nothing in this shard derived a value from an owner
     module, which is what held tools back in the keeper and taskboard shards.
-    [test_surface_tool_toml_parity] pins them against what the list published
-    before the move. *)
+    [test_surface_tool_toml_parity] keeps the publication order; the
+    descriptions and schemas it also pinned were copies of these values. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in

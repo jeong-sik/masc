@@ -63,10 +63,23 @@ const RuntimeLaneSchema = object({
   preferred_at_ts: nullable(number()),
 })
 
-const ResolvedAssignmentTargetSchema = object({
-  kind: union([literal('lane'), literal('single_runtime'), literal('missing')]),
-  id: nullable(string()),
-})
+const ResolvedAssignmentTargetSchema = union([
+  object({
+    kind: union([literal('lane'), literal('single_runtime'), literal('missing')]),
+    id: nullable(string()),
+  }),
+  object({
+    kind: literal('unavailable'),
+    id: string(),
+    reason: object({
+      kind: literal('missing_catalog_model'),
+      message: string(),
+      provider_id: string(),
+      provider_label: string(),
+      model_id: string(),
+    }),
+  }),
+])
 
 const RuntimeAssignmentSchema = object({
   keeper: string(),

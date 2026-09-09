@@ -31,14 +31,22 @@ type detail_lookup =
   | Detail_not_found
   | Detail_ambiguous
 
+type run_kind = Exact_output | Task_verification | Goal_verification
+
+val run_kind_of_string : string -> (run_kind, string) result
+(** The closed [run_kind] HTTP query vocabulary. An omitted query selects all
+    retained kinds; an unknown or empty value is a request error. *)
+
 val recent_run_page_json
   :  limit:int
   -> before:(float * string) option
   -> lane:string option
+  -> run_kind:run_kind option
   -> (Yojson.Safe.t, string) result
 (** A cursor page over the same durable registries as {!snapshot_json}.
     Filtering happens before pagination, so a quiet lane is not hidden behind
-    a busier lane's bounded page. [None] preserves the mixed admin listing. *)
+    a busier lane's bounded page. Both lane and kind filters apply to [total]
+    and the cursor page. Omitting both preserves the mixed admin listing. *)
 
 val run_detail_json : run_id:string -> detail_lookup
 (** Exact payload/result evidence for one retained run. Verifier results keep
@@ -59,6 +67,7 @@ module For_testing : sig
     :  limit:int
     -> before:(float * string) option
     -> lane:string option
+    -> run_kind:run_kind option
     -> exact_runs:Exact_lane_run_registry.run list
     -> verification_runs:Verification_run_registry.run list
     -> goal_verification_runs:Goal_verification_run_registry.run list

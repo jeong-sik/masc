@@ -148,19 +148,22 @@ let test_current_post_schema_is_exact () =
          (field ^ " is required")
          true
          (Option.is_none (decode (remove_key json field))))
+    (* Every key post_of_yojson reads with a required_* combinator, and only
+       those. "content" and "score" were in this list and are in no post:
+       content and score left the post in #31188 -- content copied body and
+       score was votes_up - votes_down. Removing either changed nothing, so the
+       case failed on the very field it was asserting about. *)
     [ "id"
     ; "author"
     ; "title"
     ; "body"
     ; "post_kind"
-    ; "content"
     ; "visibility"
     ; "created_at"
     ; "updated_at"
     ; "expires_at"
     ; "votes_up"
     ; "votes_down"
-    ; "score"
     ; "reply_count"
     ; "pinned"
     ];
@@ -177,8 +180,9 @@ let test_current_post_schema_is_exact () =
     (replace_key json "updated_at" (`String "1.0"));
   rejected "float counter rejected" (replace_key json "votes_up" (`Float 0.0));
   rejected "string bool rejected" (replace_key json "pinned" (`String "false"));
-  rejected "body/content mismatch rejected" (replace_key json "content" (`String "other"));
-  rejected "score mismatch rejected" (replace_key json "score" (`Int 1));
+  (* No content/score case. PR #31188 took both out of the post: content was a
+     copy of body, and score was votes_up - votes_down. A post carrying either
+     is a post with an extra key, which the decoder ignores like any other. *)
   rejected
     "classification mismatch rejected"
     (prepend_field json ("classification_reason", `String "fabricated"))
@@ -220,17 +224,19 @@ let test_current_comment_schema_is_exact () =
     ; "expires_at"
     ; "votes_up"
     ; "votes_down"
-    ; "score"
+      (* No "score": #31188 took the derived field off comments too, and
+         comment_to_yojson does not write one. Removing a key the document
+         never carries leaves the document unchanged. *)
     ];
   Alcotest.(check bool)
     "malformed parent id rejected"
     true
     (Option.is_none
        (decode_comment (replace_key json "parent_id" (`String ""))));
-  Alcotest.(check bool)
-    "comment score mismatch rejected"
-    true
-    (Option.is_none (decode_comment (replace_key json "score" (`Int 1))));
+  (* No score case. #31188 took the derived field off comments, and
+     [replace_key] only rewrites a key that is there -- on a document without
+     one it changes nothing, so the case asserted about a document it had not
+     modified. An added key is covered by the unknown-field case below. *)
   Alcotest.(check bool)
     "comment unknown field rejected"
     true

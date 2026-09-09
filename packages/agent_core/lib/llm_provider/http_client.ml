@@ -445,49 +445,6 @@ let max_single_header_bytes headers =
   List.fold_left (fun acc h -> max acc (header_line_bytes h)) 0 headers
 ;;
 
-(* On a 4xx response, log the request's header size profile and the response's
-   edge signature (server, cf-ray). A 4xx with an empty/opaque body and a
-   "cloudflare" server indicates an edge rejection — commonly a single header
-   line over [cdn_per_header_limit_bytes] — rather than an origin-level error.
-   This names the offending header WHEN a real failure recurs: header contents
-   are runtime-dependent and not knowable statically, so a pre-send size guess
-   either never fires (small headers) or false-fires on benign many-small-header
-   requests the edge accepts. *)
-let profile_headers_on_client_error ~url ~code ~resp_headers request_headers =
-  if code >= 400 && code < 500
-  then (
-    let server = Http.Header.get resp_headers "server" in
-    let cf_ray = Http.Header.get resp_headers "cf-ray" in
-    let opt = function
-      | Some s -> `String s
-      | None -> `Null
-    in
-    let total =
-      List.fold_left (fun acc h -> acc + header_line_bytes h) 0 request_headers
-    in
-    let json =
-      `Assoc
-        [ "event", `String "http_client_4xx_request_header_profile"
-        ; "url", `String url
-        ; "status", `Int code
-        ; "response_server", opt server
-        ; "cf_ray", opt cf_ray
-        ; "request_header_count", `Int (List.length request_headers)
-        ; "total_request_header_bytes", `Int total
-        ; "max_single_header_bytes", `Int (max_single_header_bytes request_headers)
-        ; "cdn_per_header_limit_bytes", `Int cdn_per_header_limit_bytes
-        ; "header_sizes", `List (header_size_profile request_headers)
-        ; ( "note"
-          , `String
-              "4xx from an LLM endpoint. Header VALUES omitted (may carry credentials); \
-               sizes only. A cloudflare/RunPod edge rejects a single header line over \
-               cdn_per_header_limit_bytes with an opaque 400 before the origin — compare \
-               max_single_header_bytes." )
-        ]
-    in
-    Diag.warn "http_client" "%s" (Yojson.Safe.to_string json))
-;;
-
 (* On a 4xx, the response body from a provider edge is frequently an opaque
    "Bad Request" with no field-level cause (observed 2026-07-18 against
    ollama.com/v1 deepseek-v4-flash: ~78% of turns rejected, empty-detail body).
@@ -679,26 +636,128 @@ let request_body_shape_profile (body : string) : Yojson.Safe.t =
         ])
 ;;
 
-(* Companion to [profile_headers_on_client_error]: names the request SHAPE on a
-   4xx so an opaque provider "Bad Request" can be diagnosed from the always-on
-   log, without enabling body-level debug or reproducing the exact turn. *)
-let profile_request_on_client_error ~url ~code ~request_body =
-  if code >= 400 && code < 500
+(* A 4xx whose body names its cause needs no request diagnostics: the body is
+   the diagnosis, and [Retry.classify_error] carries it to the caller. This
+   profile is for the other 4xx, where the request is the only evidence: an
+   edge in front of the origin answering with an empty or non-JSON body
+   (cloudflare in front of RunPod on a header line over
+   [cdn_per_header_limit_bytes], 2026-05-31; ollama.com/v1 "Bad Request" with
+   no detail, 2026-07-18). It names the header sizes (values omitted: they may
+   carry credentials) and the request body's shape (message and tool-argument
+   text omitted: it may carry user content and does not distinguish an
+   accepted shape from a rejected one). Header contents are runtime-dependent,
+   so this names the offending header when a real failure recurs rather than
+   guessing a size before send.
+
+   Firing on every 4xx put two WARN lines and a fixed explanation paragraph
+   under each rate limit, a 429 saying "weekly usage limit" in its own body
+   (2026-09-09), which repeated what the body already said. The gate is the
+   body, not the status: a 429 with an empty body still profiles, a 400 with a
+   structured message does not. A 4xx whose body cannot be read at all (over
+   [Api_common.max_response_body], or the transport dropped mid-body) leaves
+   no profile: that failure is reported on its own path, and without the body
+   there is nothing to gate on. *)
+let response_body_is_opaque response_body =
+  Option.is_none (Api_common.error_message_of_body response_body)
+;;
+
+let profile_opaque_client_error
+      ~url
+      ~code
+      ~resp_headers
+      ~request_headers
+      ~request_body
+      ~response_body
+  =
+  if code >= 400 && code < 500 && response_body_is_opaque response_body
   then (
+    let opt = function
+      | Some s -> `String s
+      | None -> `Null
+    in
+    let total =
+      List.fold_left (fun acc h -> acc + header_line_bytes h) 0 request_headers
+    in
     let json =
       `Assoc
-        [ "event", `String "http_client_4xx_request_shape"
+        [ "event", `String "http_client_4xx_opaque_response"
         ; "url", `String url
         ; "status", `Int code
+        ; "response_server", opt (Http.Header.get resp_headers "server")
+        ; "cf_ray", opt (Http.Header.get resp_headers "cf-ray")
+        ; "response_body_bytes", `Int (String.length response_body)
+        ; "request_header_count", `Int (List.length request_headers)
+        ; "total_request_header_bytes", `Int total
+        ; "max_single_header_bytes", `Int (max_single_header_bytes request_headers)
+        ; "cdn_per_header_limit_bytes", `Int cdn_per_header_limit_bytes
+        ; "header_sizes", `List (header_size_profile request_headers)
         ; "request_shape", request_body_shape_profile request_body
-        ; ( "note"
-          , `String
-              "4xx from an LLM endpoint. Structural request facts only; message and \
-               tool-argument TEXT omitted (may carry user content and does not \
-               distinguish accepted from rejected shapes)." )
         ]
     in
     Diag.warn "http_client" "%s" (Yojson.Safe.to_string json))
+;;
+
+let%test_module "profile_opaque_client_error" =
+  (module struct
+    (* [Yojson.Safe.to_string] keeps field order, so the event name is the
+       line's prefix; no substring search is needed to recognise it. *)
+    let event_prefix = {|{"event":"http_client_4xx_opaque_response"|}
+
+    let profiles_emitted ~code ~response_body =
+      let captured = ref [] in
+      Diag.with_sink
+        (fun _level ~ctx:_ message -> captured := message :: !captured)
+        (fun () ->
+           profile_opaque_client_error
+             ~url:"https://example.test/v1/chat/completions"
+             ~code
+             ~resp_headers:(Http.Header.of_list [ "server", "cloudflare" ])
+             ~request_headers:
+               [ "authorization", "Bearer x"; "content-type", "application/json" ]
+             ~request_body:{|{"model":"m","messages":[]}|}
+             ~response_body);
+      List.length
+        (List.filter (String.starts_with ~prefix:event_prefix) !captured)
+    ;;
+
+    let%test "a 429 whose body names the limit is not profiled" =
+      profiles_emitted
+        ~code:429
+        ~response_body:{|{"error":"Rate limited: weekly usage limit reached"}|}
+      = 0
+    ;;
+
+    let%test "a 400 with a nested error message is not profiled" =
+      profiles_emitted
+        ~code:400
+        ~response_body:{|{"error":{"message":"invalid tool schema","code":400}}|}
+      = 0
+    ;;
+
+    let%test "an empty-body 400 is profiled once" =
+      profiles_emitted ~code:400 ~response_body:"" = 1
+    ;;
+
+    let%test "a non-JSON 400 body is profiled once" =
+      profiles_emitted ~code:400 ~response_body:"Bad Request" = 1
+    ;;
+
+    let%test "an empty-body 429 is still profiled: the gate is the body" =
+      profiles_emitted ~code:429 ~response_body:"" = 1
+    ;;
+
+    let%test "JSON without an error key is opaque" =
+      profiles_emitted ~code:400 ~response_body:{|{"detail":null}|} = 1
+    ;;
+
+    let%test "a blank error message names no cause and is profiled" =
+      profiles_emitted ~code:400 ~response_body:{|{"error":""}|} = 1
+      && profiles_emitted ~code:400 ~response_body:{|{"error":{"message":" "}}|} = 1
+    ;;
+
+    let%test "a 5xx is never profiled" = profiles_emitted ~code:502 ~response_body:"" = 0
+    let%test "a 2xx is never profiled" = profiles_emitted ~code:200 ~response_body:"" = 0
+  end)
 ;;
 
 let%test "request_body_shape_profile reports non-json bodies without raising" =
@@ -915,10 +974,11 @@ let classify_eio_backend_error = function
 ;;
 
 let rec classify_eio_error = function
-  | Eio.Net.E _ ->
-    (* Eio 1.3 exposes the typed network envelope but not the finer constructors
-       introduced later. Preserve typed control flow without guessing from text. *)
-    Unknown
+  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) -> Connection_refused
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) -> Dns_failure
+  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) -> Timeout
+  | Eio.Net.E (Eio.Net.Connection_reset backend) ->
+    Option.value (classify_eio_backend_error backend) ~default:End_of_file
   | Eio.Exn.X backend ->
     Option.value (classify_eio_backend_error backend) ~default:Unknown
   | Eio.Exn.Multiple_io errors ->
@@ -1141,7 +1201,7 @@ let%test "parse_retry_after_seconds: RFC 850 obsolete form is rejected" =
 ;;
 
 (* [Http.Header.get] is case-insensitive per cohttp's contract (mirrors the
-   "server"/"cf-ray" lookups in [profile_headers_on_client_error] above). *)
+   "server"/"cf-ray" lookups in [profile_opaque_client_error] above). *)
 let retry_after_header_of_response_headers resp_headers =
   match Http.Header.get resp_headers "retry-after" with
   | None -> None
@@ -1636,10 +1696,10 @@ let cache_return (cache : cache) origin (entry : cache_entry) : unit =
 let resolve_origin net (origin : validated_uri) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
   let service = Int.to_string origin.port in
-  let* addr =
+  let* addresses =
     try
       match Eio.Net.getaddrinfo_stream ~service net origin.host with
-      | ip :: _ -> Ok ip
+      | (_ :: _ as addresses) -> Ok addresses
       | [] ->
         Error
           (NetworkError
@@ -1670,7 +1730,7 @@ let resolve_origin net (origin : validated_uri) =
       Some wrap
     | Http -> Ok None
   in
-  Ok (net, addr, tls_wrap)
+  Ok (net, addresses, tls_wrap)
 ;;
 
 (** Build a reusable client with explicit lifetime control.
@@ -1678,14 +1738,19 @@ let resolve_origin net (origin : validated_uri) =
     created by this client. The client is NOT bound to any switch; the
     caller decides when to close it or park it in a cache. *)
 let make_client ~net ~origin =
-  let+ net, addr, tls_wrap = resolve_origin net origin in
+  let+ net, addresses, tls_wrap = resolve_origin net origin in
   let tracked_transports : connection list Atomic.t = Atomic.make [] in
   let connect ~sw:conn_sw _uri =
-    let sock = Eio.Net.connect ~sw:conn_sw net addr in
+    let sock = Tcp_address_race.connect ~sw:conn_sw ~net addresses in
     let transport : connection =
-      match tls_wrap with
-      | Some wrap -> (wrap origin.uri sock :> connection)
-      | None -> (sock :> connection)
+      try
+        match tls_wrap with
+        | Some wrap -> (wrap origin.uri sock :> connection)
+        | None -> (sock :> connection)
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Resource.close sock;
+        Printexc.raise_with_backtrace exn bt
     in
     let rec push () =
       let prev = Atomic.get tracked_transports in
@@ -1730,13 +1795,18 @@ let make_client ~net ~origin =
 (** Create a single transport connection bound to [sw]. This is the unit
     stored in the connection cache and reused across requests. *)
 let make_connection ~sw ~net ~origin : (connection, http_error) result =
-  let* net, addr, tls_wrap = resolve_origin net origin in
+  let* net, addresses, tls_wrap = resolve_origin net origin in
   try
-    let sock = Eio.Net.connect ~sw net addr in
+    let sock = Tcp_address_race.connect ~sw ~net addresses in
     let conn : connection =
-      match tls_wrap with
-      | Some wrap -> (wrap origin.uri sock :> connection)
-      | None -> (sock :> connection)
+      try
+        match tls_wrap with
+        | Some wrap -> (wrap origin.uri sock :> connection)
+        | None -> (sock :> connection)
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Resource.close sock;
+        Printexc.raise_with_backtrace exn bt
     in
     Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
     Ok conn
@@ -1915,6 +1985,36 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
           })))
 ;;
 
+(* Same receipt shape as get_sync over the DELETE verb. The Files API deletes
+   by file id (RFC-0430 Phase 3) and answers with a JSON body even on 2xx, so
+   the caller keeps reading status + body the same way. *)
+let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
+  let* deadline =
+    resolve_explicit_deadline
+      ~operation:"delete_sync"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  in
+  catch_network (fun () ->
+    let* origin = parse_uri url in
+    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+      let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
+      with_explicit_deadline deadline (fun () ->
+        let resp, resp_body =
+          Cohttp_eio.Client.delete ~sw client ~headers:hdr origin.uri
+        in
+        let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+        let resp_headers = Cohttp.Response.headers resp in
+        let* body_str = read_response_body resp_body in
+        Ok
+          { status = code
+          ; body = body_str
+          ; retry_after_header = retry_after_header_of_response_headers resp_headers
+          ; content_type = content_type_of_response_headers resp_headers
+          })))
+;;
+
 let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
   let* deadline =
     resolve_explicit_deadline
@@ -1944,14 +2044,15 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
             origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
-        profile_headers_on_client_error
-          ~url
-          ~code
-          ~resp_headers:(Cohttp.Response.headers resp)
-          headers_with_length;
-        profile_request_on_client_error ~url ~code ~request_body:body;
         let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
+        profile_opaque_client_error
+          ~url
+          ~code
+          ~resp_headers
+          ~request_headers:headers_with_length
+          ~request_body:body
+          ~response_body:body_str;
         Ok
           { status = code
           ; body = body_str
@@ -2322,10 +2423,15 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
     | status ->
       let code = Cohttp.Code.code_of_status status in
       let resp_headers = Cohttp.Response.headers resp in
-      profile_headers_on_client_error ~url ~code ~resp_headers headers_with_length;
-      profile_request_on_client_error ~url ~code ~request_body:body;
       let retry_after_header = retry_after_header_of_response_headers resp_headers in
       let* body_str = read_response_body resp_body in
+      profile_opaque_client_error
+        ~url
+        ~code
+        ~resp_headers
+        ~request_headers:headers_with_length
+        ~request_body:body
+        ~response_body:body_str;
       Error (HttpError { code; body = body_str; retry_after_header }))
 ;;
 
@@ -2471,11 +2577,16 @@ let with_post_stream
         | status ->
           let code = Cohttp.Code.code_of_status status in
           let resp_headers = Cohttp.Response.headers resp in
-          profile_headers_on_client_error ~url ~code ~resp_headers headers_with_length;
-          profile_request_on_client_error ~url ~code ~request_body:body;
           let retry_after_header = retry_after_header_of_response_headers resp_headers in
           (match read_response_body resp_body with
            | Ok body_str ->
+             profile_opaque_client_error
+               ~url
+               ~code
+               ~resp_headers
+               ~request_headers:headers_with_length
+               ~request_body:body
+               ~response_body:body_str;
              Eio.Resource.close conn;
              Error (HttpError { code; body = body_str; retry_after_header })
            | Error err ->

@@ -68,6 +68,11 @@ type loaded =
     (** From the file's [title] key; [None] when absent. The human-readable
         name MCP clients show for the tool — [None] leaves the consumer its
         mechanical fallback. *)
+  ; identity_fields : string list option
+    (** From the file's [identity_fields] top-level string array. [None] when
+        the key is absent: the file says nothing about caller identity, and a
+        consumer that needs the list (the board registry generator) refuses
+        the file rather than reading an empty one. *)
   ; keeper_projection : Masc_domain.tool_schema option
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
@@ -95,7 +100,8 @@ val load
     renamed file cannot silently redefine a different tool.
 
     Accepted top-level keys: [name], [description] (non-empty),
-    [title] (non-empty when present), [additional_properties] (bool),
+    [title] (non-empty when present), [identity_fields] (string list, [None] when absent),
+    [additional_properties] (bool),
     [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
     [agent_core_projection] (the same table grammar), [defer_loading]
@@ -135,8 +141,8 @@ val validate_embedded
 (** [validate_embedded ~read ~files] loads every [tools/*.toml] entry of the
     embedded config tree ([Embedded_config.file_list] / [Embedded_config.read],
     passed in so this module stays asset-source agnostic) and returns the
-    first definition that fails to decode. Files under [tools/] that are
-    neither a [.toml] definition directly under the directory nor the
-    [managed-assets.json] manifest are errors too. Called once from server
+    first definition that fails to decode. Any file under [tools/] that is
+    not a [.toml] definition directly under the directory is an error too;
+    the tree has no manifest, the tree is the set. Called once from server
     bootstrap, before readiness, so a bad definition refuses the boot
     instead of publishing a partial tool surface. *)

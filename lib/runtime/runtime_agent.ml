@@ -107,6 +107,7 @@ type config =
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
+  recovery_view : Runtime_recovery_projection.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -134,6 +135,7 @@ let default_config = Runtime_agent_context.default_config
 type run_result = {
   response : Agent_core.Types.api_response;
   checkpoint : Agent_core.Checkpoint.t option;
+  cooperative_boundary : Agent_core.Agent.Advanced.tool_boundary option;
   session_id : string;
   session_resumed : bool option;
   turns : int;
@@ -693,6 +695,29 @@ let apply_runtime_model_input_capabilities
     supports_video_input = model_caps.supports_video_input;
   }
 
+(* A model declaration cannot make its host transport carry a media block.
+   The official-client adapters accept text plus inline images for Codex and
+   Claude, and text only for Antigravity (Keeper_official_client_host). *)
+let apply_execution_input_capabilities execution
+    (caps : Llm_provider.Capabilities.capabilities) =
+  match execution with
+  | Runtime_execution.Agent_core _ -> caps
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _ ->
+    { caps with
+      supports_multimodal_inputs = false
+    ; supports_audio_input = false
+    ; supports_video_input = false
+    ; supports_document_input = false
+    }
+  | Runtime_execution.Antigravity_cli _ ->
+    { caps with
+      supports_multimodal_inputs = false
+    ; supports_image_input = false
+    ; supports_audio_input = false
+    ; supports_video_input = false
+    ; supports_document_input = false
+    }
+
 let input_capabilities_for_config (config : config) =
   let caps = provider_caps_of_config config.provider_cfg in
   match Runtime.get_runtime_by_id (runtime_id_of_config config) with
@@ -704,11 +729,12 @@ let input_capabilities_for_config (config : config) =
           ~default:Runtime_schema.model_capabilities_default
       in
       apply_runtime_model_input_capabilities caps model_caps
+      |> apply_execution_input_capabilities runtime.execution
 
 (* Effective input capabilities of a materialized runtime (RFC-0265 reroute
    candidate scoring). Same composition as [input_capabilities_for_config]:
-   provider caps overlaid with the model's declared media capabilities (the MASC
-   SSOT, [apply_runtime_model_input_capabilities]). *)
+   provider caps overlaid with the model's declared media capabilities, then
+   constrained by the concrete execution transport. *)
 let input_capabilities_of_runtime (rt : Runtime.t) =
   let provider_caps =
     match rt.Runtime.execution with
@@ -723,17 +749,31 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
     provider_caps
     (Option.value rt.Runtime.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
+  |> apply_execution_input_capabilities rt.execution
 
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
     ~(config : config)
     (goal_blocks : Agent_core.Types.content_block list) =
-  validate_content_blocks_for_run_against_capabilities_with_checkpoint
-    ~provider_label:(provider_label config.provider_cfg)
-    (input_capabilities_for_config config)
-    ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
-    ~initial_messages:config.initial_messages
-    ~goal_blocks
+  let validate ~checkpoint_messages ~initial_messages ~goal_blocks =
+    validate_content_blocks_for_run_against_capabilities_with_checkpoint
+      ~provider_label:(provider_label config.provider_cfg)
+      (input_capabilities_for_config config)
+      ~checkpoint_messages ~initial_messages ~goal_blocks in
+  match config.recovery_view with
+  | None -> validate ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
+      ~initial_messages:config.initial_messages ~goal_blocks
+  | Some view ->
+    let ( let* ) = Result.bind in
+    let canonical = match agent_core_checkpoint with
+      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
+      | None -> config.initial_messages in
+    let incoming = match goal_blocks with
+      | [] -> canonical
+      | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
+          name=None;tool_call_id=None;metadata=[]}] in
+    let* projected = view.Runtime_recovery_projection.project incoming in
+    validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
@@ -1116,6 +1156,10 @@ let run_blocks_internal
   with
   | Error _ as err -> err
   | Ok () ->
+  let config = match config.recovery_view with
+    | None -> config
+    | Some view -> {config with model_input_projection=Some
+        (view.Runtime_recovery_projection.compose config.model_input_projection)} in
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with
@@ -1331,6 +1375,7 @@ let run_blocks_internal
         {
           response;
           checkpoint;
+          cooperative_boundary = None;
           session_id;
           session_resumed = None;
           turns;
@@ -1363,6 +1408,9 @@ let run_blocks_internal
       Ok
         { response
         ; checkpoint
+        ; cooperative_boundary =
+            Some { Agent_core.Agent.Advanced.turn = yielded.turn
+                 ; checkpoint_stage = yielded.checkpoint_stage }
         ; session_id
         ; session_resumed = None
         ; turns = yielded.turn
@@ -1397,6 +1445,7 @@ let run_blocks_internal
       Ok
         { response = partial_response
         ; checkpoint
+        ; cooperative_boundary = None
         ; session_id
         ; session_resumed = None
         ; turns

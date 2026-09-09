@@ -96,7 +96,7 @@ let run_keeper_cycle_admitted
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
-      ~(wake : Keeper_registry.wake_reason)
+      ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ()
   =
   let admitted_execution =
@@ -109,7 +109,7 @@ let run_keeper_cycle_admitted
         ~meta:meta_after_triage
         ~publication_recovery_provider:ctx.publication_recovery_provider
         ~observation:obs
-        ~wake
+        ~turn_input
         ?hitl_resolution
         ?previous_turn_stop
         (* RFC-0315: pass the whole decision, not just its channel — the
@@ -201,7 +201,7 @@ let run_keeper_cycle
       ~obs
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ~shared_context
-      ~(wake : Keeper_registry.wake_reason)
+      ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ()
   =
   (* Every lane reaches the turn through this wrapper, so the stop state
@@ -243,7 +243,7 @@ let run_keeper_cycle
       ~obs
       ~turn_decision
       ~shared_context
-      ~wake
+      ~turn_input
       ?event_bus
       ?hitl_resolution
       ()

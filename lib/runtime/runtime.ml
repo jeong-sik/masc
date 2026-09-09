@@ -21,6 +21,8 @@ type t =
     (** Turn owner materialized at load time. HTTP bindings become
         [Agent_core]; official client runtimes remain distinct and can never
         be dispatched as a fake LLM provider config. *)
+  ; candidate_preference : Runtime_lane_preference.candidate
+    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
         credential-alias selection that resolved the dispatched API key
@@ -313,6 +315,18 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
            ; model
            ; binding = b
            ; execution
+           ; candidate_preference = (
+               let binding = match execution with
+                 | Runtime_execution.Agent_core config ->
+                     (match Agent_core.Binding_identity.of_provider_config
+                       ~transport:Agent_core.Binding_identity.Http config with
+                      | Ok binding -> Runtime_lane_preference.Resolved_http_binding binding
+                      | Error reason -> Runtime_lane_preference.Http_binding_unavailable reason)
+                 | Runtime_execution.Codex_app_server _
+                 | Runtime_execution.Claude_code _
+                 | Runtime_execution.Antigravity_cli _ -> Runtime_lane_preference.Official_client_binding
+               in
+               Runtime_lane_preference.create_candidate ~binding)
            ; quota_scope = quota_scope_of_materialized ~provider ~execution
            }
        | Error reason -> Error (Execution_unbuildable reason))
@@ -601,7 +615,7 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
-type dropped_runtime_assignment =
+type unavailable_runtime_assignment =
   { keeper_name : string
   ; runtime_id : string
   }
@@ -621,7 +635,7 @@ type startup_degradation =
   ; configured_default_runtime_id : string
   ; effective_default_runtime_id : string
   ; disabled_runtime_ids : string list
-  ; dropped_assignments : dropped_runtime_assignment list
+  ; unavailable_assignments : unavailable_runtime_assignment list
   ; dropped_routes : dropped_runtime_route list
   ; dropped_media_failover : string list
   ; dropped_lane_candidates : dropped_runtime_lane list
@@ -636,7 +650,7 @@ type strict_init_error =
   | Runtime_config_error of string
   | Missing_catalog_models of missing_catalog_report
 
-let missing_catalog_model_label (missing : missing_catalog_model) =
+let missing_catalog_model_to_string (missing : missing_catalog_model) =
   Printf.sprintf
     "%s (provider_label=%s, model=%s)"
     missing.runtime_id
@@ -651,7 +665,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
      Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
-    (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
+    (String.concat ", " (List.map missing_catalog_model_to_string report.missing_models))
 ;;
 
 let strict_init_error_to_string = function
@@ -662,16 +676,15 @@ let strict_init_error_to_string = function
 let startup_degradation_to_string (degradation : startup_degradation) =
   Printf.sprintf
     "runtime catalog degraded boot: disabled %d uncatalogued runtime(s); \
-     configured default %S -> effective default %S; operator must add catalog \
-     rows for: %s"
+     configured default %S -> effective default %S; unavailable configured routes: %s"
     (List.length degradation.disabled_runtime_ids)
     degradation.configured_default_runtime_id
     degradation.effective_default_runtime_id
     (String.concat ", "
-       (List.map missing_catalog_model_label degradation.report.missing_models))
+       (List.map missing_catalog_model_to_string degradation.report.missing_models))
 ;;
 
-let dropped_assignment_to_yojson (entry : dropped_runtime_assignment) =
+let unavailable_assignment_to_yojson (entry : unavailable_runtime_assignment) =
   `Assoc
     [ "keeper_name", `String entry.keeper_name
     ; "runtime_id", `String entry.runtime_id
@@ -728,8 +741,8 @@ let startup_degradation_to_yojson = function
       ; ( "disabled_runtime_ids"
         , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
         )
-      ; ( "dropped_assignments"
-        , `List (List.map dropped_assignment_to_yojson degradation.dropped_assignments)
+      ; ( "unavailable_assignments"
+        , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
         )
       ; "dropped_routes", `List (List.map dropped_route_to_yojson degradation.dropped_routes)
       ; ( "dropped_media_failover"
@@ -741,9 +754,8 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add deployment rows to agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove \
-             those runtime.toml bindings; uncatalogued runtimes are disabled \
-             for this process." )
+            "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
+             Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch." )
       ]
 ;;
 
@@ -816,14 +828,14 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
          r.model.id)
 ;;
 
-type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+type request_body_cap_error = Non_positive_request_body_cap of
   { runtime_id : string
   }
 
 let request_body_cap_error_to_string = function
-  | Missing_or_non_positive_request_body_cap { runtime_id } ->
+  | Non_positive_request_body_cap { runtime_id } ->
     Printf.sprintf
-      "Keeper runtime %S has no positive serialized-request ceiling"
+      "Keeper runtime %S has a non-positive explicit serialized-request ceiling"
       runtime_id
 ;;
 
@@ -834,26 +846,17 @@ let request_body_cap_error_to_string = function
 let validate_request_body_cap ~runtime_id
     (provider_config : Llm_provider.Provider_config.t) =
   match provider_config.max_request_body_bytes with
-  | Some cap when cap > 0 -> Ok cap
-  | None | Some _ ->
-    Error (Missing_or_non_positive_request_body_cap { runtime_id })
+  | None -> Ok None
+  | Some cap when cap > 0 -> Ok (Some cap)
+  | Some _ ->
+    Error (Non_positive_request_body_cap { runtime_id })
 ;;
 
-(* Whether a materialized runtime could carry a keeper turn if one were routed
-   to it, independent of whether anything routes to it today.
-
-   Boot validation deliberately checks only reachable ids — refusing to start
-   over a runtime nobody is assigned to would be wrong — but that left the
-   blocked state with no observer at all: a runtime declared in runtime.toml,
-   materialized, listed by /api/v1/runtime/resolved, and impossible to assign,
-   with nothing anywhere saying why. Seven live runtimes were in that state on
-   2026-08-12 and finding them required a separate script that re-parsed the
-   TOML (masc#28404). The readiness is the same predicate boot validation uses,
-   named once so the operator-facing projection and the fail-closed gate cannot
-   disagree. *)
+(* Explicit caller caps are validated for every materialized HTTP runtime.
+   Absence is dispatchable; it is not a missing provider capability. *)
 type keeper_dispatch_readiness =
   | Dispatchable
-  | Missing_request_body_cap of { table_path : string }
+  | Invalid_request_body_cap of { table_path : string }
 
 (* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
    and the resolved projection own its observability. *)
@@ -867,7 +870,7 @@ let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
     (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
      | Ok _ -> Dispatchable
      | Error _ ->
-       Missing_request_body_cap
+       Invalid_request_body_cap
          { table_path =
              Otoml.string_of_path
                [ runtime.binding.provider_id; runtime.binding.model_id ]
@@ -880,10 +883,10 @@ let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
 (* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
 let keeper_dispatch_blocker = function
   | Dispatchable -> None
-  | Missing_request_body_cap { table_path } ->
+  | Invalid_request_body_cap { table_path } ->
     Some
       (Printf.sprintf
-         "no positive max-request-body-bytes; declare [%s].max-request-body-bytes"
+         "non-positive [%s].max-request-body-bytes; use a positive value or omit it"
          table_path)
 ;;
 
@@ -1018,20 +1021,18 @@ let validate_keeper_dispatch_request_caps
      max-prompt-bytes for them added a second authority over the same window,
      measured in wire bytes rather than tokens, and made its absence a boot
      refusal, so a deployment could not choose to let the provider decide. *)
-  let missing_ceiling runtime =
+  let invalid_ceiling runtime =
     match keeper_dispatch_readiness runtime with
     | Dispatchable -> None
-    | Missing_request_body_cap { table_path } -> Some (runtime, table_path)
+    | Invalid_request_body_cap { table_path } -> Some (runtime, table_path)
   in
-  match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
+  match List.find_map (fun id -> Option.bind (runtime_by_id id) invalid_ceiling) ids with
   | None -> Ok ()
   | Some (runtime, table_path) ->
     Error
       (Printf.sprintf
-         "%s: Keeper-dispatch runtime %S has no positive \
-          max-request-body-bytes; declare [%s].max-request-body-bytes before \
-          dispatch so the exact serialized request has an explicit admission \
-          ceiling"
+         "%s: Keeper-dispatch runtime %S has a non-positive \
+          [%s].max-request-body-bytes; use a positive value or omit it"
          config_path
          runtime.id
          table_path)
@@ -1079,7 +1080,7 @@ let runtime_missing_from_report (report : missing_catalog_report) runtime_id =
 
 let runtime_default_route_name = "[runtime].default"
 
-let dropped_assignment_label (entry : dropped_runtime_assignment) =
+let unavailable_assignment_label (entry : unavailable_runtime_assignment) =
   Printf.sprintf "[runtime.assignments].%s=%S" entry.keeper_name entry.runtime_id
 ;;
 
@@ -1099,7 +1100,7 @@ let missing_reference_error
     ~(config_path : string)
     ~(configured_default_runtime_id : string)
     ~(default_drop : dropped_runtime_route option)
-    ~(dropped_assignments : dropped_runtime_assignment list)
+    ~(unavailable_assignments : unavailable_runtime_assignment list)
     ~(dropped_routes : dropped_runtime_route list)
     ~(dropped_media_failover : string list)
     ~(dropped_lane_candidates : dropped_runtime_lane list)
@@ -1107,7 +1108,7 @@ let missing_reference_error
   =
   let references =
     List.concat
-      [ List.map dropped_assignment_label dropped_assignments
+      [ List.map unavailable_assignment_label unavailable_assignments
       ; List.map dropped_route_label dropped_routes
       ; (match dropped_media_failover with
          | [] -> []
@@ -1174,14 +1175,13 @@ let degrade_loaded_for_missing_catalog
     |> List.map (fun (missing : missing_catalog_model) -> missing.runtime_id)
     |> List.sort_uniq String.compare
   in
-  let kept_assignments, dropped_assignments =
-    List.fold_right
-      (fun (keeper_name, runtime_id) (kept, dropped) ->
-         if is_missing runtime_id
-         then kept, { keeper_name; runtime_id } :: dropped
-         else (keeper_name, runtime_id) :: kept, dropped)
+  let unavailable_assignments =
+    List.filter_map
+      (fun (keeper_name, runtime_id) ->
+         if is_missing runtime_id && Option.is_none (find_declared_lane lanes runtime_id)
+         then Some { keeper_name; runtime_id }
+         else None)
       assignments
-      ([], [])
   in
   let default_drop =
     if is_missing configured_default.id
@@ -1238,8 +1238,7 @@ let degrade_loaded_for_missing_catalog
       ([], [])
   in
   let has_routing_references =
-    (not (List.is_empty dropped_assignments))
-    || (not (List.is_empty dropped_routes))
+    (not (List.is_empty dropped_routes))
     || (not (List.is_empty dropped_media_failover))
     || (not (List.is_empty dropped_lane_candidates))
     || not (List.is_empty dropped_lanes)
@@ -1257,7 +1256,7 @@ let degrade_loaded_for_missing_catalog
          ~config_path:report.config_path
          ~configured_default_runtime_id:configured_default.id
          ~default_drop
-         ~dropped_assignments
+         ~unavailable_assignments
          ~dropped_routes
          ~dropped_media_failover
          ~dropped_lane_candidates
@@ -1268,7 +1267,7 @@ let degrade_loaded_for_missing_catalog
       ; configured_default_runtime_id = configured_default.id
       ; effective_default_runtime_id = configured_default.id
       ; disabled_runtime_ids
-      ; dropped_assignments
+      ; unavailable_assignments
       ; dropped_routes
       ; dropped_media_failover
       ; dropped_lane_candidates
@@ -1278,7 +1277,7 @@ let degrade_loaded_for_missing_catalog
     Ok
       ( ( active_runtimes
         , configured_default
-        , kept_assignments
+        , assignments
         , kept_media_failover
         , kept_lanes
         , lsp_servers )
@@ -1468,6 +1467,24 @@ let set_loaded
     , media_failover
     , lanes
     , lsp_servers ) =
+  (* Reuse observations only when the actual resolved binding is unchanged.
+     Compare the identities frozen at materialization, never re-resolve old
+     credentials/catalog facts after a reload. Removed/rebound rows retain no
+     global registry entry; in-flight snapshots alone keep their old cells. *)
+  let previous = (Atomic.get loaded_state_ref).runtimes in
+  let preserve_candidate (runtime : t) =
+    match List.find_opt (fun (old : t) ->
+      String.equal old.id runtime.id
+      && Runtime_schema.equal_provider old.provider runtime.provider
+      && Runtime_schema.equal_model_spec old.model runtime.model
+      && Runtime_schema.equal_binding old.binding runtime.binding
+      && Runtime_lane_preference.same_candidate_binding
+           old.candidate_preference runtime.candidate_preference) previous with
+    | Some old -> { runtime with candidate_preference = old.candidate_preference }
+    | None -> runtime
+  in
+  let runtimes = List.map preserve_candidate runtimes in
+  let rt = preserve_candidate rt in
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
@@ -1526,49 +1543,36 @@ let init_default_strict ~config_path =
   init_default_strict_report ~config_path
   |> Result.map_error strict_init_error_to_string
 
-let initialize_degraded_loaded ~config_path = function
-  | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
-    let verifier_exact_slot_ids =
-      verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
-    in
-    (match missing_runtime_model_capabilities ~config_path runtimes with
-     | None ->
-       (match validate_runtime_max_context ~config_path runtimes with
-        | Error msg -> Error (Runtime_config_error msg)
-        | Ok () ->
-          (match
-             validate_keeper_dispatch_request_caps
-               ~config_path
-               ~verifier_exact_slot_ids
-               loaded
-           with
-           | Error msg -> Error (Runtime_config_error msg)
-           | Ok () ->
-             set_loaded ~config_path loaded;
-             Ok Initialized))
-     | Some report ->
-       (match degrade_loaded_for_missing_catalog loaded report with
-        | Error msg -> Error (Runtime_config_error msg)
-        | Ok
-            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
-          ->
-          (match validate_runtime_max_context ~config_path active_runtimes with
-           | Error msg -> Error (Runtime_config_error msg)
-           | Ok () ->
-             (match
-                validate_keeper_dispatch_request_caps
-                  ~config_path
-                  ~verifier_exact_slot_ids
-                  degraded_loaded
-              with
-              | Error msg -> Error (Runtime_config_error msg)
-              | Ok () ->
-                set_loaded
-                  ~startup_degradation:degradation
-                  ~config_path
-                  degraded_loaded;
-                Ok (Initialized_degraded degradation)))))
+(* Prepare one immutable runtime publication. Boot and config edits share the
+   same catalog exclusion so a save cannot reactivate an unavailable route. *)
+let prepare_degraded_loaded ~config_path
+    (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) =
+  let* loaded, startup_degradation =
+    match missing_runtime_model_capabilities ~config_path runtimes with
+    | None -> Ok (loaded, None)
+    | Some report ->
+        let* loaded, degradation = degrade_loaded_for_missing_catalog loaded report in
+        Ok (loaded, Some degradation)
+  in
+  let active_runtimes, _, _, _, _, _ = loaded in
+  let* () = validate_runtime_max_context ~config_path active_runtimes in
+  let* () = validate_keeper_dispatch_request_caps ~config_path
+      ~verifier_exact_slot_ids:(verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
+      loaded in
+  Ok (loaded, exact_output_lane_decls, startup_degradation)
+;;
+
+let initialize_degraded_loaded ~config_path parsed =
+  let* parsed = Result.map_error (fun msg -> Runtime_config_error msg) parsed in
+  let* loaded, _, startup_degradation =
+    prepare_degraded_loaded ~config_path parsed
+    |> Result.map_error (fun msg -> Runtime_config_error msg)
+  in
+  set_loaded ?startup_degradation ~config_path loaded;
+  Ok (match startup_degradation with
+    | None -> Initialized
+    | Some degradation -> Initialized_degraded degradation)
+;;
 
 let init_default_degraded_report ~config_path =
   load_list_internal ~config_path ~validate_max_context:false
@@ -1609,7 +1613,7 @@ let runtimes_and_media_failover () =
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
    {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
    only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
-   [keeper_assignments_ref], never a module-level eager binding. *)
+   the immutable loaded-state assignment snapshot. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
 ;;
@@ -1711,21 +1715,28 @@ let max_context_of_runtime (rt : t) : int =
    An assignment naming a bare runtime gets a lane of its own rather than a
    bare dispatch target: the lane id is what keys sticky preference and quota
    demotion, so without one those mechanisms are simply off for that keeper.
-   [Missing] means the assignment does not name a known lane or runtime. *)
+   [Unavailable] retains a configured ID whose capability catalog entry is
+   absent; [Missing] means no configured lane or runtime has that ID. *)
 let resolve_assignment (assigned_id : string) =
-  match get_lane_by_id assigned_id with
+  let state = runtime_state () in
+  match find_declared_lane state.lanes assigned_id with
   | Some lane -> `Lane lane
   | None ->
-    (match get_runtime_by_id assigned_id with
+    (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
      | Some runtime ->
        let candidates =
-         match get_default_runtime () with
+         match state.default_runtime with
          | Some default ->
            with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
          | None -> [ runtime.id ]
        in
        `Lane (Runtime_lane.make ~id:runtime.id candidates)
-     | None -> `Missing)
+     | None ->
+       (match Option.bind state.startup_degradation (fun degradation ->
+          List.find_opt (fun (missing : missing_catalog_model) ->
+            String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
+        | Some missing -> `Unavailable missing
+        | None -> `Missing))
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)
@@ -2255,7 +2266,7 @@ let materialize_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  materialize_config ~config_path cfg
+  materialize_config ~validate_max_context:false ~config_path cfg
 ;;
 
 let runtime_config_commit_order = ref Int64.zero
@@ -2357,18 +2368,8 @@ let parse_and_validate_config_text ~config_path content =
            "; "
            (List.map Skill_source_config.diagnostic_to_string diagnostics))
   in
-  let* loaded, exact_output_lanes =
-    materialize_runtime_config_text ~config_path content
-  in
-  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () =
-    validate_keeper_dispatch_request_caps
-      ~config_path
-      ~verifier_exact_slot_ids:
-        (verifier_exact_slot_ids_of_lane_decls exact_output_lanes)
-      loaded
-  in
-  Ok (loaded, exact_output_lanes)
+  let* parsed = materialize_runtime_config_text ~config_path content in
+  prepare_degraded_loaded ~config_path parsed
 ;;
 
 let commit_runtime_config_text
@@ -2377,7 +2378,7 @@ let commit_runtime_config_text
     content
   =
   let observation = config_observation ~path content in
-  let* loaded, exact_output_lanes =
+  let* loaded, exact_output_lanes, startup_degradation =
     parse_and_validate_config_text ~config_path:path content
   in
   match
@@ -2386,7 +2387,7 @@ let commit_runtime_config_text
   | Error Runtime_exact_output_registry.Registry_not_published ->
     (match replace_file path content with
      | Ok () ->
-       set_loaded ~config_path:path loaded;
+       set_loaded ?startup_degradation ~config_path:path loaded;
        Ok (committed_receipt ~observation ~durability:Durable)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
@@ -2396,7 +2397,7 @@ let commit_runtime_config_text
             ~observation
             failure
         | Fs_compat.After_rename ->
-          set_loaded ~config_path:path loaded;
+          set_loaded ?startup_degradation ~config_path:path loaded;
           runtime_config_atomic_failure
             ~replacement_visible:true
             ~observation
@@ -2413,7 +2414,7 @@ let commit_runtime_config_text
            (runtime_config_write_outcome
               ~replace_file
               ~on_replacement_visible:(fun () ->
-                set_loaded ~config_path:path loaded)
+                set_loaded ?startup_degradation ~config_path:path loaded)
               ~path
               content)
      with
@@ -2478,7 +2479,7 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* _loaded, _exact_output_lanes =
+  let* _loaded, _exact_output_lanes, _degradation =
     parse_and_validate_config_text ~config_path:path content
   in
   Ok ()

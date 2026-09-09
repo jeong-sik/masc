@@ -1,3 +1,4 @@
+import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
 import type { KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
@@ -47,6 +48,9 @@ export interface Agent {
 }
 
 export interface Task {
+  /** Summary rows require a detail read before rendering complete task fields. */
+  detail_level?: 'summary' | 'full'
+  description_revision?: string
   id: string
   title: string
   goal_id?: string | null
@@ -565,7 +569,27 @@ export type KeeperLifecycleState =
   | 'crashed'
   | 'unknown'
 
+export interface GoalProofCriterion {
+  revision: string
+  title: string
+  metric: string | null
+  target_value: string | null
+}
+
+export type GoalProofCompletion =
+  | { state: 'idle' }
+  | { state: 'pending'; criterion: GoalProofCriterion; requestId: string; requestedAt: string }
+  | ({ criterion: GoalProofCriterion; requestId: string; runId: string;
+       evidence: string; recordedAt: string; actor: string } &
+       ({ state: 'proven' } | { state: 'refuted'; reason: string }))
+
+export type GoalProof =
+  | { state: 'current'; completion: GoalProofCompletion }
+  | { state: 'stale'; historical: Exclude<GoalProofCompletion, { state: 'idle' }> }
+  | { state: 'unreadable'; detail: string }
+
 export interface Goal {
+  verification?: GoalProof
   id: string
   title: string
   metric?: string | null
@@ -638,6 +662,7 @@ export type KeeperApprovalLifecyclePhase =
   | 'replay_failed'
   | 'replay_indeterminate'
   | 'continuation_recorded'
+  | 'continuation_failed'
 
 export interface KeeperApprovalLifecycle {
   approvalId: string
@@ -757,16 +782,37 @@ export interface KeeperConversationDetails {
   rawPayload?: unknown
 }
 
-export interface KeeperConversationAttachment {
-  id: string
-  type: 'image' | 'file'
-  name: string
-  size: number
-  mimeType: string
-  data: string
-  /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
-  dims?: string
-}
+/** An image reference the provider resolves itself (#33728): an external
+ *  http(s) URL or a Files-API id minted by a keeper upload tool. The server
+ *  never fetches either; the wire form is `{type:'image', url}` /
+ *  `{type:'image', file_id}`. */
+export type KeeperImageReference =
+  | { kind: 'url'; url: string }
+  | { kind: 'file_id'; fileId: string }
+
+export type KeeperConversationAttachment =
+  | {
+      /** Bytes this client already holds, as a data URL. */
+      kind?: undefined
+      id: string
+      type: 'image' | 'file'
+      name: string
+      size: number
+      mimeType: string
+      data: string
+      /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
+      dims?: string
+    }
+  | (KeeperImageReference & {
+      /** Discriminated by [kind]; [name] is the display label. */
+      id: string
+      name: string
+      mimeType?: string
+    })
+
+/** The byte-backed arm of the attachment union — what history decode and the
+ *  wire [attachments] array always produce. */
+export type KeeperByteAttachment = Extract<KeeperConversationAttachment, { kind?: undefined }>
 
 export type KeeperUserInputMediaKind = 'image' | 'document' | 'audio'
 
@@ -779,6 +825,8 @@ export type KeeperUserInputBlock =
       mimeType: string
       size: number
     }
+  | { type: 'image'; url: string; mimeType?: string }
+  | { type: 'image'; fileId: string; mimeType?: string }
 
 // RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
 // `audioUrl` is the absolute/relative URL the dashboard uses for playback;
@@ -838,6 +886,10 @@ export type ChatAttachBlock = {
   sizeBytes?: number
   id?: string
   kind?: string
+  /** When set, this attach chip is an image reference (#33728) the provider
+   *  fetches, not bytes this client holds; [src] then carries the url verbatim
+   *  for display and the queue rebuilds the attachment from this field. */
+  ref?: KeeperImageReference
 }
 
 export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string; src?: string }
@@ -1310,7 +1362,7 @@ export interface Keeper {
   heartbeat_stale_after_s?: number | null
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
-  proactive_enabled?: boolean
+  activation_mode?: KeeperActivationMode
   pause_state?: KeeperPauseState | null
   runtime_blocker_state?: KeeperRuntimeBlockerState | null
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
@@ -1442,7 +1494,6 @@ export interface KeeperConditions {
   heartbeat_healthy: boolean
   turn_healthy: boolean
   context_handoff_needed: boolean
-  handoff_active: boolean
   operator_paused: boolean
   stop_requested: boolean
   drain_complete: boolean
@@ -1491,9 +1542,6 @@ interface KeeperConfigExecution {
   runtime_ref?: RuntimeRef | null
 }
 
-interface KeeperConfigProactive {
-  enabled: boolean
-}
 
 export interface KeeperConfigSkills {
   /** null inherits every published Skill; [] explicitly selects none. */
@@ -1642,7 +1690,7 @@ export interface KeeperConfig {
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
   config_transaction_warnings?: KeeperManifestWarning[]
-  autoboot_enabled: boolean
+  activation_mode: KeeperActivationMode
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder
@@ -1660,7 +1708,6 @@ export interface KeeperConfig {
   sandbox_roots: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
-  proactive: KeeperConfigProactive
   skills: KeeperConfigSkills
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime

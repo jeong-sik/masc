@@ -61,8 +61,11 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
        %s\n\n\
-       Return only a JSON object with a non-empty string field named text. Do \
-       not include markdown fences or prose outside the JSON object."
+       Return only a JSON object with a non-empty string field named text. When \
+       the requested content is not visible, explicitly describe its absence \
+       in text; do not invent content to fill the field. Distinguish no visible \
+       content from content that is present but unreadable. Do not include \
+       markdown fences or prose outside the JSON object."
       req.Va.query
   in
   Agent_core.Types.make_message
@@ -94,7 +97,14 @@ let vision_runtime_candidates ()
       (fun (rt : Runtime.t) -> not (List.mem rt.Runtime.id media_failover))
       runtimes
   in
+  let rec unique_runtimes seen = function
+    | [] -> []
+    | (rt : Runtime.t) :: rest ->
+      if List.mem rt.id seen then unique_runtimes seen rest
+      else rt :: unique_runtimes (rt.id :: seen) rest
+  in
   from_failover @ rest
+  |> unique_runtimes []
   |> List.filter_map (fun (rt : Runtime.t) ->
        match rt.Runtime.execution with
        | Runtime_execution.Codex_app_server _
@@ -120,10 +130,10 @@ let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
 let store_artifact ~dir bytes =
-  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () -> Store.store ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)
+  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
@@ -138,10 +148,6 @@ let record_vision_candidate_attempt ~runtime_id ~result ~reason =
     ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
     ()
 ;;
-
-let ok_json text =
-  record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
 
 (* Default to Runtime_failure: an unclassified error is treated as an internal
    keeper-health fault, not a caller validation or workflow business rule. *)
@@ -161,13 +167,47 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-let terminal_policy_http_error = function
+(* AcceptRejected is the caller's own transport wiring refused before dispatch
+   (a missing clock, an invalid deadline). Every candidate would refuse the
+   same wiring, so this one still ends the walk. *)
+let wiring_rejected = function
   | Llm_provider.Http_client.AcceptRejected _ -> true
-  | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
+  | _ -> false
+
+(* Capacity belongs to the selected binding. A later image runtime may admit
+   the same pixels under a different request/context ceiling. HTTP 413 states
+   that cause directly; arbitrary HTTP 400/422 prose must not infer it. *)
+let candidate_capacity_http_error = function
+  | Llm_provider.Http_client.HttpError { code = 413; _ }
+  | Llm_provider.Http_client.ProviderFailure
+      { kind =
+          (Llm_provider.Http_client.Request_body_too_large _
+          | Llm_provider.Http_client.Context_overflow _)
+      ; _
+      } -> true
+  | _ -> false
+
+(* Every other 4xx is this binding's verdict on this request: a parameter
+   range (glm-4.6v refused max_tokens 40960 on 2026-09-07), a media type, a
+   key it does not accept (401), a model its plan does not serve (403/404).
+   It says nothing about the next candidate, which has its own key and its
+   own wire, so this class ends the candidate, not the walk. Transient codes
+   (408/409/429) and capacity (413) are classified before it and keep their
+   own handling; it still names the failure class once every candidate has
+   answered. *)
+let candidate_policy_http_error err =
+  match err with
+  | Llm_provider.Http_client.HttpError { code; _ } ->
+    code >= 400
+    && code < 500
+    && (not (candidate_capacity_http_error err))
+    && not (Runtime_attempt_fsm.should_try_next err)
   | _ -> false
 
 let failure_class_of_http_error = function
-  | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
+  | err when wiring_rejected err || candidate_policy_http_error err ->
+    Tool_result.Policy_rejection
+  | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
 
@@ -248,8 +288,15 @@ let media_type_for_request ~bytes args =
   | Some (`String raw) -> validate_media_type raw
   | Some _ -> Error "media_type must be a string"
 
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -260,6 +307,17 @@ type vision_outcome =
       }
   | Vo_empty
   | Vo_truncated
+
+let ok_json (reading : vision_reading) =
+  record_vision_analyze_result ~result:"ok" ~reason:"ok";
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool true
+       ; "text", `String reading.text
+       ; "runtime_id", `String reading.runtime_id
+       ; "requested_model", `String reading.requested_model
+       ; "response_model", `String reading.response_model
+       ])
 
 let vision_text_of_json = function
   | `Assoc fields ->
@@ -278,22 +336,19 @@ let vision_text_of_response (response : Agent_core.Types.api_response) =
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let outcome_of_response (response : Agent_core.Types.api_response) =
+let outcome_of_response
+    ~runtime_id ~requested_model (response : Agent_core.Types.api_response) =
+  (* A length stop is authoritative even when the prefix happens to form
+     valid, nonempty JSON. Accepting that prefix would publish a partial
+     extraction as success and prevent the next candidate from finishing it. *)
+  if truncated_of_stop_reason response.stop_reason then Vo_truncated
+  else
   match vision_text_of_response response with
-  | Error detail ->
-    (* A reply the model truncated mid-JSON fails the structured parse before
-       its text can be read, so vision_text_of_response reports a parse error
-       even though the cause is a MaxTokens cut. Consult the stop reason first:
-       a length cut is truncation (remediation: a larger budget), which we
-       report as such instead of a malformed-reply parser fault that would
-       misdirect the operator. A parse error with a non-length stop reason is
-       a genuine structured failure. *)
-    if truncated_of_stop_reason response.stop_reason then Vo_truncated
-    else Vo_invalid_structured_response detail
+  | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
-    let truncated = truncated_of_stop_reason response.stop_reason in
-    (match Va.classify ~truncated ~content:text with
-     | Ok t -> Vo_ok t
+    (match Va.classify ~truncated:false ~content:text with
+     | Ok text ->
+       Vo_ok { text; runtime_id; requested_model; response_model = response.model }
      | Error Va.Empty_extraction -> Vo_empty
      | Error Va.Truncated_extraction -> Vo_truncated)
 
@@ -321,22 +376,136 @@ let sleep_before_next_candidate ~clock ~attempt_index =
   if delay > 0.0 then Eio.Time.sleep clock delay
 ;;
 
+type candidate_failure =
+  | Candidate_timeout
+  | Candidate_provider_error of Llm_provider.Http_client.http_error
+  | Candidate_output_limit
+
+(* One walk shrinks the image at most once per distinct edge it is asked
+   for. The live fleet declares three distinct caps, so a 4K screenshot costs
+   at most two extra scaler runs on top of the first downscale. *)
+let shrink_for_edge ~(req : Va.request) ~cache edge =
+  match Hashtbl.find_opt cache edge with
+  | Some cached -> cached
+  | None ->
+    let shrunk =
+      match
+        Keeper_vision_downscale.downscale_with_status
+          ~max_dimension:edge
+          ~media_type:req.Va.image_media_type
+          ~bytes:req.Va.image_bytes
+          ()
+      with
+      | (media_type, bytes), Keeper_vision_downscale.Downscaled _ -> Some (media_type, bytes)
+      | ( _
+        , ( Keeper_vision_downscale.Unchanged_within_bounds _
+          | Keeper_vision_downscale.Unchanged_unknown_dimensions
+          | Keeper_vision_downscale.Downscale_fallback_error _ ) ) -> None
+    in
+    Hashtbl.replace cache edge shrunk;
+    shrunk
+;;
+
+let longest_edge bytes =
+  match Keeper_vision_downscale.detect_dimensions bytes with
+  | None -> None
+  | Some { Keeper_vision_downscale.width; height } -> Some (max width height)
+;;
+
+(* The request this candidate gets: the image as it is when it fits under
+   the candidate's cap, a copy shrunk once to the edge the byte ratio
+   predicts when it does not, and no request at all when neither fits. The
+   client still measures the exact serialized body before dispatch. *)
+let fit_request_to_stated_cap ~(req : Va.request) ~cache ~cap_bytes =
+  let query_bytes = String.length req.Va.query in
+  let min_edge = Env_config_keeper.KeeperVision.max_dimension_floor in
+  let plan_for bytes =
+    Keeper_vision_cap_fit.plan
+      ~cap_bytes
+      ~image_bytes:(String.length bytes)
+      ~query_bytes
+      ~longest_edge:(longest_edge bytes)
+      ~min_edge
+  in
+  match plan_for req.Va.image_bytes with
+  | Keeper_vision_cap_fit.Sends_as_is -> Ok req
+  | Keeper_vision_cap_fit.Cannot_fit { needed_bytes; cap_bytes } ->
+    Error (needed_bytes, cap_bytes)
+  | Keeper_vision_cap_fit.Shrink_longest_edge_to edge ->
+    (match shrink_for_edge ~req ~cache edge with
+     | None ->
+       Error
+         ( Keeper_vision_cap_fit.needed_bytes
+             ~image_bytes:(String.length req.Va.image_bytes)
+             ~query_bytes
+         , cap_bytes )
+     | Some (image_media_type, image_bytes) ->
+       (match plan_for image_bytes with
+        | Keeper_vision_cap_fit.Sends_as_is ->
+          Ok { req with Va.image_media_type; image_bytes }
+        | Keeper_vision_cap_fit.Shrink_longest_edge_to _
+        | Keeper_vision_cap_fit.Cannot_fit _ ->
+          Error
+            ( Keeper_vision_cap_fit.needed_bytes
+                ~image_bytes:(String.length image_bytes)
+                ~query_bytes
+            , cap_bytes )))
+;;
+
+(* No cap means nothing to fit to. #34163 let a runtime dispatch without a
+   caller byte ceiling, which turned [validate_request_body_cap] into an
+   [int option] and left this call site reading it as an [int] -- main did not
+   compile. Absence is not a number to shrink towards: the request goes as it
+   is, and the client still measures the serialized body before dispatch.
+
+   Absence is also the common case, not an edge: 117 of the 155 runtime
+   bindings in this workspace state no max-request-body-bytes (2026-09-08). A
+   reading that treated [None] as a refusal would have stopped vision on all
+   of them. *)
+let fit_request_to_cap ~(req : Va.request) ~cache ~cap_bytes =
+  match cap_bytes with
+  | None -> Ok req
+  | Some cap_bytes -> fit_request_to_stated_cap ~req ~cache ~cap_bytes
+;;
+
+
+(* The same kind the client raises when it measures the serialized body,
+   so the walk's exhaustion classifies as capacity; the message says the
+   number is this walk's prediction, made before any body was serialized. *)
+let predicted_size_failure ~actual_bytes ~limit_bytes =
+  Llm_provider.Http_client.ProviderFailure
+    { kind = Llm_provider.Http_client.Request_body_too_large { actual_bytes; limit_bytes }
+    ; message =
+        Printf.sprintf
+          "predicted request body of %d bytes exceeds the candidate's %d-byte cap; \
+           skipped before dispatch"
+          actual_bytes
+          limit_bytes
+    }
+;;
+
 let run_candidates_outcome
     ?complete
     ~sw
     ~clock
     ~net
-    ~messages
+    ~(req : Va.request)
     ~last_error
     ~attempt_index
     candidates
   =
+  let cache = Hashtbl.create 4 in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
+      (* The walk's outcome is the last candidate's: what ended it. A verdict
+         an earlier candidate gave and the walk moved past (a 400, a capacity
+         refusal) is not the reason the image went unread, and it is already
+         on the candidate counter under that runtime's id. *)
       (match last_error with
        | None -> Vo_no_runtime "no schema-capable image runtime configured"
-       | Some (`Timeout _runtime_id) -> Vo_timeout
-       | Some (`Provider_error err) ->
+       | Some Candidate_timeout -> Vo_timeout
+       | Some Candidate_output_limit -> Vo_truncated
+       | Some (Candidate_provider_error err) ->
          Vo_provider
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
@@ -356,24 +525,51 @@ let run_candidates_outcome
         record_vision_candidate_attempt
           ~runtime_id
           ~result:"error"
-          ~reason:"missing_request_body_cap";
+          ~reason:"invalid_request_body_cap";
         Vo_provider
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok _ ->
+      | Ok cap_bytes ->
+        (match fit_request_to_cap ~req ~cache ~cap_bytes with
+         | Error (actual_bytes, limit_bytes) ->
+           record_vision_candidate_attempt
+             ~runtime_id
+             ~result:"skipped"
+             ~reason:"image_exceeds_cap";
+           (* No call was made, so no backoff and no attempt counted. The
+              size failure is kept as the last error so an exhausted walk
+              reports why the image went unread. *)
+           loop
+             ~last_error:
+               (Some (Candidate_provider_error (predicted_size_failure ~actual_bytes ~limit_bytes)))
+             ~attempt_index
+             rest
+         | Ok fitted ->
         (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-             ~config ~messages ()
+             ~config ~messages:[ message_of_request fitted ] ()
          with
        | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
               ~reason:"timeout";
-            continue_with (`Timeout runtime_id)
+            continue_with Candidate_timeout
        | Error err ->
-            if terminal_policy_http_error err
+            if candidate_capacity_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"candidate_capacity_error";
+              (* Another attempt on this binding cannot change its hard limit;
+                 advance without transient-outage backoff or rewriting pixels. *)
+              loop
+                ~last_error:(Some (Candidate_provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
+            else if wiring_rejected err
             then (
               record_vision_candidate_attempt
                 ~runtime_id
@@ -383,13 +579,25 @@ let run_candidates_outcome
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
                 })
+            else if candidate_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"candidate_policy_error";
+              (* The verdict is this binding's; waiting changes nothing about
+                 it, so advance without the transient-outage backoff. *)
+              loop
+                ~last_error:(Some (Candidate_provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
             else if Runtime_attempt_fsm.should_try_next err
             then (
               record_vision_candidate_attempt
                 ~runtime_id
                 ~result:"error"
                 ~reason:"transient_provider_error";
-              continue_with (`Provider_error err))
+              continue_with (Candidate_provider_error err))
             else (
               record_vision_candidate_attempt
                 ~runtime_id
@@ -400,16 +608,34 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"ok"
-              ~reason:"provider_response";
-            outcome_of_response response)
+            (match
+               outcome_of_response ~runtime_id ~requested_model:config.model_id response
+             with
+             | Vo_truncated ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"error"
+                 ~reason:"output_token_limit";
+               (* A typed length stop is candidate-local. Keep the same pixels
+                  and query, and let the next serializer enforce its own
+                  declared ceiling. Equal ceilings are still worth trying:
+                  models differ in how much reasoning precedes the answer. *)
+               loop
+                 ~last_error:(Some Candidate_output_limit)
+                 ~attempt_index:(attempt_index + 1)
+                 rest
+             | outcome ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"ok"
+                 ~reason:"provider_response";
+               outcome)))
   in
   loop ~last_error ~attempt_index candidates
 
 let run_vision
     ?complete
+    ?runtime_id
     ~sw
     ~clock
     ~net
@@ -433,15 +659,27 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              run_candidates_outcome
+              let candidates = vision_runtime_candidates () in
+              let selected = match runtime_id with
+                | None -> Ok candidates
+                | Some requested ->
+                    let matching = List.filter
+                      (fun (id, _, _) -> String.equal id requested) candidates in
+                    if List.is_empty matching then
+                      Error "requested runtime is not a configured capable image candidate"
+                    else Ok matching
+              in
+              match selected with
+              | Error detail -> Vo_invalid_request detail
+              | Ok candidates -> run_candidates_outcome
                 ?complete
                 ~sw
                 ~clock
                 ~net
-                ~messages:[ message_of_request req ]
+                ~req
                 ~last_error:None
                 ~attempt_index:0
-                (vision_runtime_candidates ())))
+                candidates))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _exn ->
@@ -450,46 +688,40 @@ let run_vision
       ; detail = "vision sub-call raised"
       }
 
+(* The [Vo_provider] arm below binds its class once and hands the same value
+   to the result and to the payload. The other arms wrote theirs twice, so a
+   change to one spelling left the other saying something else. *)
+let failed ~failure_class ?detail code =
+  Keeper_tool_execution.failure
+    ~class_:failure_class
+    (err_json ~failure_class ?detail code)
+;;
+
 let execution_of_vision_outcome = function
   | Vo_ok text -> Keeper_tool_execution.success (ok_json text)
   | Vo_invalid_request detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Policy_rejection
-      (err_json
-         ~failure_class:Tool_result.Policy_rejection
-         ~detail
-         "invalid_request")
+    failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail
-         "no_capable_runtime")
-  | Vo_timeout ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Dependency_unavailable
-      (err_json ~failure_class:Tool_result.Dependency_unavailable "timeout")
+    failed ~failure_class:Tool_result.Runtime_failure ~detail "no_capable_runtime"
+  | Vo_timeout -> failed ~failure_class:Tool_result.Dependency_unavailable "timeout"
   | Vo_invalid_structured_response detail ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail
-         "invalid_structured_response")
+    failed
+      ~failure_class:Tool_result.Runtime_failure
+      ~detail
+      "invalid_structured_response"
   | Vo_provider { failure_class; detail } ->
-    Keeper_tool_execution.failure
-      ~class_:failure_class
-      (err_json ~failure_class ~detail "provider_error")
+    failed ~failure_class ~detail "provider_error"
   | Vo_empty ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Workflow_rejection
-      (err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction")
+    failed ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
   | Vo_truncated ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      (err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
+    failed ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 ;;
+
+let runtime_id_of_args args =
+  match json_member_opt "runtime_id" args with
+  | None -> Ok None
+  | Some (`String id) when not (String.equal (String.trim id) "") -> Ok (Some id)
+  | Some _ -> Error "runtime_id must be a non-empty configured runtime identifier"
 
 let handle_with_outcome
     ?complete
@@ -499,15 +731,17 @@ let handle_with_outcome
     ~(meta : Keeper_meta_contract.keeper_meta)
     ~args
     () =
-  match string_member "artifact" args, string_member "query" args with
-  | None, _ | _, None ->
+  match string_member "artifact" args, string_member "query" args, runtime_id_of_args args with
+  | _, _, Error detail ->
+      failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
+  | None, _, _ | _, None, _ ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (err_json
          ~failure_class:Tool_result.Policy_rejection
          ~detail:"requires string fields: artifact, query"
          "invalid_args")
-  | Some handle_str, Some query ->
+  | Some handle_str, Some query, Ok runtime_id ->
     (match sw, net, clock with
      | None, _, _ | _, None, _ | _, _, None ->
        Keeper_tool_execution.failure
@@ -518,13 +752,17 @@ let handle_with_outcome
      | Some sw, Some net, Some clock ->
        let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
-        | Error msg ->
-          Keeper_tool_execution.failure
-            ~class_:Tool_result.Runtime_failure
-            (err_json
-               ~failure_class:Tool_result.Runtime_failure
-               ~detail:msg
-               "artifact_load_failed")
+        | Error error ->
+          let failure_class, code, recovery = match error with
+            | Store.Malformed_handle _ -> Tool_result.Policy_rejection,
+                "invalid_artifact", "Copy the exact artifact returned by the image-producing tool."
+            | Store.Missing_artifact _ -> Tool_result.Workflow_rejection,
+                "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
+            | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
+                "artifact_load_failed", "The stored image could not be read with verified integrity." in
+          Keeper_tool_execution.failure ~class_:failure_class
+            (err_json ~failure_class
+               ~detail:(Store.load_error_to_string error ^ " " ^ recovery) code)
         | Ok bytes ->
           (match validate_image_size bytes with
              | Error msg ->
@@ -546,6 +784,7 @@ let handle_with_outcome
               | Ok media_type ->
                 run_vision
                   ?complete
+                  ?runtime_id
                   ~sw
                   ~clock
                   ~net

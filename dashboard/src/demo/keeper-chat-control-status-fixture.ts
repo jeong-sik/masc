@@ -10,7 +10,7 @@ import { ChatTranscript } from '../components/chat/primitives'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../tool-call-output-store'
 import type { KeeperConversationEntry } from '../types'
 
-const keeperName = 'kidsnote'
+const keeperName = 'exampleorg'
 
 const deliveredSurfacePost: ToolCallEntry = {
   ts: Date.parse('2026-07-30T02:00:01.000Z') / 1000,

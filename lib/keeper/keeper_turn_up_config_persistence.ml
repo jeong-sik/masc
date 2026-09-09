@@ -316,9 +316,6 @@ let current_config_revision ~config ~keeper_name =
 let set_string value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
 
-let set_bool value =
-  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_bool value)
-
 let set_int value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_int value)
 
@@ -344,9 +341,15 @@ let full_fields
       , Keeper_toml_loader.Toml_string
           (network_mode_to_string meta.network_mode) )
     ; "mention_targets", Keeper_toml_loader.Toml_string_array meta.mention_targets
-    ; "proactive_enabled", Keeper_toml_loader.Toml_bool meta.proactive.enabled
-    ; "autoboot_enabled", Keeper_toml_loader.Toml_bool meta.autoboot_enabled
+    ; "activation_mode", Keeper_toml_loader.Toml_string (Keeper_activation_mode.to_string meta.activation_mode)
     ]
+  in
+  let fields =
+    match meta.microvm_backend with
+    | None -> fields
+    | Some backend ->
+      ("microvm_backend", Keeper_toml_loader.Toml_string
+         (Keeper_microvm_backend.to_string backend)) :: fields
   in
   let fields =
     match meta.max_context_override with
@@ -406,9 +409,16 @@ let explicit_edits
   |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
   |> append_optional "network_mode" set_string parsed.network_mode_opt
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
-  |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
-  |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt
+  |> append_optional "activation_mode" set_string (Option.map Keeper_activation_mode.to_string parsed.activation_mode_opt)
   |> fun fields ->
+  let fields =
+    match parsed.microvm_backend_patch with
+    | None -> fields
+    | Some backend ->
+      ("microvm_backend", match backend with
+       | None -> Keeper_toml_loader.Remove
+       | Some backend -> set_string (Keeper_microvm_backend.to_string backend)) :: fields
+  in
   (if not parsed.remote_endpoint_present
    then fields
    else

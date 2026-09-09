@@ -1,0 +1,10 @@
+{
+  "binary": "/Users/dancer/.local/bin/masc-tui",
+  "sha256_before": "0a1b36e3661de12546e10f48bb86e8c36d423d92724fc1b232d2de6e4c67d921",
+  "sha256_after": "0a1b36e3661de12546e10f48bb86e8c36d423d92724fc1b232d2de6e4c67d921",
+  "exit_code": -9,
+  "forced_kill": true,
+  "terminal_rows": 45,
+  "terminal_cols": 150,
+  "duration_s": 20.67625737504568
+}

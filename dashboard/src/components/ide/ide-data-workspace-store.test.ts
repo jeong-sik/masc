@@ -7,9 +7,6 @@ const workspaceApiMocks = vi.hoisted(() => ({
   fetchGitBlame: vi.fn(),
   fetchGitDiff: vi.fn(),
 }))
-const ideApiMocks = vi.hoisted(() => ({
-  fetchIdeAnnotations: vi.fn(),
-}))
 const repositoryApiMocks = vi.hoisted(() => ({
   discoverRepositories: vi.fn(),
   fetchRepositoriesList: vi.fn(),
@@ -18,7 +15,6 @@ const repositoryApiMocks = vi.hoisted(() => ({
 vi.mock('../../api/repositories', () => repositoryApiMocks)
 
 vi.mock('../../api/workspace', () => workspaceApiMocks)
-vi.mock('../../api/ide', () => ideApiMocks)
 vi.mock('../../sse-store', () => ({
   registerIdeWorkspaceRefresh: vi.fn(() => () => {}),
 }))
@@ -139,7 +135,6 @@ function seedWorkspaceApiMocks(): void {
   workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(null)
   workspaceApiMocks.fetchGitBlame.mockResolvedValue([])
   workspaceApiMocks.fetchGitDiff.mockResolvedValue([])
-  ideApiMocks.fetchIdeAnnotations.mockResolvedValue([])
   repositoryApiMocks.discoverRepositories.mockResolvedValue([])
   repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([])
 }
@@ -219,35 +214,6 @@ describe('resolveActiveIdeRepositoryId', () => {
 })
 
 describe('IDE focus workspace provenance', () => {
-  it('addresses repository observation reads with the canonical codebase slug', async () => {
-    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
-    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
-      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
-    ])
-    workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue(
-      repositoryTree('repo-a', [changedFile('lib/a.ml')]),
-    )
-    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(
-      workspaceFile('let codebase = "github.com_test_repo-a"\n'),
-    )
-    const store = createIdeDataWorkspaceStore()
-
-    try {
-      await vi.waitFor(() => {
-        expect(store.activeRepositoryId()).toBe('repo-a')
-        expect(ideApiMocks.fetchIdeAnnotations).toHaveBeenCalled()
-      })
-      const options = ideApiMocks.fetchIdeAnnotations.mock.calls.at(-1)?.[1]
-      expect(options).toEqual(expect.objectContaining({
-        codebase: 'github.com_test_repo-a',
-        signal: expect.any(AbortSignal),
-      }))
-      expect(options).not.toHaveProperty('repoId')
-    } finally {
-      store.dispose()
-    }
-  })
-
   it('refreshes workspace and file identity when the selected repo codebase changes', async () => {
     window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValueOnce([

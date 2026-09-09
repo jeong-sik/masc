@@ -1350,11 +1350,11 @@ describe('fetchDashboardTools', () => {
       waiting_keeper_count: 1,
       row_count: 1,
       keepers: [{
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         state: 'waiting',
         waiting_count: 1,
         waiting_on: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           source: 'event_queue_pending',
           waiting_on: 'schedule_due',
           next_action: 'keeper_consume_event',
@@ -1369,10 +1369,10 @@ describe('fetchDashboardTools', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchKeeperWaitingInventory('kidsnote')
+    const result = await fetchKeeperWaitingInventory('exampleorg')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/kidsnote/waiting-inventory')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/exampleorg/waiting-inventory')
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
   })
 
@@ -1561,10 +1561,10 @@ describe('fetchDashboardFullHealth', () => {
         last_error_age_sec: null,
       },
       keeper_event_queue: {
-        schema: 'masc.keeper_event_queue.fleet_summary.v4',
-        status: 'degraded',
-        operator_action_required: true,
-        status_reasons: ['runnable_backlog', 'runnable_backlog_stale'],
+        schema: 'masc.keeper_event_queue.fleet_summary.v5',
+        status: 'warning',
+        operator_action_required: false,
+        status_reasons: ['runnable_backlog=18'],
         backlog_clean: false,
         storage_integrity: {
           status: 'ok',
@@ -1574,12 +1574,12 @@ describe('fetchDashboardFullHealth', () => {
           operator_action_required: false,
         },
         work_liveness: {
-          status: 'degraded',
-          state: 'stalled',
+          status: 'warning',
+          state: 'backlogged',
           runnable_backlog_count: 18,
-          runnable_oldest_age_seconds: 3360,
-          stale_after_seconds: 300,
-          operator_action_required: true,
+          runnable_oldest_source_age_seconds: 3360,
+          queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
+          operator_action_required: false,
         },
       },
     }
@@ -1621,15 +1621,29 @@ describe('fetchDashboardFullHealth', () => {
       last_error_age_sec: null,
     })
     expect(result.keeper_event_queue).toMatchObject({
-      status: 'degraded',
+      status: 'warning',
       backlog_clean: false,
       storage_integrity: { status: 'ok', counts_complete: true },
       work_liveness: {
-        status: 'degraded',
-        state: 'stalled',
+        status: 'warning',
+        state: 'backlogged',
         runnable_backlog_count: 18,
+        runnable_oldest_source_age_seconds: 3360,
+        queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
       },
     })
+  })
+
+  it('does not interpret a numeric residence with unknown status as evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper_event_queue: { status: 'warning', work_liveness: {
+        state: 'backlogged', runnable_backlog_count: 1, runnable_oldest_source_age_seconds: 6000,
+        queue_residence: { status: 'unknown', oldest_age_seconds: 6000, reason: 'first_admission_not_recorded' },
+      } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchDashboardFullHealth()
+    expect(result.keeper_event_queue?.work_liveness?.runnable_oldest_source_age_seconds).toBe(6000)
+    expect(result.keeper_event_queue?.work_liveness?.queue_residence).toBeNull()
   })
 
   it('preserves the backend blocked queue liveness state', async () => {
@@ -1644,8 +1658,8 @@ describe('fetchDashboardFullHealth', () => {
             status: 'warning',
             state: 'blocked',
             runnable_backlog_count: 0,
-            runnable_oldest_age_seconds: null,
-            stale_after_seconds: 300,
+            runnable_oldest_source_age_seconds: null,
+            queue_residence: { status: 'unknown', oldest_age_seconds: null, reason: 'first_admission_not_recorded' },
             operator_action_required: false,
           },
         },
@@ -2248,7 +2262,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2257,7 +2271,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             lane_id: 'hitl_auto_judge',
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
@@ -2273,7 +2287,7 @@ describe('fetchDashboardGate', () => {
 
     expect(result.keeper_modes).toEqual([
       {
-        keeper_name: 'kidsnote',
+        keeper_name: 'exampleorg',
         mode: 'manual',
         updated_by: 'vincent',
         updated_at: '2026-08-27T05:00:00Z',
@@ -2315,7 +2329,7 @@ describe('fetchDashboardGate', () => {
         keeper_modes: [],
         keeper_modes_state: { state: 'ready' },
         keeper_exact_lanes: [{
-          keeper_name: 'kidsnote',
+          keeper_name: 'exampleorg',
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
@@ -2343,7 +2357,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'manual',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -2369,7 +2383,7 @@ describe('fetchDashboardGate', () => {
         approval_rules_state: { state: 'ready' },
         keeper_modes: [
           {
-            keeper_name: 'kidsnote',
+            keeper_name: 'exampleorg',
             mode: 'ask_nicely',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
@@ -3325,7 +3339,7 @@ describe('fetchKeeperConfig', () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       config_revision: configRevision,
-      autoboot_enabled: 'false',
+      activation_mode: 'manual',
       max_context_override: 64_000,
       sandbox_profile: 'docker',
       network_mode: 'none',
@@ -3349,9 +3363,6 @@ describe('fetchKeeperConfig', () => {
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
         runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
-      },
-      proactive: {
-        enabled: 'true',
       },
       skills: {
         names: ['ocaml-coding', 'proof-harness'],
@@ -3420,7 +3431,7 @@ describe('fetchKeeperConfig', () => {
     const result = await fetchKeeperConfig('keeper-sangsu')
 
     expect(result.sandbox_roots).toEqual(['/tmp/workspace'])
-    expect(result.autoboot_enabled).toBe(false)
+    expect(result.activation_mode).toBe('manual')
     expect(result.max_context_override).toBe(64000)
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
@@ -3532,7 +3543,8 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
-          config_revision: configRevision,
+          activation_mode: 'autonomous',
+      config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
           prompt: {
@@ -3562,6 +3574,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -3604,6 +3617,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3641,6 +3655,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3676,6 +3691,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
@@ -3720,6 +3736,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
@@ -4565,7 +4582,7 @@ describe('fetchRuntimeProviders', () => {
             },
           ],
           disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
-          dropped_assignments: [
+          unavailable_assignments: [
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
@@ -4671,7 +4688,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
-    expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
+    expect(result.startup_degradation?.unavailable_assignments[0]?.keeper_name).toBe('budgettest')
     expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })

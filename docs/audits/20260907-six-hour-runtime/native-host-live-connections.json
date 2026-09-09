@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-07T04:58:17.403401+00:00",
+  "user_reported_extension_added": true,
+  "host_processes": [
+    {
+      "pid": 85483,
+      "ppid": 85089,
+      "executable": "/opt/homebrew/Cellar/node/26.3.0/bin/node"
+    },
+    {
+      "pid": 86997,
+      "ppid": 70838,
+      "executable": "/opt/homebrew/Cellar/node/26.3.0/bin/node"
+    }
+  ],
+  "tcp_connections": "COMMAND   PID   USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\nnode    85483 dancer   13u  IPv4 0xda9a39a8080819f8      0t0  TCP 127.0.0.1:58742->127.0.0.1:8935 (ESTABLISHED)\nnode    86997 dancer   13u  IPv4 0x4a093a067f0068fe      0t0  TCP 127.0.0.1:58799->127.0.0.1:8935 (ESTABLISHED)\n",
+  "native_host_installed_source": "c3a85dac8e6606767af47aadcb9b46d3bdf37c6a",
+  "tabs_or_page_round_trip_verified": false
+}

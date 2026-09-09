@@ -81,6 +81,18 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type replay_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; dropped_running : int
+  ; reached_end : bool
+  }
+
+type replay_status =
+  | Not_replayed
+  | Log_absent
+  | Replayed of replay_report
+
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
@@ -106,7 +118,15 @@ module Make (Payload : Payload) : sig
 
   val max_completed_retained : int
   val create : ?path:string -> unit -> t
+  val replay_status : t -> replay_status
+  (** Immutable diagnostics from this registry instance's startup read. *)
+
   val replay : string -> t
+  (** Retains a lightweight in-memory projection while compaction streams the
+      selected original register/complete rows. Dropped payload fields are
+      never serialized from the projection over their durable source.
+      A replayed running entry gets the subsystem's explicit restart verdict.
+      As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
 
   val register
     :  t
@@ -125,10 +145,27 @@ module Make (Payload : Payload) : sig
   (** Completion persistence is an observation-plane mutation. A durable
       append failure is returned explicitly with whether rollback established
       that it was not persisted or durability remains unknown. The in-memory
-      entry remains [Running], so the caller chooses how to expose that failed
+      entry keeps its previous state, so the caller chooses how to expose that failed
       observation without claiming a replayable completion. *)
 
+  val complete_with
+    :  t
+    -> id:string
+    -> make_completion:(Payload.completion option -> Payload.completion)
+    -> [ `Completed | `Persistence_failed of persistence_failure | `Unknown ]
+  (** Derive the completion from the previous in-memory completion under the
+      same mutation lock as its durable append and publication. [None] means
+      the entry is [Running]; an unknown id does not call [make_completion].
+      The previous value is the payload's [shed_completion] projection.
+      The callback must not re-enter this registry. This lets a subsystem
+      retain first-completion evidence without a racy [get] then [complete]. *)
+
   val list_entries : t -> entry list
+  val get_metadata : t -> id:string -> entry option
+  (** The immutable in-memory entry for this id, without sorting or disk
+      access. Payload fields may be shed; callers that need their values must
+      hydrate them and report whether that read succeeded. [None] means the
+      id is not retained. Unrelated mutations preserve this entry's identity. *)
   val get : t -> id:string -> entry option
   val cut_replay_log : execute:bool -> string -> cut_report
   (** Rewrites [path] from the state a replay of it produces. A hard-cut field

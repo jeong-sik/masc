@@ -1,21 +1,17 @@
 (** Implementation of the [masc keeper-create] declaration and its answer. See
     the interface for what each value promises. *)
 
-type booleans =
-  { autoboot : bool option
-  ; proactive : bool option
-  }
-
 type flags =
   { name : string
   ; instructions : string
   ; sandbox_profile : string
   ; network_mode : string option
+  ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
   ; skills : string list option
   ; max_context_override : int option
-  ; booleans : booleans
+  ; activation_mode : string option
   }
 
 let trimmed_nonempty raw =
@@ -110,6 +106,11 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
             | None -> []
             | Some text -> [ "instructions", `String text ]
           in
+          let microvm_backend =
+            match flags.microvm_backend with
+            | None -> []
+            | Some backend -> [ "microvm_backend", `String backend ]
+          in
           let remote_endpoint =
             match flags.remote_endpoint with
             | None -> []
@@ -130,15 +131,10 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
             | None -> []
             | Some value -> [ "max_context_override", `Int value ]
           in
-          let autoboot_enabled =
-            match flags.booleans.autoboot with
+          let activation_mode =
+            match flags.activation_mode with
             | None -> []
-            | Some value -> [ "autoboot_enabled", `Bool value ]
-          in
-          let proactive_enabled =
-            match flags.booleans.proactive with
-            | None -> []
-            | Some value -> [ "proactive_enabled", `Bool value ]
+            | Some value -> [ "activation_mode", `String value ]
           in
           Ok
             (`Assoc
@@ -147,12 +143,12 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
                  ; "network_mode", `String network_mode
                  ]
                  @ instructions
+                 @ microvm_backend
                  @ remote_endpoint
                  @ mention_targets
                  @ skills
                  @ max_context_override
-                 @ autoboot_enabled
-                 @ proactive_enabled))))
+                 @ activation_mode))))
 ;;
 
 let form_stem = Masc.Keeper_turn_up_args.creation_stem

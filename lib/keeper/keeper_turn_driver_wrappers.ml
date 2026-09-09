@@ -22,8 +22,10 @@ let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
     ~goal
+    ?goal_blocks
     ~base_path
-    ?(system_prompt = "")
+    ~system_prompt
+    ?(native_tools = [])
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
@@ -49,11 +51,13 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
+  let bridged_tools = bridged_tools @ native_tools in
   let+ selected =
     Keeper_turn_driver.run_named
       ~runtime_id
       ~keeper_name
       ~goal
+      ?goal_blocks
       ~base_path
       ~system_prompt
       ~tools:bridged_tools

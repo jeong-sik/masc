@@ -13,6 +13,8 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
+  ; candidate_preference : Runtime_lane_preference.candidate
+    (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
     (** Quota ownership key frozen at materialization, from the same
         credential-alias selection that resolved the dispatched API key. A
@@ -248,12 +250,15 @@ type missing_catalog_model =
     capability catalog. [provider_label] is the exact AGENT_CORE capability namespace
     used for lookup. *)
 
+val missing_catalog_model_to_string : missing_catalog_model -> string
+(** Exact configured runtime/provider/model identity for unavailable-route diagnostics. *)
+
 type missing_catalog_report =
   { config_path : string
   ; missing_models : missing_catalog_model list
   }
 
-type dropped_runtime_assignment =
+type unavailable_runtime_assignment =
   { keeper_name : string
   ; runtime_id : string
   }
@@ -273,7 +278,7 @@ type startup_degradation =
   ; configured_default_runtime_id : string
   ; effective_default_runtime_id : string
   ; disabled_runtime_ids : string list
-  ; dropped_assignments : dropped_runtime_assignment list
+  ; unavailable_assignments : unavailable_runtime_assignment list
   ; dropped_routes : dropped_runtime_route list
   ; dropped_media_failover : string list
   ; dropped_lane_candidates : dropped_runtime_lane list
@@ -282,8 +287,9 @@ type startup_degradation =
 (** Operator-visible startup degradation. Missing-catalog runtime bindings are
     removed from the active runtime set so requests never dispatch through AGENT_CORE
     [provider_default]. The server may continue only when at least one
-    catalog-known runtime remains and no routing config references a disabled
-    runtime id. *)
+    catalog-known default remains and no default/lane/media route references a
+    disabled runtime. Explicit Keeper assignments retain their configured IDs;
+    only affected Keepers resolve to [Unavailable] and cannot dispatch. *)
 
 type init_default_outcome =
   | Initialized
@@ -317,32 +323,27 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+type request_body_cap_error = Non_positive_request_body_cap of
   { runtime_id : string
   }
 (** A materialized runtime configuration reaches a Keeper provider boundary
-    without a positive serialized-request body ceiling. *)
+    with a non-positive explicit serialized-request body ceiling. *)
 
 val request_body_cap_error_to_string : request_body_cap_error -> string
 
 val validate_request_body_cap :
   runtime_id:string
   -> Llm_provider.Provider_config.t
-  -> (int, request_body_cap_error) result
+  -> (int option, request_body_cap_error) result
 (** Pure final-provider-config guard shared by every Keeper provider-call
     boundary. Config admission uses it for statically reachable routes; call
     sites must invoke it again after feature-local transforms. The successful
-    value is the exact positive cap validated on that final provider config. *)
+    value preserves absence or the exact positive caller cap on that final config. *)
 
 type keeper_dispatch_readiness =
   | Dispatchable
-  | Missing_request_body_cap of { table_path : string }
-      (** Whether a materialized runtime could carry a keeper turn if one were
-          routed to it, independent of whether anything routes to it today.
-          Boot validation judges only reachable ids on purpose, which left a
-          declared-but-unassigned blocked runtime with no observer: listed by
-          [/api/v1/runtime/resolved], impossible to assign, and silent about
-          why (masc#28404). *)
+  | Invalid_request_body_cap of { table_path : string }
+      (** An explicitly supplied caller cap is invalid. Omission is valid. *)
 
 val keeper_dispatch_readiness : t -> keeper_dispatch_readiness
 (** The single definition of "blocked", so the operator-facing projection and
@@ -392,11 +393,11 @@ val init_default_strict_report :
 val init_default_degraded_report :
   config_path:string -> (init_default_outcome, strict_init_error) result
 (** Server bootstrap entry point. Applies the strict AGENT_CORE catalog gate, but when
-    only unreferenced catalog-membership rows fail it can remove uncatalogued
-    runtimes from the active runtime set and continue in an operator-visible
-    degraded mode. Routing/parse errors, all-missing runtime sets, and explicit
-    routing references to uncatalogued runtimes remain fatal so configured intent
-    is never erased into default fallback. *)
+    catalog-membership rows fail it can remove uncatalogued runtimes from the
+    active set and continue in an operator-visible degraded mode. Explicit
+    Keeper assignments retain their IDs and resolve to [Unavailable]. Parse
+    errors, all-missing runtime sets, and missing default/lane/media routes
+    remain fatal; no configured route is replaced by an implicit fallback. *)
 
 val init_default_degraded_observation :
   config_observation -> (init_default_outcome, strict_init_error) result
@@ -454,7 +455,7 @@ val runtime_id_for_keeper : string -> string option
 val keeper_assignments : unit -> (string * string) list
 (** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
     [\[runtime.assignments\]]. The list is validated during {!init_default};
-    every runtime id in the returned snapshot resolves to a configured runtime.
+    a catalog-unavailable assignment retains its exact configured runtime ID.
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
@@ -499,17 +500,21 @@ val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 val get_lane_by_id : string -> Runtime_lane.t option
 (** Lane with the given id, or [None] if no such lane is configured. *)
 
-val resolve_assignment : string -> [ `Lane of Runtime_lane.t | `Missing ]
+val resolve_assignment :
+  string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
 (** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
     an id naming a bare runtime gets a lane of its own, because the lane id is
     what keys sticky candidate preference and quota demotion. Every lane ends
     at [\[runtime\].default], so a walk always has a next candidate.
-    [Missing] means the id does not name a known lane or runtime. *)
+    [Unavailable] preserves the configured identity when its capability catalog
+    entry is absent. [Missing] means the id was not configured. Neither selects
+    the default in place of the requested runtime. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
-    ["provider.model"] equals [id], or [None] if no such runtime is configured.
-    Used by the keeper turn driver to dispatch to the requested runtime (a
+    ["provider.model"] equals [id], or [None] if that runtime is not active.
+    {!resolve_assignment} distinguishes a catalog-unavailable configured ID
+    from an unknown ID. Used by the keeper turn driver to dispatch to the requested runtime (a
     keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 

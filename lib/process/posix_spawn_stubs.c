@@ -19,6 +19,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#endif
 
 #include <caml/alloc.h>
 #include <caml/fail.h>
@@ -26,6 +31,19 @@
 #include <caml/mlvalues.h>
 #include <caml/signals.h>
 #include <caml/unixsupport.h>
+
+/* posix_spawn_file_actions_addclosefrom_np landed in glibc 2.34. It is the
+   only descriptor-closing mechanism on the platforms that lack
+   POSIX_SPAWN_CLOEXEC_DEFAULT and that this stub is built for: CI and the
+   deployed server are glibc Linux, development is macOS. The musl target in
+   this repo is the exec shim, which links exec_ssh_protocol and unix and
+   never compiles this file. */
+#if defined(__GLIBC__) \
+  && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+#define MASC_HAVE_ADDCLOSEFROM 1
+#else
+#define MASC_HAVE_ADDCLOSEFROM 0
+#endif
 
 extern char **environ;
 
@@ -54,16 +72,46 @@ static void free_strings(char **strings)
   caml_stat_free(strings);
 }
 
-/* masc_posix_spawn executable argv env cwd_opt fds
+/* masc_posix_spawn executable argv env (cwd_opt, own_group) fds
    fds: (child_fd, parent_fd) list. Equal fds are inherited in place;
-   others are dup2'd. Every other descriptor is closed in the child
-   (POSIX_SPAWN_CLOEXEC_DEFAULT on macOS; elsewhere masc opens its
-   descriptors close-on-exec). Returns the child's pid or raises
-   Unix.Unix_error with the errno posix_spawn reported. */
-CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
-                                value v_cwd, value v_fds)
+   others are dup2'd. Every other descriptor is closed in the child.
+
+   exec closes only what is marked close-on-exec, so neither fork+exec nor
+   posix_spawn closes a stray descriptor on its own -- measured 2026-09-07,
+   eio_posix's own fork-based manager hands its child a raw Unix.pipe () and
+   this one does not. What makes the difference is asked for explicitly, one
+   mechanism per platform:
+
+     macOS  POSIX_SPAWN_CLOEXEC_DEFAULT -- the kernel closes everything not
+            named by an addinherit_np.
+     glibc  posix_spawn_file_actions_addclosefrom_np (2.34+) plus an
+            explicit close of anything below it that is not a dup2 target.
+
+   The glibc line used to read "masc opens its descriptors close-on-exec",
+   which made the guarantee a whole-process invariant that nothing enforces
+   and any new Unix.pipe () silently breaks -- OCaml's ?cloexec defaults to
+   false, and lib/exec_shim and bin/main_eio each open pipes that way.
+
+   Measured 2026-09-07 on glibc 2.39: with a second child spawned while an
+   unrelated pipe was open, that child inherited the pipe's write end, and
+   the pipe's reader never saw EOF after its own child exited. With
+   addclosefrom_np the EOF arrived. That is the shape the nightly lane hangs
+   in -- four suites past the 90-minute deadline, each holding a defunct
+   child (run 34049510985, issue #33782).
+
+   macOS never showed it because its mechanism is enforced by the kernel,
+   which is also why development does not see what CI does. This is not a
+   parity fix: it makes the glibc branch as strict as the macOS one, and
+   both stricter than the eio manager they otherwise match.
+
+   Returns the child's pid or raises Unix.Unix_error with the errno
+   posix_spawn reported. */
+static value spawn_process(value v_executable, value v_argv, value v_env,
+                           value v_options, value v_fds, int search_path)
 {
-  CAMLparam5(v_executable, v_argv, v_env, v_cwd, v_fds);
+  CAMLparam5(v_executable, v_argv, v_env, v_options, v_fds);
+  value v_cwd = Field(v_options, 0);
+  int own_group = Bool_val(Field(v_options, 1));
   char *executable = caml_stat_strdup(String_val(v_executable));
   char **argv = strings_of_array(v_argv);
   char **env = strings_of_array(v_env);
@@ -92,6 +140,10 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
     sigset_t empty;
     sigemptyset(&empty);
     rc = posix_spawnattr_setsigmask(&attr, &empty);
+    if (rc == 0 && own_group) {
+      flags |= POSIX_SPAWN_SETPGROUP;
+      rc = posix_spawnattr_setpgroup(&attr, 0);
+    }
     if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
@@ -107,10 +159,44 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
     }
   }
 
+#ifndef POSIX_SPAWN_CLOEXEC_DEFAULT
+#if MASC_HAVE_ADDCLOSEFROM
+  /* After every dup2, never before: a parent descriptor can be the source of
+     a dup2 that has not run yet, and closing it early would break it. Once
+     they have run the child holds its own copies, so closing the originals
+     is both safe and the point.
+
+     addclosefrom_np closes from lowfd up, so lowfd has to clear the highest
+     target. Anything below that which is not itself a target is closed one
+     by one; glibc does not fail the spawn when such a descriptor was not
+     open (measured 2026-09-07), so this needs no test for that. Today every
+     caller passes 0/1/2 and the loop finds nothing, but a caller that
+     passes a sparse set gets the same guarantee instead of a quiet gap. */
+  if (rc == 0) {
+    int lowfd = 0;
+    for (int j = 0; j < fd_count; j++) {
+      if (child_fds[j] >= lowfd) lowfd = child_fds[j] + 1;
+    }
+    for (int fd = 0; rc == 0 && fd < lowfd; fd++) {
+      int is_target = 0;
+      for (int j = 0; j < fd_count; j++) {
+        if (child_fds[j] == fd) { is_target = 1; break; }
+      }
+      if (!is_target) rc = posix_spawn_file_actions_addclose(&actions, fd);
+    }
+    if (rc == 0) rc = posix_spawn_file_actions_addclosefrom_np(&actions, lowfd);
+  }
+#else
+#warning "no posix_spawn descriptor-closing mechanism: children inherit every non-CLOEXEC descriptor"
+#endif
+#endif
+
   pid_t pid = 0;
   if (rc == 0) {
     caml_enter_blocking_section();
-    rc = posix_spawn(&pid, executable, &actions, &attr, argv, env);
+    rc = search_path
+      ? posix_spawnp(&pid, executable, &actions, &attr, argv, env)
+      : posix_spawn(&pid, executable, &actions, &attr, argv, env);
     caml_leave_blocking_section();
   }
   posix_spawn_file_actions_destroy(&actions);
@@ -124,12 +210,75 @@ CAMLprim value masc_posix_spawn(value v_executable, value v_argv, value v_env,
   if (rc != 0) {
     caml_stat_free(executable);
     errno = rc;
-    uerror("posix_spawn", v_executable);
+    uerror(search_path ? "posix_spawnp" : "posix_spawn", v_executable);
   }
   caml_stat_free(executable);
   CAMLreturn(Val_int(pid));
 }
 
+CAMLprim value masc_posix_spawn(value executable, value argv, value env,
+                                value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 0);
+}
+
+/* Unix fallback retains libc's PATH lookup semantics without duplicating
+   descriptor setup or group creation. */
+CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
+                                 value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 1);
+}
+
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+/* Observe only. The OCaml owner serializes this with group signalling and
+   final waitpid; no PID can be reused between the last signal and reap. */
+CAMLprim value masc_process_exited_without_reaping(value v_pid)
+{
+  CAMLparam1(v_pid);
+  siginfo_t info;
+  memset(&info, 0, sizeof(info));
+  int rc;
+  do {
+    rc = waitid(P_PID, (id_t)Int_val(v_pid), &info, WEXITED | WNOWAIT | WNOHANG);
+  } while (rc < 0 && errno == EINTR);
+  if (rc < 0) uerror("waitid", Nothing);
+  CAMLreturn(Val_bool(info.si_pid != 0));
+}
+
+/* Darwin killpg skips zombies, then reports EPERM when it found no live
+   signalable member (XNU kern_sig.c: killpg1). Distinguish that case from
+   real permission denial without releasing the owner's waitable PID anchor.
+   An incomplete/unavailable snapshot is not evidence of an empty live group. */
+CAMLprim value masc_process_group_only_owned_zombies(value v_pid)
+{
+  CAMLparam1(v_pid);
+  int only_owned_zombies = 0;
+#if defined(__APPLE__)
+  pid_t pid = (pid_t)Int_val(v_pid);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pid };
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
+    struct kinfo_proc *members = malloc(size);
+    if (members != NULL) {
+      size_t capacity = size;
+      if (sysctl(mib, 4, members, &size, NULL, 0) == 0 &&
+          size <= capacity && size % sizeof(*members) == 0) {
+        int found_leader = 0;
+        int all_zombies = 1;
+        for (size_t i = 0; i < size / sizeof(*members); i++) {
+          if (members[i].kp_proc.p_stat != SZOMB) all_zombies = 0;
+          if (members[i].kp_proc.p_pid == pid &&
+              members[i].kp_eproc.e_ppid == getpid()) found_leader = 1;
+        }
+        only_owned_zombies = found_leader && all_zombies;
+      }
+      free(members);
+    }
+  }
+#endif
+  CAMLreturn(Val_bool(only_owned_zombies));
+}

@@ -19,6 +19,8 @@ let agent_core_checkpoint_path ~(session_dir : string) ~(session_id : string) =
 let agent_core_history_prefix = "agent-core-snapshot-"
 let agent_core_history_suffix = ".json"
 
+let before_history_link_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
 let is_agent_core_history_file (filename : string) : bool =
   let len = String.length filename in
   len > String.length agent_core_history_prefix + String.length agent_core_history_suffix
@@ -29,10 +31,11 @@ let is_agent_core_history_file (filename : string) : bool =
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
   else
+    Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
     Sys.readdir session_dir
     |> Array.to_list
     |> List.filter is_agent_core_history_file
-    |> List.sort (fun a b -> compare b a)
+    |> List.sort (fun a b -> compare b a))
 
 let max_agent_core_history_retained = 12
 
@@ -91,7 +94,10 @@ let prune_agent_core_history ~(session_dir : string) : unit =
     |> List.filteri (fun index _ -> index >= max_agent_core_history_retained)
     |> List.iter (fun filename ->
          let path = agent_core_history_path ~session_dir ~snapshot_id:filename in
-         try Sys.remove path with
+         try
+           Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.unlink"
+             (fun () -> Sys.remove path)
+         with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Log.Keeper.warn "AGENT_CORE snapshot cleanup failed for %s: %s"
@@ -111,8 +117,11 @@ let hardlink_agent_core_history_from_canonical
     Error "canonical AGENT_CORE checkpoint is missing"
   else
     try
-      if Fs_compat.file_exists snapshot_path then Sys.remove snapshot_path;
-      Unix.link canonical_path snapshot_path;
+      let snapshot_exists = Fs_compat.file_exists snapshot_path in
+      Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.link" (fun () ->
+        Option.iter (fun hook -> hook ()) (Atomic.get before_history_link_hook);
+        if snapshot_exists then Sys.remove snapshot_path;
+        Unix.link canonical_path snapshot_path);
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -534,7 +543,7 @@ let canonical_session_location session_dir =
     try
       Fs_compat.mkdir_p parent;
       let location =
-        Eio_guard.run_in_systhread (fun () ->
+        Eio_guard.run_in_systhread ~label:"checkpoint-parent-stat" (fun () ->
           let parent = Unix.realpath parent in
           if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
           then
@@ -625,7 +634,7 @@ let load_canonical_bytes_strict path =
        | Unix.Unix_error (error, operation, argument) ->
          Error (unix_error error operation argument))
   in
-  match Eio_guard.run_in_systhread read with
+  match Eio_guard.run_in_systhread ~label:"checkpoint-read" read with
   | Ok content -> Ok content
   | Error _ as error -> error
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -695,6 +704,7 @@ type exact_checkpoint_snapshot =
 let exact_snapshot_checkpoint snapshot = snapshot.checkpoint
 let exact_snapshot_reference snapshot = snapshot.reference
 let exact_snapshot_canonical_bytes snapshot = snapshot.canonical_bytes
+let exact_snapshot_messages snapshot = snapshot.checkpoint.messages
 
 type checkpoint_cas_error =
   | Source_unavailable of checkpoint_ref_load_error
@@ -844,6 +854,7 @@ let with_checkpoint_cas_lock ~session_dir f =
     |> installation_of_lock_observation
 
 let save_agent_core_if_source_with
+    ?(require_absent = false)
     ~with_checkpoint_cas_lock
     ~write_checkpoint_bytes
     ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
@@ -889,15 +900,20 @@ let save_agent_core_if_source_with
       try
         `Returned
           (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
-         match load_ref_locked ~session_dir ~expected_session_id with
-         | Error error -> not_installed (Source_unavailable error)
-         | Ok snapshot
-           when not
-                  (Keeper_checkpoint_ref.equal
-                     expected_source_ref
-                     (exact_snapshot_reference snapshot)) ->
-           not_installed (Source_changed (exact_snapshot_reference snapshot))
-         | Ok _ ->
+         let source =
+           match load_ref_locked ~session_dir ~expected_session_id with
+           | Error Ref_not_found when require_absent -> Ok ()
+           | Error error -> Error (Source_unavailable error)
+           | Ok snapshot
+             when require_absent
+                  || not (Keeper_checkpoint_ref.equal expected_source_ref
+                            (exact_snapshot_reference snapshot)) ->
+             Error (Source_changed (exact_snapshot_reference snapshot))
+           | Ok _ -> Ok ()
+         in
+         match source with
+         | Error error -> not_installed error
+         | Ok () ->
            let canonical_path =
              agent_core_checkpoint_path
                ~session_dir
@@ -967,7 +983,99 @@ let save_agent_core_if_source ~session_dir ~expected_source_ref candidate =
     candidate
 ;;
 
+let save_agent_core_if_absent ~session_dir candidate =
+  let bytes = offload_checkpoint_cpu (fun () ->
+    Agent_core.Checkpoint.to_json candidate |> Yojson.Safe.to_string) in
+  match checkpoint_ref_of_canonical_bytes bytes candidate with
+  | Error error -> not_installed (Candidate_identity_invalid error)
+  | Ok candidate_ref ->
+    save_agent_core_if_source_with
+      ~require_absent:true ~with_checkpoint_cas_lock ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer:(fun _ -> ())
+      ~session_dir ~expected_source_ref:candidate_ref candidate
+;;
+
+(* Accepted continuations are not observational rolling history. Their
+   content address is private to this store and has no expiry or prune path. *)
+let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
+  Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+    (reference.sha256 ^ ".json")
+
+let read_retained_locked ~session_dir ~reference =
+  match Fs_compat.load_owned_regular_file
+          ~ownership_root:(Filename.dirname session_dir)
+          (retained_checkpoint_path ~session_dir reference) with
+  | Error error ->
+      Error (Source_unavailable (Ref_read_failed
+        (Store_error (Fs_compat.owned_regular_file_read_error_to_string error))))
+  | Ok None -> Ok None
+  | Ok (Some bytes) ->
+      (match exact_snapshot_of_canonical_bytes
+               ~expected_session_id:reference.Keeper_checkpoint_ref.trace_id bytes with
+       | Error error -> Error (Source_unavailable error)
+       | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference ->
+           Ok (Some snapshot)
+       | Ok snapshot -> Error (Source_changed snapshot.reference))
+
+let load_retained_exact_snapshot ~session_dir ~reference =
+  match with_session_lock ~session_dir (fun session_dir ->
+    match read_retained_locked ~session_dir ~reference with
+    | Error _ as error -> error
+    | Ok None -> Error (Source_unavailable Ref_not_found)
+    | Ok (Some snapshot) -> Ok snapshot) with
+  | Ok result -> result
+  | Error detail -> Error (Source_unavailable (Ref_lock_failed detail))
+
+let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
+  let installed = ref None in
+  let publish auxiliary =
+    let value = { installed_ref = snapshot.reference; auxiliary } in
+    installed := Some value;
+    Installed value
+  in
+  (* This observer runs after all fsyncs but before pending cancellation. It
+     preserves the committed fact if cancellation interrupts the lock unwind. *)
+  let observe_commit () =
+    installed := Some { installed_ref = snapshot.reference; auxiliary = [] }
+  in
+  let recover_unwind exn backtrace =
+    match !installed with
+    | None -> Printexc.raise_with_backtrace exn backtrace
+    | Some value -> Installed
+        { value with auxiliary = value.auxiliary @
+            [Post_commit_unwind_interrupted (exn, backtrace)] }
+  in
+  try
+    with_checkpoint_cas_lock ~session_dir (fun session_dir ->
+      match read_retained_locked ~session_dir ~reference:snapshot.reference with
+      | Error cause -> not_installed cause
+      | Ok (None | Some _) ->
+          match write_checkpoint_bytes
+                  ~on_durable_commit:observe_commit
+                  ~ownership_root:(Filename.dirname session_dir)
+                  ~path:(retained_checkpoint_path ~session_dir snapshot.reference)
+                  ~bytes:snapshot.canonical_bytes with
+          | Error error when error.Keeper_fs.renamed ->
+              publish [Commit_durability_unknown error]
+          | Error error -> not_installed (Commit_not_installed error)
+          | Ok Keeper_fs.Committed -> publish []
+          | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
+              publish [Commit_observer_failed failure])
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+      recover_unwind exn (Printexc.get_raw_backtrace ())
+  | exn -> recover_unwind exn (Printexc.get_raw_backtrace ())
+
+let retain_exact_snapshot ~session_dir snapshot =
+  retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
+
 module For_testing = struct
+  let with_before_history_link hook f =
+    let previous = Atomic.exchange before_history_link_hook (Some hook) in
+    Fun.protect ~finally:(fun () -> Atomic.set before_history_link_hook previous) f
+
+  let retain_exact_snapshot_with_writer = retain_exact_snapshot_with
+
   let save_agent_core_if_source_with_observer
       ~on_checkpoint_commit_observer
       ~session_dir

@@ -49,38 +49,86 @@ let clear_screen = "\027[2J"
    frame reliably row 1 of the window. *)
 let enter_alternate_screen = "\027[?1049h"
 let leave_alternate_screen = "\027[?1049l"
-(* OSC 10 and 11 are the terminal's own text and page colours; 110 and 111 put
-   them back. Both belong here rather than in the theme module: a scheme is a
-   set of colours, and painting the window those colours live in is the
-   renderer's job. A terminal that does not know these ignores them, which is
-   why they can be sent unconditionally.
+(* OSC 10 and 11 are the terminal's own text and page colours, OSC 4 the
+   sixteen it draws a colour code with; 110, 111 and 104 put them back. All of
+   them belong here rather than in the theme module: a scheme is a set of
+   colours, and painting the window those colours live in is the renderer's
+   job. A terminal that does not know these ignores them, which is why they
+   can be sent unconditionally.
 
-   They are set as a pair, and the type below makes that the only thing a
-   caller can do. Sending one alone is not a smaller version of the change,
-   it is the readable case turned into the unreadable one: paint the page
-   white and leave the reader's near-white default text on it and masc draws
-   white on white. That was live between #31196 and this change.
+   They are set together, and the type below makes that the only thing a
+   caller can do. Sending part of a scheme is not a smaller version of the
+   change, it is the readable case turned into the unreadable one:
+
+   - Page without text: paint the page white and leave the reader's near-white
+     default text on it and masc draws white on white. That was live between
+     #31196 and #31212.
+
+   - Text and page without the sixteen: the two quiet colours follow the
+     scheme and every colour that carries a meaning stays the terminal's. masc
+     names seven of the sixteen -- Ok, Warn, Bad, Info, the keeper, the tool
+     trail, the receding row -- and those are most of what a reader sees as
+     colour, so a scheme that moves the page and not them barely moves the
+     screen. That was live between #30781 and this change, and it is why
+     picking [norton-commander] did nothing: it clears the readable floor on
+     all seven, so the lift never fired, and the lift was the only path by
+     which a chosen scheme reached a colour code.
+
+   Sending the sixteen is also what makes the rest of the theme module true
+   again. [Masc_tui_theme.ansi_readable_for] emits the plain SGR code whenever
+   the measured colour already clears the floor, on the premise that the
+   terminal's slot holds the colour it was measured against. For a scheme the
+   reader picked, that premise is only true once the slot has been sent.
 
    The reset matters more than the set. A terminal keeps whatever colours it
-   was last told to use, so an exit that skips 110 and 111 leaves the reader's
-   shell wearing masc's until they close the window. *)
-type page =
+   was last told to use, so an exit that skips 110, 111 and 104 leaves the
+   reader's shell wearing masc's until they close the window. *)
+type scheme =
   { foreground : Masc_tui_terminal_palette.rgb
   ; background : Masc_tui_terminal_palette.rgb
+  ; ansi : Masc_tui_terminal_palette.rgb option array
+        (* [Masc_tui_terminal_palette.ansi_slot_count] entries. *)
   }
 
-let osc_color code rgb =
-  Printf.sprintf "\027]%d;rgb:%02x/%02x/%02x\027\\" code
+let rgb_spec rgb =
+  Printf.sprintf "rgb:%02x/%02x/%02x"
     (Masc_tui_terminal_palette.red rgb)
     (Masc_tui_terminal_palette.green rgb)
     (Masc_tui_terminal_palette.blue rgb)
 ;;
 
-let set_page_colors { foreground; background } =
-  osc_color 10 foreground ^ osc_color 11 background
+let osc_color code rgb =
+  Printf.sprintf "\027]%d;%s\027\\" code (rgb_spec rgb)
 ;;
 
-let reset_page_colors = "\027]110\027\\\027]111\027\\"
+(* OSC 4 carries index/colour pairs, so the sixteen travel as one sequence
+   rather than sixteen. A slot with no colour is left alone rather than
+   cleared: masc has nothing to put there, and a terminal told to forget a
+   slot draws it with something the reader did not pick either. *)
+let set_ansi_colors ansi =
+  let pairs =
+    Array.to_list ansi
+    |> List.mapi (fun index entry ->
+         Option.map
+           (fun rgb -> Printf.sprintf "%d;%s" index (rgb_spec rgb))
+           entry)
+    |> List.filter_map Fun.id
+  in
+  match pairs with
+  | [] -> ""
+  | pairs -> Printf.sprintf "\027]4;%s\027\\" (String.concat ";" pairs)
+;;
+
+let set_scheme_colors { foreground; background; ansi } =
+  osc_color 10 foreground ^ osc_color 11 background ^ set_ansi_colors ansi
+;;
+
+(* 104 with no index is every slot, which is the counterpart of sending all
+   sixteen at once. Spelling out the indices would leave a slot behind on the
+   day the count changes. *)
+let reset_scheme_colors =
+  "\027]110\027\\\027]111\027\\\027]104\027\\"
+;;
 
 let hide_cursor = "\027[?25l"
 let show_cursor = "\027[?25h"
@@ -104,12 +152,12 @@ let last_frame_is_compact presenter =
 (* Sent when a scheme is picked and when one is dropped. [None] is "follow the
    terminal", which is a reset rather than a colour: masc has no opinion to
    send once the reader has withdrawn theirs. *)
-let sync_page ~write ~flush page =
+let sync_scheme ~write ~flush scheme =
   try
     write
-      (match page with
-       | Some page -> set_page_colors page
-       | None -> reset_page_colors);
+      (match scheme with
+       | Some scheme -> set_scheme_colors scheme
+       | None -> reset_scheme_colors);
     flush ()
   with _ -> ()
 ;;
@@ -128,7 +176,7 @@ let cleanup presenter ~write ~flush =
        ^ reset_style ^ show_cursor ^ enable_autowrap
        (* Before leaving the alternate screen, so the shell that comes back is
           already wearing its own colours rather than masc's. *)
-       ^ reset_page_colors ^ leave_alternate_screen
+       ^ reset_scheme_colors ^ leave_alternate_screen
        (* Started at probe time so a theme switch would be reported. Left on,
           the terminal keeps reporting to whatever runs next, which receives
           [CSI ? 997 ; n n] as typed input it never asked for. *)

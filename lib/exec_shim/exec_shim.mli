@@ -225,15 +225,21 @@ val observe_supported : unit -> bool
 type execution_plan =
   | Run_effect  (** unrestricted, as before v3 *)
   | Run_boxed of
-      { deny_fs : bool  (** Landlock: writes only under the scratch *)
+      { deny_fs : bool  (** Landlock: writes only under scratch or to verified /dev/null *)
       ; deny_net : bool  (** seccomp: [socket(2)] answers EPERM *)
       }
   | Refuse_observe_unsupported
 
 val plan_for_mode : supported:bool -> Exec_ssh_protocol.mode -> execution_plan
-(** [Effect] runs unboxed; [Observe] denies filesystem writes and sockets;
+(** [Effect] runs unboxed; [Observe] denies persistent filesystem writes and sockets,
+    allowing its scratch and the verified /dev/null discard device;
     [Guest_local] denies sockets. Either box on an unsupported host is a
     refusal. Pure, so the decision is pinned by a test on every host. *)
+
+val child_boundary_of_ack : string -> Exec_ssh_protocol.execution_boundary
+(** Decode the fixed child-owned status-pipe protocol: setup acknowledgement,
+    exec failure after setup, or setup failure. Empty/invalid/incomplete bytes
+    mean unavailable evidence, never applied restrictions. *)
 
 val scratch_env : scratch:string -> (string * string) list -> (string * string) list
 (** The payload environment with HOME and TMPDIR pointing at the scratch. *)

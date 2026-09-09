@@ -2,7 +2,7 @@
    (GC, session purge, state machine housekeeping).
    Extracted from server_bootstrap_loops.ml during godfile decomposition. *)
 
-(* How often the loop below wakes: durable demand recovery, mention
+(* How often the loop below wakes: transition-outbox projection, mention
    reconciliation, SSE and session eviction, retention pruning.
 
    A constant rather than MASC_JANITOR_INTERVAL_SEC, which this replaces. The
@@ -163,297 +163,17 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
 ;;
 
 (* A leases term sat between these two. It could not contribute since #25969
-   moved production to peek/ack and left [State.of_yojson] restoring no leases,
-   so demand is decided by pending work and the transition outbox. *)
-let owner_has_durable_demand state =
-  not
-    (Keeper_event_queue.is_empty
-       (Keeper_event_queue_state.pending state))
-  || Keeper_event_queue_state.transition_outbox state <> []
-;;
+   moved production to peek/ack and left [State.of_yojson] restoring no leases.
 
-(* Why these five are one closed type rather than ad-hoc polymorphic variants:
-   [Owner_unknown] and [Owner_absent] read almost the same in English and mean
-   opposite things (we could not look, versus we looked and it is not there).
-   A closed type makes the compiler name every case at the log site, so a
-   later state cannot slip in behind a wildcard. *)
-type durable_demand_owner_error =
-  | Demand_unknown of string
-  | Owner_unknown of string
-  | Owner_absent
-  | Executor_unavailable of Executor_pool_ref.strict_submit_error
-  | Demand_execution_failed of exn * Printexc.raw_backtrace
-
-(* One ERROR per orphaned keeper per process: the condition is a standing
-   operator decision, not a new event, so repeating it every recovery cycle
-   buries real errors. *)
-let owner_absent_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
-
-(* Same standing-condition discipline for a store we could not read: the
-   durable work stays where it is either way, and the 2026-08-25
-   stale-owner incident retried this ERROR 881 times in fifteen
-   hours because every maintenance cycle re-visited the same unreadable
-   owner. Say it once per process; the next distinct detail still logs. *)
-let owner_unknown_reported : (string, unit) Hashtbl.t = Hashtbl.create 4
-
-(* Recovery passes that retained a non-executable owner, per keeper+reason.
-   Purely per process; see the retained arm below.
-
-   Declared here rather than after the function that reads it: OCaml resolves
-   in file order, so below its reader it is not a late definition but no
-   definition at all. *)
-let retained_owner_passes : (string, int) Hashtbl.t = Hashtbl.create 8
-
-(* One pass a minute means 1440 is about a day. The pass that lands exactly
-   on a full day warns; the rest stay quiet. Exposed for the suite. *)
-let retention_becomes_warning (count : int) = count > 0 && count mod 1440 = 0
-
-let load_durable_demand_meta ~base_path ~config ~keeper_name =
-  match
-    Executor_pool_ref.submit_strict (fun () ->
-      match
-        Keeper_event_queue_persistence.load_state_result
-          ~base_path
-          ~keeper_name
-      with
-      | Error detail -> Error (Demand_unknown detail)
-      | Ok state when not (owner_has_durable_demand state) -> Ok None
-      | Ok _state ->
-        (match Keeper_meta_store.read_effective_meta config keeper_name with
-         | Error detail -> Error (Owner_unknown detail)
-         (* A store that answered and holds no such keeper is a different fact
-            from a store we could not read. Folding both into [Owner_unknown]
-            made an orphan queue directory -- durable work under a name no
-            keeper owns -- look like a transient lookup failure, so every
-            maintenance cycle logged it as a recoverable owner and moved on.
-            One such directory produced 913 errors in a day. *)
-         | Ok None -> Error Owner_absent
-         | Ok (Some meta) -> Ok (Some meta)))
-  with
-  | Ok outcome -> outcome
-  | Error (Executor_pool_ref.Work_failed (exn, backtrace)) ->
-    Error (Demand_execution_failed (exn, backtrace))
-  | Error error -> Error (Executor_unavailable error)
-;;
-
-type durable_demand_recovery_action =
-  | Wake_executable_owner
-  | Supervise_recoverable_owner
-  | Report_unknown_owner of string
-  | Retain_non_executable_owner of string
-
-let durable_demand_recovery_action = function
-  | Keeper_activation_readiness.Executable -> Wake_executable_owner
-  | Keeper_activation_readiness.Recoverable -> Supervise_recoverable_owner
-  | Keeper_activation_readiness.Unknown detail -> Report_unknown_owner detail
-  | ( Keeper_activation_readiness.Retained_disabled _
-    | Keeper_activation_readiness.Paused_dead _
-    | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
-    Retain_non_executable_owner
-      (Keeper_activation_readiness.owner_execution_truth_to_wire retained)
-;;
-
-let recover_projected_durable_demand_owner
-      (ctx : _ Keeper_types_profile.context)
-      (projection : Keeper_event_queue_recovery.owner_projection)
-  =
-  let base_path = ctx.config.base_path in
-  let keeper_name = projection.keeper_name in
-  match projection.outcome with
-  | Ok Keeper_event_queue_recovery.Claim_busy ->
-    Log.Server.info
-      "keeper durable demand recovery retained keeper=%s reason=projection_claim_busy"
-      keeper_name
-  | Error (Keeper_event_queue_recovery.Owner_shutdown_reserved operation_id) ->
-    Log.Server.info
-      "keeper durable demand recovery retained keeper=%s reason=shutdown_reserved operation=%s"
-      keeper_name
-      (Keeper_shutdown_types.Operation_id.to_string operation_id)
-  | Error error ->
-    Log.Server.error
-      "keeper durable demand recovery retained keeper=%s reason=projection_unknown detail=%s"
-      keeper_name
-      (Keeper_event_queue_recovery.projection_error_to_string error)
-  | Ok
-      ( Keeper_event_queue_recovery.No_pending_transition
-      | Keeper_event_queue_recovery.Transition_converged ) ->
-    (match
-       load_durable_demand_meta
-         ~base_path
-         ~config:ctx.config
-         ~keeper_name
-     with
-     | Error (Demand_unknown detail) ->
-       Log.Server.error
-         "keeper durable demand recovery retained keeper=%s reason=demand_unknown detail=%s"
-         keeper_name
-         detail
-     | Error (Owner_unknown detail) ->
-       (* [Owner_unknown] means the owner truth store could not be read -- a
-          standing condition the next cycle re-discovers, not a new event.
-          [Owner_absent] below already logs once per process for the same
-          reason; an unreadable store deserves the same discipline, or one
-          broken meta read repeats its ERROR every cycle (881 times for
-          one keeper on 2026-08-25). *)
-       let once_key = keeper_name ^ "\000" ^ detail in
-       if not (Hashtbl.mem owner_unknown_reported once_key) then (
-         Hashtbl.add owner_unknown_reported once_key ();
-         Log.Server.error
-           "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
-           keeper_name
-           detail)
-     | Error Owner_absent ->
-       (* Owner-absent termination (task-370): this state used to wait on an
-          operator decision (register the name or remove the directory) that
-          no maintenance cycle could make for it, so the recovery loop
-          re-visited it every cycle -- 167/hour for one stale tenant queue on
-          2026-08-28, and 881 retained visits for one keeper on
-          2026-08-25. Retention was the wrong default: the work can never
-          execute under a name no keeper owns. Drain the pending entries now
-          through the exact accepted-cancellation transition, say the outcome
-          once, and stop re-visiting. *)
-       (match
-          Keeper_registry_event_queue.drain_owner_absent_pending_result
-            ~base_path
-            keeper_name
-            ~applied_at:(Time_compat.now ())
-            ~reason:
-              "owner absent from keeper store; pending demand cannot execute"
-        with
-        | Ok 0 ->
-          if not (Hashtbl.mem owner_absent_reported keeper_name) then (
-            Hashtbl.add owner_absent_reported keeper_name ();
-            Log.Server.info
-              "keeper durable demand orphaned keeper=%s reason=owner_absent: no \
-               pending demand under a name the Keeper store does not know; nothing \
-               to drain at %s"
-              keeper_name
-              (Filename.concat
-                 (Common.keepers_runtime_dir_of_base ~base_path)
-                 keeper_name))
-        | Ok n ->
-          if not (Hashtbl.mem owner_absent_reported keeper_name) then
-            Hashtbl.add owner_absent_reported keeper_name ();
-          Log.Server.error
-            "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
-             work sat under %s but the Keeper store holds no metadata for that \
-             name; drained %d pending stimulus via accepted cancellation"
-            keeper_name
-            (Filename.concat
-               (Common.keepers_runtime_dir_of_base ~base_path)
-               keeper_name)
-            n
-        | Error detail ->
-          Log.Server.error
-            "keeper durable demand recovery drain failed keeper=%s detail=%s"
-            keeper_name
-            detail)
-     | Error (Executor_unavailable error) ->
-       Log.Server.error
-         "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
-         keeper_name
-         (Executor_pool_ref.strict_submit_error_to_string error)
-     | Error (Demand_execution_failed (exn, backtrace)) ->
-       Log.Server.error
-         "keeper durable demand recovery retained keeper=%s reason=demand_execution_failed detail=%s\n%s"
-         keeper_name
-         (Printexc.to_string exn)
-         (Printexc.raw_backtrace_to_string backtrace)
-     | Ok None -> ()
-     | Ok (Some meta) ->
-       let admission =
-         Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
-       in
-       let runtime =
-         Keeper_activation_readiness.owner_runtime_of_registry_entry
-           (Keeper_registry.get ~base_path keeper_name)
-       in
-       let truth =
-         match admission with
-         | Error error ->
-           Keeper_activation_readiness.Unknown
-             (Keeper_owner_registry.lookup_error_to_string error)
-         | Ok shutdown_operation_id ->
-           Keeper_activation_readiness.classify_durable_demand_execution
-             ~shutdown_operation_id
-             ~runtime
-             (Ok meta)
-       in
-       (match durable_demand_recovery_action truth with
-        | Wake_executable_owner ->
-          (* The durable queue survived the process that originally sent its
-             wake hint. A live owner therefore still needs a new edge after
-             startup or maintenance discovery; otherwise it can sleep forever
-             beside runnable work. [wakeup_keeper] is only the hint -- the
-             queue remains the authoritative payload. *)
-          Keeper_keepalive.wakeup_keeper ~base_path keeper_name;
-          Log.Server.info
-            "keeper durable demand recovery woke executable owner keeper=%s"
-            keeper_name
-        | Supervise_recoverable_owner ->
-          let owner_ctx = { ctx with agent_name = meta.name } in
-          Keeper_supervisor.supervise_keepalive
-            ~proactive_warmup_sec:0
-            owner_ctx
-            meta
-        | Report_unknown_owner detail ->
-          Log.Server.error
-            "keeper durable demand recovery retained keeper=%s reason=unknown detail=%s"
-            keeper_name
-            detail
-        | Retain_non_executable_owner reason ->
-          (* A paused keeper retains recovery every pass — one line a minute,
-             forever, and an operator-paused latch can never clear itself
-             (an edgar.a.poe sat here for days before anyone looked). The
-             first retention stays quiet; every full day of them says so at
-             WARN once, naming the fix. Counting is per process — a restart
-             resets the clock but the keeper keeps its latch, so the warning
-             returns with the next day. *)
-          let key = keeper_name ^ "\000" ^ reason in
-          let current =
-            match Hashtbl.find_opt retained_owner_passes key with
-            | Some n -> n
-            | None -> 0
-          in
-          Hashtbl.replace retained_owner_passes key (current + 1);
-          let count = current + 1 in
-          let daily = retention_becomes_warning count in
-          (if daily then Log.Server.warn else Log.Server.info)
-            "keeper durable demand recovery retained keeper=%s reason=%s%s"
-            keeper_name
-            reason
-            (if daily then
-               " — paused beyond a day of recovery passes; only an operator \
-                resume clears this (POST /api/v1/keepers_bulk/directive, \
-                action=resume)"
-             else "")))
-;;
-
-let consume_owner_projection_batch
-      ~commit_cursor
-      ~keeper_name
-      ~recover_owner
-      projections
-  =
-  commit_cursor ();
-  List.iter
-    (fun projection ->
-       let owner = keeper_name projection in
-       try recover_owner projection with
-       | Eio.Cancel.Cancelled _ as exn ->
-         let backtrace = Printexc.get_raw_backtrace () in
-         Printexc.raise_with_backtrace exn backtrace
-       | exn ->
-         let backtrace = Printexc.get_raw_backtrace () in
-         Log.Server.error
-           "keeper durable demand recovery owner failed keeper=%s error=%s\n%s"
-           owner
-           (Printexc.to_string exn)
-           (Printexc.raw_backtrace_to_string backtrace))
-    projections
-;;
-
-let recover_keeper_durable_demand_owners
+   The owner-recovery half that read that demand is gone. Across 1,038 logged
+   passes it only ever re-woke an owner already classified [Executable]; the
+   supervise arm never ran once, and eleven Keepers that stopped for fifteen
+   hours were not recovered by any of them. It carried no capability of its
+   own either: new durable work wakes its owner as [wakeup_keeper ~stimulus]
+   enqueues it, and a restart runs a cycle on boot. What is left is the
+   transition-outbox projection, which converges durable transitions and is
+   why this pass still exists. *)
+let project_keeper_transition_outbox_page
       ~source
       ~budget
       ~cursor
@@ -467,27 +187,8 @@ let recover_keeper_durable_demand_owners
       ~budget
       ~cursor
   in
-  consume_owner_projection_batch
-    ~commit_cursor:(fun () -> commit_cursor page.next_cursor)
-    ~keeper_name:(fun
-                   (projection : Keeper_event_queue_recovery.owner_projection)
-                 ->
-      projection.keeper_name)
-    ~recover_owner:(recover_projected_durable_demand_owner ctx)
-    page.report.projections
+  commit_cursor page.next_cursor
 ;;
-
-module Recovery_for_testing = struct
-  type nonrec durable_demand_recovery_action = durable_demand_recovery_action =
-    | Wake_executable_owner
-    | Supervise_recoverable_owner
-    | Report_unknown_owner of string
-    | Retain_non_executable_owner of string
-
-  let durable_demand_recovery_action = durable_demand_recovery_action
-  let load_durable_demand_meta = load_durable_demand_meta
-  let consume_owner_projection_batch = consume_owner_projection_batch
-end
 
 let latest_keeper_msg_recovery = Atomic.make None
 
@@ -859,10 +560,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (Keeper_event_queue_recovery.owner_budget_error_to_string error);
         None
     in
-    let recover_durable_demand_owners source =
+    let project_transition_outboxes source =
       Option.iter
         (fun budget ->
-           recover_keeper_durable_demand_owners
+           project_keeper_transition_outbox_page
              ~source
              ~budget
              ~cursor:!transition_projection_cursor
@@ -902,7 +603,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             report.rejected
             report.corrupt_rows
     in
-    recover_durable_demand_owners Startup_projection;
+    project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
@@ -914,7 +615,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
-      recover_durable_demand_owners Maintenance_projection;
+      project_transition_outboxes Maintenance_projection;
       reconcile_broadcast_mentions ();
       (try
          let stale_sids = Sse.cleanup_stale () in

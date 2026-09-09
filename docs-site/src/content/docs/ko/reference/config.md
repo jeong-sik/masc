@@ -23,8 +23,7 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 
 명단은 작업 공간마다 다르니 `masc init` 은 `keepers/` 를 만들기만 하고 아무것도 넣지
 않습니다. 커넥터 설정(Discord, Slack)도 별도 파일이 아니라 `runtime.toml` 안의
-테이블입니다(`[discord]` 등). `repositories.toml` 과 `keeper_repo_mappings.toml` 은
-그 기능을 쓰기 시작하면 생깁니다.
+테이블입니다(`[discord]` 등). `repositories.toml` 은 저장소를 등록하면 생깁니다.
 
 `.env.local` 은 없습니다. 설정은 TOML 에, 자격증명은 **서버를 띄운 환경**에
 있습니다 — [환경 변수](/ko/reference/env-contract/) 참고.
@@ -46,8 +45,8 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 [로컬 AI 모델 연결](/ko/runbooks/llama-server/) 참고.
 
 **시드된 바인딩은 모두 keeper-dispatchable 합니다.** 카탈로그에는 예시를 겸해 provider·모델
-쌍 31개가 있고, 31개 모두 `max-request-body-bytes` 가 선언되어 부팅 경고 없이
-Keeper 턴을 받을 수 있습니다. `[runtime].default` 는 31개 안에 있습니다.
+쌍 31개가 있고 모두 Keeper 턴을 받을 수 있습니다. `max-request-body-bytes`는
+선택적인 호출자 제한이며, 생략하면 별도의 바이트 제한을 만들지 않습니다. `[runtime].default` 는 31개 안에 있습니다.
 
 ## runtime.toml
 

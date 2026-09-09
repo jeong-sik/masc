@@ -1,0 +1,20 @@
+name = "norton-commander"
+light = false
+
+[palette]
+base00 = "000080"
+base01 = "1a1a94"
+base02 = "2d2da8"
+base03 = "8b8bd0"
+base04 = "b8b8e8"
+base05 = "ffffff"
+base06 = "e6f2ff"
+base07 = "ffffff"
+base08 = "ff6060"
+base09 = "ffb266"
+base0a = "ffe066"
+base0b = "66ff66"
+base0c = "66ffff"
+base0d = "7a7aff"
+base0e = "e07aff"
+base0f = "c08040"

@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
+import { waitFor } from '@testing-library/preact'
 import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from '../api/core'
@@ -1459,10 +1460,15 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot initial')
 
     last.value = { type: 'connector_refresh' }
-    await new Promise(resolve => setTimeout(resolve, 2100))
+    // The refetch sits behind a 2000ms debounce (connector-status.ts:2157).
+    // Sleeping 2100ms and then asserting leaves 100ms of slack for a timer to
+    // be late in, which a parallel suite run spends easily. Waiting for the
+    // call returns as soon as it lands -- usually well before 2.1s -- and
+    // tolerates a timer that fires behind schedule.
+    await waitFor(() => expect(fetchGateConnectors).toHaveBeenCalledTimes(2), {
+      timeout: 8000,
+    })
     await flushUi()
-
-    expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
     expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot refreshed')
   })
 })

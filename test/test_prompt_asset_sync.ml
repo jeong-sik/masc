@@ -4,8 +4,8 @@
 open Alcotest
 module Managed_asset_sync = Masc.Managed_asset_sync
 
-let manifest_rel = "prompts/managed-assets.json"
-
+(* The runtime manifest a previous sync would have left behind. No embedded
+   fixture carries one: the embedded tree is the managed set (#31283). *)
 let manifest ?(schema = "masc.prompt-managed-assets.v1") paths =
   Yojson.Safe.to_string
     (`Assoc
@@ -20,9 +20,6 @@ let embedded =
     , "---\ndescription: example\n---\nbody v2\n" )
   ; ( "prompts/behavior/contract.md"
     , "---\ndescription: contract\n---\nrules\n" )
-  ; ( manifest_rel
-    , manifest
-        [ "keeper.example.md"; "behavior/contract.md" ] )
   ; "runtime.toml", "[runtime]\n"
   ]
 
@@ -93,56 +90,138 @@ let test_overwrites_stale_copy () =
       check string "converged content"
         "---\ndescription: example\n---\nbody v2\n" (read_file stale))
 
-let test_runtime_extra_files_are_removed () =
-  with_temp_prompts_dir (fun dir ->
-      let extra = Filename.concat dir "operator.custom.md" in
-      Out_channel.with_open_text extra (fun oc ->
-          Out_channel.output_string oc "local-only\n");
-      let (_ : Managed_asset_sync.sync_result) = sync ~prompts_dir:dir in
-      check bool "runtime extra removed" false (Sys.file_exists extra))
+let mentions ~line needle =
+  let nl = String.length needle and hl = String.length line in
+  let rec scan i = i + nl <= hl && (String.sub line i nl = needle || scan (i + 1)) in
+  scan 0
 
-(* The deletion above is the only thing that happens to a file an operator
-   puts in the runtime directory, and the boot log is the only place it is
-   announced. That log reads [removed], so the two have to be checked
-   together: the case above dropped the result and asserted on the
-   filesystem, which passes just as well when [removed] comes back empty and
-   the operator is told nothing. *)
-let test_an_operator_file_reaches_the_log_line () =
+(* A prompt file the operator wrote into the runtime directory was in no
+   manifest, so it is not the distribution's to remove. It survives the
+   first pass (no manifest yet), a pass with a manifest that lists only the
+   managed files, and a pass on which a managed asset retires beside it. *)
+let test_an_operator_file_survives_every_pass () =
   with_temp_prompts_dir (fun dir ->
       let extra = Filename.concat dir "operator.custom.md" in
       Out_channel.with_open_text extra (fun oc ->
           Out_channel.output_string oc "local-only\n");
+      let first = sync ~prompts_dir:dir in
+      check (list string) "first pass removes nothing" [] first.Managed_asset_sync.removed;
+      check bool "first pass leaves it" true (Sys.file_exists extra);
+      let second = sync ~prompts_dir:dir in
+      check (list string) "a pass with a manifest removes nothing" []
+        second.Managed_asset_sync.removed;
+      check bool "no log line for a file that stayed" true
+        (Option.is_none (Managed_asset_sync.removed_line ~label:"prompt" second));
+      let retired = Filename.concat dir "keeper.retired.md" in
+      Out_channel.with_open_text retired (fun oc ->
+          Out_channel.output_string oc "distribution copy\n");
+      write_runtime_manifest dir
+        [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ];
+      let third = sync ~prompts_dir:dir in
+      check (list string) "only the retired asset goes" [ "prompts/keeper.retired.md" ]
+        third.Managed_asset_sync.removed;
+      check bool "the operator's file is still there" true (Sys.file_exists extra);
+      check string "with its content" "local-only\n" (read_file extra))
+
+(* The boot log is the only place a retirement is announced. That log
+   reads [removed], so the two are checked together: asserting on the
+   filesystem alone passes just as well when [removed] comes back empty and
+   the operator is told nothing. *)
+let test_a_retired_asset_reaches_the_log_line () =
+  with_temp_prompts_dir (fun dir ->
+      let retired = Filename.concat dir "keeper.retired.md" in
+      Out_channel.with_open_text retired (fun oc ->
+          Out_channel.output_string oc "distribution copy\n");
+      write_runtime_manifest dir
+        [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ];
       let result = sync ~prompts_dir:dir in
-      check (list string) "removed names the operator's file"
-        [ "prompts/operator.custom.md" ] result.Managed_asset_sync.removed;
+      check (list string) "removed names the retired asset"
+        [ "prompts/keeper.retired.md" ] result.Managed_asset_sync.removed;
       match Managed_asset_sync.removed_line ~label:"prompt" result with
       | None -> failf "a deleted file produced no log line"
       | Some line ->
-          let mentions needle =
-            let nl = String.length needle and hl = String.length line in
-            let rec scan i =
-              i + nl <= hl && (String.sub line i nl = needle || scan (i + 1))
-            in
-            scan 0
-          in
-          check bool "the line names the file" true
-            (mentions "operator.custom.md");
-          check bool "and says why it went" true (mentions "manifest"))
+          check bool "the line names the file" true (mentions ~line "keeper.retired.md");
+          check bool "and says why it went" true (mentions ~line "no longer embedded"))
 
-(* A readable manifest that lists assets the embedded tree does not carry is
-   the crunch-lost-the-tree state: fail closed, delete nothing. *)
-let test_missing_embedded_assets_fail_closed () =
+(* A manifest another domain wrote, or one that does not read, owns
+   nothing here: the pass copies and overwrites as usual, deletes nothing,
+   and says what was wrong with the manifest. *)
+let test_a_foreign_or_broken_manifest_retires_nothing () =
+  List.iter
+    (fun (name, content, expected_reason) ->
+      with_temp_prompts_dir (fun dir ->
+          let stray = Filename.concat dir "keeper.stray.md" in
+          Out_channel.with_open_text stray (fun oc ->
+              Out_channel.output_string oc "whatever was here\n");
+          Out_channel.with_open_text (Filename.concat dir "managed-assets.json")
+            (fun oc -> Out_channel.output_string oc content);
+          let result = sync ~prompts_dir:dir in
+          check (list string) (name ^ ": removed") [] result.Managed_asset_sync.removed;
+          check bool (name ^ ": the stray file stays") true (Sys.file_exists stray);
+          check (list string) (name ^ ": managed assets still copied")
+            [ "prompts/behavior/contract.md"; "prompts/keeper.example.md" ]
+            (List.sort compare result.Managed_asset_sync.copied);
+          (match
+             List.filter
+               (fun (rel, _) -> String.equal rel "prompts/managed-assets.json")
+               result.Managed_asset_sync.failed
+           with
+           | [ (_, reason) ] ->
+             check bool (name ^ ": the report says what was wrong") true
+               (mentions ~line:reason expected_reason)
+           | reports ->
+             failf "%s: expected one manifest report, found %d" name (List.length reports));
+          (* The evidence stays: a rewrite would make the next boot read
+             clean and the report would have shown once. *)
+          check string (name ^ ": the manifest is left as it was") content
+            (read_file (Filename.concat dir "managed-assets.json"))))
+    [ ( "tool-domain manifest"
+      , manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
+      , "is not" )
+    ; "not JSON", "{ this is not json", "not JSON"
+    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}, "lacks"
+    ; "unsafe path", manifest [ "../keeper.stray.md" ], "unsafe path"
+    ]
+
+(* A manifest that exists and cannot be read is the same case with a
+   different cause: reported, nothing retired, and the file untouched. This
+   used to escape as Sys_error and end the boot. Root reads any file, so
+   the case is skipped there rather than reported as passing. *)
+let test_an_unreadable_manifest_retires_nothing () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_temp_prompts_dir (fun dir ->
+        let stray = Filename.concat dir "keeper.stray.md" in
+        Out_channel.with_open_text stray (fun oc ->
+            Out_channel.output_string oc "whatever was here\n");
+        let manifest_file = Filename.concat dir "managed-assets.json" in
+        write_runtime_manifest dir [ "keeper.stray.md" ];
+        Unix.chmod manifest_file 0o000;
+        Fun.protect
+          ~finally:(fun () -> try Unix.chmod manifest_file 0o600 with Unix.Unix_error _ -> ())
+          (fun () ->
+            let result = sync ~prompts_dir:dir in
+            check (list string) "removed" [] result.Managed_asset_sync.removed;
+            check bool "the stray file stays" true (Sys.file_exists stray);
+            match result.Managed_asset_sync.failed with
+            | [ ("prompts/managed-assets.json", reason) ] ->
+              check bool "the report names the read failure" true
+                (mentions ~line:reason "unreadable")
+            | failed ->
+              failf "expected the manifest report alone, found %d" (List.length failed)))
+
+(* An embedded tree with nothing under prompts/ is the crunch-lost-the-tree
+   state. Every domain ships assets, so the sync refuses to project the
+   emptiness: fail closed, delete nothing. *)
+let test_empty_embedded_set_fails_closed () =
   with_temp_prompts_dir (fun dir ->
       let existing = Filename.concat dir "keeper.existing.md" in
       Out_channel.with_open_text existing (fun oc ->
           Out_channel.output_string oc "must survive a lost embedded tree\n");
       let result =
         Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
-          ~read:(function
-            | rel when String.equal rel manifest_rel ->
-              Some (manifest [ "keeper.example.md" ])
-            | _ -> None)
-          ~files:[ manifest_rel ]
+          ~read:(fun (_ : string) -> None)
+          ~files:[ "runtime.toml"; "tools/masc_board_vote.toml" ]
           ~dest_dir:dir
           ()
       in
@@ -151,31 +230,43 @@ let test_missing_embedded_assets_fail_closed () =
       check bool "empty set failure visible" true
         (List.exists
            (fun (rel, msg) ->
-             String.equal rel manifest_rel
-             && String.equal msg "embedded prompt asset set is empty")
+             String.equal rel "prompts/"
+             && String.equal msg
+                  "embedded prompt asset set is empty; refusing to project an empty tree")
            result.Managed_asset_sync.failed))
 
-(* An empty manifest over an empty embedded set is the valid state of a
-   domain before its first migrated asset: the runtime dir is projected to
-   exactly that emptiness. *)
-let test_empty_manifest_with_empty_set_projects_exactly () =
-  with_temp_prompts_dir (fun dir ->
-      let stale = Filename.concat dir "keeper.stale.md" in
-      Out_channel.with_open_text stale (fun oc ->
-          Out_channel.output_string oc "stale distribution copy\n");
-      let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
-          ~read:(function
-            | rel when String.equal rel manifest_rel -> Some (manifest [])
-            | _ -> None)
-          ~files:[ manifest_rel ]
-          ~dest_dir:dir
-          ()
-      in
-      check (list string) "removed" [ "prompts/keeper.stale.md" ]
-        result.Managed_asset_sync.removed;
-      check bool "stale copy purged" false (Sys.file_exists stale);
-      check int "failed" 0 (List.length result.Managed_asset_sync.failed))
+let test_unsafe_embedded_paths_preserve_runtime_tree () =
+  List.iter
+    (fun unsafe_path ->
+      with_temp_prompts_dir (fun dir ->
+        let existing = Filename.concat dir "keeper.existing.md" in
+        Out_channel.with_open_text existing (fun oc ->
+          Out_channel.output_string oc "existing runtime content\n");
+        write_runtime_manifest dir [ "keeper.existing.md" ];
+        let manifest_path = Filename.concat dir "managed-assets.json" in
+        let before_manifest = read_file manifest_path in
+        let read_called = ref false in
+        let result =
+          Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+            ~read:(fun _ -> read_called := true; Some "new embedded content\n")
+            ~files:[ "prompts/new.md"; "prompts/" ^ unsafe_path ]
+            ~dest_dir:dir ()
+        in
+        check (list string) "nothing copied" [] result.Managed_asset_sync.copied;
+        check (list string) "nothing overwritten" [] result.Managed_asset_sync.overwritten;
+        check (list string) "nothing removed" [] result.Managed_asset_sync.removed;
+        check (list (pair string string)) "unsafe path is reported"
+          [ "prompts/" ^ unsafe_path, "unsafe embedded prompt asset path" ]
+          result.Managed_asset_sync.failed;
+        check bool "no embedded reads before complete path validation" false !read_called;
+        check bool "existing asset remains" true (Sys.file_exists existing);
+        check string "existing content is unchanged" "existing runtime content\n"
+          (read_file existing);
+        check string "runtime manifest is unchanged" before_manifest
+          (read_file manifest_path);
+        check bool "valid preceding asset is not written" false
+          (Sys.file_exists (Filename.concat dir "new.md"))))
+    [ "../outside.md"; "/absolute.md"; "nested/../outside.md"; "."; "nested//file.md"; "" ]
 
 let test_removed_managed_file_is_deleted () =
   with_temp_prompts_dir (fun dir ->
@@ -235,47 +326,6 @@ let test_removed_managed_leaf_symlink_is_deleted_without_following () =
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside)))
 
-let test_invalid_manifest_preserves_managed_file () =
-  with_temp_prompts_dir (fun dir ->
-      let removed = Filename.concat dir "keeper.removed.md" in
-      Out_channel.with_open_text removed (fun oc ->
-          Out_channel.output_string oc "must survive invalid manifest\n");
-      let read = function
-        | rel when String.equal rel manifest_rel -> Some "{not-json"
-        | rel -> read_embedded rel
-      in
-      let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~read
-          ~files:embedded_files ~dest_dir:dir ()
-      in
-      check (list string) "removed" [] result.Managed_asset_sync.removed;
-      check bool "managed asset preserved" true (Sys.file_exists removed);
-      check bool "manifest failure visible" true
-        (List.exists
-           (fun (rel, _) -> String.equal rel manifest_rel)
-           result.Managed_asset_sync.failed))
-
-let test_incomplete_embedded_manifest_preserves_managed_file () =
-  with_temp_prompts_dir (fun dir ->
-      let removed = Filename.concat dir "keeper.removed.md" in
-      Out_channel.with_open_text removed (fun oc ->
-          Out_channel.output_string oc "must survive incomplete manifest\n");
-      let read = function
-        | rel when String.equal rel manifest_rel ->
-          Some (manifest [ "keeper.removed.md" ])
-        | rel -> read_embedded rel
-      in
-      let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~read
-          ~files:embedded_files ~dest_dir:dir ()
-      in
-      check (list string) "removed" [] result.Managed_asset_sync.removed;
-      check bool "managed asset preserved" true (Sys.file_exists removed);
-      check bool "manifest coverage failure visible" true
-        (List.exists
-           (fun (rel, _) -> String.equal rel manifest_rel)
-           result.Managed_asset_sync.failed))
-
 let test_symlink_ancestor_cannot_escape_prompt_root () =
   with_temp_prompts_dir (fun dir ->
       let outside = Filename.temp_dir "prompt-asset-sync-outside" "test" in
@@ -287,12 +337,9 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
           let outside_old = Filename.concat outside "old.md" in
           Out_channel.with_open_text outside_old (fun oc ->
               Out_channel.output_string oc "outside must survive\n");
-          Unix.symlink outside (Filename.concat dir "link");
-          let assets =
-            [ "prompts/link/current.md", "current embedded body\n"
-            ; ( manifest_rel, manifest [ "link/current.md" ] )
-            ]
-          in
+          let link = Filename.concat dir "link" in
+          Unix.symlink outside link;
+          let assets = [ "prompts/link/current.md", "current embedded body\n" ] in
           write_runtime_manifest dir [ "link/current.md"; "link/old.md" ];
           let result =
             Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
@@ -301,25 +348,29 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
               ~dest_dir:dir
               ()
           in
-          check (list string) "ancestor symlink removed"
-            [ "prompts/link" ]
-            result.Managed_asset_sync.removed;
+          (* The link is the operator's: no manifest placed it, so the sync
+             neither follows it nor removes it. The managed asset under it
+             cannot be written without crossing the link, and that is
+             reported rather than done. *)
+          check (list string) "nothing removed" [] result.Managed_asset_sync.removed;
+          check bool "the link stays" true
+            ((Unix.lstat link).Unix.st_kind = Unix.S_LNK);
           check bool "outside managed file survives" true
             (Sys.file_exists outside_old);
           check string "outside content unchanged" "outside must survive\n"
             (read_file outside_old);
-          check int "no boundary failure after exact-tree purge" 0
-            (List.length result.Managed_asset_sync.failed)))
+          check bool "nothing written through the link" false
+            (Sys.file_exists (Filename.concat outside "current.md"));
+          check (list string) "the asset behind the link is reported, not written"
+            [ "prompts/link/current.md" ]
+            (List.map fst result.Managed_asset_sync.failed)))
 
 let test_unreadable_embedded_entry_is_failed () =
   with_temp_prompts_dir (fun dir ->
       let result =
         Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
-          ~read:(function
-            | rel when String.equal rel manifest_rel ->
-              Some (manifest [ "ghost.md" ])
-            | _ -> None)
-          ~files:[ "prompts/ghost.md"; manifest_rel ]
+          ~read:(fun (_ : string) -> None)
+          ~files:[ "prompts/ghost.md" ]
           ~dest_dir:dir ()
       in
       check int "failed count" 1 (List.length result.Managed_asset_sync.failed);
@@ -327,7 +378,7 @@ let test_unreadable_embedded_entry_is_failed () =
       | [ (rel, _) ] -> check string "failed entry" "prompts/ghost.md" rel
       | _ -> fail "expected exactly one failure")
 
-let test_binary_manifest_covers_current_assets () =
+let test_binary_prompt_assets_sync_without_failure () =
   with_temp_prompts_dir (fun dir ->
       let result =
         Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
@@ -336,18 +387,14 @@ let test_binary_manifest_covers_current_assets () =
           ~dest_dir:dir
           ()
       in
-      check (list (pair string string)) "all embedded prompt assets managed" []
+      check (list (pair string string)) "every embedded prompt asset synced" []
         result.Managed_asset_sync.failed)
 
 (* ── Tools domain ─────────────────────────────────────────────────────── *)
 
-let tools_manifest_rel = "tools/managed-assets.json"
-
 let tools_embedded =
   [ ( "tools/masc_board_vote.toml"
     , "name = \"masc_board_vote\"\ndescription = \"Vote.\"\n" )
-  ; ( tools_manifest_rel
-    , manifest ~schema:"masc.tool-managed-assets.v1" [ "masc_board_vote.toml" ] )
   ; ( "prompts/keeper.example.md"
     , "---\ndescription: example\n---\nbody v2\n" )
   ]
@@ -370,71 +417,71 @@ let test_tools_domain_scopes_to_tools () =
       check bool "prompt asset not written" false
         (Sys.file_exists (Filename.concat dir "keeper.example.md")))
 
-(* 2026-08-25: a half-built binary held the masc server down and the failure
-   line ("manifest differs from current assets") said neither which side was
-   ahead nor that a rebuild was the remedy. Two sessions each spent time
-   guessing at the runtime directory and the source tree instead. Both
-   directions are asserted so the message keeps naming them. *)
-let tools_unlisted_embedded =
-  [ ( "tools/masc_listed.toml"
-    , "name = \"masc_listed\"\ndescription = \"Listed.\"\n" )
-  ; ( "tools/masc_unlisted.toml"
-    , "name = \"masc_unlisted\"\ndescription = \"Unlisted.\"\n" )
-  ; ( tools_manifest_rel
-    , manifest ~schema:"masc.tool-managed-assets.v1" [ "masc_listed.toml" ] )
-  ]
+(* The runtime manifest is a projection of the embedded set. No source file
+   declares that set any more (#31283: the hand-written copy drifted from the
+   tree five releases running), so the only way the runtime file can be
+   wrong is for the sync to have written something other than what it
+   embedded. This reads it back and pins it to the fixture, then drops one
+   embedded asset and checks that exactly that file and that line go. *)
+let runtime_manifest dir =
+  match Yojson.Safe.from_file (Filename.concat dir "managed-assets.json") with
+  | `Assoc fields ->
+    (match
+       ( List.assoc_opt "managed_by" fields
+       , List.assoc_opt "schema" fields
+       , List.assoc_opt "paths" fields )
+     with
+     | Some (`String managed_by), Some (`String schema), Some (`List paths) ->
+       ( managed_by
+       , schema
+       , List.map
+           (function
+             | `String path -> path
+             | _ -> failwith "runtime manifest path is not a string")
+           paths )
+     | _ -> failwith "runtime manifest is missing managed_by, schema, or paths")
+  | _ -> failwith "runtime manifest is not a JSON object"
 
-let mentions_substring ~needle haystack =
-  let nl = String.length needle and hl = String.length haystack in
-  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
-  nl = 0 || scan 0
-
-let test_manifest_mismatch_names_direction_and_remedy () =
+let test_runtime_manifest_projects_the_embedded_set () =
   with_temp_prompts_dir (fun dir ->
-      let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
-          ~read:(fun rel -> List.assoc_opt rel tools_unlisted_embedded)
-          ~files:(List.map fst tools_unlisted_embedded)
-          ~dest_dir:dir
-          ()
-      in
-      let msg =
-        match result.Managed_asset_sync.failed with
-        | [ (rel, m) ] when String.equal rel tools_manifest_rel -> m
-        | _ -> failwith "expected exactly one failure on the tools manifest"
-      in
-      let has needle = mentions_substring ~needle msg in
-      check bool "names the build as the fault" true (has "half-built");
-      check bool "states the remedy" true (has "rebuild");
-      check bool "names the embedded-but-unlisted asset" true
-        (has "masc_unlisted.toml");
-      check bool "shows the empty direction explicitly" true (has "(none)");
-      check bool "nothing is deleted on a failed check" true
-        (List.length result.Managed_asset_sync.removed = 0))
-
-let test_tools_domain_rejects_prompt_manifest_schema () =
-  with_temp_prompts_dir (fun dir ->
-      let mixed_schema =
-        [ ( tools_manifest_rel
-          , manifest ~schema:"masc.prompt-managed-assets.v1" [] )
+      let three =
+        [ "tools/masc_alpha.toml", "name = \"masc_alpha\"\n"
+        ; "tools/masc_beta.toml", "name = \"masc_beta\"\n"
+        ; "tools/masc_gamma.toml", "name = \"masc_gamma\"\n"
+        ; "prompts/keeper.example.md", "not a tool\n"
         ]
       in
-      let result =
+      let run assets =
         Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
-          ~read:(fun rel -> List.assoc_opt rel mixed_schema)
-          ~files:(List.map fst mixed_schema)
+          ~read:(fun rel -> List.assoc_opt rel assets)
+          ~files:(List.map fst assets)
           ~dest_dir:dir
           ()
       in
-      check bool "schema failure visible" true
-        (List.exists
-           (fun (rel, msg) ->
-             String.equal rel tools_manifest_rel
-             && String.equal msg
-                  "unsupported managed tool asset schema: masc.prompt-managed-assets.v1")
-           result.Managed_asset_sync.failed))
+      let first = run three in
+      check int "failed" 0 (List.length first.Managed_asset_sync.failed);
+      let managed_by, schema, paths = runtime_manifest dir in
+      check string "managed_by" "MASC" managed_by;
+      check string "schema" "masc.tool-managed-assets.v1" schema;
+      check (list string) "paths are exactly the embedded tool files"
+        [ "masc_alpha.toml"; "masc_beta.toml"; "masc_gamma.toml" ]
+        paths;
+      let without_beta =
+        List.filter (fun (rel, _) -> not (String.equal rel "tools/masc_beta.toml")) three
+      in
+      let second = run without_beta in
+      check (list string) "the dropped asset is removed"
+        [ "tools/masc_beta.toml" ] second.Managed_asset_sync.removed;
+      check int "nothing else failed" 0 (List.length second.Managed_asset_sync.failed);
+      check bool "the others survive" true
+        (Sys.file_exists (Filename.concat dir "masc_alpha.toml")
+        && Sys.file_exists (Filename.concat dir "masc_gamma.toml"));
+      let _, _, paths = runtime_manifest dir in
+      check (list string) "the manifest shrank with the set"
+        [ "masc_alpha.toml"; "masc_gamma.toml" ]
+        paths)
 
-let test_binary_manifest_covers_current_tool_assets () =
+let test_binary_tool_assets_sync_without_failure () =
   with_temp_prompts_dir (fun dir ->
       let result =
         Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
@@ -443,7 +490,7 @@ let test_binary_manifest_covers_current_tool_assets () =
           ~dest_dir:dir
           ()
       in
-      check (list (pair string string)) "all embedded tool assets managed" []
+      check (list (pair string string)) "every embedded tool asset synced" []
         result.Managed_asset_sync.failed)
 
 let () =
@@ -456,14 +503,18 @@ let () =
           test_case "second run is a no-op" `Quick test_second_run_is_noop;
           test_case "overwrites stale runtime copy" `Quick
             test_overwrites_stale_copy;
-          test_case "runtime extra files are removed" `Quick
-            test_runtime_extra_files_are_removed;
-          test_case "an operator's file reaches the log line" `Quick
-            test_an_operator_file_reaches_the_log_line;
-          test_case "missing embedded assets fail closed" `Quick
-            test_missing_embedded_assets_fail_closed;
-          test_case "empty manifest with empty set projects exactly" `Quick
-            test_empty_manifest_with_empty_set_projects_exactly;
+          test_case "an operator's file survives every pass" `Quick
+            test_an_operator_file_survives_every_pass;
+          test_case "a retired asset reaches the log line" `Quick
+            test_a_retired_asset_reaches_the_log_line;
+          test_case "a foreign or broken manifest retires nothing" `Quick
+            test_a_foreign_or_broken_manifest_retires_nothing;
+          test_case "an unreadable manifest retires nothing" `Quick
+            test_an_unreadable_manifest_retires_nothing;
+          test_case "empty embedded set fails closed" `Quick
+            test_empty_embedded_set_fails_closed;
+          test_case "unsafe embedded paths preserve runtime assets and manifest" `Quick
+            test_unsafe_embedded_paths_preserve_runtime_tree;
           test_case "removed managed file is deleted" `Quick
             test_removed_managed_file_is_deleted;
           test_case "current managed leaf symlink is replaced without following"
@@ -472,26 +523,20 @@ let () =
           test_case "removed managed leaf symlink is deleted without following"
             `Quick
             test_removed_managed_leaf_symlink_is_deleted_without_following;
-          test_case "invalid manifest preserves managed files" `Quick
-            test_invalid_manifest_preserves_managed_file;
-          test_case "incomplete manifest preserves managed files" `Quick
-            test_incomplete_embedded_manifest_preserves_managed_file;
           test_case "ancestor symlink cannot escape prompt root" `Quick
             test_symlink_ancestor_cannot_escape_prompt_root;
           test_case "unreadable embedded entry recorded as failure" `Quick
             test_unreadable_embedded_entry_is_failed;
-          test_case "binary manifest covers current prompt assets" `Quick
-            test_binary_manifest_covers_current_assets;
+          test_case "binary prompt assets sync without failure" `Quick
+            test_binary_prompt_assets_sync_without_failure;
         ] );
       ( "tools",
         [
           test_case "copies missing, scopes to tools/" `Quick
             test_tools_domain_scopes_to_tools;
-          test_case "rejects a prompt manifest schema under tools/" `Quick
-            test_tools_domain_rejects_prompt_manifest_schema;
-          test_case "binary manifest covers current tool assets" `Quick
-            test_binary_manifest_covers_current_tool_assets;
-          test_case "manifest mismatch names direction and remedy" `Quick
-            test_manifest_mismatch_names_direction_and_remedy;
+          test_case "runtime manifest projects the embedded set" `Quick
+            test_runtime_manifest_projects_the_embedded_set;
+          test_case "binary tool assets sync without failure" `Quick
+            test_binary_tool_assets_sync_without_failure;
         ] );
     ]

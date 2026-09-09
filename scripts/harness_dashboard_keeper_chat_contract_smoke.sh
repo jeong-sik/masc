@@ -88,7 +88,7 @@ cp "$RUNTIME_CONFIG_SOURCE" "$BASE_PATH/.masc/config/runtime.toml"
 
 cat >"$BASE_PATH/.masc/config/keepers/${KEEPER_NAME}.toml" <<EOF_TOML
 [keeper]
-autoboot_enabled = false
+activation_mode = "manual"
 EOF_TOML
 
 KEEPER_NAME="$KEEPER_NAME" BASE_PATH="$BASE_PATH" node <<'NODE'

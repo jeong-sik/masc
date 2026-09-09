@@ -1,47 +1,81 @@
 # Contributing to MASC
 
-MASC is a repo-local MCP server for coordinating Keepers, MCP clients, and workspace state inside one repository. This document is about contributing to this codebase; it is not meant to justify the whole design.
+MASC is a harness for running several coding agents against one repository:
+a workspace server over MCP, supervised Keepers, and a terminal UI, in one
+OCaml binary. This document is about changing this codebase, not about
+justifying its design.
 
-## Quick Start
+Coding agents that work on MASC read [`AGENTS.md`](AGENTS.md) and
+`docs/constitution.xml` first. For them the constitution's execution protocol
+replaces the local-build and CI-wait advice below.
+
+## Quick start
 
 ```bash
-# 1. Clone and setup
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-# Enable repo hooks: pre-push refuses dune trace dumps that carry the env
-git config core.hooksPath .githooks
+git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
-# 2. Pin external OCaml dependencies
-chmod +x scripts/opam-pin-external-deps.sh
-scripts/opam-pin-external-deps.sh
-
-# 3. Install OCaml dependencies
+scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
 opam install . --deps-only
 
-# 4. Focused local build
-scripts/dune-local.sh build @default
-
-# 5. Run a focused test while developing
+scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
-
-# 6. Start server (HTTP mode)
-./start-masc.sh --http
+./start-masc.sh --http                    # server from the checkout
 ```
 
-## Development Guidelines
+`scripts/dune-local.sh` wraps Dune for a machine where several agents build at
+once: it serializes Dune inside one worktree, defaults concurrency to
+`DUNE_JOBS` or 2, injects `--root`, and refuses a toolchain that does not
+match `dune-project`. `MASC_DUNE_DRY_RUN=1` prints the command instead of
+running it.
 
-### Code Style
+The hooks: `pre-commit` skips the `dune build` type-check for a commit that
+only touches docs and assets; `pre-push` refuses a push that adds Dune trace
+dumps, because those carry the environment.
 
-- **OCaml 5.x + Eio** — the current project stack; follow existing direct-style Eio patterns
-- **No blocking IO** — `Unix.sleepf` / `Lwt.bind` are forbidden; use `Eio.Time.sleep`
-- **Type safety** — prefer typed variants/records for runtime contracts, and avoid `Obj.magic`
-- **Result types** — Use `Result.t` over exceptions for recoverable errors
-- **Resource cleanup** — `Eio.Switch.on_release` over nested `Fun.protect`
-- **Pure functions** — extract testable logic from IO code when it keeps the change simpler
+## Where things are
 
-#### Formatting
+```text
+bin/
+├── main_eio.ml                  server, CLI subcommands, and the hand-over to the TUI
+├── main_stdio_eio.ml            stdio MCP entry point
+├── masc_tui.ml                  TUI entry point; masc_tui_*.ml are its modules (about 120 files)
+├── masc_exec_shim.ml            the shim a remote_ssh endpoint runs
+└── ...                          SSH bootstrap, browser host, cost and trace tools, probes
 
-CI checks `.ml` and `.mli` files with `ocamlformat`, on changed files only.
+lib/                             about 180 top-level modules and 147 directories, among them
+├── keeper/                      Keeper runtime, turn loop, tools, chat channels
+├── server/                      HTTP routes, MCP transport, sidecars, gateways
+├── workspace/                   tasks, claims, goals, board, verification
+├── runtime/, runtime_model/     provider catalog, lanes, assignments
+├── gate/, keeper_approval/      approval lanes and the Gate queue
+├── exec/, exec_ssh_protocol/, egress_proxy/   sandboxes, the SSH lane, egress policy
+├── dashboard/                   read models the SPA consumes
+├── lsp_client/                  the language-server client behind the Code view
+└── tui_decode.ml                server payload decoding shared with the TUI
+
+packages/                        embedded Agent Core
+dashboard/                       TypeScript + Preact SPA
+config/                          seeds embedded into the binary: runtime.toml, prompts, tools/*.toml
+docs/                            manuals, runbooks, docs/spec, docs/rfc
+scripts/                         build, install, local operations; scripts/ci/ holds the lint suite
+test/                            Alcotest suites (about 1,200 files) and fixtures
+```
+
+## Code style
+
+- OCaml 5.x with Eio, direct style. No `Unix.sleepf` and no Lwt; use
+  `Eio.Time.sleep`.
+- Typed variants and records for runtime contracts. No `Obj.magic`.
+- `Result.t` over exceptions for recoverable errors.
+- `Eio.Switch.on_release` over nested `Fun.protect` for cleanup.
+- Pure functions extracted from IO when that keeps the change simpler.
+- No string or substring matching to decide control flow, and no numeric
+  budgets or weights as Keeper control gates. `docs/constitution.xml` lists
+  the rest.
+
+CI runs `ocamlformat` on the `.ml` and `.mli` files a pull request changes.
 Either command matches it:
 
 ```bash
@@ -49,121 +83,88 @@ opam exec -- dune build --root . @fmt --auto-promote   # whole tree
 opam exec -- ocamlformat -i <changed .ml/.mli files>   # just what you touched
 ```
 
-`dune-project` scopes formatting to `ocaml`, so `dune fmt` leaves `dune` files
-alone. Without that scope it rewrote 18 of them from a clean tree, and the
-blank line it added to `lib/dune` put the file one over the line-count metric
-the OCaml Structure Ratchet used then — the repo's own formatter breaking the
-repo's own gate (#29253). That metric now counts the modules in the `masc`
-library instead of the lines in the file that declares it, so a blank line
-cannot trip it; the formatting scope stays because CI enforces ocamlformat
-over `.ml`/`.mli` only.
+`dune-project` scopes formatting to OCaml, so `dune fmt` leaves `dune` files
+alone.
 
-### Project Structure
+## Tests
 
-```
-bin/
-├── main_eio.ml               # Primary HTTP server entry point
-├── main_stdio_eio.ml         # stdio compatibility entry point
-├── masc_cost.ml              # Cost analysis tool
-├── masc_tui.ml               # Terminal UI dashboard
-└── ...                       # Additional executables and build files
-
-lib/
-├── keeper/                   # keeper runtime and turn loop
-├── worker_contract_types/    # worker contract enums and shared runtime types
-├── dashboard/                # dashboard providers and read models
-├── board/                    # board/social surface helpers
-├── grpc/                     # gRPC transport support
-├── workspace/                     # workspace/session/task workspace collaboration
-└── tools.ml                  # tool schema registry entrypoint
-
-dashboard/                    # TypeScript + Preact SPA source
-docs/spec/                    # living specification suite
-scripts/                      # harnesses, CI helpers, review tooling
-test/                         # Alcotest suites + fixtures
-```
-
-### Key Subsystems
-
-| Subsystem | Entry Point | Description |
-|-----------|-------------|-------------|
-| **MCP Server** | `bin/main_eio.ml`, `lib/mcp_server_eio_*` | JSON-RPC over Streamable HTTP |
-| **Board** | `lib/board/`, `lib/board_tool_adapter/` | Posts, votes, comments |
-| **Keeper** | `lib/keeper/` | long-running keeper runtime |
-| **Worker Contracts** | `lib/worker_contract_types/` | shared worker/runtime contract types |
-
-### Testing
-
-- **Test framework**: Alcotest
-- **Test files**: many focused Alcotest suites plus coverage/integration/benchmark harnesses
-- **Pure functions**: Tested without mocking
-- **IO functions**: tested with integration harnesses when the required service is configured
+Tests are Alcotest suites under `test/`, registered through `test/dune` and
+`test/stanzas/*.inc`. Pure functions are tested without mocks. IO paths run
+against integration harnesses when the service they need is configured.
 
 ```bash
-# Run a focused test through the repo wrapper
-scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
-
-# Run specific test
-scripts/dune-local.sh exec test/<test-name>.exe
-
-# Build only
-scripts/dune-local.sh build @default
-
-# Build + run a Valgrind leak check on the HTTP server startup/MCP smoke path
-make check-memory-leak
+scripts/dune-local.sh exec test/<test-name>.exe   # one suite
+scripts/dune-local.sh build @default              # build only
+make check-memory-leak                            # Valgrind over server start, initialize, tools/list
 ```
 
-- `make check-memory-leak` builds `bin/main_eio.exe`, starts it under Valgrind memcheck, waits for `/health`, runs `initialize` + `tools/list`, and fails on definite / indirect / possible leaks.
-- Prerequisites: `dune`, `curl`, `python3`, and `valgrind`.
-- Useful overrides:
-  - `MASC_MAIN_EIO_EXE=/abs/path/to/main_eio.exe make check-memory-leak`
-  - `VALGRIND_BIN=/abs/path/to/valgrind make check-memory-leak`
-  - `bash scripts/check-memory-leak.sh --skip-build --keep-artifacts`
+`make check-memory-leak` needs `dune`, `curl`, `python3`, and `valgrind`, and
+fails on definite, indirect, or possible leaks.
+`bash scripts/check-memory-leak.sh --skip-build --keep-artifacts` reuses a
+built binary.
 
-### External Dependencies
+## What CI runs
 
-| Service | Purpose | Required |
-|---------|---------|----------|
-| GraphQL API / Neo4j | agent graph and identity-backed features | Optional by workflow |
-| Supabase pgvector / PostgreSQL | persistence and vector-backed features | Optional by workflow |
+On every pull request (`pr-check.yml`):
 
-### Commit Messages
+- **lint**: about 40 scripts through `scripts/ci/run-lint-suite.sh
+  blocking-pr`, run to completion so every failure is listed at once. An
+  advisory set follows and is recorded, not enforced.
+- **check**: source text integrity, the RFC index,
+  `scripts/check-doc-truth.sh`, release and namespace fixtures,
+  `dune build @check`, then the tests the pull request edits
+  (`scripts/ci/run-edited-tests.sh`) and the suites that need no build.
+- **dashboard-types**: type-checks the SPA.
 
-Use conventional commits:
+The full test suite is `test.yml`, on a daily schedule and on dispatch, not
+per pull request. `release.yml` runs on a tag push and builds the published
+binaries. `ci.yml` is a dispatchable build.
+
+## Commits
+
+Conventional commits, in English:
 
 ```
-feat(governance): add review queue guard
-fix(heartbeat): reduce GraphQL query cost under limit
-refactor(keeper): simplify Keeper terminology
-test(governance): add review queue persistence tests
-docs: update CONTRIBUTING for current architecture
-chore: bump version to 0.9.0
+feat(tui): show the sandbox image a keeper resolved
+fix(keeper): keep a rejected max_tokens response out of the checkpoint
+refactor(server): move sidecar routes behind one table
+test(gate): pin the external-services lane default
+docs: describe the TUI as the front door
+chore: bump version to 0.34.0
 ```
 
-## Pull Request Process
+## Pull requests
 
-1. **Create branch**: `feat/description` or `fix/description`
-2. **Write tests** for new functionality
-3. **Run relevant local checks** for changed files through `scripts/dune-local.sh`
-4. **Let CI own full-suite truth** when the PR opens
-5. **Open a draft PR** linked to at least one issue
-6. **Include review evidence** when the repo workflow or reviewer asks for it
-7. **Wait for review**
+1. Branch from `main` as `feat/<topic>`, `fix/<topic>`, or `docs/<topic>`.
+2. Write tests for new behaviour.
+3. Run the focused checks for what you changed through
+   `scripts/dune-local.sh`. CI owns the full-suite result.
+4. Open a **draft** pull request linked to at least one issue. The template
+   asks for `Summary`, `Product impact`, `Evidence`, `Direct evidence`,
+   `Review evidence`, and `Linked issue`. Fill them, and leave the two
+   checklists unchecked with a reason when they do not apply.
+5. `Product impact` names the surface: the TUI, the MCP workspace, the Keeper
+   runtime, the dashboard, or none/internal.
+6. `Review evidence` records a cross-model review when the repo or a reviewer
+   asks for one: which model reviewed, and why a fallback was used if one was.
+7. Pull requests are squash-merged. Never push to a branch whose pull request
+   has merged; open a new one.
+8. When the work is ready to verify, hand it over with typed evidence. Every
+   `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a
+   producer-relative file opened and snapshotted on submission; the reviewer
+   reads that snapshot) or `note:<text>` (prose the reviewer reads but cannot
+   inspect); see RFC-0417. A PR URL, a commit, or a board post id inside a
+   `note:` is narrative until something opens it — pair it with an
+   `artifact:` entry, and never let a `note:` stand alone as completion
+   evidence. Submission moves the task to awaiting_verification; completion
+   requires the completion authority's verdict.
 
-### Release Versioning
+## Issues
 
-- The active product line is pre-1.0: use `0.y.0` for a new promise train and `0.y.z` for stabilization inside that train.
-- `v2.*` tags are legacy history and are no longer the active release line.
-- After a release-line reset or new train bump lands on `main`, publish its tag before opening the next train bump.
-  Example: after merging `0.2.0`, tag `v0.2.0` before opening `0.3.0`.
-- Use `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh` before asking for release review.
-- CI also enforces `bash scripts/check-release-train-guard.sh` to block widening an untagged pending train.
-
-## GitHub Planning Rules
-
-Issue classification comes from a `masc-triage` declaration block in the issue body, and nothing else.
-Labels are a projection of that block, applied by the `Issue Taxonomy` workflow.
-The vocabulary SSOT is `.github/issue-taxonomy.json`; a value that is not in that file does not exist.
+Issue classification comes from a `masc-triage` block in the issue body, and
+nothing else. Labels are a projection of that block, applied by the
+`Issue Taxonomy` workflow. The vocabulary is `.github/issue-taxonomy.json`; a
+value that is not in that file does not exist.
 
 ````text
 ```masc-triage
@@ -177,99 +178,97 @@ must-do: true
 
 Axes:
 
-- `kind` (required, exactly one) - `defect` implementation breaks its contract, `gap` the contract or wiring is absent,
-  `capability` a new surface, `erosion` dead code or stale artifacts to delete, `inquiry` not yet known to be a defect
-- `area` (required, exactly one) - `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime`
-  `transport` `dashboard` `connector` `observability` `persistence` `ci`
-- `impact` (required, exactly one) - this order *is* the priority order.
-  `breaks-continuity` turns stop or memory does not carry across them, `breaks-collab` keepers stop reaching each other, or output lands where nobody reads it,
-  `blinds-operator` it runs but nobody can see it, `degrades` friction, performance, or accuracy, `internal` development flow only
-- `root` (optional, zero or more) - `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt`
-- `must-do` (optional) - `true` when this breaks the product promise right now
+- `kind` (required, exactly one): `defect` implementation breaks its contract,
+  `gap` the contract or wiring is absent, `capability` a new surface,
+  `erosion` dead code or stale artifacts to delete, `inquiry` not yet known to
+  be a defect.
+- `area` (required, exactly one): `turn` `continuity` `collab` `goal-task`
+  `verification` `tools` `runtime` `transport` `dashboard` `connector`
+  `observability` `persistence` `ci`.
+- `impact` (required, exactly one), and this order is the priority order:
+  `breaks-continuity` turns stop or memory does not carry across them,
+  `breaks-collab` keepers stop reaching each other or output lands where
+  nobody reads it, `blinds-operator` it runs but nobody can see it,
+  `degrades` friction, performance, or accuracy, `internal` development flow
+  only.
+- `root` (optional, zero or more): `ssot` `silent` `string` `variant`
+  `boundary` `telemetry` `det` `ndt`.
+- `must-do` (optional): `true` when this breaks the product promise right now.
 
-Pick `impact` from what the issue breaks in the product, not from how severe the issue claims to be.
-The product fails when turns stop, when a keeper cannot recall its own last ten turns, when keepers stop talking
-to each other, or when output lands somewhere nobody reads. `impact` names which of those is at stake.
+Pick `impact` from what the issue breaks in the product, not from how severe
+the issue claims to be. The product fails when turns stop, when a keeper
+cannot recall its own last ten turns, when keepers stop talking to each
+other, or when output lands somewhere nobody reads.
 
-Filing with `gh issue create` uses the same block, so the web form and the CLI produce one shape and one parser.
-Do not edit labels by hand; edit the block and the workflow reconciles them.
-To reconcile repository labels with the SSOT, run `APPLY=1 bash scripts/sync-issue-labels.sh`.
+`gh issue create` uses the same block, so the web form and the CLI produce one
+shape and one parser. Do not edit labels by hand; edit the block and the
+workflow reconciles them. `APPLY=1 bash scripts/sync-issue-labels.sh`
+reconciles repository labels with the vocabulary file.
 
-## PR Description Expectations
+When reporting a bug, include the OCaml version, the OS and version, steps to
+reproduce, expected versus actual behaviour, and the relevant log
+(`start-masc.sh` output or the harness output).
 
-PRs should include these sections:
+## Releases
 
-- `## Summary`
-- `## Product impact`
-- `## Evidence`
-- `## Review evidence`
-- `## Linked issue`
+- The active line is pre-1.0: `0.y.0` opens a user-visible train, `0.y.z`
+  stabilizes it.
+- `v2.*` tags are history and do not define the active line.
+- After a train bump lands on `main`, publish its tag before opening the next
+  one: after merging `0.33.0`, tag `v0.33.0` before opening `0.34.0`.
+- Run `bash scripts/check-version-truth.sh` and `bash scripts/check-doc-truth.sh`
+  before a release review; the tag workflow runs the former and CI runs the
+  latter. `check-release-train-guard.sh` is not wired into CI yet
+  (`scripts/ci/guards-not-wired.txt`).
+- Release evidence follows [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md).
 
-State which promise the PR affects:
+## Architecture notes
 
-- `repo workspace collaboration`
-- `ops visibility`
-- `none/internal`
+### OCaml 5.x and Eio
 
-Cross-model review evidence should use direct `sb glm-text` when available. If a fallback reviewer is used, record the reason in the PR body or comment.
-
-## Architecture Decisions
-
-### OCaml 5.x + Eio notes
-
-OCaml/Eio is the current implementation stack, not a general recommendation.
-The project uses it because it has worked well enough for this experiment and
-because most runtime code already follows that shape.
+OCaml with Eio is the current stack, not a general recommendation. It is used
+because it has worked for this project and most runtime code already has that
+shape.
 
 - `Switch.run` scopes fiber lifetime; release resources when the switch exits.
-- Compile-time checks catch many record/variant drift errors before runtime.
+- Compile-time checks catch record and variant drift before runtime.
 - The server builds as a native binary.
-- Eio uses direct-style async; avoid introducing Lwt-style control flow.
+- Eio is direct style; do not introduce Lwt-style control flow.
 
-### State Storage
+### State storage
 
 - Runtime state is filesystem-first under `<base-path>/.masc/`.
-- State files are JSON/JSONL where practical so operators can inspect them.
-- Optional graph/vector integrations are workflow-specific. They are not required for a basic local build, boot, or Keeper turn.
+- State files are JSON or JSONL where practical, so an operator can read them.
+- Nothing outside the binary is required to build, boot, or run a Keeper
+  turn. Graph and vector integrations exist for specific workflows only.
+- A change that stops reading a state file's existing rows is a hard cut. The
+  code does not read or convert the old shape. The pull request adds a
+  `Fresh state required` entry to `CHANGELOG.md` that names the file and says
+  whether to delete or rewrite it, and the load error names the file path.
 
-### Runtime Assignment
+### Runtime assignment
 
 - Runtime order is controlled by `runtime.toml` at the resolved config root.
-- Missing or invalid `runtime.toml` is a config error; the retired `runtime.json` fallback is not used.
-- Keeper TOML/profile files do not own concrete model/provider selection.
-- Keeper-specific routing lives in `runtime.toml` under `[runtime.assignments]`, keyed by keeper name. Unassigned keepers use `[runtime].default`.
-- Runtime catalog changes in `runtime.toml` apply on the next runtime resolve.
+- A missing or invalid `runtime.toml` is a configuration error. There is no
+  fallback file.
+- Keeper TOML does not own model or provider selection. Keeper-specific
+  routing lives in `runtime.toml` under `[runtime.assignments]`, keyed by
+  keeper name; unassigned keepers use `[runtime].default`.
+- Catalog changes in `runtime.toml` apply on the next runtime resolve.
 
-### Runtime Lens Boundary (provider/model identity in JSON)
+### Runtime lens boundary
 
-The Runtime Lens redacts provider/model identity at **external** surfaces
-(metric labels, dashboard agent core bridge, provider error envelopes,
-keeper unified metrics redacted variants). It must **NOT** redact at
-**internal observability** surfaces (boot log, audit log,
-operator-facing `Log.*.info`).
+The Runtime Lens redacts provider and model identity at external surfaces:
+metric labels, the dashboard agent-core bridge, provider error envelopes, and
+the redacted variants of keeper metrics. It must not redact internal
+observability: the boot log, the audit log, and operator-facing `Log.*.info`.
 
-Before adding a new `*_to_yojson` function or metric emitter that touches
-provider/model identity, answer three questions: who reads this surface,
-is there a `redacted_*` companion, and do sibling fields agree.
-
-A new internal serializer should come with a test that pins the
-un-redacted shape.
-
-## Reporting Issues
-
-When reporting issues, please include:
-
-1. **OCaml version** (`ocaml --version`)
-2. **OS and version**
-3. **Steps to reproduce**
-4. **Expected vs actual behavior**
-5. **Error messages/logs** (`start-masc.sh` stdout/stderr or relevant harness output)
+Before adding a `*_to_yojson` function or a metric emitter that touches
+provider or model identity, answer three questions: who reads this surface, is
+there a `redacted_*` companion, and do sibling fields agree. A new internal
+serializer comes with a test that pins the un-redacted shape.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
----
-
-Questions? Open an issue with the reproduction details above.
- 
+By contributing, you agree that your contributions are licensed under the MIT
+License.

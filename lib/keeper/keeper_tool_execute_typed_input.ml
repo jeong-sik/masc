@@ -14,7 +14,10 @@ type source =
   | Argv of string list
   | Script of script
 
+type intent = Auto | Request_effect
+
 type execute_input = {
+  intent : intent;
   source : source;
   cwd : string option;
   timeout_sec : float option;
@@ -179,13 +182,18 @@ let of_json (json : Yojson.Safe.t) =
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:[ "argv"; "script"; "shell"; "cwd"; "timeout_sec" ]
+      ~allowed:[ "argv"; "script"; "shell"; "cwd"; "timeout_sec"; "intent" ]
       fields
+  in
+  let* intent = match member fields "intent" with
+    | None | Some (`String "auto") -> Ok Auto
+    | Some (`String "request_effect") -> Ok Request_effect
+    | _ -> Error "$.intent must be auto or request_effect"
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
   let* source = source_of_fields ~path:"$" fields in
-  Ok { source; cwd; timeout_sec }
+  Ok { source; cwd; timeout_sec; intent }
 ;;
 
 let check_argv argv =
@@ -225,7 +233,7 @@ let check_exec ~argv ~cwd =
     check_cwd cwd
 ;;
 
-let validate { source; cwd; timeout_sec = _ } =
+let validate { source; cwd; timeout_sec = _; intent = _ } =
   let ( let* ) = Result.bind in
   let* () = check_cwd cwd in
   match source with
@@ -304,7 +312,7 @@ let script_to_shell ~sandbox ~cwd { shell; text } =
 
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
-      { source; cwd; timeout_sec = _ }
+      { source; cwd; timeout_sec = _; intent = _ }
   =
   (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
      shell with [-c] is a script wearing an argv costume: it normalises to the

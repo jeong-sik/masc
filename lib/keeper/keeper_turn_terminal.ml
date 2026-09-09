@@ -59,12 +59,6 @@ let of_disposition ?source ?summary ?next_action disposition =
 ;;
 
 let success () = make ~source:"turn_result" "success"
-(* WORKAROUND removed: [contract_code_from_error_text] was a substring
-   classifier emitting one of two wire strings. It had zero callers
-   (verified by rg, 2026-06-28) and was a textbook anti-pattern #2
-   (string classifier where typed variant is possible). Removed in
-   commit 3 of the keeper typed-reason series. *)
-
 let of_failure ?(tool_call_count = 0) ~raw_error err =
   match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->

@@ -1,0 +1,126 @@
+name: Browser Host Proof
+
+on:
+  pull_request:
+    # Only the paths whose behaviour a real Firefox on macOS can change.
+    # bin/dune and test/dune used to be listed too, and that made this
+    # 20-minute macos-14 job run for most pull requests: on 2026-09-07,
+    # 19 of the 28 branches it ran for touched no browser file at all,
+    # only a dune stanza elsewhere. A broken stanza is caught by the Linux
+    # dune build @check on every pull request; nothing about Firefox
+    # depends on it.
+    paths:
+      - 'bin/masc_browser_host.ml'
+      - 'lib/browser_lane/**'
+      - 'lib/browser_webdriver.*'
+      - 'lib/browser_download*'
+      - 'lib/browser_bidi_downloads.*'
+      - 'scripts/fixtures/firefox_download_artifact_probe.ml'
+      - 'lib/browser_page_script.ml'
+      - 'lib/browser_screenshot.*'
+      - 'lib/keeper/keeper_browser_upload.*'
+      - 'lib/core/exec_buffer.*'
+      - 'lib/core/common.*'
+      - 'lib/process/process_eio.ml'
+      - 'scripts/probe-browser-upload-bytes.py'
+      - 'scripts/probe-firefox-controls.py'
+      - 'scripts/fixtures/firefox_controls_probe.ml'
+      - 'test/test_browser_native_host.py'
+      - '.github/workflows/browser-host-proof.yml'
+  workflow_dispatch:
+  # Weekly on main so main holds a macOS opam switch in the cache store.
+  # Pull requests only restore (see .github/actions/setup-ocaml-toolchain),
+  # and this workflow is the only one that runs on macOS, so without a
+  # main-scoped run there would be nothing for them to restore.
+  schedule:
+    - cron: "17 18 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-host-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-native-host:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Pin dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol --with-bisect
+
+      - name: Install OCaml dependencies
+        run: opam install . --deps-only --with-test -y
+
+      - name: Build native host
+        run: opam exec -- dune build --release bin/masc_browser_host.exe
+
+      - name: Exercise native pipes directly
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
+
+      - name: Install Firefox and geckodriver
+        run: |
+          brew install geckodriver
+          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
+            brew install --cask firefox
+          fi
+
+      - name: Verify bounded upload byte transfer
+        run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
+
+      - name: Build native Firefox scenario
+        run: opam exec -- dune build --release test/firefox_controls_probe.exe
+
+      - name: Exercise real Firefox controls and screenshots
+        run: |
+          python3 scripts/probe-firefox-controls.py \
+            --geckodriver "$(command -v geckodriver)" \
+            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --compiled-probe _build/default/test/firefox_controls_probe.exe \
+            --out proof/firefox
+
+      - name: Package verified executable and identity
+        working-directory: proof
+        run: |
+          cp ../_build/default/bin/masc_browser_host.exe masc-browser-host-macos-arm64
+          cp ../_build/default/test/firefox_controls_probe.exe firefox-controls-probe-macos-arm64
+          git rev-parse HEAD > SOURCE_COMMIT
+          shasum -a 256 masc-browser-host-macos-arm64 firefox-controls-probe-macos-arm64 > SHA256SUMS
+
+      - name: Upload native host proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-browser-host-proof-macos-arm64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof/
+          if-no-files-found: ignore

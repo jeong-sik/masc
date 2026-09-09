@@ -153,10 +153,19 @@ scripts/test-ssh-fixture.sh
 It builds a stale static shim, creates an ephemeral key and pinned sshd, runs
 seven integration cases, and cleans up its container, image, and key directory.
 
-To upgrade a real endpoint, rebuild the static artifact and rerun the bootstrap
-with the same endpoint and keeper token inputs. The dedicated key is reused;
-the unchanged host key is re-confirmed; the shim and recorded probe are
-replaced through the pinned channel. A major-version mismatch blocks preflight.
+To upgrade a real endpoint, take the shim asset from this server's release (or
+rebuild the static artifact) and rerun the bootstrap with the same endpoint and
+keeper token inputs. The dedicated key is reused; the unchanged host key is
+re-confirmed; the shim and recorded probe are replaced through the pinned
+channel. A major-version mismatch blocks preflight.
+
+The shim names the release it was built from in its `--probe` answer, so
+`/usr/local/share/masc/exec-shim.version` on the endpoint records it and the
+server compares it with its own on every probe. A difference is the WARN
+`remote_shim_outdated`, not a refusal: the two sides negotiate the protocol
+major and keep running one release apart. A keeper can read the same fact for
+its own lane with the `keeper_lane_status` tool, which reports `shim_release`
+beside `server_release`.
 
 ### Reading the evidence instead of the report
 
@@ -184,6 +193,7 @@ sentence saying so is not.
 | `remote_ssh_endpoint_unreachable` | Pinned SSH connect/probe failed or exited 255. | Check host/port, sshd, key authorization, host key, and connect timeout. |
 | `remote_ssh_probe_invalid` | `--probe` did not return the typed probe JSON. | Verify the installed binary and remote PATH; reinstall the shim. |
 | `remote_shim_version_skew` | Remote shim major version is incompatible. | Build and bootstrap the shim from the same MASC revision. |
+| `remote_shim_outdated` (WARN, not a failure) | The endpoint's shim names a different MASC release than this server, or names none because it predates the stamp. The lane keeps running. | Reinstall the shim from this server's release with the same bootstrap command. |
 | `remote_git_unavailable` | Remote `git --version` failed. | Install/fix git for the endpoint account. |
 | `remote_ssh_root_missing` | Declared `remote_root` is absent. | Rerun bootstrap or restore the declared root. |
 | `remote_ssh_keeper_root_missing` | `remote_root/<keeper>` is absent. | Bootstrap that keeper identity/root. |

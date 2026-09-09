@@ -1,0 +1,24 @@
+name = "masc_browser_session"
+description = """
+Open, close, or check the automation lane's keeper-dedicated Gecko browser \
+through MASC's OCaml WebDriver client, with an isolated profile separate \
+from the operator's session. Configure browser.webdriver_url first; optional browser.binary selects an explicit Gecko browser such as Zen. \
+Action "open" launches it (headless by default), "close" shuts it down, \
+"status" reports whether one is running without touching it. \
+The live lane has no session to manage — the operator's browser owns \
+itself. After open, use masc_browser_goto and masc_browser_read with \
+lane=automation."""
+additional_properties = false
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["open", "close", "status"]
+required = true
+description = "open launches the automation browser; close shuts it down; status reports whether one is open, its tab count, and whether downloads are ready."
+
+[[params]]
+name = "headless"
+type = "boolean"
+description = "Run without a window. Default: true."
+default = true

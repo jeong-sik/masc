@@ -166,13 +166,32 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
   in
-  let* execution =
-    match runtime_execution ~runtime_id with
-    | Some execution -> Ok execution
+  let* runtime =
+    match Runtime.get_runtime_by_id runtime_id with
+    | Some runtime -> Ok runtime
     | None -> Error (provider_error ~runtime_id "runtime is not configured")
   in
+  (* Capture ownership with the execution before any subprocess yields. A
+     runtime catalog reload may change the credential alias under this id. *)
+  let execution = runtime.Runtime.execution in
+  let quota_scope = Runtime.quota_scope_of_runtime runtime in
+  let succeeded text =
+    Runtime_quota_window.note_succeeded ~scope:quota_scope;
+    Ok text
+  in
+  let claude_failed error =
+    (match error with
+     | Runtime_claude_code.Quota_blocked { rate_limit; _ } ->
+       (match Option.bind rate_limit (fun limit -> limit.Runtime_claude_code.resets_at) with
+        | Some resets_at ->
+          Runtime_quota_window.note_exhausted
+            ~scope:quota_scope ~resets_at:(float_of_int resets_at)
+        | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
+     | _ -> ());
+    Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error))
+  in
   let* env, clock = eio_context ~runtime_id in
-  let mgr = Eio.Stdenv.process_mgr env in
+  let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->
@@ -200,8 +219,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
          ~cwd
          probe_config
      with
-     | Error error ->
-       Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error))
+     | Error error -> claude_failed error
      | Ok admitted_subscription ->
        (match
           Runtime_claude_code.run_turn
@@ -213,18 +231,14 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
             ~prompt
             ~images:[]
         with
-        | Ok (result : Runtime_claude_code.turn_result) -> Ok result.text
-        | Error error ->
-          Error
-            (provider_error
-               ~runtime_id
-               (Runtime_claude_code.error_to_string error))))
+        | Ok (result : Runtime_claude_code.turn_result) -> succeeded result.text
+        | Error error -> claude_failed error))
   | Runtime_execution.Codex_app_server execution ->
     let config =
       codex_config ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:[] with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> Ok result.text
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded result.text
      | Error error ->
        Error
          (provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)))
@@ -236,7 +250,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
-     | Ok (result : Runtime_antigravity.turn_result) -> Ok result.text
+     | Ok (result : Runtime_antigravity.turn_result) -> succeeded result.text
      | Error error ->
        Error (provider_error ~runtime_id (Runtime_antigravity.error_to_string error)))
 ;;

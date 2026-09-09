@@ -583,10 +583,92 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
       true
       (restored = checkpoint_messages)
 
+let test_official_transport_caps_override_model_media_declarations () =
+  let fixture =
+    {|[runtime]
+default = "fixture.vision"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.vision]
+api-name = "vision"
+max-context = 4096
+[models.vision.capabilities]
+supports-image-input = true
+supports-audio-input = true
+supports-video-input = true
+supports-multimodal-inputs = true
+[fixture.vision]
+max-request-body-bytes = 65536
+|}
+  in
+  let path = Filename.temp_file "vision-transport-capabilities-" ".toml" in
+  let channel = open_out_bin path in
+  output_string channel fixture;
+  close_out channel;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let native =
+      match Runtime.load_list ~config_path:path with
+      | Ok (_, runtime, _, _, _) -> runtime
+      | Error error -> fail error
+    in
+    let runtime id execution = { native with Runtime.id; execution } in
+    let antigravity =
+      runtime "antigravity.vision"
+        (Runtime_execution.Antigravity_cli
+           { cli_path = "antigravity"; model = "vision"; agent = None
+           ; effort = None; oauth_source = path; timeout_s = 30.; add_dirs = [] })
+    in
+    let claude =
+      runtime "claude.vision"
+        (Runtime_execution.Claude_code
+           { cli_path = "claude"; model = Some "vision"; timeout_s = 30. })
+    in
+    let codex =
+      runtime "codex.vision"
+        (Runtime_execution.Codex_app_server
+           { cli_path = "codex"; model = Some "vision"; timeout_s = 30. })
+    in
+    let image = Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () in
+    (match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+             ~assigned:antigravity ~candidates:[ claude; native ] [ image ] with
+     | Runtime_agent.Reroute { target; _ } ->
+       check string "text-only transport reroutes to actual image carrier"
+         "claude.vision" target.Runtime.id
+     | _ -> fail "advertised vision model cannot make Antigravity transport carry pixels");
+    let text_caps =
+      { (Option.get native.model.capabilities) with
+        Runtime_schema.supports_image_input = false }
+    in
+    let text =
+      { native with id = "text.only"
+      ; model = { native.model with capabilities = Some text_caps } }
+    in
+    (match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+             ~assigned:text ~candidates:[ antigravity; codex ] [ image ] with
+     | Runtime_agent.Reroute { target; _ } ->
+       check string "unavailable image transport skipped as reroute candidate"
+         "codex.vision" target.Runtime.id
+     | _ -> fail "the image must reach a capable transport");
+    List.iter
+      (fun runtime ->
+        let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+        check bool "audio is absent from official client transport" false caps.supports_audio_input;
+        check bool "video is absent from official client transport" false caps.supports_video_input;
+        check bool "documents are absent from official client transport" false caps.supports_document_input;
+        check bool "document modality is rejected before dispatch" false
+          (Runtime_agent.caps_admit_required_modalities caps [ "document" ]))
+      [ antigravity; claude; codex ];
+    let native_caps = Runtime_agent.input_capabilities_of_runtime native in
+    check bool "native image declaration remains effective" true native_caps.supports_image_input;
+    check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
       , [ test_case "text turn no reroute" `Quick test_text_turn_no_reroute
+        ; test_case "official transport constrains advertised model media" `Quick
+            test_official_transport_caps_override_model_media_declarations
         ; test_case "image on capable no reroute" `Quick
             test_image_turn_on_capable_no_reroute
         ; test_case "reroute to first capable" `Quick

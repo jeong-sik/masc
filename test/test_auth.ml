@@ -110,6 +110,17 @@ let keeper_strict_auth_regression_tools =
     "masc_board_search";
     "keeper_tools_list";
     "keeper_capability_search";
+    "keeper_analyze_image";
+    "masc_browser_tabs";
+    "masc_browser_read";
+    "masc_browser_session";
+    "masc_browser_goto";
+    "masc_browser_interact";
+    "masc_web_search";
+    "masc_web_fetch";
+    "masc_file_list";
+    "masc_file_upload";
+    "masc_file_delete";
   ]
 
 (* ============================================ *)
@@ -515,6 +526,59 @@ let test_delete_credential () =
   let creds = Auth.list_credentials dir in
   cleanup_test_workspace dir;
   check int "0 credentials after delete" 0 (List.length creds)
+
+let test_ordinary_credential_changes_remain_visible () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let name = "ordinary-reader" in
+      let first_token = "ordinary-first-token" in
+      let next_token = "ordinary-next-token" in
+      let first : Masc_domain.agent_credential =
+        { id = None; agent_id = None; agent_name = name;
+          token = Auth.sha256_hash first_token; role = Masc_domain.Worker;
+          created_at = "2026-01-01T00:00:00Z"; expires_at = None }
+      in
+      Auth.save_credential dir first;
+      check bool "ordinary credential loads" true
+        (Auth.load_credential dir name = Some first);
+      check bool "initial token verifies" true
+        (Result.is_ok (Auth.verify_token dir ~agent_name:name ~token:first_token));
+      let path = Auth.credential_file dir name in
+      let replacement =
+        { first with token = Auth.sha256_hash next_token; role = Masc_domain.Admin }
+      in
+      (* Replace outside the Auth writer: the next read must observe the file
+         without relying on an in-process cache invalidation notification. *)
+      let replace cred =
+        let staged = path ^ ".replacement" in
+        write_file staged (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson cred));
+        Unix.rename staged path
+      in
+      replace replacement;
+      check bool "replacement token and role are observed" true
+        (Auth.load_credential dir name = Some replacement);
+      check bool "replaced token is rejected" true
+        (Result.is_error (Auth.verify_token dir ~agent_name:name ~token:first_token));
+      check bool "replacement token verifies" true
+        (Result.is_ok (Auth.verify_token dir ~agent_name:name ~token:next_token));
+      replace { replacement with expires_at = Some "2000-01-01T00:00:00Z" };
+      check bool "replacement expiry remains enforced" true
+        (match Auth.verify_token dir ~agent_name:name ~token:next_token with
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _)) -> true
+         | _ -> false);
+      List.iter (fun contents ->
+        write_file path contents;
+        check bool "corrupt credential is not reused" true
+          (Option.is_none (Auth.load_credential dir name)))
+        [ "{"; "[]"; {|{"agent_name":"ordinary-reader"}|} ];
+      replace replacement;
+      check bool "repaired file is read afresh" true
+        (Auth.load_credential dir name = Some replacement);
+      Unix.unlink path;
+      check bool "deleted credential is not reused" true
+        (Option.is_none (Auth.load_credential dir name)))
 
 let test_load_credential_redirect_stub () =
   (* UUID-backed credentials write a redirect stub so legacy exact-name
@@ -1184,6 +1248,11 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+  (match Tool_catalog.registered_metadata "masc_browser_session" with
+   | Some metadata ->
+     check bool "browser lifecycle requires write authority" true
+       (metadata.required_permission = Masc_domain.CanBroadcast)
+   | None -> fail "browser session has no catalog authority");
   let result =
     List.fold_left
       (fun acc tool_name ->
@@ -1315,6 +1384,8 @@ let () =
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;
+      test_case "ordinary credential replacement corruption and deletion remain visible" `Quick
+        test_ordinary_credential_changes_remain_visible;
       test_case "load_credential redirect stub resolves" `Quick
         test_load_credential_redirect_stub;
       test_case "delete uuid-backed credential removes target" `Quick

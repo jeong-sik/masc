@@ -15,10 +15,6 @@
 
 (** {1 Policy types} *)
 
-type proactive_policy = {
-  enabled : bool;
-}
-
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -210,7 +206,6 @@ type keeper_meta = {
   network_mode : Keeper_types_profile.network_mode;
   microvm_backend : Keeper_microvm_backend.t option;
   mention_targets : string list;
-  proactive : proactive_policy;
   (* Lifecycle *)
   created_at : string;
   updated_at : string;
@@ -222,7 +217,7 @@ type keeper_meta = {
       (** Typed companion to [paused]. Explicit operator pause and
           transcript-corruption reset-required paths may write it. [None] while paused is a fail-closed unclassified state
           requiring operator action. *)
-  autoboot_enabled : bool;
+  activation_mode : Keeper_activation_mode.t;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set
           when keeper claims a task; cleared on

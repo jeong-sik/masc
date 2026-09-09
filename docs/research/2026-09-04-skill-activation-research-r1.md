@@ -35,7 +35,7 @@
 | analyst | 58,871 | 0 |
 | edgar.a.poe | 53,014 | 0 |
 | pr-updater | 24,334 | 0 |
-| jazz-developer · kidsnote-pr-jira-checker · microvm-probe-829 · rondo | | 0 |
+| jazz-developer · exampleorg-pr-jira-checker · microvm-probe-829 · rondo | | 0 |
 | lane-smith · polisher · sangsu | | **1 (각각)** |
 
 그 1건은 카탈로그가 아니라 키퍼가 스스로 적어둔 메모리 행이다. polisher 쪽:

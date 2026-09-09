@@ -429,6 +429,10 @@ let get_post ~post_id =
   match backend () with
   | Jsonl store -> Board.get_post store ~post_id
 
+let list_posts_by_run_origin () =
+  match backend () with
+  | Jsonl store -> Board.list_posts_by_run_origin store
+
 let find_post_by_run_id ~run_id =
   match backend () with
   | Jsonl store -> Board.find_post_by_run_id store ~run_id

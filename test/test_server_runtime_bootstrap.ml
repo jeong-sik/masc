@@ -240,7 +240,7 @@ let test_keeper_msg_startup_recovery_settles_disk_only_running_request () =
 let write_example_keeper config =
   write_file
     (Filename.concat config "keepers/example.toml")
-    "[keeper]\nautoboot_enabled = true\ninstructions = \"example instructions\"\n"
+    "[keeper]\nactivation_mode = \"autonomous\"\ninstructions = \"example instructions\"\n"
 
 let make_config_root root =
   let config = Filename.concat root "config" in
@@ -460,9 +460,9 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = %b\nsandbox_profile = \"docker\"\n"
+       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\n"
        name
-       autoboot_enabled)
+       (if autoboot_enabled then "autonomous" else "manual"))
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -479,8 +479,7 @@ let write_basepath_keeper_toml base_path name =
     (Filename.concat keepers_dir (name ^ ".toml"))
 {|[keeper]
 instructions = "example"
-proactive_enabled = false
-autoboot_enabled = true
+activation_mode = "on_demand"
 sandbox_profile = "docker"
 |}
 let find_free_port_from start =
@@ -1500,8 +1499,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (durable_paused_detail |> member "pause_kind" |> to_string);
           Alcotest.(check bool) "pause missing root cause" true
             (durable_paused_detail |> member "missing_pause_root_cause" |> to_bool);
-          Alcotest.(check bool) "pause detail keeps autoboot" true
-            (durable_paused_detail |> member "autoboot_enabled" |> to_bool);
+          Alcotest.(check string) "pause detail keeps activation mode" "autonomous"
+            (durable_paused_detail |> member "activation_mode" |> to_string);
           Alcotest.(check bool) "union includes durable paused keeper" true
             (List.exists (( = ) "durable-paused") names);
           Alcotest.(check bool) "union excludes active durable keeper" false
@@ -1758,7 +1757,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\ninstructions = \"test keeper\"\nautoboot_enabled = false\n";
+      "[keeper]\ninstructions = \"test keeper\"\nactivation_mode = \"manual\"\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -1825,7 +1824,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "base.toml")
-      "[keeper]\nautoboot_enabled = true\n";
+      "[keeper]\nactivation_mode = \"autonomous\"\n";
     write_keeper_instructions
       (Filename.concat config_root "keepers")
       "base"
@@ -1903,7 +1902,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "omega.toml")
-      "[keeper]\nautoboot_enabled = false\n";
+      "[keeper]\nactivation_mode = \"manual\"\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -1932,7 +1931,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2006,7 +2005,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2129,7 +2128,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2197,7 +2196,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2263,6 +2262,7 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
         Workspace.write_backlog config
           {
             Types.tasks = [];
+            pending_completion_rejections = [];
             last_updated = "2026-08-03T00:00:00Z";
             version = 1;
           };
@@ -2290,6 +2290,18 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
           "recovery-backed observation degrades fleet health"
           "degraded"
           (fleet_safety |> member "status" |> to_string);
+        (* The dashboard reads this schema through an equality, not two
+           independent fields: store-normalizers.ts:594 asserts
+           [operator_action_required === (status !== 'ok')] and, when the two
+           disagree, throws the payload away for a synthesized row reading
+           status "blocked" with blocker "current_fact_invalid" -- a severity
+           the fleet never reported and a blocker name the server never sends,
+           with every real count replaced by null. This test held the status
+           half only, so the verdict could drift out from under it. *)
+        Alcotest.(check bool)
+          "and the verdict the dashboard compares it against agrees"
+          true
+          (fleet_safety |> member "operator_action_required" |> to_bool);
         Alcotest.(check int)
           "recovery-backed observation records one scan error"
           1
@@ -2316,7 +2328,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
     write_config_root_keeper_toml
       ~autoboot_enabled:false
       config_root
-      "canonical-meta-disabled";
+      "canonical-meta-manual";
     write_config_root_keeper_toml config_root "canonical-meta-paused";
     with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -2335,20 +2347,20 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
             ~trace_id:"trace-canonical-meta-missing"
             ()
         in
-        let cached_disabled =
+        let cached_manual =
           make_keeper_meta
-            ~name:"canonical-meta-disabled"
-            ~trace_id:"trace-canonical-meta-disabled"
+            ~name:"canonical-meta-manual"
+            ~trace_id:"trace-canonical-meta-manual"
             ()
         in
         let paused =
           make_keeper_meta
-            ~paused:true
+            ~paused:false
             ~name:"canonical-meta-paused"
             ~trace_id:"trace-canonical-meta-paused"
             ()
         in
-        let cached_owners = [ cached_missing; cached_disabled; paused ] in
+        let cached_owners = [ cached_missing; cached_manual; paused ] in
         List.iter
           (fun (meta : Keeper_meta_contract.keeper_meta) ->
             Keeper_registry.For_testing.unregister
@@ -2375,8 +2387,8 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
           (fun () ->
             write_keeper_meta_exn
               config
-              { cached_disabled with autoboot_enabled = false };
-            write_keeper_meta_exn config paused;
+              { cached_manual with activation_mode = Masc.Keeper_activation_mode.Manual };
+            write_keeper_meta_exn config { paused with paused = true };
             with_owner_inventory config (fun () ->
             let missing_meta_path =
               Keeper_types_profile.keeper_meta_path config cached_missing.name
@@ -2391,7 +2403,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
               0
               (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
             Alcotest.(check int)
-              "durable missing/disabled owners are not executable"
+              "offline owners are not executable even when recoverable"
               0
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check (list string))
@@ -2422,13 +2434,13 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
                |> member "owner_lifecycle"
                |> to_string);
             Alcotest.(check string)
-              "durable disabled meta overrides cached enabled registry meta"
-              "retained_disabled"
-              (owner cached_disabled.name
+              "manual owner remains recoverable for requested work"
+              "recoverable"
+              (owner cached_manual.name
                |> member "owner_lifecycle"
                |> to_string);
             Alcotest.(check string)
-              "paused durable owner remains a distinct retained variant"
+              "durable pause overrides the unpaused registry cache"
               "paused_dead"
               (owner paused.name |> member "owner_lifecycle" |> to_string)))))
 ;;
@@ -2519,8 +2531,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
             ()
           |> fun meta ->
           { meta with
-            autoboot_enabled = true
-          ; proactive = { enabled = true }
+            activation_mode = Masc.Keeper_activation_mode.Autonomous
           }
         in
         write_keeper_meta_exn config meta;
@@ -2569,7 +2580,24 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
             let open Yojson.Safe.Util in
             Alcotest.(check int) "in-flight Keeper remains executable" 1
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
-            Alcotest.(check bool) "in-flight Keeper needs no operator action" false
+            (* This workspace never writes a backlog, so the fleet cannot read
+               one and [status] is already "degraded" here -- it was before this
+               assertion changed, too. What moved is the verdict beside it. The
+               dashboard does not read the two as independent fields:
+               store-normalizers.ts:594 requires [operator_action_required ===
+               (status !== 'ok')] and throws the payload away when they
+               disagree, showing status "blocked" with blocker
+               "current_fact_invalid" instead. A bare [false] next to a
+               "degraded" status is that disagreement, so this test used to pin
+               the shape the dashboard rejects. Assert the relation rather than
+               a literal, so neither half can drift alone again. *)
+            let status = fleet_safety |> member "status" |> to_string in
+            Alcotest.(check string)
+              "a fleet that cannot read its backlog is degraded" "degraded"
+              status;
+            Alcotest.(check bool)
+              "and the verdict the dashboard compares it against agrees"
+              (status <> "ok")
               (fleet_safety |> member "operator_action_required" |> to_bool);
             Alcotest.(check (list string)) "in-flight Keeper is running" []
               (keepers_not_running fleet_safety)))))
@@ -2606,7 +2634,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             ~name:"non-target-running"
             ~trace_id:"trace-non-target-running"
             ()
-          |> fun meta -> { meta with proactive = { enabled = false } }
+          |> fun meta -> { meta with activation_mode = Masc.Keeper_activation_mode.On_demand }
         in
         List.iter
           (write_keeper_meta_exn config)
@@ -2822,21 +2850,11 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> to_int);
        Alcotest.(check bool) "unavailable durable discovery error null" true
          (reaction_ledger |> member "durable_event_queue_discovery_error" = `Null);
-       ignore
-         (reaction_ledger
-          |> member "durable_event_queue_stale_after_sec"
-          |> to_float);
-       Alcotest.(check int) "unavailable durable stale count" 0
-         (reaction_ledger |> member "durable_event_queue_stale_count" |> to_int);
-       Alcotest.(check int) "unavailable durable stale keeper count" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_keeper_count"
-          |> to_int);
-       Alcotest.(check int) "unavailable durable stale rows empty" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_by_keeper"
-          |> to_list
-          |> List.length))
+       let residence = reaction_ledger |> member "durable_event_queue_residence" in
+       Alcotest.(check bool) "unavailable queue residence is null" true
+         (residence |> member "oldest_age_seconds" = `Null);
+       Alcotest.(check string) "unavailable queue residence reason"
+         "queue_observation_incomplete" (residence |> member "reason" |> to_string))
 
 let test_health_json_owner_unavailable_shape () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -2992,6 +3010,49 @@ let rec check_unique_object_keys path = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> ()
 ;;
 
+let check_health_request_timing value =
+  let phases = String.split_on_char ',' value |> List.map (fun entry ->
+    match String.split_on_char ';' (String.trim entry) with
+    | [name; duration] when String.starts_with ~prefix:"dur=" duration ->
+      let ms = String.sub duration 4 (String.length duration - 4) |> float_of_string in
+      Alcotest.(check bool) (name ^ " is finite nonnegative elapsed time") true
+        (Float.is_finite ms && ms >= 0.);
+      name
+    | _ -> Alcotest.failf "malformed health timing entry: %s" entry) in
+  Alcotest.(check (list string)) "each request phase appears exactly once"
+    (List.sort String.compare ["health_build_identity"; "health_paths";
+      "health_internal_auth"; "health_dashboard_surface"; "health_response";
+      "json_serialize"])
+    (List.sort String.compare phases)
+
+let timed_health_body ~listener request =
+  let body, headers = Runtime_under_test.make_health_response_body ~listener
+    ~request_authority:(test_request_authority ()) request in
+  let timings = List.filter (fun (name, _) -> name = "server-timing") headers in
+  Alcotest.(check int) "one lowercase timing header" 1 (List.length timings);
+  check_health_request_timing (snd (List.hd timings));
+  let json = Yojson.Safe.from_string body in
+  check_unique_object_keys "$" json;
+  Alcotest.(check string) "listener identity survives timed serialization" listener
+    Yojson.Safe.Util.(json |> member "protocol" |> member "listener" |> to_string);
+  json
+
+let test_health_request_timing_keeps_probe_shape () =
+  List.iter (fun listener ->
+    let request = Httpun.Request.create `GET "/health" in
+    List.iter (fun () ->
+      let json = timed_health_body ~listener request in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "timed default response remains a probe" "probe"
+        (json |> member "health_detail" |> to_string);
+      Alcotest.(check string) "full-health pointer remains unchanged" "/health?full=1"
+        (json |> member "full_health_url" |> to_string);
+      Alcotest.(check bool) "timings stay outside the JSON body" true
+        (json |> member "server_timing" = `Null);
+      Alcotest.(check bool) "probe does not gain full scans" true
+        (json |> member "keeper_reaction_ledger" = `Null)) [(); ()])
+    ["http/1.1"; "h2"]
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -3068,6 +3129,17 @@ let test_health_response_full_query_uses_snapshot_cache () =
             Server_routes_http_runtime.make_health_response_json request
           in
           check_unique_object_keys "$" refreshed;
+          List.iter (fun listener ->
+            let timed = timed_health_body ~listener request in
+            Alcotest.(check string) "timed full response retains full detail" "full"
+              (timed |> member "health_detail" |> to_string);
+            List.iter (fun key ->
+              Alcotest.(check string) ("request timing preserves cached " ^ key)
+                (refreshed |> member "full_health_snapshot" |> member key |> Yojson.Safe.to_string)
+                (timed |> member "full_health_snapshot" |> member key |> Yojson.Safe.to_string))
+              ["computed_at_unix"; "duration_ms"; "section_timings";
+               "refresh_worker_submissions_total"; "refresh_worker_joins_total"])
+            ["http/1.1"; "h2"];
           Alcotest.(check string) "refreshed snapshot is ready" "ready"
             (refreshed |> member "full_health_snapshot" |> member "status"
            |> to_string);
@@ -3372,13 +3444,12 @@ let test_lazy_startup_plan_groups_independent_tasks () =
       check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
         ~tasks:[ "restore_sessions" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"parallel"
-        ~tasks:[ "jsonl_prune"; "microvm_guest_sweep" ];
+        ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
           "restore_sessions";
           "jsonl_prune";
-          "microvm_guest_sweep";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
@@ -3955,7 +4026,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -3986,7 +4057,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
               ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
           in
-          ignore health_headers;
+          check_health_request_timing (require_header_value health_headers "Server-Timing");
           let health_json = parse_json_response_file health_body in
           let startup =
             Yojson.Safe.Util.member "startup" health_json
@@ -4125,7 +4196,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4347,7 +4418,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4431,7 +4502,7 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4503,7 +4574,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4574,7 +4645,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
-            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
             ("MASC_USE_H2", "0");
             ("DUNE_SOURCEROOT", project_root ());
           ]
@@ -4637,26 +4708,6 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
                (fun error ->
                   String_util.contains_substring error "required default profile")
                rejection_errors)))
-
-let test_transition_projection_cursor_commits_before_isolated_owner_recovery () =
-  let cursor_committed = ref false in
-  let processed = ref [] in
-  Server_bootstrap_maintenance.Recovery_for_testing.consume_owner_projection_batch
-    ~commit_cursor:(fun () -> cursor_committed := true)
-    ~keeper_name:Fun.id
-    ~recover_owner:(fun owner ->
-      Alcotest.(check bool)
-        "cursor commits before owner activation"
-        true
-        !cursor_committed;
-      processed := owner :: !processed;
-      if String.equal owner "first" then failwith "injected owner activation failure")
-    [ "first"; "second" ];
-  Alcotest.(check (list string))
-    "ordinary first-owner failure does not starve the next owner"
-    [ "first"; "second" ]
-    (List.rev !processed)
-;;
 
 (* A wedged case in this suite has burned 57 CI minutes in silence: a hang
    never fails, so dune kept the Alcotest stream buffered and the log showed
@@ -4739,10 +4790,6 @@ let () =
     [
       ( "bootstrap",
         [
-          Alcotest.test_case
-            "transition projection cursor commits before isolated owner recovery"
-            `Quick
-            test_transition_projection_cursor_commits_before_isolated_owner_recovery;
           Alcotest.test_case
             "gRPC tool arguments fail closed before dispatch"
             `Quick
@@ -4910,6 +4957,8 @@ let () =
             test_health_json_surfaces_internal_mcp_auth_diagnostics;
           Alcotest.test_case "default health response is light probe" `Quick
             test_health_response_default_is_light_probe;
+          Alcotest.test_case "request timings retain probe shape" `Quick
+            test_health_request_timing_keeps_probe_shape;
           Alcotest.test_case "full health query uses snapshot cache" `Quick
             test_health_response_full_query_uses_snapshot_cache;
           Alcotest.test_case "full health refresh timeout is independent"

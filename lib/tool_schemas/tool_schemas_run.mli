@@ -17,6 +17,24 @@
     strings are part of the public contract because the agent
     Agent Core tool-routing tables grep them at startup. *)
 
+type operation =
+  | Run_init
+  | Run_plan
+  | Run_get
+  | Run_list
+[@@deriving enumerate]
+(** Closed vocabulary routed by [Tool_run.dispatch], in the surface order
+    documented above. *)
+
+val operations : operation list
+(** Exhaustive stable-order projection of the run operations. *)
+
+val schema : operation -> Masc_domain.tool_schema
+(** Declaration for a run operation. *)
+
+val operation_of_tool_name : string -> operation option
+(** Parse a canonical run wire name at the dispatch boundary. *)
+
 val schemas : Masc_domain.tool_schema list
 (** The four run-tracking schemas in the surface order documented
     above. List length and [name] strings are pinned at the

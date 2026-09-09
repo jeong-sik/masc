@@ -5,9 +5,28 @@ type user_media_block = {
   size : int option;
 }
 
+(* An image reference the provider resolves itself (#33728): an external URL
+   passed through as the image_url, or a Files-API id minted by an upload tool.
+   The server never fetches either; [value] rides the wire verbatim in the
+   native form the serializers emit (#33669). [mime_type] is advisory — the
+   openai chat surface does not carry it for a reference, the anthropic source
+   object does. *)
+type user_image_reference = {
+  value : string;
+  mime_type : string option;
+}
+
+(* The three carriers of a user image, mutually exclusive in the type so no
+   downstream code re-checks field combinations: bytes this server already
+   holds (an [attachments] entry), or one of the two reference forms. *)
+type user_image_source =
+  | Attached of user_media_block
+  | Url_ref of user_image_reference
+  | File_id_ref of user_image_reference
+
 type user_input_block =
   | User_text of string
-  | User_image of user_media_block
+  | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
 
@@ -146,9 +165,17 @@ let user_media_block_to_yojson kind (media : user_media_block) =
   in
   `Assoc (List.rev fields)
 
+let user_image_reference_to_yojson ~key ref =
+  let base = [ ("type", `String "image"); (key, `String ref.value) ] in
+  match ref.mime_type with
+  | None -> `Assoc base
+  | Some mime_type -> `Assoc (("mime_type", `String mime_type) :: base)
+
 let user_block_to_yojson = function
   | User_text text -> `Assoc [ ("type", `String "text"); ("text", `String text) ]
-  | User_image media -> user_media_block_to_yojson "image" media
+  | User_image (Attached media) -> user_media_block_to_yojson "image" media
+  | User_image (Url_ref ref) -> user_image_reference_to_yojson ~key:"url" ref
+  | User_image (File_id_ref ref) -> user_image_reference_to_yojson ~key:"file_id" ref
   | User_document media -> user_media_block_to_yojson "document" media
   | User_audio media -> user_media_block_to_yojson "audio" media
 
@@ -194,11 +221,85 @@ let parse_media_input_block json ~kind make =
   let* media = parse_user_media_block ~kind fields in
   Ok (make media)
 
+(* The advisory media type a reference image may carry. Absent is fine — the
+   chat surface puts nothing on the wire for a reference — so no guess is
+   fabricated here; the agent-core block below names its own default. *)
+let parse_user_image_reference ~(kind : string) ~value_key fields =
+  let field = "user_blocks image " ^ kind ^ " block" in
+  let* value = required_string ~field value_key fields in
+  let* mime_type = optional_string ~field "mime_type" fields in
+  let mime_type = String.trim mime_type in
+  let value = String.trim value in
+  if value = "" then
+    Error (Printf.sprintf "user_blocks image block requires non-empty %s" value_key)
+  else
+    Ok
+      { value
+      ; mime_type = if mime_type = "" then None else Some mime_type
+      }
+
+(* An image block names exactly one carrier: [attachment_id] for bytes this
+   server holds, [url] for an external location the provider fetches, or
+   [file_id] for a Files-API reference an upload tool minted. Zero or more
+   than one is a request error — the type above cannot hold either. *)
+let parse_user_image_block json =
+  let* base_fields =
+    exact_object_fields
+      ~field:"user_blocks image block"
+      ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size"; "url"; "file_id" ]
+      json
+  in
+  let has key = List.mem_assoc key base_fields in
+  let present = List.filter (fun key -> has key) [ "attachment_id"; "url"; "file_id" ] in
+  match present with
+  | [ "attachment_id" ] ->
+    parse_media_input_block json ~kind:"image" (fun media -> User_image (Attached media))
+  | [ "url" ] ->
+    let* fields =
+      exact_object_fields
+        ~field:"user_blocks image url block"
+        ~allowed:[ "type"; "url"; "mime_type" ]
+        json
+    in
+    let* reference = parse_user_image_reference ~kind:"url" ~value_key:"url" fields in
+    (* Scheme prefix plus a non-empty rest: the provider fetches the URL, and
+       no other scheme names a fetchable image location. *)
+    let scheme_rest =
+      if String_util.starts_with_ci ~prefix:"https://" reference.value
+      then Some (String.sub reference.value 8 (String.length reference.value - 8))
+      else if String_util.starts_with_ci ~prefix:"http://" reference.value
+      then Some (String.sub reference.value 7 (String.length reference.value - 7))
+      else None
+    in
+    (match scheme_rest with
+     | Some rest when rest <> "" -> Ok (User_image (Url_ref reference))
+     | _ ->
+         Error
+           (Printf.sprintf
+              "user_blocks image block url must be an http or https URL: %S"
+              reference.value))
+  | [ "file_id" ] ->
+    let* fields =
+      exact_object_fields
+        ~field:"user_blocks image file_id block"
+        ~allowed:[ "type"; "file_id"; "mime_type" ]
+        json
+    in
+    let* reference = parse_user_image_reference ~kind:"file_id" ~value_key:"file_id" fields in
+    Ok (User_image (File_id_ref reference))
+  | [] ->
+    Error
+      "user_blocks image block requires exactly one of attachment_id, url, or file_id"
+  | _ ->
+    Error
+      "user_blocks image block accepts only one of attachment_id, url, or file_id"
+
 let parse_user_input_block json =
   let* base_fields =
     exact_object_fields
       ~field:"user_blocks entry"
-      ~allowed:[ "type"; "text"; "attachment_id"; "name"; "mime_type"; "size" ]
+      ~allowed:
+        [ "type"; "text"; "attachment_id"; "name"; "mime_type"; "size"; "url"; "file_id" ]
       json
   in
   let* block_type = required_string ~field:"user_blocks entry" "type" base_fields in
@@ -212,7 +313,7 @@ let parse_user_input_block json =
     let text = String.trim text in
     if text = "" then Error "user_blocks text block requires non-empty text"
     else Ok (User_text text)
-  | "image" -> parse_media_input_block json ~kind:"image" (fun media -> User_image media)
+  | "image" -> parse_user_image_block json
   | "document" ->
     parse_media_input_block json ~kind:"document" (fun media -> User_document media)
   | "audio" -> parse_media_input_block json ~kind:"audio" (fun media -> User_audio media)
@@ -283,7 +384,15 @@ let fallback_message ~attachments blocks =
       blocks
       |> List.filter_map (function
         | User_text _ -> None
-        | User_image media -> Some (user_media_label "image" media)
+        | User_image (Attached media) -> Some (user_media_label "image" media)
+        (* Text-line stand-in for a reference image on the string-only turn
+           path, where no block can ride. Same bracket shape as
+           [user_media_label] so the prompt reads uniformly whether the image
+           was bytes or a reference. *)
+        | User_image (Url_ref { value; _ }) ->
+            Some (Printf.sprintf "[image: %s]" value)
+        | User_image (File_id_ref { value; _ }) ->
+            Some (Printf.sprintf "[image: file_id %s]" value)
         | User_document media -> Some (user_media_label "document" media)
         | User_audio media -> Some (user_media_label "audio" media))
       |> String.concat "\n"
@@ -300,8 +409,12 @@ let validate_attachment_references ~attachments blocks =
     List.filter_map
       (function
         | User_text _ -> None
-        | User_image media | User_document media | User_audio media ->
-            Some media.attachment_id)
+        | User_image (Attached media) -> Some media.attachment_id
+        (* A reference carrier names no attachment: it resolves at the
+           provider, not through the byte store, so it neither references
+           nor orphans one. *)
+        | User_image (Url_ref _) | User_image (File_id_ref _) -> None
+        | User_document media | User_audio media -> Some media.attachment_id)
       blocks
   in
   let orphan_ids =
@@ -330,7 +443,7 @@ let find_attachment ~attachments attachment_id =
 
 let normalize_media_type value = String.trim value |> String.lowercase_ascii
 
-let declared_media_type media (att : Keeper_chat_store.attachment) =
+let declared_media_type (media : user_media_block) (att : Keeper_chat_store.attachment) =
   match String.trim media.mime_type with
   | "" ->
       (match String.trim att.mime_type with
@@ -526,6 +639,20 @@ let document_block_to_agent_core ~attachments media =
        | Preserve_document ->
            Ok (Agent_core.Types.document_block ~media_type ~data ()))
 
+(* A reference image crosses as the native carrier form: [data] holds the URL
+   or file id verbatim and [source_type] tells the serializers which wire shape
+   to emit (#33669). [media_type] is required by the block record but carries
+   nothing for a reference on the chat surface; the advisory value the request
+   named is passed through, else the generic unknown this module already uses.
+   Nothing here fetches the reference — the provider resolves it or visibly
+   rejects it. *)
+let image_reference_to_agent_core ~source_type (reference : user_image_reference) =
+  Agent_core.Types.image_block
+    ~source_type
+    ~media_type:(Option.value reference.mime_type ~default:"application/octet-stream")
+    ~data:reference.value
+    ()
+
 let to_agent_core_blocks ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -535,7 +662,7 @@ let to_agent_core_blocks ~attachments blocks =
           if text = "" then acc else Agent_core.Types.Text text :: acc
         in
         loop acc rest
-    | User_image media :: rest -> (
+    | User_image (Attached media) :: rest -> (
         match
           media_block_to_agent_core ~attachments "image"
             (fun ~media_type ~data () ->
@@ -544,6 +671,20 @@ let to_agent_core_blocks ~attachments blocks =
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
+    | User_image (Url_ref reference) :: rest ->
+        loop
+          (image_reference_to_agent_core
+             ~source_type:Agent_core.Types.Url
+             reference
+           :: acc)
+          rest
+    | User_image (File_id_ref reference) :: rest ->
+        loop
+          (image_reference_to_agent_core
+             ~source_type:Agent_core.Types.File_id
+             reference
+           :: acc)
+          rest
     | User_document media :: rest -> (
         match document_block_to_agent_core ~attachments media with
         | Ok block -> loop (block :: acc) rest

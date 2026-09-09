@@ -174,6 +174,10 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
   | Readonly_sandbox
+  | Local_output
+      (** The operation's effect lands only on the operator's own outputs:
+          a speak plays on the operator's speakers and is appended to the
+          keeper's own chat. [Auto_judge] allowed it without a judge. *)
   | Observed_in_box
       (** The request ran once inside the executor's box and exited 0
           (RFC-0422); the kernel, not a table, said it had no effect. *)

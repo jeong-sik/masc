@@ -16,7 +16,7 @@
 #
 # node_modules is excluded unless --include-node-modules is passed. _build is
 # recreated by `dune build` with no network, but node_modules needs a package
-# install, and kidsnote_web_inapp keeps yarn PnP packages under
+# install, and exampleorg_web_inapp keeps yarn PnP packages under
 # .yarn/unplugged/*/node_modules that a plain reinstall may not restore
 # offline. Deleting those trades disk for a broken checkout.
 #

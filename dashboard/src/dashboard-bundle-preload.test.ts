@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { build, type Rollup } from 'vite'
@@ -76,6 +77,10 @@ describe('dashboard production bundle preloads', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'masc-dashboard-preload-'))
     outDirs.push(outDir)
 
+    // A direct Vite build used to erase the previous stamp while replacing
+    // the HTML, leaving a working dashboard that /health called missing.
+    writeFileSync(join(outDir, '.build-stamp'), 'previous-build\n')
+    const startedAt = Date.now()
     const buildResult = await build({
       configFile: resolve(__dirname, '../vite.config.ts'),
       logLevel: 'silent',
@@ -85,6 +90,22 @@ describe('dashboard production bundle preloads', () => {
         manifest: true,
         sourcemap: false,
       },
+    })
+
+    const finishedAt = Date.now()
+    const stamp = readFileSync(join(outDir, '.build-stamp'), 'utf8').trim()
+    const builtAt = Date.parse(stamp)
+    expect(builtAt).toBeGreaterThanOrEqual(startedAt)
+    expect(builtAt).toBeLessThanOrEqual(finishedAt)
+
+    const identity = JSON.parse(readFileSync(join(outDir, '.build-identity.json'), 'utf8'))
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: resolve(__dirname, '../..'), encoding: 'utf8',
+    }).trim()
+    expect(identity).toEqual({
+      schema: 'masc.dashboard-build.v1',
+      source_commit: git('status', '--porcelain', '--untracked-files=normal') === ''
+        ? git('rev-parse', 'HEAD') : null,
     })
 
     const html = readFileSync(join(outDir, 'index.html'), 'utf8')
@@ -129,6 +150,34 @@ describe('dashboard production bundle preloads', () => {
     expect(initialModuleIds.some(isValibotModule)).toBe(false)
     expect(allModuleIds.some(isEffectModule)).toBe(true)
     expect(initialModuleIds.some(isEffectModule)).toBe(false)
+  }, 120_000)
+
+  it('does not write a new stamp when bundle generation fails', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'masc-dashboard-failed-build-'))
+    outDirs.push(outDir)
+
+    // Fail after normal plugins have generated their assets, before Rollup
+    // commits them to disk. A stamp written eagerly in a build hook would
+    // survive this failure and falsely mark this unbuilt directory as ready.
+    await expect(build({
+      configFile: resolve(__dirname, '../vite.config.ts'),
+      logLevel: 'silent',
+      plugins: [{
+        name: 'fixture-failed-bundle',
+        enforce: 'post',
+        generateBundle() {
+          this.error('fixture refuses generated bundle')
+        },
+      }],
+      build: {
+        outDir,
+        emptyOutDir: true,
+        sourcemap: false,
+      },
+    })).rejects.toThrow('fixture refuses generated bundle')
+
+    expect(existsSync(join(outDir, '.build-stamp'))).toBe(false)
+    expect(existsSync(join(outDir, 'index.html'))).toBe(false)
   }, 120_000)
 
   it('reads modulepreloads from parsed link attributes', () => {

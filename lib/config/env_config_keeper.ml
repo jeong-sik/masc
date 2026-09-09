@@ -17,7 +17,7 @@ open Env_config_core
 
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
@@ -523,24 +523,6 @@ module WorkAsHeartbeat = struct
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 end
 
-(** {1 Keeper health policy} *)
-
-module KeeperHealth = struct
-  (** Durable event-queue backlog age threshold for fleet health degradation.
-      The durable queue remains fully reported regardless of this value; this
-      policy only decides when backlog should flip [/health?full=1] from
-      informational to operator-actionable. Default [0.0] preserves the
-      existing behavior where any durable backlog is immediately visible as
-      degraded. Operators may raise it to avoid treating fresh, expected queue
-      handoff as degraded.
-
-      Env: [MASC_KEEPER_DURABLE_QUEUE_STALE_SEC].
-      @category Telemetry @ops_class operator *)
-  let durable_queue_stale_sec () =
-    get_float_nonneg ~default:0.0 "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-  ;;
-end
-
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct
@@ -573,8 +555,9 @@ module KeeperKeepalive = struct
       keepalive cycle. A provider rate-limit ([429]) or capacity route makes
       the next cycle wait longer than the plain cadence would, but the wait is
       capped so a misread [Retry-After] header (or a stale env override) can
-      never park a lane indefinitely: [interruptible_sleep] still wakes within
-      [sleep_chunk_sec] of any queued stimulus. Default: 900 (15 min).
+      never park a lane for longer than this. A rate-limit or quota backoff
+      sleeps to its end and serves queued stimuli then (#34653); a capacity
+      backoff still wakes within [sleep_chunk_sec]. Default: 900 (15 min).
       Range: [60.0, 3600.0].
       @category Thresholds
       @ops_class operator *)

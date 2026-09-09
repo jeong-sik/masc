@@ -199,23 +199,3 @@ export function parseAgentCorePayloadOrNull(
   return result.success ? result.data : null
 }
 
-/** Convenience wrapper that returns the typed payload or throws.
- *  Use this only when a parse failure should be treated as an unrecoverable
- *  invariant violation. */
-export function parseAgentCorePayloadStrict(
-  eventType: string,
-  raw: unknown,
-): TypedAgentCorePayload {
-  const result = parseAgentCorePayload(eventType, raw)
-  if (!result.success) {
-    throw new SSEPayloadParseError(result.error.issues)
-  }
-  return result.data
-}
-
-export class SSEPayloadParseError extends Error {
-  constructor(public readonly issues: readonly AgentCorePayloadParseIssue[]) {
-    super(`SSE payload parse error: ${issues.map(i => i.message).join('; ')}`)
-    this.name = 'SSEPayloadParseError'
-  }
-}

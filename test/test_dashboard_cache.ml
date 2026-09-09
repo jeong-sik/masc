@@ -397,6 +397,140 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
 
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
+module Execution_http = Server_dashboard_http_execution_surfaces.For_testing
+
+let with_execution_http_fixture f =
+  let config = Workspace.default_config "/tmp/execution-http-preparation" in
+  let invalidate = Server_dashboard_http_execution_surfaces.invalidate_execution_cache in
+  invalidate ();
+  Fun.protect ~finally:invalidate (fun () -> f config)
+
+let publish_execution_fixture marker =
+  let generation = Execution_http.execution_publication_generation () in
+  Alcotest.(check bool) "publish snapshot" true
+    (Execution_http.publish_execution_success_if_current ~generation
+       (`Assoc [ "marker", `String marker; "data", `String (String.make 4000 'x') ]))
+
+let execution_request ?(target = "/api/v1/dashboard/execution") encoding =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "accept-encoding", encoding ]) `GET target
+
+let test_execution_preparation_reuse_and_scope () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "first";
+    let preparations = ref 0 in
+    let prepare body = incr preparations; Http_response_payload.prepare body in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check int) "one preparation for repeated refreshes" 1 !preparations;
+    let read ?target encoding =
+      Execution_http.cached_representation ~config (execution_request ?target encoding)
+    in
+    (match read "gzip", read "identity" with
+     | Some (compressed, compressed_tag, headers), Some (body, tag, _) ->
+       Alcotest.(check string) "ETag identifies same snapshot" tag compressed_tag;
+       Alcotest.(check bool) "compressed response is smaller" true
+         (String.length compressed < String.length body);
+       Alcotest.(check (option string)) "wire encoding" (Some "gzip")
+         (List.assoc_opt "content-encoding" headers)
+     | _ -> Alcotest.fail "prepared snapshot not available");
+    List.iter (fun query ->
+      Alcotest.(check bool) "scoped request bypasses default bytes" true
+        (Option.is_none (read ~target:("/api/v1/dashboard/execution?" ^ query) "gzip")))
+      [ "full=true"; "force=true"; "fixture=sample"; "agent=alice" ];
+    Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+    Alcotest.(check bool) "mutation discards all representations" true
+      (Option.is_none (read "gzip")))
+
+let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "obsolete";
+    let prepare body =
+      Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+      Http_response_payload.prepare body
+    in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "worker result cannot undo mutation" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
+let test_execution_preparation_rejects_replaced_source () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "old";
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    (* A new success must hide the old bytes before its own codecs are ready. *)
+    publish_execution_fixture "new";
+    Alcotest.(check bool) "new source hides old prepared bytes immediately" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "gzip")));
+    let prepare body =
+      publish_execution_fixture "latest";
+      Http_response_payload.prepare body
+    in
+    ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "superseded worker bytes stay hidden" true
+      (Option.is_none (Execution_http.cached_representation ~config
+                        (execution_request "identity")));
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    match Execution_http.cached_representation ~config (execution_request "identity") with
+    | None -> Alcotest.fail "latest snapshot was not prepared"
+    | Some (body, _, _) ->
+      Alcotest.(check string) "newest publication wins" "latest"
+        Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "marker" |> to_string))
+
+let test_execution_preparation_failure_releases_owner () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "recoverable";
+    let raised =
+      try
+        ignore (Execution_http.refresh_execution_default_light_http_body
+                  ~prepare:(fun _ -> raise Exit) ~config ());
+        false
+      with Exit -> true
+    in
+    Alcotest.(check bool) "preparation failure propagates" true raised;
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    Alcotest.(check bool) "later request can prepare" true
+      (Option.is_some (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
+let test_execution_concurrent_polls_share_preparation () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "shared";
+    let preparations = ref 0 in
+    let prepare body =
+      incr preparations;
+      Eio.Fiber.yield ();
+      Http_response_payload.prepare body
+    in
+    let refresh () =
+      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+    in
+    let first, second = Eio.Fiber.pair refresh refresh in
+    Alcotest.(check int) "simultaneous polls prepare once" 1 !preparations;
+    check_json "both requests see same snapshot" first second)
+
+let test_execution_preparation_failure_wakes_waiter () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "retry";
+    let preparations = ref 0 in
+    let prepare body =
+      incr preparations;
+      if !preparations = 1 then (Eio.Fiber.yield (); raise Exit);
+      Http_response_payload.prepare body
+    in
+    let refresh () =
+      Execution_http.refresh_execution_default_light_http_body ~prepare ~config ()
+    in
+    let failed, _ = Eio.Fiber.pair
+      (fun () -> try ignore (refresh ()); false with Exit -> true) refresh
+    in
+    Alcotest.(check bool) "owner failed" true failed;
+    Alcotest.(check int) "waiter prepared after failure" 2 !preparations;
+    Alcotest.(check bool) "waiter published usable response" true
+      (Option.is_some (Execution_http.cached_representation ~config
+                        (execution_request "gzip"))))
+
 let test_stats () =
   Dashboard_cache.invalidate_all ();
   ignore (Dashboard_cache.get_or_compute "s1" ~ttl:10.0 (fun () -> `Null));
@@ -886,6 +1020,391 @@ let test_nested_shared_pool_submission_does_not_starve ~clock ~sw ~dm () =
       in
       check_json "nested shared-pool submit completes" (`String "ok") result)
 
+let check_payload_consistent (payload : Dashboard_cache.cached_payload) =
+  check_json "bytes decode to the published AST" payload.json
+    (Yojson.Safe.from_string payload.raw_json);
+  let digest = Digest.to_hex (Digest.string payload.raw_json) in
+  Alcotest.(check string) "ETag describes the published bytes"
+    ("W/\"" ^ String.sub digest 0 12 ^ "\"") payload.etag
+
+let test_payload_prepared_before_publication ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "prepared-first-fill" in
+  let caller = (Domain.self () :> int) in
+  let observed = Atomic.make None in
+  let preparations = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        Atomic.incr preparations;
+        Atomic.set observed (Some (Domain.self () :> int));
+        check_payload_consistent payload;
+        let encoded = match payload.encoded with
+          | Some encoded -> encoded
+          | None -> Alcotest.fail "HTTP codecs were not prepared on the worker" in
+        Alcotest.(check bool) "identity representation shares serialized bytes" true
+          (encoded.identity == payload.raw_json);
+        List.iter (fun encoding ->
+          let body, headers = Dashboard_cache.select_http_representation
+            ~accept_encoding:(Some encoding) payload in
+          Alcotest.(check (option string)) "compressed representation ready before publication"
+            (Some encoding) (List.assoc_opt "content-encoding" headers);
+          Alcotest.(check bool) "compression reduces the published representation" true
+            (String.length body < String.length payload.raw_json)) [ "gzip"; "zstd" ];
+        Alcotest.(check bool) "AST is not published ahead of bytes" true
+          (Option.is_none (Dashboard_cache.peek key)))
+      (fun () ->
+        let first = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~preparation:Dashboard_cache.Http_encodings
+          ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String (String.make 8192 'a')) in
+        Alcotest.(check bool) "serialization and hash complete on worker" true
+          (Option.fold ~none:false ~some:((<>) caller) (Atomic.get observed));
+        Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+          let hit = Dashboard_cache.get_or_compute_payload key ~ttl:60.
+            ~preparation:Dashboard_cache.Http_encodings
+            (fun () -> Alcotest.fail "hit recomputed") in
+          let peeked = Option.get (Dashboard_cache.peek_payload key) in
+          Alcotest.(check bool) "hit reuses prepared bytes without a pool" true
+            (first.raw_json == hit.raw_json && hit.raw_json == peeked.raw_json);
+          List.iter (fun accept_encoding ->
+            let first_body, _ = Dashboard_cache.select_http_representation ~accept_encoding first in
+            let hit_body, _ = Dashboard_cache.select_http_representation ~accept_encoding hit in
+            Alcotest.(check bool) "cache hits reuse each codec without a worker" true
+              (first_body == hit_body)) [ None; Some "gzip"; Some "zstd" ];
+          Alcotest.(check int) "one preparation across fill, hit and peek" 1
+            (Atomic.get preparations))))
+
+let test_seed_payload_is_prepared_before_publication ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "prepared-seed" in
+  let caller = (Domain.self () :> int) in
+  let observed = Atomic.make None in
+  let preparations = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun _ ->
+        Atomic.incr preparations;
+        Atomic.set observed (Some (Domain.self () :> int));
+        Alcotest.(check bool) "seed is unpublished until its bytes are ready" true
+          (Option.is_none (Dashboard_cache.peek key)))
+      (fun () ->
+        Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "seed");
+        Alcotest.(check (option int)) "small seed prepares without a worker queue"
+          (Some caller) (Atomic.get observed);
+        check_json "AST peek retains seed" (`String "seed")
+          (Option.get (Dashboard_cache.peek key));
+        let payload = Option.get (Dashboard_cache.peek_payload key) in
+        check_payload_consistent payload;
+        Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "ignored");
+        Alcotest.(check int) "peek and existing-slot seed attempt do not serialize" 1
+          (Atomic.get preparations));
+    Dashboard_cache.invalidate key;
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        if payload.Dashboard_cache.json = `String "seed" then
+          ignore (Dashboard_cache.get_or_compute_payload_with_timeout key
+            ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "real-fill")))
+      (fun () ->
+        Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "seed"));
+    check_json "real fill arriving during seed preparation wins"
+      (`String "real-fill") (Option.get (Dashboard_cache.peek key)))
+
+let test_payload_swr_publishes_prepared_bytes ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "prepared-swr" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "old");
+  let old = Option.get (Dashboard_cache.peek_payload key) in
+  let prepared, prepared_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let caller = (Domain.self () :> int) in
+  let preparations = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        Atomic.incr preparations;
+        Eio.Promise.resolve prepared_u (payload, (Domain.self () :> int));
+        Eio.Promise.await release)
+      (fun () ->
+        Fun.protect ~finally:(fun () ->
+          if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ())
+        (fun () ->
+          let immediate = Dashboard_cache.get_or_compute_payload_with_timeout key
+            ~preparation:Dashboard_cache.Http_encodings
+            ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "new") in
+          Alcotest.(check bool) "SWR returns existing bytes immediately" true
+            (immediate.raw_json == old.raw_json);
+          let next, domain = Eio.Time.with_timeout_exn clock 2.
+            (fun () -> Eio.Promise.await prepared) in
+          Alcotest.(check bool) "SWR serialization occurs on worker" true (domain <> caller);
+          check_json "prepared result remains unpublished while owner is paused"
+            old.json (Option.get (Dashboard_cache.peek key));
+          Eio.Promise.resolve release_u ();
+          let rec await_publication () =
+            match Dashboard_cache.peek_payload key with
+            | Some current when current.json = next.json -> current
+            | _ -> Eio.Fiber.yield (); await_publication ()
+          in
+          let current = Eio.Time.with_timeout_exn clock 2. await_publication in
+          check_payload_consistent current;
+          Alcotest.(check bool) "SWR publishes all prepared representations atomically" true
+            (Option.is_some current.encoded && current.encoded == next.encoded);
+          Alcotest.(check bool) "publication retains worker-prepared byte identity" true
+            (next.raw_json == current.raw_json);
+          Alcotest.(check int) "first read after SWR does not prepare again" 1
+            (Atomic.get preparations))))
+
+let test_worker_seed_refresh_survives_reader_switch ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "worker-seeded-swr" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let seeded = Option.get (Dashboard_cache.peek_payload key) in
+  let root_domain = (Domain.self () :> int) in
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let prepared, prepared_u = Eio.Promise.create () in
+  let calls = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload -> Eio.Promise.resolve prepared_u payload)
+      (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ())
+          (fun () ->
+            let stale = Eio.Time.with_timeout_exn clock 2. (fun () ->
+              Executor_pool_ref.submit_or_inline (fun () ->
+                (* The only worker is occupied by the reader while fork
+                   registration is dispatched. Waiting for the refresh itself
+                   here would deadlock; attaching it to reader_sw would lose
+                   its independent lifetime. *)
+                Eio.Switch.run (fun reader_sw ->
+                  Eio_context.with_turn_switch reader_sw (fun () ->
+                    Dashboard_cache.get_or_compute_payload_with_timeout key
+                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                        Atomic.incr calls;
+                        Eio.Promise.resolve started_u (Domain.self () :> int);
+                        Eio.Promise.await release;
+                        `String "ready"))))) in
+            Alcotest.(check bool) "worker returns warming bytes before refresh finishes" true
+              (stale.raw_json == seeded.raw_json);
+            let compute_domain = Eio.Time.with_timeout_exn clock 2.
+              (fun () -> Eio.Promise.await started) in
+            Alcotest.(check bool) "refresh computation remains off the root domain" true
+              (compute_domain <> root_domain);
+            let concurrent = Dashboard_cache.get_or_compute_payload_with_timeout key
+              ~ttl:60. ~clock ~timeout_sec:2.
+              (fun () -> Alcotest.fail "in-flight refresh was duplicated") in
+            Alcotest.(check bool) "other readers retain the same stale bytes" true
+              (concurrent.raw_json == seeded.raw_json);
+            Eio.Promise.resolve release_u ();
+            let ready = Eio.Time.with_timeout_exn clock 2.
+              (fun () -> Eio.Promise.await prepared) in
+            let rec await_publication () =
+              match Dashboard_cache.peek_payload key with
+              | Some current when current.json = `String "ready" -> current
+              | _ -> Eio.Fiber.yield (); await_publication ()
+            in
+            let published = Eio.Time.with_timeout_exn clock 2. await_publication in
+            Alcotest.(check bool) "worker refresh publishes its prepared bytes" true
+              (published.raw_json == ready.raw_json);
+            Alcotest.(check int) "one refresh after the worker reader exits" 1
+              (Atomic.get calls);
+            check_payload_consistent published)))
+
+let test_registered_refresh_survives_reader_cancellation ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "registered-swr-reader-cancel" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let registered, registered_u = Eio.Promise.create () in
+  let acknowledge, acknowledge_u = Eio.Promise.create () in
+  let cancel_reader, cancel_reader_u = Eio.Promise.create () in
+  let reader_done, reader_done_u = Eio.Promise.create () in
+  let compute_started, compute_started_u = Eio.Promise.create () in
+  let release_compute, release_compute_u = Eio.Promise.create () in
+  let calls = Atomic.make 0 in
+  let registrations = Atomic.make 0 in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  let release promise resolver =
+    if not (Eio.Promise.is_resolved promise) then Eio.Promise.resolve resolver ()
+  in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Dashboard_cache.For_testing.with_refresh_registered_hook
+      (fun () ->
+        if Atomic.fetch_and_add registrations 1 = 0 then (
+          Eio.Promise.resolve registered_u ();
+          Eio.Promise.await acknowledge))
+      (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            release cancel_reader cancel_reader_u;
+            release acknowledge acknowledge_u;
+            release release_compute release_compute_u)
+          (fun () ->
+            Eio.Fiber.fork ~sw (fun () ->
+              Executor_pool_ref.submit_or_inline (fun () ->
+                Eio.Fiber.first
+                  (fun () ->
+                    ignore (Dashboard_cache.get_or_compute_payload_with_timeout key
+                      ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+                        Atomic.incr calls;
+                        Eio.Promise.resolve compute_started_u ();
+                        Eio.Promise.await release_compute;
+                        `String "ready")))
+                  (fun () -> Eio.Promise.await cancel_reader));
+              Eio.Promise.resolve reader_done_u ());
+            (* The root has forked the refresh, but its acknowledgement is
+               deliberately held. Cancel the worker's actual cache call here,
+               not just the main fiber awaiting an executor result. *)
+            await registered;
+            Eio.Promise.resolve cancel_reader_u ();
+            await reader_done;
+            await compute_started;
+            Alcotest.(check int) "reader cancellation preserves registered Computing slot" 1
+              Yojson.Safe.Util.(Dashboard_cache.stats () |> member "computing" |> to_int);
+            let stale = Dashboard_cache.get_or_compute_payload_with_timeout key
+              ~ttl:60. ~clock ~timeout_sec:2.
+              (fun () -> Alcotest.fail "cancelled reader started a duplicate refresh") in
+            check_json "other readers still receive warming while refresh runs"
+              (`String "warming") stale.json;
+            Alcotest.(check int) "no duplicate root registration" 1
+              (Atomic.get registrations);
+            Eio.Promise.resolve acknowledge_u ();
+            Eio.Promise.resolve release_compute_u ();
+            let rec await_publication () =
+              match Dashboard_cache.peek_payload key with
+              | Some payload when payload.json = `String "ready" -> payload
+              | _ -> Eio.Fiber.yield (); await_publication ()
+            in
+            let published = Eio.Time.with_timeout_exn clock 2. await_publication in
+            check_payload_consistent published;
+            Alcotest.(check int) "original refresh publishes after reader cancellation" 1
+              (Atomic.get calls))))
+
+let test_payload_preparation_replacement_token ~clock () =
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    List.iter (fun fail_preparation ->
+      Dashboard_cache.invalidate_all ();
+      let key = "prepared-replacement" in
+      let replacement = `String "replacement" in
+      let result =
+        try
+          Ok (Dashboard_cache.For_testing.with_payload_prepared_hook
+            (fun payload ->
+              if payload.Dashboard_cache.json = `String "old-owner" then (
+                Dashboard_cache.invalidate key;
+                Dashboard_cache.seed_stale_if_missing key ~stale_for:60. replacement;
+                if fail_preparation then failwith "preparation failed"))
+            (fun () -> Dashboard_cache.get_or_compute_payload_with_timeout key
+              ~ttl:60. ~clock ~timeout_sec:2. (fun () -> `String "old-owner")))
+        with Failure message -> Error message
+      in
+      (match result, fail_preparation with
+       | Ok payload, false -> check_payload_consistent payload
+       | Error message, true -> Alcotest.(check string) "error propagated"
+           "preparation failed" message
+       | _ -> Alcotest.fail "unexpected preparation result");
+      check_json "old owner publication or cleanup cannot replace new slot"
+        replacement (Option.get (Dashboard_cache.peek key))) [false; true])
+
+let test_payload_preparation_timeout_and_cancel ~clock ~sw ~dm () =
+  let run_cases () =
+    List.iter (fun cancel_caller ->
+      Dashboard_cache.invalidate_all ();
+      let key = "prepared-timeout" in
+      let prepare payload =
+        if not (Dashboard_cache.is_timeout_envelope payload.Dashboard_cache.json)
+        then Eio.Time.sleep clock 1.
+      in
+      Dashboard_cache.For_testing.with_payload_prepared_hook prepare (fun () ->
+        let call () = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~ttl:60. ~clock ~timeout_sec:(if cancel_caller then 2. else 0.01)
+          (fun () -> `String "not-published") in
+        if cancel_caller then (
+          let result = Eio.Time.with_timeout clock 0.01 (fun () -> Ok (call ())) in
+          match result with
+          | Error `Timeout -> ()
+          | Ok _ -> Alcotest.fail "caller cancellation did not interrupt preparation")
+        else (
+          let result = call () in
+          Alcotest.(check bool) "preparation shares compute timeout" true
+            (Dashboard_cache.is_timeout_envelope result.json)));
+      Alcotest.(check bool) "interrupted preparation publishes no AST" true
+        (Option.is_none (Dashboard_cache.peek key));
+      let recovered = Dashboard_cache.get_or_compute_payload key ~ttl:60.
+        (fun () -> `String "recovered") in
+      check_json "cancelled owner releases its slot" (`String "recovered") recovered.json;
+      check_payload_consistent recovered) [false; true]
+  in
+  Executor_pool_ref.For_testing.with_pool_option None run_cases;
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool run_cases
+
+let test_seed_payload_returns_while_worker_is_occupied ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "prepared-seed-busy-pool" in
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let finished, finished_u = Eio.Promise.create () in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Executor_pool_ref.submit_or_inline (fun () ->
+        Eio.Promise.resolve started_u ();
+        Eio.Promise.await release);
+      Eio.Promise.resolve finished_u ());
+    Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await started);
+    Fun.protect
+      ~finally:(fun () ->
+        Eio.Promise.resolve release_u ();
+        Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Eio.Promise.await finished;
+          Executor_pool_ref.submit_or_inline (fun () -> ())))
+      (fun () ->
+        Eio.Time.with_timeout_exn clock 0.5 (fun () ->
+          Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+          let seeded = Option.get (Dashboard_cache.peek_payload key) in
+          let result = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
+            ~clock ~timeout_sec:2. (fun () -> `String "refreshed") in
+          check_json "warming response returns before worker capacity is released"
+            (`String "warming") result.json;
+          Alcotest.(check bool) "warming response reuses already prepared bytes" true
+            (seeded.raw_json == result.raw_json);
+          Alcotest.(check bool) "worker is still occupied when response returns" false
+            (Eio.Promise.is_resolved release);
+          check_payload_consistent result)))
+
+let test_payload_preparation_timeout_retains_stale_bytes ~clock () =
+  Dashboard_cache.invalidate_all ();
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    let key = "prepared-stale-timeout" in
+    let old = Dashboard_cache.get_or_compute_payload key ~ttl:(-1.)
+      ~preparation:Dashboard_cache.Http_encodings
+      (fun () -> `String "last-good") in
+    Alcotest.(check bool) "last-good payload includes prepared HTTP representations" true
+      (Option.is_some old.encoded);
+    let result = Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun _ -> Eio.Time.sleep clock 1.)
+      (fun () -> Dashboard_cache.get_or_compute_payload_with_timeout key
+        ~preparation:Dashboard_cache.Http_encodings
+        ~ttl:60. ~clock ~timeout_sec:0.01 (fun () -> `String "too-late")) in
+    Alcotest.(check bool) "preparation timeout returns last-good byte identity" true
+      (old.raw_json == result.raw_json);
+    Alcotest.(check bool) "preparation timeout returns last-good encoding identity" true
+      (old.encoded == result.encoded);
+    check_json "preparation timeout restores last-good AST" old.json result.json;
+    let restored = Option.get (Dashboard_cache.peek_payload key) in
+    Alcotest.(check bool) "restored stale entry keeps bytes and tag together" true
+      (old.raw_json == restored.raw_json && old.etag == restored.etag);
+    Alcotest.(check bool) "restored stale entry retains prepared encoding identity" true
+      (old.encoded == restored.encoded);
+    check_payload_consistent restored)
+
 let test_nested_dashboard_cache_compute_does_not_starve ~clock ~sw ~dm () =
   Dashboard_cache.invalidate_all ();
   let pool = Domain_pool.create ~sw ~domain_count:1 dm in
@@ -930,8 +1449,11 @@ let test_timeout_envelope_recognizer ~clock () =
     `String "never_reached"
   in
   let timed_out () =
-    Dashboard_cache.get_or_compute_with_timeout "envelope_paths" ~ttl:1.0
-      ~clock ~timeout_sec:0.05 slow
+    let payload = Dashboard_cache.get_or_compute_payload_with_timeout
+      "envelope_paths" ~ttl:1.0 ~clock ~timeout_sec:0.05 slow in
+    Alcotest.(check bool) "timeout and circuit envelopes carry timeout provenance" true
+      (payload.origin = Dashboard_cache.Timeout);
+    payload.json
   in
   let owner = timed_out () in
   Alcotest.(check string) "owner kind" "owner" (timeout_kind owner);
@@ -946,11 +1468,13 @@ let test_timeout_envelope_recognizer ~clock () =
     (Dashboard_cache.is_timeout_envelope circuit);
   Dashboard_cache.invalidate_all ();
   let computed =
-    Dashboard_cache.get_or_compute "envelope_control" ~ttl:1.0 (fun () ->
+    Dashboard_cache.get_or_compute_payload "envelope_control" ~ttl:1.0 (fun () ->
       `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ])
   in
+  Alcotest.(check bool) "computed error fields do not change producer provenance" true
+    (computed.origin = Dashboard_cache.Computed);
   Alcotest.(check bool) "computed payload is not an envelope" false
-    (Dashboard_cache.is_timeout_envelope computed)
+    (Dashboard_cache.is_timeout_envelope computed.json)
 
 (* -- Harness ---------------------------------------------------------------- *)
 
@@ -973,6 +1497,31 @@ let () =
           test_case "compute leaves the caller domain" `Quick
             (test_compute_leaves_caller_domain ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "payload prepared on worker before publication" `Quick
+            (test_payload_prepared_before_publication ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "seed payload is prepared before publication" `Quick
+            (test_seed_payload_is_prepared_before_publication ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "SWR publishes prepared payload bytes" `Quick
+            (test_payload_swr_publishes_prepared_bytes ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "worker seeded SWR survives reader switch with one worker" `Quick
+            (test_worker_seed_refresh_survives_reader_switch ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "registered SWR survives reader cancellation before acknowledgement" `Quick
+            (test_registered_refresh_survives_reader_cancellation ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "prepared result respects replacement token" `Quick
+            (test_payload_preparation_replacement_token ~clock);
+          test_case "payload preparation timeout and cancellation release slot" `Quick
+            (test_payload_preparation_timeout_and_cancel ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "seed response returns while worker is occupied" `Quick
+            (test_seed_payload_returns_while_worker_is_occupied ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "payload preparation timeout retains stale bytes" `Quick
+            (test_payload_preparation_timeout_retains_stale_bytes ~clock);
           test_case "nested shared-pool submit does not starve" `Quick
             (test_nested_shared_pool_submission_does_not_starve ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
@@ -1003,6 +1552,14 @@ let () =
             test_board_write_invalidates_every_board_projection;
           test_case "task mutation invalidates every execution variant" `Quick
             test_task_mutation_hook_invalidates_all_execution_variants;
+          test_case "execution preparation reuse and request scope" `Quick
+            test_execution_preparation_reuse_and_scope;
+          test_case "execution preparation cannot undo invalidation" `Quick
+            test_execution_preparation_cannot_resurrect_invalidated_snapshot;
+          test_case "execution preparation rejects replaced source" `Quick
+            test_execution_preparation_rejects_replaced_source;
+          test_case "execution preparation failure releases owner" `Quick
+            test_execution_preparation_failure_releases_owner;
           test_case "stats" `Quick test_stats;
           test_case "stats detail surface" `Quick test_stats_detail_surface;
           test_case "stats empty table" `Quick test_stats_handles_empty_table;
@@ -1013,6 +1570,10 @@ let () =
       ( "concurrency",
         [
           test_case "stampede protection" `Quick test_stampede;
+          test_case "concurrent execution polls share preparation" `Quick
+            test_execution_concurrent_polls_share_preparation;
+          test_case "failed execution preparation wakes waiter" `Quick
+            test_execution_preparation_failure_wakes_waiter;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git cache worker-domain stale hit" `Quick

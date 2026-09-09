@@ -14,6 +14,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_microvm_backend = Masc.Keeper_microvm_backend
 module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
@@ -28,6 +29,7 @@ module Dashboard_execution = Dashboard_execution
 module Dashboard_briefing = Dashboard_briefing
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
+module Installed_dashboard = Masc.Installed_dashboard
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api
@@ -895,6 +897,9 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   Log.Server.info "MASC MCP: Shutdown complete."
 
 let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
+  let identity = Build_identity.current () in
+  Installed_dashboard.initialize ~executable_path:identity.executable_path
+    ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
     run_cmd host port base_path accept_store_quarantine;
@@ -1231,15 +1236,22 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let init_skills_only =
+  let doc = "Install missing builtin Skills without changing runtime config files" in
+  Arg.(value & flag & info ["skills-only"] ~doc)
+
 type init_tally = { written : int; skipped : int; failed : int }
 
-let seed_one ~target_root ~force tally rel =
+(* [rel] keys the embedded tree and [dest_rel] names where it lands. They are
+   the same string for every asset but the fresh-install roster, which is
+   authored under [keepers-default/] and seeds as [keepers/]. *)
+let seed_one ~target_root ~force tally (rel, dest_rel) =
   match Embedded_config.read rel with
   | None ->
     Printf.eprintf "init: missing embedded asset: %s\n" rel;
     { tally with failed = tally.failed + 1 }
   | Some content ->
-    let dest = Filename.concat target_root rel in
+    let dest = Filename.concat target_root dest_rel in
     Fs_compat.mkdir_p (Filename.dirname dest);
     if Fs_compat.file_exists dest && not force then begin
       Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
@@ -1253,7 +1265,7 @@ let seed_one ~target_root ~force tally rel =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force =
+let init_cmd_exit base_path force skills_only =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1262,31 +1274,40 @@ let init_cmd_exit base_path force =
       ~cwd:(Config_dir_resolver.current_working_dir ())
       base_path
   in
-  Fs_compat.mkdir_p target_root;
-  (* Same distribution/operator split the server's own config-root seed makes
-     ([Server_runtime_config_root_bootstrap.copy_missing_config_root_seed]), so
-     the two paths hand back the same workspace: keeper manifests are the
-     operator's to write, and [init] leaves the directory empty for them. *)
-  Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
   let result =
-    List.fold_left
-      (seed_one ~target_root ~force)
-      { written = 0; skipped = 0; failed = 0 }
-      (List.filter Common.seeds_into_fresh_config_root Embedded_config.file_list)
+    if skills_only then { written = 0; skipped = 0; failed = 0 }
+    else (
+      Fs_compat.mkdir_p target_root;
+      Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
+      List.fold_left
+        (seed_one ~target_root ~force)
+        { written = 0; skipped = 0; failed = 0 }
+        (List.filter_map
+           (fun rel ->
+             if Common.seeds_into_fresh_config_root rel
+             then Some (rel, rel)
+             else
+               Common.fresh_config_root_keeper_seed_target rel
+               |> Option.map (fun dest_rel -> rel, dest_rel))
+           Embedded_config.file_list))
   in
-  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
-    result.written result.skipped result.failed target_root;
+  let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
+  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
+    result.written result.skipped result.failed skills target_root;
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
   let doc =
     "Seed default .masc/config/ from binary-embedded assets. Writes runtime \
-     settings, prompts, tool definitions and connector declarations, and leaves \
-     keepers/ empty for you to declare -- the same split the server makes when \
-     it creates a config root itself. Existing files are kept unless --force."
+     settings, prompts, tool definitions, connector declarations and first-party \
+     Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
+     -- it does not autoboot, so it waits until a model and a sandbox exist. \
+     The same split the server makes when it creates a config root itself. \
+     Existing config files are kept unless --force; existing Skill packages are \
+     always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1303,9 +1324,23 @@ let runtime_default_id =
 
 let runtime_default_set_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  match
-    Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
-  with
+  let result =
+    try
+      (* Validate against the same catalog sources as server startup, before
+         the config writer checks deployment-local provider/model bindings.
+         This command edits the resolved runtime file, so its sibling overlay
+         must come from that same config root. No server services are started. *)
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      in
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+          ~config_root:(Filename.dirname runtime_config_path) ()
+      in
+      Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+    with Env_config_core.Config_error message -> Error message
+  in
+  match result with
   | Ok _receipt ->
       Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
         runtime_config_path;
@@ -1702,6 +1737,15 @@ let keeper_create_network_mode =
   in
   Arg.(value & opt (some string) None & info [ "network-mode" ] ~docv:"MODE" ~doc)
 
+let keeper_create_microvm_backend =
+  let doc =
+    Printf.sprintf
+      "MicroVM runtime (%s), valid only with --sandbox-profile microvm. \
+       Linux requires an explicit backend; the server validates the selection."
+      (String.concat ", " Keeper_microvm_backend.valid_strings)
+  in
+  Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
+
 let keeper_create_remote_endpoint =
   let doc =
     "Endpoint registry name under [exec.ssh.endpoints.<name>] in runtime.toml. \
@@ -1740,39 +1784,11 @@ let keeper_create_max_context_override =
     & opt (some int) None
     & info [ "max-context-override" ] ~docv:"N" ~doc)
 
-(* Tri-state, not [Arg.flag]. A [bool] cannot say "leave the key out", and the
-   key's absence is load-bearing: the config writer persists whatever the meta
-   holds, so a two-valued flag would write an autoboot decision the operator
-   never made. [vflag] also lets cmdliner refuse both spellings at once. *)
-let keeper_create_autoboot =
-  Arg.(
-    value
-    & vflag
-        None
-        [ ( Some true
-          , info [ "autoboot" ] ~doc:"Start this keeper on every server boot." )
-        ; ( Some false
-          , info
-              [ "no-autoboot" ]
-              ~doc:
-                "Persist this keeper but do not start it on future server \
-                 boots. It still starts once now." )
-        ])
-
-let keeper_create_proactive =
-  Arg.(
-    value
-    & vflag
-        None
-        [ ( Some true
-          , info
-              [ "proactive" ]
-              ~doc:"Let scheduled cycles produce proactive responses." )
-        ; ( Some false
-          , info
-              [ "no-proactive" ]
-              ~doc:"Answer only when addressed." )
-        ])
+let keeper_create_activation_mode =
+  Arg.(value & opt (some (enum ["manual", "manual"; "on_demand", "on_demand";
+                               "autonomous", "autonomous"])) None
+       & info ["activation-mode"] ~docv:"MODE"
+           ~doc:"Activation: manual, on_demand, or autonomous.")
 
 (* This command's own [--host] and [--port], not the server's. The shared
    terms are [masc serve]'s bind address, and they render in this command's
@@ -1823,13 +1839,13 @@ let keeper_create_flags_term =
         instructions
         sandbox_profile
         network_mode
+        microvm_backend
         remote_endpoint
         mention_targets
         skill_names
         no_skills
         max_context_override
-        autoboot
-        proactive
+        activation_mode
     : (Masc_cli_keeper_create.flags, string) result
     =
     let selected_skills =
@@ -1845,17 +1861,17 @@ let keeper_create_flags_term =
     match selected_skills with
     | Error message -> Error message
     | Ok skills ->
-      let booleans : Masc_cli_keeper_create.booleans = { autoboot; proactive } in
       let flags : Masc_cli_keeper_create.flags =
         { name
         ; instructions
         ; sandbox_profile
         ; network_mode
+        ; microvm_backend
         ; remote_endpoint
         ; mention_targets
         ; skills
         ; max_context_override
-        ; booleans
+        ; activation_mode
         }
       in
       Ok flags
@@ -1866,13 +1882,13 @@ let keeper_create_flags_term =
     $ keeper_create_instructions
     $ keeper_create_sandbox_profile
     $ keeper_create_network_mode
+    $ keeper_create_microvm_backend
     $ keeper_create_remote_endpoint
     $ keeper_create_mention_target
     $ keeper_create_skill
     $ keeper_create_no_skills
     $ keeper_create_max_context_override
-    $ keeper_create_autoboot
-    $ keeper_create_proactive)
+    $ keeper_create_activation_mode)
 
 (* [--edit] takes the whole declaration from the editor, so a flag passed
    alongside it would be read by nobody. Naming the conflict costs one
@@ -1883,12 +1899,12 @@ let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
   && String.equal (String.trim flags.instructions) ""
   && String.equal (String.trim flags.sandbox_profile) ""
   && Option.is_none flags.network_mode
+  && Option.is_none flags.microvm_backend
   && Option.is_none flags.remote_endpoint
   && List.is_empty flags.mention_targets
   && Option.is_none flags.skills
   && Option.is_none flags.max_context_override
-  && Option.is_none flags.booleans.autoboot
-  && Option.is_none flags.booleans.proactive
+  && Option.is_none flags.activation_mode
 
 let keeper_create_edit_conflict_message =
   "masc keeper-create: --edit takes the declaration from the editor, so it \
@@ -1953,6 +1969,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         Eio_context.set_clock (Eio.Stdenv.clock env);
         (* The same deadline the TUI's own create already runs under; this
            command does not invent a second one. *)
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         match
           Masc_http_client.post_sync
             ~clock:(Eio.Stdenv.clock env)
@@ -1964,7 +1981,7 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         with
         | Error message -> Masc_cli_keeper_create.Unreachable message
         | Ok (status, response_body) ->
-          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body))
+          Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body)))
   in
   let text, code = Masc_cli_keeper_create.render outcome in
   if code = 0 then print_endline text else prerr_endline text;
@@ -2152,7 +2169,7 @@ let keeper_github_cmd =
     [ login; status; logout ]
 
 let build_commit_cmd_exit () =
-  match (Build_identity.current ()).binary_commit with
+  match Build_identity.embedded_commit with
   | Some commit ->
       print_endline commit;
       0
@@ -2169,18 +2186,55 @@ let build_commit_cmd =
    same on a host that has no checkout -- which is the whole point, since the
    only image MASC described before was one you could build from the repository
    and nowhere else. *)
-let sandbox_image_build_exit ~tag =
-  let argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ Keeper_sandbox_image.build_argv ~tag
+(* Build the recipe into the store of a runtime that takes a directory, not
+   stdin. Apple's [container build] is the one: its usage line takes a
+   context directory and it has no [-], so the recipe is written to a
+   directory of its own and named with [-f]. Nothing else goes in that
+   directory, so the context stays what the stdin form's [-] gave docker:
+   the recipe and nothing else. *)
+let sandbox_image_build_in_a_directory_exit ~cli ~tag =
+  let context = Filename.temp_file "masc-sandbox-image-" ".d" in
+  Sys.remove context;
+  Unix.mkdir context 0o700;
+  let cleanup () =
+    (try Sys.remove (Filename.concat context "Dockerfile") with Sys_error _ -> ());
+    try Unix.rmdir context with Unix.Unix_error _ -> ()
   in
-  match argv with
+  Fun.protect ~finally:cleanup (fun () ->
+      let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
+      let argv =
+        cli
+        :: Keeper_sandbox_image.context_directory_build_argv ~tag ~dockerfile
+             ~context
+      in
+      let pid =
+        Unix.create_process cli (Array.of_list argv) Unix.stdin Unix.stdout
+          Unix.stderr
+      in
+      let _, status = Unix.waitpid [] pid in
+      match status with
+      | Unix.WEXITED 0 ->
+        Printf.printf
+          "built %s into %s's image store\n\
+           Point a Keeper at it with sandbox_image = %S in its TOML.\n"
+          tag cli tag;
+        Cmd.Exit.ok
+      | Unix.WEXITED code ->
+        Printf.eprintf "sandbox-image: %s build exited %d\n" cli code;
+        Cmd.Exit.some_error
+      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+        Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
+        Cmd.Exit.some_error)
+
+let sandbox_image_build_exit ~command ~tag =
+  match command with
   | [] ->
-    prerr_endline "sandbox-image: no docker command resolved";
+    prerr_endline "sandbox-image: no image build command resolved";
     Cmd.Exit.some_error
   | bin :: _ ->
-    (* docker exiting first would otherwise kill this process mid-write, and
-       the exit status we want to report is docker's own. *)
+    let argv = command @ Keeper_sandbox_image.build_argv ~tag in
+    (* The runtime exiting first would otherwise kill this process mid-write, and
+       the exit status we want to report is the runtime's own. *)
     let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
     let read_fd, write_fd = Unix.pipe () in
     Unix.set_close_on_exec write_fd;
@@ -2192,32 +2246,67 @@ let sandbox_image_build_exit ~tag =
     (try
        output_string oc Keeper_sandbox_image.dockerfile;
        close_out oc
-     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));
+     with Sys_error _ -> (try close_out_noerr oc with _ -> ()));  (* @observe-allowed: the write already failed; close_out_noerr is the no-raise form and there is no second failure to report *)
     let _, status = Unix.waitpid [] pid in
     Sys.set_signal Sys.sigpipe previous_sigpipe;
     (match status with
      | Unix.WEXITED 0 ->
        Printf.printf
-         "built %s\n\
+         "built %s via %s\n\
           Point a Keeper at it with sandbox_image = %S in its TOML, or set \
           MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
          tag
+         (String.concat " " command)
          tag;
        Cmd.Exit.ok
      | Unix.WEXITED code ->
-       Printf.eprintf "sandbox-image: docker build exited %d\n" code;
+       Printf.eprintf "sandbox-image: %s build exited %d\n" bin code;
        Cmd.Exit.some_error
      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-       Printf.eprintf "sandbox-image: docker build stopped by signal %d\n" n;
+       Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" bin n;
        Cmd.Exit.some_error)
 
-let sandbox_image_cmd_exit print_only tag =
+(* Which store to build into. Docker stays the default because that is where
+   [sandbox_profile = "docker"] keepers look and where this command has always
+   put it. A microVM keeper looks somewhere else entirely -- each runtime
+   keeps its images apart from Docker's -- so the image its gate wants can
+   only be made by naming that runtime here. *)
+let sandbox_image_build_for_runtime ~runtime ~tag =
+  match runtime with
+  | None ->
+    sandbox_image_build_exit
+      ~command:(Keeper_sandbox_runtime.docker_command_argv ()) ~tag
+  | Some backend ->
+    (match Keeper_microvm_backend.recipe_delivery backend with
+     | Keeper_microvm_backend.On_stdin ->
+       sandbox_image_build_exit
+         ~command:[ Keeper_microvm_backend.cli_name backend ] ~tag
+     | Keeper_microvm_backend.In_a_context_directory ->
+       sandbox_image_build_in_a_directory_exit
+         ~cli:(Keeper_microvm_backend.cli_name backend)
+         ~tag
+     | Keeper_microvm_backend.Builds_no_images ->
+       Printf.eprintf
+         "sandbox-image: %s builds no images -- it has pull, load and save \
+          and no build. Next: build %s elsewhere, save it as an OCI archive, \
+          and `%s load` it.\n"
+         (Keeper_microvm_backend.cli_name backend)
+         tag
+         (Keeper_microvm_backend.cli_name backend);
+       Cmd.Exit.some_error)
+
+let sandbox_image_cmd_exit print_only tag runtime =
   let tag = match tag with Some t -> t | None -> Keeper_sandbox_image.default_tag in
   if print_only
   then (
     print_string Keeper_sandbox_image.dockerfile;
     Cmd.Exit.ok)
-  else sandbox_image_build_exit ~tag
+  else
+    match runtime with
+    | Error message ->
+      prerr_endline message;
+      Cmd.Exit.some_error
+    | Ok runtime -> sandbox_image_build_for_runtime ~runtime ~tag
 
 let sandbox_image_cmd =
   let doc = "Build the general Keeper sandbox image from the recipe in this binary." in
@@ -2231,12 +2320,17 @@ let sandbox_image_cmd =
     ; `P
         "This builds the other one: bash, ripgrep and git on a Debian base, \
          which is what a turn needs to read, search and edit a repository. The \
-         recipe is embedded in this binary and reaches docker on stdin, so no \
-         checkout and no registry is involved."
+         recipe is embedded in this binary and goes straight to the runtime's \
+         build command, so no source checkout or prepublished MASC image is \
+         needed. The initial Debian base image pull and package downloads \
+         require network access."
     ; `P
-        "It is not polyglot on purpose. A Keeper that has to build a project \
-         needs that project's toolchain, named in its TOML with sandbox_image; \
-         the container is read-only, so a turn cannot install what is missing."
+        "It carries gh and python3 because MASC itself asks the guest for \
+         them: it mounts a GitHub CLI config there, and its own \
+         repository-checkout probe runs python3. A Keeper that has to build a \
+         project needs that project's toolchain instead, named in its TOML \
+         with sandbox_image; the container is read-only, so a turn cannot \
+         install what is missing."
     ]
   in
   let print_only =
@@ -2247,9 +2341,36 @@ let sandbox_image_cmd =
     let doc = "Image tag to build (default: " ^ Keeper_sandbox_image.default_tag ^ ")." in
     Arg.(value & opt (some string) None & info [ "tag" ] ~docv:"TAG" ~doc)
   in
+  let runtime =
+    let doc =
+      "microVM runtime whose image store to build into (one of "
+      ^ String.concat ", " Keeper_microvm_backend.valid_strings
+      ^ "). Omit for Docker's store, which is where sandbox_profile = \"docker\" \
+         keepers look. Each runtime keeps its images apart from Docker's, so a \
+         microvm keeper cannot see one built without this."
+    in
+    Arg.(value & opt (some string) None & info [ "runtime" ] ~docv:"RUNTIME" ~doc)
+  in
+  let resolved_runtime =
+    Term.(
+      const (fun named ->
+          match named with
+          | None -> Ok None
+          | Some name ->
+            (match Keeper_microvm_backend.of_string name with
+             | Some backend -> Ok (Some backend)
+             | None ->
+               Error
+                 (Printf.sprintf
+                    "sandbox-image: --runtime %S names no microVM runtime. One \
+                     of: %s."
+                    name
+                    (String.concat ", " Keeper_microvm_backend.valid_strings))))
+      $ runtime)
+  in
   Cmd.v
     (Cmd.info "sandbox-image" ~doc ~man)
-    Term.(const sandbox_image_cmd_exit $ print_only $ tag)
+    Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling

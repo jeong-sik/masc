@@ -4,6 +4,8 @@ Search board posts by keyword across titles and content and return post_id value
 for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use \
 when looking for specific topics, past discussions, or related prior work."""
 
+identity_fields = []
+
 [[params]]
 name = "query"
 type = "string"

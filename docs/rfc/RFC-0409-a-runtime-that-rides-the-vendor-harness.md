@@ -94,7 +94,7 @@ keeper 를 변종에 붙이는 건 `runtime_id` 한 줄이다. 새 keeper 필드
 | `lab-sangsu` | 781 | 6 | **0.9%** | `masc_board_post_update` |
 | `analyst` | 1,218 | 22 | 5.3% | `masc_config` 1% |
 | `code-reviewer` | 2,578 | 28 | 5.4% | `masc_board_post_update` 1% |
-| `kidsnote` | 672 | 18 | 9.2% | `masc_board_post_update` 2% |
+| `exampleorg` | 672 | 18 | 9.2% | `masc_board_post_update` 2% |
 | `rondo` | 1,319 | 21 | 13.4% | `masc_board_stats` 5% |
 | `rw-e0-r9-20260820-review` | 388 | 4 | 14.9% | `masc_board_stats` 13% |
 | `sangsu` | 1,746 | 25 | 22.2% | `keeper_skill` 7% |

@@ -1056,32 +1056,35 @@ let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
   ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows
 ;;
 
+(* The keeper filter used to be paid for with an over-scan: to end up with
+   [n] rows from one keeper the store was read [n * read_over_scan_factor]
+   rows deep and the rest discarded. It was not only expensive - it was
+   wrong. Asking for 500 of one keeper's calls returned 454 on 2026-08-24 and
+   asking for 5,000 returned 1,409, and a caller could not tell a keeper that
+   made no more calls from a scan that stopped short.
+
+   The read index answers both questions exactly (RFC-0437). It advances
+   itself to the ledger's current end before the query, so there is no
+   staleness to reason about, and it holds only where each row lives plus the
+   two fields these reads filter on. The ledger stays the authority: the rows
+   returned here are read back out of it.
+
+   An index failure is an error, not a reason to scan: a fallback would mean
+   two read paths whose answers can differ with nobody able to say which is
+   right. The failure is logged and the answer is empty, which is what a
+   caller already handles for an unconfigured store. *)
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    (* The over-scan pays for the keeper filter: to end up with [n] rows from
-       one keeper you must read more than [n] fleet rows. With no keeper the
-       filter keeps everything, so the extra rows are read, parsed, and then
-       discarded by [ring_keep_last] — four fifths of the work for an answer
-       that cannot change.
-
-       It is not a rounding error at this size. The tool-call log averages
-       6.8 KB per row on this host, so the fleet-wide dashboard aggregate
-       (n = 5000) read 25,000 rows = 165 MB and took 3.5 s in the tail read
-       alone, where 5,000 rows = 33 MB and 0.65 s answer the same question. *)
-    let scan_factor =
-      match keeper_name with
-      | None -> 1
-      | Some _ -> read_over_scan_factor
-    in
-    let raw = read_recent_rows ~n:(n * scan_factor) () in
-    let keep =
-      match keeper_name with
-      | None -> fun (_ : Yojson.Safe.t) -> true
-      | Some name -> keeper_matches name
-    in
-    ring_keep_last ~n ~keep raw)
+    match (Atomic.get store_state).store with
+    | None -> []
+    | Some store ->
+      (match Keeper_tool_call_index.recent_rows ~store ?keeper_name ~n () with
+       | Ok rows -> rows
+       | Error detail ->
+         Log.Misc.warn "[keeper_tool_call_log] read index unavailable: %s" detail;
+         []))
 ;;
 
 

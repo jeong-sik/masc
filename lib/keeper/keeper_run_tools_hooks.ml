@@ -345,6 +345,16 @@ let adopt_projection_meta
       detail;
     admitted
 
+let guard_repetition_before_turn_params repetition_execution hook event =
+  match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
+  | Some error ->
+    Agent_core.Hooks.HookFailed
+      { stage = Agent_core.Hooks.Before_turn_params
+      ; detail = Keeper_repetition_snapshot.error_to_string error
+      }
+  | None -> hook event
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -361,6 +371,7 @@ let assemble_hooks
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list)
+      ?repetition_execution
       ?gate_replay_evidence
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -572,6 +583,11 @@ let assemble_hooks
                        progress_io_fingerprints
                  }
                  :: acc.tool_calls;
+              (match repetition_execution, acc.tool_calls with
+               | Some execution, call :: _ ->
+                 Keeper_repetition_scope.Execution.observe execution
+                   ~target:shared_context call
+               | None, _ | Some _, [] -> ());
               (* Emit neutral agent observation events; UI adapters subscribe separately. *)
               (let typed_outcome_str =
                  match typed_outcome with
@@ -695,7 +711,7 @@ let assemble_hooks
       ;
         before_turn_params =
           Some
-            (fun event ->
+            (guard_repetition_before_turn_params repetition_execution (fun event ->
               match event with
               | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
@@ -781,6 +797,38 @@ let assemble_hooks
                 record_block
                   Prompt_block_id.Temporal_summary
                   (Masc_context_injector.render_temporal_summary shared_context);
+                (* Name this turn's composition Skills once. Nothing else did:
+                   the keeper prompt reached Skills only through
+                   [current_task.skills] / [held_task.skills], and both render
+                   only when a task names one — 0 of 292 recorded tasks ever
+                   did (RFC-0411 §1.5). A model that never reads a tool
+                   description therefore had no sentence telling it these
+                   exist, and 2026-09 measured 250 Skill reads across 108,185
+                   tool calls with the busiest runtime at 0 in 24,041.
+
+                   Selected through the catalog's own
+                   [skill_source_of_tool_name] rather than by matching a name
+                   prefix: that function answers [None] for a name that is not
+                   a composition tool, so the choice is a declared fact rather
+                   than a guess about spelling. *)
+                (match
+                   List.filter
+                     (fun tool_name ->
+                       Option.is_some
+                         (Keeper_tool_composition_catalog
+                          .skill_source_of_tool_name
+                            tool_name))
+                     all_tool_names
+                 with
+                 | [] -> ()
+                 | compositions ->
+                   record_block
+                     Prompt_block_id.Skill_compositions
+                     (Printf.sprintf
+                        "[Skills] %d composition tools on this turn — each is \
+                         one call whose reads run in parallel: %s"
+                        (List.length compositions)
+                        (String.concat ", " compositions)));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
@@ -830,13 +878,29 @@ let assemble_hooks
                 in
                 let turn_blocks =
                   let blocks = List.rev !recorded_blocks in
-                  if post_tool_round
-                  then
-                    List.filter
-                      (fun (block, _) ->
-                         Prompt_block_id.injected_on_post_tool_round block)
-                      blocks
-                  else blocks
+                  let blocks =
+                    if post_tool_round
+                    then
+                      List.filter
+                        (fun (block, _) ->
+                           Prompt_block_id.injected_on_post_tool_round block)
+                        blocks
+                    else blocks
+                  in
+                  (* The assembly is a cached prefix, so a block that changes
+                     every turn re-bills every block behind it. Order by how
+                     often each one actually changes rather than by the order
+                     the producers happened to run in: over 386 one measured Keeper turns
+                     the 51,518 B memory block changed 65 times while the 81 B
+                     clock line ahead of it changed 306, and that turn paid
+                     314,080 cache-creation tokens against 50,788 reads.
+                     [stable_sort] keeps producer order inside one rank. *)
+                  List.stable_sort
+                    (fun (left, _) (right, _) ->
+                       Int.compare
+                         (Prompt_block_id.cache_rank left)
+                         (Prompt_block_id.cache_rank right))
+                    blocks
                 in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
@@ -1045,7 +1109,7 @@ let assemble_hooks
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_core.Hooks.Continue)
+              | _event -> Agent_core.Hooks.Continue))
       }
     in
     let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

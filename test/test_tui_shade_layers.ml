@@ -30,6 +30,7 @@ let entry style body : Layout.entry =
   ; body
   ; markdown_source = Layout.Markdown_streaming
   ; turn_rail = Layout.Rail_none
+  ; action = Layout.Action_none
   }
 ;;
 

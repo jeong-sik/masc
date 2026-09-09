@@ -154,18 +154,25 @@ let with_env key value f =
   result
 ;;
 
-let test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates () =
+(* Receipts are found by directory name, and a keeper's directory may have
+   been written under the name as given or under its filename-safe form, so
+   both are candidates. Nothing else is derived from the spelling: the list
+   is the names the query and the agent record supply, in those two forms. *)
+let test_receipt_candidates_are_the_two_directory_spellings () =
   with_test_env (fun config ->
+    let agent_name = "Moss Two" in
     let candidates =
-      Workspace_task_schedule.keeper_receipt_candidate_names
-        config
-        ~agent_name:"keeper_foo-agent"
+      Workspace_task_schedule.keeper_receipt_candidate_names config ~agent_name
     in
-    Alcotest.(check bool) "canonical keeper candidate" true (List.mem "foo" candidates);
-    Alcotest.(check bool)
-      "historical loose keeper candidate"
-      true
-      (List.mem "keeper_foo" candidates))
+    let expected =
+      List.sort_uniq
+        String.compare
+        [ agent_name; Workspace.safe_filename agent_name ]
+    in
+    Alcotest.(check (list string))
+      "the query's two directory spellings and nothing derived from them"
+      expected
+      candidates)
 ;;
 
 let latest_ring_seq () =
@@ -1219,10 +1226,28 @@ config
 ~reason:"Changed plans"
 ()
     in
-    match result with
-    | Ok msg ->
-      Alcotest.(check bool) "cancel own task" true (str_contains msg "cancelled")
-    | Error _ -> Alcotest.fail "Expected Ok")
+    (match result with
+     | Ok _ -> ()
+     | Error e -> Alcotest.failf "expected Ok, got %s" (Masc_domain.masc_error_to_string e));
+    (* A producer stops its own work the way it finishes it: by submitting the
+       claim and waiting for a verdict. Read the status the store now holds --
+       the message is prose, and sniffing it for a word is what the typed
+       outcome exists to replace. *)
+    match
+      Workspace.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
+    with
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; intent; _ }; _ } ->
+      Alcotest.(check string) "the producer is still the assignee" "claude" assignee;
+      Alcotest.(check bool)
+        "the submission carries the stop it was asked for"
+        true
+        (intent = Masc_domain.Cancel_task)
+    | Some task ->
+      Alcotest.failf
+        "task-001 is %s, not a submitted stop"
+        (Masc_domain.task_status_to_string task.task_status)
+    | None -> Alcotest.fail "task-001 not found")
 ;;
 
 let test_cancel_task_claimed_by_other () =
@@ -3261,9 +3286,9 @@ let () =
         ] )
     ; ( "receipt candidates"
       , [ Alcotest.test_case
-            "mixed alias keeps canonical and loose candidates"
+            "the query's two directory spellings"
             `Quick
-            test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates
+            test_receipt_candidates_are_the_two_directory_spellings
         ] )
     ; (* === Status === *)
       ( "status"

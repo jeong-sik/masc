@@ -17,11 +17,22 @@ let keeper_lane_idle_text seconds =
 let memory_fact_age_label ts =
   keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
 
+let memory_date ts =
+  let tm = Unix.localtime ts in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min
+
+let memory_updated_text = function
+  | None -> "-"
+  | Some ts -> memory_date ts
+
 let memory_context_lines (k : memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  ordinary snapshot r%d · %s · %s" k.mkh_revision
+    Printf.sprintf "  %s · %s · snapshot r%d · %s · updated %s (local)"
+      k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
       (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
-      (if k.mkh_snapshot_present then "present" else "absent")
+      (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
     Printf.sprintf
@@ -30,7 +41,7 @@ let memory_context_lines (k : memory_keeper_health) =
       k.mkh_removed k.mkh_support_invalidations
   in
   let librarian_line =
-    Printf.sprintf "  librarian lane-busy %d · failures %d"
+    Printf.sprintf "  Librarian · deferred %d · failed %d (counters since server start)"
       k.mkh_librarian_lane_busy k.mkh_librarian_failures
   in
   let source_line =
@@ -79,51 +90,16 @@ let memory_context_lines (k : memory_keeper_health) =
   current_line :: facts_line :: source_line :: librarian_line :: vision_line
   :: (read_error_lines @ alert_lines)
 
-type memory_state =
-  | Memory_ordinary
-  | Memory_warning
-  | Memory_degraded
-  | Memory_no_current
-  | Memory_source_only
-  | Memory_starving
-  | Memory_read_error
-
-let memory_state (k : memory_keeper_health) =
-  if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
-  then Memory_read_error
-  else if
-    (not k.mkh_snapshot_present)
-    && k.mkh_librarian_failures > 0
-    && not k.mkh_source_snapshot_present
-  then Memory_starving
-  else if (not k.mkh_snapshot_present) && k.mkh_source_snapshot_present
-  then Memory_source_only
-  else if not k.mkh_snapshot_present
-  then Memory_no_current
-  else if k.mkh_librarian_failures > 0
-  then Memory_degraded
-  else if
-    List.exists
-      (fun alert ->
-        match Masc.Tui_decode.memory_alert_severity alert.ma_code with
-        | `Warn -> true
-        | `Error -> false)
-      k.mkh_alerts
-  then Memory_warning
-  else Memory_ordinary
-
-let memory_state_label = function
-  | Memory_ordinary -> "ok"
-  | Memory_warning -> "warning"
-  | Memory_degraded -> "degraded"
-  | Memory_no_current -> "no-current"
-  | Memory_source_only -> "source-only"
-  | Memory_starving -> "STARVING"
-  | Memory_read_error -> "read-error"
+type memory_state = Masc_tui_types.memory_state =
+  | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
+  | Memory_source_only | Memory_starving | Memory_read_error
 
 let memory_state_cell = function
-  | Memory_ordinary -> ""
-  | state -> memory_state_label state
+  | Memory_ordinary -> "+"
+  | Memory_warning | Memory_degraded -> "!"
+  | Memory_no_current -> "-"
+  | Memory_source_only -> "s"
+  | Memory_starving | Memory_read_error -> "x"
 
 let memory_deviation_style (k : memory_keeper_health) =
   let server_error =
@@ -172,7 +148,7 @@ let memory_row_line columns (k : memory_keeper_health) =
   ^ Render_schedule.memory_row ~state_style ~size_style ~delta_style columns
       { Render_schedule.mrow_state = memory_state_cell (memory_state k)
       ; mrow_name = k.mkh_keeper_id
-      ; mrow_revision = ordinary_reading (fun () -> string_of_int k.mkh_revision)
+      ; mrow_updated = memory_updated_text k.mkh_updated_at
       ; mrow_facts = ordinary_reading (fun () -> string_of_int k.mkh_facts)
       ; mrow_size =
           ordinary_reading (fun () ->
@@ -369,64 +345,8 @@ let render_memory_body ~cols ~budget (state : state)
     ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
-  let raw_keepers =
-    match state.memory_health with
-    | None -> []
-    | Some s -> s.mhs_keepers
-  in
-  let sorted_keepers =
-    match state.memory_overview_sort with
-    | Mem_overview_facts ->
-        List.sort
-          (fun (a : memory_keeper_health) (b : memory_keeper_health) ->
-            if a.mkh_facts <> b.mkh_facts then Stdlib.compare b.mkh_facts a.mkh_facts
-            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
-          raw_keepers
-    | Mem_overview_size ->
-        List.sort
-          (fun a b ->
-            if a.mkh_snapshot_bytes <> b.mkh_snapshot_bytes then
-              Stdlib.compare b.mkh_snapshot_bytes a.mkh_snapshot_bytes
-            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
-          raw_keepers
-    | Mem_overview_delta ->
-        List.sort
-          (fun a b ->
-            let da = a.mkh_added + a.mkh_removed in
-            let db = b.mkh_added + b.mkh_removed in
-            if da <> db then Stdlib.compare db da
-            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
-          raw_keepers
-    | Mem_overview_state ->
-        List.sort
-          (fun a b ->
-            let sa = memory_state a in
-            let sb = memory_state b in
-            if sa <> sb then Stdlib.compare sb sa
-            else String.compare a.mkh_keeper_id b.mkh_keeper_id)
-          raw_keepers
-    | Mem_overview_name ->
-        List.sort
-          (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
-          raw_keepers
-  in
-  let query =
-    match state.search with
-    | Some q -> String.lowercase_ascii (String.trim q)
-    | None ->
-        if String.length (String.trim state.search_last) > 0 then
-          String.lowercase_ascii (String.trim state.search_last)
-        else ""
-  in
-  let keepers =
-    if query = "" then sorted_keepers
-    else
-      List.filter
-        (fun k ->
-          palette_contains ~needle:query k.mkh_keeper_id
-          || palette_contains ~needle:query (memory_state_label (memory_state k)))
-        sorted_keepers
-  in
+  let query = memory_overview_query state in
+  let keepers = visible_memory_keepers state in
   let shown = List.length keepers in
   let columns =
     Render_schedule.allocate_memory_columns
@@ -441,6 +361,23 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
+  (match state.memory_health with
+   | None -> push "  Total: waiting for memory snapshots"
+   | Some snapshot ->
+       push (Printf.sprintf "  Total %d facts · %d ordinary + %d source · %s · %d keepers"
+         (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+         snapshot.mhs_total_facts snapshot.mhs_total_source_facts
+         (Masc_tui_context_inspector.format_bytes
+            (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
+         (List.length snapshot.mhs_keepers)));
+  (match state.memory_health with
+   | None -> push "  Librarian: waiting for health data"
+   | Some snapshot ->
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
+         snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
+         snapshot.mhs_total_support_invalidations snapshot.mhs_total_librarian_failures));
+  push_styled ~style:(Theme.recede ())
+    "  ST: + ready  ! attention  - no snapshot  s source only  x failed  |  UPDATED: local date/time";
   push info_bar;
   let search_bar =
     if query <> "" then
@@ -468,20 +405,20 @@ let render_memory_body ~cols ~budget (state : state)
     | None -> []
     | Some k -> memory_context_lines k
   in
-  let context_rows =
-    match context_lines with [] -> 0 | _ -> 1 + List.length context_lines
-  in
-  let fixed =
-    4
-    + (if search_bar <> "" then 1 else 0)
-    + context_rows
-    + (if Option.is_some state.memory_health_error then 2 else 0)
-  in
-  let available = max 1 (budget - fixed) in
+  let layout = memory_overview_scrolled ~cursor state in
+  let rows = budget + Masc_tui_frame.chrome_rows in
+  let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in
-  let content_height = if overflowing then max 1 (available - 1) else available in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.memory_health_scroll max_scroll) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+      ~overflow_takes_row:layout.sc_overflow_takes_row
+  in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:shown ~height:content_height
+      state.memory_health_scroll
+    |> Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
+  in
   if shown = 0 then
     let note =
       if Option.is_some state.memory_health_error then

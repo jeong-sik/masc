@@ -17,11 +17,12 @@ name: Test
 # future proposal to move tests into the PR gate; until that proposal
 # exists, the gate is unchanged by design.
 #
-# Known gap: a red scheduled run is silent. GitHub emails only the last
+# A red scheduled run used to reach nobody: GitHub emails only the last
 # editor of the cron line, and a dispatched run notifies only the
-# dispatcher. Until a notification step or tracking automation exists,
-# someone has to look at the Actions tab; that follow-up is tracked under
-# #33008.
+# dispatcher. The last step of this job now files the failure as an issue
+# labelled `nightly-test-lane`, reusing the open one so a run of red
+# nights is one thread. A dispatch files nothing — its dispatcher is
+# already told.
 #
 # See: https://github.com/jeong-sik/masc/issues/33008
 #
@@ -36,6 +37,17 @@ name: Test
 # backend difference from a scheduling one.
 
 on:
+  workflow_call:
+    inputs:
+      candidate_verification:
+        type: boolean
+        default: false
+      suite:
+        type: string
+        default: ""
+      eio_backend:
+        type: string
+        default: ""
   schedule:
     # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
     - cron: "43 17 * * *"
@@ -43,11 +55,17 @@ on:
     inputs:
       suite:
         description: >-
-          Comma-separated test executables under test/ to build and run on
-          their own instead of the full runner, for example
-          test_heartbeat_integration,test_hitl_summary_worker. A name with
-          a test/<name>.py script runs its dune alias runtest-<name>
-          instead (test_tui_keyboard_input). Empty runs the full suite.
+          Comma-separated test suites to build and run on their own instead of
+          the full runner. Empty runs the full suite. A bare name is resolved
+          under test/, for example test_heartbeat_integration. A suite outside
+          test/ is named by its path from the repository root, for example
+          packages/agent_core/test/test_capabilities -- the 43 suites under
+          packages/ and tools/ have no other spelling here, and a bare name
+          is reported as "no test/<name>.ml and no <name>.ml" while the names
+          that did resolve still run. A name with a
+          test/<name>.py script, or one a test/ dune file declares as
+          (alias runtest-<name>), runs that alias instead
+          (test_tui_keyboard_input).
         type: string
         default: ""
       eio_backend:
@@ -60,6 +78,9 @@ on:
 
 permissions:
   contents: read
+  # The scheduled failure below files an issue. A dispatch never reaches
+  # that step, so this scope is unused on every other path.
+  issues: write
 
 # Two lanes plus one per targeted run. Every full dispatch shares one
 # lane, where a new dispatch cancels the run in flight instead of stacking
@@ -76,7 +97,7 @@ permissions:
 # with '' by coercing both to 0, so the test below is false and the
 # scheduled run keeps its lane.
 concurrency:
-  group: ${{ inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
+  group: ${{ inputs.candidate_verification && format('candidate-test-{0}', github.run_id) || inputs.suite != '' && format('test-targeted-{0}', github.run_id) || format('test-{0}', github.event_name) }}
   cancel-in-progress: true
 
 jobs:
@@ -150,6 +171,15 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
+      # test_run_local_script builds the PATH a dashboard build would run
+      # under, from the directories holding node, pnpm, python3, git, mkdir
+      # and bash. Every one but pnpm is on the runner, so the suite failed
+      # with "required test command is missing: pnpm" before reaching a
+      # single scenario -- in the only lane that runs it. The version is the
+      # one pr-check.yml and release.yml build the SPA with.
+      - name: Make pnpm available to the suites that read a dashboard PATH
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Test
         env:
           # Public runners give four CPUs; use all four for the build
@@ -207,6 +237,33 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TARGET_SUITES}" ]; then
+            # Four suites read a file through a Keeper's sandbox, and on this
+            # runner the read answers "image_not_found: keeper sandbox image
+            # masc-sandbox:general is not available" -- 14 assertions counted
+            # as red for an image nothing here builds. The recipe lives in the
+            # binary (Keeper_sandbox_image.dockerfile) so that `masc
+            # sandbox-image` works on a host with no checkout; --print is how
+            # it is read without a checkout's copy going stale. Debian slim
+            # plus bash, ripgrep and git, so this is a short build, and it is
+            # done only on the full lane -- the one whose verdict is main's.
+            opam exec -- dune build --root . bin/main_eio.exe
+            ./_build/default/bin/main_eio.exe sandbox-image --print \
+              | docker build -t masc-sandbox:general -
+            # Building the image is half of what a sandboxed suite needs. A
+            # fixture whose keeper runs a command starts a persistent
+            # container through the turn sandbox factory, and
+            # Keeper_sandbox_runtime_setup refuses that under a test
+            # executable unless the run says it wants the real daemon: the
+            # guard exists so a developer's daemon does not collect
+            # containers named for temp workspaces. This runner is thrown
+            # away with its daemon, and a fixture that started a container
+            # removes it in its own teardown
+            # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
+            # so, once, here -- not in every stanza that dispatches. Without
+            # it every Docker
+            # case that used to skip on "image not found" fails on the
+            # guard instead (dispatch_runtime, execute_exit_result).
+            export MASC_TEST_ALLOW_REAL_DOCKER=1
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
           fi
@@ -218,21 +275,57 @@ jobs:
           suites=()
           exes=()
           aliases=()
+          unresolved=()
           IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
           for suite in "${requested[@]}"; do
             suite="${suite// /}"
             [ -n "${suite}" ] || continue
             # A suite that is a script under a dune alias rather than an
-            # executable: test/<suite>.py with (alias runtest-<suite>) in
-            # test/dune, the PTY suite being the one. Dune runs the script
-            # as the alias's action, so building the alias is the run.
-            if [ -f "test/${suite}.py" ]; then
+            # executable. Two spellings reach the same place: test/<suite>.py
+            # for a script named after its file, and any name a test/ dune
+            # file declares as (alias runtest-<suite>) — the PTY suite's
+            # per-family lanes are named that way and have no file of their
+            # own. Dune runs the script as the alias's action, so building
+            # the alias is the run.
+            if [ -f "test/${suite}.py" ] \
+              || grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
+                   test/dune test/stanzas 2>/dev/null; then
               aliases+=("${suite}")
             else
-              suites+=("${suite}")
-              exes+=("test/${suite}.exe")
+              # The name used to be a path fragment under test/, so a suite
+              # outside it was unreachable: every one of the 43 under
+              # packages/agent_core/test and tools/ could only run in the
+              # nightly root @runtest, and a fix to one waited a night to be
+              # seen. Resolve the name instead -- under test/ first, so
+              # test_string_util and toml_line_editor/test_toml_line_editor
+              # keep meaning what they meant, then from the repo root, which
+              # is how packages/agent_core/test/test_provider is written.
+              if [ -f "test/${suite}.ml" ]; then
+                suite_path="test/${suite}"
+              elif [ -f "${suite}.ml" ]; then
+                suite_path="${suite}"
+              else
+                unresolved+=("${suite}")
+                continue
+              fi
+              suites+=("${suite_path}")
+              exes+=("${suite_path}.exe")
             fi
           done
+          # A name that resolves to nothing used to end the dispatch right
+          # here, before a single suite was built, and it named only the first
+          # one it reached: a ten-suite batch with one misspelling returned no
+          # verdict for the other nine and did not say whether a second name
+          # was wrong too, so the next attempt could lose the batch again.
+          # Name every one of them, keep the run non-zero so nobody reads it
+          # as ten green suites, and let the ones that did resolve report.
+          resolution_status=0
+          if [ "${#unresolved[@]}" -ne 0 ]; then
+            for suite in ${unresolved[@]+"${unresolved[@]}"}; do
+              log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
+            done
+            resolution_status=1
+          fi
           # dune build with no target builds everything; a suite input of
           # separators only must not turn into the full build.
           if [ "${#suites[@]}" -eq 0 ] && [ "${#aliases[@]}" -eq 0 ]; then
@@ -240,7 +333,7 @@ jobs:
             exit 2
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
-          status=0
+          status="${resolution_status}"
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)
@@ -259,19 +352,48 @@ jobs:
           if [ "${#exes[@]}" -eq 0 ]; then
             exit "${status}"
           fi
-          log "[targeted] dune build ${exes[*]}"
-          opam exec -- dune build --root . "${exes[@]}" 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
-          cd _build/default/test
-          for suite in "${suites[@]}"; do
-            case "${suite}" in
-              test_heartbeat_integration)
-                suite_env=(MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=true
-                           MASC_BASE_PATH=/tmp/test-heartbeat-integ
-                           MASC_BASE_PATH_INPUT=/tmp/test-heartbeat-integ) ;;
-              *)
-                suite_env=() ;;
-            esac
-            log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # A stanza's (setenv ...) belongs to dune's runtest action, so a run
+          # of the executable does not get it, and 22 of the 346 stanzas
+          # declare one. This file used to carry a case block that named
+          # exactly one of them, so a dispatch naming any of the other 21 ran
+          # that suite under the wrong environment and reported verdicts the
+          # nightly lane would not agree with -- silently, since a missing
+          # variable looks like a normal run. stanza_env.py reads the stanza.
+          # Captured, not piped: a failing script inside a process
+          # substitution leaves the loop's exit status at 0, and a suite that
+          # runs with no environment because the reader broke is the exact
+          # outcome this replaces.
+          stanza_env_reader="${GITHUB_WORKSPACE}/scripts/ci/stanza_env.py"
+          # suites hold the resolved path; the reader takes the directory and
+          # the bare name, because a stanza names a suite without its path.
+          stanza_deps=()
+          for suite_path in "${suites[@]}"; do
+            dep_lines=$(python3 "${stanza_env_reader}" \
+              --dir "$(dirname "${suite_path}")" \
+              --deps "$(basename "${suite_path}")")
+            while IFS= read -r dep; do
+              if [ -n "${dep}" ]; then stanza_deps+=("${dep}"); fi
+            done <<< "${dep_lines}"
+          done
+          log "[targeted] dune build ${exes[*]} ${stanza_deps[*]+${stanza_deps[*]}}"
+          opam exec -- dune build --root . "${exes[@]}" \
+            ${stanza_deps[@]+"${stanza_deps[@]}"} 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+          # Each suite runs from its own directory under _build/default: a
+          # stanza's paths are written relative to the stanza, and dune's own
+          # runtest action stands there too, so anywhere else reads a
+          # different tree than the nightly lane does.
+          repo_root="${PWD}"
+          for suite_path in "${suites[@]}"; do
+            suite_dir="$(dirname "${suite_path}")"
+            suite="$(basename "${suite_path}")"
+            cd "${repo_root}/_build/default/${suite_dir}"
+            suite_env=()
+            env_lines=$(python3 "${stanza_env_reader}" --dir "${suite_dir}" "${suite}")
+            while IFS= read -r pair; do
+              if [ -n "${pair}" ]; then suite_env+=("${pair}"); fi
+            done <<< "${env_lines}"
+            log "[targeted] ${suite_path}: stanza env ${suite_env[*]+${suite_env[*]}}"
+            log "[targeted] ${suite_path}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             started=$(date +%s)
             rc=0
             # ${arr[@]+"${arr[@]}"} expands an empty array to nothing under
@@ -286,16 +408,30 @@ jobs:
             # timeout(1) exits 124 when TERM ended the command and 137
             # when it took the KILL after the grace.
             case "${rc}" in
-              0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
+              0)   log "[targeted] ${suite_path}: OK in ${elapsed}s" ;;
               124|137)
-                   log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s;" \
+                   log "[targeted] ${suite_path}: TIMEOUT exit ${rc} after ${elapsed}s;" \
                        "the hung case is the one after the last [OK] line above"
                    status=1 ;;
-              *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
+              *)   log "[targeted] ${suite_path}: FAIL exit ${rc} in ${elapsed}s"
                    status=1 ;;
             esac
           done
           exit "${status}"
+
+      # The ocamlfind suites: run-standalone-suites.py compiles every suite
+      # it can reach without dune and runs it, which is the check that a
+      # suite's declared dependencies are the ones it really needs. It ran on
+      # every pull request until 2026-09-08, where it was 327 s of a 625 s
+      # check job and, being continue-on-error, gated nothing; here it runs
+      # once a day on main instead. continue-on-error stays for the reason
+      # the pull-request lane recorded: test_tool_name_prefix_boundary is
+      # red on purpose until #33778 is decided.
+      - name: Run the suites that need no build
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python3 scripts/run-standalone-suites.py --all-matching '*'
 
       # The step output carries the heartbeat and the last 120 lines of the
       # runner log; every per-suite verdict lives only in the file. The
@@ -307,6 +443,58 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: suite-runner-log
+          overwrite: ${{ inputs.candidate_verification == true }}
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14
+
+      # The lane's whole point is that a test-only regression surfaces
+      # within ~24h. Without this step it surfaced only to whoever opened
+      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
+      # unread. Scheduled runs only: a dispatcher already sees their own
+      # run. Cancellation counts as a failure here because the job-level
+      # 180-minute cap is exactly what a hung suite hits.
+      - name: File the scheduled failure as an issue
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh infers the repo from the checkout's git remote. This step also
+          # runs when the job failed before Checkout, where there is no remote
+          # to read, so name the repo outright.
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          label=nightly-test-lane
+          # --force is a no-op when the label already exists, so the first
+          # red night does not fail on a label nobody created yet.
+          gh label create "${label}" \
+            --color B60205 \
+            --description "야간 테스트 레인이 실패한 실행" \
+            --force
+          # The taxonomy workflow comments on any issue with no declaration
+          # block, so this body carries one. A red lane is a ci defect that
+          # degrades and whose root is that nothing said so.
+          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
+            "- 실행: ${RUN_URL}" \
+            "- 커밋: \`${GITHUB_SHA}\`" \
+            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
+            "단계 출력에는 마지막 120줄만 남습니다." \
+            '```masc-triage' \
+            "kind: defect" \
+            "area: ci" \
+            "impact: degrades" \
+            "must-do: false" \
+            '```')
+          existing=$(gh issue list --state open --label "${label}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "commented on #${existing}"
+          else
+            gh issue create --label "${label}" \
+              --title "야간 테스트 레인이 빨갛습니다" \
+              --body "${body}"
+          fi

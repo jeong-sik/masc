@@ -14,4 +14,12 @@ val message_texts_as_joined : Agent_core.Types.message list -> string
 (** MD5 hex of the message texts joined by newline, in order. The empty list
     digests as the empty string, so a turn with no replayed history is not
     distinguishable from one whose messages all rendered empty — the message
-    count recorded alongside it carries that distinction. *)
+    count recorded alongside it carries that distinction.
+
+    Nonempty histories are computed on the shared CPU executor when called
+    from an Eio fiber with a pool installed. The immutable message list is
+    read in the worker and the caller awaits the digest before publishing it.
+    Empty histories, calls already inside Executor_pool_ref.submit_or_inline
+    workers, and callers without a pool or Eio context compute inline. The
+    executor adapter may retry this pure computation inline on a
+    non-cancellation executor error. Cancellation propagates to the caller. *)

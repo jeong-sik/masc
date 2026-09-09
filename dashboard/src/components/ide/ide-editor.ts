@@ -7,8 +7,6 @@ import type { CodeDocumentStore } from './code-document-store'
 import type { KeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { ideEditorSelection } from './ide-editor-selection'
 import type { UnifiedDiffRow } from '../../api/workspace'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
-import type { IdeAnnotationDeleteOutcome } from '../../api/ide'
 import {
   readOnlyExt,
   themeExt,
@@ -20,22 +18,14 @@ import {
   keeperTraceLineChipExt,
   contextFocusLineExt,
   focusEditorContextLine,
-  annotationLineChipExt,
   pushOwnership,
   pushKeeperTraceLines,
   keeperTraceLinesForFile,
-  pushAnnotationLines,
   internalDocumentSync,
   syntaxHighlightExt,
   type EditorKeeperTraceLine,
 } from './ide-editor-extensions'
-import {
-  lspDiagnosticSnapshot,
-  lspExtension,
-  getSelectedAnnotation,
-  clearSelectedAnnotation,
-  type SelectedAnnotation,
-} from './ide-lsp-client'
+import { lspDiagnosticSnapshot, lspExtension } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import { globalPresenceSnapshot } from './keeper-presence-store'
@@ -50,7 +40,7 @@ import {
   activeLayersInDisplayOrder,
 } from './ide-editor-blame'
 import { buildCurrentFileSignals, EditorCurrentFileSignals, focusTraceLineContext } from './ide-editor-signals'
-import { EditorContextRouteLink, EditorContextRouteCount, AnnotationPopover } from './ide-editor-annotation-ui'
+import { EditorContextRouteLink, EditorContextRouteCount } from './ide-editor-route-ui'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -66,10 +56,6 @@ interface IdeEditorProps {
   readonly onFindOpen?: () => void
   readonly onFindClose?: () => void
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
-  readonly annotations?: ReadonlyArray<IdeAnnotation>
-  readonly onAnnotationDelete?: (
-    annotation: SelectedAnnotation,
-  ) => Promise<IdeAnnotationDeleteOutcome>
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
@@ -94,8 +80,6 @@ export function IdeEditor({
   onFindOpen,
   onFindClose,
   onKeeperLineSelect,
-  annotations = [],
-  onAnnotationDelete,
 }: IdeEditorProps) {
   useStoreSubscription(documentStore.subscribe)
   useStoreSubscription(ownershipStore.subscribe)
@@ -136,7 +120,6 @@ export function IdeEditor({
   const replayTraceEvents = filterTraceEventsByReplay(keeperTraceState.value.events, ideReplayUntilMs.value)
   const currentFileSignals = buildCurrentFileSignals({
     filePath: documentFilePath,
-    annotations,
     diffRows: currentDiffRows,
     traceEvents: replayTraceEvents,
   })
@@ -230,7 +213,7 @@ export function IdeEditor({
         ` : null}
       </div>
       ${activeLayerKinds.length > 0
-        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers, annotations)
+        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
         : null}
       ${findOpen
         ? html`<${IdeFindPanel}
@@ -253,8 +236,6 @@ export function IdeEditor({
               contextFocus=${currentFileFocus}
               traceActive=${activeLayers.has('keeper-trace')}
               traceEvents=${replayTraceEvents}
-              annotations=${annotations}
-              onAnnotationDelete=${onAnnotationDelete}
             />`
       }
     </div>
@@ -271,11 +252,9 @@ function CodeMirrorEditor({
   showOwnership,
   keepers,
   onKeeperLineSelect,
-  annotations = [],
   contextFocus,
   traceActive = false,
   traceEvents = EMPTY_TRACE_EVENTS,
-  onAnnotationDelete,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -283,29 +262,17 @@ function CodeMirrorEditor({
   readonly showOwnership: boolean
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
-  readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly contextFocus?: IdeContextFocus | null
   readonly traceActive?: boolean
   readonly traceEvents?: ReadonlyArray<KeeperTraceEvent>
-  readonly onAnnotationDelete?: (
-    annotation: SelectedAnnotation,
-  ) => Promise<IdeAnnotationDeleteOutcome>
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
   const [ready, setReady] = useState(false)
-  const [selectedAnn, setSelectedAnn] = useState<SelectedAnnotation | null>(null)
-  const prevAnnRef = useRef<SelectedAnnotation | null>(null)
 
   const document = documentStore.document()
   const documentFilePath = document.file_path
   const ownership = ownershipStore.ownership()
-  const currentFileAnnotations = useMemo(
-    () => documentFilePath === null
-      ? []
-      : annotations.filter(annotation => annotation.file_path === documentFilePath),
-    [annotations, documentFilePath],
-  )
   const traceLines = useMemo(
     () => traceActive && documentFilePath !== null
       ? keeperTraceLinesForFile(documentFilePath, traceEvents)
@@ -343,15 +310,9 @@ function CodeMirrorEditor({
           lang,
           lspExtension({ filePath: mountFilePath }),
           contextFocusLineExt(),
-          annotationLineChipExt(),
           EditorView.updateListener.of((update) => {
-            const sel = getSelectedAnnotation(update.view)
-            if (sel !== prevAnnRef.current) {
-              prevAnnRef.current = sel
-              setSelectedAnn(sel)
-            }
-            // #23471 FE-4: publish the human selection as 1-based line
-            // numbers for the annotation composer's default range.
+            // Publish the human selection as 1-based line numbers for the
+            // surfaces that talk about "these lines" (interject).
             if (update.selectionSet || update.docChanged) {
               const main = update.state.selection.main
               ideEditorSelection.value = {
@@ -436,22 +397,6 @@ function CodeMirrorEditor({
   useEffect(() => {
     const view = editorRef.current
     if (!view || !ready) return
-    pushAnnotationLines(view, currentFileAnnotations.map(annotation => ({
-      id: annotation.id,
-      line: annotation.line_start,
-      kind: annotation.kind,
-      keeperId: annotation.keeper_id,
-      goalId: annotation.goal_id,
-      taskId: annotation.task_id,
-    })))
-  }, [
-    currentFileAnnotations,
-    ready,
-  ])
-
-  useEffect(() => {
-    const view = editorRef.current
-    if (!view || !ready) return
     if (!contextFocus || contextFocus.file_path !== documentStore.document().file_path) {
       focusEditorContextLine(view, undefined)
       return
@@ -487,18 +432,6 @@ function CodeMirrorEditor({
     >
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
-      ${selectedAnn && editorRef.current ? AnnotationPopover({
-        annotation: selectedAnn,
-        view: editorRef.current,
-        onClose: () => {
-          if (editorRef.current) {
-            clearSelectedAnnotation(editorRef.current)
-            prevAnnRef.current = null
-            setSelectedAnn(null)
-          }
-        },
-        onDelete: onAnnotationDelete,
-      }) : null}
     </div>
   `
 }
@@ -525,4 +458,3 @@ function contextFocusMetaParts(focus: IdeContextFocus): ReadonlyArray<string> {
 
 // Re-exports for backward compatibility
 export { currentFileFindMatches } from './ide-editor-find'
-export { annotationRouteLinks } from './ide-editor-annotation-ui'

@@ -321,7 +321,7 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
   in
   (* Surface the autoboot exclusion reason so the roster can show *why* a keeper
      is not booting/proactive (declarative_autoboot_disabled / paused /
-     autoboot_disabled).  paused/proactive_enabled already ride on the snapshot
+     autoboot_disabled).  paused/activation_mode already ride on the snapshot
      keeper row; exclusion_reason is the missing visibility piece. *)
   (match result with
    | `Assoc fields ->
@@ -599,6 +599,25 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
   `Assoc fields
 ;;
 
+(* Card previews show a short description; full text is fetched only for
+   detail expansion or search. This byte bound preserves UTF-8 boundaries and
+   does not limit the task set, contracts, or handoff evidence. *)
+let task_description_preview_bytes = 160
+
+let task_list_json ~goal_task_index (task : Masc_domain.task) =
+  if String.length task.description <= task_description_preview_bytes then
+    task_json ~goal_task_index task
+  else
+    let preview = String_util.utf8_prefix
+      ~max_bytes:task_description_preview_bytes task.description in
+    let revision = Digestif.SHA256.(digest_string task.description |> to_hex) in
+    match task_json ~goal_task_index {task with description = preview} with
+    | `Assoc fields -> `Assoc
+        (("detail_level", `String "summary")
+         :: ("description_revision", `String revision) :: fields)
+    | _ -> assert false
+;;
+
 let agent_json ~model_map (agent : Masc_domain.agent) =
   let profile = get_agent_profile agent.name in
   let model_value =
@@ -851,7 +870,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          number. The raw list is surfaced instead; frontend paginates. *)
     let all_visible = active_tasks @ recent_done in
     let task_fields =
-      [ "tasks", `List (List.map (task_json ~goal_task_index) all_visible)
+      [ "tasks", `List (List.map (task_list_json ~goal_task_index) all_visible)
       ; ( "task_counts"
         , `Assoc
             [ "active", `Int (List.length active_tasks)

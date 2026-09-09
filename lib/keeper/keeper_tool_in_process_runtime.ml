@@ -173,7 +173,7 @@ let external_gate_decision
                   ; "gate_reason"
                   , `String (Keeper_gate.unavailable_reason_to_string reason)
                   ])
-         ; failure_class = Tool_result.Runtime_failure
+         ; failure_class = Tool_result.Dependency_unavailable
          })
   | Keeper_gate.Allow authorization ->
     Log.Keeper.info
@@ -452,6 +452,64 @@ let handle_memory_retract_with_outcome
     ~config
     ~meta
     ~args
+;;
+
+(* Browser lane tools preserve selected native-client identity. The closed
+   state-layer verb set distinguishes reads from explicit-tab interactions;
+   session ownership and direct navigation remain automation-only. *)
+let handle_browser_tabs_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_tabs ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
+;;
+
+let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
+  let result =
+    Tool_misc_browser_lane.handle_read ~keeper_name:meta.name
+      ~tool_name:"masc_browser_read" ~start_time:0.0 args
+  in
+  (* Downloads carry normalized references to durable files. The result's
+     manifest must be persisted by this producer before provider projection,
+     just as Execute and composition results preserve their artifact roots. *)
+  match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
+  | Ok result -> Keeper_tool_execution.of_tool_result result
+  | Error error ->
+    Log.Misc.error "browser result manifest persistence failed: %s" error.message;
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_post_effect
+      "Browser read completed, but its result manifest could not be preserved. Do not repeat the download."
+;;
+
+let handle_browser_session_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
+;;
+
+let handle_browser_interact_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_interact ~tool_name:"masc_browser_interact" ~start_time:0.0 args)
+;;
+
+let handle_browser_goto_with_outcome ~args =
+  Keeper_tool_execution.of_tool_result
+    (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
+;;
+
+let handle_browser_act_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+  let invoke ?upload_paths () =
+    let result, failure_effect_disposition =
+      Tool_misc_browser_lane.handle_act_with_phase ?upload_paths
+        ~tool_name:"masc_browser_act" ~start_time:0.0 args in
+    Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
+  match Browser_lane.Action.parse args with
+  | Ok (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) ->
+    (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
+       ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
+     | Ok outcome -> outcome
+     | Error message -> Keeper_tool_execution.failure
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message))
+  | _ -> invoke ()
 ;;
 
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
@@ -1331,10 +1389,10 @@ let replay_connector_post_with_outcome
                       [#일반] on the message that arrived and an id on our own
                       reply to it -- the same room, named twice over. *)
                  ; channel_name =
-                     Connector_names.recall
+                     Keeper_connector_names.recall
                        ~base_dir:config.Workspace.base_path
                        ~connector:Channel_gate_discord_state.channel
-                       ~scope:Connector_names.Channel ~id:channel_id
+                       ~scope:Keeper_connector_names.Channel ~id:channel_id
                  ; parent_channel_id = None
                  ; thread_id = None
                  })
@@ -1395,10 +1453,10 @@ let replay_connector_post_with_outcome
                     { team_id = None
                     ; channel_id
                     ; channel_name =
-                        Connector_names.recall
+                        Keeper_connector_names.recall
                           ~base_dir:config.Workspace.base_path
                           ~connector:Channel_gate_slack_state.channel
-                          ~scope:Connector_names.Channel ~id:channel_id
+                          ~scope:Keeper_connector_names.Channel ~id:channel_id
                     ; thread_ts
                     })
                ()
@@ -1538,10 +1596,10 @@ let handle_surface_post_with_outcome
              else bound_discord_channels
            in
            let names =
-             Connector_names.entries
+             Keeper_connector_names.entries
                ~base_dir:config.Workspace.base_path
                ~connector:surface
-               ~scope:Connector_names.Channel
+               ~scope:Keeper_connector_names.Channel
            in
            (match
               Keeper_surface_post.resolve_bound_channel_reference
@@ -1763,7 +1821,11 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
     ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
     }
   in
-  Tool_misc.dispatch ctx ~name ~args
+  (match Tool_schemas_misc.misc_operation_of_tool_name name with
+   | Some Tool_schemas_misc.Misc_msx_screen ->
+     Some (Keeper_msx_screen.handle ~keeper_name:meta.name
+       ~tool_name:name ~start_time:(Time_compat.now ()) args)
+   | _ -> Tool_misc.dispatch ctx ~name ~args)
   |> dispatch_option_to_execution ~name
 ;;
 
@@ -2053,6 +2115,107 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
               , `String "fusion requires the server root switch + net (unavailable)" )
             ]))
 ;;
+
+(* RFC-0430 Phase 3 — masc_file_* provider Files tools. Same root-switch+net
+   gate as fusion (the upload posts over provider HTTP), and the API key comes
+   from the same env the direct provider binding declares. Results are the
+   client's typed decode rendered as JSON — a tool result, never a silent
+   fallback. *)
+let masc_file_failure message =
+  Keeper_tool_execution.failure
+    ~class_:Tool_result.Runtime_failure
+    (Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String message ]))
+;;
+
+let handle_masc_file_with_outcome ~name ~args () =
+  let require_env key =
+    (* The key is the caller's, but the floor is the same: a value set in
+       runtime.toml has to answer here too, or masc_file refuses a variable the
+       deployment did declare. *)
+    match Env_config_core.raw_value_opt key with
+    | Some v when v <> "" -> Ok v
+    | _ -> Error ("masc_file requires the " ^ key ^ " environment variable")
+  in
+  match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> (
+    match name with
+    | "masc_file_upload" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        let filename = Tool_args.get_string args "filename" "" in
+        let content_base64 = Tool_args.get_string args "content_base64" "" in
+        let purpose = Tool_args.get_string args "purpose" "user_data" in
+        if filename = "" || content_base64 = "" then
+          masc_file_failure "filename and content_base64 are required"
+        else (
+          (* The boundary only needs to be unique within one request body. *)
+          let boundary = "masc-file-" ^ string_of_int (int_of_float (Unix.time ())) in
+          match
+            Llm_provider.Provider_files.upload ~sw ~net ~api_key ~boundary
+              ~filename ~purpose ~content:content_base64 ()
+          with
+          | Error msg -> masc_file_failure msg
+          | Ok file ->
+            Keeper_tool_execution.of_tool_result
+              (Tool_result.make_ok
+                 ~tool_name:name
+                 ~start_time:0.0
+                 ~data:
+                   (`Assoc
+                      [ ("ok", `Bool true)
+                      ; ("file_id", `String file.Llm_provider.Provider_files.id)
+                      ; ("filename", `String file.Llm_provider.Provider_files.filename)
+                      ; ("bytes", `Int file.Llm_provider.Provider_files.bytes)
+                      ])
+                 ()))
+        )
+    | "masc_file_delete" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        let file_id = Tool_args.get_string args "file_id" "" in
+        if file_id = "" then masc_file_failure "file_id is required"
+        else
+          match Llm_provider.Provider_files.delete ~sw ~net ~api_key ~file_id () with
+          | Error msg -> masc_file_failure msg
+          | Ok true ->
+            Keeper_tool_execution.of_tool_result
+              (Tool_result.make_ok
+                 ~tool_name:name
+                 ~start_time:0.0
+                 ~data:(`Assoc [ ("ok", `Bool true); ("file_id", `String file_id) ])
+                 ())
+          | Ok false -> masc_file_failure "deletion not confirmed"
+      )
+    | "masc_file_list" -> (
+      match require_env "DEEPSEEK_API_KEY" with
+      | Error msg -> masc_file_failure msg
+      | Ok api_key ->
+        (match Llm_provider.Provider_files.list_files ~sw ~net ~api_key () with
+         | Error msg -> masc_file_failure msg
+         | Ok files ->
+           let rows =
+             List.map
+               (fun (f : Llm_provider.Provider_files.file_object) ->
+                  `Assoc
+                    [ ("file_id", `String f.Llm_provider.Provider_files.id)
+                    ; ("filename", `String f.Llm_provider.Provider_files.filename)
+                    ; ("bytes", `Int f.Llm_provider.Provider_files.bytes)
+                    ])
+               files
+           in
+           Keeper_tool_execution.of_tool_result
+             (Tool_result.make_ok
+                ~tool_name:name
+                ~start_time:0.0
+                ~data:(`Assoc [ ("ok", `Bool true); ("count", `Int (List.length rows)); ("files", `List rows) ])
+                ())))
+    | _ -> masc_file_failure ("unknown file tool " ^ name))
+  | _ ->
+    masc_file_failure "masc_file requires the server root switch + net (unavailable)"
+;;
+
 
 (* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the caller's
    fusion runs (in-progress + recently completed). [fusion_status_json] is the

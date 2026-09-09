@@ -117,13 +117,13 @@ let load_keepers (base_path : string) : keeper list * string option =
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
 let load_active_tasks (base_path : string) :
-    task list * Masc_domain.task list * string option =
+    task list * Masc_domain.task list * string option * Masc_tui_task_flow.t option =
   let config = Workspace_core.default_config base_path in
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], [], Some ("task backlog unavailable: " ^ err)
+      [], [], Some ("task backlog unavailable: " ^ err), None
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -155,7 +155,9 @@ let load_active_tasks (base_path : string) :
       , observation.observed_backlog.tasks
       , (match recovery_error, goal_link_error with
          | Some recovery, _ -> Some recovery
-         | None, other -> other) )
+         | None, other -> other)
+      , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ())
+                observation.observed_backlog.tasks) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
 let apply_keeper_log_snapshot (state : state)
@@ -225,10 +227,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let tasks, tasks_domain, tasks_error = load_active_tasks base_path in
+  let tasks, tasks_domain, tasks_error, task_flow = load_active_tasks base_path in
   state.tasks_domain <- tasks_domain;
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
+  state.task_flow <- task_flow;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
@@ -356,6 +359,7 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.task_flow <- None;
   state.tasks_error <- None;
   state.keepers <- [];
   state.keepers_error <- None;
@@ -473,6 +477,14 @@ let decode_board_post ?(require_body = false) json =
      fact. Absent reads as the creation time, which is what an untouched post's
      [updated_at] holds anyway -- so a server too old to send it degrades to
      "as old as it looks" rather than to a blank column. *)
+  let created_at_epoch =
+    match Yojson.Safe.Util.member "created_at" json with
+    | `Float value -> Some value
+    | `Int value -> Some (Float.of_int value)
+    | `Intlit raw -> float_of_string_opt raw
+    | `String value -> float_of_string_opt value
+    | _ -> None
+  in
   let updated_at =
     match Yojson.Safe.Util.member "updated_at" json with
     | `Float value -> Some value
@@ -504,7 +516,7 @@ let decode_board_post ?(require_body = false) json =
       bp_updated_at =
         (match updated_at with
          | Some updated_at -> updated_at
-         | None -> Option.value (float_of_string_opt bp_created_at) ~default:0.);
+         | None -> Option.value created_at_epoch ~default:0.);
       bp_hearth;
       bp_kind;
     }
@@ -1337,6 +1349,11 @@ let load_fusion_runs ~(host : string) ~(port : int) :
   | Ok json -> Tui_decode.decode_fusion_snapshot json
 
 (** Load one exact Fusion run/evidence projection. *)
+let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
+  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id with
+  | Error err -> Error ("Fusion Board original load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_historical_detail ~reference json
+
 let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Tui_decode.fusion_detail, string) result =
   match fetch_fusion_detail ~host ~port ~run_id with
@@ -1653,16 +1670,11 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
             rows))
 
 let load_runtime_config_view ~(host : string) ~(port : int) :
-    (string * string list, string) result =
+    (string * string list * Masc_tui_runtime_config_view.metadata, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error err -> Error ("runtime config load failed: " ^ err)
   | Ok json ->
-    let member key =
-      match json with
-      | `Assoc fields -> List.assoc_opt key fields
-      | _ -> None
-    in
-    (match member "path", member "source_text" with
-     | Some (`String path), Some (`String text) ->
-       Ok (path, sanitize_view_lines (String.split_on_char '\n' text))
-     | _ -> Error "runtime config response missing path/source_text")
+      match Masc_tui_runtime_config_view.decode json with
+      | Error detail -> Error ("runtime config decode failed: " ^ detail)
+      | Ok reading -> Ok (reading.path,
+          sanitize_view_lines (String.split_on_char '\n' reading.source_text), reading.metadata)

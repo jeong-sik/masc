@@ -155,6 +155,10 @@ val exact_snapshot_reference :
 
 val exact_snapshot_canonical_bytes : exact_checkpoint_snapshot -> string
 
+(** Immutable message values decoded from these same canonical bytes. No second
+    file read or re-encoding participates in their source identity. *)
+val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.message list
+
 (** Strictly decode exact canonical bytes and derive their reference without
     re-encoding. *)
 val exact_snapshot_of_canonical_bytes :
@@ -242,7 +246,60 @@ val save_agent_core_if_source :
   Agent_core.Checkpoint.t ->
   checkpoint_installation
 
+(** Install only if no canonical checkpoint exists, under the same stable
+    session lock as source CAS. A concurrently created checkpoint produces
+    [Source_changed]; corrupt/unreadable existing bytes are never overwritten.
+    Installation and durability semantics match [save_agent_core_if_source]. *)
+val save_agent_core_if_absent : session_dir:string -> Agent_core.Checkpoint.t ->
+  checkpoint_installation
+
+(** Retain an accepted immutable checkpoint outside rolling history. The path
+    is derived internally from its reference, under [session_dir]. Existing
+    bytes must validate against that exact reference before any write; corrupt
+    evidence is never repaired. An identical retry durably rewrites the same
+    bytes to reconfirm fsync after an earlier uncertain publication.
+
+    [Installed] describes the retained artifact, not the latest canonical file.
+    Only an installation without durability uncertainty permits a journal to
+    reference it. Persist these bytes before the journal Suspend CAS; a failed
+    CAS may leave an unreferenced artifact, which this API never expires or
+    prunes. These bytes are accepted evidence, not authority to roll the shared
+    canonical conversation back: cooperative A continuation must preserve B's
+    newer shared history and use an explicit settled boundary and original
+    admitted input. Exact runtime recovery remains a separate contract.
+
+    Whole-session cleanup (including shutdown [remove_session_dir]) can remove
+    this directory. Runtime journal lifecycle integration must settle or protect
+    owned continuations before that cleanup. Owner/native callers, those cleanup
+    guards, and eventual explicit reclamation are not wired by this primitive. *)
+val retain_exact_snapshot :
+  session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
+
+(** Read only the artifact addressed by the complete accepted reference, under
+    the stable session lock. Validates immutable bytes, trace and turn count;
+    returns their snapshot or a typed error. Never falls back to the latest
+    canonical checkpoint, rolling history, or an empty context. A caller must
+    load and validate the bytes before a Resume CAS: possession of a reference
+    alone proves no checkpoint availability. Reload after an uncertain write
+    establishes byte identity, not fsync; successful retention must reconfirm
+    durability before a new journal reference is committed. *)
+val load_retained_exact_snapshot :
+  session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (exact_checkpoint_snapshot, checkpoint_cas_error) result
+
 module For_testing : sig
+  val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause the accepted history-link syscall job. The hook must not perform
+      Eio effects; the caller retains its checkpoint transaction until the
+      syscall job completes. *)
+
+  val retain_exact_snapshot_with_writer :
+    write_checkpoint_bytes:
+      (on_durable_commit:(unit -> unit) -> ownership_root:string ->
+       path:string -> bytes:string ->
+       (Keeper_fs.durable_commit_outcome, Keeper_fs.durable_write_error) result) ->
+    session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
+
   val save_agent_core_if_source_with_observer :
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->

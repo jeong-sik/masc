@@ -8,7 +8,7 @@
 
 open Masc_tui_types
 
-type memory_state =
+type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary
   | Memory_warning
   | Memory_degraded

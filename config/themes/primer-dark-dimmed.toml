@@ -1,0 +1,20 @@
+name = "primer-dark-dimmed"
+light = false
+
+[palette]
+base00 = "1c2128"
+base01 = "373e47"
+base02 = "444c56"
+base03 = "545d68"
+base04 = "768390"
+base05 = "909dab"
+base06 = "adbac7"
+base07 = "cdd9e5"
+base08 = "f47067"
+base09 = "e0823d"
+base0a = "c69026"
+base0b = "57ab5a"
+base0c = "96d0ff"
+base0d = "539bf5"
+base0e = "e275ad"
+base0f = "ae5622"

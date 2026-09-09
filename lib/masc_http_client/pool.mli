@@ -46,6 +46,12 @@ val default_config : config
 (** [{ max_idle_per_host = 8; max_total_idle = 256;
        idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0 }]. *)
 
+val shutdown : t -> unit
+(** Idempotently stop accepting idle connections and close parked clients.
+    Call before leaving a short-lived switch: client fibers must be closed
+    before that switch can finish joining them. In-flight requests must have
+    completed; late releases close their clients instead of parking them. *)
+
 val create :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
@@ -154,11 +160,17 @@ val request_streaming :
   url:string ->
   ?headers:(string * string) list ->
   ?body:string ->
+  ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
   (stream_outcome, string) result
 (** [request_streaming t ~clock ~idle_timeout_sec ~method_ ~url ~on_chunk ()]
     issues one request and calls [on_chunk] with each body chunk as it arrives.
+
+    [on_response], when supplied, runs once after response headers arrive and
+    before any body chunk is delivered, including for non-success statuses.
+    It lets a streaming protocol establish response identity before consuming
+    data. Exceptions propagate through the normal connection cleanup path.
 
     The connection lifecycle matches {!request}: parked on success, closed on
     error, released under cancellation.

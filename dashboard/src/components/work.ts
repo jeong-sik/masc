@@ -1,3 +1,4 @@
+import { GoalProofStatus } from './goals/goal-proof'
 // MASC Dashboard — Work Tab (keeper-v2 goal/task layout)
 // Surface: Goal list (priority-sorted), Task terminology, inline expandable gate detail,
 // claimable backlog, the 5 KPI strip, and WorkAside operator triage panel.
@@ -7,7 +8,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers, executionTaskTotal } from '../store'
-import { goalTreeData } from '../goal-tree-state'
+import { goalTreeData, goalTreeError } from '../goal-tree-state'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { BoardSurface } from './board/board-surface'
@@ -26,6 +27,7 @@ import { openTaskDetail } from './goals/task-detail-state'
 import { goalPhaseLabel } from './goals/goal-helpers'
 import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
+import { GoalAssignPicker } from './goals/goal-assign-picker'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
 import { VerifyQueue } from './verification/verify-queue'
@@ -305,6 +307,7 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
   return {
     id: node.id,
     title: node.title,
+    verification: node.verification,
     metric: node.metric,
     target_value: node.target_value,
     due_date: node.due_date,
@@ -733,6 +736,7 @@ function GoalCard({
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
         <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
+        <${GoalProofStatus} proof=${goalNode?.verification ?? goal.verification} />
         ${goal.metric ? html`
           <span
             class="wk-metric mono"
@@ -1174,7 +1178,7 @@ function WorkAside({
         <span class="wka-bar-t">운영 상태</span>
         <span class="wka-bar-live">
           <span class="wka-livedot" aria-hidden="true"></span>
-          ${counts.active} active
+          ${goalTreeError.value ? '목표 확인 불가' : `${counts.active} active`}
         </span>
         <button
           type="button"
@@ -1212,7 +1216,9 @@ function WorkAside({
             지금 상황
             ${flagged.length > 0 ? html`<span class="wka-h-n bad">${flagged.length}</span>` : null}
           </div>
-          ${flagged.length === 0
+          ${goalTreeError.value
+            ? html`<div role="alert" data-testid="wka-goal-source-error">목표 상태 확인 불가 · ${goalTreeError.value}</div>`
+            : flagged.length === 0
             ? html`<div class="wka-calm mono" data-testid="wka-flagged-calm">주의 목표 없음 · 정상 순환</div>`
             : html`
               <div class="wka-list" data-testid="wka-flagged-list">
@@ -1323,6 +1329,7 @@ function WorkSurfaceV2() {
   const goalList = goals.value
   const executionTasks = tasks.value
   const goalTreeSnapshot = goalTreeData.value
+  const goalSourceError = goalTreeError.value
   const goalStoreTasks = useMemo(
     () => collectGoalTreeTasks(goalTreeSnapshot?.tree ?? []),
     [goalTreeSnapshot],
@@ -1645,10 +1652,11 @@ function WorkSurfaceV2() {
           </div>
         </header>
 
+          ${goalSourceError ? html`<div role="alert" data-testid="work-goal-source-error">목표 데이터를 읽을 수 없습니다 · ${goalSourceError}</div>` : null}
           <section class="wk-kpis" data-testid="work-kpis">
             <div class="wk-kpi primary">
               <div class="wk-kpi-k">활성 목표</div>
-              <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
+              <div class="wk-kpi-v brass" data-testid="kpi-goals">${goalSourceError ? '—' : totals.goals}</div>
             </div>
             <div class="wk-kpi">
               <div class="wk-kpi-k">전체 작업</div>
@@ -1692,6 +1700,10 @@ function WorkSurfaceV2() {
                     </span>
                     <span class="wk-spacer"></span>
                     <span class="wk-bl-prio mono">P${t.priority ?? 0}</span>
+                    ${/* Goal presence is goal_id, not goalTitle: a title lookup
+                          that misses also leaves goalTitle undefined, and
+                          masc_task_set_goal refuses an already-assigned task. */
+                      t.goal_id ? null : html`<${GoalAssignPicker} taskId=${t.id} />`}
                     <button type="button" class="wk-task-claim" onClick=${() => claimTask(t.id)}>＋ claim</button>
                   </div>
                 `}

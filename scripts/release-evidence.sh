@@ -11,10 +11,11 @@ The bundle includes:
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
   - dashboard read-path captures for briefing + project snapshot
-  - Keeper V01-V15 compile/regression conformance logs + correlated bundle
+  - verified Keeper V01-V15 compile/regression conformance receipt
   - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
-Raw files are written next to OUTPUT_MARKDOWN.
+Only the Markdown report is written next to release artifacts.
+Raw captures and lifecycle logs stay in private temporary storage and are removed on exit.
 EOF
 }
 
@@ -47,35 +48,40 @@ for smoke_fixture in runtime.toml agent-core-models-overlay.toml; do
 done
 
 mkdir -p "$(dirname "$OUTFILE")"
-out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
+
+# Publish only the report. Keep probe responses, logs and credentials in temporary
+# storage so they cannot become distribution assets.
 
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
+# Everything the run writes except the report itself, kept off $OUTFILE's
+# directory so a new capture cannot land beside the binaries by default.
+scratch_dir="$tmp/scratch"
+mkdir -p "$scratch_dir"
 base_path="$tmp/base"
 prefix_dir="$tmp/prefix"
 installed_bin="$prefix_dir/masc"
-server_log="$out_dir/server.log"
-health_json="$out_dir/health.json"
-initialize_headers="$out_dir/initialize.headers"
-initialize_body="$out_dir/initialize.body"
-initialize_json="$out_dir/initialize.json"
-tools_headers="$out_dir/tools-list.headers"
-tools_body="$out_dir/tools-list.body"
-tools_json="$out_dir/tools-list.json"
-status_headers="$out_dir/masc-status.headers"
-status_body="$out_dir/masc-status.body"
-status_json="$out_dir/masc-status.json"
-briefing_headers="$out_dir/dashboard-briefing.headers"
-briefing_body="$out_dir/dashboard-briefing.body"
-briefing_json="$out_dir/dashboard-briefing.json"
-project_snapshot_headers="$out_dir/project-snapshot.headers"
-project_snapshot_body="$out_dir/project-snapshot.body"
-project_snapshot_json="$out_dir/project-snapshot.json"
-dev_token_json="$out_dir/dashboard-dev-token.json"
-install_version_stdout="$out_dir/install-version.stdout"
-install_version_stderr="$out_dir/install-version.stderr"
-lifecycle_dir="$out_dir/keeper-full-lifecycle"
+server_log="$scratch_dir/server.log"
+health_json="$scratch_dir/health.json"
+initialize_headers="$scratch_dir/initialize.headers"
+initialize_body="$scratch_dir/initialize.body"
+initialize_json="$scratch_dir/initialize.json"
+tools_headers="$scratch_dir/tools-list.headers"
+tools_body="$scratch_dir/tools-list.body"
+tools_json="$scratch_dir/tools-list.json"
+status_headers="$scratch_dir/masc-status.headers"
+status_body="$scratch_dir/masc-status.body"
+status_json="$scratch_dir/masc-status.json"
+briefing_headers="$scratch_dir/dashboard-briefing.headers"
+briefing_body="$scratch_dir/dashboard-briefing.body"
+briefing_json="$scratch_dir/dashboard-briefing.json"
+project_snapshot_headers="$scratch_dir/project-snapshot.headers"
+project_snapshot_body="$scratch_dir/project-snapshot.body"
+project_snapshot_json="$scratch_dir/project-snapshot.json"
+dev_token_json="$scratch_dir/dashboard-dev-token.json"
+install_version_stdout="$scratch_dir/install-version.stdout"
+install_version_stderr="$scratch_dir/install-version.stderr"
+lifecycle_dir="$scratch_dir/keeper-full-lifecycle"
 lifecycle_bundle_json="$lifecycle_dir/bundle.json"
-lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 
 stop_server() {
   if [[ -n "${SERVER_PID:-}" ]]; then
@@ -289,15 +295,15 @@ MCP_URL="${BASE_URL}/mcp"
 copy_install_smoke
 installed_version="$(capture_installed_version)"
 
-env \
+(cd "$base_path" && exec env \
   MASC_BASE_PATH="$base_path" \
   MASC_ADMIN_TOKEN= \
   MASC_INTERNAL_MCP_TOKEN= \
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_KEEPER_BOOTSTRAP_ENABLED=false \
-  "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
+  MASC_KEEPER_AUTONOMOUS_ENABLED=false \
+  "$installed_bin" --base-path "$base_path" --port "$PORT") >"$server_log" 2>&1 &
 SERVER_PID=$!
 
 if ! wait_for_http "${BASE_URL}/health"; then
@@ -382,8 +388,7 @@ python3 - \
   "$project_snapshot_json" \
   "$initialize_json" \
   "$server_log" \
-  "$lifecycle_bundle_json" \
-  "$lifecycle_bundle_md" <<'PY'
+  "$lifecycle_bundle_json" <<'PY'
 import json
 import pathlib
 import sys
@@ -405,7 +410,6 @@ from datetime import datetime, timezone
     initialize_json,
     server_log,
     lifecycle_bundle_json,
-    lifecycle_bundle_md,
 ) = sys.argv[1:]
 
 def load(path):
@@ -432,6 +436,40 @@ briefing_keys = sorted(briefing.keys())[:10]
 project_snapshot_keys = sorted(project_snapshot.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# The matrix is rendered here from the bundle this script already loaded, not
+# read back out of the scratch directory. The receipt is the only thing that
+# outlives the run -- every capture beside it is removed on exit -- so a row
+# that lives in a deleted file is a row the reader cannot check.
+def markdown_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def lifecycle_matrix(bundle):
+    scenarios = bundle.get("scenarios", [])
+    if not scenarios:
+        return "No scenario rows were recorded in the lifecycle bundle."
+    rows = [
+        "| ID | Scenario | Status | Authority transition | User outcome |",
+        "|---|---|---|---|---|",
+    ]
+    for row in scenarios:
+        rows.append(
+            "| "
+            + " | ".join(
+                markdown_cell(row.get(field, "<missing>"))
+                for field in (
+                    "id",
+                    "name",
+                    "status",
+                    "authority_transition",
+                    "user_outcome",
+                )
+            )
+            + " |"
+        )
+    return "\n".join(rows)
 
 md = f"""# Release Evidence Bundle
 
@@ -478,23 +516,18 @@ md = f"""# Release Evidence Bundle
 - Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
 - Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
 - Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
-- Human-readable matrix: `{pathlib.Path(lifecycle_bundle_md).resolve().relative_to(pathlib.Path(outfile).resolve().parent)}`
+- Verification: source SHA, scenario results, log digests, and correlation bundle were verified before this receipt was rendered.
 
-## Raw Captures
+### Verified lifecycle matrix
 
-- `install-version.stdout`
-- `install-version.stderr`
-- `health.json`
-- `initialize.headers`
-- `initialize.json`
-- `tools-list.json`
-- `masc-status.json`
-- `dashboard-briefing.json`
-- `project-snapshot.json`
-- `server.log`
-- `keeper-full-lifecycle/bundle.json`
-- `keeper-full-lifecycle/bundle.md`
-- `keeper-full-lifecycle/v01-*.log` through `v15-*.log`
+{lifecycle_matrix(lifecycle)}
+
+## Capture Retention
+
+Raw HTTP captures, authentication material, server logs, and lifecycle bundle
+files remain in private temporary storage and are removed on exit. They are
+not release attachments. The verified lifecycle matrix above is rendered into
+this report and is the only capture it retains.
 
 ## Re-run
 

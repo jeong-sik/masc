@@ -184,6 +184,28 @@ let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())
    named the file; [day_key] is the writer's own key (#27143). *)
 let format_utc_date_of (t : float) = Jsonl_writer.day_key ~ts:t
 
+(* A log line is read by people and by models, and both pay per token. A field
+   the producer did not measure carries no fact, so it is left out rather than
+   rendered as a placeholder: [cache_n=-] on every turn of a lane that never
+   reports a cache says nothing that its absence does not (2026-09-09). [false]
+   and [0] are values, not absences, and are rendered. Only the message text is
+   shaped here; the ring entry's typed fields are untouched. *)
+module Kv = struct
+  type field = string * string option
+
+  let str key value : field = key, Some value
+  let int key value : field = key, Some (string_of_int value)
+  let bool key value : field = key, Some (string_of_bool value)
+  let opt key value : field = key, value
+  let opt_map key render value : field = key, Option.map render value
+
+  let render (fields : field list) =
+    fields
+    |> List.filter_map (fun (key, value) ->
+         Option.map (fun value -> key ^ "=" ^ value) value)
+    |> String.concat " "
+end
+
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.
     Lock-free: single-writer (log functions), multi-reader (API).
@@ -1003,64 +1025,36 @@ end
 module Workspace = Make(struct let name = "Workspace" end)
 module Mcp = Make(struct let name = "MCP" end)
 module Auth = Make(struct let name = "Auth" end)
-module Retry = Make(struct let name = "Retry" end)
 module Backend = Make(struct let name = "Backend" end)
 module Session = Make(struct let name = "Session" end)
-module Cancel = Make(struct let name = "Cancellation" end)
 module Sub = Make(struct let name = "Subscriptions" end)
-module Spawn = Make(struct let name = "Spawn" end)
 module Pulse = Make(struct let name = "Pulse" end)
-module ModelClient = Make(struct let name = "ModelClient" end)
 module Orchestrator = Make(struct let name = "Orchestrator" end)
 module BoardLog = Make(struct let name = "Board" end)
+module MsxLog = Make(struct let name = "Msx" end)
 module Metrics = Make(struct let name = "Metrics" end)
 module Dashboard = Make(struct let name = "Dashboard" end)
-module Trpg = Make(struct let name = "Trpg" end)
-module Feed = Make(struct let name = "Feed" end)
 module Telemetry = Make(struct let name = "Telemetry" end)
-module Noosphere = Make(struct let name = "Noosphere" end)
-module CmdPlane = Make(struct let name = "CmdPlane" end)
 module Gate = Make(struct let name = "Gate" end)
-module Social = Make(struct let name = "Social" end)
 module Transport = Make(struct let name = "Transport" end)
-module Gc = Make(struct let name = "GC" end)
-module Reputation = Make(struct let name = "Reputation" end)
 module Keeper = Make(struct let name = "Keeper" end)
 (* RFC-0058 Phase 8.1.5: dedicated runtime namespace so partial-catalog
    warnings and other runtime-domain events route through a stable
    channel that alerting/dashboard filters can target without false
    positives from the Keeper namespace. *)
 module Runtime = Make(struct let name = "Runtime" end)
-module Memory = Make(struct let name = "Memory" end)
 module Mention = Make(struct let name = "Mention" end)
 module Misc = Make(struct let name = "Misc" end)
 module Identity = Make(struct let name = "Identity" end)
-module Institution = Make(struct let name = "Institution" end)
 module Pages = Make(struct let name = "Pages" end)
 module Config = Make(struct let name = "Config" end)
 module Task = Make(struct let name = "Task" end)
 module Http = Make(struct let name = "Http" end)
-module Langfuse = Make(struct let name = "Langfuse" end)
 module Server = Make(struct let name = "Server" end)
-module Dispatch = Make(struct let name = "Dispatch" end)
-module BoardPg = Make(struct let name = "BoardPg" end)
-module MemoryPg = Make(struct let name = "MemoryPg" end)
-module MemoryJsonl = Make(struct let name = "MemoryJsonl" end)
-module AutoResponder = Make(struct let name = "AutoResponder" end)
-module Env = Make(struct let name = "Env" end)
-module Level2 = Make(struct let name = "Level2" end)
 module TaskState = Make(struct let name = "TaskState" end)
-module Inline = Make(struct let name = "Inline" end)
-module Protocol = Make(struct let name = "Protocol" end)
-module AlwaysOn = Make(struct let name = "AlwaysOn" end)
 module KeeperExec = Make(struct let name = "KeeperExec" end)
 module LocalWorker = Make(struct let name = "LocalWorker" end)
-module Worker = Make(struct let name = "Worker" end)
-module Sse = Make(struct let name = "SSE" end)
-module Planner = Make(struct let name = "Planner" end)
-module Compact = Make(struct let name = "Compact" end)
 module Harness = Make(struct let name = "Harness" end)
-module Discovery = Make(struct let name = "Discovery" end)
 
 (* Logging-consistency migration (refactor/logging-consistency-harness):
    modules added so that former top-level [Log.info ~ctx:"<name>"] call sites
@@ -1069,11 +1063,7 @@ module Discovery = Make(struct let name = "Discovery" end)
    string is the original [~ctx] value verbatim; the module identifier is its
    Capitalized form. See docs/LOGGING.md. *)
 module Otel = Make(struct let name = "otel" end)
-module Agent_health = Make(struct let name = "agent_health" end)
-module Relay = Make(struct let name = "relay" end)
 module Runtime_verify = Make(struct let name = "runtime_verify" end)
-module Checkpoint = Make(struct let name = "checkpoint" end)
-module Jsonl_atomic = Make(struct let name = "jsonl_atomic" end)
 module Mcp_transport = Make(struct let name = "mcp_transport" end)
 module Startup = Make(struct let name = "startup" end)
 module Model_inference_metrics = Make(struct let name = "model_inference_metrics" end)

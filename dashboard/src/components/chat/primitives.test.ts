@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { render, options } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
+import type { ChatBlock, KeeperByteAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import {
   CHAT_COMPOSER_COMMAND_HEADER_SUFFIX,
@@ -298,7 +298,7 @@ describe('ChatTranscript', () => {
             id: 'slack-thread-post-done',
             role: 'assistant',
             source: 'direct_assistant',
-            label: 'kidsnote',
+            label: 'exampleorg',
             text: '',
             rawText: '',
             details: {
@@ -446,6 +446,40 @@ describe('ChatTranscript', () => {
     expect(replayed?.textContent).toContain('aaaaaaaaaaaa')
     expect(continued?.textContent).toContain('후속 작업을 이어갔습니다')
     expect(container.querySelectorAll('[data-chat-approval-id="appr_01typed"]')).toHaveLength(3)
+  })
+
+  it('renders a failed continuation as its own typed card', () => {
+    // #32956: the turn that received the replay failed after the provider
+    // answered. The card says so and says the approval is not re-delivered.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'approval-continuation-failed',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '',
+            approvalLifecycle: {
+              approvalId: 'appr_02failed',
+              toolName: 'Execute',
+              phase: 'continuation_failed',
+              artifactSha256: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const failed = container.querySelector('[data-chat-approval-lifecycle="continuation_failed"]')
+    expect(failed).not.toBeNull()
+    expect(failed?.textContent).toContain('이어가기 실패')
+    expect(failed?.textContent).toContain('승인 결과를 받은 턴이 실패')
+    expect(failed?.textContent).toContain('다시 전달하지 않습니다')
+    expect(failed?.textContent).toContain('appr_02failed')
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
@@ -2130,6 +2164,70 @@ describe('ChatComposer multimodal', () => {
     )
   }
 
+  it('adds a URL reference chip from the 🔗 input and sends its carrier block', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: '이 그림 어때?', onSend })
+
+    const refButton = container.querySelector('[title="이미지 참조 첨부 (URL · file_id)"]') as HTMLButtonElement
+    refButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    const refInput = container.querySelector('[data-testid="composer-ref-input"] input') as HTMLInputElement
+    expect(refInput).not.toBeNull()
+    fireEvent.input(refInput, { target: { value: 'https://example.test/a.png' } })
+    fireEvent.keyDown(refInput, { key: 'Enter' })
+    await new Promise((r) => setTimeout(r, 10))
+
+    // The input row closes and a reference chip with the URL stays.
+    expect(container.querySelector('[data-testid="composer-ref-input"]')).toBeNull()
+    const chip = container.querySelector('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toContain('https://example.test/a.png')
+    expect(chip?.textContent).toContain('URL 참조')
+
+    const sendButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent === '전송') as HTMLButtonElement
+    sendButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const payload = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(payload?.userBlocks).toEqual([
+      { type: 'image', url: 'https://example.test/a.png' },
+      { type: 'text', text: '이 그림 어때?' },
+    ])
+    const attachBlock = payload?.blocks.find(block => block.t === 'attach') as { ref?: unknown; via?: string } | undefined
+    expect(attachBlock?.ref).toEqual({ kind: 'url', url: 'https://example.test/a.png' })
+    expect(attachBlock?.via).toBe('URL 참조')
+  })
+
+  it('turns a pasted bare image URL into a reference chip, and leaves prose URLs as text', async () => {
+    renderComposer()
+    const textarea = container.querySelector('.composer-textarea') as HTMLTextAreaElement
+
+    // Bare image URL: becomes a chip, and no text lands in the draft.
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [],
+        getData: () => 'https://example.test/shot.png',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(container.querySelector('[data-chat-attachment-draft^="ref-url-"]')).not.toBeNull()
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).value).toBe('')
+
+    // A URL inside prose pastes as text, not as a chip.
+    fireEvent.paste(container.querySelector('.composer-textarea') as HTMLTextAreaElement, {
+      clipboardData: {
+        items: [],
+        getData: () => '문서는 https://example.test/doc.html 를 봐',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const chips = container.querySelectorAll('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chips.length).toBe(1)
+  })
+
   it('renders attachment and voice buttons', () => {
     Object.assign(globalThis.navigator, { mediaDevices: { getUserMedia: vi.fn() } })
     Object.assign(globalThis, { MediaRecorder: vi.fn() })
@@ -2279,7 +2377,7 @@ describe('ChatComposer multimodal', () => {
   })
 
   it('does not derive client action ids from attachment payloads', async () => {
-    const baseAttachment: Omit<KeeperConversationAttachment, 'data'> = {
+    const baseAttachment: Omit<KeeperByteAttachment, 'data'> = {
       id: 'att-same',
       type: 'image',
       name: 'screen.png',
@@ -3870,18 +3968,27 @@ describe('fusion chat card', () => {
     fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
     await flushUi()
 
-    // Judge synthesis renders to real markdown elements immediately (not collapsed).
-    const judge = container.querySelector('[data-fusion-judge]')
-    expect(judge?.querySelector('strong')?.textContent).toBe('Consensus')
+    // Judge synthesis renders to real markdown elements, not a collapsed dump.
+    // AsyncMarkdownDiv reaches those elements through a dynamic import of the
+    // markdown renderer, so this waits on the elements rather than on a fixed
+    // 30ms: that sleep passed on an idle machine and, under a full-suite run,
+    // delivered fewer scheduler turns than the import needed.
+    const judge = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-judge]')
+      expect(el?.querySelector('strong')?.textContent).toBe('Consensus')
+      return el
+    })
     // synthesis takes precedence over resolved_answer when both present.
     expect(judge?.textContent).toContain('agreed point')
     expect(judge?.textContent).not.toContain('PLAIN RESOLVED')
     // Panel answer markdown renders to real elements once its row is opened.
     // Scope to the panel — the judge synthesis above also contains an <li>.
     fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
-    await flushUi()
-    const panel = container.querySelector('[data-fusion-panel]')
-    expect(panel?.querySelector('h2')?.textContent).toBe('Heading One')
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-panel]')
+      expect(el?.querySelector('h2')?.textContent).toBe('Heading One')
+      return el
+    })
     expect(panel?.querySelector('li')?.textContent).toContain('bullet item')
   })
 

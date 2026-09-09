@@ -354,10 +354,9 @@ let keepers_section now : section =
   in
   let format_entry (e : Keeper_registry.registry_entry) =
     let phase_str = Keeper_state_machine.phase_to_string e.phase in
-    let since =
-      match e.phase with
-      | _ -> format_elapsed_float now e.started_at
-    in
+    (* The phase used to be matched here and every arm answered the same, so
+       the row's age never depended on it. Read [started_at] and say so. *)
+    let since = format_elapsed_float now e.started_at in
     let last_info =
       match e.last_error with
       | Some err ->

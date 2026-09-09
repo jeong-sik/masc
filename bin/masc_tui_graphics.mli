@@ -13,10 +13,23 @@
 type placement = {
   columns : int;
   rows : int;
-      (** The cell box the image is asked to fit inside. The terminal scales
-          to it, so the caller sizes the box from the frame it is drawing and
-          does not have to know the image's pixel dimensions. *)
+      (** The cell box an iTerm2 placement is asked to fit inside. iTerm2 takes
+          both dimensions together with [preserveAspectRatio=1], so a box wider
+          than the image's shape leaves margin rather than stretching it.
+
+          The Kitty placements do not take a box. Kitty has no such flag: the
+          protocol says "if only one of either r or c is specified, the other
+          one is computed based on the source image aspect ratio, so that the
+          image is displayed without distortion" -- and, by the same sentence,
+          giving both scales the image into that exact rectangle. So those
+          functions take the row count alone and let the terminal derive the
+          width. *)
 }
+
+val fit_rows : cell_pixels:(int * int) option -> image_pixels:(int * int) option
+  -> columns:int -> rows:int -> int
+(** Aspect-preserving rows that fit both terminal dimensions. Without measured
+    pixel geometry, retain the requested rows rather than inventing cell shape. *)
 
 val query : string
 (** Ask the terminal whether it speaks the protocol. Sends a one-pixel image
@@ -48,7 +61,35 @@ val payload_media_type : string
     identifies bytes whether they are this, before placing -- after placing
     there is nobody to ask. *)
 
-val place : data:string -> placement -> string
+val place_rgb
+  :  data:string
+  -> pixel_width:int
+  -> pixel_height:int
+  -> rows:int
+  -> string
+(** Bytes that put a raw RGB frame -- three bytes per pixel, row-major, no
+    container -- on the terminal at the cursor, scaled into the cell box.
+
+    For a caller holding a frame rather than a file: no encoder stands between
+    the pixels and the wire. [pixel_width] and [pixel_height] are what the
+    format cannot carry itself and the terminal needs to read the payload.
+
+    [""] when [data] is empty or its length is not
+    [pixel_width * pixel_height * 3] -- a frame that disagrees with its own
+    dimensions is refused here rather than drawn as whatever the terminal
+    makes of it.
+
+    Chunked and silent for the same reasons as {!place}. *)
+
+val replace_rgb : image_id:int -> placement_id:int -> data:string
+  -> pixel_width:int -> pixel_height:int -> rows:int -> string
+(** Transmit and display a replacement under a stable image and placement ID.
+    The caller owns both IDs and must retire the image when leaving its surface. *)
+
+val delete_image : image_id:int -> string
+(** Delete this image's placements and free its stored pixels. *)
+
+val place : data:string -> rows:int -> string
 (** Bytes that put [data] -- the contents of a PNG file -- on the terminal at
     the cursor.
 

@@ -47,20 +47,82 @@ let pending_hitl_approval_keeper_names config =
   pending_hitl_approval_counts config |> Result.map (List.map fst)
 ;;
 
+(* Pending HITL counts are state the sweep reads every 30 s, not events: a
+   line per sweep while nothing changed was five keepers times 120 lines an
+   hour (#34643). A keeper's count is announced when it differs from the count
+   last announced for it, including its return to zero. *)
+type hitl_announcement =
+  { keeper_name : string
+  ; pending_count : int
+  }
+
+let pending_hitl_announcements ~announced ~counts =
+  let changed =
+    List.filter_map
+      (fun (name, count) ->
+         match List.assoc_opt name announced with
+         | Some previous when previous = count -> None
+         (* Never announced, or announced with another count: news either
+            way. *)
+         | Some _ | None -> Some { keeper_name = name; pending_count = count })
+      counts
+  in
+  (* [counts] lists the keepers the workspace config knows with a non-zero
+     queue. A keeper that left it is reported as zero: it either drained, or
+     it was removed from the config while entries stayed queued, and in the
+     second case the sweep itself no longer sees those entries either. *)
+  let cleared =
+    List.filter_map
+      (fun (name, count) ->
+         if count > 0 && not (List.mem_assoc name counts)
+         then Some { keeper_name = name; pending_count = 0 }
+         else None)
+      announced
+  in
+  changed @ cleared
+;;
+
+(* The counts last announced, keyed by workspace and keeper. Process-local
+   memory for log deduplication, not authority: after a process restart the
+   first sweep announces every non-zero count once more; stopping and
+   starting the sweep inside one process keeps the memory. The sweep is one
+   pulse fiber per workspace, so the read-modify-write below is not raced;
+   a second sweep on the same workspace would at worst announce a line
+   twice, never lose a change. *)
+let announced_pending_hitl : ((string * string) * int) list Atomic.t =
+  Atomic.make []
+;;
+
+let announce_pending_hitl ~base_path counts =
+  let all = Atomic.get announced_pending_hitl in
+  let announced =
+    List.filter_map
+      (fun ((workspace, name), count) ->
+         if String.equal workspace base_path then Some (name, count) else None)
+      all
+  in
+  List.iter
+    (fun { keeper_name; pending_count } ->
+       Log.Keeper.info
+         "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
+         keeper_name
+         pending_count)
+    (pending_hitl_announcements ~announced ~counts);
+  let others =
+    List.filter (fun ((workspace, _), _) -> not (String.equal workspace base_path)) all
+  in
+  Atomic.set
+    announced_pending_hitl
+    (others @ List.map (fun (name, count) -> (base_path, name), count) counts)
+;;
+
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
   =
   let now = Time_compat.now () in
   let base_path = ctx.config.base_path in
   (* HITL requests are observable inputs, not Keeper-lane ownership. *)
   (match pending_hitl_approval_counts ctx.config with
-   | Ok counts ->
-     List.iter
-       (fun (name, pending_count) ->
-          Log.Keeper.info
-            "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
-            name
-            pending_count)
-       counts
+   | Ok counts -> announce_pending_hitl ~base_path counts
    | Error error ->
      Log.Keeper.error
        "pending HITL visibility unavailable workspace=%s error=%s"

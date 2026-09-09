@@ -71,6 +71,12 @@ product_package_version="$(extract_single '^> Current package version: v\([^ ]*\
 product_changelog_entry="$(extract_single '^> Latest changelog entry: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 product_published_release="$(extract_single '^> Latest published GitHub release: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 spec_baseline="$(extract_single '^> Snapshot baseline: `dune-project` version `\([^`]*\)`$' docs/spec/SPEC-INDEX.md)"
+# The copy-paste install block. Nothing checked it, so it kept the previous
+# release across two of them: v0.33.0 stood while v0.34.0 was Latest, and a
+# reader following the README installed the version before the one the same
+# page announced two paragraphs earlier.
+readme_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.md)"
+readme_ko_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.ko.md)"
 changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
 
 [[ -n "$product_package_version" ]] || fail "missing current package version in docs/PRODUCT-OPERATING-PLAN.md"
@@ -88,21 +94,32 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
 
-# The release the docs name is checked against git, not only against the
-# other doc. Two states are legal: the docs name the newest v* tag in this
-# checkout (the steady state), or they name the current package version (the
-# release runbook's own window: the docs and the version bump land first and
-# the tag follows). Anything else is a doc that fell behind a release. The
-# newest tag is the highest v* by version among the tags the checkout holds,
-# which is the same answer in a full clone and in a shallow CI checkout that
-# fetched tags (pr-check.yml and ci.yml do); git describe is not used
-# because a shallow checkout has no history for it to walk. No v* tag at all
-# is a checkout this comparison cannot run in, and it fails rather than
-# passes.
-latest_release_tag="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
-[[ -n "$latest_release_tag" ]] || fail "no v* tag in this checkout to compare the published release against (git fetch --tags)"
-[[ "v$roadmap_published_release" == "$latest_release_tag" || "$roadmap_published_release" == "$package_version" ]] || \
-  fail "ROADMAP latest published release (v$roadmap_published_release) is neither the newest v* tag ($latest_release_tag) nor the package version ($package_version)"
+[[ -n "$readme_tag" ]] || fail "missing TAG= install pin in README.md"
+[[ -n "$readme_ko_tag" ]] || fail "missing TAG= install pin in README.ko.md"
+# Against the published release, not the package version: the install block
+# fetches a tag from GitHub, and a package version bumped ahead of its tag
+# names a tag that is not there yet.
+[[ "$readme_tag" == "$roadmap_published_release" ]] || \
+  fail "README install TAG ($readme_tag) != latest published release ($roadmap_published_release)"
+[[ "$readme_ko_tag" == "$readme_tag" ]] || \
+  fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
+
+# The same copy-paste block, in the guide the README sends installers to three
+# times over. It was left out when the pin above was added, so the lesson in
+# the comment there -- a block naming the release before the one the page
+# announces -- still had somewhere to happen. Both files are checked against
+# README rather than each other: a pair that agrees on a tag nobody published
+# still hands the reader a 404.
+for install_doc in docs/INSTALL.md docs/INSTALL.ko.md; do
+  install_tag="$(extract_single '^TAG=v\([^ ]*\)$' "$install_doc")"
+  [[ -n "$install_tag" ]] || fail "missing TAG= install pin in $install_doc"
+  [[ "$install_tag" == "$readme_tag" ]] || \
+    fail "$install_doc install TAG ($install_tag) != README install TAG ($readme_tag)"
+done
+
+# PR checks compare checked-in documents only. Repository-global tags can
+# change after this commit without changing its documentation. The release
+# workflow validates its explicit tag with check-version-truth.sh --tag.
 
 require_contains docs/MCP-TEMPLATE.md 'bearer_token_env_var = "MASC_TOKEN"'
 require_contains docs/MCP-TEMPLATE.md 'Authorization: Bearer ${MASC_TOKEN}'
@@ -124,10 +141,12 @@ require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
 
 require_contains README.md 'docs/RELEASE-EVIDENCE.md'
 require_not_contains README.md '/api/v1/command-plane'
-require_contains README.md 'dashboard#monitoring?section=journey'
-require_contains README.md 'dashboard#command?section=operations'
-require_contains README.md 'dashboard#connectors?section=connector-status'
-require_contains README.md 'dashboard#workspace?section=verification'
+# The dashboard route contract lives with the dashboard doc, not the README:
+# the README names the dashboard in one section and the TUI is the front door.
+require_contains docs/DASHBOARD-INTEGRATION.md '#monitoring?section=journey'
+require_contains docs/DASHBOARD-INTEGRATION.md '#command?section=operations'
+require_contains docs/DASHBOARD-INTEGRATION.md '#connectors?section=connector-status'
+require_contains docs/DASHBOARD-INTEGRATION.md '#workspace?section=verification'
 require_not_contains README.md 'dashboard#monitoring/sessions'
 require_not_contains README.md 'dashboard#command/intervene'
 
@@ -195,6 +214,33 @@ if ((${#missing_refs[@]} > 0)); then
   printf '  %s\n' "${missing_refs[@]}" >&2
   exit 1
 fi
+
+# A translated pair is two files carrying one document. Prose wraps differently
+# in each language, so line counts say nothing -- but a heading, a command
+# block and a table row are the same countable things on both sides. An edit
+# that lands in one file only changes one of those counts, which is the drift
+# that leaves a reader of the other language without a section that exists.
+#
+# This counts shapes, not sentences: a stale sentence translated years ago
+# still passes. It catches the coarse case, where one language is simply
+# missing something the other has.
+check_translation_shape() {
+  local english="$1"
+  local translated="$2"
+  local label pattern
+  for label in headings:'^#' commands:'^```' table-rows:'^|'; do
+    pattern="${label#*:}"
+    label="${label%%:*}"
+    local a b
+    a="$(grep -c -- "$pattern" "$english" || true)"
+    b="$(grep -c -- "$pattern" "$translated" || true)"
+    [[ "$a" == "$b" ]] || \
+      fail "$translated has $b $label but $english has $a -- an edit reached one language only"
+  done
+}
+
+check_translation_shape README.md README.ko.md
+check_translation_shape docs/INSTALL.md docs/INSTALL.ko.md
 
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
 

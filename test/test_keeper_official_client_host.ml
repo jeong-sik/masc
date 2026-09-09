@@ -96,13 +96,16 @@ let one_dynamic_tool
       ?(pre_tool_rejects = ref [])
       ?tool_approval
       ?on_result_handoff
+      ?on_tool_boundary
+      ?(runtime_label = "test")
+      ?(name = "effect")
       ~active
       handler
   =
   let tool =
     Agent_core.Tool.create
       ?descriptor
-      ~name:"effect"
+      ~name
       ~description:"test effect"
       ~parameters:[]
       handler
@@ -111,7 +114,7 @@ let one_dynamic_tool
   let projected =
     Host.dynamic_tools
       ~tool_approval
-      ~runtime_label:"test"
+      ~runtime_label
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
       ~tools:[ tool ]
@@ -123,6 +126,7 @@ let one_dynamic_tool
       ~terminal_error
       ~pre_tool_rejects
       ?on_result_handoff
+      ?on_tool_boundary
       ~raw_trace_run:(Some active)
       ()
   in
@@ -290,6 +294,280 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
        fail "ordinary repeated tool produced a terminal-tool stop"
      | None -> fail "reordered object did not produce a typed host stop");
     check (option string) "host stop is not a terminal error" None !terminal_error)
+;;
+
+let scoped_observation : Masc.Keeper_agent_result.tool_call_detail =
+  let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+  { tool_name = "effect"; provider = "fixture"; execution_outcome = Tool_result.Ok
+  ; typed_outcome = None; latency_ms = 1.; task_id = None; route_evidence = None
+  ; input_fingerprint = Some (hash "same-input")
+  ; output_fingerprint = Some (hash "same-output") }
+;;
+
+let prepare_direct_execution () =
+  let module Scope = Masc.Keeper_repetition_scope in
+  let operation =
+    match Keeper_chat_operation.Operation_id.of_string "host-scope-operation" with
+    | Ok operation -> operation
+    | Error _ -> fail "fixture operation ID rejected"
+  in
+  let execution = Scope.Execution.direct_operation operation in
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  (match Scope.Execution.prepare execution ~source ~target with
+   | Ok _ -> () | Error _ -> fail "first attempt admission failed");
+  execution, source, target
+;;
+
+let test_scoped_boundary_spans_official_attempts () =
+  List.iter (fun runtime_label ->
+    with_active_raw_trace (fun ~path:_ ~active ->
+      let module Scope = Masc.Keeper_repetition_scope in
+      let execution, source, previous_target = prepare_direct_execution () in
+      Scope.Execution.observe execution ~target:previous_target scoped_observation;
+      Scope.Execution.observe execution ~target:previous_target scoped_observation;
+      let target = Agent_core.Context.create_sync () in
+      let calls = ref (match Scope.Execution.prepare execution ~source ~target with
+        | Ok calls -> calls | Error _ -> fail "next attempt lost scope") in
+      let executions = ref 0 in
+      let boundary_calls = ref 0 in
+      let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+          Scope.Execution.observe execution ~target scoped_observation;
+          calls := scoped_observation :: !calls)
+        ~on_tool_boundary:(fun () ->
+          incr boundary_calls;
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:!calls)
+        (fun _ -> incr executions;
+          Ok { Agent_core.Types.content = "same-output"; _meta = None })
+      in
+      let result = tool.call ~call_id:"new-provider-first-call" (`Assoc []) in
+      check int (runtime_label ^ " executes once") 1 !executions;
+      check int "boundary follows handoff once" 1 !boundary_calls;
+      (match result.abort_turn with
+       | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 3 }) -> ()
+       | _ -> fail (runtime_label ^ " discarded prior-attempt repetition"));
+      check (option string) "repeat stop is not failure" None !terminal_error))
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
+(* #28971: a keeper repeated a successful tool call with identical arguments 31
+   times in one turn while every success changed the tool's own state, so the
+   output never repeated either. The exact axis is blind to that shape by
+   construction — its fingerprint includes the output — and the incident was
+   filed before the input axis existed. This pin reproduces the shape through
+   the official client wiring (identical input, moving output, as when a tool
+   appends to a file) and holds two lines: below the input threshold the turn
+   keeps going, at the threshold it aborts with the measured streak. *)
+let test_moving_output_input_loop_aborts_at_input_threshold () =
+  List.iter (fun runtime_label ->
+    with_active_raw_trace (fun ~path:_ ~active ->
+      let module Scope = Masc.Keeper_repetition_scope in
+      let execution, _source, target = prepare_direct_execution () in
+      let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+      let annotate_input = hash "annotate --file log.txt --line done" in
+      let calls = ref [] in
+      let appended = ref 0 in
+      let observation () =
+        incr appended;
+        { scoped_observation with
+          input_fingerprint = Some annotate_input
+        ; output_fingerprint =
+            Some (hash (Printf.sprintf "appended line %d" !appended)) }
+      in
+      let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+          let observation = observation () in
+          Scope.Execution.observe execution ~target observation;
+          calls := observation :: !calls)
+        ~on_tool_boundary:(fun () ->
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:!calls)
+        (fun _input ->
+          Ok { Agent_core.Types.content =
+                 Printf.sprintf "appended line %d" (!appended + 1)
+             ; _meta = None })
+      in
+      ignore (tool.call ~call_id:"input-loop-call-1" (`Assoc []));
+      ignore (tool.call ~call_id:"input-loop-call-2" (`Assoc []));
+      let third = tool.call ~call_id:"input-loop-call-3" (`Assoc []) in
+      check bool "moving output keeps the turn below the input threshold"
+        true (Option.is_none third.abort_turn);
+      let fourth = tool.call ~call_id:"input-loop-call-4" (`Assoc []) in
+      check bool "the fourth call still runs below the input threshold"
+        true (Option.is_none fourth.abort_turn);
+      (* The boundary counts the current call together with the recorded
+         observations, so the fifth identical-input call's boundary sees a
+         streak of five and aborts the turn. *)
+      let fifth = tool.call ~call_id:"input-loop-call-5" (`Assoc []) in
+      (match fifth.abort_turn with
+       | Some (Repeated_tool_call { tool_name = "effect"; repeated_count = 5 }) -> ()
+       | _ -> fail (runtime_label ^ " missed the identical-input loop"));
+      check (option string) "input-loop stop is not failure" None !terminal_error))
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
+(* #34083: an autonomous official-client turn admits no execution scope, and
+   until this boundary was installed for it the host kept only its own
+   exact-adjacent counter. The production boundary now runs for that turn
+   too, reading the turn accumulator without a scope. Reproduce the issue's
+   shape -- the Execute script one keeper ran 186 times with byte-identical
+   input -- through the host wiring and hold both axes: identical output
+   stops at [repeated_tool_call_yield_threshold] (3), moving output at
+   [repeated_tool_call_input_yield_threshold] (5). *)
+let execute_script_input =
+  `Assoc
+    [ "cwd", `String "."
+    ; "script", `String "hostname; id -un; uname -m; pwd; cat /proc/1/comm"
+    ; "shell", `String "sh"
+    ]
+;;
+
+let execute_observation ~output_text : Masc.Keeper_agent_result.tool_call_detail =
+  match
+    Masc.Keeper_tool_progress_identity.digest_tool_io
+      ~tool_name:"Execute"
+      ~input:execute_script_input
+      ~output_text
+  with
+  | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
+    { scoped_observation with
+      tool_name = "Execute"
+    ; input_fingerprint = Some input_fingerprint
+    ; output_fingerprint = Some output_fingerprint
+    }
+  | None -> fail "digest_tool_io refused the Execute fixture input"
+;;
+
+let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
+  List.iter (fun runtime_label ->
+    let run ~label ~(output_text : int -> string) ~stops_at =
+      with_active_raw_trace (fun ~path:_ ~active ->
+        let calls = ref [] in
+        let boundary_calls = ref 0 in
+        let executions = ref 0 in
+        let tool, terminal_error =
+          one_dynamic_tool ~active ~runtime_label ~name:"Execute"
+            ~on_result_handoff:(fun ~invocation:_ ~content ->
+              calls := execute_observation ~output_text:content :: !calls)
+            ~on_tool_boundary:(fun () ->
+              incr boundary_calls;
+              Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+                ~repetition_execution:None ~tool_calls:!calls)
+            (fun _input ->
+              incr executions;
+              Ok { Agent_core.Types.content = output_text !executions; _meta = None })
+        in
+        let call index =
+          tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_script_input
+        in
+        for index = 1 to stops_at - 1 do
+          check bool
+            (Printf.sprintf "%s %s call %d continues" runtime_label label index)
+            true
+            (Option.is_none (call index).abort_turn)
+        done;
+        (match (call stops_at).abort_turn with
+         | Some (Repeated_tool_call { tool_name; repeated_count }) ->
+           check string (label ^ " repeated tool") "Execute" tool_name;
+           check int (label ^ " repeat count") stops_at repeated_count
+         | Some (Terminal_tool_boundary _) ->
+           fail (label ^ " produced a terminal-tool stop instead of a repeat stop")
+         | None ->
+           fail
+             (Printf.sprintf
+                "%s %s: autonomous official-client loop was not stopped at call %d"
+                runtime_label label stops_at));
+        check int (label ^ " boundary decided every call") stops_at !boundary_calls;
+        check int (label ^ " every call executed") stops_at !executions;
+        check (option string) (label ^ " repeat stop is not failure") None !terminal_error)
+    in
+    (* The issue's shape: the container answers the same bytes every time. *)
+    run ~label:"identical-output"
+      ~output_text:(fun _ -> "host-a\nkeeper\naarch64\n/work\nsh\n")
+      ~stops_at:3;
+    (* Moving output: the exact axis cannot match, the input axis still can,
+       and the host's own counter could never have fired here because it
+       fingerprints the output. *)
+    run ~label:"moving-output"
+      ~output_text:(fun n -> Printf.sprintf "host-a\nkeeper\naarch64\n/work\nsh\n%d\n" n)
+      ~stops_at:5)
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
+let test_scoped_boundary_error_stops_immediately () =
+  List.iter (fun runtime_label ->
+    with_active_raw_trace (fun ~path:_ ~active ->
+      let module Scope = Masc.Keeper_repetition_scope in
+      let execution, _source, target = prepare_direct_execution () in
+      let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+          Scope.Execution.observe execution ~target
+            { scoped_observation with input_fingerprint = Some "invalid-hash" })
+        ~on_tool_boundary:(fun () ->
+          Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:(Some execution) ~tool_calls:[])
+        (fun _ -> Ok { Agent_core.Types.content = "effect returned"; _meta = None })
+      in
+      let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
+      check bool "boundary error is latched" true (Option.is_some !terminal_error);
+      check bool "boundary failure is not reported as success" false result.success;
+      (match result.abort_turn with
+       | Some (Terminal_tool_boundary { tool_name = "effect";
+           outcome = Terminal_failed { failure_class = Tool_result.Runtime_failure;
+             effect_disposition = Tool_result.Effect_outcome_unknown; diagnostic } } as stop) ->
+         check (option string) "exact failure retained" (Some diagnostic) !terminal_error;
+         (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
+             ~session_id:"session" ~turn_id:"turn" ~turns_used:1
+             ~latency_ms:None ~usage:None stop with
+          | Error error ->
+            (match Keeper_internal_error.classify_masc_internal_error error with
+             | Some (Terminal_effect_failed
+                 { failure_class = Tool_result.Runtime_failure;
+                   effect_disposition = Tool_result.Effect_outcome_unknown;
+                   diagnostic = projected }) ->
+               check string "typed outward diagnostic" diagnostic projected
+             | _ -> fail "scope failure lost its typed effect disposition")
+          | Ok _ -> fail "scope failure projected a completed result")
+       | _ -> fail (runtime_label ^ " continued after scope observation failure"))))
+    [ "Codex"; "Claude Code"; "Antigravity" ]
+;;
+
+let test_scoped_boundary_preserves_terminal_priority () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let checks = ref 0 in
+    let tool, _ = one_dynamic_tool ~active
+      ~terminal_effect_state:(fun () ->
+        Masc.Keeper_tools_agent_core.Terminal_effect_failed
+          { failure_class = Tool_result.Runtime_failure
+          ; effect_disposition = Tool_result.Proven_post_effect
+          ; diagnostic = "exact committed effect failure" })
+      ~on_tool_boundary:(fun () -> incr checks;
+        Ok (Some (Host.Repeated_tool_call { tool_name = "effect"; repeated_count = 3 })))
+      (fun _ -> Ok { Agent_core.Types.content = "effect returned"; _meta = None })
+    in
+    let result = tool.call ~call_id:"terminal-priority" (`Assoc []) in
+    check int "terminal boundary still observes scope" 1 !checks;
+    match result.abort_turn with
+    | Some (Terminal_tool_boundary { outcome = Terminal_failed
+        { effect_disposition = Tool_result.Proven_post_effect;
+          diagnostic = "exact committed effect failure"; _ }; _ }) -> ()
+    | _ -> fail "repeat stop replaced stronger terminal evidence")
+;;
+
+let test_scoped_boundary_replaces_local_counter () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let checks = ref 0 in
+    let tool, _ = one_dynamic_tool ~active
+      ~on_tool_boundary:(fun () -> incr checks; Ok None)
+      (fun _ -> Ok { Agent_core.Types.content = "same"; _meta = None })
+    in
+    List.iter (fun index ->
+      let result = tool.call ~call_id:(string_of_int index) (`Assoc []) in
+      check bool "scope authority permits call" true (Option.is_none result.abort_turn))
+      [ 1; 2; 3 ];
+    check int "scope callback owns every decision" 3 !checks)
 ;;
 
 let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
@@ -1680,6 +1958,22 @@ let () =
             "repeated exact dynamic tool call aborts the turn"
             `Quick
             test_repeated_exact_dynamic_tool_call_aborts_the_turn
+        ; test_case "scope repetition survives official provider replacement" `Quick
+            test_scoped_boundary_spans_official_attempts
+        ; test_case
+            "identical-input loop with moving output aborts at the input threshold"
+            `Quick
+            test_moving_output_input_loop_aborts_at_input_threshold
+        ; test_case
+            "autonomous official-client Execute loop stops without a scope"
+            `Quick
+            test_autonomous_official_boundary_stops_execute_loop_without_scope
+        ; test_case "scope observation failure stops official tool call" `Quick
+            test_scoped_boundary_error_stops_immediately
+        ; test_case "scope stop preserves exact terminal priority" `Quick
+            test_scoped_boundary_preserves_terminal_priority
+        ; test_case "scope callback replaces provider-local counter" `Quick
+            test_scoped_boundary_replaces_local_counter
         ; test_case
             "dynamic tool progress does not trip repeat guard"
             `Quick

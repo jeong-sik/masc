@@ -69,13 +69,6 @@ let handle_tool name args : Tool_result.result =
     Board_tool_sub_board.handle_sub_board_delete ~tool_name:name ~start_time args
 ;;
 
-let tool_spec_read_only =
-  Tool_name.Board_name.all
-  |> List.filter (fun board_name ->
-    (Board_tool_registry.operation_policy board_name).readonly)
-  |> List.map Tool_name.Board_name.to_string
-;;
-
 let register () =
   let handler ~name ~args = handle_tool name args in
   let make_spec board_name =

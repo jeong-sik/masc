@@ -4,6 +4,7 @@
  (name llm_provider)
  (public_name masc.agent_core.llm_provider)
  (private_modules
+  tcp_address_race
   complete_stream_error
   complete_stream_state
   model_catalog_embedded

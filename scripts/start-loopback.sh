@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Local loopback is the safe single-user path. Ignore inherited
-# MASC_KEEPER_BOOTSTRAP_ENABLED by default so a global shell profile cannot
+# MASC_KEEPER_AUTONOMOUS_ENABLED by default so a global shell profile cannot
 # accidentally autoboot a whole keeper set on 8935.
 keeper_bootstrap_enabled=false
 args=()
@@ -31,6 +31,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-export MASC_KEEPER_BOOTSTRAP_ENABLED="$keeper_bootstrap_enabled"
+export MASC_KEEPER_AUTONOMOUS_ENABLED="$keeper_bootstrap_enabled"
 
 exec "$REPO_ROOT/start-masc.sh" --http --host 127.0.0.1 --port 8935 ${args[@]+"${args[@]}"}

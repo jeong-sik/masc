@@ -53,16 +53,24 @@ val build_forest :
   goals:Goal_store.goal list ->
   tasks:Masc_domain.task list ->
   pending_approvals:Yojson.Safe.t list ->
-  tree_node list
+  (tree_node list, string) result
 (** Projects every flat Goal as one top-level node. [children] remains an
     always-empty compatibility field in the JSON record; the Goal schema has
     no parent relation. Each node keeps its own direct task, approval,
-    receipt/runtime, and activity observations. *)
+    receipt/runtime, and activity observations. Reads primary Goal–Task links
+    once; a missing or unreadable authoritative link source returns [Error]
+    instead of projecting an empty association set. *)
 
 (** {1 Per-node JSON renderer} *)
 
+val verification_projection :
+  config:Workspace.config -> Goal_store.goal -> Yojson.Safe.t
+(** Load the authoritative proof ledger once, then project each Goal against
+    its criterion revision. *)
+
 val tree_node_to_json :
   ?events_for_goal:(string -> Yojson.Safe.t list) ->
+  ?verification_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
   tree_node ->
   Yojson.Safe.t
 (** Renders a single {!tree_node} as JSON. The optional callback supplies
@@ -85,3 +93,8 @@ val goal_detail_json :
   (Yojson.Safe.t, string) result
 (** Returns the per-goal detail envelope for [goal_id].
     [Error msg] when the goal is not in the tree. *)
+
+val goal_store_unavailable_json : string -> Yojson.Safe.t
+(** Shared source failure envelope for Planning, Goal tree and detail. *)
+
+val goal_task_links_unavailable_json : string -> Yojson.Safe.t

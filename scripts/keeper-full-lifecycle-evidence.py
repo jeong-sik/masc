@@ -262,7 +262,9 @@ def print_failure_summary(output_dir: pathlib.Path, results: list[dict]) -> None
             file=sys.stderr,
         )
         print("command: " + " ".join(row["command"]), file=sys.stderr)
-        for line in lines[-80:]:
+        # Dune may print another target's warnings after the failing assertion.
+        # Keep the complete failed scenario output so that cause is not lost.
+        for line in lines:
             print(line, file=sys.stderr)
 
 

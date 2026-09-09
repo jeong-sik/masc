@@ -214,3 +214,8 @@ val verification_notify_verdict_fn :
    decision:[ `Approve of string | `Reject of string ] ->
    unit) Atomic.t
 
+
+(** Acceleration hint after the verdict and its delivery obligation commit.
+    The runtime owns retries; an absent callback never loses the obligation. *)
+val rejection_delivery_requested_fn :
+  (Workspace_utils_backend_setup.config -> unit) Atomic.t

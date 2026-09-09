@@ -26,10 +26,10 @@ type attachment = {
   size : int;
   mime_type : string;
   data : string;
-  (** Pixel size, measured once when the payload is swapped for its
-      [masc://] reference -- after that swap the bytes are gone and this
-      field is the only record of them. [None] for WebP, non-images, and
-      rows written before the field existed. *)
+  (** Pixel dimensions measured before externalizing the attachment payload.
+      [None] when the supported image headers do not provide dimensions.
+      Persisted [data] is a canonical blob marker; the retained blob contains
+      the original wire payload (base64 or data URI). *)
   width : int option;
   height : int option;
 }
@@ -95,7 +95,12 @@ type stream_lifecycle_event =
     resolution and replay are distinct phases: a requested call is parked
     but the turn it was asked on keeps running, an approved request has
     permission, and its effect is not reported as applied until a replay
-    row exists. *)
+    row exists. The continuation settles once, at the continuation slot:
+    [Approval_continuation_recorded] when the turn that received the replay
+    completed or durably checkpointed, [Approval_continuation_failed] when
+    that turn failed after the provider answered. Either settlement retires
+    the approval's queued wake; a turn that failed before any answer leaves
+    the slot empty so the evidence is delivered again. *)
 type approval_lifecycle_phase =
   | Approval_requested
   | Approval_resolved_approved
@@ -105,6 +110,7 @@ type approval_lifecycle_phase =
   | Approval_replay_failed
   | Approval_replay_indeterminate
   | Approval_continuation_recorded
+  | Approval_continuation_failed
 
 type approval_lifecycle =
   { approval_id : string
@@ -299,6 +305,18 @@ val approval_lifecycle_phase_present :
   approval_id:string ->
   phase:approval_lifecycle_phase ->
   bool
+
+val approval_lifecycle_is_continuation : approval_lifecycle_phase -> bool
+(** The two settlements of the continuation slot,
+    [Approval_continuation_recorded] and [Approval_continuation_failed]. *)
+
+val approval_continuation_settled :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  bool
+(** Whether a continuation settlement row exists for the approval, in
+    either phase. One scan of the store. *)
 
 val approval_request_call_summary :
   base_dir:string ->

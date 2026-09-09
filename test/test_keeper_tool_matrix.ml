@@ -209,6 +209,7 @@ let isolated_child_env_unset =
   ; "MISTRAL_API_KEY"
   ; "OPENROUTER_API_KEY"
   ; "ZAI_API_KEY"
+  ; "DEEPSEEK_API_KEY"
   ; "OLLAMA_HOST"
   ]
 
@@ -413,7 +414,30 @@ let selected_schemas () =
       |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name requested)
 
+(* Forced only by a sandbox case in the sequential, non-Eio parent runner.
+   Listing/filtering tests does not build an image. Lazy also caches failure. *)
+let sandbox_image_preparation =
+  lazy (
+    (* Once in the parent, before any case's timeout. Use the runtime-owned
+       recipe under a test-only tag; child handlers exercise the real backend. *)
+    log_progress "building test sandbox image %s" Cases.sandbox_image;
+    let argv =
+      Array.of_list
+        ("docker" :: Keeper_sandbox_image.build_argv ~tag:Cases.sandbox_image)
+    in
+    let channel = Unix.open_process_args_out "docker" argv in
+    let status = ref (Unix.WEXITED 1) in
+    Fun.protect
+      ~finally:(fun () -> status := Unix.close_process_out channel)
+      (fun () -> output_string channel Keeper_sandbox_image.dockerfile);
+    match !status with
+    | Unix.WEXITED 0 -> ()
+    | _ -> fail "the matrix's test-owned sandbox image could not be built")
+
 let run_tool_case_or_fail tool_name () =
+  if List.mem tool_name
+       [ "Execute"; "Grep"; "Read"; "Write"; "keeper_ide_annotate"; "keeper_spawn" ]
+  then Lazy.force sandbox_image_preparation;
   match run_tool_case_process tool_name with
   | Ok () -> ()
   | Error message -> failf "%s" message

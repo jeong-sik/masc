@@ -77,13 +77,6 @@ type fatal_error =
 
 val fatal_error_to_string : fatal_error -> string
 
-val max_completed_settlements_per_owner_turn : unit -> int
-(** Hard ceiling for filesystem-backed completed partitions settled by one
-    owner turn. Remaining work is preserved behind a continuation wake.
-    Backed by the [keeper.board_attention.settlements_per_turn]
-    runtime_params tunable (see [Keeper_config]); read fresh on each call
-    since an operator override can change it between turns. *)
-
 val run :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -100,16 +93,19 @@ val run :
     unbound claim and quarantines every durably bound execution. Process recovery
     ownership is released when the lifecycle ends or is cancelled. *)
 
-val settle_one_completed :
+val settle_completed_snapshot :
   base_path:string ->
   keeper_name:string ->
   (settlement, string) result
-(** Owner-admission boundary. Settle preceding non-admitting judgments only up
-    to the fixed per-turn durability bound, cooperatively yielding between
-    them; stop after the first admitting judgment and request one continuation
-    wake when more completed results remain. A completion that remains
-    sync-unconfirmed after one explicit confirmation returns an error without
-    delivery or wake. This function never invokes AGENT_CORE. *)
+(** Owner-admission boundary. Capture the ordered completed partitions once,
+    then durably settle that finite snapshot, cooperatively yielding between
+    records. Newly completed judgments remain for a continuation wake. Stop at
+    the first failed transition and leave later members untouched. A delivery
+    failure retains its evidence without consuming the candidate; if delivery
+    committed before partition settlement failed, replay preserves that effect.
+    The returned candidate id is the last settled member. A sync-unconfirmed
+    completion must pass explicit confirmation before delivery. This function never invokes
+    AGENT_CORE. *)
 
 module For_testing : sig
   type rearm_scheduler

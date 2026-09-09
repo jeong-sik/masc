@@ -5,6 +5,7 @@
  (public_name masc.tool_schemas)
  (modules
   tool_schemas_agent
+  tool_schemas_agent_timeline
   tool_schemas_misc_toml
   tool_schemas_workspace_core_toml
   tool_schemas_library_toml
@@ -30,6 +31,8 @@
   tool_schemas_operator_surface
   tools)
  (wrapped false)
+ (preprocess
+  (pps ppx_enumerate))
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
@@ -40,6 +43,8 @@
   masc_core
   masc.task_handlers
   masc.masc_tool_surface
+  ; Tool_name owns the Goal vocabulary the schema list is built from.
+  masc.masc_tool_dispatch
   ; tool_schemas_workspace_extra, tool_schemas_filesystem_files and
   ; tool_schemas_operator_surface read config/tools/*.toml from the
   ; binary-embedded config tree.

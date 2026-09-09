@@ -1,0 +1,93 @@
+name: Release Candidate Verification
+run-name: Verify release candidate ${{ github.sha }}
+
+on:
+  workflow_dispatch: {}
+
+# Called workflows cannot elevate the caller's permissions. Release still
+# requires contents:write for its tag-push job, which is ineligible here.
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+# Supersede older candidates on this branch as one unit. Child workflows use
+# separate run-scoped groups so they cannot cancel their caller or other lanes.
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    uses: ./.github/workflows/ci.yml
+    with:
+      candidate_verification: true
+
+  behavior:
+    uses: ./.github/workflows/test.yml
+    with:
+      candidate_verification: true
+      suite: ""
+      eio_backend: ""
+
+  installation:
+    uses: ./.github/workflows/release.yml
+    with:
+      candidate_verification: true
+
+  evidence:
+    name: Record candidate verification
+    needs: [compile, behavior, installation]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Record results for this exact commit
+        env:
+          CANDIDATE_RESULTS: ${{ toJSON(needs) }}
+          CANDIDATE_COMMIT: ${{ github.sha }}
+          CANDIDATE_REF: ${{ github.ref }}
+          CANDIDATE_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          needs = json.loads(os.environ['CANDIDATE_RESULTS'])
+          results = {name: needs[name]['result'] for name in ('compile', 'behavior', 'installation')}
+          passed = all(result == 'success' for result in results.values())
+          receipt = {
+              'schema_version': 1,
+              'commit': os.environ['CANDIDATE_COMMIT'],
+              'ref': os.environ['CANDIDATE_REF'],
+              'run_attempt': int(os.environ['CANDIDATE_ATTEMPT']),
+              'run_url': os.environ['CANDIDATE_RUN'],
+              'results': results,
+              'checks_passed': passed,
+              'behavior_scope': 'full Test workflow with the checked-in known-failure policy',
+              'published': False,
+          }
+          Path('candidate-verification.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Candidate commit: `' + receipt['commit'] + '`\n\n')
+              for name, result in results.items():
+                  summary.write('- ' + name + ': ' + result + '\n')
+              summary.write('\nPublication: not performed.\n')
+          PYCODE
+
+      - name: Upload candidate receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: candidate-verification-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: candidate-verification.json
+          if-no-files-found: error
+
+      - name: Require all candidate checks to pass
+        run: |
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          receipt = json.loads(Path('candidate-verification.json').read_text())
+          raise SystemExit(0 if receipt['checks_passed'] else 1)
+          PYCODE

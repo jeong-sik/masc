@@ -38,6 +38,9 @@ val valid_strings : string list
 (** The accepted spellings, for a schema mirror and for a refusal that can
     name what it would have taken. *)
 
+val kata_containerd_shim : string
+(** Containerd runtime identity used for Kata boot and inventory scoping. *)
+
 val run_runtime_args : t -> string list
 (** Extra argv the boot needs to get a microVM rather than whatever the CLI
     would default to. Apple's [container] and [msb] are microVM runtimes by
@@ -48,6 +51,26 @@ val run_runtime_args : t -> string list
 val cli_name : t -> string
 (** The executable this backend drives. A backend whose CLI is absent is
     refused rather than substituted, so the name reaches the refusal. *)
+
+(** How a runtime takes a build recipe.
+
+    Each of these keeps its own image store, so an image built into Docker's
+    is invisible here — which is what makes "build it first" an instruction
+    that has to name the runtime. Read off each CLI rather than assumed from
+    a family resemblance. *)
+type recipe_delivery =
+  | On_stdin
+      (** [build -t <tag> -]: Docker's grammar, recipe on stdin, no context. *)
+  | In_a_context_directory
+      (** [build -t <tag> -f <file> <dir>]. [container build --help] states
+          "USAGE: container build [<options>] [<context-dir>]" and offers
+          [-f <path>]; it has no [-], so the recipe must be a file on disk. *)
+  | Builds_no_images
+      (** [msb --help] (0.6.16) lists pull, load, save and image under Images
+          and no build at all. An image reaches it as a tar. *)
+
+val recipe_delivery : t -> recipe_delivery
+(** How this backend's CLI takes a build recipe. *)
 
 val default_for_host : unit -> t option
 (** The backend to assume when a keeper declares [Micro_vm] without naming
@@ -102,7 +125,10 @@ type constraint_argv =
       (** Why this runtime cannot say it, in the operator's words. *)
 
 val run_constraint_argv : t -> guest_constraint -> constraint_argv
-(** How one runtime spells one guarantee on its [run], or why it cannot.
+(** How one runtime spells one guarantee on the detached Keeper [run], or why
+    it cannot. nerdctl 2.3.5 rejects [--rm] together with [-d], so its
+    [Remove_on_exit] is recorded as dropped; explicit teardown and the
+    abandoned-guest sweep own removal.
     Every pair is enumerated: a runtime added later has to answer each
     guarantee rather than inherit a default that would drop it. *)
 

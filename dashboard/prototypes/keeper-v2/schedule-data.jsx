@@ -74,8 +74,8 @@ const SCHEDULES = [
     requested_by: OPERATOR, scheduled_by: kpr('analyst'),
     at: '13:30', due_rel: '매일 09:00 KST', due_off: 66600, expires_rel: '없음', approval_required: true,
     recurrence: { kind: 'Daily', hour: 9, minute: 0, second: 0, timezone: 'KST' },
-    payload: { kind: 'report.generate', schema_version: 2, body: { report: 'retention-weekly', deliver: 'slack:#kidsnote-growth' } },
-    summary: '리텐션 주간 리포트 생성 후 Slack #kidsnote-growth 게시',
+    payload: { kind: 'report.generate', schema_version: 2, body: { report: 'retention-weekly', deliver: 'slack:#exampleorg-growth' } },
+    summary: '리텐션 주간 리포트 생성 후 Slack #exampleorg-growth 게시',
   },
   {
     schedule_id: 'sch_4d3e', status: 'Scheduled', source: 'Automated_request',

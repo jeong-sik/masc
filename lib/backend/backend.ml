@@ -220,7 +220,7 @@ module FileSystem = struct
   (** Run a blocking file operation in a system thread.
       FileSystem backend requires Eio context — no fallback. *)
   let run_blocking_file_op f =
-    Eio_unix.run_in_systhread f
+    Eio_unix.run_in_systhread ~label:"backend-blocking-io" f
 
   let with_locked_rw_fd path_str f =
     run_blocking_file_op (fun () ->

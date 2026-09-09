@@ -125,6 +125,12 @@ type action =
   | Boot
   | Shutdown
   | Wakeup
+  | Delete
+      (** Remove the keeper through the same route the web dashboard uses,
+          [POST /api/v1/dashboard/agents/purge]. There is no inverse: the
+          server's plan removes the metrics store, the decision and feedback
+          logs, the runtime directory, the Memory OS snapshots and journal, the
+          TOML configuration, the chat store, and the agent files and tokens. *)
 
 val action_key : action -> string
 (** The single key that submits the action on the Keepers surface. *)
@@ -134,8 +140,17 @@ val action_label : action -> string
 val action_gerund : action -> string
 (** Present-tense label for an action already in flight ("pausing"). *)
 
+val purge_artifacts : string list
+(** What the server's purge plan removes, in the order it removes it
+    ([Keeper_shutdown_types.dashboard_purge_artifact_plan]). The confirmation
+    line lists these, so an operator reads what goes before pressing again --
+    the web dashboard shows the same list from its own copy
+    (dashboard/src/api/keeper-lifecycle.ts). Drift between the three is a
+    confirmation that understates what it confirms. *)
+
 val requires_confirmation : action -> bool
-(** True for the actions that end a fiber. The second press is what submits
+(** True for the actions that end a fiber, and for [Delete], which has no
+    inverse at all. The second press is what submits
     those, matching the Approvals surface's arm-then-submit gate; the
     reversible actions submit on the first press. *)
 
@@ -155,6 +170,12 @@ type step =
       (** [POST /api/v1/keepers/<name>/<action>] with an empty JSON body. *)
   | Directive of string
       (** [POST /api/v1/keepers/<name>/directive] with this action name. *)
+  | Purge
+      (** [POST /api/v1/dashboard/agents/purge] with the keeper in an
+          [agent_name] field. Named apart from {!Lifecycle} because the path is
+          not under [/api/v1/keepers/] and the keeper travels in the body: a
+          step that spelled it as a lifecycle action would have posted to a
+          route that does not exist. *)
 
 val plan : action -> step list
 (** The steps an action takes, in order. A step that fails ends the plan,
@@ -216,6 +237,10 @@ val directive_body : operator_operation_id:string -> string -> string
 
 val lifecycle_body : string
 (** JSON body for a lifecycle step. *)
+
+val purge_body : string -> string
+(** JSON body for a {!Purge} step: the keeper travels as [agent_name], the
+    field the route reads and the one the dashboard sends. *)
 
 val mint_operation_id : keeper:string -> serial:int -> string
 (** The resume operation id for one attempt. Stable across the steps of that

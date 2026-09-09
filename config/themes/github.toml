@@ -1,0 +1,20 @@
+name = "github"
+light = true
+
+[palette]
+base00 = "ffffff"
+base01 = "f6f8fa"
+base02 = "afb8c1"
+base03 = "8c959f"
+base04 = "6e7781"
+base05 = "424a53"
+base06 = "32383f"
+base07 = "1f2328"
+base08 = "953800"
+base09 = "0550ae"
+base0a = "bf8700"
+base0b = "0a3069"
+base0c = "116329"
+base0d = "8250df"
+base0e = "cf222e"
+base0f = "82071e"

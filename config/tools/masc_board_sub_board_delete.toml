@@ -3,6 +3,8 @@ description = """
 Delete a SubBoard by slug or ID. Existing posts inside the SubBoard keep \
 their content but lose their hearth binding (orphan policy)."""
 
+identity_fields = ["owner"]
+
 [[params]]
 name = "sub_board_id"
 type = "string"

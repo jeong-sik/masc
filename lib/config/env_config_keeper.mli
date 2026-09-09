@@ -12,7 +12,7 @@
 (** {1 Keeper bootstrap} *)
 
 module KeeperBootstrap : sig
-  val enabled : bool
+  val enabled : unit -> bool
   val lazy_startup_poll_interval_sec : float
   val keeper_listener_retry_interval_sec : float
   val post_startup_settle_sec : float
@@ -126,6 +126,10 @@ module KeeperVision : sig
   (** Maximum image dimension (longest edge) before downscaling, clamped to [256, 8192].
       Default: 1568. *)
   val max_dimension : unit -> int
+
+  (** The floor of {!max_dimension}; also the smallest edge the vision walk
+      will shrink an image to when fitting it under a candidate's cap. *)
+  val max_dimension_floor : int
 end
 
 (** {1 Keeper lane gate} *)
@@ -158,12 +162,6 @@ end
 
 module WorkAsHeartbeat : sig
   val enabled : bool
-end
-
-(** {1 Keeper health policy} *)
-
-module KeeperHealth : sig
-  val durable_queue_stale_sec : unit -> float
 end
 
 (** {1 Keeper keepalive loop} *)

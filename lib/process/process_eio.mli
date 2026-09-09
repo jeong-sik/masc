@@ -6,6 +6,9 @@
 
 (** {1 Global init (call once from main_eio.ml)} *)
 
+(** Native foreground commands own a separate process group through the
+    foreground manager. [proc_mgr] supplies pipe plumbing; direct callers of
+    that manager (LSP and official clients) retain their own lifecycle. *)
 val init :
   cwd_default:Eio.Fs.dir_ty Eio.Path.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
@@ -153,6 +156,7 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?output_capture:Process_output_capture.t ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
@@ -230,7 +234,7 @@ type spawn_refusal =
       (** argv[0], as the caller gave it, resolved to no file. Eio's spawner
           does the PATH resolution and raises
           [Eio.Process.Executable_not_found]; the Unix fallback learns the
-          same from [Unix.create_process_env] raising [ENOENT] at the spawn. *)
+          same from its group-owning [posix_spawnp] raising [ENOENT] at the spawn. *)
   | Spawn_failed of
       { executable : string
       ; error : Unix.error
@@ -317,14 +321,17 @@ val run_argv_with_status_split_streaming :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?output_capture:Process_output_capture.t ->
   on_stdout_chunk:(string -> unit) ->
   on_stderr_chunk:(string -> unit) ->
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_status_split], but invokes [on_stdout_chunk] and
     [on_stderr_chunk] for every chunk read from the child pipes while the
-    process is still running. The returned strings still contain the full
-    captured output. *)
+    process is still running. The returned strings are bounded previews.
+    [output_capture], when supplied, preserves raw chunks independently of
+    callbacks and marks completeness only at pipe EOF. Unix fallback has no
+    authoritative chunk/EOF contract and marks capture unavailable. *)
 
 type pipeline_stage = {
   argv : string list;

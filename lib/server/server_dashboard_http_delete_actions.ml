@@ -57,7 +57,7 @@ let lstat_path_blocking path =
 ;;
 
 let lstat_path path =
-  try Eio_guard.run_in_systhread (fun () -> lstat_path_blocking path) with
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-lstat" (fun () -> lstat_path_blocking path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (path_error "systhread lstat" path exn)
 ;;
@@ -111,7 +111,7 @@ let rec remove_path_strict_blocking path =
 ;;
 
 let remove_path_strict path =
-  try Eio_guard.run_in_systhread (fun () -> remove_path_strict_blocking path) with
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-remove" (fun () -> remove_path_strict_blocking path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (path_error "systhread recursive removal" path exn)
 ;;
@@ -689,9 +689,17 @@ let add_delete_action_routes router =
              | Some task_id ->
              let config = (Mcp_server.workspace_config state) in
              match Workspace.delete_task_r config ~task_id with
-             | Ok () -> respond_ok ~request:req reqd
+             | Ok outcome ->
+               let status, errors = match outcome with
+                 | Workspace.Task_deleted -> "deleted", []
+                 | Workspace.Task_already_absent -> "already_absent", []
+                 | Workspace.Task_delete_cleanup_failed errors -> "cleanup_failed", errors in
+               Http.Response.json_value ~request:req
+                 (`Assoc ["ok", `Bool (errors = []); "task_id", `String task_id;
+                   "task_deleted", `Bool true; "status", `String status;
+                   "errors", `List (List.map (fun error -> `String error) errors)]) reqd
              | Error err ->
-                 respond_error ~status:`Not_found ~request:req reqd
+                 respond_error ~status:`Internal_server_error ~request:req reqd
                    (Printf.sprintf "task delete failed: %s"
                       (Masc_domain.masc_error_to_string err))
            with Yojson.Json_error _ ->
@@ -728,7 +736,8 @@ let add_delete_action_routes router =
                 respond_error ~status:`Conflict ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err)
               | Error
-                  (( Task.Goal_assignment.Backlog_read_failed _
+                  (( Task.Goal_assignment.Goal_source_unavailable _
+                   | Task.Goal_assignment.Backlog_read_failed _
                    | Task.Goal_assignment.Link_write_failed _ ) as err) ->
                 respond_error ~status:`Internal_server_error ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err))

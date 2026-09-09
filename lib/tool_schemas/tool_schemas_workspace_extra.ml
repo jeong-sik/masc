@@ -32,8 +32,12 @@ let schema_of_name name : tool_schema =
    would reject every metadata update of an existing goal. The create/update
    split is only decidable against the store, so the handler enforces it on the
    creation branch (Goal_store.upsert_goal, inside the write lock). *)
+(* One schema per Tool_name.Goal_name constructor. Spelling the three names
+   here again let a constructor be routable (Tool_workspace.goal_handler) and
+   never advertised; now a new one either brings its config/tools file or
+   refuses the boot, which is what schema_of_name already does for the rest. *)
 let schemas : tool_schema list =
   List.map
-    schema_of_name
-    [ "masc_goal_list"; "masc_goal_upsert"; "masc_goal_transition" ]
+    (fun name -> schema_of_name (Tool_name.Goal_name.to_string name))
+    Tool_name.Goal_name.all
 ;;

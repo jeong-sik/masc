@@ -134,6 +134,7 @@ val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
   ?on_spawned:(unit -> unit) ->
+  ?on_prompt_sent:(unit -> unit) ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
@@ -142,5 +143,10 @@ val run_turn :
   config ->
   prompt:string ->
   (turn_result, error) result
-(** [home_dir], when present, replaces inherited [HOME] and removes inherited
+(** [on_prompt_sent] runs once after the complete prompt has been written to
+    the spawned client's stdin and EOF has been delivered. It does not claim
+    provider acceptance or successful execution. Spawn, validation, and partial
+    write failures do not call it. Callback failures fail the runtime turn.
+
+    [home_dir], when present, replaces inherited [HOME] and removes inherited
     XDG directory overrides before spawning the official client. *)

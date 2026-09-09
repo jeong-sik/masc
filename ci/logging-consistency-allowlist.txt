@@ -38,7 +38,9 @@ bin/main_eio.ml
 # interface, not structured server logging.
 bin/masc_trace.ml
 bin/masc_tui_loader.ml
-bin/masc_cost.ml
+bin/masc_cost.ml# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
+# malformed or incomplete Board TOML declaration to the build operator.
+bin/gen_board_tool_registry.ml
 
 # --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
 # Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed
@@ -86,6 +88,11 @@ bin/deployment_preflight_helper.ml
 # per-trial verdicts are the measurement the operator asked for, not server
 # records.
 bin/masc_lane_cli_probe.ml
+# masc_http_probe times the TUI's HTTP client with no TUI around it
+# (RFC-0429 §3.0). Its per-trial readings and its usage diagnostics are the
+# measurement the operator asked for; sending them to the log file would
+# hide them from the terminal that ran the probe.
+bin/masc_http_probe.ml
 
 # --- Before the screen, and before the log ---
 # masc_tui writes to stderr while deciding where stderr goes; saying it

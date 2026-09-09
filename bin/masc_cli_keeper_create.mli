@@ -5,26 +5,17 @@
     the exit code; none of those is here, so the flag surface can be asserted
     without a server. *)
 
-type booleans =
-  { autoboot : bool option
-  ; proactive : bool option
-  }
-(** Tri-state, one field per boolean flag pair. [None] leaves the key out of
-    the declaration, which is what keeps a create from writing a decision the
-    operator never named:
-    [Keeper_turn_up_config_persistence.full_fields] writes whatever the meta
-    holds, so a two-valued flag would settle [autoboot_enabled] by default. *)
-
 type flags =
   { name : string
   ; instructions : string
   ; sandbox_profile : string
   ; network_mode : string option
+  ; microvm_backend : string option
   ; remote_endpoint : string option
   ; mention_targets : string list
   ; skills : string list option
   ; max_context_override : int option
-  ; booleans : booleans
+  ; activation_mode : string option
   }
 (** One invocation's flags, before any of them is judged.
 

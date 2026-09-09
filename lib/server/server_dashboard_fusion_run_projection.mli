@@ -27,7 +27,9 @@ val to_yojson : generated_at:string -> detail -> Yojson.Safe.t
 
 val list_response :
   generated_at:string -> registry:Fusion_run_registry.t -> Yojson.Safe.t
-(** Shared HTTP/1 and HTTP/2 list payload. *)
+(** Shared HTTP/1 and HTTP/2 list payload. Startup replay diagnostics and
+    historical Board references are separate from the retained run list;
+    Board publication time is never used as a run completion timestamp. *)
 
 val detail_response :
   generated_at:string ->
@@ -36,4 +38,4 @@ val detail_response :
   [ `Bad_request | `Not_found | `OK ] * Yojson.Safe.t
 (** Shared HTTP/1 and HTTP/2 detail response. The path suffix is decoded
     exactly; a blank suffix is [Bad_request] and an unknown run is
-    [Not_found]. *)
+    [Not_found], with a historical Board reference when an exact origin exists. *)

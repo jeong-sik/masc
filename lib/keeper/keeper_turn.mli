@@ -76,6 +76,7 @@ end
 val surface_context_to_instructions : Yojson.Safe.t -> string option
 
 val handle_keeper_msg_admitted :
+  operation_id:Keeper_chat_operation.Operation_id.t ->
   admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->

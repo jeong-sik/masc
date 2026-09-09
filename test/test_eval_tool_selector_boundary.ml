@@ -5,8 +5,20 @@ open Alcotest
 
 let guarded_roots = [ "lib/keeper"; "lib/runtime" ]
 
+(* Dune runs this binary from [_build/default/test]. The roots above are not
+   there, [Sys.readdir] raised [Sys_error], the swallow answered [[||]], and
+   an empty scan has no offenders -- so the guard reported OK without reading
+   a single file. Resolve against DUNE_SOURCEROOT, which the targeted runner
+   and the standalone runner both set, and let a missing or empty root fail
+   (#34385). *)
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists root -> root
+  | _ -> Sys.getcwd ()
+;;
+
 let rec collect_sources dir acc =
-  let entries = try Sys.readdir dir with Sys_error _ -> [||] in
+  let entries = Sys.readdir dir in
   Array.fold_left
     (fun acc name ->
       let path = Filename.concat dir name in
@@ -28,7 +40,16 @@ let read_file path =
 
 
 let test_not_used_by_live_keeper_or_runtime () =
-  let files = List.fold_left (fun acc root -> collect_sources root acc) [] guarded_roots in
+  let root = source_root () in
+  let collect_guarded_root acc guarded =
+    let dir = Filename.concat root guarded in
+    if not (Sys.file_exists dir)
+    then failf "guarded root %s does not exist under %s" guarded root;
+    match collect_sources dir [] with
+    | [] -> failf "guarded root %s holds no sources under %s" guarded root
+    | sources -> sources @ acc
+  in
+  let files = List.fold_left collect_guarded_root [] guarded_roots in
   let offenders =
     files
     |> List.filter (fun path ->

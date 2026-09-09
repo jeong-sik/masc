@@ -644,15 +644,15 @@ let test_json_conditional_tag_is_weak_and_body_derived () =
    exercised here against a real [Server_connection] rather than inferred from
    the branch that builds it. *)
 
-let serve_json_over_wire ?if_none_match body =
+let serve_json_over_wire ?if_none_match ?(headers = []) ?(respond = fun ~request body reqd -> Response.json ~request body reqd) body =
   Eio_main.run (fun _env ->
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Response.json ~request:(Httpun.Reqd.request reqd) body reqd)
+        respond ~request:(Httpun.Reqd.request reqd) body reqd)
     in
     let headers =
-      let base = [ ("host", "127.0.0.1") ] in
+      let base = ("host", "127.0.0.1") :: headers in
       match if_none_match with
       | None -> base
       | Some tag -> ("if-none-match", tag) :: base
@@ -752,8 +752,8 @@ let test_json_response_matching_tag_sends_no_body () =
     "HTTP/1.1 304 Not Modified"
     (response_status_line response);
   Alcotest.(check (option string))
-    "with nothing to read"
-    (Some "0")
+    "304 omits the selected representation length"
+    None
     (response_header response "content-length");
   Alcotest.(check bool)
     "and the body itself never reaches the socket"
@@ -985,8 +985,135 @@ let test_json_lazy_preserves_extra_headers_and_matches_wildcard () =
       (response_header response "x-custom"))
 ;;
 
+let test_json_worker_yields_to_caller () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      let blocker_done, blocker_done_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Executor_pool_ref.submit_or_inline (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await release);
+        Eio.Promise.resolve blocker_done_u ());
+      let release_blocker () =
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u () in
+      Eio.Switch.on_release sw release_blocker;
+      begin
+      Eio.Promise.await occupied;
+      let reqd_ref = ref None in
+      let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+      let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
+      let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
+      let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
+      Alcotest.(check int) "request accepted" (String.length head) consumed;
+      let reqd = Option.get !reqd_ref in
+      let started, started_u = Eio.Promise.create () in
+      let completed, completed_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve started_u ();
+        Response.json_value_on_cpu (`Assoc ["data", `String (String.make 20000 'x')]) reqd;
+        Eio.Promise.resolve completed_u ());
+      Eio.Promise.await started;
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "encoding waits for worker while caller can run" false
+        (Eio.Promise.is_resolved completed);
+      Eio.Promise.resolve release_u ();
+      Eio.Promise.await completed;
+      Eio.Promise.await blocker_done;
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write _ -> ()
+      | `Yield | `Close _ -> Alcotest.fail "worker response was not written"
+      end)))
+;;
+
+let test_json_worker_cancelled_before_write () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      let blocker_done, blocker_done_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Executor_pool_ref.submit_or_inline (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await release);
+        Eio.Promise.resolve blocker_done_u ());
+      let release_blocker () =
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u () in
+      Eio.Switch.on_release sw release_blocker;
+      begin
+        Eio.Promise.await occupied;
+        let reqd_ref = ref None in
+        let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+        let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
+        let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
+        let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
+        Alcotest.(check int) "request accepted" (String.length head) consumed;
+        let reqd = Option.get !reqd_ref in
+        let context, context_u = Eio.Promise.create () in
+        let outcome, outcome_u = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          let cancelled =
+            try
+              Eio.Cancel.sub (fun cancellation ->
+                Eio.Promise.resolve context_u cancellation;
+                Response.json_value_on_cpu
+                  (`Assoc ["data", `String (String.make 20000 'x')]) reqd);
+              false
+            with Eio.Cancel.Cancelled _ -> true
+          in
+          Eio.Promise.resolve outcome_u cancelled);
+        let cancellation = Eio.Promise.await context in
+        Eio.Fiber.yield ();
+        Alcotest.(check bool) "response is queued behind occupied worker" false
+          (Eio.Promise.is_resolved outcome);
+        Eio.Cancel.cancel cancellation Exit;
+        Alcotest.(check bool) "queued response propagates cancellation" true
+          (Eio.Promise.await outcome);
+        let check_no_write () =
+          match Httpun.Server_connection.next_write_operation conn with
+          | `Write _ -> Alcotest.fail "cancelled response wrote HTTP bytes"
+          | `Yield | `Close _ -> () in
+        check_no_write ();
+        release_blocker ();
+        Eio.Promise.await blocker_done;
+        (* Pass a worker barrier before checking that cancellation did not
+           defer a response write until the occupied executor was released. *)
+        Executor_pool_ref.submit_or_inline (fun () -> ());
+        Eio.Fiber.yield ();
+        check_no_write ()
+      end)))
+;;
+
+let test_json_worker_wire_parity () =
+  let respond ~request body reqd =
+    Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd
+  in
+  let body = Yojson.Safe.to_string (`Assoc ["auth", `String "operator";
+    "description", `String (String.make 20000 'x')]) in
+  List.iter (fun encoding ->
+    let headers = ["accept-encoding", encoding; "origin", "http://localhost"] in
+    let direct = serve_json_over_wire ~headers body in
+    let worker = serve_json_over_wire ~headers ~respond body in
+    Alcotest.(check string) (encoding ^ " complete wire response") direct worker;
+    let etag = Response.weak_etag_value body in
+    Alcotest.(check string) (encoding ^ " conditional response")
+      (serve_json_over_wire ~headers ~if_none_match:etag body)
+      (serve_json_over_wire ~headers ~if_none_match:etag ~respond body))
+    ["identity"; "gzip"; "zstd"];
+  let changed = {|{"auth":"viewer","served_at":"next"}|} in
+  Alcotest.(check bool) "new request is not a cached operator response" false
+    (String.equal (serve_json_over_wire ~respond body)
+       (serve_json_over_wire ~respond changed))
+;;
+
 let response_tests =
-  [ ( "content_headers preserve all header segments"
+  [ "worker yields to caller", `Quick, test_json_worker_yields_to_caller
+  ; "cancelled queued worker never writes", `Quick, test_json_worker_cancelled_before_write
+  ; "worker JSON wire parity", `Quick, test_json_worker_wire_parity
+  ; ( "content_headers preserve all header segments"
     , `Quick
     , test_response_content_headers_preserve_all_segments )
   ; ( "empty response includes Content-Length: 0"

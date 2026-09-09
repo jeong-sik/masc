@@ -30,10 +30,12 @@ paths refuse by name before any endpoint is asked. Present, each must name its
 key the section does not know, or a value of the wrong type, fails the load
 naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.
 For capture that is the measured value; for gate it is `always_allow = false`
-and no exemptions, so the Gate reviews every speak. `gate.exempt_agents` is a
-list of agent ids, and an element that is not a non-blank string is refused by
-its index, as `gate.exempt_agents[1]`. Field errors name `<section>.<key>`; a
-section that is not a table is named `root.<section>`.
+and no exemptions, so every speak goes to the Gate: `auto_judge` allows it as
+a local output without a judge turn, `manual` parks it for the operator.
+`gate.exempt_agents` is a list of agent ids, and an element that is not a
+non-blank string is refused by its index, as `gate.exempt_agents[1]`. Field
+errors name `<section>.<key>`; a section that is not a table is named
+`root.<section>`.
 
 ### A load failure is reported per call, not at boot
 
@@ -249,7 +251,7 @@ Any device that can make two HTTP calls can speak to a keeper. No MASC change
 is needed; this was verified end to end on 2026-09-04.
 
 ```sh
-TOKEN=$(cat ~/me/.masc/auth/admin.token)
+TOKEN=$(cat "${MASC_BASE_PATH:?set it to the base path the server runs with}/.masc/auth/admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \

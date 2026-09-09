@@ -69,9 +69,19 @@ type user_media_block = Keeper_multimodal_input.user_media_block = {
     in the attachment payload for the current dashboard contract and is
     not mixed into the text [message]. *)
 
+type user_image_reference = Keeper_multimodal_input.user_image_reference = {
+  value : string;
+  mime_type : string option;
+}
+
+type user_image_source = Keeper_multimodal_input.user_image_source =
+  | Attached of user_media_block
+  | Url_ref of user_image_reference
+  | File_id_ref of user_image_reference
+
 type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_text of string
-  | User_image of user_media_block
+  | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
 (** Semantic user-input blocks accepted from the dashboard.  This is a

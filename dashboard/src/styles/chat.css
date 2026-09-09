@@ -1,5 +1,7 @@
 /* Chat — transcript, bubble, avatar, role-chip, detail-panel/callout. Extracted for #3915. */
 
+@import './chat-layout.css';
+
 /* ── Chat (merged from chat.css) ───────────────────────── */
 
 :root {

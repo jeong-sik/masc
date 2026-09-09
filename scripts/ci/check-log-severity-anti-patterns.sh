@@ -42,10 +42,17 @@ cd "$(git rev-parse --show-toplevel)"
 # matches. The previous baselines were line counts inside multi-line matches,
 # so they were vulnerable to false failures when unrelated lines were added
 # within the match window.
-BASELINE_L1_SILENT=8
-BASELINE_L1_LOGGING_ONLY=2
-BASELINE_L2_OPERATOR_BROADCAST=1
-BASELINE_L4_WATCHDOG_TICK=1
+# 2026-09-07: pinned to what main measures. Until #34024 wired this script
+# into the lint suite it ran nowhere, so the "cleanup detected -- drop
+# BASELINE" line it printed on four of these rules was never read. Counted 3
+# against a baseline total of 12: nine violations could have been added
+# without a word.
+BASELINE_L1_SILENT=3
+BASELINE_L1_LOGGING_ONLY=0
+BASELINE_L2_OPERATOR_BROADCAST=0
+# L4 is the dead rule described below. Its baseline is 0 like the rest, which
+# does not make it live -- nothing can reach it either way.
+BASELINE_L4_WATCHDOG_TICK=0
 BASELINE_L5_VALIDATION_SUCCESS=0
 # 2026-06-03: L6 added strict (0). An outcome-carrying line must derive its
 # level from the outcome value, not hardcode [Info]. The three known sites

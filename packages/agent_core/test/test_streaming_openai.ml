@@ -1148,12 +1148,8 @@ let test_responses_stream_reasoning_tool_and_terminal () =
       {|{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.5","status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Need a lookup."}],"encrypted_content":"enc_reasoning_1"},{"id":"fc_1","type":"function_call","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"weather\"}"}],"usage":{"input_tokens":12,"output_tokens":8,"input_tokens_details":{"cached_tokens":2}}}}|}
   in
   match events5 with
-  | [ ContentBlockStart
-        { index = 0
-        ; content_type = "redacted_thinking"
-        ; tool_id = Some raw_reasoning
-        ; tool_name = None
-        }
+  | [ ContentBlockDelta
+        { index = 0; delta = RedactedThinkingSnapshot raw_reasoning }
     ; MessageDelta { stop_reason = Some StopToolUse; usage = Some usage }
     ; MessageStop
     ] ->

@@ -236,7 +236,7 @@ let run_durable_write_stage ~renamed ~before_stage stage f =
 ;;
 
 let run_in_systhread_cancel_checked f =
-  let outcome = Eio_guard.run_in_systhread f in
+  let outcome = Eio_guard.run_in_systhread ~label:"keeper-fs-op" f in
   Eio_guard.check_if_ready ();
   outcome
 ;;
@@ -318,7 +318,7 @@ let save_bytes_durable_atomic_core
         temp_dir
   in
   let result =
-    Eio_guard.run_in_systhread (fun () ->
+    Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write" (fun () ->
     let temp_path = ref None in
     let channel = ref None in
     let renamed = ref false in
@@ -390,7 +390,7 @@ let save_bytes_durable_atomic_core
           ?ownership_root
           dir
       in
-      Eio_guard.run_in_systhread (fun () ->
+      Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write-stage" (fun () ->
         run_durable_write_stage
           ~renamed:true
           ~before_stage
@@ -413,7 +413,7 @@ let save_bytes_durable_atomic_core
           ?ownership_root
           temp_dir
       in
-      Eio_guard.run_in_systhread (fun () ->
+      Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write-stage" (fun () ->
         run_durable_write_stage
           ~renamed:true
           ~before_stage

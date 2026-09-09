@@ -18,33 +18,39 @@ let default_intents : Gw.intent list =
 (* Env-driven config                                                *)
 (* ---------------------------------------------------------------- *)
 
-let trimmed_env name =
-  match Sys.getenv_opt name with
-  | None -> None
-  | Some raw ->
-    let t = String.trim raw in
-    if String.equal t "" then None else Some t
-
 let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 (* Default trigger policy when none is configured (empty/unset). The
    "quiet, mention-triggered bot" baseline per RFC-0203. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-(* Typed trigger-policy loading, mirroring the Slack sibling
-   ([Server_slack_in_process_gateway.load_trigger_policy_from_toml]): a
-   missing file or missing key is "unset" (default applies); an unreadable
-   file, malformed TOML, wrong field type, or a value the strict grammar
-   rejects is an explicit load error and the gateway does not start —
-   never a silent fallback onto a policy the operator did not write
-   (masc#25123 / PR #25126 recut). *)
+(* The env > TOML walk moved to [Connector_trigger_policy]: this module and the
+   Slack sibling each carried a byte-for-byte copy of it. A missing file or
+   missing key is "unset" (default applies); an unreadable file, malformed
+   TOML, wrong field type, or a value the strict grammar rejects is an explicit
+   load error and the gateway does not start — never a silent fallback onto a
+   policy the operator did not write (masc#25123 / PR #25126 recut).
 
-type trigger_policy_toml_load =
+   Both types are re-exported by type equation rather than aliased, so this
+   module still publishes the constructor names its suite reads. *)
+
+module Policy_load = Connector_trigger_policy.Make (struct
+  type policy = Gw.trigger_policy
+
+  let table = "discord"
+  (* [Gw] is the client here, not the state machine: the grammar lives with
+     the state module the client re-exports its policy type from. *)
+  let parse = Discord_gateway_state.parse_trigger_policy
+  let env = Env_config_discord.trigger_policy_opt
+  let default = default_trigger_policy
+end)
+
+type trigger_policy_toml_load = Policy_load.load =
   | Runtime_toml_missing
   | Trigger_policy_missing
   | Trigger_policy_loaded of Gw.trigger_policy
 
-type trigger_policy_load_error =
+type trigger_policy_load_error = Connector_trigger_policy.load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
@@ -61,59 +67,19 @@ let trigger_policy_load_error_to_string = function
     Printf.sprintf "invalid MASC_DISCORD_TRIGGER_POLICY: %s" detail
 ;;
 
-let load_trigger_policy_from_toml ~path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
-  | exception Unix.Unix_error (code, _, _) ->
-    Error (Runtime_toml_unreadable { path; detail = Unix.error_message code })
-  | _ ->
-    (match Safe_ops.read_file_safe path with
-     | Error detail -> Error (Runtime_toml_unreadable { path; detail })
-     | Ok content ->
-       (match Otoml.Parser.from_string_result content with
-        | Error detail -> Error (Runtime_toml_invalid { path; detail })
-        | Ok toml ->
-          (match
-             Field_resolution.resolve_string toml [ "discord"; "trigger_policy" ]
-           with
-           | Field_resolution.Missing -> Ok Trigger_policy_missing
-           | Field_resolution.Type_mismatch { expected; message; _ } ->
-             Error
-               (Trigger_policy_invalid
-                  { path
-                  ; detail = Printf.sprintf "expected %s: %s" expected message
-                  })
-           | Field_resolution.Present raw ->
-             let raw = String.trim raw in
-             if String.equal raw ""
-             then Ok Trigger_policy_missing
-             else
-               (match Discord_gateway_state.parse_trigger_policy raw with
-                | Ok policy -> Ok (Trigger_policy_loaded policy)
-                | Error detail ->
-                  Error (Trigger_policy_invalid { path; detail })))))
-;;
+let load_trigger_policy_from_toml ~path = Policy_load.load_from_toml ~path
 
-(* Env > TOML > default — the precedence config/runtime.toml documents for
-   this key. An invalid env value is a load error like an invalid TOML value;
-   an empty/unset env falls through to the TOML plane. *)
-let resolved_trigger_policy () =
-  match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
-  | Some raw ->
-    (match Discord_gateway_state.parse_trigger_policy raw with
-     | Ok policy -> Ok policy
-     | Error detail -> Error (Trigger_policy_env_invalid { detail }))
-  | None ->
-    let resolution = Config_dir_resolver.resolve () in
-    let toml_path =
-      Filename.concat resolution.Config_dir_resolver.config_root.path
-        Config_dir_resolver.runtime_toml_filename
-    in
-    (match load_trigger_policy_from_toml ~path:toml_path with
-     | Error _ as error -> error
-     | Ok (Trigger_policy_loaded policy) -> Ok policy
-     | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
-       Ok default_trigger_policy)
+(* Env > TOML > default — the precedence config/runtime.toml documents for this
+   key. [Env_config_discord.trigger_policy_opt] reports a blank value as unset, so
+   a blank environment variable falls through to the TOML plane. *)
+let resolved_trigger_policy () = Policy_load.resolve ()
+
+(* What the gateway judges by right now: the operator's override when the
+   params surface holds one, otherwise what env and runtime.toml said at boot.
+   Read per step by the client, so a change lands on the next message. *)
+let current_trigger_policy () =
+  Runtime_params.get Runtime_settings.discord_trigger_policy
+;;
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
@@ -182,8 +148,8 @@ let discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id 
    all read as the same [discord] badge. A name reads as a place. *)
 let resolve_channel_name ~base_dir ~channel_id =
   match
-    Connector_names.recall ~base_dir ~connector:State.channel
-      ~scope:Connector_names.Channel ~id:channel_id
+    Keeper_connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Keeper_connector_names.Channel ~id:channel_id
   with
   | Some _ as known -> known
   | None -> (
@@ -203,8 +169,8 @@ let resolve_channel_name ~base_dir ~channel_id =
           match Json_util.get_string json "name" with
           | Some name when String.trim name <> "" ->
             let name = String.trim name in
-            Connector_names.remember ~base_dir ~connector:State.channel
-              ~scope:Connector_names.Channel ~id:channel_id ~name ();
+            Keeper_connector_names.remember ~base_dir ~connector:State.channel
+              ~scope:Keeper_connector_names.Channel ~id:channel_id ~name ();
             Some name
           (* A direct message has no name. Absent, not blank. *)
           | Some _ | None -> None))))
@@ -300,7 +266,7 @@ let discord_member_directory_page = function
 let remember_directory_entries ~base_dir ~scope entries =
   List.iter
     (fun (id, name) ->
-       Connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
+       Keeper_connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
          ~name ())
     entries
 
@@ -395,7 +361,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
             Log.Server.warn "Discord channel directory rejected channel=%s: %s"
               channel_id detail
           | Ok (returned_id, name) when String.equal returned_id channel_id ->
-            remember ~scope:Connector_names.Channel channels
+            remember ~scope:Keeper_connector_names.Channel channels
               [ returned_id, name ]
           | Ok (returned_id, _) ->
             Log.Server.warn
@@ -413,7 +379,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
             Log.Server.warn "Discord people directory rejected channel=%s: %s"
               channel_id detail
           | Ok entries ->
-            remember ~scope:Connector_names.Person people entries))
+            remember ~scope:Keeper_connector_names.Person people entries))
   in
   let refresh_guild guild_id =
     match Discord_rest_client.snowflake_of_string guild_id with
@@ -426,7 +392,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
        | Ok json ->
          (match discord_channel_directory_entry json with
           | Ok (returned_id, name) when String.equal returned_id guild_id ->
-            remember ~scope:Connector_names.Server servers [ returned_id, name ]
+            remember ~scope:Keeper_connector_names.Server servers [ returned_id, name ]
           | Ok (returned_id, _) ->
             errors := "server: identity mismatch" :: !errors;
             Log.Server.warn
@@ -443,7 +409,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
        | Error error -> record_rest_error ~scope:"channels" ~target:guild_id error
        | Ok json ->
          (match discord_channel_directory_entries json with
-          | Ok entries -> remember ~scope:Connector_names.Channel channels entries
+          | Ok entries -> remember ~scope:Keeper_connector_names.Channel channels entries
           | Error detail ->
             errors := "channels" :: !errors;
             Log.Server.warn "Discord directory channels rejected guild=%s: %s"
@@ -462,7 +428,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
              Log.Server.warn "Discord directory members rejected guild=%s: %s"
                guild_id detail
            | Ok (entries, next_after, count) ->
-             remember ~scope:Connector_names.Person people entries;
+             remember ~scope:Keeper_connector_names.Person people entries;
              if count = discord_member_page_limit then
                match next_after with
                | None ->
@@ -576,8 +542,8 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
   =
   Option.iter
     (fun name ->
-      Connector_names.remember ~base_dir ~connector:State.channel
-        ~scope:Connector_names.Person ~id:author_id ~name ())
+      Keeper_connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Keeper_connector_names.Person ~id:author_id ~name ())
     author_name;
   let surface =
     discord_attention_surface ~guild_id ~channel_id ~channel_name
@@ -1090,7 +1056,13 @@ let start ~sw ~env ~clock ~state =
          "RFC-0203: Discord trigger-policy configuration rejected; gateway \
           not started (%s)"
          (trigger_policy_load_error_to_string error)
-     | Ok policy ->
+     | Ok configured ->
+    (* What env and runtime.toml said, published so the params surface can
+       offer it as the value a cleared override returns to. *)
+    Runtime_settings.set_discord_trigger_policy_configured configured;
+    (* An override left on the params surface outlives a restart, so what this
+       gateway judges by is the param, not [configured] alone. *)
+    let policy = current_trigger_policy () in
     State.set_trigger_policy policy;
     let ingress =
       Connector_ingress_lane.create
@@ -1116,7 +1088,7 @@ let start ~sw ~env ~clock ~state =
         Gw.run
           ~sw ~env ~token
           ~intents:default_intents
-          ~trigger_policy:policy
+          ~trigger_policy:current_trigger_policy
           ~on_event:(fun ev ->
             let config = Mcp_server.workspace_config state in
             submit_triggered_event

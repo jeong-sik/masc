@@ -11,22 +11,31 @@ type parsed =
 
 let head = "masc("
 
-let kind_word = function
-  | Agent_observation.Comment -> None
-  | Agent_observation.Decision -> Some "decision"
-  | Agent_observation.Question -> Some "question"
-  | Agent_observation.Bookmark -> Some "bookmark"
+(* The one table of kind words. The printer, the reader, the tool schema's
+   enum and the runtime's error message all derive from it, so a fifth kind
+   reaches every one of them by being added here. *)
+let word_of_kind = function
+  | Agent_observation.Comment -> "comment"
+  | Agent_observation.Decision -> "decision"
+  | Agent_observation.Question -> "question"
+  | Agent_observation.Bookmark -> "bookmark"
 ;;
 
-(* The reader's side of [kind_word], plus the plain kind spelled out. The
-   absent word is read as the plain comment by [parse_body] before a word
-   reaches here. *)
-let kind_of_word = function
-  | "comment" -> Some Agent_observation.Comment
-  | "decision" -> Some Agent_observation.Decision
-  | "question" -> Some Agent_observation.Question
-  | "bookmark" -> Some Agent_observation.Bookmark
-  | _ -> None
+let kind_words = List.map word_of_kind Agent_observation.all_annotation_kinds
+
+(* The printer leaves the plain kind's word out. *)
+let kind_word = function
+  | Agent_observation.Comment -> None
+  | (Agent_observation.Decision | Agent_observation.Question | Agent_observation.Bookmark) as kind ->
+    Some (word_of_kind kind)
+;;
+
+(* The reader's side, the plain kind spelled out included. The absent word
+   is read as the plain comment by [parse_body] before a word reaches here. *)
+let kind_of_word word =
+  List.find_opt
+    (fun kind -> String.equal (word_of_kind kind) word)
+    Agent_observation.all_annotation_kinds
 ;;
 
 let is_author_char = function

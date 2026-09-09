@@ -119,16 +119,9 @@ let make_meta ?(name = "keeper-exec-tools") () =
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 (* replay_approved_effect fails closed when a guest profile is dispatched
-   without a turn sandbox factory (#33345).  The suite's meta declares Docker
-   by default, so every replay site wires the same factory the production
-   turn bundle wires.  Cleanup is idempotent and registered with at_exit: the
-   factory creates its runtime lazily, so sites that never dispatch a guest
-   command pay nothing. *)
-let test_turn_sandbox_factory ~config ~meta =
-  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
-  at_exit (fun () -> Masc.Keeper_sandbox_factory.cleanup factory);
-  Some factory
-;;
+   without a turn sandbox factory (#33345), so every replay site wires
+   [Masc_test_deps.fixture_turn_sandbox_factory], the one factory helper the
+   suites share. *)
 
 (* Durable HITL intake reads the recipient's metadata to decide whether the
    Keeper exists (#31717), so a fixture that only registers in the in-memory
@@ -165,11 +158,21 @@ let playground_file ~config ~meta name =
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
 
+(* The tag the runtime asks the daemon for, read off the constant that names
+   it rather than written out again: this probe used to inspect
+   masc-keeper-sandbox:local while a sandboxed run reached for
+   masc-sandbox:general, so a host holding the first one answered "available"
+   and the run failed on the second. *)
 let is_sandbox_available =
   lazy (
     match Masc_test_deps.fixture_sandbox_profile () with
     | Masc.Keeper_types_profile.Docker ->
-      (try Sys.command "docker image inspect masc-keeper-sandbox:local > /dev/null 2>&1" = 0
+      (try
+         Sys.command
+           (Printf.sprintf
+              "docker image inspect %s > /dev/null 2>&1"
+              (Filename.quote Keeper_sandbox_image.default_tag))
+         = 0
        with _ -> false)
     | _ -> false
   )
@@ -220,6 +223,7 @@ let with_exec_fixture
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
+          Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
           Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
         (fun () ->
           Masc_test_deps.with_publication_recovery_registry
@@ -2957,7 +2961,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
           ~config
           ~meta
           ~publication_recovery
-          ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+          ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~grant
           ~approval_id
           ()
@@ -3180,7 +3184,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3212,7 +3216,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3284,7 +3288,7 @@ let test_journal_failure_retries_only_persistence () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3320,7 +3324,7 @@ let test_journal_failure_retries_only_persistence () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3367,7 +3371,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3385,7 +3389,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:(grant ())
            ~approval_id
            ()
@@ -3463,7 +3467,7 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant:restarted_grant
            ~approval_id
            ()
@@ -3562,7 +3566,7 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
            ~config
            ~meta
            ~publication_recovery
-           ~turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+           ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
            ~grant
            ~approval_id
            ()
@@ -4324,6 +4328,63 @@ let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =
   result, !provider_call_count
 ;;
 
+(* The returned SDK boundary is continuation evidence, not a label inferred
+   from stop_reason. Exercise the real HTTP -> tool -> sink -> yield path. *)
+let test_cooperative_boundary_result ~with_sink ~fail_sink () =
+  with_exec_fixture ~bind_eio_context:true "cooperative_boundary_result"
+    (fun ~config:_ ~meta:_ ~publication_recovery:_ ~ctx_work:_ ->
+      let tool_calls = ref 0 in
+      let observed_boundary = ref None in
+      let sink_stages = ref [] in
+      let tool = Agent_core.Tool.create ~name:"boundary_probe"
+        ~description:"Return one local tool result" ~parameters:[]
+        (fun _ -> incr tool_calls; Ok {content="boundary result"; _meta=None}) in
+      let result, provider_calls =
+        with_openai_tool_call_server ~tool_name:"boundary_probe" ~tool_input:(`Assoc [])
+          (fun ~sw ~net ~base_url ->
+            let provider_cfg = Llm_provider.Provider_config.make
+              ~kind:Llm_provider.Provider_config.OpenAI_compat
+              ~model_id:"boundary-model" ~base_url ~api_key:"test-key"
+              ~request_path:"/chat/completions" ~tool_stream:false () in
+            let config = Runtime_agent.default_config ~name:"boundary-runtime"
+              ~provider_cfg ~system_prompt:"Execute the local probe." ~tools:[tool] in
+            let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+              sink_stages := snapshot.stage :: !sink_stages;
+              if fail_sink && snapshot.stage = Agent_core.Agent.After_tool_results_appended
+              then Error "injected tool-boundary checkpoint failure"
+              else Ok () in
+            let config = {config with Runtime_agent.checkpoint_sink =
+                (if with_sink then Some sink else None)} in
+            Runtime_agent.run_blocks ~sw ~net ~config
+              ~cooperative_yield_probe:(fun boundary ->
+                observed_boundary := Some boundary;
+                Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
+              [Agent_core.Types.Text "run probe"])
+      in
+      check int "one actual provider call" 1 provider_calls;
+      check int "one completed local tool" 1 !tool_calls;
+      if fail_sink then (
+        check bool "failed sink never reaches cooperative boundary" true
+          (Option.is_none !observed_boundary);
+        match result with
+        | Error _ -> ()
+        | Ok _ -> fail "failed checkpoint sink produced a resumable runtime result")
+      else match result with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result ->
+        (match result.cooperative_boundary, !observed_boundary, result.checkpoint with
+         | Some actual, Some expected, Some checkpoint ->
+           check int "exact yielded turn survives adapter" expected.turn actual.turn;
+           check bool "exact SDK stage survives adapter" true
+             (actual.checkpoint_stage = expected.checkpoint_stage);
+           check int "boundary joins returned checkpoint turn" checkpoint.turn_count actual.turn;
+           check bool "the tool-result stage is carried" true
+             (actual.checkpoint_stage = Agent_core.Agent.After_tool_results_appended);
+           check bool "sink presence remains distinct from boundary presence" with_sink
+             (List.mem actual.checkpoint_stage !sink_stages)
+         | _ -> fail "runtime dropped the actual yielded boundary or checkpoint"))
+;;
+
 (* A Gate deferral parks the search and the turn keeps going: the model gets
    the deferred tool result and answers in the same turn. The parked call is
    replayed by the host once the approval resolves. *)
@@ -4423,7 +4484,9 @@ let test_deferred_web_search_keeps_the_turn_going () =
           fail
             (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match runtime_result with
-        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
+        | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; cooperative_boundary; _ } ->
+          check bool "parked call does not invent a cooperative yield" true
+            (Option.is_none cooperative_boundary)
         | Ok result ->
           failf
             "parked effect returned stop_reason=%s"
@@ -7118,19 +7181,39 @@ let composable_model_names () =
    state first — an artifact to read — can create it. *)
 type output_probe =
   { tool_name : string
+  ; (* Whether running this producer reaches the sandbox runtime. A probe
+       that does cannot report anything on a host without the image, and
+       naming the tools that do by hand -- the skip below matched the string
+       "Execute" -- left keeper_spawn out and reported its container failure
+       as a schema problem. *)
+    needs_sandbox : bool
   ; prepare :
       config:Masc.Workspace.config
       -> meta:Masc.Keeper_meta_contract.keeper_meta
       -> Yojson.Safe.t
   }
 
-let probe tool_name args =
-  { tool_name; prepare = (fun ~config:_ ~meta:_ -> args) }
+let probe ?(needs_sandbox = false) tool_name args =
+  { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
 let composable_output_probes =
-  [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+  [ probe
+      ~needs_sandbox:true
+      "Execute"
+      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+    (* #34263 gave the start answer a named handle so a composition can hand
+       it on. The declaration landed without a probe, and this list is the
+       only thing that runs the producer against the schema it now claims.
+       Start builds a container argv, so it needs the sandbox the same way
+       Execute does. *)
+  ; probe
+      ~needs_sandbox:true
+      "keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_time_now" (`Assoc [])
+  ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* A tool that reads durable state needs some, or it fails before
@@ -7160,6 +7243,7 @@ let composable_output_probes =
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
   ; { tool_name = "masc_goal_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* An empty list validates the envelope and nothing else. The goal
@@ -7178,6 +7262,7 @@ let composable_output_probes =
            `Assoc [])
     }
   ; { tool_name = "masc_run_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* Same reason as the goal probe: the run item's task_id, plan and
@@ -7194,14 +7279,17 @@ let composable_output_probes =
            `Assoc [])
     }
   ; { tool_name = "masc_get_metrics"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "masc_agent_fitness"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "keeper_artifact_read"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            let store = Tool_blob_store.create ~base_path:config.Masc.Workspace.base_path in
@@ -7283,6 +7371,39 @@ let validate_probe_output ~tool_name ~data =
      | Error _ ->
        failf "%s output validation failed before reaching the schema" tool_name)
 
+let test_lane_status_observations_remain_composable () =
+  let module Profile = Masc.Keeper_types_profile in
+  with_exec_fixture
+    ~always_allow:true
+    "lane-status-composable-observations"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       List.iter
+         (fun (sandbox_profile, observation_field) ->
+            let meta = { meta with sandbox_profile } in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config ~meta ~publication_recovery ~ctx_work
+                ~name:"keeper_lane_status" ~input:(`Assoc []) ()
+            in
+            check string "status observation completes without a guest"
+              "success" (outcome_label result.KTE.disposition);
+            match result.KTE.data with
+            | None -> fail "lane status lost its structured observation"
+            | Some data ->
+              check string "the selected profile reaches the producer"
+                (Profile.sandbox_profile_to_string sandbox_profile)
+                Yojson.Safe.Util.(data |> member "profile" |> to_string);
+              (match Yojson.Safe.Util.member observation_field data with
+               | `String detail ->
+                 check bool "the profile-specific observation is present"
+                   true (String.length detail > 0)
+               | _ -> fail "lane status lost its profile-specific observation");
+              validate_probe_output ~tool_name:"keeper_lane_status" ~data)
+         [ Profile.Docker, "note"
+         ; Profile.Micro_vm, "unreachable"
+         ; Profile.Remote_ssh, "unreachable"
+         ])
+
 let test_composable_outputs_satisfy_declared_schema () =
   with_exec_fixture
     ~process:true
@@ -7324,10 +7445,26 @@ let test_composable_outputs_satisfy_declared_schema () =
           it exists to cover. One unavailable runtime is not a reason to stop
           asking the other producers whether they still match their declared
           schema. *)
+       (* keeper_spawn refuses outside a turn -- it needs the turn's spawn
+          registry to hand a handle to, and answers
+          {"error":"spawn is only available inside a keeper turn"} without
+          one. Installing it around the whole list costs the other probes
+          nothing: a tool that does not read the registry cannot see it. *)
+       let spawn_registry =
+         match
+           Spawn_registry.create
+             ~run:"composable-output-probe"
+             ~output_limit_bytes:(1 lsl 16)
+         with
+         | Some registry -> registry
+         | None -> fail "valid spawn registry was rejected"
+       in
+       Spawn_turn_registry.with_turn_registry (Some spawn_registry)
+       @@ fun () ->
        let failures =
          List.filter_map
-           (fun { tool_name; prepare } ->
-              if String.equal tool_name "Execute" && not (Lazy.force is_sandbox_available)
+           (fun { tool_name; needs_sandbox; prepare } ->
+              if needs_sandbox && not (Lazy.force is_sandbox_available)
               then None
               else
               let input = prepare ~config ~meta in
@@ -7337,7 +7474,7 @@ let test_composable_outputs_satisfy_declared_schema () =
                   ~meta
                   ~publication_recovery
                   ~ctx_work
-                  ?turn_sandbox_factory:(test_turn_sandbox_factory ~config ~meta)
+                  ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
                   ~name:tool_name
                   ~input
                   ()
@@ -7466,6 +7603,12 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
+      test_case "SDK yield carries the exact checkpoint boundary" `Quick
+        (test_cooperative_boundary_result ~with_sink:true ~fail_sink:false);
+      test_case "in-memory SDK boundary does not imply a checkpoint sink" `Quick
+        (test_cooperative_boundary_result ~with_sink:false ~fail_sink:false);
+      test_case "failed checkpoint sink cannot publish a yielded boundary" `Quick
+        (test_cooperative_boundary_result ~with_sink:true ~fail_sink:true);
       test_case "deferred WebSearch keeps the turn going" `Quick
         test_deferred_web_search_keeps_the_turn_going;
       test_case "invalid surface input stays correction-capable" `Quick
@@ -7536,6 +7679,8 @@ let () =
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
     ("composable_output_contract", [
+      test_case "lane observations remain composable without a guest" `Quick
+        test_lane_status_observations_remain_composable;
       test_case "every composable tool has an output probe" `Quick
         test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick

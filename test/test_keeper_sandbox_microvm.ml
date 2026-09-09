@@ -368,6 +368,34 @@ let test_live_structured_image_probe () =
     | M.Image_missing -> ()
     | _ -> Alcotest.fail "a definitely absent image did not produce Image_missing"
 
+(* The gate builds the image this binary carries the recipe for, and only
+   that one. A keeper naming any other image names one we have no recipe
+   for -- and an operator who pointed the default at their own tag would
+   find our recipe written over theirs. So an absent image that is not the
+   recipe's own tag has to come back as the plain refusal, with no build
+   attempted: a build that ran would say so in its own error. *)
+let test_live_absent_image_we_have_no_recipe_for_is_not_built () =
+  match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
+  | None -> ()
+  | Some _ ->
+    with_eio_fs @@ fun () ->
+    (match
+       M.image_present_for
+         Backend.Apple_container
+         ~image:"masc-proof-definitely-missing:never"
+         ~timeout_sec:15.0
+     with
+     | Ok () ->
+       Alcotest.fail "an absent image passed the gate"
+     | Error message ->
+       Alcotest.(check bool)
+         "the refusal is the plain one, so nothing was built"
+         true
+         (String.length message > 0
+         && not
+              (Astring.String.is_infix ~affix:"microvm_image_build_failed"
+                 message)))
+
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
   let base = temp_dir "microvm_factory_" in
@@ -1025,9 +1053,9 @@ let test_leaves_foreign_base_guest_untouched () =
    found". *)
 let test_sweep_skips_listing_when_cli_is_unavailable () =
   let spawn_count = ref 0 in
-  let run_argv ~timeout_sec:_ _argv =
+  let run_argv ~timeout_sec:_ argv =
     incr spawn_count;
-    Unix.WEXITED 0, "[]"
+    Unix.WEXITED 0, (match argv with "nerdctl" :: _ -> "" | _ -> "[]")
   in
   let asked = ref [] in
   let unavailable =
@@ -1054,22 +1082,179 @@ let test_sweep_skips_listing_when_cli_is_unavailable () =
       ~is_pid_alive
       ~run_argv
   in
-  (* Only Apple's runtime has an established labelled listing today, so it is
-     the only row and the only spawn. *)
-  Alcotest.(check int) "available listing count" 1 !spawn_count;
-  match available with
-  | [] -> Alcotest.fail "available CLI did not run the sweep"
-  | [ (backend, outcome) ] ->
-    Alcotest.(check string)
-      "the row names the runtime it swept"
-      "apple_container"
-      (Backend.to_string backend);
+  (* Apple and Kata have independently parsed labelled inventories. *)
+  Alcotest.(check int) "available listing count" 2 !spawn_count;
+  Alcotest.(check (list string)) "available backend inventory rows"
+    [ "apple_container"; "nerdctl_kata" ]
+    (List.map (fun (backend, _) -> Backend.to_string backend) available);
+  List.iter (fun (_, outcome) ->
     Alcotest.(check (list string)) "available removed" [] outcome.M.removed;
-    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)
-  | rows ->
-    Alcotest.failf
-      "expected one swept runtime, got %d"
-      (List.length rows)
+    Alcotest.(check int) "available failures" 0 (List.length outcome.M.failed)) available
+
+
+let test_startup_sweep_serializes_inventory_with_boot () =
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let bin_dir = temp_dir "microvm-sweep-cli-" in
+  let cli = Filename.concat bin_dir "container" in
+  let oc = open_out cli in
+  output_string oc
+    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
+  close_out oc;
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin_dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_spawn_guard_for_testing ();
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      Unix.unlink cli;
+      Unix.rmdir bin_dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let config = Masc.Workspace.default_config sweep_base_path in
+  let meta = { (microvm_meta ~name:"sweep-race") with
+               sandbox_image = Some "test-image" } in
+  let runtime = Turn.For_testing.create_minimal ~config ~meta
+      ~state:Turn.Not_started in
+  let name = Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:meta.name ~network_mode:Profile.Network_none in
+  let listing_started, listing_started_r = Eio.Promise.create () in
+  let release_listing, release_listing_r = Eio.Promise.create () in
+  let delete_started, delete_started_r = Eio.Promise.create () in
+  let release_delete, release_delete_r = Eio.Promise.create () in
+  let boot_attempted, boot_attempted_r = Eio.Promise.create () in
+  let boot_finished, boot_finished_r = Eio.Promise.create () in
+  let guest_removed = ref false in
+  let boot_command_ran = ref false in
+  Process_eio.set_spawn_guard
+    { run = (fun run ->
+        boot_command_ran := true;
+        Alcotest.(check bool) "boot cannot touch the guest before sweep removal"
+          true !guest_removed;
+        run ()) };
+  let run_argv ~timeout_sec:_ argv =
+    match argv with
+    | [ "container"; "list"; "-a"; "--format"; "json" ] ->
+      Eio.Promise.resolve listing_started_r ();
+      Eio.Promise.await release_listing;
+      Unix.WEXITED 0,
+      Yojson.Safe.to_string
+        (`List [ entry ~keeper:meta.name ~owner_pid:(string_of_int dead_pid) name ])
+    | [ "container"; "delete"; "--force"; target ] ->
+      Alcotest.(check string) "delete the name from the inventory" name target;
+      Eio.Promise.resolve delete_started_r ();
+      Eio.Promise.await release_delete;
+      guest_removed := true;
+      Unix.WEXITED 0, ""
+    | argv -> Alcotest.failf "unexpected sweep command: %s" (String.concat " " argv)
+  in
+  Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+    ~sweep:(fun () ->
+      ignore (Turn.sweep_abandoned_microvm_guests
+        ~base_path:sweep_base_path
+        ~command_available:(String.equal "container")
+        ~timeout_sec:1.0 ~is_pid_alive ~run_argv));
+  Eio.Promise.await listing_started;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve boot_attempted_r ();
+    (match Turn.microvm_remote_endpoint runtime with
+     | Error _ -> () (* Fake CLI refuses the image after the lifecycle calls. *)
+     | Ok _ -> Alcotest.fail "fake CLI should refuse the image");
+    Eio.Promise.resolve boot_finished_r ());
+  Eio.Promise.await boot_attempted;
+  (* Yield to the boot fiber before observing the absence of its command.
+     The parent fiber is unrelated lane work and continues at both holds. *)
+  Eio.Fiber.yield ();
+  Alcotest.(check bool) "boot waits while listing is held" false !boot_command_ran;
+  Eio.Promise.resolve release_listing_r ();
+  Eio.Promise.await delete_started;
+  Eio.Fiber.yield ();
+  Alcotest.(check bool) "boot waits until deletion finishes" false !boot_command_ran;
+  Eio.Promise.resolve release_delete_r ();
+  Eio.Promise.await boot_finished;
+  Alcotest.(check bool) "boot proceeds after deletion" true !boot_command_ran
+;;
+
+let test_runtime_sweep_preserves_live_owner () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let commands = ref [] in
+  let outcomes =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:sweep_base_path
+      ~command_available:(String.equal "container")
+      ~timeout_sec:1.0 ~is_pid_alive
+      ~run_argv:(fun ~timeout_sec:_ argv ->
+        commands := argv :: !commands;
+        Unix.WEXITED 0,
+        Yojson.Safe.to_string
+          (`List [ entry ~owner_pid:(string_of_int live_pid) "reused-live-name" ]))
+  in
+  Alcotest.(check int) "a live owner triggers only the listing" 1 (List.length !commands);
+  Alcotest.(check int) "runtime inventory observed" 1 (List.length outcomes);
+  List.iter (fun (_, (outcome : M.sweep_outcome)) ->
+    Alcotest.(check (list string)) "live guest survives" [] outcome.removed)
+    outcomes
+;;
+
+let test_sweep_exception_does_not_poison_lifecycle raise_error =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let sweep run_argv =
+    Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:sweep_base_path
+      ~command_available:(String.equal "container")
+      ~timeout_sec:1.0 ~is_pid_alive ~run_argv
+  in
+  let original = ref None in
+  let run_argv ~timeout_sec:_ _ =
+    try raise_error (); Alcotest.fail "expected an exception" with
+    | (Exit | Eio.Cancel.Cancelled _) as exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      original := Some exn;
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  let caught =
+    try
+      (* The sweep must propagate this exact exception after releasing the lock. *)
+      ignore (sweep run_argv);
+      Alcotest.fail "CLI exception must remain visible"
+    with
+    | (Exit | Eio.Cancel.Cancelled _) as caught -> caught
+  in
+  Alcotest.(check bool) "the original exception reaches the caller" true
+    (Option.exists (fun expected -> caught == expected) !original);
+  let outcomes = sweep (fun ~timeout_sec:_ _ -> Unix.WEXITED 0, "[]") in
+  Alcotest.(check int) "the lifecycle lock is reusable after a CLI failure"
+    1 (List.length outcomes)
+;;
+
+let test_startup_maintenance_is_owned_by_its_switch () =
+  Eio_main.run @@ fun _ ->
+  let started, started_r = Eio.Promise.create () in
+  let cancelled = ref false in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Server_runtime_startup_maintenance.start_microvm_guest_maintenance ~sw
+       ~sweep:(fun () ->
+         Eio.Promise.resolve started_r ();
+         try Eio.Fiber.await_cancel () with
+         | Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn);
+     Eio.Promise.await started;
+     Eio.Switch.fail sw Exit
+   with Exit -> ());
+  Alcotest.(check bool) "shutdown cancels owned maintenance" true !cancelled
+;;
 
 let live_entry ~base_path ~keeper_name ~id =
   let label key value = key, `String value in
@@ -1157,6 +1342,61 @@ let test_volume_create_argv_carries_a_size () =
   (* The image is sparse -- 4 GiB nominal measured at 84 MB on disk -- so the
      size is a ceiling, not an allocation. *)
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
+;;
+
+let test_nerdctl_volume_ensure_confirms_persistent_identity () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "nerdctl-volume-cli-" in
+  let cli = Filename.concat dir "nerdctl" in
+  let log = Filename.concat dir "calls" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [cli; log];
+      Unix.rmdir dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let run ~create_exit ~inspect_exit ~payload =
+    let oc = open_out cli in
+    Printf.fprintf oc
+      "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\ncase \"$*\" in\n'volume create masc-keeper-work-fixture') exit %d;;\n'volume inspect masc-keeper-work-fixture') printf '%%s\\n' %s; exit %d;;\n*) exit 99;;\nesac\n"
+      (Filename.quote log) create_exit (Filename.quote payload) inspect_exit;
+    close_out oc;
+    Unix.chmod cli 0o755;
+    M.ensure_work_volume_for Masc.Keeper_microvm_backend.Nerdctl_kata
+      ~volume_name:"masc-keeper-work-fixture" ~size:"256g" ~timeout_sec:5.0
+  in
+  let valid = {|[{"Name":"masc-keeper-work-fixture","Mountpoint":"/managed/fixture/_data"}]|} in
+  for _ = 1 to 2 do
+    match run ~create_exit:0 ~inspect_exit:0 ~payload:valid with
+    | Ok `Ensured -> ()
+    | _ -> Alcotest.fail "repeated ensure must confirm identity without claiming new creation"
+  done;
+  let ic = open_in log in
+  let calls = In_channel.input_all ic in
+  close_in ic;
+  Alcotest.(check string) "only idempotent create and inspect, no size/list/remove"
+    "volume create masc-keeper-work-fixture\nvolume inspect masc-keeper-work-fixture\nvolume create masc-keeper-work-fixture\nvolume inspect masc-keeper-work-fixture\n"
+    calls;
+  List.iter
+    (fun payload ->
+      match run ~create_exit:0 ~inspect_exit:0 ~payload with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed or mismatched inspect must fail")
+    [ "[]"; "not json"; {|[{"Name":"other","Mountpoint":"/managed/x"}]|}
+    ; {|[{"Name":"masc-keeper-work-fixture","Mountpoint":"relative"}]|}
+    ; {|[{"Name":"masc-keeper-work-fixture","Name":"other","Mountpoint":"/managed/x"}]|} ];
+  List.iter
+    (fun (create_exit, inspect_exit) ->
+      match run ~create_exit ~inspect_exit ~payload:valid with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "CLI failure must not be read as an ensured volume")
+    [1, 0; 0, 1]
 ;;
 
 let test_work_volume_is_named_and_mounted_at_its_root () =
@@ -1942,6 +2182,8 @@ let () =
             test_the_inspect_shape_follows_the_runtime
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
+        ; Alcotest.test_case "an absent image we have no recipe for is not built"
+            `Slow test_live_absent_image_we_have_no_recipe_for_is_not_built
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick
@@ -1952,6 +2194,19 @@ let () =
             test_leaves_foreign_base_guest_untouched
         ; Alcotest.test_case "leaves guests it cannot account for" `Quick
             test_leaves_guests_it_cannot_account_for
+        ; Alcotest.test_case "startup sweep serializes inventory with boot" `Quick
+            test_startup_sweep_serializes_inventory_with_boot
+        ; Alcotest.test_case "sweep failure does not poison lifecycle" `Quick
+            (fun () -> test_sweep_exception_does_not_poison_lifecycle (fun () -> raise Exit))
+        ; Alcotest.test_case "sweep cancellation propagates without poisoning lifecycle" `Quick
+            (fun () -> test_sweep_exception_does_not_poison_lifecycle (fun () ->
+               Eio.Cancel.sub (fun cancel_context ->
+                 Eio.Cancel.cancel cancel_context Exit;
+                 Eio.Cancel.check cancel_context)))
+        ; Alcotest.test_case "startup maintenance is owned by its switch" `Quick
+            test_startup_maintenance_is_owned_by_its_switch
+        ; Alcotest.test_case "runtime sweep preserves a live owner" `Quick
+            test_runtime_sweep_preserves_live_owner
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
             test_sweep_skips_listing_when_cli_is_unavailable
         ] )
@@ -1998,7 +2253,9 @@ let () =
             test_live_turn_runtime_cat
         ] )
     ; ( "work volume"
-      , [ Alcotest.test_case "work volume is named and mounted at its root" `Quick
+      , [ Alcotest.test_case "nerdctl ensure confirms persistent volume identity" `Quick
+            test_nerdctl_volume_ensure_confirms_persistent_identity
+        ; Alcotest.test_case "work volume is named and mounted at its root" `Quick
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size

@@ -60,6 +60,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     trace_ref = None;
     run_validation = None;
     runtime_observation = None;
+    cooperative_boundary = None;
     stop_reason = Runtime_agent.Completed;
   }
 
@@ -139,7 +140,18 @@ let direct_no_progress_retry_decision err =
     ~attempted_runtimes:[ "runtime.direct-empty" ]
     err
 
-let test_dispatch_rejects_runtime_without_serialized_request_cap () =
+let test_admitted_continuation_requires_checkpoint () =
+  match
+    Masc.Keeper_turn_driver.run_named
+      ~runtime_id:"unused" ~base_path:"." ~goal:"continue"
+      ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
+  with
+  | Error (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "continuation_checkpoint"; _ })) -> ()
+  | Error error -> Alcotest.failf "wrong admission error: %s" (Agent_core.Error.to_string error)
+  | Ok _ -> Alcotest.fail "missing admitted checkpoint must not dispatch a new input"
+
+let test_dispatch_accepts_runtime_without_serialized_request_cap () =
   let snapshot = Runtime.For_testing.snapshot () in
   let path = Filename.temp_file "uncapped_keeper_runtime_" ".toml" in
   let uncapped =
@@ -174,18 +186,9 @@ let test_dispatch_rejects_runtime_without_serialized_request_cap () =
             Masc.Keeper_turn_driver.For_testing.resolve_runtime_candidate_for_attempt
               "test_provider.test_model"
           with
-          | Error
-              (Agent_core.Error.Config
-                (Agent_core.Error.InvalidConfig
-                  { field = "max-request-body-bytes"; _ })) ->
-            ()
-          | Error error ->
-            Alcotest.failf
-              "wrong typed cap rejection: %s"
-              (Agent_core.Error.to_string error)
-          | Ok _ ->
-            Alcotest.fail
-              "uncapped Keeper runtime must be rejected before provider dispatch"))
+          | Ok _ -> ()
+          | Error error -> Alcotest.failf "uncapped runtime should resolve for dispatch: %s"
+              (Agent_core.Error.to_string error)))
 
 type direct_retry_observed_attempt =
   { observed_runtime_id : string
@@ -467,7 +470,7 @@ let test_a_rejected_response_leaves_the_checkpoint_either_way () =
     Alcotest.fail "the rejected response must leave the checkpoint"
 
 (* The cut has to reach the durable checkpoint, or the rejected text is back
-   as input next turn: sangsu carried the same 31 KB collapse four times,
+   as input next turn: fixture_worker carried the same 31 KB collapse four times,
    2026-09-05 (#33267). The drop is persisted through the keeper's own sink
    under its own stage, at the turn count of the checkpoint it replaces. *)
 let test_a_dropped_response_is_written_through_the_sink () =
@@ -2227,9 +2230,13 @@ let () =
             `Quick
             test_session_conflict_exhaustion_preserves_typed_terminal_reason;
           Alcotest.test_case
-            "dispatch rejects runtime without serialized-request cap"
+            "admitted continuation requires its checkpoint before dispatch"
             `Quick
-            test_dispatch_rejects_runtime_without_serialized_request_cap;
+            test_admitted_continuation_requires_checkpoint;
+          Alcotest.test_case
+            "dispatch accepts runtime without serialized-request cap"
+            `Quick
+            test_dispatch_accepts_runtime_without_serialized_request_cap;
           Alcotest.test_case
             "runtime exhaustion labels cap free-text detail"
             `Quick

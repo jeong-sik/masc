@@ -3,7 +3,7 @@ name: "masc"
 version: "0.24.0"
 synopsis: "Multi-Agent Shared Context MCP Server in OCaml"
 description:
-  "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents"
+  "Multi-Agent Shared Context: a harness for running several coding agents against one repository, with the shared workspace state served over MCP and a terminal UI"
 maintainer: "Jeongsik Yun"
 authors: "Jeongsik Yun"
 license: "MIT"
@@ -119,10 +119,11 @@ depends: [
   "mirage-crypto-rng-eio" {= "1.2.0"}
   "mtime" {= "2.1.0"}
   "num" {= "1.6"}
-  "ocaml" {= "5.5.0"}
-  "ocaml-base-compiler" {= "5.5.0"}
-  "ocaml-compiler" {= "5.5.0"}
+  "ocaml" {= "5.5.1"}
+  "ocaml-base-compiler" {= "5.5.1"}
+  "ocaml-compiler" {= "5.5.1"}
   "ocaml-compiler-libs" {= "v0.17.0"}
+  "ocaml-msx" {= "dev"}
   "ocaml-options-vanilla" {= "1"}
   "ocaml-protoc-plugin" {= "6.2.0"}
   "ocaml-syntax-shims" {= "1.0.0"}
@@ -232,6 +233,10 @@ pin-depends: [
   [
     "mcp_protocol.1.3.0"
     "git+https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0"
+  ]
+  [
+    "ocaml-msx.dev"
+    "git+https://github.com/jeong-sik/ocaml-msx.git#a754105fde711dd351afaca90d03f3d750bc4f87"
   ]
   [
   "ws-direct-core.0.1.0"

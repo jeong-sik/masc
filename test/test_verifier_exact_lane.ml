@@ -13,6 +13,7 @@ let request : AR.review_request =
   ; completion_notes = "Implemented the change and ran the focused test."
   ; task_id = "test-task"
   ; evidence_refs = []
+  ; evidence_images = []
   }
 ;;
 
@@ -34,7 +35,7 @@ let with_lane_and_reviewer ~slots ~reviewer f =
        f ())
 ;;
 
-let review () =
+let review_with (req : AR.review_request) () =
   AR.review
     ~question:
       { AR.completion_contract = None
@@ -44,12 +45,14 @@ let review () =
       }
     ~lookup:AR.No_lookup_surface
     ~base_path:(Filename.get_temp_dir_name ())
-    request
+    req
 ;;
+
+let review () = review_with request ()
 
 (* A reviewer that answers per slot and records the attempt order. *)
 let recording_reviewer calls behaviors =
-  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+  fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> behavior
@@ -168,7 +171,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
     ~slots:(fun () -> Ok [ "slot-a" ])
     ~reviewer:
       (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
-           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+           ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~on_runtime_attempt_error () ->
          on_runtime_attempt_error
            ~runtime_id:"glm.test-model"
@@ -205,7 +208,57 @@ let test_exhaustion_reports_all_nonretryable_attempts () =
        Alcotest.(check (option bool))
          "all typed evaluator errors are non-retryable"
          (Some false)
-         result.evaluator_error_retryable)
+       result.evaluator_error_retryable)
+;;
+
+(* RFC-0436 §4.3: recorded images ride to the reviewer as attached blocks
+   after the prompt text. An imageless request sends no blocks at all — the
+   prompt string stays the whole goal, as before this channel existed. *)
+let image_request =
+  { request with
+    evidence_images =
+      [ { AR.image_reference = "artifact:shot.png"
+        ; image_sha256 = "e3b0c442"
+        ; image_bytes = 3
+        ; image_media_type = "image/png"
+        ; image_body_base64 = "aGk="
+        }
+      ]
+  }
+;;
+
+let test_recorded_images_ride_to_the_reviewer_as_blocks () =
+  let received = ref None in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "slot-a" ])
+    ~reviewer:
+      (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks
+           ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+           ~on_runtime_attempt_error:_ () ->
+         received := goal_blocks;
+         Ok (Some (AR.Approve "")))
+    (fun () ->
+       ignore (review_with image_request ());
+       (match !received with
+        | Some
+            [ Agent_core.Types.Text prompt
+            ; Agent_core.Types.Image { media_type; data; _ } ] ->
+          Alcotest.(check string)
+            "the image block carries the recorded media type" "image/png"
+            media_type;
+          Alcotest.(check string)
+            "the image block carries the base64 body" "aGk=" data;
+          Alcotest.(check bool) "the prompt text rides as the first block" true
+            (String.length prompt > 0)
+        | blocks ->
+          Alcotest.failf "expected the prompt text and one image block, got %s"
+            (match blocks with
+             | None -> "no blocks"
+             | Some blocks ->
+               Printf.sprintf "%d blocks" (List.length blocks)));
+       ignore (review ());
+       Alcotest.(check bool) "an imageless review sends no blocks" true
+         (!received = None))
 ;;
 
 let test_unconfigured_lane_is_unavailable_not_rerouted () =
@@ -468,6 +521,10 @@ let () =
             "exhaustion reports all non-retryable attempts"
             `Quick
             test_exhaustion_reports_all_nonretryable_attempts
+        ; Alcotest.test_case
+            "recorded images ride to the reviewer as blocks"
+            `Quick
+            test_recorded_images_ride_to_the_reviewer_as_blocks
         ; Alcotest.test_case
             "nested runtime retryable attempt survives terminal error"
             `Quick

@@ -425,7 +425,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -535,16 +535,19 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                 })
               images )
     in
-    (* Reported from [prepared.messages], the post-window list, and gated on
+    (* Prepared from [prepared.messages], the post-window list, and gated on
        the same [session_mode] the prompt below is built from -- one match,
        so the record cannot claim bytes the prompt did not carry. A [Start]
        renders the whole list; a [Resume] sends the goal alone and leaves the
        accumulated conversation in the session the CLI owns, which is the fact
-       the composition line at the foot of this function already states. *)
-    on_transmitted_model_input
-      (match session_mode with
-       | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-       | Runtime_claude_code.Resume _ -> Host.Held_by_client_session);
+       the composition line at the foot of this function already states.
+       Report it only after the runtime writes the complete user message. *)
+    let report_transmitted_input () =
+      on_transmitted_model_input
+        (match session_mode with
+         | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
+         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
+    in
     let prompt =
       match session_mode with
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
@@ -608,6 +611,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -624,7 +628,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Ok () -> Ok ()
       | Error error -> Error (claude_error_to_core_error error)
     in
-    let process_mgr = Eio.Stdenv.process_mgr env in
+    let process_mgr = Posix_spawn_process_mgr.mgr in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let probe_config =
       bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config
@@ -699,6 +703,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
@@ -914,6 +919,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                    ~expected
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
+             ~on_prompt_sent:report_transmitted_input
              ~on_turn_starting:(fun ~session_id ->
                update_session "turn-starting transition" (fun expected ->
                  Session_store.mark_turn_starting
@@ -940,9 +946,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         (match client_result with
          | Error (Runtime_claude_code.Stopped_by_host { stop; usage }) ->
            recovery_failure := Session_store.Host_hook_failed;
-           (match !terminal_error with
-            | Some detail -> Error (internal_error detail)
-            | None -> settle_host_stop ~usage stop)
+           (match stop, !terminal_error with
+            | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary -> settle_host_stop ~usage stop
+            | _, Some detail -> Error (internal_error detail)
+            | _, None -> settle_host_stop ~usage stop)
          | Error error ->
            context_overflow_retry_safe :=
              (match error with
@@ -1060,6 +1068,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              ; trace_ref = None
              ; run_validation = None
              ; runtime_observation = Some runtime_observation
+             ; cooperative_boundary = None
              ; stop_reason = Completed
              })
       with
@@ -1113,6 +1122,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
@@ -1219,7 +1229,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
             ~config)
         ())
   in

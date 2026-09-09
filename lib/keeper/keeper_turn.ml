@@ -224,11 +224,17 @@ let turn_resources_error ~surface failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
-  tool_result_error_data ~class_:Tool_result.Dependency_unavailable
+  (* The payload said "runtime_failure" while the call beside it set
+     Dependency_unavailable, so anything reading the payload got the opposite
+     answer from anything reading the result. One value now feeds both. *)
+  let class_ = Tool_result.Dependency_unavailable in
+  tool_result_error_data
+    ~class_
     ~tool_name:(invocation_tool_name surface)
     (`Assoc
        [ "error", `String "keeper_turn_resources_unavailable"
-       ; "failure_class", `String "runtime_failure"
+       ; ( "failure_class"
+         , `String (Tool_result.tool_failure_class_to_string class_) )
        ; "detail", `String detail
        ])
 ;;
@@ -366,6 +372,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -399,6 +406,11 @@ let run_keeper_invocation_turn_admitted_inner
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in
+  (* One admitted operation owns the observation state across all provider
+     attempts, including official clients that return no AGENT_CORE checkpoint. *)
+  let repetition_execution =
+    Keeper_repetition_scope.Execution.direct_operation operation_id
+  in
   let turn_instructions, direct_reply, channel_session_key, channel, user_blocks =
     match direct_message with
     | None -> None, false, None, "", None
@@ -447,8 +459,11 @@ let run_keeper_invocation_turn_admitted_inner
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
-         BEFORE it enters the turn, so the main history stays text-only and
-         RFC-0265 never recomputes required=['image'] from it. A runtime that
+         BEFORE it enters the turn, so inline pixels never reach the main
+         history and RFC-0265 never recomputes required=['image'] from them.
+         A Url/File_id reference passes through (#33682): the degrade floor
+         strips it from a text-only runtime's dispatch view while the
+         reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
       let user_blocks =
         Option.map
@@ -766,6 +781,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~build_turn_prompt
 		                                ~user_message:message
 		                                ~turn_kind:Turn_record.Direct
+                                ~repetition_execution
 		                                ~skill_snapshot
 			                                ~task_skill_selection
 			                                ?user_blocks
@@ -912,6 +928,7 @@ let run_keeper_invocation_turn_admitted_inner
    mask an in-flight cancellation, so it is swallowed and logged the way the
    autonomous lane's turn cleanup does. *)
 let run_keeper_invocation_turn_admitted
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -953,6 +970,7 @@ let run_keeper_invocation_turn_admitted
   in
   match
     run_keeper_invocation_turn_admitted_inner
+      ~operation_id
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -974,6 +992,7 @@ let run_keeper_invocation_turn_admitted
 ;;
 
 let handle_keeper_msg_admitted
+      ~operation_id
       ~admission_token:_
       ?on_text_delta
       ?on_event
@@ -989,6 +1008,7 @@ let handle_keeper_msg_admitted
     Keeper_invocation_contract.direct_message_request direct_message
   in
   run_keeper_invocation_turn_admitted
+    ~operation_id
     ?on_text_delta
     ?on_event
     ?on_tool_stream_observation

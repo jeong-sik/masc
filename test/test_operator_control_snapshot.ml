@@ -313,10 +313,11 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
           ~args:
             (`Assoc
               [
+                ("sandbox_profile", `String "docker");
                 ("name", `String keeper_name);
                 ("instructions", `String "Prefer metrics context truth");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("activation_mode", `String "on_demand");
+                ("activation_mode", `String "manual");
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -735,10 +736,11 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
           ~args:
             (`Assoc
               [
+                ("sandbox_profile", `String "docker");
                 ("name", `String keeper_name);
                 ("instructions", `String "Expose keeper attention in digest");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("activation_mode", `String "on_demand");
+                ("activation_mode", `String "manual");
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -836,10 +838,11 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
           ~args:
             (`Assoc
               [
+                ("sandbox_profile", `String "docker");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep receipt causal signal in summary");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("activation_mode", `String "on_demand");
+                ("activation_mode", `String "manual");
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -1109,10 +1112,11 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
           ~args:
             (`Assoc
               [
+                ("sandbox_profile", `String "docker");
                 ("name", `String keeper_name);
                 ("instructions", `String "Surface tool audit in lightweight snapshots");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("activation_mode", `String "on_demand");
+                ("activation_mode", `String "manual");
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -1248,10 +1252,11 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
           ~args:
             (`Assoc
               [
+                ("sandbox_profile", `String "docker");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep recent tool names distinct from latest");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("activation_mode", `String "on_demand");
+                ("activation_mode", `String "manual");
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -1544,6 +1549,58 @@ let test_snapshot_rejects_pending_confirm_with_invalid_timestamp () =
           ]
       ])
 
+(* The walk takes names from the newest rows and stops at the limit, so the
+   rows behind the stopping point are never parsed. What it returns must not
+   depend on that: the newest names, in the order the newest rows give them,
+   and a malformed row it reaches is skipped rather than fatal. *)
+(* The identity fields come from the record that defines them, the way the
+   three other row builders in this suite already take them. Hand-written
+   here, the row said "kind": "turn" -- the versionless shape the module
+   docstring calls retired -- so kind_of_json answered None, every row
+   contributed no names, and all three cases below read []. *)
+let turn_row tools =
+  Yojson.Safe.to_string
+    (`Assoc
+       (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+        @ [ "tools_used", `List (List.map (fun t -> `String t) tools) ]))
+;;
+
+let test_recent_tool_names_take_the_newest_rows () =
+  let lines =
+    [ turn_row [ "oldest_a"; "oldest_b" ]
+    ; turn_row [ "middle" ]
+    ; turn_row [ "newest_a"; "newest_b" ]
+    ]
+  in
+  Alcotest.(check (list string))
+    "newest row first, then older ones, up to the limit"
+    [ "newest_a"; "newest_b"; "middle"; "oldest_a" ]
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names ~limit:4 lines);
+  Alcotest.(check (list string))
+    "a limit the newest row alone fills stops there"
+    [ "newest_a" ]
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names ~limit:1 lines)
+;;
+
+let test_recent_tool_names_skip_a_malformed_row () =
+  let lines =
+    [ turn_row [ "oldest" ]; "{ not json"; turn_row [ "newest" ] ]
+  in
+  Alcotest.(check (list string))
+    "a malformed row between two good ones is skipped, not fatal"
+    [ "newest"; "oldest" ]
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names ~limit:4 lines)
+;;
+
+let test_recent_tool_names_ignore_blank_rows () =
+  Alcotest.(check (list string))
+    "blank rows carry no names and do not stop the walk"
+    [ "only" ]
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names
+       ~limit:4
+       [ ""; turn_row [ "only" ]; "   " ])
+;;
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
@@ -1580,6 +1637,20 @@ let () =
             "digest includes typed tool-host failure"
             `Quick
             test_digest_workspace_includes_tool_host_failure_attention
+        ] );
+      ( "recent tool names"
+      , [ Alcotest.test_case
+            "newest rows fill the limit"
+            `Quick
+            test_recent_tool_names_take_the_newest_rows
+        ; Alcotest.test_case
+            "a malformed row is skipped"
+            `Quick
+            test_recent_tool_names_skip_a_malformed_row
+        ; Alcotest.test_case
+            "blank rows are ignored"
+            `Quick
+            test_recent_tool_names_ignore_blank_rows
         ] );
       ( "pending-confirm store"
       , [ Alcotest.test_case

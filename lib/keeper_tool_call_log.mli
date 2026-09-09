@@ -281,20 +281,29 @@ val read_recent :
   unit ->
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
-    optionally filtered by keeper name. Default [n=100]. Reads the store tail
-    only far enough to answer: [n] rows unfiltered, [n *
-    {!read_over_scan_factor}] when filtering by keeper. *)
+    oldest first, optionally only one keeper's. Default [n=100].
+
+    The answer is exact: [n] rows come back whenever the store holds [n] for
+    that keeper, so a short answer means the store is short. It used to be a
+    tail scan with a keeper filter, which returned 454 rows for a request of
+    500 and left the caller unable to tell that from a keeper that had made
+    no more calls.
+
+    Answered from the derived read index (RFC-0437), which advances itself to
+    the store's current end before the query and names rows the store is then
+    read for - the store stays the authority. An index that cannot be built
+    is logged and answered as empty rather than fallen back from, so there is
+    one read path. *)
 
 val read_over_scan_factor : int
-(** Scan multiplier [read_recent] applies before its keeper filter: to end up
-    with [n] rows from one keeper it reads [n * read_over_scan_factor] fleet
-    rows. Callers sharing one fleet read ({!read_recent_rows}) size their
-    window with this to reproduce a per-keeper [read_recent]'s coverage.
+(** Scan multiplier for callers that share one fleet read
+    ({!read_recent_rows} + {!filter_rows_for_keeper}) instead of asking per
+    keeper: to end up with [n] rows from one keeper such a read must cover
+    [n * read_over_scan_factor] fleet rows, and it is still a scan, so the
+    coverage it buys is approximate.
 
-    It applies only when [keeper_name] is given. Without one the filter keeps
-    every row, so reading past [n] would parse rows that {!read_recent} then
-    discards — on a store averaging 6.8 KB per row that was 165 MB read for an
-    answer 33 MB contains. *)
+    {!read_recent} no longer applies it. That read goes through the index and
+    is exact. *)
 
 val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
 (** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows

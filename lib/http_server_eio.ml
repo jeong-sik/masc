@@ -25,7 +25,7 @@ let default_config = {
     Env_config_core.get_int
       ~default:Masc_network_defaults.masc_http_default_max_connections
       "MASC_HTTP_MAX_CONNECTIONS";
-  listen_backlog = Env_config_core.get_int ~default:128 "MASC_TCP_LISTEN_BACKLOG";
+  listen_backlog = Env_setting.Int_knob.get Tcp_listen_backlog;
 }
 
 (** HTTP request handler type *)
@@ -224,12 +224,7 @@ module Response = struct
         Not_modified etag_value
       | Some _ | None -> Tagged etag_value
 
-  let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request ?etag body reqd =
-    let request =
-      match request with
-      | Some req -> req
-      | None -> Httpun.Reqd.request reqd
-    in
+  let prepare_json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ~(request : Httpun.Request.t) ?etag body =
     let send ~validator_headers =
       let final_body, compression_headers =
         Http_response_payload.compress_body
@@ -237,12 +232,10 @@ module Response = struct
           ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
           body
       in
-      safe_respond_with_string reqd
-        (response
+      (response
            ~before_headers:(extra_headers @ validator_headers)
            ~tail_headers:compression_headers
-           ~content_type:json_content_type status final_body)
-        final_body
+           ~content_type:json_content_type status final_body), final_body
     in
     let outcome =
       match etag with
@@ -278,14 +271,22 @@ module Response = struct
       let headers =
         Httpun.Headers.of_list
           (extra_headers
-          @ [ ("content-length", "0");
-              ("etag", etag_value);
+          @ [ ("etag", etag_value);
               ("cache-control", json_revalidate_cache_control);
             ])
       in
-      safe_respond_with_string reqd
-        (Httpun.Response.create ~headers `Not_modified)
-        ""
+      Httpun.Response.create ~headers `Not_modified, ""
+
+  let json ?status ?compress ?extra_headers ?request ?etag body reqd =
+    let request =
+      match request with
+      | Some request -> request
+      | None -> Httpun.Reqd.request reqd
+    in
+    let response, final_body =
+      prepare_json ?status ?compress ?extra_headers ~request ?etag body
+    in
+    safe_respond_with_string reqd response final_body
 
   let json_lazy ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request
       ~etag (lazy_body : unit -> string) reqd =
@@ -307,8 +308,7 @@ module Response = struct
         let headers =
           Httpun.Headers.of_list
             (extra_headers
-            @ [ ("content-length", "0");
-                ("etag", etag);
+            @ [ ("etag", etag);
                 ("cache-control", json_revalidate_cache_control);
               ])
         in
@@ -332,6 +332,19 @@ module Response = struct
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
+
+  let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
+    let request =
+      match request with
+      | Some request -> request
+      | None -> Httpun.Reqd.request reqd
+    in
+    let response, body =
+      Executor_pool_ref.submit_or_inline (fun () ->
+        prepare_json ?status ?compress ?extra_headers ~request
+          (Yojson.Safe.to_string value))
+    in
+    safe_respond_with_string reqd response body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).

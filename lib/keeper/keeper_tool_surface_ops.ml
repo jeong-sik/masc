@@ -108,9 +108,6 @@ let annotate_keeper_json ~runtime_class json =
   | `Assoc fields ->
       `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
-let attach_assoc_field key value = function
-  | `Assoc fields -> `Assoc ((key, value) :: fields)
-  | other -> other
 
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in
@@ -204,8 +201,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("meta", keeper_brief_meta_json meta);
           ("created_at", `String meta.created_at);
           ("updated_at", `String meta.updated_at);
-          ("autoboot_enabled", `Bool meta.autoboot_enabled);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
+          ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
         ]
     | None ->
         [
@@ -285,7 +281,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("paused", `Bool meta.paused);
             ("next_action", next_action);
             ("keepalive_running", `Bool keepalive_running);
-            ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
+            ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
@@ -885,6 +881,7 @@ let complete_keeper_msg_stream_result result =
   end
 
 let handle_keeper_msg_stream_admitted
+      ~operation_id
       ~admission_token
       ?on_text_delta
       ?on_event
@@ -906,6 +903,7 @@ let handle_keeper_msg_stream_admitted
   | Ok message ->
     let event_bus = Event_bus_slots.get_keeper () in
     Turn.handle_keeper_msg_admitted
+      ~operation_id
       ~admission_token
       ?on_text_delta
       ?on_event

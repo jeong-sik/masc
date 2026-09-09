@@ -79,6 +79,7 @@ type goal_proof =
           recorded without text, which is a different fact from an empty
           measurement and is drawn as such. *)
   | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_stale of string option
   | Proof_unreadable of string option
       (** The ledger did not decode, or named a state this build does not know.
           Distinct from {!Proof_idle}: an unreadable store is not the same fact
@@ -368,6 +369,12 @@ type skills_catalog_state =
   | Skills_uninitialized
   | Skills_invalid_workspace
 
+(** Coverage of current Keeper trace activation ledgers, not lifetime usage. *)
+type skill_usage_coverage = {
+  suc_ledgers_loaded : int;
+  suc_unavailable : string list;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -376,6 +383,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_usage_coverage : skill_usage_coverage option;
 }
 
 val skills_catalog_state_to_string : skills_catalog_state -> string
@@ -637,10 +645,19 @@ type runtime_probe_snapshot = {
 (** One runtime row shared by the Keeper picker and Runtime surface.
     [ro_is_default] is derived from the document's top-level
     [default_runtime], not the row's independent binding flag. *)
+type runtime_context_source =
+  | Runtime_context_override
+  | Runtime_context_capability
+  | Runtime_context_clamped
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_effective_max_context : int;
+  ro_max_context_source : runtime_context_source;
+  ro_max_output_tokens : int option;
+  ro_is_local : bool;
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
@@ -710,7 +727,7 @@ type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   rp_codebase : string option;
-      (** the server-minted slug the IDE annotation routes scope by;
+      (** the server-minted slug the IDE events route scopes by;
           [None] when the remote cannot canonicalize *)
   rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
@@ -777,6 +794,7 @@ type memory_alert = {
 type memory_keeper_health = {
   mkh_keeper_id : string;
   mkh_revision : int;
+  mkh_updated_at : float option;
   mkh_facts : int;
   mkh_observed_facts : int;
   mkh_derived_facts : int;
@@ -1005,14 +1023,15 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
     same mark as a working one. *)
 
 
+type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
-  kr_autoboot_enabled : bool;
-  kr_proactive_enabled : bool;
+  kr_activation_mode : keeper_activation_mode;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   kr_sandbox_profile : string;
@@ -1280,6 +1299,7 @@ type fusion_run = {
   fur_preset : string;
   fur_topology : Fusion_types.fusion_topology;
   fur_started_at : float;
+  fur_finished_at : float option;
   fur_status : fusion_run_status;
   fur_stage : fusion_run_stage;
   (** Process-local stage for running rows, or the exact terminal stage. *)
@@ -1290,9 +1310,28 @@ type fusion_run = {
       neither. *)
 }
 
+type fusion_replay =
+  | Fusion_not_replayed
+  | Fusion_log_absent
+  | Fusion_replayed of
+      { malformed_lines : int; dropped_running : int; incomplete : bool }
+
+type fusion_historical_evidence = {
+  fhe_run_id : string;
+  fhe_post_id : string;
+  fhe_title : string;
+  fhe_created_at : float;
+}
+
+type fusion_list_entry =
+  | Fusion_retained_run of fusion_run
+  | Fusion_historical_evidence of fusion_historical_evidence
+
 type fusion_snapshot = {
   fus_generated_at : string;
   fus_runs : fusion_run list;
+  fus_replay : fusion_replay;
+  fus_historical_evidence : fusion_historical_evidence list;
 }
 
 type fusion_panel_answer = {
@@ -1442,6 +1481,22 @@ type fusion_detail = {
   fud_evidence : fusion_evidence option;
 }
 
+type fusion_historical_detail = {
+  fhd_reference : fusion_historical_evidence;
+  fhd_author : string;
+  fhd_title : string;
+  fhd_body : string;
+  fhd_observations : ((int * int) option * float option, string) result;
+  fhd_evidence : (fusion_evidence, string) result;
+}
+
+val decode_fusion_historical_detail :
+  reference:fusion_historical_evidence -> Yojson.Safe.t ->
+  (fusion_historical_detail, string) result
+(** Read an exact Board original independently of registry lifecycle. Source
+    identity is required; a malformed evidence payload remains an explicit
+    error beside the preserved original. *)
+
 val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
 (** Decode the retained registry list from
     [GET /api/v1/dashboard/fusion-runs]. The published count must equal the
@@ -1490,6 +1545,10 @@ type runtime_param_row =
   ; rpr_value_type : string
   ; rpr_min_json : string option
   ; rpr_max_json : string option
+  ; rpr_choices : string list
+    (** The closed set of values this param accepts, when it has one. Empty
+        for a param whose value the reader types. A partly closed domain
+        lists its named values here and still accepts the rest. *)
   }
 
 val decode_runtime_params :
@@ -1638,6 +1697,7 @@ type runtime_assignment = {
   ra_keeper : string;
   ra_source : string;
   ra_target_id : string option;
+  ra_unavailable_reason : string option;
       (** Resolved lane id, or [None] when the assignment is missing. *)
 }
 
@@ -1773,6 +1833,11 @@ type prompt_row = {
   pr_file_path : string;
   pr_source : prompt_source;
   pr_template_variables : string list;
+  pr_override_default_moved : bool;
+      (** The override in force was written against a default that has since
+          changed -- its body, or the variables it declares. The override
+          still applies; the text it replaced is not the text it replaced
+          then. False for a row without an override. *)
 }
 
 type runtime_prompt_asset = {
@@ -1782,9 +1847,27 @@ type runtime_prompt_asset = {
   pra_file_exists : bool;
 }
 
+type held_back_override = {
+  hbo_key : string;
+  hbo_bytes : int;
+  hbo_reason : string;
+      (** Why the registry is not applying it: the override names a template
+          variable the prompt does not declare, so it cannot render. *)
+}
+(** An override the operator saved and the registry declined to restore.
+
+    A default body that changed since the override was written is not a
+    reason: the override applies and the row reads as
+    [pr_override_default_moved]. What holds one back is a contract it cannot
+    render under. The override is kept rather than deleted -- writing the key
+    again, without the stale variable, puts it back in force. *)
+
 type prompts_snapshot = {
   ps_rows : prompt_row list;
   ps_runtime_assets : runtime_prompt_asset list;
+  ps_held_back : held_back_override list;
+      (** Empty in the ordinary case. Non-empty means the reader has
+          customization that is not reaching any turn. *)
 }
 (** GET /api/v1/prompts. *)
 
@@ -1815,8 +1898,16 @@ type presets_snapshot = {
       (** directory name, why its manifest did not read *)
 }
 
+type preset_settings_match =
+  | Preset_settings_match
+  | Preset_settings_differ
+  | Preset_settings_unavailable of string
+
 type preset_detail = {
   pd_name : string;
+  pd_directory : string;
+  pd_settings_match : preset_settings_match;
+  pd_prompt_files : (string * string option * prompt_source) list;
   pd_overrides : (string * int) list;  (** prompt key, bytes *)
   pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
   pd_assignments : (string * string) list;  (** keeper, runtime id *)
@@ -1893,6 +1984,7 @@ type lane_run_status =
   | Lane_run_approved
   | Lane_run_reviewed
   | Lane_run_committed
+  | Lane_run_superseded
   | Lane_run_rejected
   | Lane_run_deferred
   | Lane_run_review_cancelled
@@ -1918,6 +2010,7 @@ type lane_run_decision =
   | Lane_run_decision_rejected
   | Lane_run_decision_reviewed
   | Lane_run_decision_committed
+  | Lane_run_decision_superseded
   | Lane_run_decision_pending
   | Lane_run_decision_not_reached
   | Lane_run_not_a_decision
@@ -1958,6 +2051,7 @@ type lane_run_gate_judgment =
   | Lane_run_not_gate_judgment
   | Lane_run_gate_judgment_pending
   | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_judgment_unavailable
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
@@ -1976,6 +2070,7 @@ type lane_run_summary =
 type lane_run_page =
   { lrpg_runs : lane_run_summary list
   ; lrpg_next : (float * string) option
+  ; lrpg_total : int option
   }
 
 type lane_run_detail =
@@ -1989,10 +2084,13 @@ type lane_run_detail =
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_input_availability : Exact_lane_run_registry.payload_availability
+  ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
+  ; lrd_decision : lane_run_decision
   }
 
 val decode_lane_run_page :
@@ -2443,7 +2541,7 @@ val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 
 (** One run of adjacent lines the same author last touched, as
     [/api/v1/git/blame] groups them. The wire spells the author [keeper_id],
-    the shape it shares with the activity and annotation routes; here it is
+    the shape it shares with the activity routes; here it is
     whatever git reported, which is a person and not a Keeper. *)
 type blame_block = {
   bb_line_start : int;
@@ -2646,3 +2744,49 @@ type skill_evidence =
   }
 
 val decode_skill_evidence : Yojson.Safe.t -> (skill_evidence, string) result
+
+val runtime_context_source_label : runtime_context_source -> string
+val runtime_probe_for_id : runtime_surface_snapshot -> runtime_id:string -> runtime_provider_probe option
+
+(** Decoded durable async inventory. Malformed counters are errors, never zero.
+    The active inventory contains queued, running and cancelling requests only. *)
+type async_request_phase = Async_queued | Async_running | Async_cancelling
+
+type async_request_ownership = Async_runtime_owned | Async_ownership_unknown
+
+type async_request_row =
+  { ar_request_id : string
+  ; ar_keeper_name : string
+  ; ar_phase : async_request_phase
+  ; ar_elapsed_sec : float option
+  ; ar_ownership : async_request_ownership
+  }
+
+type async_request_summary =
+  { ars_active : int
+  ; ars_runtime_owned : int
+  ; ars_ownership_unknown : int
+  ; ars_record_errors : int
+  }
+
+type async_recovery_report =
+  { arr_lost : int
+  ; arr_finalized : int
+  ; arr_cleaned : int
+  ; arr_unreadable : int
+  ; arr_failed : int
+  ; arr_staging_inspected : int
+  ; arr_staging_deleted : int
+  ; arr_staging_preserved : int
+  }
+
+type async_request_observation =
+  | Async_ready of
+      { summary : async_request_summary
+      ; requests : async_request_row list
+      ; recovery : async_recovery_report option
+      }
+  | Async_unavailable of { kind : string; reason : string option }
+
+val decode_async_request_observation :
+  Yojson.Safe.t -> (async_request_observation, string) result

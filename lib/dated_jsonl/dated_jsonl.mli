@@ -211,6 +211,13 @@ val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
+val range_day_file_paths_result :
+  t -> since:string -> until:string -> (string list, read_error) result
+(** Enumerate the complete selected dated paths, oldest first. A missing
+    store is empty; invalid ranges and failures to inspect or list the store
+    or a selected month are errors. Foreign names are ignored, as with
+    {!iter_range_entries_result}. Day files are not opened. *)
+
 val range_day_file_paths : t -> since:string -> until:string -> string list
 (** The day files the inclusive [[since, until]] range covers, oldest first,
     without opening any of them. Same day-selection rule as {!iter_range}, so a
@@ -236,6 +243,34 @@ val fold_range_appended
     A file that shrank below its cursor (rotation, rewrite) is re-read from
     zero, so such a caller double-counts rather than under-counts. Compare the
     returned cursor against the one passed to detect it. *)
+
+type append_cursor
+(** File identities, observed sizes and complete-line boundaries from one
+    successful strict incremental read. Owned by this module. *)
+
+type 'a appended_read =
+  | Appended of 'a * append_cursor
+  | Cursor_invalidated
+
+val fold_range_appended_result :
+  t -> since:string -> until:string -> cursor:append_cursor option ->
+  init:'a -> f:('a -> Yojson.Safe.t -> 'a) ->
+  ('a appended_read, read_error) result
+(** Strict incremental read using the same complete range as
+    {!range_day_file_paths_result}. Missing previous files, replacement,
+    shrinkage or a same-size metadata change invalidate the cursor before
+    invoking [f]. The caller must discard its accumulator and read with
+    [cursor:None]. New files and appended bytes are read without replaying
+    retained files. In-place prefix edits combined with growth are outside
+    the append-only file contract.
+
+    Reads use verified regular-file handles and stop at captured sizes;
+    incomplete trailing lines are retried on the next call. A file or layout
+    change observed during the read is an error, as are inspection/open/read
+    failures. [f] may already have run before an error or exception, so a
+    mutable accumulator must be discarded in either case. Only [Appended]
+    authorizes retaining the returned cursor. Malformed JSON rows are skipped
+    as in {!fold_range_appended}; callback exceptions propagate unchanged. *)
 
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls

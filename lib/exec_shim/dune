@@ -1,9 +1,34 @@
 (include_subdirs no)
 
+; A leaf library rather than a module of exec_shim: the shim library's own
+; module carries the library's name, so nothing outside it can reach a
+; sibling module, and this one has a test. The C stub lives with the module
+; that declares its external.
+(library
+ (name shim_clock)
+ (wrapped false)
+ (modules shim_clock)
+ (foreign_stubs
+  (language c)
+  (names monotonic_stub)))
+
 (library
  (name exec_shim)
- (modules exec_shim)
- (libraries exec_ssh_protocol unix)
+ (modules exec_shim shim_build_id)
+ (libraries exec_ssh_protocol shim_clock unix)
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))
+
+; RFC-0427 B-3. shim_build_id.ml is generated so the release version the probe
+; reports comes from dune-project and nothing has to remember to stamp it.
+; scripts/build-shim-static.sh builds in a scratch project with no package, so
+; it writes this file itself with the same two values.
+(rule
+ (targets shim_build_id.ml)
+ (action
+  (with-stdout-to
+   shim_build_id.ml
+   (progn
+    (echo "let suffix = \"\"\n")
+    (echo "let release = \"%{version:masc}\"\n")))))

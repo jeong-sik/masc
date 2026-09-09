@@ -14,7 +14,11 @@
  (flags :standard -open Masc -w +33)
  (libraries
   masc
+  masc.sse_wire
   masc.agent_observation
+  masc.browser_lane
+  masc.slack_lane
+  masc.msx_lane
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).
@@ -42,6 +46,7 @@
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.
   masc.fusion_core
+  masc.run_registry_core
   masc.masc_tool_surface
   masc.operator
   masc.voice_bridge_core
@@ -135,6 +140,7 @@
   domain-name
   ca-certs
   pbrt
+  masc.monotonic_deadline
   mtime
   mtime.clock
   mtime.clock.os

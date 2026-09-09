@@ -101,6 +101,18 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type replay_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; dropped_running : int
+  ; reached_end : bool
+  }
+
+type replay_status =
+  | Not_replayed
+  | Log_absent
+  | Replayed of replay_report
+
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
@@ -125,6 +137,7 @@ module Make (Payload : Payload) = struct
     { entries : entry list Atomic.t
     ; path : string option
     ; mutation_mutex : Cross_context_mutex.t
+    ; replay_status : replay_status
     }
 
   type event =
@@ -137,6 +150,30 @@ module Make (Payload : Payload) = struct
         { id : string
         ; completion : Payload.completion
         }
+
+  module Id_map = Map.Make (String)
+  module Row_map = Map.Make (Int)
+
+  (* Positions count the nonblank rows visited by [fold_appended_lines], not
+     bytes: blank lines advance its byte boundary without invoking the fold. *)
+  type event_rows =
+    { registration_row : int
+    ; completion_row : int option
+    }
+
+  type replay_snapshot =
+    { retained_entries : entry list
+    ; rows : event_rows Id_map.t
+    ; malformed : string list
+    ; reached_end : bool
+    ; boundary : int
+    ; lines_read : int
+    ; dropped_running : int
+    }
+
+  type retained_row =
+    | Original_event
+    | Registration_with_restart of event
 
   let ( let* ) = Result.bind
   let max_completed_retained =
@@ -191,7 +228,10 @@ module Make (Payload : Payload) = struct
     { entries = Atomic.make []
     ; path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; replay_status = Not_replayed
     }
+
+  let replay_status t = t.replay_status
 
   let event_to_yojson = function
     | Register { id; started_at; registration } ->
@@ -330,14 +370,13 @@ module Make (Payload : Payload) = struct
   ;;
 
   let register t ~id ~started_at ~registration =
-    (* The event carries the whole registration to disk; the entry keeps the
-       shed copy, as replay's does. Two paths build entries -- this one and
-       [apply_event] -- and both shed, or the store's weight depends on
-       whether a row was written by this process or read back by it. *)
+    (* A disk-backed store keeps the shed copy, as replay does. An in-memory
+       store has no other source from which to recover a dropped payload. *)
     let entry =
       { id
       ; started_at
-      ; registration = Payload.shed_registration registration
+      ; registration =
+          (match t.path with None -> registration | Some _ -> Payload.shed_registration registration)
       ; status = Running
       }
     in
@@ -363,19 +402,24 @@ module Make (Payload : Payload) = struct
       replace_entry_locked t entry)
   ;;
 
-  let complete t ~id ~completion =
+  let complete_with t ~id ~make_completion =
     Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
       let current = Atomic.get t.entries in
-      if not (List.exists (fun entry -> String.equal entry.id id) current)
-      then (
+      match List.find_opt (fun entry -> String.equal entry.id id) current with
+      | None ->
         Log.Misc.warn "%s: completion for unknown id %s" Payload.name id;
-        `Unknown)
-      else (
+        `Unknown
+      | Some entry ->
+        let previous =
+          match entry.status with Running -> None | Completed completion -> Some completion
+        in
+        let completion = make_completion previous in
         let next =
           current
           |> List.map (fun entry ->
             if String.equal entry.id id
-            then { entry with status = Completed (Payload.shed_completion completion) }
+            then { entry with status = Completed
+                (match t.path with None -> completion | Some _ -> Payload.shed_completion completion) }
             else entry)
           |> prune
         in
@@ -383,7 +427,11 @@ module Make (Payload : Payload) = struct
         | Error detail -> `Persistence_failed detail
         | Ok () ->
           Atomic.set t.entries next;
-          `Completed))
+          `Completed)
+  ;;
+
+  let complete t ~id ~completion =
+    complete_with t ~id ~make_completion:(fun _ -> completion)
   ;;
 
   let list_entries t =
@@ -431,19 +479,6 @@ module Make (Payload : Payload) = struct
         entries)
   ;;
 
-  let events_of_entry entry =
-    let register =
-      Register
-        { id = entry.id
-        ; started_at = entry.started_at
-        ; registration = entry.registration
-        }
-    in
-    match entry.status with
-    | Running -> [ register ]
-    | Completed completion -> [ register; Complete { id = entry.id; completion } ]
-  ;;
-
   let settle_replayed_running entries =
     let running, completed = List.partition is_running entries in
     match running, Payload.replayed_running_completion with
@@ -476,34 +511,77 @@ module Make (Payload : Payload) = struct
       @ completed
   ;;
 
-  let compact_replay_log path entries =
-    let content =
-      entries
-      |> List.sort (fun left right -> Float.compare left.started_at right.started_at)
-      |> List.concat_map events_of_entry
-      |> List.map (fun event -> Yojson.Safe.to_string (event_to_yojson event) ^ "\n")
-      |> String.concat ""
+  let compact_replay_log path (snapshot : replay_snapshot) =
+    (* Only original rows can supply retained payloads. A new restart verdict
+       is the sole synthesized event; a shed registration/completion is never
+       serialized back over the row that owns its full input/output. *)
+    let selected =
+      List.fold_left
+        (fun selected (entry : entry) ->
+           let rows = Id_map.find entry.id snapshot.rows in
+           match rows.completion_row, entry.status with
+           | Some completed, _ ->
+             selected
+             |> Row_map.add rows.registration_row Original_event
+             |> Row_map.add completed Original_event
+           | None, Running ->
+             Row_map.add rows.registration_row Original_event selected
+           | None, Completed completion ->
+             Row_map.add
+               rows.registration_row
+               (Registration_with_restart (Complete { id = entry.id; completion }))
+               selected)
+        Row_map.empty
+        snapshot.retained_entries
     in
-    try
-      match Fs_compat.save_file_atomic path content with
-      | Ok () ->
-        (* [save_file_atomic] replaces the inode. Drop any writer cached by an
-           earlier in-process registry instance so the first post-replay append
-           cannot continue writing to the unlinked pre-compaction file. *)
-        Fs_compat.invalidate_cached_writer path
-      | Error message ->
-        Log.Misc.warn
-          "%s: replay compaction failed for %s: %s"
-          Payload.name
-          path
-          message
-    with
-    | exn ->
-      Log.Misc.warn
-        "%s: replay compaction raised for %s: %s"
-        Payload.name
-        path
-        (Printexc.to_string exn)
+    let result =
+      Fs_compat.write_file_atomic_strict_staged path ~write:(fun oc ->
+        let visited, boundary =
+          Fs_compat.fold_appended_lines
+            ~path
+            ~from:0
+            ~init:0
+            ~f:(fun visited line ->
+              let row = visited + 1 in
+              (match Row_map.find_opt row selected with
+               | None -> ()
+               | Some retained ->
+                 output_string oc line;
+                 output_char oc '\n';
+                 (match retained with
+                  | Original_event -> ()
+                  | Registration_with_restart event ->
+                    output_string oc (Yojson.Safe.to_string (event_to_yojson event));
+                    output_char oc '\n'));
+              row)
+        in
+        if visited <> snapshot.lines_read
+           || boundary <> snapshot.boundary
+           || Fs_compat.file_size path <> Some boundary
+        then raise (Sys_error (Payload.name ^ ": replay source changed before compaction")))
+    in
+    match result with
+    | Ok () ->
+      Fs_compat.invalidate_cached_writer path;
+      true
+    | Error failure ->
+      let rewritten =
+        match failure.Fs_compat.stage with
+        | Fs_compat.Before_rename -> false
+        | Fs_compat.After_rename ->
+          Fs_compat.invalidate_cached_writer path;
+          true
+      in
+      (match failure.exception_ with
+       | Eio.Cancel.Cancelled _ ->
+         Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+       | _ ->
+         Log.Misc.warn
+           "%s: replay compaction failed for %s: %s"
+           Payload.name
+           path
+           (Fs_compat.atomic_replace_failure_to_string failure);
+         rewritten)
   ;;
 
   (* The whole entry, payloads included.
@@ -559,28 +637,51 @@ module Make (Payload : Payload) = struct
           shed)
   ;;
 
-  let get t ~id =
+  let get_metadata t ~id =
     List.find_opt (fun entry -> String.equal entry.id id) (Atomic.get t.entries)
-    |> Option.map (full_entry_from_disk t)
+  ;;
+
+  let get t ~id =
+    get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
   let fold_replay_entries path =
+    let unread =
+      { retained_entries = []
+      ; rows = Id_map.empty
+      ; malformed = []
+      ; reached_end = false
+      ; boundary = 0
+      ; lines_read = 0
+      ; dropped_running = 0
+      }
+    in
     if not (Fs_compat.file_exists path)
-    then [], [], false, 0
+    then unread
     else (
       try
-        let (entries, malformed, line_no), boundary =
+        let (entries, rows, malformed, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
-            ~init:([], [], 1)
-            ~f:(fun (entries, malformed, line_no) line ->
+            ~init:([], Id_map.empty, [], 1)
+            ~f:(fun (entries, rows, malformed, line_no) line ->
               match parse_event_line ~path ~line_no line with
-              | Ok None -> entries, malformed, line_no + 1
+              | Ok None -> entries, rows, malformed, line_no + 1
               | Ok (Some event) ->
                 let entries = apply_event entries event in
-                entries, malformed, line_no + 1
-              | Error message -> entries, message :: malformed, line_no + 1)
+                let rows =
+                  match event with
+                  | Register { id; _ } ->
+                    Id_map.add id
+                      { registration_row = line_no; completion_row = None } rows
+                  | Complete { id; _ } ->
+                    Id_map.update id
+                      (Option.map (fun source ->
+                         { source with completion_row = Some line_no })) rows
+                in
+                entries, rows, malformed, line_no + 1
+              | Error message -> entries, rows, message :: malformed, line_no + 1)
         in
         let reached_end =
           match Fs_compat.file_size path with
@@ -597,21 +698,29 @@ module Make (Payload : Payload) = struct
             Log.Misc.warn "%s: replay stat failed after streaming %s" Payload.name path;
             false
         in
+        let dropped_running =
+          match Payload.replayed_running_completion with
+          | Some _ -> 0
+          | None -> List.length (List.filter is_running entries)
+        in
         let entries = settle_replayed_running entries |> prune in
-        entries, List.rev malformed, reached_end, line_no - 1
+        { retained_entries = entries; rows; malformed = List.rev malformed; reached_end
+        ; boundary; lines_read = line_no - 1; dropped_running }
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Misc.warn
           "%s: replay stream failed for %s: %s"
           Payload.name
           path
           (Printexc.to_string exn);
-        [], [], false, 0)
+        unread)
   ;;
 
   let replay path =
-    let entries, malformed, reached_end, _lines_read = fold_replay_entries path in
-    (match malformed with
+    let existed = Fs_compat.file_exists path in
+    let snapshot = fold_replay_entries path in
+    (match snapshot.malformed with
      | [] -> ()
      | first :: _ as errors ->
        Log.Misc.warn
@@ -619,11 +728,21 @@ module Make (Payload : Payload) = struct
          Payload.name
          (List.length errors)
          first);
-    if reached_end && malformed = [] && Payload.completed_retention <> `All
-    then compact_replay_log path entries;
-    { entries = Atomic.make entries
+    if snapshot.reached_end && snapshot.malformed = [] && Payload.completed_retention <> `All
+    then (
+      (* See [compact_replay_log]: it reports failure; replay still publishes the parsed state. *)
+      ignore (compact_replay_log path snapshot));
+    { entries = Atomic.make snapshot.retained_entries
     ; path = Some path
     ; mutation_mutex = Cross_context_mutex.create ()
+    ; replay_status =
+        if not existed then Log_absent
+        else Replayed
+          { lines_read = snapshot.lines_read
+          ; malformed_lines = List.length snapshot.malformed
+          ; dropped_running = snapshot.dropped_running
+          ; reached_end = snapshot.reached_end
+          }
     }
   ;;
 
@@ -639,13 +758,14 @@ module Make (Payload : Payload) = struct
      unterminated-tail guard still holds: a partial read must not become a
      truncating rewrite. *)
   let cut_replay_log ~execute path =
-    let entries, malformed, reached_end, lines_read = fold_replay_entries path in
-    let rewritten = execute && reached_end in
-    if rewritten then compact_replay_log path entries;
-    { lines_read
-    ; malformed_lines = List.length malformed
-    ; retained_entries = List.length entries
-    ; reached_end
+    let snapshot = fold_replay_entries path in
+    let rewritten =
+      execute && snapshot.reached_end && compact_replay_log path snapshot
+    in
+    { lines_read = snapshot.lines_read
+    ; malformed_lines = List.length snapshot.malformed
+    ; retained_entries = List.length snapshot.retained_entries
+    ; reached_end = snapshot.reached_end
     ; rewritten
     }
   ;;

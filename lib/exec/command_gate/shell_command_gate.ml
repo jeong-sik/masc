@@ -221,6 +221,9 @@ let log_verdict ~source = function
    entry point can produce, and nothing produced it -- a nested pipeline
    reached dispatch and ran. *)
 let rec structural_refusal (ir : SI.t) =
+  if SI.has_variable_expansion ir then
+    Some (`Too_complex (Unsupported_construct `Param_expansion))
+  else
   match ir with
   | SI.Simple _ -> None
   | SI.Pipeline stages ->
@@ -274,6 +277,9 @@ let gate_raw ~text ~syntax_policy ~sandbox () : verdict =
 
 let lower_typed_pipeline ~stages ~sandbox () : verdict =
   let verdict =
+    if List.exists (fun stage -> SI.has_variable_expansion (SI.Simple stage)) stages
+    then Too_complex { reason = Unsupported_construct `Param_expansion }
+    else
     match stages with
     | [] -> Cannot_parse { reason = Parse_error }
     | [ single ] ->

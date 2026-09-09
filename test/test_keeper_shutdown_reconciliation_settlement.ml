@@ -147,6 +147,8 @@ let phase_label operation =
   | Finalized _ -> "finalized"
   | Blocked _ -> "blocked"
   | Superseded _ -> "superseded"
+  | Owner_absent _ -> "owner_absent"
+  | Operator_absence_acknowledged _ -> "operator_absence_acknowledged"
 ;;
 
 (* A durable operation already parked in [Reconciliation_required] (written

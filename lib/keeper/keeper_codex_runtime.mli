@@ -34,6 +34,8 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?on_official_client_tool_boundary:
+    (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
@@ -60,6 +62,7 @@ val run :
     from here. *)
 
 module For_testing : sig
+  val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
   val observe_stream_native_action :
     turn_count:int ->
     observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->

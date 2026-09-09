@@ -309,14 +309,32 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 
+(* RFC-0377 admits a whole conversation backlog as one wake, so a batch is
+   every pending payload of one connector conversation. A batch used to route
+   as "not a continuation wake", so a reply to a batched conversation could
+   never be [Continuation_route_addressed], and under the rule #34662 removed
+   its rows could never settle (#34662 review). The newest member names the
+   conversation; [Keeper_surface_post.matches_continuation_route] compares
+   the conversation, not the message. Members that are not the same
+   conversation are not one continuation and route nowhere. *)
 let continuation_channel_of_wake = function
-  | Keeper_registry.Woken [ payload ] ->
-    (match Keeper_event_queue.continuation_channel_of_payload payload with
-     | Some channel when Keeper_continuation_channel.is_routable channel ->
-       Some channel
-     | Some _ | None -> None)
+  | Keeper_registry.Woken (_ :: _ as payloads) ->
+    let routable payload =
+      match Keeper_event_queue.continuation_channel_of_payload payload with
+      | Some channel when Keeper_continuation_channel.is_routable channel ->
+        Some channel
+      | Some _ | None -> None
+    in
+    (match List.rev_map routable payloads with
+     | Some newest :: older
+       when List.for_all
+              (function
+                | Some channel ->
+                  Keeper_continuation_channel.same_conversation channel newest
+                | None -> false)
+              older -> Some newest
+     | Some _ :: _ | None :: _ | [] -> None)
   | Keeper_registry.Woken []
-  | Keeper_registry.Woken (_ :: _ :: _)
   | Keeper_registry.Proactive_tick
   | Keeper_registry.Chat_request -> None
 ;;
@@ -331,7 +349,7 @@ let run_keeper_cycle
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
-      ~(wake : Keeper_registry.wake_reason)
+      ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
       ?shared_context
@@ -340,6 +358,7 @@ let run_keeper_cycle
       ()
   : (turn_success, turn_failure) result
   =
+  let wake = Keeper_heartbeat_source_batch.wake turn_input in
   match
     Keeper_publication_recovery_scope.resolve_turn_resources
       ~provider:publication_recovery_provider
@@ -565,14 +584,17 @@ let run_keeper_cycle
               ~error_message
               ~keeper_turn_id
               ();
+            (* The same discarded classification as the Streaming path below:
+               both arms were wildcards and the branch was decided by the
+               [when] guard, which never looks at the scrutinee. Written as
+               the two-way choice it is. Whether a masc-internal failure
+               deserves a reason of its own is #33671. *)
             let failure_reason =
-              match Keeper_turn_driver.classify_masc_internal_error err with
-              | _ when EC.is_runtime_exhausted_error err ->
+              if EC.is_runtime_exhausted_error err
+              then
                 Keeper_turn_fsm.Failure_runtime_unavailable
-                  { base = effective_runtime_runtime_name
-                  ; resolved = None
-                  }
-              | _ ->
+                  { base = effective_runtime_runtime_name; resolved = None }
+              else
                 Keeper_turn_fsm.Failure_provider_error
                   { kind = Agent_core.Error.(category err |> category_label)
                   ; detail = error_message
@@ -695,19 +717,22 @@ let run_keeper_cycle
                    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
-                 Keeper_unified_prompt.build_prompt
-                   ~meta
-                   ~config
-                   ~profile_defaults
-                   ~turn_decision
-                   ?previous_turn_stop
-                   ~current_task
-                   ~task_skill_surfaces
-                   ~active_goal_summaries
-                   ~repository_freshness
-                   ?context_budget_bytes
-                   ~observation
-                   ()
+                 (* Named so a run on the main domain during prompt assembly
+                    reads as [keeper <name> cycle > turn:prompt] in the trace. *)
+                 Eio_guard.with_named_switch "turn:prompt" (fun () ->
+                   Keeper_unified_prompt.build_prompt
+                     ~meta
+                     ~config
+                     ~profile_defaults
+                     ~turn_decision
+                     ?previous_turn_stop
+                     ~current_task
+                     ~task_skill_surfaces
+                     ~active_goal_summaries
+                     ~repository_freshness
+                     ?context_budget_bytes
+                     ~observation
+                     ())
                in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
@@ -1097,13 +1122,33 @@ let run_keeper_cycle
                        then
                          Keeper_turn_fsm.Failure_receipt_lost
                            { primary_error = e_str; fallback_path = None }
-                      else
-                        match Keeper_turn_driver.classify_masc_internal_error err with
-                         | _ ->
-                           Keeper_turn_fsm.Failure_provider_error
-                             { kind = Agent_core.Error.(category err |> category_label)
-                             ; detail = short_preview e_str
-                             }
+                       else
+                         (* Every remaining failure out of Streaming is reported as
+                            a provider error, including the ones that are ours.
+                            [classify_masc_internal_error] used to be called here
+                            and its answer thrown away by a lone wildcard, which
+                            read as if the two were told apart.
+
+                            They are not, and nothing upstream stops them from
+                            being: {!Turn_fsm} admits every failure reason out of
+                            an active state through
+                            [_, Any (Failed _) when is_active from_state], which
+                            names the event [GenericFail]. A masc-internal failure
+                            given [Failure_runtime_error] here would be allowed and
+                            would report GenericFail where it now reports
+                            ProviderError. That is the open question, and it is
+                            about which event operators should count, not about
+                            what the machine permits — #33671.
+
+                            Until it is answered an internal failure rides the
+                            provider edge and says what it really is in [kind] —
+                            "internal" rather than "provider". 54 turns took that
+                            path on 2026-09-06 (grep [masc_agent_core_error] in the
+                            system log). *)
+                         Keeper_turn_fsm.Failure_provider_error
+                           { kind = Agent_core.Error.(category err |> category_label)
+                           ; detail = short_preview e_str
+                           }
                      in
                      Keeper_turn_fsm.emit_transition
                        ~keeper_name:meta.name
@@ -1331,7 +1376,8 @@ let run_keeper_cycle
                              (Keeper_tool_execution.Surface_post_completed _) ) ->
                          (* A terminal surface post landed on a different channel
                             than the one that woke this turn. Not a judgement to
-                            ignore: leave it pending for investigation. *)
+                            ignore; the batch is still acked on completion
+                            (#34662) and the route names what happened. *)
                          Continuation_route_mismatch
                        | ( Some _
                          , Some

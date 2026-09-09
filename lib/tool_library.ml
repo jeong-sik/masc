@@ -293,15 +293,31 @@ let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
    (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
    PR-1c will move the Tool_dispatch.handler ABI to result, removing
    this bridge. *)
+(* The name is resolved against the same [definitions] list registration walks,
+   and the operation is matched, so an operation added to
+   [Tool_schemas_library] is a compile error here rather than an advertised
+   name with no route. *)
+let find_operation name =
+  List.find_opt
+    (fun (definition : Tool_schemas_library.definition) ->
+      String.equal definition.schema.name name)
+    Tool_schemas_library.definitions
+  |> Option.map (fun (definition : Tool_schemas_library.definition) ->
+       definition.operation)
+
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let lift r = Some r in
-  match name with
-  | "masc_library_list" -> lift (handle_list ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_read" -> lift (handle_read ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_add" -> lift (handle_add ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_search" -> lift (handle_search ~tool_name:name ~start_time:start ctx args)
-  | _ -> None
+  match find_operation name with
+  | None -> None
+  | Some Tool_schemas_library.List_documents ->
+    lift (handle_list ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_library.Read_document ->
+    lift (handle_read ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_library.Add_document ->
+    lift (handle_add ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_library.Search_documents ->
+    lift (handle_search ~tool_name:name ~start_time:start ctx args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

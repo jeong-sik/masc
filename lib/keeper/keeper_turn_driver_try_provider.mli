@@ -24,8 +24,8 @@ type provider_progress_sample =
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
-  ; max_request_body_bytes : int
-  ; model_input_capacity_bytes : int
+  ; max_request_body_bytes : int option
+  ; model_input_capacity_bytes : int option
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -36,6 +36,7 @@ type try_provider_ctx =
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
+  ; recovery_view : Keeper_recovery_transmission.t option
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
@@ -78,7 +79,7 @@ type try_provider_ctx =
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
       (runtime_id:string ->
-       max_request_body_bytes:int ->
+       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)
@@ -197,6 +198,7 @@ val run_try_provider :
   * (string * Obj.t) option
 
 val run_try_provider_with_context_overflow_shrink :
+  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -204,6 +206,7 @@ val run_try_provider_with_context_overflow_shrink :
   * (string * Obj.t) option
 
 val run_try_provider_with_truncation_recovery :
+  ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -258,10 +261,10 @@ module For_testing : sig
 
   val observe_request_wire_error :
     runtime_id:string ->
-    max_request_body_bytes:int ->
+    max_request_body_bytes:int option ->
     on_request_wire_observation:
       (runtime_id:string ->
-       max_request_body_bytes:int ->
+       max_request_body_bytes:int option ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
        unit)

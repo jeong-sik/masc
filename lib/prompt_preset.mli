@@ -112,3 +112,9 @@ val snapshot_to_json : snapshot -> Yojson.Safe.t
     whether to apply it: which override, and which ten. Restoring is the only
     way to find out, and restoring is the thing being decided. *)
 val report_to_json : restore_report -> Yojson.Safe.t
+
+val same_settings : snapshot -> snapshot -> bool
+val source_directory : base_path:string -> snapshot -> string
+val matches_saved_settings : base_path:string -> snapshot -> (bool, string) result
+(** Compare fresh durable override, Keeper TOML and runtime files. An unreadable
+    input makes the comparison unavailable. Does not change the live registry. *)

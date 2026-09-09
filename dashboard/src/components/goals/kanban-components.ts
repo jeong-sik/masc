@@ -1,10 +1,10 @@
 // Kanban board components: KanbanCard, TaskBacklog
 
 import { html } from 'htm/preact'
+import { useTaskSearchText, TaskSearchFeedback } from '../common/task-search-text'
 import { signal } from '@preact/signals'
-import { useRef, useEffect } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
-import autoAnimate from '@formkit/auto-animate'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { SectionCard } from '../common/card'
@@ -14,7 +14,7 @@ import { RichContent } from '../common/rich-content'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
 import { tasksByStatus, refreshExecution, executionLoading, executionLoaded, executionError } from '../../store'
-import { deleteTask } from '../../api/actions'
+import { deleteTask, fetchTaskDetail } from '../../api/actions'
 import type { Task } from '../../types'
 import {
   expandedTasks,
@@ -147,10 +147,35 @@ function taskScope(task: Task): string | null {
 function KanbanCard({ task }: { task: Task }) {
   const p = effectiveTaskPriority(task)
   const isExpanded = expandedTasks.value.has(task.id)
-  const hasDescription = Boolean(task.description)
+  const [details, setDetails] = useState<
+    | { source: Task; kind: 'loading' }
+    | { source: Task; kind: 'ready'; task: Task }
+    | { source: Task; kind: 'error' }
+    | null
+  >(null)
+  const requestToken = useRef(0)
+  const currentDetails = details?.source === task ? details : null
+  const needsDetails = task.detail_level === 'summary' && currentDetails?.kind !== 'ready'
   const isDeleting = deletingTaskId.value === task.id
-  const description = task.description ?? ''
-  const canExpand = description.length > 160
+  const description = (currentDetails?.kind === 'ready' ? currentDetails.task.description : task.description) ?? ''
+  const hasDescription = Boolean(description) || task.detail_level === 'summary'
+  const canExpand = task.detail_level === 'summary' || description.length > 160
+
+  async function loadDescription() {
+    const token = ++requestToken.current
+    setDetails({ source: task, kind: 'loading' })
+    try {
+      const full = await fetchTaskDetail(task.id)
+      if (token === requestToken.current) setDetails({ source: task, kind: 'ready', task: full })
+    } catch {
+      if (token === requestToken.current) setDetails({ source: task, kind: 'error' })
+    }
+  }
+
+  function expandDescription() {
+    if (!isExpanded && needsDetails && currentDetails?.kind !== 'loading') void loadDescription()
+    toggleTaskExpand(task.id)
+  }
   const scope = taskScope(task)
 
   async function handleDelete(e: Event) {
@@ -163,9 +188,7 @@ function KanbanCard({ task }: { task: Task }) {
     if (!confirmed) return
     deletingTaskId.value = task.id
     try {
-      await deleteTask(task.id)
-      showToast('태스크를 삭제했습니다', 'success')
-      await refreshExecution({ force: true })
+      await settleTaskDeletion(task.id)
     } catch {
       showToast('태스크 삭제에 실패했습니다', 'error')
     } finally {
@@ -201,13 +224,21 @@ function KanbanCard({ task }: { task: Task }) {
       ${hasDescription ? html`
         <div class="flex flex-col gap-2">
           <div class=${`overflow-hidden text-xs leading-relaxed text-[var(--color-fg-secondary)] ${isExpanded || !canExpand ? '' : 'max-h-[8rem]'}`}>
-            <${RichContent} text=${description} previewLimit=${1} />
+            ${isExpanded && needsDetails
+              ? currentDetails?.kind === 'error'
+                ? html`<span role="alert">설명을 불러오지 못했습니다.</span><button type="button" onClick=${loadDescription}>다시 시도</button>`
+                : currentDetails?.kind === 'loading'
+                  ? html`<span role="status">설명 불러오는 중...</span>`
+                  : html`<button type="button" onClick=${loadDescription}>전체 설명 불러오기</button>`
+              : description
+                ? html`<${RichContent} text=${description} previewLimit=${1} />`
+                : html`<span>${needsDetails ? '전체 설명을 펼쳐 확인하세요.' : '설명 없음'}</span>`}
           </div>
           ${canExpand ? html`
             <button
               type="button"
               class="v2-workspace-action w-fit rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
-              onClick=${() => toggleTaskExpand(task.id)}
+              onClick=${expandDescription}
               aria-expanded=${isExpanded}
             >
               ${isExpanded ? '설명 접기' : '설명 더 보기'}
@@ -247,14 +278,6 @@ function TaskColumn({
   badgeClass: string
   children: ComponentChildren
 }) {
-  const listRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (listRef.current) {
-      autoAnimate(listRef.current, { duration: 250, easing: 'ease-out' })
-    }
-  }, [listRef])
-
   return html`
     <section class="v2-workspace-panel flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
       <div class="v2-workspace-toolbar ${DECK_HEAD} flex items-start justify-between gap-3">
@@ -264,7 +287,7 @@ function TaskColumn({
         </div>
         <span class="rounded-[var(--r-0)] px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>
       </div>
-      <div ref=${listRef} class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
+      <div class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
         ${children}
       </div>
     </section>
@@ -321,15 +344,54 @@ function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
   `
 }
 
+const pendingTaskCleanups = signal<Array<{ taskId: string; errors: string[] }>>([])
+
+async function settleTaskDeletion(taskId: string) {
+  const result = await deleteTask(taskId)
+  pendingTaskCleanups.value = pendingTaskCleanups.value.filter(item => item.taskId !== taskId)
+  if (result.status === 'cleanup_failed') {
+    pendingTaskCleanups.value = [...pendingTaskCleanups.value, result]
+    showToast('태스크는 삭제됐지만 삭제 후 정리가 실패했습니다. 아래에서 재시도할 수 있습니다.', 'error')
+  } else {
+    showToast('태스크 삭제와 삭제 후 정리를 완료했습니다', 'success')
+  }
+  await refreshExecution({ force: true })
+}
+
+function TaskCleanupFailures() {
+  const [retrying, setRetrying] = useState<string | null>(null)
+  async function retry(taskId: string) {
+    setRetrying(taskId)
+    try { await settleTaskDeletion(taskId) }
+    catch (error) { showToast(error instanceof Error ? error.message : '삭제 후 정리 재시도 실패', 'error') }
+    finally { setRetrying(null) }
+  }
+  return html`${pendingTaskCleanups.value.map(item => html`
+    <section key=${item.taskId} role="alert" class="mb-3 border border-[var(--color-err-border)] p-3">
+      <p>태스크 ${item.taskId}는 삭제됐습니다. 삭제 후 정리가 남아 있습니다.</p>
+      <pre class="whitespace-pre-wrap">${item.errors.join('\n')}</pre>
+      <${ActionButton} disabled=${retrying !== null} onClick=${() => void retry(item.taskId)}>
+        ${retrying === item.taskId ? '정리 중...' : '삭제 후 정리 재시도'}
+      <//>
+    </section>`)} `
+}
+
 export function TaskBacklog() {
+  return html`<${TaskCleanupFailures} /><${TaskBacklogContent} />`
+}
+
+function TaskBacklogContent() {
   const { todo, inProgress, awaitingVerification, done } = tasksByStatus.value
   const totalTasks = todo.length + inProgress.length + awaitingVerification.length + done.length
   const query = taskSearchQuery.value
   const hasSearch = query.trim().length > 0
-  const filteredTodo = filterTasksByQuery(todo, query)
-  const filteredInProgress = filterTasksByQuery(inProgress, query)
-  const filteredAwaitingVerification = filterTasksByQuery(awaitingVerification, query)
-  const filteredDone = filterTasksByQuery(done, query)
+  const taskSearch = useTaskSearchText([...todo, ...inProgress, ...awaitingVerification, ...done], query)
+  const descriptions = new Map(taskSearch.kind === 'ready' ? taskSearch.tasks.map(task => [task.id, task]) : [])
+  const searchable = (rows: Task[]) => rows.map(task => descriptions.get(task.id) ?? task)
+  const filteredTodo = filterTasksByQuery(searchable(todo), query)
+  const filteredInProgress = filterTasksByQuery(searchable(inProgress), query)
+  const filteredAwaitingVerification = filterTasksByQuery(searchable(awaitingVerification), query)
+  const filteredDone = filterTasksByQuery(searchable(done), query)
   const filteredTotal =
     filteredTodo.length +
     filteredInProgress.length +
@@ -410,11 +472,12 @@ export function TaskBacklog() {
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
             }}
           >검색 초기화</button>
-          <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>
+          ${taskSearch.kind === 'ready' ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>` : null}
         ` : null}
       </div>
+      <${TaskSearchFeedback} state=${taskSearch} />
       <${BacklogPressure} todoTasks=${todo} />
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
+      <div style=${taskSearch.kind === 'ready' ? undefined : { display: 'none' }} class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
         <${TaskColumn}
           title="할 일"
           count=${sortedTodo.length}

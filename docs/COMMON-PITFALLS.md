@@ -78,7 +78,7 @@ SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit 기록.
 
 **로그 선택 (`debug`) — 읽다가 실패:**
 ```ocaml
-| Error e -> Log.Reputation.debug "task file unreadable: %s" e
+| Error e -> Log.Task.debug "task file unreadable: %s" e
 ```
 디렉토리 스캔 중 개별 파일, config 파싱, runtime context 미가용.
 

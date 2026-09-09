@@ -118,17 +118,33 @@ let deferred_runtime_ids hint =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_preference_of candidates =
+  let available, backpressured = List.partition (fun candidate ->
+    let quota_exhausted =
+      Option.fold ~none:false
+        ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
+        (quota_scope_of candidate)
+    in
+    let rate_limited =
+      Option.fold ~none:false
+        ~some:(fun candidate -> Option.is_some
+          (Runtime_lane_preference.candidate_backpressure ~now ~candidate))
+        (candidate_preference_of candidate)
+    in
+    not (quota_exhausted || rate_limited)) candidates in
+  available @ backpressured
+;;
+
 let quota_ordered_runtime_ids ~now runtime_ids =
-  let resolvable, unresolvable =
-    List.partition
-      (fun id -> Option.is_some (Runtime.get_runtime_by_id id))
-      runtime_ids
-  in
-  Runtime_quota_window.demote_order
-    ~now
-    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
-    resolvable
-  @ unresolvable
+  (* Resolve once so both kinds of ordering evidence use the same catalog row. *)
+  let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
+  let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
+  let ordered = demote_unavailable_candidates ~now
+    ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
+    ~candidate_preference_of:(fun (_, rt) ->
+      Option.map (fun (rt : Runtime.t) -> rt.candidate_preference) rt)
+    resolvable in
+  List.map fst (ordered @ unresolvable)
 ;;
 
 let quota_ordered_deferred_runtime_lane ~now hint =
@@ -152,6 +168,13 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   ; later_runtime_ids
   ; failure
   }
+;;
+
+let canonical_checkpoint_sink ~replay_prefix_projection sink
+    (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection snapshot.checkpoint with
+  | Error error -> Error (Keeper_replay_prefix.restore_error_to_string error)
+  | Ok checkpoint -> sink { snapshot with checkpoint }
 ;;
 
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
@@ -199,6 +222,8 @@ let lane_should_retry
     error =
   if is_last || not allow_retry then
     false
+  else if Keeper_required_tools.should_try_next error then
+    true
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry
@@ -215,6 +240,10 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
   then
     true
+  else if Keeper_recovery_transmission.should_try_next error then true
+  else if Keeper_turn_driver_try_runtime.candidate_access_should_try_next error
+  then
+    true
   else
     match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
@@ -229,6 +258,7 @@ let attempt_runtime_candidates
     ?(on_retry_deferred = fun _ -> ())
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ _error -> ())
     ?quota_scope_of
+    ?candidate_preference_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -254,6 +284,13 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
+  let candidate_preference_of =
+    match candidate_preference_of with
+    | Some candidate_preference_of -> candidate_preference_of
+    | None -> fun candidate ->
+        Runtime.get_runtime_by_id (runtime_id_of candidate)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.candidate_preference)
+  in
   (* Mid-walk demotion shares the pre-walk rule: never move an
      exhausted-but-dispatchable candidate behind one that cannot dispatch, or
      the walk fails on the dead head with a non-rotating error before real
@@ -276,9 +313,9 @@ let attempt_runtime_candidates
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
-    Runtime_quota_window.demote_order
+    demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of
+      ~quota_scope_of ~candidate_preference_of
       dispatchable
     @ undispatchable
   in
@@ -300,6 +337,7 @@ let attempt_runtime_candidates
          the provider returns could then attribute the old credential's
          response to the replacement catalog row. *)
       let attempt_quota_scope = quota_scope_of candidate in
+      let attempt_candidate_preference = candidate_preference_of candidate in
       emit_runtime_manifest
         ~status:"attempt"
         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -319,6 +357,16 @@ let attempt_runtime_candidates
             Runtime_lane_preference.note_success ~lane_id
               ~candidate:attempt_runtime_id
           | None -> ());
+         Option.iter
+           (fun candidate -> Runtime_lane_preference.note_candidate_success ~candidate)
+           attempt_candidate_preference;
+         (* A call getting through is the only evidence a quota came back that
+            a provider stating no reset time leaves available, so it is what
+            clears the observation. A stated window is left alone: it names a
+            time, and one success inside it does not make that untrue. *)
+         (match attempt_quota_scope with
+          | Some scope -> Runtime_quota_window.note_succeeded ~scope
+          | None -> ());
          Ok value
        | Error error, _checkpoint_after, effect_disposition ->
          emit_runtime_manifest
@@ -329,36 +377,36 @@ let attempt_runtime_candidates
            ~runtime_id:attempt_runtime_id
            ~attempt:idx
            error;
-         (* A hard-quota rejection with a provider-stated reset time is an
-            account-scoped fact; remember it so later lane ordering stops
-            re-dispatching into the exhausted window (RFC-0370 §3.3). The
-            provider identity comes from the attempted candidate's catalog
-            row, not the error payload, so both sides of the window share
-            one namespace. Quota errors without [retry_after] record
-            nothing — a cooldown the provider never stated would be a
-            synthesized default. *)
+         (* HTTP 429 and coarse Provider.RateLimit do not identify the
+            exhausted resource. Keep that unknown scope and the optional
+            provider hint as candidate-only ordering evidence. A shared
+            credential quota requires the distinct HardQuota/402 contract. *)
+         let note_quota retry_after =
+           match attempt_quota_scope, retry_after with
+           | None, _ -> ()
+           | Some scope, Some retry_after_s ->
+             Runtime_quota_window.note_exhausted
+               ~scope
+               (* NDT-OK: convert the provider's relative reset at ingress. *)
+               ~resets_at:(Unix.gettimeofday () +. retry_after_s)
+           | Some scope, None ->
+             Runtime_quota_window.note_observed_exhausted ~scope
+         in
+         let note_rate_limit retry_after =
+           Option.iter
+             (fun candidate -> Runtime_lane_preference.note_rate_limit ~candidate ~retry_after)
+             attempt_candidate_preference
+         in
          (match error with
-          | Agent_core.Error.Provider
-              (Llm_provider.Error.HardQuota { retry_after = Some retry_after_s; _ })
-            ->
-            (* Quota is credential-account-owned, so the window is keyed by
-               the row's quota scope: siblings sharing the credential are
-               demoted together (PR #28202 review P2). *)
-            (match attempt_quota_scope with
-             | Some scope ->
-               Runtime_quota_window.note_exhausted
-                 ~scope
-                 (* NDT-OK: [retry_after] is relative to the provider response;
-                    convert it to the wall-clock expiry at this ingress. *)
-                 ~resets_at:(Unix.gettimeofday () +. retry_after_s)
-             | None -> ())
+          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ })
+          | Agent_core.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+              note_rate_limit retry_after
+          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after; _ }) ->
+              note_quota retry_after
+          | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> note_quota None
           | _ -> ());
-         (* The window just learned above must affect this same lane walk.
-            Otherwise a sibling on the same credential is retried before an
-            unrelated candidate even though the provider has already stated
-            that the shared account is exhausted.  This remains ordering,
-            not admission: if every remaining candidate is demoted they are
-            all still attempted in their prior relative order. *)
+         (* Stable demotion retains every declared candidate, including when
+            all are observed unavailable. Neither hint causes a wait or gate. *)
          let rest = demote_rest rest in
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
@@ -455,7 +503,7 @@ let runtime_candidate_missing_error id =
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
-let runtime_candidate_missing_request_cap_error error =
+let runtime_candidate_invalid_request_cap_error error =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig
        { field = "max-request-body-bytes"
@@ -466,7 +514,7 @@ let validate_provider_request_cap ~runtime_id
     (provider_config : Llm_provider.Provider_config.t) =
   match Runtime.validate_request_body_cap ~runtime_id provider_config with
   | Ok cap -> Ok cap
-  | Error error -> Error (runtime_candidate_missing_request_cap_error error)
+  | Error error -> Error (runtime_candidate_invalid_request_cap_error error)
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
@@ -482,7 +530,12 @@ let resolve_runtime_candidate id =
            provider_config
        in
        Ok runtime)
-  | None -> Error (runtime_candidate_missing_error id)
+  | None ->
+    (match Runtime.resolve_assignment id with
+     | `Unavailable missing ->
+       Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
+         ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
+     | `Missing | `Lane _ -> Error (runtime_candidate_missing_error id))
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =
   match resolve_runtime_candidate id with
@@ -523,7 +576,7 @@ let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
 
 (* The WARN names the runtime being left and the runtime being taken. It used to
    print [assignment_id] on the left, which for a keeper whose assignment is a
-   bare runtime id reads as a reroute from a runtime to itself — the "kimi -> kimi"
+   bare runtime id reads as a reroute from a runtime to itself — the "<id> -> <id>"
    lines that made a working reroute look like a no-op. The assignment is still
    reported, as the assignment. *)
 let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
@@ -553,33 +606,13 @@ type attempt_input =
   ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
   }
 
-(* RFC-0265 follow-up -- graceful media degrade floor, decided per attempt.
-   A lane walk crosses runtimes with different input capabilities, so the
-   strip is decided against the runtime actually being dispatched rather than
-   once against the lane head. With the strip bound before the walk, a lane
-   ordered [text-only; vision] handed the vision candidate a stripped turn,
-   and one ordered [vision; text-only] handed the text-only candidate the
-   images the vision candidate had just failed on -- the hard multimodal gate
-   that #33034 moved only the deferred head off.
-
-   The decision is the RFC-0265 one with no reroute candidates, so it is
-   [No_reroute_needed] (this runtime admits the turn's modality: dispatch
-   untouched) or [No_capable_runtime] (it does not: strip the unsupported
-   media from the goal, the prior [initial_messages] and the resumed
-   checkpoint, append a degraded [Runtime_routed] manifest row and inject a
-   text notice so the turn runs on text instead of the loud terminal reject in
-   [Runtime_agent.run_blocks]). [Reroute] names a target drawn from the
-   candidate list, and that list is empty here, so it has no producer on this
-   call. The drop is non-silent (WARN log + runtime manifest row + injected
-   model-input notice -- RFC-0126/0145). The stripped checkpoint is the
-   dispatch view only; the persisted checkpoint is unchanged, so a later
-   vision-capable candidate in the same walk still sees the original media.
-
-   [initial_messages] is the caller's canonical pre-turn history and is the
-   exact prefix checked later by replay persistence. A resumed checkpoint is
-   only the AGENT_CORE dispatch carrier; media degradation may project its
-   messages without changing this canonical history. *)
+(* Project against the candidate being dispatched, preserving the canonical
+   input for subsequent candidates. Inline images that this candidate cannot
+   see are delegated through the turn-scoped projector before the generic
+   media strip. A failed vision head must not make a text fallback forget the
+   picture. Other unsupported media retain the explicit degrade contract. *)
 let project_input_for_attempt
+    ~project_images
     ~keeper_name
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -619,14 +652,59 @@ let project_input_for_attempt
   | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> unchanged
   | Runtime_agent.No_capable_runtime { required } ->
     let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+    let project ~mode blocks =
+      if caps.supports_image_input
+      then { Keeper_vision_ingest.blocks; delegated_images = 0 }
+      else project_images ~mode blocks
+    in
+    let projected_goal = project ~mode:Keeper_vision_ingest.Eager current_goal_blocks in
+    let project_messages messages =
+      let projected =
+        List.map
+          (fun (message : Agent_core.Types.message) ->
+            let projection =
+              project ~mode:Keeper_vision_ingest.Store_only message.content
+            in
+            { message with content = projection.blocks }, projection.delegated_images)
+          messages
+      in
+      List.map fst projected,
+      List.fold_left (fun count (_, images) -> count + images) 0 projected
+    in
+    let projected_initial, initial_images = project_messages initial_messages in
+    let projected_checkpoint, checkpoint_images =
+      match agent_core_checkpoint with
+      | None -> None, 0
+      | Some (checkpoint : Agent_core.Checkpoint.t) ->
+        let messages, count = project_messages checkpoint.messages in
+        Some { checkpoint with messages }, count
+    in
+    let delegated_images =
+      projected_goal.delegated_images + initial_images + checkpoint_images
+    in
+    if delegated_images > 0 then (
+      Log.Keeper.info
+        "%s: image fallback on %s -- projected %d image occurrences to readings or references"
+        keeper_name runtime_id delegated_images;
+      emit_runtime_manifest
+        ~status:"delegated"
+        ~decision:
+          (Keeper_runtime_manifest.with_payload_role
+             ~payload_role:Keeper_runtime_manifest.Operator_evidence
+             (`Assoc
+               [ "routing_action", `String "images_delegated_for_candidate"
+               ; "runtime_id", `String runtime_id
+               ; "image_occurrences", `Int delegated_images
+               ]))
+        Keeper_runtime_manifest.Runtime_routed);
     let stripped_goal, goal_dropped =
-      Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
+      Runtime_agent.strip_unsupported_modality_blocks caps projected_goal.blocks
     in
     let stripped_initial, initial_dropped =
-      Runtime_agent.strip_unsupported_modality_messages caps initial_messages
+      Runtime_agent.strip_unsupported_modality_messages caps projected_initial
     in
     let stripped_checkpoint, checkpoint_dropped =
-      match agent_core_checkpoint with
+      match projected_checkpoint with
       | None -> None, []
       | Some (checkpoint : Agent_core.Checkpoint.t) ->
         let messages, dropped =
@@ -642,7 +720,7 @@ let project_input_for_attempt
         checkpoint_dropped
     in
     (match Runtime_agent.media_degrade_note ~runtime_id dropped with
-     | None ->
+     | None when delegated_images = 0 ->
        (* [required] is non-empty -- that is why the decision was
           [No_capable_runtime] -- yet nothing was strippable, so there is no
           text-only turn to offer and the provider capability floor will reject
@@ -673,31 +751,58 @@ let project_input_for_attempt
                 ]))
          Keeper_runtime_manifest.Runtime_routed;
        unchanged
-     | Some note ->
-       Log.Keeper.warn
-         "%s: RFC-0265 media degrade on %s -- dropped %s, continuing text-only"
-         keeper_name
-         runtime_id
-         (modality_counts_summary dropped);
-       emit_runtime_manifest
-         ~status:"degraded"
-         ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
-         Keeper_runtime_manifest.Runtime_routed;
+     | note ->
+       Option.iter
+         (fun _ ->
+           Log.Keeper.warn
+             "%s: RFC-0265 media degrade on %s -- dropped %s, continuing text-only"
+             keeper_name runtime_id (modality_counts_summary dropped);
+           emit_runtime_manifest
+             ~status:"degraded"
+             ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
+             Keeper_runtime_manifest.Runtime_routed)
+         note;
        let goal_with_note =
-         stripped_goal @ [ Agent_core.Types.text_block note ]
+         stripped_goal
+         @ (match note with
+            | None -> []
+            | Some text -> [ Agent_core.Types.text_block text ])
        in
        let dispatch_prefix =
          match stripped_checkpoint with
          | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
          | None -> stripped_initial
        in
-       { attempt_goal_blocks = Some goal_with_note
+       let replay_projection =
+         match goal_blocks with
+         | Some canonical_blocks when canonical_blocks <> goal_with_note ->
+           (* Agent_input.append_user_input appends this exact sanitized User
+              message after the seed history. Record the boundary now, before
+              the provider can append answers, tools or injected context. *)
+           let input_message blocks =
+             Agent_core.Types.user_msg_blocks
+               (List.map
+                  (function
+                    | Agent_core.Types.Text text ->
+                      Agent_core.Types.Text (Llm_provider.Utf8_sanitize.sanitize text)
+                    | block -> block)
+                  blocks)
+           in
+           Keeper_replay_prefix.media_degraded_with_current_input
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+             ~canonical_input:(input_message canonical_blocks)
+             ~dispatch_input:(input_message goal_with_note)
+         | Some _ | None ->
+           Keeper_replay_prefix.media_degraded
+             ~canonical_prefix:initial_messages ~dispatch_prefix
+       in
+       { attempt_goal_blocks =
+           (match goal_blocks, goal_with_note with
+            | None, [] -> None
+            | _ -> Some goal_with_note)
        ; attempt_initial_messages = stripped_initial
        ; attempt_agent_core_checkpoint = stripped_checkpoint
-       ; attempt_replay_prefix_projection =
-           Keeper_replay_prefix.media_degraded
-             ~canonical_prefix:initial_messages
-             ~dispatch_prefix
+       ; attempt_replay_prefix_projection = replay_projection
        })
 
 type attempt_inference_policy =
@@ -726,11 +831,22 @@ let run_named
     ~goal
     ?goal_blocks
     ?session_id
-    ?(system_prompt = "")
+    (* Required, not defaulted to "". Three of the runtimes this dispatches to
+       -- Codex, Claude Code, Antigravity -- refuse a blank composition in
+       [Keeper_official_client_host.prepare_turn], because a blank one runs the
+       turn under the vendor's built-in instructions with masc's tool surface
+       still attached (#33165). A default that part of the domain rejects is not
+       a default: it left 34 cases red across the three official-client suites
+       and #33165 fixed one of the five call sites, because an optional
+       argument asks nobody. Callers that mean "no system prompt" now say so
+       (#33862). *)
+    ~system_prompt
     ?(tools = [])
     ~agent_core_tools
+    ?(tool_requirement = Keeper_required_tools.Optional)
     ?(initial_messages = [])
     ?model_input_projection
+    ?recovery_view
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
@@ -753,11 +869,13 @@ let run_named
     ?enable_thinking
     ?cooperative_yield_probe
     ?agent_core_checkpoint
+    ?(continue_from_checkpoint = false)
     ?trace_link
     ?event_bus
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_request_attribution
+    ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
     ?on_model_input_window_observation
@@ -773,6 +891,14 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "continuation_checkpoint"
+            ; detail = "An admitted-input continuation requires its persisted checkpoint"
+            }))
+  else
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_core_error e)
   | Ok (sw, net) ->
@@ -823,7 +949,7 @@ let run_named
      operators can route through explicit failover groups.  Lane candidate
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
-  (* Quota-window demotion is ordering only — a demoted candidate is still
+  (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
      selecting a fresh lane walk. A deferred suffix was already frozen before
      pre-dispatch shaping, so re-reading wall-clock quota state here could make
@@ -836,26 +962,27 @@ let run_named
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
-         wall clock; [demote_order] stays pure via injected [now]. *)
+         wall clock; the ordering read receives one explicit [now]. *)
       ~now:(Unix.gettimeofday ())
       candidates
   in
-  let lane_id_opt, lane_candidate_ids =
+  let* lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
     | Some hint ->
-      Some hint.assignment_id, deferred_runtime_ids hint
+      Ok (Some hint.assignment_id, deferred_runtime_ids hint)
     | None ->
       (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> None, []
+       | `Missing -> Ok (None, [])
+       | `Unavailable missing ->
+         Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
+           ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
-         ( Some lane_id
-         , (* Demotion runs after sticky preference: a provider that stated
-              "exhausted until T" outranks a remembered last-good candidate
-              on that same account. *)
-           Runtime_lane_preference.prefer_order ~lane_id
-             (Runtime_lane.ordered_candidates lane)
-           |> demote_quota_exhausted ))
+         Ok
+           ( Some lane_id
+           , Runtime_lane_preference.prefer_order ~lane_id
+               (Runtime_lane.ordered_candidates lane)
+             |> demote_quota_exhausted ))
   in
   if lane_candidate_ids = []
   then
@@ -952,6 +1079,7 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
+  let project_images = Keeper_vision_ingest.fallback_projector ~keeper_name () in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -985,6 +1113,9 @@ let run_named
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
+    ~candidate_preference_of:(function
+      | Resolved_runtime runtime -> Some runtime.Runtime.candidate_preference
+      | Missing_runtime _ -> None)
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml
          reload removed its id from the current table; only a candidate that
@@ -1000,6 +1131,36 @@ let run_named
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
+      let agent_core_tools = match runtime.Runtime.execution, agent_ref with
+        | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
+            ~agent_cell ~built:agent_core_tools
+        | _ -> agent_core_tools in
+      let source_reader_ready = match recovery_view, runtime.Runtime.execution with
+        | Some _, Runtime_execution.Agent_core _ ->
+          Keeper_recovery_transmission.require_reader agent_core_tools
+          |> Result.map_error Keeper_recovery_transmission.to_core_error
+        | _ -> Ok () in
+      let has_tools, surface_enabled = match runtime.Runtime.execution with
+        | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
+        | Runtime_execution.Codex_app_server _
+        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
+      (match Result.bind source_reader_ready (fun () ->
+          Keeper_required_tools.check_surface tool_requirement
+            ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
+          |> Result.map_error Keeper_required_tools.to_core_error) with
+       | Error failure ->
+         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+         Error failure, None,
+         Keeper_provider_attempt_effect.No_effect_observed
+       | Ok () ->
+      (* Native continuation already owns its input in the checkpoint. Official
+         clients still need the explicit goal, including any media blocks. *)
+      let goal_blocks =
+        match continue_from_checkpoint, runtime.Runtime.execution with
+        | true, Runtime_execution.Agent_core _ -> None
+        | _ -> goal_blocks
+      in
       (* Shadows the caller's inputs with this candidate's dispatch view; the
          originals stay bound above for the next candidate's own projection. *)
       let { attempt_goal_blocks = goal_blocks
@@ -1007,7 +1168,13 @@ let run_named
           ; attempt_agent_core_checkpoint = agent_core_checkpoint
           ; attempt_replay_prefix_projection = replay_prefix_projection
           } =
-        project_input_for_attempt
+        match recovery_view with
+        | Some _ ->
+          {attempt_goal_blocks=goal_blocks;attempt_initial_messages=initial_messages;
+           attempt_agent_core_checkpoint=agent_core_checkpoint;
+           attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
+        | None -> project_input_for_attempt
+          ~project_images
           ~keeper_name
           ~emit_runtime_manifest
           ~goal_blocks
@@ -1033,6 +1200,13 @@ let run_named
           ()
       in
       match runtime.Runtime.execution with
+      | (Runtime_execution.Codex_app_server _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Antigravity_cli _) when Option.is_some recovery_view ->
+        (Error (Keeper_recovery_transmission.to_core_error
+          (Keeper_recovery_transmission.Client_projection_not_integrated
+            {runtime_id=attempt_runtime_id})), None,
+         Keeper_provider_attempt_effect.No_effect_observed)
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
           let on_transmitted_model_input transmitted =
@@ -1065,6 +1239,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter
@@ -1190,6 +1365,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter
@@ -1298,6 +1474,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
                  Option.iter
@@ -1383,6 +1560,14 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
+        (match Keeper_required_tools.check_provider
+            (match recovery_view with Some _ -> Keeper_required_tools.Required | None -> tool_requirement)
+            ~runtime_id:attempt_runtime_id provider_config with
+         | Error failure ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+           Error (Keeper_required_tools.to_core_error failure), None,
+           Keeper_provider_attempt_effect.No_effect_observed
+         | Ok () ->
         (match
            Runtime.validate_dispatch_credential ~provider_config runtime
          with
@@ -1433,6 +1618,7 @@ let run_named
               tools = agent_core_tools
             ; initial_messages
             ; model_input_projection
+            ; recovery_view
             ; stream_idle_timeout_s
             ; first_event_timeout_s =
                 (* Keeper policy knob, injected from the resolved layer like
@@ -1493,7 +1679,10 @@ let run_named
             ; checkpoint_sidecar
             ; cache_system_prompt
             ; yield_on_tool
-            ; checkpoint_sink
+            ; checkpoint_sink =
+                Option.map
+                  (canonical_checkpoint_sink ~replay_prefix_projection)
+                  checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector
             ; context
@@ -1521,6 +1710,8 @@ let run_named
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider_with_truncation_recovery
+              ?continuation_checkpoint:
+                (if continue_from_checkpoint then agent_core_checkpoint else None)
               try_provider_ctx candidate
           in
           let outcomes =
@@ -1531,7 +1722,7 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed ))))
-       )
+       )))
     attempt_candidates
 
 
@@ -1545,6 +1736,7 @@ module For_testing = struct
   ;;
 
   let project_provider_attempt_result = project_provider_attempt_result
+  let canonical_checkpoint_sink = canonical_checkpoint_sink
   let provider_result outcomes = outcomes.provider_result
   let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt

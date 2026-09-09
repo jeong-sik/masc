@@ -3,7 +3,6 @@
   test_backend_coverage
   test_tools_coverage
   test_types_utils_coverage
-  test_tempo_coverage
   test_transport_coverage
   test_validation_coverage
   test_dashboard_resilience_coverage
@@ -16,7 +15,6 @@
   test_sse_coverage
   test_workspace_utils_coverage
   test_orchestrator_coverage
-  test_web_dashboard_coverage
   test_resilience_coverage
   test_types_coverage
   test_agent_core_message_constructor_contract
@@ -44,7 +42,6 @@
   test_backend_coverage
   test_tools_coverage
   test_types_utils_coverage
-  test_tempo_coverage
   test_transport_coverage
   test_validation_coverage
   test_dashboard_resilience_coverage
@@ -57,7 +54,6 @@
   test_sse_coverage
   test_workspace_utils_coverage
   test_orchestrator_coverage
-  test_web_dashboard_coverage
   test_resilience_coverage
   test_types_coverage
   test_agent_core_message_constructor_contract

@@ -68,14 +68,14 @@ obligation 을 가진 keeper 전수 (측정 시점 42건):
 | keeper | obligation | non-null `connector_message_id` | 커넥터 |
 |---|---|---|---|
 | sangsu | 19 | 17 | discord |
-| kidsnote | 10 | 2 | slack |
+| exampleorg | 10 | 2 | slack |
 | rtprobe | 8 | 0 | dashboard |
 | analyst | 3 | 0 | dashboard |
 | rondo | 2 | 0 | dashboard |
 
 본문을 확인한 38건이 전부 사고 기록이다. 커넥터 종류와 무관하다.
 
-- kidsnote: `"이미 처리한 Vincent의 Slack 메시지입니다. 새 요청 없음. 게시 없이
+- exampleorg: `"이미 처리한 Vincent의 Slack 메시지입니다. 새 요청 없음. 게시 없이
   종료합니다."`
 - rondo: `"Memory write confirmed. 상태 불변 — 말할 것 없음."`
 

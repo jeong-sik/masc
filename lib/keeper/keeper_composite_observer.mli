@@ -237,13 +237,6 @@ type snapshot = {
       (** Board consumption cursor (ts + last consumed post id). Always
           present; [ts = 0.0] / [post_id = None] before the keeper has
           consumed any board post. *)
-  board_wakeups : int;
-      (** Number of distinct board-wakeup dedup keys currently held.
-          The registry keeps a content-fingerprint debounce ledger
-          ([board_wakeups : float StringMap.t], cleared per turn); this
-          field projects its cardinality so the dashboard can show how many
-          board stimuli woke the keeper in the current window without
-          leaking the high-cardinality fingerprint keys. *)
   fiber_stop_flag : bool;
       (** Snapshot of [registry_entry.fiber_stop] at observation time.
           When [true] without a corresponding stopped/dead phase, the
@@ -253,8 +246,9 @@ type snapshot = {
   fiber_wakeup_flag : bool;
       (** Snapshot of [registry_entry.fiber_wakeup]. [true] means a
           wake signal is queued; the next [interruptible_sleep] chunk
-          will return early. Stale [true] points at a wake source
-          that was set but never consumed. *)
+          returns early, or a rate-limit backoff sleep serves it when it
+          ends (#34653). Stale [true] points at a wake source that was set
+          but never consumed. *)
   idle_seconds : int;
       (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Observation only. *)

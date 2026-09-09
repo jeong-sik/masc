@@ -4,12 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import '@testing-library/jest-dom'
 import { TaskBacklog, buildBacklogPressureRows, resetTaskBacklogState } from './kanban-components'
 import { executionError, executionLoaded, executionLoading, tasks } from '../../store'
-import { resetTaskSearch } from './goal-helpers'
+import { resetTaskSearch, expandedTasks } from './goal-helpers'
 import type { Task } from '../../types'
-
-vi.mock('@formkit/auto-animate', () => ({
-  default: vi.fn(),
-}))
+import * as actions from '../../api/actions'
+import * as store from '../../store'
+import * as confirmation from '../common/confirm-dialog'
 
 function makeDoneTask(index: number): Task {
   const day = String(26 - index).padStart(2, '0')
@@ -29,6 +28,7 @@ function makeDoneTask(index: number): Task {
 describe('TaskBacklog', () => {
   beforeEach(() => {
     resetTaskBacklogState()
+    expandedTasks.value = new Set()
     resetTaskSearch()
     executionLoaded.value = true
     executionLoading.value = false
@@ -38,6 +38,7 @@ describe('TaskBacklog', () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
     vi.useRealTimers()
     tasks.value = []
     executionLoaded.value = false
@@ -45,6 +46,82 @@ describe('TaskBacklog', () => {
     executionError.value = null
     resetTaskSearch()
     resetTaskBacklogState()
+  })
+
+  it('keeps cleanup retry available after the deleted Task card disappears', async () => {
+    tasks.value = [{ id: 'cleanup-target', title: 'Cleanup target', status: 'todo', priority: 3 }]
+    vi.spyOn(confirmation, 'requestConfirm').mockResolvedValue(true)
+    const remove = vi.spyOn(actions, 'deleteTask')
+      .mockResolvedValueOnce({ status: 'cleanup_failed', taskId: 'cleanup-target', errors: ['primary link store unreadable'] })
+      .mockResolvedValueOnce({ status: 'already_absent', taskId: 'cleanup-target' })
+    vi.spyOn(store, 'refreshExecution').mockImplementation(async () => { tasks.value = [] })
+    render(h(TaskBacklog, {}))
+    fireEvent.click(screen.getByRole('button', { name: '태스크 삭제: Cleanup target' }))
+    await waitFor(() => expect(screen.queryByText('Cleanup target')).not.toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('cleanup-target')
+    fireEvent.click(screen.getByRole('button', { name: '삭제 후 정리 재시도' }))
+    await waitFor(() => expect(remove).toHaveBeenNthCalledWith(2, 'cleanup-target'))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('loads the complete description only when a summary card expands', async () => {
+    const task: Task = { id: 'summary', title: 'Summary task', status: 'todo', detail_level: 'summary', description: 'Preview' }
+    tasks.value = [task]
+    const fetch = vi.spyOn(actions, 'fetchTaskDetail').mockResolvedValue({ ...task, detail_level: 'full', description: 'Full description with distant evidence' })
+    render(h(TaskBacklog, {}))
+    expect(fetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '설명 더 보기' }))
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Full description with distant evidence'))
+    expect(fetch).toHaveBeenCalledWith('summary')
+    fireEvent.click(screen.getByRole('button', { name: '설명 접기' }))
+    fireEvent.click(screen.getByRole('button', { name: '설명 더 보기' }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('distinguishes unavailable details from an empty description and retries', async () => {
+    const task: Task = { id: 'summary', title: 'Summary task', status: 'todo', detail_level: 'summary' }
+    tasks.value = [task]
+    const fetch = vi.spyOn(actions, 'fetchTaskDetail').mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ...task, detail_level: 'full', description: '' })
+    render(h(TaskBacklog, {}))
+    expect(screen.queryByText('설명 없음')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '설명 더 보기' }))
+    await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('설명을 불러오지 못했습니다.'))
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
+    await vi.waitFor(() => expect(screen.getByText('설명 없음')).toBeInTheDocument())
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps refreshed task details when the previous same-id response arrives late', async () => {
+    const original: Task = {
+      id: 'summary-race', title: 'Original summary', status: 'todo', detail_level: 'summary',
+    }
+    let resolveOlder!: (task: Task) => void
+    let resolveNewer!: (task: Task) => void
+    const older = new Promise<Task>(resolve => { resolveOlder = resolve })
+    const newer = new Promise<Task>(resolve => { resolveNewer = resolve })
+    const fetch = vi.spyOn(actions, 'fetchTaskDetail')
+      .mockReturnValueOnce(older).mockReturnValueOnce(newer)
+    tasks.value = [original]
+    render(h(TaskBacklog, {}))
+    fireEvent.click(screen.getByRole('button', { name: '설명 더 보기' }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    const refreshed = { ...original, title: 'Refreshed summary' }
+    tasks.value = [refreshed]
+    await vi.waitFor(() => expect(screen.getByText('Refreshed summary')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '설명 접기' }))
+    fireEvent.click(screen.getByRole('button', { name: '설명 더 보기' }))
+    expect(fetch).toHaveBeenCalledTimes(2)
+
+    resolveNewer({ ...refreshed, detail_level: 'full', description: 'Current confirmed description' })
+    await newer
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Current confirmed description'))
+    resolveOlder({ ...original, detail_level: 'full', description: 'Obsolete late description' })
+    await older
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    expect(document.body.textContent).toContain('Current confirmed description')
+    expect(document.body.textContent).not.toContain('Obsolete late description')
   })
 
   it('summarizes unclaimed priority pressure by oldest task age', () => {

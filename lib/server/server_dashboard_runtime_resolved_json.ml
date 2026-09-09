@@ -55,22 +55,39 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
 let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
   (* Sticky failover preference (Runtime_lane_preference) is read-only
      operator observability: which candidate the lane will try first next. *)
+  let candidates = Runtime_lane.ordered_candidates lane in
   let preferred =
-    Runtime_lane_preference.preferred_of_lane ~lane_id:(Runtime_lane.id lane)
+    match Runtime_lane_preference.preferred_of_lane ~lane_id:(Runtime_lane.id lane) with
+    | Some (candidate, _) as preference
+      when List.exists (String.equal candidate) candidates -> preference
+    | Some _ | None -> None
   in
   `Assoc
     [ "id", `String (Runtime_lane.id lane)
-    ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
+    ; "runtime_ids", Json_util.json_string_list candidates
     ; "preferred_candidate", string_opt_json (Option.map fst preferred)
     ; "preferred_at_ts", Json_util.float_opt_to_json (Option.map snd preferred)
     ]
 ;;
 
-let resolved_assignment_json (resolution : [ `Lane of Runtime_lane.t | `Missing ])
+let resolved_assignment_json
+    (resolution : [ `Lane of Runtime_lane.t | `Unavailable of Runtime.missing_catalog_model | `Missing ])
   : Yojson.Safe.t
   =
   match resolution with
   | `Lane lane -> `Assoc [ "kind", `String "lane"; "id", `String (Runtime_lane.id lane) ]
+  | `Unavailable missing ->
+      `Assoc
+        [ "kind", `String "unavailable"
+        ; "id", `String missing.runtime_id
+        ; "reason", `Assoc
+            [ "kind", `String "missing_catalog_model"
+            ; "message", `String ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
+            ; "provider_id", `String missing.provider_id
+            ; "provider_label", `String missing.provider_label
+            ; "model_id", `String missing.model_id
+            ]
+        ]
   | `Missing -> `Assoc [ "kind", `String "missing"; "id", `Null ]
 ;;
 
@@ -127,7 +144,7 @@ let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
     |> List.filter_map (fun id ->
       match Runtime.resolve_assignment id with
       | `Lane lane when not (List.mem (Runtime_lane.id lane) seen) -> Some lane
-      | `Lane _ | `Missing -> None)
+      | `Lane _ | `Missing | `Unavailable _ -> None)
     |> List.sort_uniq (fun a b ->
       String.compare (Runtime_lane.id a) (Runtime_lane.id b))
   in

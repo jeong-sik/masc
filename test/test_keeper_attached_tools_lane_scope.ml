@@ -71,7 +71,7 @@ let tool_names tools =
 
 (* No descriptors, so the only difference between the two shapes is the one
    under test. *)
-let with_bundle ?(history = []) ?(attached = true) f =
+let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -102,6 +102,23 @@ let with_bundle ?(history = []) ?(attached = true) f =
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
       ~task_skills:[]
   in
+  let context = Agent_core.Context.create_sync () in
+  let load_receipts =
+    match Keeper_tool_load_receipts.restore ~source:context ~target:context with
+    | Ok restored -> restored
+    | Error error -> fail (Keeper_tool_load_receipts.error_to_string error)
+  in
+  let identity_surface =
+    if with_loader then
+      Some
+        { Keeper_tools_agent_core.offered =
+            offered (if attached then [ "jira_search"; "confluence_search" ] else [])
+        ; agent_cell = ref None
+        ; history
+        ; load_receipts
+        }
+    else None
+  in
   let bundle =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
       ~config:(Workspace.default_config dir)
@@ -112,12 +129,7 @@ let with_bundle ?(history = []) ?(attached = true) f =
           ; keeper_name = meta.Keeper_meta_contract.name
           }
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
-      ~identity_surface:
-        { Keeper_tools_agent_core.offered =
-            offered (if attached then [ "jira_search"; "confluence_search" ] else [])
-        ; agent_cell = ref None
-        ; history
-        }
+      ?identity_surface
       ~capability_surface
       ()
   in
@@ -410,6 +422,16 @@ let test_a_keeper_with_nothing_attached_still_gets_a_listing () =
       (List.sort_uniq String.compare listed))
 ;;
 
+let test_a_surface_without_a_loader_keeps_builtin_schemas () =
+  with_bundle ~attached:false ~with_loader:false (fun bundle ->
+    check bool "no listing advertises an impossible extension" false
+      (listing_placed bundle);
+    check (list string) "every built-in remains directly callable"
+      (tool_names bundle.Keeper_tools_agent_core.tools |> List.sort_uniq String.compare)
+      (tool_names bundle.Keeper_tools_agent_core.agent_core_tools
+       |> List.sort_uniq String.compare))
+;;
+
 (* And the thing the [listed] flag must not become: read back off the surface,
    it would expect the listing exactly when the listing is there. *)
 let test_a_missing_listing_is_still_caught () =
@@ -492,6 +514,8 @@ let () =
             "gives a Keeper with nothing attached a listing"
             `Quick
             test_a_keeper_with_nothing_attached_still_gets_a_listing
+        ; test_case "a surface without a loader keeps builtin schemas" `Quick
+            test_a_surface_without_a_loader_keeps_builtin_schemas
         ; test_case
             "still expects a listing the surface lost"
             `Quick

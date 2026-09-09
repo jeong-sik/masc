@@ -14,6 +14,8 @@ include Server_routes_http_routes_dashboard_setup
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
+module Keeper_shutdown_reconciliation =
+  Server_dashboard_http_keeper_shutdown_reconciliation
 module Official_client_session = Server_dashboard_official_client_session
 module Official_client_probe = Server_dashboard_official_client_probe
 
@@ -386,7 +388,7 @@ let runtime_config_raw_json
     ; ( "source_revision"
       , `String (Runtime.config_source_revision_to_string source_revision) )
     ; ("path", `String path)
-    ; ("file_name", `String "runtime.toml")
+    ; ("file_name", `String Config_dir_resolver.runtime_toml_filename)
     ; ("source_text", `String source_text)
     ; ( "application"
       , runtime_config_application_json
@@ -551,6 +553,8 @@ let parse_runtime_route_lane = function
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
+     | `Unavailable missing ->
+       Error ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
      | `Missing ->
        Error
          (Printf.sprintf
@@ -1453,7 +1457,7 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
-  (* Paged, and without detail payloads. [lane=] filters BEFORE pagination so
+  (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response
      246 MB for 5,908 runs; [exact-lane-runs/<run_id>] carries the exact prompt
@@ -1483,12 +1487,20 @@ let add_routes ~sw ~clock router =
              (Server_utils.query_param req "lane" |> Option.map String.trim)
              (fun value -> if String.equal value "" then None else Some value)
          in
-         match before with
-         | Error message -> respond_dashboard_error ~request:req reqd message
-         | Ok before ->
+         let run_kind =
+           match Server_utils.query_param req "run_kind" with
+           | None -> Ok None
+           | Some value ->
+             Server_standalone_lane_projection.run_kind_of_string value
+             |> Result.map Option.some
+         in
+         match before, run_kind with
+         | Error message, _ | _, Error message ->
+           respond_dashboard_error ~request:req reqd message
+         | Ok before, Ok run_kind ->
            (match
               Server_standalone_lane_projection.recent_run_page_json
-                ~limit ~before ~lane
+                ~limit ~before ~lane ~run_kind
             with
             | Error message ->
               respond_dashboard_error ~request:req reqd message
@@ -2338,17 +2350,32 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         (* The default execution surface is a large proactive cached snapshot.
-            Re-compressing it on every dashboard poll burns the same serving
-            domain that accepts health/chat/keeper requests; serve identity JSON
-            here and keep the compute/cache policy in
-            [dashboard_execution_http_json]. *)
-         match dashboard_execution_cached_http_body_and_etag ~state request with
-         | Some (body, etag) ->
-           Http.Response.json_lazy ~compress:false ~request:req ~etag (fun () -> body) reqd
+         (* The producer prepares all encodings once per snapshot. Requests
+            select bytes and validate the identity ETag without recompression. *)
+         let timing = Server_timing.create () in
+         let context, cached =
+           Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
+             let context = execution_http_request ~state request in
+             context, dashboard_execution_cached_http_representation context)
+         in
+         match cached with
+         | Some (body, etag, extra_headers) ->
+           Http.Response.json_lazy ~compress:false ~request:req ~etag
+             ~extra_headers:(extra_headers @ Server_timing.extra_header timing)
+             (fun () -> body) reqd
          | None ->
-           let json = dashboard_execution_http_json ~state ~sw ~clock request in
-           Http.Response.json_value ~compress:false ~request:req json reqd
+           let response = Server_timing.measure timing Server_timing.Cache_compute
+             (fun () -> dashboard_execution_http_response ~sw ~clock context) in
+           (match response with
+            | Execution_json json ->
+              Http.Response.json_value ~compress:false ~request:req
+                ~extra_headers:(Server_timing.extra_header timing) json reqd
+            | Execution_payload payload ->
+              let body, headers = Dashboard_cache.select_http_representation
+                ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding") payload in
+              Http.Response.json_lazy ~compress:false ~request:req ~etag:payload.etag
+                ~extra_headers:(headers @ Server_timing.extra_header timing)
+                (fun () -> body) reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2598,7 +2625,7 @@ let add_routes ~sw ~clock router =
           just the auth + transport wrapper. *)
        with_public_read (fun state req reqd ->
          let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2636,6 +2663,25 @@ let add_routes ~sw ~clock router =
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/search-text" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Server_dashboard_task_search_text.read ~config)
+           |> Server_dashboard_task_search_text.response in
+         Http.Response.json_value ~status:(status :> Httpun.Status.t)
+           ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/detail" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let task_id = Server_utils.query_param req "task_id" in
+         let config = Mcp_server.workspace_config state in
+         let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Server_dashboard_task_detail.read ~config ~task_id)
+           |> Server_dashboard_task_detail.response in
+         Http.Response.json_value ~status:(status :> Httpun.Status.t)
+           ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd
@@ -2661,13 +2707,24 @@ let add_routes ~sw ~clock router =
            (* RFC-0138 Phase 3 Step 2: wait-free read via
               [Dashboard_snapshot.current ()] for the global catalog. An exact
               Keeper selector computes the effective surface beside it. *)
-           let json =
-             Server_dashboard_snapshot_select.select_tools_json
+           let response =
+             Server_dashboard_snapshot_select.select_tools_response
                ~timing
                ?keeper:(Server_utils.query_param request "keeper")
                (Mcp_server.workspace_config state)
            in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
+           let extra_headers = public_read_cors_headers req @ Server_timing.extra_header timing in
+           match response with
+           | Server_dashboard_snapshot_select.Tools_json json ->
+             Http.Response.json_value ~compress:true ~request:req
+               ~extra_headers json reqd
+           | Tools_prepared tools ->
+             let body, headers = Http_response_payload.select_prepared
+               ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding")
+               tools.encoded in
+             Http.Response.json_lazy ~compress:false ~request:req ~etag:tools.etag
+               ~extra_headers:(headers @ extra_headers)
+               (fun () -> body) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/skill-activations" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2993,6 +3050,13 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission
+           (fun state _actor req reqd ->
+             Keeper_shutdown_reconciliation.handle_get state req reqd target)
+           request reqd
+       | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
@@ -3076,6 +3140,14 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
+       | Some target ->
+         with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission
+           (fun state actor req reqd ->
+             Http.Request.read_body_async reqd (fun body ->
+               Keeper_shutdown_reconciliation.handle_post state ~actor req reqd target body))
+           request reqd
+       | None ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth

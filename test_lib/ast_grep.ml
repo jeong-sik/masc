@@ -235,6 +235,30 @@ let count_field_accesses_outside_calls_in_value_binding
       | _ -> false)
 ;;
 
+(* Reads of [fields] taken off something other than the identifier [record].
+   Counting how many times a surface reads its row budget answers nothing:
+   the number climbs whenever the surface draws one more thing, and a budget
+   read off some other value leaves it unchanged. What breaks a single
+   allocation is a second source, so that is what this counts, and zero of
+   them holds while the surface grows. *)
+let count_field_accesses_off_other_records_in_value_binding
+      ~module_path
+      ~binding_name
+      ~record
+      ~fields
+  =
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees:[]
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_field (receiver, { txt; _ })
+        when List.mem (longident_leaf txt) fields ->
+        (match receiver.pexp_desc with
+         | Pexp_ident { txt = Lident name; _ } -> not (String.equal name record)
+         | _ -> true)
+      | _ -> false)
+;;
+
 (* String literals a binding draws, by value. A screen mark is a literal, and
    a table that draws one mark for several states says less than the style
    beside it does -- which is a thing to assert, and not one the type checker

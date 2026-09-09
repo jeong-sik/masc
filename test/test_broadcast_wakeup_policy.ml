@@ -53,12 +53,6 @@ let with_workspace f =
     (fun () -> f config)
 ;;
 
-let persist_meta config name =
-  match Keeper_meta_store.replace_snapshot config (make_meta name) with
-  | Ok () -> ()
-  | Error detail -> failf "keeper meta persistence failed: %s" detail
-;;
-
 let rec mkdir_p path =
   if not (Sys.file_exists path)
   then (
@@ -74,13 +68,36 @@ let write_file path content =
     (fun () -> output_string oc content)
 ;;
 
-let configure_mention_targets config name mention_targets =
+let keeper_toml_path config name =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path
   in
   mkdir_p keepers_dir;
-  let path = Filename.concat keepers_dir (name ^ ".toml") in
+  Filename.concat keepers_dir (name ^ ".toml")
+;;
+
+(* A snapshot alone does not make a keeper deliverable. The mention path reads
+   the target through effective metadata, which merges the snapshot with the
+   keeper's declared profile, and a keeper that declares none is rejected
+   outright ("sandbox_profile is required") since #32078. Cases that only
+   persist a snapshot still need the declaration, so it is written here --
+   only when absent, so [configure_mention_targets] stays free to replace it
+   with a version that also lists mention targets. *)
+let persist_meta config name =
+  let path = keeper_toml_path config name in
+  if not (Sys.file_exists path)
+  then
+    write_file
+      path
+      "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\n";
+  match Keeper_meta_store.replace_snapshot config (make_meta name) with
+  | Ok () -> ()
+  | Error detail -> failf "keeper meta persistence failed: %s" detail
+;;
+
+let configure_mention_targets config name mention_targets =
+  let path = keeper_toml_path config name in
   let rendered_targets =
     mention_targets
     |> List.map (Printf.sprintf "%S")
@@ -89,7 +106,7 @@ let configure_mention_targets config name mention_targets =
   write_file
     path
     (Printf.sprintf
-       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"local\"\nmention_targets = [%s]\n"
+       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\nmention_targets = [%s]\n"
        rendered_targets)
 ;;
 

@@ -8,30 +8,18 @@ val assets_root : unit -> string option
     build. *)
 val build_stamp_path : unit -> string option
 
-(** Result of comparing the served bundle's build-stamp mtime against the
-    running server binary's mtime. [Missing_stamp] covers both "never built"
-    and any stat failure on the stamp path. *)
+(** Source identity comparison, independently of file build times. A matching
+    declaration does not certify an unbound asset tree's integrity. *)
 type bundle_freshness =
   | Fresh
-  | Stale of { stamp_mtime : float; binary_mtime : float }
-  | Missing_stamp
+  | Mismatched of { dashboard_commit : string; binary_commit : string }
+  | Unknown_identity
 
-(** Compare the dashboard bundle's build-stamp mtime against the running
-    server binary's mtime. See {!log_bundle_freshness_warning} for the
-    boot-time WARN this backs. *)
 val bundle_freshness : unit -> bundle_freshness
-
-(** Log a boot-time WARN via [Log.Dashboard.warn] when the served dashboard
-    bundle is stale (predates the running binary) or its build-stamp is
-    missing/unreadable. A no-op when the bundle is fresh. Call once during
-    server startup. *)
 val log_bundle_freshness_warning : unit -> unit
 
-(** Health projection of the dashboard surface for [/health]. [status] is
-    ["ok"], ["stale"] (bundle predates the running binary), or ["missing"]
-    (no build-stamp, unreadable stamp, or a stamp without [index.html]).
-    Carries [assets_root], [build_stamp_path], [index_sha256], [index_present],
-    a typed [recovery] action, and RFC3339 freshness timestamps when known. *)
+(** Health reports source mismatch, unknown provenance and missing assets
+    separately. Bound manifests retain their integrity checks. *)
 val surface_status_json : unit -> Yojson.Safe.t
 
 (** Generate the dashboard HTML page *)
@@ -46,13 +34,15 @@ val is_safe_asset_relative_path : string -> bool
 
 type asset_load_error =
   | Asset_binding_invalid of Build_identity.dashboard_asset_invalid_reason
+  | Asset_installed_invalid of Installed_dashboard.error
   | Asset_build_unavailable
   | Asset_not_manifested
   | Asset_exact_read_failed of string
 
 type recovery_reason =
   | Unbound_assets_missing
-  | Unbound_assets_stale
+  | Unbound_source_mismatch
+  | Unbound_identity_unavailable
   | Build_receipt_unavailable
   | Binding_invalid
   | Manifest_entry_missing
@@ -61,7 +51,7 @@ type recovery_reason =
 
 type surface_recovery =
   | No_recovery
-  | Build_in_place of recovery_reason
+  | Install_matching_ci_artifacts of recovery_reason
   | Restart_with_exact_build
   | Repair_exact_artifacts_and_restart of recovery_reason
 
@@ -74,6 +64,16 @@ val load_dashboard_asset : string -> (string, asset_load_error) result
     returning bytes. Invalid/replaced bindings fail closed. *)
 
 module For_testing : sig
+  val surface_status_json :
+    ?binary_commit:string option -> Installed_dashboard.selection -> Yojson.Safe.t
+  (** Health projection with an explicit, already selected installed authority.
+      Performs the real asset and receipt checks afresh on every call. *)
+
+  val select_installed_authority :
+    launch_source_root_state:Build_identity.launch_source_root_state ->
+    installed:Installed_dashboard.selection -> Installed_dashboard.selection
+  (** Explicit source bindings, including invalid ones, take precedence. *)
+
   val surface_recovery :
     asset_resolution:Build_identity.dashboard_asset_resolution ->
     loaded_index:(string, asset_load_error) result ->

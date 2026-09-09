@@ -35,7 +35,7 @@ let test_systhread_offload_poisons_mutex () =
         let mu = Eio.Mutex.create () in
         let raised =
           try
-            Eio_guard.run_in_systhread (fun () ->
+            Eio_guard.run_in_systhread ~label:"test-eio-mutex-poison" (fun () ->
               Eio.Mutex.use_rw ~protect:true mu (fun () -> ()));
             false
           with
@@ -58,7 +58,7 @@ let test_systhread_offload_raises_actionable_failure () =
         let mu = Eio.Mutex.create () in
         let is_failure =
           try
-            Eio_guard.run_in_systhread (fun () ->
+            Eio_guard.run_in_systhread ~label:"test-eio-mutex-poison-diagnostic" (fun () ->
               Eio.Mutex.use_rw ~protect:true mu (fun () -> ()));
             false
           with
@@ -136,7 +136,7 @@ let test_ready_raw_domain_uses_non_eio_path () =
             in
             ( Eio_guard.execution_context ()
             , Executor_pool_ref.submit_or_inline Eio_guard.execution_context
-            , Eio_guard.run_in_systhread (fun () -> protected_value)
+            , Eio_guard.run_in_systhread ~label:"test-protected-value" (fun () -> protected_value)
             , !cleanup_ran
             , mutex_rejected
             , directory_result ))

@@ -74,14 +74,6 @@ let setting
    then an unknown key to boot/save validation, like any other. *)
 let all =
   [ setting
-      ~env_name:"MASC_KEEPER_BOOTSTRAP_ENABLED"
-      ~exposure:(Toml_and_env "bootstrap.enabled")
-      ~value_kind:Boolean
-      ~default:"true"
-      ~consumers:[ "Keeper_lifecycle_gate_env"; "server bootstrap" ]
-      ~category:"bootstrap"
-      "Enable startup keeper auto-bootstrap"
-  ; setting
       ~range:(int_range ~min:4096 ())
       ~env_name:"MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES"
       ~exposure:Env_only
@@ -90,6 +82,18 @@ let all =
       ~consumers:[ "Keeper_agent_run spawn registry" ]
       ~category:"spawn"
       "Bytes of each spawned process stream kept for reading"
+  ; setting
+      (* The clamp in Env_config_keeper.KeeperLaneGate is [0.001, 600], which
+         is what this range repeats. Its doc comment says "(0, 600]"; the code
+         is the one an operator meets. *)
+      ~range:(float_range ~min:0.001 ~max:600. ())
+      ~env_name:"MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC"
+      ~exposure:Env_only
+      ~value_kind:Float
+      ~default:"60"
+      ~consumers:[ "Keeper_msg_async submit lane" ]
+      ~category:"turn"
+      "Seconds a submit waits for its lane before reporting it unavailable"
   ; setting
       ~range:(float_range ~min:0.05 ())
       ~env_name:"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC"
@@ -126,21 +130,13 @@ let all =
       ~category:"lifecycle"
       "Global kill-switch for reactive keeper turns"
   ; setting
-      ~env_name:"MASC_KEEPER_PROACTIVE_ENABLED"
-      ~exposure:(Toml_and_env "proactive.enabled")
-      ~value_kind:Boolean
-      ~default:"true"
-      ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_world_observation" ]
-      ~category:"lifecycle"
-      "Global kill-switch for scheduled proactive keeper turns"
-  ; setting
       ~env_name:"MASC_KEEPER_AUTONOMOUS_ENABLED"
       ~exposure:(Toml_and_env "autonomous.enabled")
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_activation_readiness" ]
       ~category:"lifecycle"
-      "Global kill-switch for autonomous keeper activation"
+      "Global switch for automatic Keeper startup and spontaneous turns"
   ; setting
       ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
       ~exposure:(Toml_and_env "autonomous.wake_prompt")
@@ -150,6 +146,14 @@ let all =
       ~consumers:[ "Keeper_unified_prompt" ]
       ~category:"lifecycle"
       "User message an autonomous turn is woken with, before any keeper override"
+  ; setting
+      ~env_name:"MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+      ~exposure:(Toml_and_env "keeper.model_input_demotion_enabled")
+      ~value_kind:Boolean
+      ~default:"true"
+      ~consumers:[ "Keeper_turn_driver_try_provider" ]
+      ~category:"lifecycle"
+      "Kill-switch for RFC-0363 aged-tool-result demotion (issue #27268 A/B measurement)"
   ; setting
       ~range:(int_range ~min:1 ())
       ~env_name:"MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
@@ -194,15 +198,6 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
       ~category:"heartbeat"
       "Upper bound for rate-limit failure-route backoff in seconds"
-  ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~env_name:"MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-      ~exposure:(Toml_and_env "health.durable_queue_stale_sec")
-      ~value_kind:Float
-      ~default:"0.0"
-      ~consumers:[ "Env_config_keeper.KeeperHealth"; "Server_health" ]
-      ~category:"health"
-      "Durable queue backlog age before health degrades"
   ; setting
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
       ~exposure:(Toml_and_env "wire_capture.enabled")

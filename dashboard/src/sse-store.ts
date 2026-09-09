@@ -55,7 +55,6 @@ import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
 import { showToast } from './components/common/toast'
-import type { ErrorCode } from './types/error'
 import { parseAgentCorePayloadOrNull } from './schemas/sse-event-payload'
 import { hydrateAgentCoreTelemetrySample } from './agent-core-telemetry-store'
 import { sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
@@ -324,7 +323,7 @@ const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
 
 /**
  * Fire the IDE workspace-store's live refresh, debounced and scoped to the
- * `code` surface. The store re-fetches tree/diff/file/blame/annotations from
+ * `code` surface. The store re-fetches tree/diff/file/blame from
  * the same HTTP endpoints it already uses; these are idempotent (server is the
  * SSOT), so a coalesced refresh is safe. Off the code tab this is a no-op, so
  * the singleton store does not fetch in the background.
@@ -839,7 +838,9 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
         handleAgentFailed({
           agentName: (p.agent_name || event.agent_name) ?? 'unknown',
           taskId: p.task_id,
-          errorCode: p.error_code as ErrorCode | undefined,
+          errorCode: p.error_code,
+          errorDomain: p.error_domain,
+          errorRetryable: p.error_retryable,
           error: (p.error || event.error_text) ?? '알 수 없는 오류',
         })
       })

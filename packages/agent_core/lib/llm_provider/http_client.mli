@@ -250,6 +250,12 @@ type http_error =
       invalid CLI policy, or a request that requires a capability the
       transport cannot provide. *)
 
+(** Shared transport-edge exception classification. Exact-output measurement
+    uses the same typed Unix/Eio/TLS facts as ordinary provider requests.
+    [None] means the exception is not a known transport failure; in particular
+    caller cancellation and reserved exceptions must still propagate. *)
+val classify_network_exn : exn -> http_error option
+
 (** Diagnostic rendering only. Consumers must branch on [provider_failure_kind]
     directly and never parse this string. *)
 val provider_failure_kind_to_string : provider_failure_kind -> string
@@ -392,6 +398,20 @@ type raw_sync_response =
     timeout owned by this wrapper surfaces as
     [TimeoutError { phase = Http_operation; _ }]. *)
 val get_sync
+  :  ?cache:cache
+  -> ?clock:_ Eio.Time.clock
+  -> ?timeout_s:float
+  -> sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> url:string
+  -> headers:(string * string) list
+  -> unit
+  -> (raw_sync_response, http_error) result
+
+(** DELETE synchronously, returning the full response — same receipt shape
+    and deadline semantics as {!get_sync} over the DELETE verb. The Files API
+    (RFC-0430 Phase 3) answers deletion with a JSON body even on 2xx. *)
+val delete_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float

@@ -77,7 +77,10 @@ let run_all () =
      logged and ignored so a single permission error cannot block the rest
      of shutdown. Cleanup is explicitly bounded because this hook runs in a
      synchronous shutdown path that Eio timeouts cannot preempt. *)
-  let t_tmp = Unix.gettimeofday () in
+  (* One stopwatch for both readers: the budget below decides when to stop,
+     and the line that reports the run must not disagree with it. Subtracting
+     two wall-clock readings measured any NTP step in between as work. *)
+  let tmp_clock = Monotonic_deadline.start () in
   let tmp_cleanup_file_budget = 500 in
   let tmp_cleanup_wall_budget_s = 0.25 in
   let inspected = ref 0 in
@@ -86,7 +89,7 @@ let run_all () =
   let budget_exhausted = ref false in
   let tmp_budget_exceeded () =
     !inspected >= tmp_cleanup_file_budget
-    || Unix.gettimeofday () -. t_tmp >= tmp_cleanup_wall_budget_s
+    || Monotonic_deadline.elapsed_seconds tmp_clock >= tmp_cleanup_wall_budget_s
   in
   let cleanup_dir dir =
     (* Stream entries via [Unix.opendir]/[readdir] instead of
@@ -170,6 +173,6 @@ let run_all () =
       !inspected
       !removed
       !bytes_freed
-      (Unix.gettimeofday () -. t_tmp);
+      (Monotonic_deadline.elapsed_seconds tmp_clock);
   Log.Server.info "[Shutdown] hooks total: %.2fs" (Unix.gettimeofday () -. t0)
 ;;

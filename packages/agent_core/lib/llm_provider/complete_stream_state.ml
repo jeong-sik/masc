@@ -336,6 +336,7 @@ let delta_kind_name = function
   | Types.TextSnapshot _ -> "text_snapshot"
   | Types.ThinkingDelta _ -> "thinking"
   | Types.ThinkingSignatureDelta _ -> "thinking_signature"
+  | Types.RedactedThinkingSnapshot _ -> "redacted_thinking_snapshot"
   | Types.ReasoningDetailsDelta _ -> "reasoning_details"
   | Types.InputJsonDelta _ -> "input_json_delta"
   | Types.InputJsonSnapshot _ -> "input_json_snapshot"
@@ -362,6 +363,7 @@ let block_kind_accepts_delta kind delta =
   | Tool_result_block _, (Types.TextDelta _ | Types.TextSnapshot _)
   | Thinking_block, Types.ThinkingDelta _
   | Thinking_block, Types.ThinkingSignatureDelta _
+  | Thinking_block, Types.RedactedThinkingSnapshot _
   | Reasoning_details_block, Types.ReasoningDetailsDelta _
   | Tool_use_block, Types.InputJsonDelta _
   | Tool_use_block, Types.InputJsonSnapshot _
@@ -592,6 +594,11 @@ let transition_open state = function
             ; raw = ""
             })
          state
+     | Some block, Types.RedactedThinkingSnapshot data
+       when String.trim data = "" || block.signature_chunks_rev <> [] ->
+       terminal_event_failure
+         (Printf.sprintf "invalid_redacted_thinking_snapshot:index:%d" index)
+         state
      | ( Some { media = Some media; _ }
        , Types.MediaDelta { media_type; source_type; _ } )
        when not
@@ -642,6 +649,17 @@ let transition_open state = function
          | Types.ThinkingSignatureDelta signature ->
            { block with
              signature_chunks_rev = signature :: block.signature_chunks_rev
+           }
+         | Types.RedactedThinkingSnapshot data ->
+           (* The producer explicitly authorizes this final carrier. Generic
+              repeated/conflicting starts remain rejected above. *)
+           { empty_block with
+             header =
+               Announced
+                 { kind = Redacted_thinking_block
+                 ; tool_id = Some data
+                 ; tool_name = None
+                 }
            })
             state))
   | Types.ContentBlockStop { index } ->

@@ -1,0 +1,18 @@
+{
+  "source": "macOS sample of installed binary during startup; diagnostic, not duration benchmark",
+  "frames": [
+    "+ ! 21 camlMasc_tui_config$table_frame_702  (in masc-tui) + 44  [0x104881c3c]",
+    "+ !   21 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "+ ! 14 camlMasc_tui_config$theme_545  (in masc-tui) + 44  [0x10488191c]",
+    "+ !   14 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "+ ! 13 camlMasc_tui_config$voice_send_on_stop_723  (in masc-tui) + 44  [0x104881e7c]",
+    "+ !   13 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "+ ! 10 camlMasc_tui_config$hints_visible_709  (in masc-tui) + 44  [0x104881cfc]",
+    "+ !   10 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "+ !   7 camlMasc_tui_config$table_frame_702  (in masc-tui) + 44  [0x104881c3c]",
+    "+ !     7 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "+ ! 3 camlMasc_tui_config$coalesce_queued_input_719  (in masc-tui) + 44  [0x104881dfc]",
+    "+ !   3 camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]",
+    "6       camlMasc_tui_config$doc_of_path_350  (in masc-tui) + 132  [0x104881844]"
+  ]
+}

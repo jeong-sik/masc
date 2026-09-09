@@ -395,7 +395,9 @@ let platform_release_asset () =
   in
   match uname "-s", uname "-m" with
   | "Darwin", "arm64" -> "masc-macos-arm64"
+  | "Darwin", "x86_64" -> "masc-macos-x64"
   | "Linux", "x86_64" -> "masc-linux-x64"
+  | "Linux", ("aarch64" | "arm64") -> "masc-linux-arm64"
   | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
 ;;
 
@@ -422,6 +424,9 @@ let stage_release_mirror base_path =
   let tui = Filename.concat dir ("masc-tui-" ^ suffix) in
   unlink_if_exists tui;
   Unix.symlink (Unix.realpath (real_masc_binary ())) tui;
+  let browser_host = Filename.concat dir ("masc-browser-host-" ^ suffix) in
+  unlink_if_exists browser_host;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) browser_host;
   let helper =
     Filename.concat
       dir
@@ -439,10 +444,50 @@ let stage_release_mirror base_path =
     (Unix.realpath
        (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
+  (* The installer places but does not execute the guest shim. As with the
+     companion fixtures, reuse the test binary bytes and retain the production
+     asset name so missing-shim failures cannot hide wizard behavior. *)
+  let shim_arch =
+    match suffix with
+    | "linux-x64" | "macos-x64" -> "amd64"
+    | "linux-arm64" | "macos-arm64" -> "arm64"
+    | other -> failf "unsupported guest shim fixture platform: %s" other
+  in
+  let shim = Filename.concat dir ("masc-exec-shim-linux-" ^ shim_arch) in
+  unlink_if_exists shim;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) shim;
+  let bundle_helper =
+    Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
+  in
+  write_file
+    (Filename.concat dir ("masc-release-dashboard-bundle-" ^ suffix ^ ".py"))
+    (read_file bundle_helper);
+  (* These are test-owned bundle bytes, never a product dashboard build. The
+     packaging tool still pairs them with the actual tested binary digest. *)
+  let dashboard = Filename.concat dir "fixture-dashboard" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote dashboard));
+  write_file (Filename.concat dashboard "index.html") "<html>installer fixture</html>";
+  write_file (Filename.concat dashboard ".build-stamp") "2026-09-07T00:00:00Z\n";
+  let commit_channel =
+    Unix.open_process_in (Filename.quote asset ^ " build-commit")
+  in
+  let commit = String.trim (In_channel.input_all commit_channel) in
+  (match Unix.close_process_in commit_channel with
+   | Unix.WEXITED 0 -> ()
+   | _ -> fail "release fixture binary must report embedded commit");
+  let package_command =
+    String.concat " "
+      (List.map Filename.quote
+         [ "python3"; bundle_helper; "package"; "--binary"; asset
+         ; "--binary-asset"; platform_release_asset (); "--assets"; dashboard
+         ; "--source-commit"; commit; "--archive"
+         ; Filename.concat dir ("masc-dashboard-" ^ suffix ^ ".tar.gz") ])
+  in
+  check int "release fixture packages matching dashboard" 0 (Sys.command package_command);
   "file://" ^ Filename.concat base_path ".release"
 ;;
 
-let run_install_status ?(extra_env = "") args base_path =
+let run_install_status ?(extra_env = "") ?(seed_config = false) args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
@@ -451,7 +496,7 @@ let run_install_status ?(extra_env = "") args base_path =
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
-      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified --no-seed --base-path %s %s 2>&1"
+      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified %s --base-path %s %s 2>&1"
       extra_env
       (if String.equal extra_env "" then "" else " ")
       (Filename.quote release_base_url)
@@ -459,6 +504,7 @@ let run_install_status ?(extra_env = "") args base_path =
       (Filename.quote (release_tag ()))
       (Filename.quote base_path)
       (Filename.quote script)
+      (if seed_config then "" else "--no-seed")
       (Filename.quote base_path)
       quoted_args
   in
@@ -486,31 +532,30 @@ let run_install args base_path =
 ;;
 
 let test_config_seed_skips_each_existing_file_without_force () =
-  let script = install_script () in
-  assert_contains
-    "per-file seed helper exists"
-    script
-    "seed_config_if_missing()";
-  assert_contains
-    "existing config file skips without force"
-    script
-    {|if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then|};
-  assert_contains
-    "runtime uses per-file seed"
-    script
-    {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
-  assert_contains
-    "model catalog overlay has config-root destination"
-    script
-    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"|};
-  assert_contains
-    "model catalog overlay uses config release seed"
-    script
-    {|seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
-  assert_not_contains
-    "legacy full model catalog is not seeded"
-    script
-    {|seed_raw_if_missing "agent-core-models.toml"|};
+  let base_path = Filename.temp_dir "masc-install-skills-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let config = Filename.concat base_path ".masc/config" in
+    let init = String.concat " "
+        (List.map Filename.quote [ real_masc_binary (); "init"; "--base-path"; base_path ]) in
+    check int "existing config prepared" 0 (Sys.command (init ^ " >/dev/null"));
+    Fs_compat.remove_tree (Filename.concat base_path ".masc/skills");
+    let runtime = Filename.concat config "runtime.toml" in
+    let edited = read_file runtime ^ "\n# operator config survives\n" in
+    write_file runtime edited;
+    let omitted = Filename.concat config "prompts/keeper.md" in
+    Sys.remove omitted;
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    let body = Filename.concat base_path ".masc/skills/browser-lanes/SKILL.md" in
+    check bool "upgrade installs builtin Skill" true (Sys.file_exists body);
+    check bool "upgrade installs reference" true
+      (Sys.file_exists (Filename.concat (Filename.dirname body) "references/advanced.md"));
+    check string "runtime bytes preserved" edited (read_file runtime);
+    check bool "omitted prompt stays absent" false (Sys.file_exists omitted);
+    write_file body "operator's browser skill";
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    check string "reinstall preserves Skill edit" "operator's browser skill" (read_file body))
 ;;
 
 (* What follows [instructions =] in a keeper TOML, with the TOML string
@@ -598,7 +643,7 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release checks advertised asset list"
     workflow
-    "for arch in macos-arm64 linux-x64 linux-arm64; do";
+    "for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do";
   assert_contains
     "release builds the terminal UI"
     workflow
@@ -774,11 +819,11 @@ let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
   assert_contains
     "classic empty-key guard preserves explicit bootstrap override"
     entrypoint
-    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]|};
+    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}" ]|};
   assert_contains
     "classic empty-key guard disables implicit autoboot"
     entrypoint
-    "export MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+    "export MASC_KEEPER_AUTONOMOUS_ENABLED=false"
 ;;
 
 let test_oneclick_image_stamps_copied_dashboard_bundle () =
@@ -788,13 +833,6 @@ let test_oneclick_image_stamps_copied_dashboard_bundle () =
     image
     "COPY --from=dashboard-builder /build/assets/dashboard /app/assets/dashboard\n\
 RUN touch /app/assets/dashboard/.build-stamp"
-;;
-
-let test_oneclick_image_opts_into_classic_local_sandbox () =
-  assert_contains
-    "one-click image explicitly enables its classic local sandbox"
-    (dockerfile_oneclick ())
-    "ENV MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1"
 ;;
 
 
@@ -837,9 +875,9 @@ let test_binary_checks_use_install_environment () =
     script
     {|runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "|};
   assert_contains
-    "start hint omits runtime events default"
+    "start hint selects installed assets and omits runtime events default"
     script
-    {|start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
+    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
   assert_contains
     "start hint documents dual base path env"
     script
@@ -994,10 +1032,10 @@ let test_wizard_offers_subscription_runtime () =
         "subscription default runtime is set"
         output
         {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
-      assert_contains
-        "subscription needs no API key"
+      assert_not_contains
+        "subscription does not ask to export an API credential"
         output
-        "does not require an API key";
+        "is not set; export it in the shell that starts masc";
       assert_not_contains
         "subscription record is not rejected as unknown kind"
         output
@@ -1059,10 +1097,41 @@ let test_wizard_warns_when_selected_local_server_is_down () =
         {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
 ;;
 
+(* A non-dry default update validates AGENT_CORE capabilities, unlike catalog
+   display. Use a registered provider/model with a keyless closed-loopback
+   transport; fictional local_llama.qwen would fail before the ping is reached. *)
+let write_runtime_catalog_for_connectivity_probe base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file (Filename.concat config_dir "runtime.toml")
+    {|
+[runtime]
+default = "deepseek.deepseek-v4-flash"
+
+[providers.deepseek]
+display-name = "Local connectivity fixture"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+|}
+;;
+
 (* The interactive wizard offers a connectivity test and can retry or abort. The
    non-TTY path (CI, scripted --provider, or the zero-config auto-select) used to
    return blind after writing the default. It now runs the same check
-   report-only: local_llama is keyless and bound to a closed loopback port, so
+   report-only: the fixture is keyless and bound to a closed loopback port, so
    the check fails instantly without any network, and the install must still
    finish 0 -- a first-run install surfaces an unreachable provider, it does not
    gate on it. This is not a --dry-run: the run reaches the post-write step. *)
@@ -1073,15 +1142,12 @@ let test_wizard_nontty_runs_report_only_connectivity_check () =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog_with_local_server tmpdir);
+      write_runtime_catalog_for_connectivity_probe tmpdir;
       let output, status =
-        run_install_status [ "--provider"; "local_llama" ] tmpdir
+        run_install_status [ "--provider"; "deepseek" ] tmpdir
       in
-      check
-        bool
-        "a failed connectivity check does not fail the install"
-        true
-        (status = Unix.WEXITED 0);
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity probe installer failed:\n%s" output;
       assert_contains
         "the non-TTY wizard reports the connectivity result instead of returning blind"
         output
@@ -1098,14 +1164,15 @@ let test_wizard_nontty_connectivity_check_opt_out () =
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
-      ignore (write_runtime_catalog_with_local_server tmpdir);
+      write_runtime_catalog_for_connectivity_probe tmpdir;
       let output, status =
         run_install_status
           ~extra_env:"MASC_INSTALL_NO_PING=1"
-          [ "--provider"; "local_llama" ]
+          [ "--provider"; "deepseek" ]
           tmpdir
       in
-      check bool "opt-out install still exits 0" true (status = Unix.WEXITED 0);
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity opt-out installer failed:\n%s" output;
       assert_not_contains
         "the opt-out skips the post-write connectivity check"
         output
@@ -1126,16 +1193,16 @@ let test_nontty_wizard_connectivity_check_is_wired () =
     "MASC_INSTALL_NO_PING"
 ;;
 
-(* A fresh install with no --team has zero Keepers, and the post-install "Next"
-   block used to stop at "start server + open TUI" without saying how to get one.
-   Guard that it now points at both the TUI Keepers view and the scripted
-   keeper-create path. *)
+(* A fresh install seeds one Keeper, imp, with autoboot off, and the
+   post-install "Next" block used to stop at "start server + open TUI" without
+   saying that. Guard that it names the seeded Keeper, points at the TUI
+   Keepers view to start it, and keeps the scripted keeper-create path. *)
 let test_next_steps_guide_first_keeper () =
   let script = install_script () in
   assert_contains
-    "the post-install guidance points at creating a first keeper in the TUI"
+    "the post-install guidance names the seeded Keeper and where to start it"
     script
-    "create your first from the Keepers view";
+    "seeds one Keeper, imp, with autoboot off: start it from the Keepers view";
   assert_contains
     "the post-install guidance surfaces the scripted keeper-create path"
     script
@@ -1201,11 +1268,13 @@ let test_wizard_zero_config_auto_selects_single_ready_source () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_local_server tmpdir);
-      (* Non-TTY (the harness pipes stdio) and no --provider. The local server is
+      (* The fixture already has a config root, so --reset-config requests a
+         fresh default selection. Non-TTY and no --provider: the local server is
          down and only the cloud provider has its key, so exactly one source is
          ready and the wizard uses it without being told to. *)
       let output, status =
-        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key" [ "--dry-run" ]
+        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key"
+          [ "--dry-run"; "--reset-config" ]
           tmpdir
       in
       check bool "zero-config auto-select exits 0" true (status = Unix.WEXITED 0);
@@ -1227,11 +1296,13 @@ let test_wizard_skips_when_no_single_ready_source () =
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
     (fun () ->
       ignore (write_runtime_catalog_with_local_server tmpdir);
-      (* Same config, but with no key the cloud provider is not ready either, so
+      (* Request a fresh default selection for the existing fixture config.
+         With no key the cloud provider is not ready either, so
          no source is unambiguously ready. Without a terminal the wizard leaves
          the choice to the operator rather than guess. *)
       let output, status =
-        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY" [ "--dry-run" ]
+        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY"
+          [ "--dry-run"; "--reset-config" ]
           tmpdir
       in
       check bool "no-ready-source skip exits 0" true (status = Unix.WEXITED 0);
@@ -1635,13 +1706,13 @@ let () =
     "install_script"
     [ ( "config_seed"
       , [ test_case
-            "partial existing config is not overwritten without force"
-            `Quick
-            test_config_seed_skips_each_existing_file_without_force
-        ; test_case
             "advertised binary assets are release-required"
             `Quick
             test_release_requires_advertised_binary_assets
+        ; test_case
+            "an upgrade keeps config and installs missing builtin Skills"
+            `Quick
+            test_config_seed_skips_each_existing_file_without_force
         ; test_case
             "quickstart defaults to workspace-only mode"
             `Quick
@@ -1670,10 +1741,6 @@ let () =
             "one-click image stamps copied dashboard bundle"
             `Quick
             test_oneclick_image_stamps_copied_dashboard_bundle
-        ; test_case
-            "one-click image opts into classic local sandbox"
-            `Quick
-            test_oneclick_image_opts_into_classic_local_sandbox
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

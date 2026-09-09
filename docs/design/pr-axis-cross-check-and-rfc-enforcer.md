@@ -248,7 +248,7 @@ def check_rfc_section1(file: Path) -> List[Violation]:
 
 ### PR-C: Integration
 - [ ] 두 도구를 `masc` repo에 배포
-- [ ] 다른 repo(`me`, kidsnote)에 재사용 가능하도록 config 외부화
+- [ ] 다른 repo(`me`, exampleorg)에 재사용 가능하도록 config 외부화
 
 ## §5 References
 

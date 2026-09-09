@@ -21,6 +21,13 @@ type unavailable =
   | Runtime_non_runtime
   | Lane_unavailable of Fs_compat.Publication_recovery.lane_open_error
 
+val failure_class : unavailable -> Tool_result.tool_failure_class
+(** The tool failure class an unavailability is reported as. The JSON in
+    {!unavailable_to_yojson} and the [Tool_result] a caller builds both take it
+    from here. They spelled it separately until 2026-09-06, one of them as the
+    string literal ["runtime_failure"], so changing one left the other saying
+    something else. *)
+
 type turn_context =
   { provider : provider
   ; keeper_name : string

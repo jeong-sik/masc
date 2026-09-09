@@ -243,35 +243,26 @@ let ensure_board_post_author ~agent_name arguments =
    caller, a direct call from [Mcp_tool_runtime], and the sibling handlers take
    a different shape (~tool_name ~start_time ctx). What the [ignore] did was
    suppress the warning that would have named [sw] and [clock] as dead. *)
+(* Which caller-identity fields a board tool binds comes from the same
+   generated registry the Keeper runtime reads --
+   [Board_tool_registry.identity_fields_for_board_name], built from
+   config/tools/masc_board_*.toml -- so the TOML declaration moves both
+   consumers at once. Until 2026-09-08 this path carried its own copy of the
+   list as a match on tool-name strings ending in [_ -> arguments], and a
+   declaration edited in TOML changed the Keeper path only (#34157). A name
+   that is not a board tool has no identity fields to bind. *)
+let bind_caller_identity ~name ~agent_name arguments =
+  match Tool_name.Board_name.of_string name with
+  | None -> arguments
+  | Some board_name ->
+      List.fold_left
+        (fun arguments field ->
+          enforce_caller_identity ~tool:name ~field ~agent_name arguments)
+        arguments
+        (Board_tool_registry.identity_fields_for_board_name board_name)
+
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
-  let arguments =
-    match name with
-    | "masc_board_post" | "masc_board_post_update" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
-    | "masc_board_comment" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
-    | "masc_board_vote" | "masc_board_comment_vote" ->
-        enforce_caller_identity ~tool:name ~field:"voter" ~agent_name
-          arguments
-    | "masc_board_reaction" ->
-        enforce_caller_identity ~tool:name ~field:"user_id" ~agent_name
-          arguments
-    | "masc_board_sub_board_create" ->
-        enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
-          arguments
-    | "masc_board_delete" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
-    | "masc_board_sub_board_update" | "masc_board_sub_board_delete" ->
-        enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
-          arguments
-    | "masc_board_curation_submit" ->
-        enforce_caller_identity ~tool:name ~field:"submitted_by" ~agent_name
-          arguments
-    | _ -> arguments
-  in
+  let arguments = bind_caller_identity ~name ~agent_name arguments in
   match (name : string) with
   | "masc_board_post" ->
       let result_tr = Board_tool.handle_tool name arguments in

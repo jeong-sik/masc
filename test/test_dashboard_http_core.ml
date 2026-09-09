@@ -2103,6 +2103,194 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_goal_source_failure_is_not_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  let planning () = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check int "fresh planning store is empty" 0
+    (planning () |> member "goals" |> to_list |> List.length);
+  check int "fresh tree store is empty" 0
+    (tree () |> member "tree" |> to_list |> List.length);
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+      ~metric:"visible goals" ~target_value:"1" () with
+    | Ok goal -> goal | Error detail -> fail detail
+  in
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  check int "valid primary is visible" 1
+    (planning () |> member "goals" |> to_list |> List.length);
+  let check_unavailable label =
+    let detail = match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+      | Ok json -> json | Error error -> fail error
+    in
+    List.iter (fun (surface, json) ->
+      check bool (label ^ surface ^ " not successful") false
+        (json |> member "ok" |> to_bool);
+      check string (label ^ surface ^ " source classification")
+        "goal_store_unavailable" (json |> member "error_code" |> to_string);
+      check bool (label ^ surface ^ " preserves cause") true
+        (String.length (json |> member "error" |> to_string) > 0);
+      List.iter (fun field ->
+        check bool (label ^ surface ^ " no invented " ^ field) true
+          (member field json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
+      ["planning", planning (); "tree", tree (); "detail", detail]
+  in
+  let invalid_schema =
+    match Yojson.Safe.from_string original with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if key = "goals" then
+            key, `List (value |> to_list |> List.map (function
+              | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+              | json -> json))
+          else key, value) fields)
+    | _ -> fail "saved Goal store must be an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+  check_unavailable "invalid criterion schema: ";
+  Fs_compat.save_file primary "unreadable primary";
+  check_unavailable "valid mirror: ";
+  check string "read does not replace primary" "unreadable primary"
+    (Fs_compat.load_file primary);
+  check string "read does not alter mirror" original (Fs_compat.load_file mirror);
+  Fs_compat.save_file mirror "unreadable mirror";
+  check_unavailable "both invalid: ";
+  Sys.remove primary;
+  Fs_compat.save_file mirror original;
+  check_unavailable "primary missing: ";
+  check bool "read does not recreate missing primary" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  check int "both absent is a fresh store" 0
+    (planning () |> member "goals" |> to_list |> List.length)
+
+let test_goal_link_source_failure_preserves_unrelated_planning () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Linked source"
+      ~metric:"tasks" ~target_value:"1" ()) in
+  let created = match Workspace.add_task_with_result ~goal_id:goal.id config
+      ~title:"Linked task" ~priority:3 ~description:"evidence" with
+    | Ok created -> created
+    | Error error -> fail (Workspace.add_task_error_to_string error) in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = links_path ^ ".last-good" in
+  let original = Fs_compat.load_file links_path in
+  let open Yojson.Safe.Util in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let detail () = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
+  let assert_link_visible () =
+    let node = tree () |> member "tree" |> to_list |> List.hd in
+    check int "tree preserves linked task" 1 (node |> member "tasks" |> to_list |> List.length);
+    check int "detail preserves linked task" 1
+      (detail () |> member "linked_tasks" |> to_list |> List.length)
+  in
+  assert_link_visible ();
+  let check_unavailable () =
+    List.iter (fun json ->
+      check bool "source failure is explicit" false (json |> member "ok" |> to_bool);
+      check string "link source is named" "goal_task_links_unavailable"
+        (json |> member "error_code" |> to_string);
+      check bool "no invented task collection" true (member "linked_tasks" json = `Null);
+      check bool "no fabricated tree" true (member "tree" json = `Null)) [tree (); detail ()];
+    (match Dashboard_goals.build_forest ~config ~goals:[goal]
+        ~tasks:(Workspace.get_tasks_safe config) ~pending_approvals:[] with
+     | Error _ -> () | Ok _ -> fail "forest builder accepted unavailable links");
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    check int "unrelated planning still lists its Goal" 1
+      (planning |> member "goals" |> to_list |> List.length);
+    check bool "unrelated Task remains available" true
+      (List.exists (fun (task : Masc_domain.task) -> task.id = created.task_id)
+        (Workspace.get_tasks_safe config))
+  in
+  Fs_compat.save_file links_path "{broken";
+  check_unavailable ();
+  check string "read does not repair primary" "{broken" (Fs_compat.load_file links_path);
+  check string "read does not alter recovery" original (Fs_compat.load_file mirror);
+  Sys.remove links_path;
+  check_unavailable ();
+  check bool "read does not recreate primary" false (Sys.file_exists links_path);
+  Fs_compat.save_file links_path original;
+  assert_link_visible ()
+
+let test_goal_proof_surfaces_share_persisted_criterion_truth () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+      ~metric:"passing cases" ~target_value:"10" ()) in
+  let goal_id = goal.Goal_store.id in
+  let open Yojson.Safe.Util in
+  let find_goal nodes =
+    nodes |> to_list |> List.find (fun row -> row |> member "id" |> to_string = goal_id)
+  in
+  let check_surfaces ~phase ~proof_state =
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    let planned = find_goal (member "goals" planning) in
+    let tree = Dashboard_goals.dashboard_goals_tree_json ~config in
+    let tree_goal = find_goal (member "tree" tree) in
+    let detail = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id) in
+    let detail_goal = member "goal" detail in
+    (* The Keeper detail assembles its own forest and uses this exact callback.
+       Exercise that caller shape against the same persisted source too. *)
+    let goals = Goal_store.list_goals config () in
+    let projection = Dashboard_goals.verification_projection ~config in
+    let keeper_goal =
+      Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
+      |> get_ok
+      |> List.find (fun (node : Dashboard_goals.tree_node) -> node.goal.id = goal_id)
+      |> Dashboard_goals.tree_node_to_json ~verification_for_goal:projection
+    in
+    let expected = member "verification" planned in
+    List.iter (fun (name, row) ->
+      check string (name ^ " lifecycle") phase (row |> member "phase" |> to_string);
+      let proof = member "verification" row in
+      let actual_state =
+        match member "state" proof with
+        | `String "ledger_error" -> "ledger_error"
+        | _ -> proof |> member "completion" |> member "state" |> to_string
+      in
+      check string (name ^ " proof state") proof_state actual_state;
+      (* Idle rows have no persisted record yet, so each projection stamps its
+         own default observation time. Every persisted proof compares exactly. *)
+      let comparable value = if proof_state = "idle" then member "completion" value else value in
+      check string (name ^ " same source projection")
+        (Yojson.Safe.to_string (comparable expected))
+        (Yojson.Safe.to_string (comparable proof)))
+      [ "planning", planned; "tree", tree_goal; "detail", detail_goal; "keeper", keeper_goal ];
+    expected
+  in
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
+  let _, pending = get_ok (Lib.Workspace_goals.request_current_proof config ~goal_id) in
+  let request_id, criterion = match pending.Goal_verification.completion with
+    | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
+    | _ -> fail "request did not persist pending proof"
+  in
+  ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
+  let committed = Lib.Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
+    ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
+  check bool "internal verifier committed" true (Tool_result.is_success committed);
+  let proven = check_surfaces ~phase:"completed" ~proof_state:"proof_proven" in
+  ignore (get_ok (Goal_store.upsert_goal config ~id:goal_id
+    ~title:"Measured dashboard Goal" ~target_value:"20" ()));
+  let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
+  check string "stale projection preserves the original proof"
+    (Yojson.Safe.to_string (member "completion" proven))
+    (Yojson.Safe.to_string (stale |> member "completion" |> member "historical_completion"));
+  let path = Goal_verification.verifications_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  Fs_compat.save_file path "invalid primary proof ledger";
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"ledger_error");
+  check string "display never repairs primary from mirror"
+    "invalid primary proof ledger" (Fs_compat.load_file path);
+  check string "display preserves historical mirror" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -2250,7 +2438,7 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
     ~finally:Dashboard_snapshot.reset_for_test
     (fun () ->
        let snapshot =
-         Dashboard_snapshot.make_for_test
+         Dashboard_snapshot.make_for_test ~config
            ~shell:
              (`Assoc
                 [
@@ -2296,6 +2484,248 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
       check (option string) "execution actor canonicalized to token owner"
         (Some "codex") actor
 
+let with_execution_payload_env f =
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "true" @@ fun () ->
+  with_env "MASC_DASHBOARD_FIXTURE" "execution_smoke" @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_prefix "execution:";
+  Eio_guard.protect
+    ~finally:(fun () -> Dashboard_cache.invalidate_prefix "execution:")
+    (fun () ->
+      let state =
+        Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+      in
+      f ~env ~sw ~state)
+
+let execution_payload ~state ~sw ~clock req =
+  match
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~sw ~clock
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state req)
+  with
+  | Server_dashboard_http_execution_surfaces.Execution_payload payload -> payload
+  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+    failf "expected cached execution bytes, received JSON: %s"
+      (Yojson.Safe.to_string json)
+
+let test_execution_request_resolves_actor_once () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Metrics = Masc.Otel_metric_store in
+  let labels = [ "outcome", "error"; "err_kind", "unauthorized" ] in
+  let count () = Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels () in
+  (* The real resolver records a typed fallback for this credential. It is
+     an observation of resolution, not a mocked call counter. HTTP admission
+     remains outside these surface helpers and is covered by wire/auth tests. *)
+  let req = request_with_headers
+      "/api/v1/dashboard/execution?fixture=execution_smoke&full=1"
+      [ "authorization", "Basic invalid" ] in
+  let before = count () in
+  let context = Surface.execution_http_request ~state req in
+  check (float 0.0) "request resolves actor once" (before +. 1.0) (count ());
+  check bool "parameterized request falls through prepared default lookup" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+  let payload = match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) context with
+    | Surface.Execution_payload payload -> payload
+    | Surface.Execution_json _ -> fail "expected parameterized fixture payload"
+  in
+  check (float 0.0) "fallback reuses resolved identity" (before +. 1.0) (count ());
+  let next_context = Surface.execution_http_request ~state req in
+  check (float 0.0) "next request resolves its own identity" (before +. 2.0) (count ());
+  match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) next_context with
+  | Surface.Execution_payload next ->
+    check bool "same query retains prepared cache bytes" true
+      (payload.raw_json == next.raw_json)
+  | Surface.Execution_json _ -> fail "expected warm parameterized fixture payload"
+
+let execution_payload_key (payload : Dashboard_cache.cached_payload) =
+  Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
+
+let test_execution_default_response_remains_json () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
+  match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env)
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
+         (request "/api/v1/dashboard/execution")) with
+  | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+    fail "the default light route must return its cached-surface JSON"
+  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+    let open Yojson.Safe.Util in
+    check string "default snapshot retained" "last-success"
+      (json |> member "default_marker" |> to_string);
+    check bool "default-light query retained" true
+      (json |> member "query" |> member "default_light_request" |> to_bool)
+
+let test_execution_parameterized_payload_reuses_decorated_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req =
+    request_with_headers "/api/v1/dashboard/execution"
+      [ "x-masc-agent", "alice" ]
+  in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "repeat request retains serialized string" true
+    (first.raw_json == second.raw_json);
+  check bool "repeat request retains decorated JSON" true
+    (first.json == second.json);
+  check string "repeat request retains ETag" first.etag second.etag;
+  check bool "bytes decode to the decorated JSON" true
+    (Yojson.Safe.equal first.json (Yojson.Safe.from_string first.raw_json));
+  check string "ETag identifies the exact response bytes"
+    (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
+  let open Yojson.Safe.Util in
+  check string "actor metadata is part of cached body" "alice"
+    (first.json |> member "query" |> member "actor" |> to_string);
+  check string "workspace metadata is part of cached body" config.workspace_path
+    (first.json |> member "retention" |> member "workspace_path" |> to_string);
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
+      ~state ~sw ~clock req
+  in
+  check bool "JSON accessor shares the same decorated snapshot" true
+    (json == first.json)
+
+let test_execution_parameterized_payload_separates_request_queries () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let absent = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1") in
+  let empty = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=") in
+  let explicit = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=execution_smoke") in
+  let light = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?fixture=execution_smoke") in
+  let forced = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&force=1") in
+  let alice = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "alice" ]) in
+  let bob = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "bob" ]) in
+  let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    let encoded = match payload.encoded with Some value -> value
+      | None -> fail "parameterized execution lacks prepared encodings" in
+    check bool "each scoped encoding retains its own complete identity bytes" true
+      (encoded.identity == payload.raw_json)) payloads;
+  let keys = List.map execution_payload_key payloads in
+  check int "every distinct query owns its response bytes"
+    (List.length payloads) (List.length (List.sort_uniq String.compare keys));
+  let open Yojson.Safe.Util in
+  check bool "absent fixture stays null" true
+    (absent.json |> member "query" |> member "fixture" = `Null);
+  check string "empty fixture stays explicitly empty" ""
+    (empty.json |> member "query" |> member "fixture" |> to_string);
+  check bool "full query preserved" true
+    (explicit.json |> member "query" |> member "full" |> to_bool);
+  check bool "light query preserved" true
+    (light.json |> member "query" |> member "light" |> to_bool);
+  check bool "parameterized force query preserved" true
+    (forced.json |> member "query" |> member "force" |> to_bool);
+  check string "second actor does not inherit first actor metadata" "bob"
+    (bob.json |> member "query" |> member "actor" |> to_string)
+
+let test_execution_parameterized_payload_separates_workspace_scope () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first_config = Lib.Mcp_server.workspace_config state in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second_config =
+    { first_config with workspace_path = Filename.concat first_config.base_path "other-workspace" }
+  in
+  (match Lib.Mcp_server.set_workspace_config state second_config with
+   | Ok () -> ()
+   | Error error -> fail (Lib.Mcp_server.workspace_switch_error_to_string error));
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "same base with a different active workspace has another key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check string "active workspace metadata is current" second_config.workspace_path
+    Yojson.Safe.Util.(second.json |> member "retention" |> member "workspace_path" |> to_string);
+  let other_base = test_dir () in
+  Eio_guard.protect ~finally:(fun () -> cleanup_dir other_base) @@ fun () ->
+  let other_state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:other_base () in
+  let other = execution_payload ~state:other_state ~sw ~clock req in
+  check bool "a different runtime base cannot reuse prior workspace bytes" true
+    (execution_payload_key second <> execution_payload_key other);
+  check string "runtime base metadata is current" other_base
+    Yojson.Safe.Util.(other.json |> member "retention" |> member "workspace_root" |> to_string)
+
+let test_execution_parameterized_payload_changes_after_invalidation () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first = execution_payload ~state ~sw ~clock req in
+  let generation payload =
+    Yojson.Safe.Util.(payload.Dashboard_cache.json
+      |> member "execution_publication_generation" |> to_int)
+  in
+  let first_generation = generation first in
+  Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "publication generation advances" true
+    (generation second > first_generation);
+  check bool "invalidated bytes are not reused" true (first.raw_json != second.raw_json);
+  check bool "invalidated representations are rebuilt together" true
+    (Option.is_some second.encoded && first.encoded != second.encoded);
+  check bool "new generation has a new cache key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check bool "old key was evicted" true
+    (Option.is_none (Dashboard_cache.peek_payload (execution_payload_key first)));
+  check int "the retained prior response is not restamped" first_generation
+    (generation first)
+
+let test_execution_parameterized_timeout_keeps_request_metadata () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req = request_with_headers "/api/v1/dashboard/execution?full=1"
+      [ "x-masc-agent", "timeout-observer" ] in
+  let key = execution_payload_key (execution_payload ~state ~sw ~clock req) in
+  Dashboard_cache.invalidate key;
+  (* Drive the existing no-stale timeout circuit through its public compute
+     boundary. Raising its typed timeout keeps this scenario deterministic. *)
+  for _attempt = 1 to 3 do
+    let timeout = Dashboard_cache.get_or_compute_with_timeout key
+        ~ttl:120.0 ~clock ~timeout_sec:0.01
+        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+    check bool "timeout does not publish a successful payload" true
+      (Dashboard_cache.is_timeout_envelope timeout)
+  done;
+  let json =
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+        ~sw ~clock
+        (Server_dashboard_http_execution_surfaces.execution_http_request ~state req) with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "a circuit timeout must remain an uncached JSON response"
+  in
+  let open Yojson.Safe.Util in
+  check bool "response retains the timeout envelope" true
+    (Dashboard_cache.is_timeout_envelope json);
+  check string "timeout kind is preserved" "circuit_open"
+    (json |> member "timeout_kind" |> to_string);
+  check string "timeout query actor is decorated" "timeout-observer"
+    (json |> member "query" |> member "actor" |> to_string);
+  check bool "timeout full query is decorated" true
+    (json |> member "query" |> member "full" |> to_bool);
+  check string "timeout workspace is decorated" config.workspace_path
+    (json |> member "retention" |> member "workspace_path" |> to_string);
+  check string "timeout cache key is decorated" key
+    (json |> member "cache" |> member "request_cache_key" |> to_string);
+  check bool "timeout was not cached as success" true
+    (Option.is_none (Dashboard_cache.peek_payload key))
+
 let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
@@ -2312,11 +2742,14 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
     seed
   @@ fun () ->
   let json =
-    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
-      ~state
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
       ~sw
       ~clock:(Eio.Stdenv.clock env)
-      (request "/api/v1/dashboard/execution?force=1")
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
+         (request "/api/v1/dashboard/execution?force=1")) with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "default force refresh must return its JSON response"
   in
   let open Yojson.Safe.Util in
   check bool "force query surfaced" true
@@ -2416,7 +2849,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "wire_marker", `String "snapshot-path" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:marker ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -2466,7 +2899,7 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
   let full = `Assoc [ "wire_marker", `String "full-shell" ] in
   let light = `Assoc [ "wire_marker", `String "light-shell" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:full ~shell_light:light ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -2698,13 +3131,13 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   mkdir_p keepers_dir;
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
+    "[keeper]\nactivation_mode = \"manual\"\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   write_file
     (Filename.concat keepers_dir "beta.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
   Config_dir_resolver.reset ();
   Fun.protect
@@ -2737,7 +3170,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (json |> member "counts" |> member "persisted_keepers" |> to_int);
       write_file
         (Filename.concat keepers_dir "base.toml")
-        "[keeper]\nautoboot_enabled = true\n";
+        "[keeper]\nactivation_mode = \"autonomous\"\n";
       Config_dir_resolver.reset ();
       let configured_names_after_autoboot_change =
         Masc.Keeper_meta_store.configured_keeper_names config
@@ -2792,12 +3225,94 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
+let test_tools_worker_promotes_seed_before_component_ttl () =
+  let guard_was_ready = Eio_guard.is_ready () in
+  (* Restore after the fixture's entire Eio runtime and worker pool close,
+     including exceptional exits. Later synchronous fixtures must not inherit
+     this test's process-wide mutex guard. *)
+  Fun.protect
+    ~finally:(fun () ->
+      if guard_was_ready then Eio_guard.enable () else Eio_guard.disable ())
+  @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Eio_guard.enable ();
+  let clock = Eio.Stdenv.clock env in
+  let key = "tools:" ^ config.Workspace.base_path in
+  Dashboard_cache.invalidate key;
+  let seed_json = `Assoc [ "status", `String "warming"; "tool_inventory", `List [] ] in
+  let ready_json = `Assoc [ "tool_inventory", `List [] ] in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. seed_json;
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ();
+        Dashboard_cache.invalidate key)
+      (fun () ->
+        (* Keep the inventory fill pending while the real Tools producer and
+           snapshot component run on another worker. No HTTP request warms it. *)
+        let returned_seed = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~ttl:60. ~clock ~timeout_sec:2. (fun () ->
+            Eio.Promise.resolve started_u ();
+            Eio.Promise.await release;
+            ready_json) in
+        await started;
+        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+        let now_value = ref 100. in
+        let producer_calls = Atomic.make 0 in
+        let owner_domain = (Domain.self () :> int) in
+        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Executor_pool_ref.submit_or_inline (fun () ->
+            Dashboard_snapshot.For_testing.refresh_tools
+              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
+                check bool "tools producer remains on a worker" true
+                  ((Domain.self () :> int) <> owner_domain);
+                Atomic.incr producer_calls;
+                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
+        let pending = refresh () in
+        now_value := 102.;
+        let still_pending = refresh () in
+        check bool "pending cycles reuse identity and all encodings" true
+          (pending == still_pending);
+        check int "pending producer is retried without waiting sixty seconds" 2
+          (Atomic.get producer_calls);
+        Eio.Promise.resolve release_u ();
+        let rec await_computed () =
+          match Dashboard_cache.peek_payload key with
+          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
+          | _ -> Eio.Fiber.yield (); await_computed ()
+        in
+        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
+        check bool "returned seed keeps its origin after concurrent publication" true
+          (returned_seed.origin = Dashboard_cache.Seeded);
+        check bool "completed empty inventory has computed origin" true
+          (computed.origin = Dashboard_cache.Computed);
+        now_value := 104.;
+        let ready = refresh () in
+        check bool "ready promotes on the next cycle before the old TTL" true
+          (ready != pending);
+        check int "empty inventory remains empty after promotion" 0
+          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
+        check bool "promotion keeps the real producer's final decoration" true
+          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
+        check string "promoted bytes describe the decorated JSON"
+          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
+        now_value := 106.;
+        let ready_again = refresh () in
+        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
+        check int "ready component TTL avoids another producer call" 3
+          (Atomic.get producer_calls)))
+
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "tools_marker", `String "from-snapshot" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:marker
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
@@ -2818,22 +3333,390 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
      Re.execp re header);
   Dashboard_snapshot.reset_for_test ()
 
-(* [test_tools_snapshot_wire_bypasses_snapshot_when_actor_given]
-   intentionally omitted from the unit suite.  The selector's
-   actor=Some branch routes to
-   [Server_dashboard_http_runtime_info.dashboard_tools_http_json] which
-   requires a full Eio scheduler + runtime probe wiring not present
-   in [with_test_env].  Integration coverage of the actor-filter
-   bypass belongs in [test_dashboard_tools.ml] (which already runs
-   inside the live HTTP harness).  See RFC-0138 §3.3 Step 2 retire
-   criterion: snapshot grows an [Actor_filter] arm. *)
+let test_tools_prepared_selector_scope_and_keeper_contract () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect ~finally:Dashboard_snapshot.reset_for_test (fun () ->
+    let marker = `Assoc [ "snapshot", `String "final-tools" ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null
+      ~tools:marker ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    let require_prepared timing =
+      match Server_dashboard_snapshot_select.select_tools_response ~timing config with
+      | Tools_prepared tools -> tools
+      | Tools_json _ -> fail "matching default tools request missed prepared snapshot"
+    in
+    let first_timing = Server_timing.create () in
+    ignore (Server_timing.measure first_timing (Server_timing.Custom "request_one") (fun () -> ()));
+    let first = require_prepared first_timing in
+    let second_timing = Server_timing.create () in
+    let second = require_prepared second_timing in
+    check bool "repeat request reuses typed component" true (first == second);
+    check bool "each request records its snapshot read" true
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "snapshot_read");
+    check bool "previous request timing is not cached" false
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "request_one");
+    let other_base = { config with Workspace.base_path = config.base_path ^ "-other" } in
+    let other_workspace = { config with Workspace.workspace_path = config.workspace_path ^ "-other" } in
+    let other_root = { config with Workspace.backend_config =
+      { config.backend_config with Backend_types.cluster_name = "other-tools-cluster" } } in
+    check bool "cluster fixture resolves a distinct MASC root" true
+      (Workspace.masc_root_dir config <> Workspace.masc_root_dir other_root);
+    let expect_json query_config keeper =
+      let seen = ref None in
+      let fallback ~keeper ~timing:_ actual_config =
+        seen := Some (keeper, actual_config);
+        `Assoc [ "live", `Bool true ]
+      in
+      match Server_dashboard_snapshot_select.For_testing.select_tools_response
+        ~fallback ?keeper query_config with
+      | Tools_prepared _ -> fail "scoped or cold request reused unrelated tools bytes"
+      | Tools_json json ->
+        check bool "fallback JSON preserved" true (json = `Assoc [ "live", `Bool true ]);
+        (match !seen with
+         | Some (actual_keeper, actual_config) ->
+           check (option string) "keeper selector forwarded exactly" keeper actual_keeper;
+           check bool "requested config forwarded unchanged" true (actual_config == query_config)
+         | None -> fail "live fallback was not called")
+    in
+    List.iter (fun (scope, keeper) -> expect_json scope keeper)
+      [ config, Some ""; config, Some "exact-keeper";
+        other_base, None; other_workspace, None; other_root, None ];
+    Dashboard_snapshot.reset_for_test ();
+    expect_json config None)
+
+let tools_h1_wire_response ~router ~headers target =
+  let output = Buffer.create 4096 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let request = Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list (("host", "localhost:8935") :: headers)) `GET target in
+  let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s" target
+    (Httpun.Headers.to_string request.headers) in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+        total + iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result connection (`Ok written);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let boundary = try Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0
+    with Not_found -> failf "tools route produced invalid H1 response: %S" raw in
+  let head = String.sub raw 0 boundary |> String.split_on_char '\n' in
+  let status = int_of_string (List.nth (String.split_on_char ' ' (List.hd head)) 1) in
+  let headers = List.tl head |> List.map (fun line ->
+    let colon = String.index line ':' in
+    String.lowercase_ascii (String.sub line 0 colon),
+    String.trim (String.sub line (colon + 1) (String.length line - colon - 1))) in
+  status, headers, String.sub raw (boundary + 4) (String.length raw - boundary - 4)
+
+let test_asks_list_publishes_written_alternative_capability () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module Ask = Masc.Keeper_ask in
+  let name = "ask-capability" in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String "ask-capability-trace" ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      let choice = match Ask.choice ~choice_id:"offered" ~label:"Offered route" () with
+        | Ok choice -> choice
+        | Error error -> fail (Ask.invalid_choice_to_string error)
+      in
+      let question id mode free_text =
+        match Ask.question ~question_id:id ~header:id ~prompt:"Choose or explain another route"
+          ~choices:[choice] ~mode ~free_text with
+        | Ok question -> question
+        | Error error -> fail (Ask.invalid_question_to_string error)
+      in
+      let questions =
+        [ question "single" Ask.Single Ask.Choices_only;
+          question "multi" Ask.Multi Ask.Choices_only;
+          question "hinted" Ask.Single (Ask.Free_text_allowed {hint = Some "Explain the constraint"}) ]
+      in
+      let ask = match Ask.ask ~ask_id:"ask-capability" ~keeper_name:name ~questions
+        ~continuation:(Keeper_continuation_channel.unrouted "projection fixture")
+        ~asked_at:100. () with
+        | Ok ask -> ask
+        | Error error -> fail (Ask.invalid_ask_to_string error)
+      in
+      (match Masc.Keeper_ask_store.record_ask ~base_path:config.base_path ask with
+       | Ok () -> () | Error detail -> fail detail);
+      let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+      let router = Lib.Http_server_eio.Router.create ()
+        |> Lib.Http_server_eio.Router.get "/api/v1/keepers/asks"
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+      in
+      let status, _, body = tools_h1_wire_response ~router ~headers:[]
+        ("/api/v1/keepers/asks?name=" ^ name) in
+      check int "asks list HTTP success" 200 status;
+      let open Yojson.Safe.Util in
+      let wire_questions = Yojson.Safe.from_string body |> member "asks" |> index 0
+        |> member "questions" |> to_list in
+      check int "all authored questions published" 3 (List.length wire_questions);
+      List.iter (fun json -> check bool "every question permits a written alternative" true
+        (json |> member "free_text" |> member "allowed" |> to_bool)) wire_questions;
+      check string "author hint survives capability projection" "Explain the constraint"
+        (List.nth wire_questions 2 |> member "free_text" |> member "hint" |> to_string);
+      match Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:name with
+      | [_, (stored, Ask.Open)] ->
+        check bool "wire capability does not rewrite stored author metadata" true
+          (List.map (fun (q : Ask.question) -> q.free_text) stored.questions
+           = [Ask.Choices_only; Ask.Choices_only;
+              Ask.Free_text_allowed {hint = Some "Explain the constraint"}])
+      | _ -> fail "stored open question metadata changed")
+
+let tools_h2_wire_response ~handler ~headers target =
+  let response = ref None in
+  let body = Buffer.create 4096 in
+  let complete = ref false in
+  let client = H2.Client_connection.create
+    ~error_handler:(fun _ -> fail "tools H2 connection error") () in
+  let request = H2.Request.create ~scheme:"http" `GET target
+    ~headers:(H2.Headers.of_list ((":authority", "localhost:8935") :: headers)) in
+  let writer = H2.Client_connection.request client request
+    ~error_handler:(fun _ -> fail "tools H2 stream error")
+    ~response_handler:(fun reply reader ->
+      response := Some (H2.Status.to_code reply.H2.Response.status, H2.Headers.to_list reply.headers);
+      let rec consume () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () -> complete := true)
+        ~on_read:(fun buffer ~off ~len ->
+          Buffer.add_string body (Bigstringaf.substring buffer ~off ~len);
+          consume ()) in
+      consume ()) in
+  H2.Body.Writer.close writer;
+  let server = H2.Server_connection.create handler in
+  let transfer next_write report_write read =
+    let rec drain progressed = match next_write () with
+      | `Write iovecs ->
+        let written = List.fold_left (fun total (iov : Bigstringaf.t H2.IOVec.t) ->
+          let rec feed off remaining =
+            if remaining > 0 then (
+              let consumed = read iov.buffer ~off ~len:remaining in
+              if consumed <= 0 then fail "tools H2 transfer made no progress";
+              feed (off + consumed) (remaining - consumed))
+          in
+          feed iov.off iov.len;
+          total + iov.len) 0 iovecs in
+        report_write (`Ok written);
+        drain true
+      | `Yield | `Close _ -> progressed
+    in
+    drain false
+  in
+  let rec pump () =
+    let sent = transfer
+      (fun () -> H2.Client_connection.next_write_operation client)
+      (H2.Client_connection.report_write_result client) (H2.Server_connection.read server) in
+    let received = transfer
+      (fun () -> H2.Server_connection.next_write_operation server)
+      (H2.Server_connection.report_write_result server) (H2.Client_connection.read client) in
+    if !complete then ()
+    else if sent || received then pump ()
+    else fail "tools H2 route stalled before response completion"
+  in
+  pump ();
+  match !response with
+  | Some (status, headers) -> status, headers, Buffer.contents body
+  | None -> fail "tools H2 route omitted response headers"
+
+let tools_gunzip payload =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let decoded = Buffer.create 4096 in
+  let consumed = ref 0 in
+  let refill buffer =
+    let take = min (Bigstringaf.length buffer) (String.length payload - !consumed) in
+    Bigstringaf.blit_from_string payload ~src_off:!consumed buffer ~dst_off:0 ~len:take;
+    consumed := !consumed + take;
+    take
+  in
+  let flush buffer written = Buffer.add_string decoded (Bigstringaf.substring buffer ~off:0 ~len:written) in
+  match Gz.Higher.uncompress ~refill ~flush input output with
+  | Ok _ -> Buffer.contents decoded
+  | Error (`Msg detail) -> fail detail
+
+let test_tools_routes_serve_prepared_http_representations () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Dashboard_snapshot.reset_for_test ();
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"tools-wire-reader" ~role:Types.Worker with
+      | Ok (token, _) -> token
+      | Error error -> fail (Types.masc_error_to_string error) in
+    let final_json = `Assoc
+      [ "tool_inventory", `List (List.init 200 (fun i -> `Assoc
+          [ "name", `String ("tool-" ^ string_of_int i); "description", `String "full final snapshot tool description" ]))
+      ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
+      ; "effective_keeper_surface", `Null
+      ; "skill_activations", `Null ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
+      ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
+    ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
+      (fun () -> `Assoc [ "tool_inventory", `List [] ]));
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let trust_policy = match Server_request_authority.make_trust_policy
+      ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+      | Ok policy -> policy
+      | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. () in
+    let request_headers = [ "origin", "http://localhost:8935";
+      "authorization", "Bearer " ^ token ] in
+    let path = "/api/v1/dashboard/tools" in
+    List.iter (fun (protocol, send) ->
+      let check_headers headers =
+        if protocol = "H2" then
+          List.iter (fun (name, _) ->
+            check string "H2 wire field names are lowercase"
+              (String.lowercase_ascii name) name) headers;
+        check (option string) (protocol ^ " CORS reflects admitted origin")
+          (Some "http://localhost:8935") (List.assoc_opt "access-control-allow-origin" headers);
+        let vary = List.filter_map (fun (name, value) ->
+          if name = "vary" then Some value else None) headers |> String.concat "," in
+        check bool (protocol ^ " Vary preserves Origin") true (String_util.contains_substring vary "Origin");
+        check bool (protocol ^ " Vary preserves Accept-Encoding") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        check (option string) (protocol ^ " validator") (Some snapshot.tools.etag)
+          (List.assoc_opt "etag" headers);
+        check (option string) (protocol ^ " revalidate cache policy") (Some "no-cache")
+          (List.assoc_opt "cache-control" headers);
+        check bool (protocol ^ " request-local snapshot timing") true
+          (String_util.contains_substring
+            (Option.value ~default:"" (List.assoc_opt "server-timing" headers)) "snapshot_read")
+      in
+      List.iter (fun encoding ->
+        let headers = ("accept-encoding", encoding) :: request_headers in
+        let status, reply_headers, body = send ~headers path in
+        check int (protocol ^ " compressed success") 200 status;
+        check_headers reply_headers;
+        check (option string) (protocol ^ " selected content encoding") (Some encoding)
+          (List.assoc_opt "content-encoding" reply_headers);
+        check (option string) (protocol ^ " length describes compressed bytes")
+          (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+        let decode body = if encoding = "gzip" then tools_gunzip body else
+          match Compression_codec.decompress ~orig_size:(String.length snapshot.tools.encoded.identity) body with
+          | Ok json -> json | Error error -> fail error in
+        check string (protocol ^ " decoded body is complete final projection")
+          (Yojson.Safe.to_string final_json) (decode body);
+        let status, reply_headers, body = send
+          ~headers:(("if-none-match", snapshot.tools.etag) :: headers) path in
+        check int (protocol ^ " matching validator") 304 status;
+        check_headers reply_headers;
+        check string (protocol ^ " 304 has no body") "" body;
+        check (option string) (protocol ^ " 304 omits Content-Length") None
+          (List.assoc_opt "content-length" reply_headers);
+        let status, reply_headers, body = send ~headers:(("if-none-match", "W/\"older\"") :: headers) path in
+        check int (protocol ^ " stale validator receives current representation") 200 status;
+        check_headers reply_headers;
+        check string (protocol ^ " stale validator receives complete current bytes")
+          (Yojson.Safe.to_string final_json) (decode body))
+        [ "gzip"; "zstd" ];
+      let status, _, body = send ~headers:request_headers (path ^ "?keeper=missing-wire-keeper") in
+      check int (protocol ^ " exact Keeper fallback succeeds") 200 status;
+      let json = Yojson.Safe.from_string body in
+      check string (protocol ^ " exact Keeper uses live effective projection") "keeper_not_found"
+        Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
+      check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
+        (String_util.contains_substring body "final-decoration"))
+      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ])
+
+let test_execution_routes_serve_prepared_http_representations () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
+  @@ fun () ->
+  let config = Lib.Mcp_server.workspace_config state in
+  Server_auth.For_testing.restore_server_state (Some state);
+  Auth.save_auth_config config.base_path
+    { Types.default_auth_config with enabled = true; require_token = true };
+  let token = match Auth.create_token config.base_path ~agent_name:"execution-wire-reader"
+    ~role:Types.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Types.masc_error_to_string error) in
+  let clock = Eio.Stdenv.clock env in
+  let path = "/api/v1/dashboard/execution" in
+  let request_headers = [ "origin", "http://localhost:8935";
+    "authorization", "Bearer " ^ token; "x-masc-agent", "untrusted-hint" ] in
+  let first = execution_payload ~state ~sw ~clock
+    (request_with_headers path request_headers) in
+  check string "authenticated producer canonicalizes the actor" "execution-wire-reader"
+    Yojson.Safe.Util.(first.json |> member "query" |> member "actor" |> to_string);
+  let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock
+    (Lib.Http_server_eio.Router.create ()) in
+  let trust_policy = match Server_request_authority.make_trust_policy
+    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+    ~server_start_time:0. () in
+  List.iter (fun (protocol, send) ->
+    List.iter (fun encoding ->
+      let headers = ("accept-encoding", encoding) :: request_headers in
+      let status, reply_headers, body = send ~headers path in
+      check int (protocol ^ " success") 200 status;
+      let expected_encoding = if encoding = "identity" then None else Some encoding in
+      check (option string) (protocol ^ " encoding selection") expected_encoding
+        (List.assoc_opt "content-encoding" reply_headers);
+      check (option string) (protocol ^ " wire length")
+        (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+      let check_headers headers =
+        check (option string) (protocol ^ " identity ETag") (Some first.etag)
+          (List.assoc_opt "etag" headers);
+        let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
+          headers |> String.concat "," in
+        check bool (protocol ^ " encoding varies") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        if protocol = "H2" then
+          check bool (protocol ^ " origin still varies") true
+            (String_util.contains_substring vary "Origin")
+      in
+      check_headers reply_headers;
+      let decoded = match encoding with
+        | "gzip" -> tools_gunzip body
+        | "zstd" -> (match Compression_codec.decompress ~orig_size:(String.length first.raw_json) body with
+          | Ok json -> json | Error error -> fail error)
+        | _ -> body in
+      check string (protocol ^ " full decorated payload decodes") first.raw_json decoded;
+      let status, cached_headers, cached_body = send
+        ~headers:(("if-none-match", first.etag) :: headers) path in
+      check int (protocol ^ " conditional response") 304 status;
+      check_headers cached_headers;
+      check string (protocol ^ " 304 empty body") "" cached_body;
+      check (option string) (protocol ^ " 304 omits length") None
+        (List.assoc_opt "content-length" cached_headers)) [ "identity"; "gzip"; "zstd" ])
+    [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler ];
+  let hit = execution_payload ~state ~sw ~clock (request_with_headers path request_headers) in
+  check bool "wire reads reuse the published encodings" true (first.encoded == hit.encoded)
 
 let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker = `Assoc [ "tele_marker", `String "from-snapshot" ] in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:marker ());
   let timing = Server_timing.create () in
@@ -2876,7 +3759,7 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
     `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
   in
   Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test
+    (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
        ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
@@ -3490,8 +4373,7 @@ let prepare_config_sync_keeper ~sw config name =
     | Error error -> fail ("meta fixture: " ^ error)
     | Ok meta ->
       { meta with
-        Masc.Keeper_meta_contract.autoboot_enabled = true
-      ; proactive = { enabled = false }
+        Masc.Keeper_meta_contract.activation_mode = Masc.Keeper_activation_mode.On_demand
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
            keeper.toml -- before it will materialize a keeper.
@@ -3510,6 +4392,9 @@ let prepare_config_sync_keeper ~sw config name =
   | Error error ->
     fail (Masc.Keeper_owner_registry.install_error_to_string error)
 
+(* These fixtures exercise config publication with a valid profile.
+   test/dune disables sandbox preflight, so Docker daemon/image readiness is
+   not part of these transaction tests. Profile validation still applies. *)
 let write_config_sync_toml config name =
   let dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -3518,7 +4403,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"local\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
+       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -3717,15 +4602,43 @@ let test_config_post_requires_expected_revision () =
   let raw, _ =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true}|}
+      ~name {|{"activation_mode":"autonomous"}|}
   in
-  check bool "missing revision HTTP 400" true
-    (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  expect_http_status "missing revision HTTP 400" 400 raw;
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
 
+let with_direct_assignment_model_catalog f =
+  let module Catalog = Llm_provider.Model_catalog in
+  (* Assignment publication validates the configured provider/model against
+     AGENT_CORE. Declare the synthetic model used by config_sync_runtime_toml
+     for the whole fixture, including its Keeper fiber cleanup. *)
+  let previous = Catalog.global () in
+  let catalog =
+    match
+      Catalog.of_toml_string ~source:"direct-assignment-fixture"
+        {|[[models]]
+id_prefix = "test-model"
+provider_name = "test_provider"
+base = "openai_chat"
+max_context_tokens = 8192
+|}
+    with
+    | Ok catalog -> catalog
+    | Error detail -> failf "direct assignment model catalog: %s" detail
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Catalog.set_global catalog
+      | None -> Catalog.clear_global ())
+    (fun () ->
+      Catalog.set_global catalog;
+      f ())
+
 let test_direct_assignment_route_rejects_stale_revision_without_write () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let name = "direct-assignment-cas" in
   prepare_config_sync_keeper ~sw config name;
@@ -3764,6 +4677,7 @@ let test_direct_assignment_route_rejects_stale_revision_without_write () =
        ~base_path:config.base_path name)
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "direct-assignment-fences-config" in
   prepare_config_sync_keeper ~sw config name;
@@ -3794,7 +4708,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             expected_config )
-      ; "proactive_enabled", `Bool true
+      ; "activation_mode", `String "autonomous"
       ]
     |> Yojson.Safe.to_string
   in
@@ -3802,8 +4716,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state ~name keeper_body
   in
-  check bool "stale Keeper config POST HTTP 409" true
-    (String.starts_with ~prefix:"HTTP/1.1 409" keeper_raw);
+  expect_http_status "stale Keeper config POST HTTP 409" 409 keeper_raw;
   let open Yojson.Safe.Util in
   check string "Keeper POST observes composite conflict"
     "keeper_config_revision_conflict"
@@ -3813,6 +4726,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
        ~base_path:config.base_path name)
 
 let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
+  with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let name = "direct-assignment-release-warning" in
   prepare_config_sync_keeper ~sw config name;
@@ -3876,12 +4790,12 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok revision -> revision
     | Error detail -> failf "initial revision: %s" detail
   in
-  let body proactive_enabled =
+  let body activation_mode =
     `Assoc
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             initial_revision )
-      ; "proactive_enabled", `Bool proactive_enabled
+      ; "activation_mode", `String activation_mode
       ]
     |> Yojson.Safe.to_string
   in
@@ -3889,15 +4803,13 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
   in
   let winner_raw, _ =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body true)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "autonomous")
   in
-  check bool "winner HTTP 200" true
-    (String.starts_with ~prefix:"HTTP/1.1 200" winner_raw);
+  expect_http_status "winner HTTP 200" 200 winner_raw;
   let loser_raw, loser_json =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body false)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "manual")
   in
-  check bool "loser HTTP 409" true
-    (String.starts_with ~prefix:"HTTP/1.1 409" loser_raw);
+  expect_http_status "loser HTTP 409" 409 loser_raw;
   let open Yojson.Safe.Util in
   check string "typed conflict code" "keeper_config_revision_conflict"
     (loser_json |> member "error" |> member "code" |> to_string);
@@ -3925,8 +4837,8 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "winner remains durable" (Some true)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled");
+  check (option string) "winner remains durable" (Some "autonomous")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode");
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -3942,11 +4854,12 @@ let test_config_post_restarts_from_atomic_toml () =
            ~base_path:config.base_path name))
     (fun () ->
       let toml_path = write_config_sync_toml config name in
-      let _, response =
+      let raw, response =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
            ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-           ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
+           ~name {|{"activation_mode":"autonomous"}|}
       in
+      expect_http_status "atomic config restart HTTP 200" 200 raw;
       check string "readback carries manifest SHA-256 revision" "sha256"
         Yojson.Safe.Util.
           (response |> member "config_revision" |> member "manifest"
@@ -3965,13 +4878,11 @@ let test_config_post_restarts_from_atomic_toml () =
       (match parsed with
        | Error error -> fail error
        | Ok doc ->
-         check (option bool) "autoboot committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
-         check (option bool) "proactive committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
+         check (option string) "activation committed" (Some "autonomous")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
       check bool "running projection converged" true
         (match Masc.Keeper_registry.get ~base_path:config.base_path name with
-         | Some entry -> entry.meta.proactive.enabled
+         | Some entry -> Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode
          | None -> false))
 
 let test_config_post_materializes_missing_toml () =
@@ -3988,12 +4899,12 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"proactive_enabled":true}|}
+          ~name {|{"activation_mode":"autonomous","sandbox_profile":"docker"}|}
       in
-      check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+      expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
-      check bool "runtime projection applied proactive config" true
-        (json |> member "proactive" |> member "enabled" |> to_bool);
+      check string "runtime projection applied activation mode" "autonomous"
+        (json |> member "activation_mode" |> to_string);
       let path =
         Config_dir_resolver.keepers_dir_for_base_path
           ~base_path:config.Workspace.base_path
@@ -4008,8 +4919,10 @@ let test_config_post_materializes_missing_toml () =
       match parsed with
       | Error error -> fail error
       | Ok doc ->
-        check (option bool) "materialized proactive config" (Some true)
-          (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
+        check (option string) "materialized sandbox profile" (Some "docker")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
+        check (option string) "materialized activation mode" (Some "autonomous")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
 
 let test_config_post_rolls_back_missing_runtime_assignment () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4024,9 +4937,9 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"runtime_id":"missing.runtime"}|}
+      ~name {|{"activation_mode":"autonomous","runtime_id":"missing.runtime"}|}
   in
-  check bool "HTTP 503" true (String.starts_with ~prefix:"HTTP/1.1 503" raw);
+  expect_http_status "HTTP 503" 503 raw;
   let open Yojson.Safe.Util in
   check bool "TOML rolled back" false (json |> member "config_applied" |> to_bool);
   check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
@@ -4042,8 +4955,27 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "TOML is rolled back" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "TOML is rolled back" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+let test_config_post_rejects_invalid_activation_mode () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-activation" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let original = In_channel.with_open_bin toml_path In_channel.input_all in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  List.iter
+    (fun body ->
+      let raw, _ =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name body
+      in
+      expect_http_status "invalid activation mode is rejected" 400 raw;
+      check string "rejected activation preserves config bytes" original
+        (In_channel.with_open_bin toml_path In_channel.input_all))
+    [ {|{"activation_mode":true}|}
+    ; {|{"activation_mode":"unknown"}|}
+    ]
 
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4053,9 +4985,9 @@ let test_config_post_prevalidates_mixed_request () =
   let raw, _ =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"allowed_paths":["*"]}|}
+      ~name {|{"activation_mode":"autonomous","allowed_paths":["*"]}|}
   in
-  check bool "HTTP 400" true (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  expect_http_status "HTTP 400" 400 raw;
   let doc =
     match
       Keeper_toml_loader.parse_toml
@@ -4064,8 +4996,8 @@ let test_config_post_prevalidates_mixed_request () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "activation was not committed" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "activation was not committed" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_round_trips_typed_tools_patch () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4093,7 +5025,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"full"}}|}
        in
-       check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+       expect_http_status "HTTP 200" 200 raw;
        let open Yojson.Safe.Util in
        check string "readback native" "full"
          (json |> member "tools" |> member "native" |> to_string);
@@ -4144,8 +5076,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"full"}}|}
        in
-       check bool "Yolo preview HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" yolo_raw);
+       expect_http_status "Yolo preview HTTP 200" 200 yolo_raw;
        check string "Yolo allows full preview" "allowed"
          Yojson.Safe.Util.(
            yolo_json
@@ -4167,8 +5098,7 @@ let test_config_post_round_trips_typed_tools_patch () =
            ~name
            {|{"tools":{"native":"yolo"}}|}
        in
-       check bool "invalid native is HTTP 400" true
-         (String.starts_with ~prefix:"HTTP/1.1 400" invalid_raw))
+       expect_http_status "invalid native is HTTP 400" 400 invalid_raw)
 ;;
 
 let test_config_post_round_trips_typed_skills_patch () =
@@ -4210,8 +5140,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{"names":["ocaml-coding","proof-harness"]}}|}
        in
-       check bool "exact selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" exact_raw);
+       expect_http_status "exact selection HTTP 200" 200 exact_raw;
        check (list string) "exact selection reads back"
          [ "ocaml-coding"; "proof-harness" ]
          (exact_json
@@ -4239,8 +5168,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{"names":[]}}|}
        in
-       check bool "empty selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" none_raw);
+       expect_http_status "empty selection HTTP 200" 200 none_raw;
        check (list string) "empty selection reads back" []
          (none_json
           |> member "skills"
@@ -4271,8 +5199,7 @@ let test_config_post_round_trips_typed_skills_patch () =
            ~name
            {|{"skills":{}}|}
        in
-       check bool "all selection HTTP 200" true
-         (String.starts_with ~prefix:"HTTP/1.1 200" all_raw);
+       expect_http_status "all selection HTTP 200" 200 all_raw;
        check bool "all selection reads back as null" true
          (all_json |> member "skills" |> member "names" = `Null);
        let all_doc = parse_toml "parse all selection TOML" in
@@ -4616,6 +5543,12 @@ let () =
             test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "bootstrap omits eager goal tree" `Quick
             test_dashboard_bootstrap_omits_eager_goal_tree;
+          test_case "Goal proof surfaces share persisted criterion truth" `Quick
+            test_goal_proof_surfaces_share_persisted_criterion_truth;
+          test_case "Goal source failure is not empty" `Quick
+            test_goal_source_failure_is_not_empty;
+          test_case "Goal link source error preserves unrelated planning" `Quick
+            test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick
@@ -4630,6 +5563,20 @@ let () =
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
             test_execution_actor_for_request_canonicalizes_token_owner;
+          test_case "execution request resolves actor once" `Quick
+            test_execution_request_resolves_actor_once;
+          test_case "execution default response remains JSON" `Quick
+            test_execution_default_response_remains_json;
+          test_case "execution parameterized response reuses decorated bytes" `Quick
+            test_execution_parameterized_payload_reuses_decorated_bytes;
+          test_case "execution parameterized responses separate queries" `Quick
+            test_execution_parameterized_payload_separates_request_queries;
+          test_case "execution parameterized responses separate workspace scopes" `Quick
+            test_execution_parameterized_payload_separates_workspace_scope;
+          test_case "execution parameterized response follows invalidation" `Quick
+            test_execution_parameterized_payload_changes_after_invalidation;
+          test_case "execution parameterized timeout keeps request metadata" `Quick
+            test_execution_parameterized_timeout_keeps_request_metadata;
           test_case "execution force refresh bypasses default cache" `Quick
             test_dashboard_execution_force_refresh_bypasses_default_cache;
           test_case "execution trust default route uses cached surface" `Quick
@@ -4650,6 +5597,14 @@ let () =
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
+            test_tools_worker_promotes_seed_before_component_ttl;
+          test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
+            test_tools_prepared_selector_scope_and_keeper_contract;
+          test_case "tools routes serve prepared encodings and conditional responses" `Quick
+            test_tools_routes_serve_prepared_http_representations;
+          test_case "authenticated execution routes reuse prepared encodings" `Quick
+            test_execution_routes_serve_prepared_http_representations;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
@@ -4664,6 +5619,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper path extraction uses shared name grammar" `Quick
             test_keeper_name_extractors_use_shared_grammar;
+          test_case "asks list publishes the written alternative capability" `Quick
+            test_asks_list_publishes_written_alternative_capability;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper up route classifies and extracts" `Quick
@@ -4770,6 +5727,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config rejects invalid activation mode" `Quick
+            test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick
             test_config_post_round_trips_typed_tools_patch;
           test_case "typed Skills patch preserves all, exact and none" `Quick

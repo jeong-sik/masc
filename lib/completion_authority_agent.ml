@@ -18,6 +18,26 @@ let authority_actor = Runtime.verifier_exact_lane_id
    cut. *)
 let judge_few_shot_examples = 3
 
+type review_key =
+  { task_id : string
+  ; verification_id : string
+  }
+
+module Review_keys = Set.Make (struct
+  type t = review_key
+
+  let compare left right =
+    match String.compare left.task_id right.task_id with
+    | 0 -> String.compare left.verification_id right.verification_id
+    | order -> order
+  ;;
+end)
+
+type retry_batch =
+  { keys : Review_keys.t
+  ; sweep : bool
+  }
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
@@ -26,20 +46,19 @@ type runtime =
   ; sweep_pending : bool Atomic.t
       (** A whole-backlog read is due. Boot recovery and a failed backlog read
           are the only things that need one: they have no key to aim at. *)
+  ; rejection_delivery_pending : bool Atomic.t
+  ; rejection_retry_pending : bool Atomic.t
   ; targets : review_key list Atomic.t
       (** Verifications a submission or a retryable deferral asked for by name.
           The submission hook already receives [task], [assignee] and
           [verification_id]; carrying them here is what keeps one submission
           from re-reviewing every other awaiting Task. *)
-  ; retry_scheduled : bool Atomic.t
+  ; retry_pending : retry_batch option Atomic.t
+      (** [Some] owns one interval timer and every retry admitted before its
+          atomic drain. The timer flag cannot outlive or forget its work. *)
   ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
   ; review_slots : Eio.Semaphore.t
-  }
-
-and review_key =
-  { task_id : string
-  ; verification_id : string
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
@@ -259,11 +278,55 @@ let evidence_posture_of_snapshot
            | Workspace_verification_store.Evidence_artifact
                { reference = _; content = _; bytes = _; truncated = false } ->
              true
+           | Workspace_verification_store.Evidence_artifact_binary _ ->
+             (* A binary item is judgeable on its own terms: the hash, the
+                size, and the filed body are the facts the verdict can rest
+                on (RFC-0436 §4.1). *)
+             true
            | _ -> false)
       |> List.length
   in
   if usable = 0 then Task.Anti_rationalization.Note_only
   else Task.Anti_rationalization.Usable_artifacts usable
+;;
+
+(* RFC-0436 §4.3: the binary image artifacts the judge receives as attached
+   blocks. An image whose format the runtimes do not take as attached input,
+   or whose filed body cannot be read back, stays out of the list — its
+   reference and hash remain in the prompt text, which is the §4.4 posture
+   for it. A failed read is not fatal to the review: the artifact is still
+   judgeable on the recorded hash and size. *)
+let evidence_images_of_snapshot ~base_path
+      (snapshot : Workspace_verification_store.submitted_evidence_access) :
+      Task.Anti_rationalization.evidence_image list =
+  let module Store = Workspace_verification_store in
+  match snapshot with
+  | Store.Evidence_unavailable _ -> []
+  | Store.Evidence_available { request = _; items } ->
+    List.filter_map
+      (fun (item : Store.submitted_evidence_item) ->
+         match item with
+         | Store.Evidence_artifact_binary
+             { reference; bytes; sha256; format; body = _ } ->
+           (match Store.image_media_type_of_binary_format format with
+            | None -> None
+            | Some media_type -> (
+              match Store.read_binary_body_base64 ~base_path item with
+              | Error _reason -> None
+              | Ok body_base64 ->
+                Some
+                  Task.Anti_rationalization.
+                    { image_reference = reference
+                    ; image_sha256 = sha256
+                    ; image_bytes = bytes
+                    ; image_media_type = media_type
+                    ; image_body_base64 = body_base64
+                    }))
+         | Store.Evidence_note _ -> None
+         | Store.Evidence_artifact _ -> None
+         | Store.Evidence_invalid_reference -> None
+         | Store.Evidence_artifact_unreadable _ -> None)
+      items
 ;;
 
 type prepared_review =
@@ -408,6 +471,8 @@ let prepare_review
               ; agent_name = assignee
               ; task_id = task.id
               ; evidence_refs
+              ; evidence_images =
+                  evidence_images_of_snapshot ~base_path:config.base_path evidence_access
               }
           ; question
           }
@@ -433,87 +498,6 @@ let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~re
   process_outcome_of_evaluator_retryable evaluator_retryable
 ;;
 
-let observe_rejection_wakeup
-      (runtime : runtime)
-      (task : Masc_domain.task)
-      ~assignee
-      ~verification_id
-      ~reason
-      ~authority
-  =
-  match
-    Completion_authority_wakeup.wake_rejected_producer
-      ~config:runtime.config
-      ~producer:assignee
-      ~task_id:task.id
-      ~verification_id
-      ~reason
-      ~authority
-  with
-  | Completion_authority_wakeup.Signaled { keeper_name } ->
-    Log.Misc.info
-      "completion authority rejection durably queued and signaled producer Keeper task_id=%s verification_id=%s keeper=%s"
-      task.id
-      verification_id
-      keeper_name
-  | Completion_authority_wakeup.Durable_deferred { keeper_name; wakeup } ->
-    (match wakeup with
-     | Keeper_registry.Deferred_unregistered ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper is unregistered task_id=%s verification_id=%s keeper=%s"
-         task.id
-         verification_id
-         keeper_name
-     | Keeper_registry.Deferred_not_running phase ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper is not running task_id=%s verification_id=%s keeper=%s phase=%s"
-         task.id
-         verification_id
-         keeper_name
-         (Keeper_state_machine.phase_to_string phase)
-     | Keeper_registry.Deferred_lifecycle denial ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper wake denied task_id=%s verification_id=%s keeper=%s reason=%s"
-         task.id
-         verification_id
-         keeper_name
-         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-     | Keeper_registry.Signaled ->
-       Log.Misc.error
-         "completion authority rejection returned deferred Signaled outcome task_id=%s verification_id=%s keeper=%s"
-         task.id
-         verification_id
-         keeper_name)
-  | Completion_authority_wakeup.Durable_wake_failed { keeper_name; detail } ->
-    Log.Misc.error
-      "completion authority rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
-      task.id
-      verification_id
-      keeper_name
-      detail
-  | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
-    Log.Misc.error
-      "completion authority rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
-      task_id
-      producer
-      verification_id
-  | Completion_authority_wakeup.Producer_identity_lookup_failed
-      { producer; task_id; detail } ->
-    Log.Misc.error
-      "completion authority rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
-      task_id
-      producer
-      verification_id
-      detail
-  | Completion_authority_wakeup.Durable_queue_failed { keeper_name; detail } ->
-    Log.Misc.error
-      "completion authority rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
-      task.id
-      verification_id
-      keeper_name
-      detail
-;;
-
 (* Returns the control-flow outcome the scan loop acts on, paired with the
    observation outcome recorded for this review. [on_commit] is the exact
    semantic verdict produced by the evaluator. Infrastructure failures never
@@ -522,7 +506,6 @@ let observe_rejection_wakeup
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
-      ~assignee
       ~verification_id
       ~authority
       ~verdict
@@ -543,16 +526,6 @@ let commit_verdict
       ()
   with
   | Ok _ ->
-    (match verdict with
-     | Masc_domain.Verdict_approved -> ()
-     | Masc_domain.Verdict_rejected { reason } ->
-       observe_rejection_wakeup
-         runtime
-         task
-         ~assignee
-         ~verification_id
-         ~reason
-         ~authority);
     Log.Misc.info
       "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
       task.id
@@ -785,7 +758,6 @@ let process_task_once
            (commit_verdict
               runtime
               task
-              ~assignee
               ~verification_id
               ~authority
               ~verdict
@@ -836,22 +808,67 @@ let request_review (runtime : runtime) key =
   Eio.Condition.broadcast runtime.wake
 ;;
 
+let queue_retry ~sw ~wait ~dispatch pending scope =
+  Eio.Switch.check sw;
+  let rec enqueue () =
+    let current = Atomic.get pending in
+    let batch =
+      match current with
+      | None -> { keys = Review_keys.empty; sweep = false }
+      | Some batch -> batch
+    in
+    let next =
+      match scope with
+      | Whole_backlog -> { batch with sweep = true }
+      | Targets keys ->
+        { batch with
+          keys = List.fold_left (fun set key -> Review_keys.add key set) batch.keys keys
+        }
+    in
+    if batch.sweep = next.sweep && Review_keys.equal batch.keys next.keys
+    then false
+    else if Atomic.compare_and_set pending current (Some next)
+    then (
+      (match current with
+       | Some _ -> ()
+       | None ->
+         Eio.Fiber.fork ~sw (fun () ->
+           wait ();
+           (* Detach the entire batch before publication. A retry arriving
+              during dispatch owns the next timer and cannot be cleared by
+              this one. A cancelled timer leaves the durable awaiting Tasks
+              for the next runtime's boot sweep. *)
+           match Atomic.exchange pending None with
+           | None -> ()
+           | Some { keys; sweep } ->
+             dispatch
+               (if sweep then Whole_backlog else Targets (Review_keys.elements keys))));
+      true)
+    else enqueue ()
+  in
+  enqueue ()
+;;
+
+let schedule_retry_scope (runtime : runtime) scope =
+  queue_retry
+    ~sw:runtime.sw
+    ~wait:(fun () -> Eio.Time.sleep runtime.clock runtime.retry_interval_sec)
+    ~dispatch:(function
+      | Whole_backlog -> request_sweep runtime
+      | Targets keys -> List.iter (request_review runtime) keys)
+    runtime.retry_pending
+    scope
+;;
+
 let schedule_retry (runtime : runtime) key =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_review runtime key)
+  schedule_retry_scope runtime (Targets [ key ])
 ;;
 
 let schedule_sweep_retry (runtime : runtime) =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_sweep runtime)
+  (* The backlog-read diagnostic already names this request. A duplicate
+     sweep shares the existing timer and needs no separate notification. *)
+  let (_ : bool) = schedule_retry_scope runtime Whole_backlog in
+  ()
 ;;
 
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
@@ -871,21 +888,23 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
     in
     match outcome with
     | Retryable_deferred ->
-      Log.Misc.info
-        "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
-        task.id
-        verification_id
-        runtime.retry_interval_sec;
-      schedule_retry runtime key
+      if schedule_retry runtime key
+      then
+        Log.Misc.info
+          "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+          task.id
+          verification_id
+          runtime.retry_interval_sec
     | Committed -> ()
     | Deferred ->
       (* Nothing schedules another look at this key: the scope rule admits it
          again only through a fresh submission, or through the sweep, which is
          armed at boot and after a failed backlog read rather than on a timer.
          So the Task sits in [AwaitingVerification] until a producer or operator
-         acts, and this is the one line that says so — at the level its
-         retryable sibling above already uses. *)
-      Log.Misc.info
+         acts. The Task's own status already says so; this line is per-task
+         bookkeeping of a sweep that touches every awaiting Task, and at Info
+         it was 46 lines per boot (#34641), so it is routine. *)
+      Log.Misc.routine
         "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
         task.id
         verification_id)
@@ -933,6 +952,31 @@ let process_scope (runtime : runtime) ~scope =
       (entries_in_scope ~scope entries)
 ;;
 
+let request_rejection_delivery (runtime : runtime) =
+  Atomic.set runtime.rejection_delivery_pending true;
+  Eio.Condition.broadcast runtime.wake
+;;
+
+let retry_rejection_delivery (runtime : runtime) =
+  if Atomic.compare_and_set runtime.rejection_retry_pending false true then
+    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
+      Atomic.set runtime.rejection_retry_pending false;
+      request_rejection_delivery runtime)
+;;
+
+let process_rejection_deliveries (runtime : runtime) =
+  (* Separate from review scopes: retrying a delivery must never run another
+     model judgment over an already-settled verdict. The backlog is the durable
+     obligation and this timer only accelerates the next attempt. *)
+  match Completion_authority_wakeup.reconcile_pending ~config:runtime.config with
+  | Ok { retained = 0; _ } -> ()
+  | Ok _ -> retry_rejection_delivery runtime
+  | Error detail ->
+    Log.Misc.error "completion repair backlog unavailable: %s" detail;
+    retry_rejection_delivery runtime
+;;
+
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
     (* Targets first: a named verification is the common case and costs one
@@ -943,10 +987,16 @@ let run (runtime : runtime) : [ `Stop_daemon ] =
      | (_ :: _) as keys -> process_scope runtime ~scope:(Targets keys));
     if Atomic.exchange runtime.sweep_pending false
     then process_scope runtime ~scope:Whole_backlog;
+    if Atomic.exchange runtime.rejection_delivery_pending false
+    then process_rejection_deliveries runtime;
     None)
 ;;
 
 let install_callback (runtime : runtime) =
+  Atomic.set Workspace_hooks.rejection_delivery_requested_fn (fun config ->
+    if String.equal config.Workspace.base_path runtime.config.base_path
+    then request_rejection_delivery runtime
+    else Log.Misc.error "completion repair rejected wake from another base path");
   Atomic.set Workspace_hooks.verification_submitted_fn
     (fun config ~task ~assignee ~verification_id ->
        if not (String.equal config.base_path runtime.config.base_path)
@@ -977,8 +1027,10 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; clock
     ; wake = Eio.Condition.create ()
     ; sweep_pending = Atomic.make true
+    ; rejection_delivery_pending = Atomic.make true
+    ; rejection_retry_pending = Atomic.make false
     ; targets = Atomic.make []
-    ; retry_scheduled = Atomic.make false
+    ; retry_pending = Atomic.make None
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
     ; review_slots = Eio.Semaphore.make 4
@@ -1007,10 +1059,15 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     let previous_submitted_hook =
       Atomic.get Workspace_hooks.verification_submitted_fn
     in
+    let previous_rejection_hook =
+      Atomic.get Workspace_hooks.rejection_delivery_requested_fn
+    in
     install_callback runtime;
     Eio.Switch.on_release sw (fun () ->
       if Atomic.compare_and_set active_runtime owner None
-      then Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted_hook);
+      then (
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted_hook;
+        Atomic.set Workspace_hooks.rejection_delivery_requested_fn previous_rejection_hook));
     Eio.Fiber.fork_daemon ~sw (fun () -> run runtime)
 ;;
 
@@ -1039,6 +1096,11 @@ module For_testing = struct
     | Targets of review_key list
 
   let entries_in_scope = entries_in_scope
+
+  let make_retry_scheduler ~sw ~wait ~dispatch =
+    let pending = Atomic.make None in
+    queue_retry ~sw ~wait ~dispatch pending
+  ;;
 
   type nonrec admission = admission =
     | Review_completion

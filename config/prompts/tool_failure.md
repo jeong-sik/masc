@@ -4,7 +4,7 @@ category: tool
 operator_surface: fragment
 ---
 ### dependency_unavailable
-The dependency this tool needs did not answer. Your arguments were not judged, so the same call with other arguments fails the same way. Do other work or end the turn; it can answer on a later turn.
+An external dependency could not fulfill this call. Read the failure details: the cause may be transport, authentication, resource availability, or a remote service response. This class alone does not establish retryability. Use the stated cause to choose the next action; do not assume that changing arguments or waiting will resolve it.
 
 ### operator_cancelled
 An operator stopped this call. It is not re-issued. Say where it stopped in your answer.

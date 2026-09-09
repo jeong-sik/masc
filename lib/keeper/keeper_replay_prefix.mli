@@ -22,6 +22,16 @@ val media_degraded :
   dispatch_prefix:Agent_core.Types.message list ->
   projection
 
+(** Record the current input appended immediately after the known seed
+    prefix. Restoration checks the complete User message at that boundary;
+    it never searches or rewrites arbitrary messages in the turn suffix. *)
+val media_degraded_with_current_input :
+  canonical_prefix:Agent_core.Types.message list ->
+  dispatch_prefix:Agent_core.Types.message list ->
+  canonical_input:Agent_core.Types.message ->
+  dispatch_input:Agent_core.Types.message ->
+  projection
+
 (** Split [messages] after an exact structural [prefix]. *)
 val split :
   prefix:Agent_core.Types.message list ->
@@ -31,7 +41,9 @@ val split :
 (** Restore a projected provider checkpoint to its canonical replay prefix.
     An unchanged projection is returned verbatim.  A media-degraded projection
     accepts either an already-canonical checkpoint or the exact dispatch prefix
-    and fails explicitly for every other checkpoint. *)
+    and fails explicitly for every other checkpoint. When current input was
+    projected, the exact canonical or dispatch input must follow that prefix;
+    missing or mismatched inputs fail without modifying the answer/tool suffix. *)
 val restore_messages :
   projection ->
   Agent_core.Types.message list ->

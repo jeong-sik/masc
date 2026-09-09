@@ -585,6 +585,24 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">런타임 오버라이드</div>
               <div class="text-2xs text-[var(--color-fg-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
             </div>
+            ${selectedPrompt.key === 'keeper' ? html`
+              <div class="mb-3" data-keeper-prompt-language>
+                <div class="mb-2 text-xs text-[var(--color-fg-muted)]">
+                  공통 지침 초안: 언어를 고른 뒤 내용을 확인하고 저장하세요. 개별 역할 지침은 Keeper 설정에서 편집합니다.
+                </div>
+                <div class="flex gap-2">
+                  ${(['ko', 'en'] as const).map(language => {
+                    const sourceKey = language === 'ko' ? 'keeper' : 'keeper.en'
+                    const text = prompts.find(prompt => prompt.key === sourceKey)?.file_value
+                    return html`<${ActionButton} variant="ghost" size="sm"
+                      disabled=${saving || loading || draftDirty || !text}
+                      onClick=${() => { if (text) { setDraft(text); setStatus(null) } }}>
+                      ${language === 'ko' ? '한국어' : 'English'}
+                    <//>`
+                  })}
+                </div>
+              </div>
+            ` : null}
             <${TextArea}
               rows=${28}
               value=${draft}

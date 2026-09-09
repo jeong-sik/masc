@@ -655,6 +655,10 @@ type content_delta =
           incremental chunks must remain [TextDelta]. *)
   | ThinkingDelta of string
   | ThinkingSignatureDelta of string
+  | RedactedThinkingSnapshot of string
+  (** Provider-authorized final opaque reasoning carrier replacing an open,
+      unsigned thinking block at the same index. This is a one-way transition,
+      not permission to replace a content block with another header. *)
   | ReasoningDetailsDelta of
       { reasoning_content : string option
       ; details : reasoning_detail list

@@ -73,10 +73,8 @@ let test_exact_ack_removes_only_selected_identity () =
     (post_ids (State.pending acked))
 ;;
 
-(* 2026-09-05 sangsu incident: a checkpoint-yield turn retains a
-   Connector_attention entry instead of acking it, and that retention is a
-   durable, countable fact — the count is what bounds the retention (see
-   [Keeper_heartbeat_loop.connector_attention_retention_bound]). *)
+(* Retention updates the exact durable selection. Its count is observation
+   and source-binding metadata, never authority to acknowledge a request. *)
 let test_checkpoint_retention_spends_the_caller_snapshot () =
   let state = State.with_pending (queue [ stimulus "discord-a" 1.0 ]) State.empty in
   let selected = select state in
@@ -848,6 +846,117 @@ let test_transition_wal_commit_observer_exactly_once () =
          Alcotest.(check int) "WAL replay does not notify" 1 !notifications))
 ;;
 
+let test_primary_replacement_cannot_poison_cache () =
+  with_temp_dir "keeper-primary-cache-replacement" (fun base_path ->
+    let keeper_name = "cache-replacement" in
+    Persistence.update_result ~base_path ~keeper_name (fun q ->
+      Queue.enqueue q (stimulus "original" 1.0)) |> require_ok "seed snapshot";
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    let replacement = Filename.concat dir "replacement" in
+    let bytes = {|{"schema":"unsupported-replacement","pending":["retain"]}|} in
+    Out_channel.with_open_bin replacement (fun oc -> output_string oc bytes);
+    let interleaved = ref false in
+    let result = Persistence.For_testing.load_state_with_read_interleave
+      ~base_path ~keeper_name
+      ~after_read:(fun () -> interleaved := true; Unix.rename replacement primary) in
+    Alcotest.(check bool) "replacement occurred after decode" true !interleaved;
+    (match result with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "replacement was cached as original state");
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "new" 2.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "cache bypass overwrote replacement evidence");
+    Alcotest.(check string) "replacement bytes retained" bytes
+      (In_channel.with_open_bin primary In_channel.input_all))
+;;
+
+let test_dangling_primary_is_not_absence () =
+  with_temp_dir "keeper-primary-dangling" (fun base_path ->
+    let keeper_name = "dangling-primary" in
+    Persistence.update_result ~base_path ~keeper_name (fun q ->
+      Queue.enqueue q (stimulus "retained" 1.0)) |> require_ok "seed primary";
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    Unix.unlink primary;
+    let missing_target = Filename.concat dir "missing-target" in
+    Unix.symlink missing_target primary;
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "replacement" 2.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "dangling primary link treated as first boot");
+    Alcotest.(check string) "primary link retained" missing_target (Unix.readlink primary);
+    Alcotest.(check bool) "missing target not created" false (Sys.file_exists missing_target))
+;;
+
+let test_undecodable_primary_retains_wal_and_absence_recovers () =
+  with_temp_dir "keeper-primary-wal-authority" (fun base_path ->
+    let keeper_name = "primary-wal-authority" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      pending |> fun q -> Queue.enqueue q (stimulus "completed" 1.0)
+              |> fun q -> Queue.enqueue q (stimulus "sibling" 2.0))
+    |> require_ok "seed sibling sources";
+    let scope = Keeper_chat_operation.Operation_id.of_string "wal-binding"
+      |> require_ok "WAL operation ID" |> Keeper_execution_scope_id.direct_operation in
+    let selections = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "WAL pending selections" in
+    Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
+      ~selections ~scope () |> require_ok "WAL bind" |> ignore;
+    let selection = Persistence.select_when_result ~base_path ~keeper_name
+      ~now:3.0 ~ready:(fun _ -> true)
+      |> require_ok "select" |> require_some "selection" in
+    Persistence.terminalize_pending_turn_completed_result
+      ~base_path ~keeper_name ~applied_at:4.0 ~selection ()
+    |> require_ok "durably record completion" |> fun _ ->
+    let dir = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
+    let primary = Filename.concat dir Persistence.snapshot_filename in
+    let wal = Filename.concat dir Persistence.transition_wal_filename in
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    let wal_bytes = read wal in
+    Alcotest.(check bool) "real transition WAL exists" true (String.length wal_bytes > 0);
+    let invalid = match Yojson.Safe.from_file primary with
+      | `Assoc fields -> Yojson.Safe.to_string
+          (`Assoc (("schema", `String "unsupported-schema") :: List.remove_assoc "schema" fields))
+      | _ -> Alcotest.fail "primary was not an object" in
+    Out_channel.with_open_bin primary (fun channel -> output_string channel invalid);
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "valid WAL replaced undecodable primary authority");
+    (match Persistence.validate_state_read_only_result ~base_path ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "read-only validation ignored undecodable primary");
+    (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name
+       (stimulus "new-source" 5.0) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "new source overwrote undecodable primary");
+    Alcotest.(check string) "primary bytes retained" invalid (read primary);
+    Alcotest.(check string) "WAL bytes retained" wal_bytes (read wal);
+    (* Physical absence is the separate recovery contract. The complete WAL
+       pre-state must recover the sibling and the exact completion receipt. *)
+    Unix.unlink primary;
+    let recovered = Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "WAL-only recovery after physical absence" in
+    Alcotest.(check (list string)) "sibling recovered" ["sibling"]
+      (post_ids (State.pending recovered));
+    Alcotest.(check bool) "WAL pre-state retains sibling scope" true
+      (match State.pending_selections recovered with
+       | [sibling] -> Option.fold ~none:false
+           ~some:(Keeper_execution_scope_id.equal scope) sibling.repetition_scope
+       | _ -> false);
+    Alcotest.(check int) "completion outbox recovered" 1
+      (List.length (State.transition_outbox recovered));
+    let replay = Persistence.terminalize_pending_turn_completed_result
+      ~base_path ~keeper_name ~applied_at:6.0 ~selection ()
+      |> require_ok "completion replay after WAL-only recovery" in
+    (match replay with
+     | Persistence.Transition_already_applied _ -> ()
+     | Persistence.Transition_applied _ | Persistence.Transition_committed_followup_failed _ ->
+         Alcotest.fail "completion replay lost its disposition evidence");
+    Alcotest.(check string) "unprojected recovery keeps WAL" wal_bytes (read wal))
+;;
+
 let test_durable_peek_ack_restart () =
   with_temp_dir "keeper-pending-v12" (fun base_path ->
     let keeper_name = "fresh-keeper" in
@@ -1388,23 +1497,195 @@ let test_unchanged_snapshot_is_not_reparsed () =
       "a write is visible through the cache"
       true
       (post_ids (State.pending third) <> post_ids (State.pending second));
-    (* And it is visible without paying for the parse: the writer holds the
-       state it wrote, so the read after a write is a hit rather than a
-       decode of bytes this process just produced. *)
+    (* A write has no read-bound file identity. The first read decodes it,
+       and subsequent unchanged reads may reuse that observed snapshot. *)
     Alcotest.(check int)
-      "the read after a write is a hit"
-      (hits_before + 1)
+      "the first read after a write decodes"
+      hits_before
       (Persistence.For_testing.snapshot_cache_hits ());
     Alcotest.(check int)
       "and it was one read"
       (reads_before + 1)
-      (Persistence.For_testing.snapshot_cache_reads ()))
+      (Persistence.For_testing.snapshot_cache_reads ());
+    let fourth = read () in
+    Alcotest.(check int) "the next unchanged read hits"
+      (hits_before + 1) (Persistence.For_testing.snapshot_cache_hits ());
+    Alcotest.(check (list string)) "cached state matches the decoded write"
+      (post_ids (State.pending third)) (post_ids (State.pending fourth)))
 ;;
+
+module Scope_id = Keeper_execution_scope_id
+
+let scope_id name =
+  Keeper_chat_operation.Operation_id.of_string name
+  |> require_ok "operation ID" |> Scope_id.direct_operation
+
+let bind_scope state selections scope =
+  State.bind_pending_repetition_scope ~selections ~scope state
+  |> Result.map_error State.scope_binding_error_to_string
+  |> require_ok "bind scope"
+
+let check_scope label expected (selection : State.pending_selection) =
+  Alcotest.(check bool) label true
+    (Option.fold ~none:false ~some:(Scope_id.equal expected) selection.repetition_scope)
+
+let expect_binding_error label = function
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail label
+
+let test_scope_batch_atomic_and_idempotent () =
+  let original = State.with_pending
+    (queue [stimulus "a" 1.; stimulus "b" 2.; stimulus "c" 3.]) State.empty in
+  let entries = State.pending_selections original in
+  let a, b, c = match entries with [a; b; c] -> a,b,c | _ -> assert false in
+  let scope = scope_id "batch-a" in
+  let bound, selected = bind_scope original [b;a] scope in
+  Alcotest.(check (list string)) "caller order" ["b";"a"]
+    (List.map (fun (s : State.pending_selection) -> s.source.post_id) selected);
+  List.iter (check_scope "batch binding" scope) selected;
+  Alcotest.(check (list string)) "queue order unchanged" ["a";"b";"c"]
+    (post_ids (State.pending bound));
+  State.validate_pending_selection ~selection:c bound |> require_ok "unrelated exact authority";
+  expect_binding_error "pre-binding selector accepted"
+    (State.validate_pending_selection ~selection:a bound);
+  let repeated, _ = bind_scope bound selected scope in
+  Alcotest.(check bool) "replay is physical no-op" true (repeated == bound);
+  expect_binding_error "empty batch accepted"
+    (State.bind_pending_repetition_scope ~selections:[] ~scope bound);
+  expect_binding_error "duplicate batch accepted"
+    (State.bind_pending_repetition_scope ~selections:[c;c] ~scope bound);
+  expect_binding_error "stale batch accepted"
+    (State.bind_pending_repetition_scope ~selections:[c;a] ~scope bound);
+  expect_binding_error "conflict after unbound member accepted"
+    (State.bind_pending_repetition_scope ~selections:(c::selected)
+       ~scope:(scope_id "other-batch") bound);
+  Alcotest.(check bool) "failed batch did not bind unrelated source" true
+    ((List.nth (State.pending_selections bound) 2).repetition_scope = None)
+
+let test_scope_preserved_by_scheduling_not_reincarnation () =
+  let scope = scope_id "scheduling" in
+  let original = State.with_pending
+    (queue [stimulus "a" 1.; stimulus "b" 2.]) State.empty in
+  let bound, _ = bind_scope original (State.pending_selections original) scope in
+  let changed, _ = State.reprioritize_pending ~selection:(select bound)
+    ~urgency:Queue.Immediate bound |> require_ok "reprioritize" in
+  List.iter (check_scope "priority preserves binding" scope) (State.pending_selections changed);
+  let deferred, _ = State.defer_pending ~selection:(select changed) changed
+    |> require_ok "defer" in
+  List.iter (check_scope "defer preserves binding" scope) (State.pending_selections deferred);
+  let retained, (selected, _) = State.note_checkpoint_retention
+    ~selection:(select deferred) deferred |> require_ok "retention" in
+  check_scope "retention preserves binding" scope selected;
+  let removed = State.ack_pending ~selection:selected retained |> require_ok "ack" in
+  let reinserted = State.with_pending (Queue.enqueue (State.pending removed) selected.source) removed in
+  let fresh = State.pending_selections reinserted
+    |> List.find (fun (s : State.pending_selection) -> s.source.post_id = selected.source.post_id) in
+  Alcotest.(check bool) "new source does not inherit removed binding" true
+    (fresh.repetition_scope = None);
+  State.pending_selections removed |> List.iter (check_scope "sibling retains binding" scope)
+
+let test_scope_codec_strict_optional_binding () =
+  let state = State.with_pending (queue [stimulus "a" 1.]) State.empty in
+  let raw = State.to_yojson state in
+  let entry_fields = match Yojson.Safe.Util.member "pending" raw with
+    | `List [`Assoc fields] -> fields | _ -> Alcotest.fail "pending codec shape" in
+  Alcotest.(check bool) "unbound field omitted" false (List.mem_assoc "repetition_scope" entry_fields);
+  State.of_yojson raw |> require_ok "unbound roundtrip" |> ignore;
+  let scope = scope_id "codec" in
+  let bound, _ = bind_scope state (State.pending_selections state) scope in
+  State.of_yojson (State.to_yojson bound) |> require_ok "bound roundtrip"
+    |> State.pending_selections |> List.iter (check_scope "binding roundtrip" scope);
+  let replace_pending fields = match raw with
+    | `Assoc outer -> `Assoc (("pending", `List [`Assoc fields]) :: List.remove_assoc "pending" outer)
+    | _ -> assert false in
+  List.iter (fun bad -> expect_binding_error "malformed binding decoded"
+    (State.of_yojson (replace_pending (("repetition_scope", bad)::entry_fields))))
+    [`Null; `String "codec"; `Assoc ["kind", `String "autonomous_admission"; "id", `String "bad-uuid"]];
+  expect_binding_error "duplicate binding decoded"
+    (State.of_yojson (replace_pending
+      (("repetition_scope", Scope_id.to_json scope)::("repetition_scope", Scope_id.to_json scope)::entry_fields)))
+
+let test_scope_durable_reload_noop_and_conflict () =
+  with_temp_dir "keeper-repetition-scope-binding" (fun base_path ->
+    let keeper_name = "scope-binding" in
+    Persistence.update_result ~base_path ~keeper_name (fun _ ->
+      queue [stimulus "a" 1.; stimulus "b" 2.]) |> require_ok "seed";
+    let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
+    let initial = read () in
+    let scope = scope_id "durable-batch" in
+    let committed = ref 0 in
+    let bind selections scope = Persistence.bind_pending_repetition_scope_result
+      ~after_commit:(fun _ -> incr committed) ~base_path ~keeper_name ~selections ~scope () in
+    bind (State.pending_selections initial) scope |> require_ok "durable bind" |> ignore;
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let reloaded = read () in
+    List.iter (check_scope "cold reload binding" scope) (State.pending_selections reloaded);
+    Alcotest.(check int64) "one committed revision" (Int64.succ (State.revision initial)) (State.revision reloaded);
+    let primary = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      Persistence.snapshot_filename in
+    let bytes () = In_channel.with_open_bin primary In_channel.input_all in
+    let before = bytes () in
+    bind (State.pending_selections reloaded) scope |> require_ok "same-scope replay" |> ignore;
+    expect_binding_error "conflicting durable binding accepted"
+      (bind (State.pending_selections reloaded) (scope_id "conflicting"));
+    expect_binding_error "stale durable binding accepted" (bind (State.pending_selections initial) scope);
+    Alcotest.(check string) "no-op and errors preserve bytes" before (bytes ());
+    Alcotest.(check int) "callback only for committed binding" 1 !committed;
+    Alcotest.(check int64) "no phantom revision" (State.revision reloaded) (State.revision (read ())))
+
+let test_scope_uncertain_rename_requires_durability_confirmation () =
+  with_temp_dir "keeper-repetition-uncertain-rename" (fun base_path ->
+    let keeper_name = "uncertain-binding" in
+    Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [stimulus "a" 1.])
+      |> require_ok "seed";
+    let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
+    let initial = read () in
+    let scope = scope_id "uncertain" in
+    let bound, _ = bind_scope initial (State.pending_selections initial) scope in
+    let bound = State.with_revision (Int64.succ (State.revision initial)) bound in
+    let primary = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      Persistence.snapshot_filename in
+    let fail_after_rename path json =
+      match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file:(fun _ -> ())
+        ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "parent")))
+        path (Yojson.Safe.to_string json) with
+      | Error ({ stage = Fs_compat.After_rename; _ } as error) ->
+          Error (Fs_compat.atomic_replace_failure_to_string error)
+      | Error _ -> Alcotest.fail "fixture failed before rename"
+      | Ok () -> Alcotest.fail "fixture unexpectedly synced parent" in
+    expect_binding_error "uncertain write succeeded" (fail_after_rename primary (State.to_yojson bound));
+    Persistence.For_testing.reset_snapshot_cache_for_testing ();
+    let visible = read () in
+    let selections = State.pending_selections visible in
+    List.iter (check_scope "binding visible despite sync failure" scope) selections;
+    let confirmations = ref 0 in
+    expect_binding_error "strict no-op skipped failing durability confirmation"
+      (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
+        ~confirm_snapshot:(fun path json -> incr confirmations; fail_after_rename path json)
+        ~base_path ~keeper_name ~selections ~scope ());
+    Alcotest.(check int) "same binding retried the barrier" 1 !confirmations;
+    let notifications = ref 0 in
+    with_state_change_observer (fun () -> incr notifications) (fun () ->
+      Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
+        ~after_commit:(fun _ -> incr notifications) ~selections ~scope ()
+        |> require_ok "real strict durability confirmation" |> ignore);
+    Alcotest.(check int) "confirmation is not a logical mutation" 0 !notifications;
+    Alcotest.(check int64) "confirmation preserves committed revision"
+      (State.revision bound) (State.revision (read ())))
 
 let () =
   Alcotest.run
     "keeper pending queue current schema"
-    [ ( "state"
+    [ ( "scope binding"
+      , [ Alcotest.test_case "atomic batch and idempotent replay" `Quick test_scope_batch_atomic_and_idempotent
+        ; Alcotest.test_case "scheduling preserves; reincarnation clears" `Quick test_scope_preserved_by_scheduling_not_reincarnation
+        ; Alcotest.test_case "strict optional codec" `Quick test_scope_codec_strict_optional_binding
+        ; Alcotest.test_case "durable reload, no-op and conflict" `Quick test_scope_durable_reload_noop_and_conflict
+        ; Alcotest.test_case "uncertain rename retries durability" `Quick test_scope_uncertain_rename_requires_durability_confirmation ] )
+    ; ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
         ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
@@ -1461,6 +1742,12 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
+        ; Alcotest.test_case "undecodable primary retains WAL; absence recovers"
+            `Quick test_undecodable_primary_retains_wal_and_absence_recovers
+        ; Alcotest.test_case "dangling primary is not absence"
+            `Quick test_dangling_primary_is_not_absence
+        ; Alcotest.test_case "primary replacement cannot poison cache"
+            `Quick test_primary_replacement_cannot_poison_cache
         ; Alcotest.test_case
             "checkpoint retention spends the caller snapshot"
             `Quick

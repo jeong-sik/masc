@@ -175,6 +175,8 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
+# This fixture explicitly opts into a one-MiB request body limit.
+max-request-body-bytes = 1048576
 |}
   in
   let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in
@@ -300,6 +302,17 @@ let install_test_env env =
   Eio_context.set_net (Eio.Stdenv.net env);
   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env)
 
+(* [Memory_lane.submit] has four ways to not accept a unit and its .mli gives
+   each a different meaning -- Rejected_draining even names the call a later
+   lifecycle has to make first. Both fixture sites collapsed all four into one
+   sentence, so a failure said only that it was not Submitted. *)
+let memory_lane_outcome_name : Memory_lane.outcome -> string = function
+  | Memory_lane.Submitted -> "Submitted"
+  | Memory_lane.Coalesced -> "Coalesced"
+  | Memory_lane.Ran_inline -> "Ran_inline"
+  | Memory_lane.Dropped -> "Dropped"
+  | Memory_lane.Rejected_draining -> "Rejected_draining"
+
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   install_test_env env; fn ())
@@ -308,7 +321,7 @@ let base_observation : WO.world_observation =
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = 0
-  ; active_goals = []
+  ; active_goals = Ok []
   ; unclaimed_task_count = 0
   ; claimable_tasks = []
   ; held_task_skills = []
@@ -1070,11 +1083,13 @@ let test_direct_stop_resolves_done_after_librarian_drain_failure () =
                  Eio.Promise.await never)
           with
           | Memory_lane.Submitted -> ()
-          | Memory_lane.Coalesced
-          | Memory_lane.Ran_inline
-          | Memory_lane.Dropped
-          | Memory_lane.Rejected_draining ->
-            fail "failed Librarian receipt fixture was not submitted");
+          | ( Memory_lane.Coalesced
+            | Memory_lane.Ran_inline
+            | Memory_lane.Dropped
+            | Memory_lane.Rejected_draining ) as other ->
+            failf
+              "failed Librarian receipt fixture was not submitted: %s"
+              (memory_lane_outcome_name other));
          Eio.Promise.await started;
          Eio.Switch.fail librarian_sw Librarian_executor_cancel
        with
@@ -1491,6 +1506,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Owner_absent _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
@@ -1974,15 +1991,15 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let parsed : Turn_up_args.parsed_args =
         { name = live_name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
         ; remote_endpoint_opt = None
+        ; microvm_backend_patch = None
         ; remote_endpoint_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
@@ -2237,15 +2254,15 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
         ; remote_endpoint_opt = None
+        ; microvm_backend_patch = None
         ; remote_endpoint_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
@@ -2355,7 +2372,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let clock = Eio.Stdenv.clock env in
       let meta =
         { (make_meta name) with
-          proactive = { enabled = false }
+          activation_mode = Masc.Keeper_activation_mode.On_demand
         }
       in
       create_owner_meta_exn config meta;
@@ -2371,13 +2388,15 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               (publication_recovery_registry env root_sw config)
         }
       in
-      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      (* Keep the original lane idle through the bounded cancellation scenario.
+         [proactive.enabled = false] alone still permits its initial autonomous
+         turn; an elapsed sleep does not prove that turn has released its slot. *)
+      (match Masc.Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx meta with
        | Masc.Keeper_keepalive.Keepalive_started _ -> ()
        | outcome ->
          failf
            "cancelled-update fixture failed to start: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      Eio.Time.sleep clock 0.05;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let release_librarian, resolve_release_librarian = Eio.Promise.create () in
       (match
@@ -2389,12 +2408,17 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
               Eio.Promise.await release_librarian)
        with
        | Memory_lane.Submitted -> ()
-       | Memory_lane.Coalesced
-       | Memory_lane.Ran_inline
-       | Memory_lane.Dropped
-       | Memory_lane.Rejected_draining ->
-         fail "cancelled-update Librarian fixture was not submitted");
+       | ( Memory_lane.Coalesced
+         | Memory_lane.Ran_inline
+         | Memory_lane.Dropped
+         | Memory_lane.Rejected_draining ) as other ->
+         failf
+           "cancelled-update Librarian fixture was not submitted: %s"
+           (memory_lane_outcome_name other));
       Eio.Promise.await librarian_started;
+      check bool "original lane has no admitted turn before the swap" true
+        (Option.is_none
+           (owner_turn_in_flight_exn ~base_path:config.base_path ~keeper_name:name));
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -2403,15 +2427,15 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = Some Masc.Keeper_activation_mode.On_demand
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = Some false
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
         ; remote_endpoint_opt = None
+        ; microvm_backend_patch = None
         ; remote_endpoint_present = false
         ; skill_names_opt = None
         ; skill_names_present = false
@@ -2424,6 +2448,19 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; instructions_opt = profile_defaults.instructions
         }
       in
+      let owner =
+        match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+        | Ok owner -> owner
+        | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+      in
+      let fence_reached, resolve_fence_reached = Eio.Promise.create () in
+      Masc.Keeper_owner.For_testing.observe_state_changes ~sw:root_sw (fun () ->
+        match Masc.Keeper_owner.shutdown_operation_id owner with
+        | None -> ()
+        | Some operation_id ->
+          (* Further state notifications cannot replace the first exact fence. *)
+          (match Eio.Promise.try_resolve resolve_fence_reached operation_id with
+           | true | false -> ()));
       let update_switch, resolve_update_switch = Eio.Promise.create () in
       let update_done, resolve_update_done = Eio.Promise.create () in
       Eio.Fiber.fork ~sw:root_sw (fun () ->
@@ -2431,36 +2468,43 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            ignore
-              (Turn_up_update.update_keeper
-                 ~expected_config_revision:(config_revision_exn config name)
-                 ctx
-                 parsed
-                 meta);
-            `Returned
+            let result =
+              Turn_up_update.update_keeper
+                ~expected_config_revision:(config_revision_exn config name)
+                ctx
+                parsed
+                meta
+            in
+            `Returned result
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled
         in
         Eio.Promise.resolve resolve_update_done disposition);
       let update_sw = Eio.Promise.await update_switch in
-      Eio.Time.with_timeout_exn clock 1.0 (fun () ->
-        let rec await_lane_swap_fence () =
-          match
-            owner_shutdown_operation_id_exn
-              ~base_path:config.base_path
-              ~keeper_name:name
-          with
-          | Some _ -> ()
-          | None ->
-            Eio.Fiber.yield ();
-            await_lane_swap_fence ()
-        in
-        await_lane_swap_fence ());
+      (* Await the actual Owner publication. The CI trace with the runnable yield loop
+         showed successive system-thread completions in roughly 50ms steps; the unchanged one-second test boundary then expired
+         before the writer finished. Promise waiting lets I/O drive progress. *)
+      let observed_fence = Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Promise.await fence_reached)
+          (fun () -> match Eio.Promise.await update_done with
+            | `Returned result ->
+              failf "update returned before its lane swap fence: %s"
+                (Tool_result.message result)
+            | `Cancelled -> fail "update was cancelled before the test cancelled it"))
+      in
+      check bool "the exact published fence is still held before cancellation" true
+        (match Masc.Keeper_owner.shutdown_operation_id owner with
+         | Some current ->
+           Masc.Keeper_shutdown_types.Operation_id.equal current observed_fence
+         | None -> false);
       Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
       Eio.Promise.resolve resolve_release_librarian ();
       (match Eio.Promise.await update_done with
        | `Cancelled -> ()
-       | `Returned -> fail "keeper update returned after its caller was cancelled");
+       | `Returned result ->
+         failf "keeper update returned after its caller was cancelled: %s"
+           (Tool_result.message result));
       check bool
         "cancelled update rolls back its temporary shutdown fence"
         true
@@ -2555,8 +2599,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
                      ~args:
                        (`Assoc
                           [ "name", `String target_name
-                          ; "proactive_enabled", `Bool false
-                          ; "autoboot_enabled", `Bool false
+                          ; "activation_mode", `String "manual"
                           ])))
             with
             | Eio.Time.Timeout -> None
@@ -3291,6 +3334,8 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Owner_absent _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
@@ -3534,6 +3579,8 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Owner_absent _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "not-started lane did not reach Joined_idle");
       (match Lane.peek_exit entry.lane with
        | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
@@ -3798,6 +3845,8 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
+       | Shutdown_types.Owner_absent _
+       | Shutdown_types.Operator_absence_acknowledged _
        | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
          begin_owner_shutdown_exn
@@ -4384,8 +4433,8 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
           Keeper_owner_registry.apply_meta
             ~base_path:config.base_path
             ~keeper_name:meta.name
-            (Masc.Keeper_owner_reducer.Set_autoboot
-               { enabled = true; updated_at = "newer-snapshot" })
+            (Masc.Keeper_owner_reducer.Set_activation_mode
+               { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "newer-snapshot" })
         with
         | Ok (Some _) -> ()
         | Ok None -> fail "concurrent metadata update removed its snapshot"
@@ -4400,7 +4449,7 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
         | Ok _ -> fail "stale cleanup authority deleted a newer metadata snapshot");
        match Keeper_meta_store.read_meta config meta.name with
        | Ok (Some current) ->
-         check bool "newer metadata survives stale cleanup" true current.autoboot_enabled
+         check bool "newer metadata survives stale cleanup" true (Masc.Keeper_activation_mode.restore_owner current.activation_mode)
        | Ok None -> fail "stale cleanup removed newer metadata"
        | Error detail -> fail detail)
 
@@ -4965,25 +5014,18 @@ let test_invalid_keeper_config_revision_name_creates_no_artifact () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 (* keeper_up field-only update must resolve TOML-declared sandbox settings.
-   The persisted meta never carries sandbox_profile/network_mode — the meta
-   decoder pins them to the Local defaults — so an update that omitted
-   sandbox_profile used to fall back to that pin, and the fail-closed
-   playground gate rejected every field-only update on docker/microvm
-   keepers (and a TOML "none" network mode would have read back inherit). *)
+   The persisted meta never carries sandbox_profile/network_mode, so an
+   update that omitted sandbox_profile used to fall back to the decoder's
+   defaults instead of the TOML (and a TOML "none" network mode would have
+   read back inherit). *)
 let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "update-toml-profile" in
-  let gate = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND" in
-  let prev_gate = Sys.getenv_opt gate in
   Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv gate (Option.value prev_gate ~default:"0");
-      cleanup_dir base_dir)
+    ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      (* Production posture: the local playground is off. *)
-      Unix.putenv gate "0";
       let config = Masc.Workspace.default_config base_dir in
       let (_ : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
@@ -5000,15 +5042,15 @@ let test_field_only_update_honors_toml_declared_profile () =
       let parsed : Turn_up_args.parsed_args =
         { name
         ; runtime_id_opt = None
-        ; autoboot_enabled_opt = None
+        ; activation_mode_opt = None
         ; mention_targets_opt = None
         ; max_context_override_opt = None
         ; max_context_override_present = false
-        ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; egress_allow_opt = None
         ; remote_endpoint_opt = None
+        ; microvm_backend_patch = None
         ; remote_endpoint_present = false
         ; skill_names_opt = None
         ; skill_names_present = false

@@ -1,0 +1,14 @@
+{
+  "start_utc": "2026-09-07T03:22:10Z",
+  "end_utc": "2026-09-07T03:32:26Z",
+  "binary_commit": "148a773ff845ed8240d1b350cf83b2c0b60b7a5d",
+  "records": 4391,
+  "representative_counts": {
+    "insufficient_tool_messages": 0,
+    "overlapping_checkpoint": 0,
+    "composition_evidence_failed": 0,
+    "claude_quota": 13,
+    "prose_id_warning": 0
+  },
+  "caveat": "Unequal window and concurrent operations; absence of a failure without exercised path is not recovery proof."
+}

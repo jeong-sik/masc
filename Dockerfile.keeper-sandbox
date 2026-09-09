@@ -1,7 +1,7 @@
 # MASC Keeper Sandbox
 # Runtime environment for keeper agents executing Bash/Read/Edit tools.
 #
-# Base: masc.opam pins `"ocaml" {= "5.5.0"}`. The previous
+# Base: masc.opam pins `"ocaml" {= "5.5.1"}`. The previous
 # `ubuntu:24.04` + `opam switch create ocaml-system` combination resolved to
 # the distribution compiler (4.x), so `opam install --deps-only` for this repo
 # could never succeed there. The upstream opam image ships the pinned compiler
@@ -154,6 +154,23 @@ RUN npm install --global --no-fund --no-audit pnpm@10.31.0 \
 RUN mkdir -p /home/keeper/playground && chmod 0777 /home/keeper /home/keeper/playground
 
 USER opam
+
+# masc.opam requires `ocaml = 5.5.1` (pinned in #34143 for the 5.5.1 security
+# and runtime-leak fixes). The `ocaml-5.5` base tag ships 5.5.0 and pins
+# `ocaml-base-compiler` to it, so `--deps-only` below cannot solve: with the
+# pin in place the only route to 5.5.1 is `ocaml-variants`, which wants
+# libunwind-dev and autoconf that are not installed, and the build stops with
+# "No solution found". Dropping the pin and moving the switch invariant keeps
+# the compiler on `ocaml-base-compiler`, so no depext is needed and the switch
+# keeps the name "5.5" that the OPAM_SWITCH_PREFIX paths below spell out.
+#
+# scripts/check-sandbox-ocaml-version.sh reads the version out of the line
+# below and fails CI when masc.opam asks for a different one.
+RUN opam update --yes \
+ && opam pin remove ocaml-base-compiler --yes \
+ && opam switch set-invariant ocaml-base-compiler.5.5.1 --yes \
+ && opam install ocaml-base-compiler.5.5.1 --yes \
+ && opam clean -a -c -s --logs
 
 # Only the package metadata is copied: the dependency set is what belongs in
 # the image, and copying sources would pin the image to one commit of the repo

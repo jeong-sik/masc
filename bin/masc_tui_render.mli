@@ -72,6 +72,15 @@ val acting_pane_drawn_cols : unit -> int
 val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
 
 val acting_pane_scroll_limit : unit -> int
+
+val chat_row_action_at : row:int -> Masc_tui_message_layout.row_action
+(** What a press on this terminal row opens in the chat history the last frame
+    drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
+
+    Absolute terminal rows: the two-pane split places the chat beside the
+    roster rather than below it, so a line keeps the vertical position its
+    buffer gave it. Answers {!Action_none} until a frame has drawn a history,
+    so a press cannot be served by a row that is no longer on screen. *)
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
 val finish_surface :
@@ -118,6 +127,7 @@ type visible_timeline_memo = {
   vtm_messages : Masc_tui_types.msg_entry list;
   vtm_memory : Masc_tui_types.memory_visibility;
   vtm_reasoning : Masc_tui_types.reasoning_visibility;
+  vtm_tools : Masc_tui_types.tool_visibility;
   vtm_timeline : (Masc_tui_types.msg_entry * float option) list;
 }
 type layout_entries_memo = {
@@ -189,7 +199,24 @@ val help_viewport : Masc_tui_types.state -> int * int
 val agenda_viewport : Masc_tui_types.state -> int * int
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 val answering_viewport : Masc_tui_types.state -> int * int
+(** Pure projection for the visible Recent pane, or [None] when it will not
+    consume chunks. Dimensions are the raw terminal measurement. The loop
+    stores this result inside frame Build timing; rendering never stores it. *)
+val acting_pane_chunk_projection :
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
+  Masc_tui_acting.chunk_projection option
+
 val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_types.approval_row option
+
+val browser_lane_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int ->
+  Masc_tui_types.Browser_lane_view.t -> int
+
+val ask_question_scroll_limit : Masc_tui_types.state -> int
+val ask_question_page_size : Masc_tui_types.state -> int
+
+val runtime_config_status_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int

@@ -5,7 +5,13 @@ import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
-import { ATTACHMENT_INPUT_ACCEPT, collectAttachments } from './attachments'
+import {
+  ATTACHMENT_INPUT_ACCEPT,
+  MAX_ATTACHMENTS,
+  attachmentFromImageReference,
+  collectAttachments,
+  wholeImageUrl,
+} from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { buildChatContextScope, ChatContextScopeRow, ChatSpeakerHandle } from './message-context-scope'
@@ -21,7 +27,7 @@ import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
-import { memo } from 'preact/compat'
+import { createPortal, memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
@@ -625,6 +631,7 @@ export function formatAttachmentSize(bytes: number): string {
 }
 
 function isSafeAttachmentHref(attachment: KeeperConversationAttachment): boolean {
+  if (attachment.kind) return false
   if (attachment.type === 'image') return attachment.data.startsWith('data:image/')
   return (
     attachment.data.startsWith('data:text/')
@@ -633,10 +640,17 @@ function isSafeAttachmentHref(attachment: KeeperConversationAttachment): boolean
 }
 
 function isRenderableImageAttachment(attachment: KeeperConversationAttachment): boolean {
+  if (attachment.kind) return false
   return attachment.type === 'image' && attachment.data.startsWith('data:image/')
 }
 
 function attachmentMeta(attachment: KeeperConversationAttachment): string {
+  if (attachment.kind === 'url') {
+    return [attachment.mimeType, 'URL 참조 — provider가 내려받음'].filter(Boolean).join(' · ')
+  }
+  if (attachment.kind === 'file_id') {
+    return [attachment.mimeType, 'file_id 참조'].filter(Boolean).join(' · ')
+  }
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
@@ -976,7 +990,9 @@ function ChatPreviewModal({
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
-  return html`
+  // Keep the fixed overlay relative to the viewport, outside transcript row
+  // layout/paint containment and the transcript scroll clip.
+  return createPortal(html`
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick=${onClose}
@@ -1002,7 +1018,7 @@ function ChatPreviewModal({
         <div class="chat-preview-modal-body">${children}</div>
       </div>
     </div>
-  `
+  `, document.body)
 }
 
 function codeBlockText(htmlContent: string, source?: string): string {
@@ -2302,6 +2318,8 @@ function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecyc
         return { badge: '적용 불명', title: '작업 적용 여부를 확정할 수 없습니다', detail: '효과가 이미 발생했을 수 있어 자동 재실행하지 않습니다.', tone: 'var(--color-status-warning)' }
       case 'continuation_recorded':
         return { badge: '이어감', title: '승인 후 후속 작업을 이어갔습니다', detail: 'replay 결과를 받은 Keeper 턴이 완료되거나 안전하게 checkpoint되었습니다.', tone: 'var(--color-status-success)' }
+      case 'continuation_failed':
+        return { badge: '이어가기 실패', title: '승인 결과를 받은 턴이 실패했습니다', detail: '모델이 replay 결과를 받은 뒤 턴이 실패했습니다. 이 승인은 다시 전달하지 않습니다.', tone: 'var(--color-status-error)' }
     }
   })()
   return html`
@@ -2336,6 +2354,44 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
   const meta = attachmentMeta(attachment)
   const isImage = isRenderableImageAttachment(attachment)
   const multimodalKind = userInputMediaKindForAttachment(attachment)
+
+  // Reference card (#33728): no bytes to preview or download. A URL opens in
+  // a new tab; a file_id names provider-side storage this browser cannot reach.
+  if (attachment.kind === 'url' || attachment.kind === 'file_id') {
+    return html`
+      <div
+        class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+        data-chat-attachment-card=${attachment.id}
+        data-chat-multimodal-source="reference_attachment"
+        data-chat-multimodal-kind="image"
+        data-chat-multimodal-attachment-id=${attachment.id}
+        data-chat-multimodal-mime=${attachment.mimeType ?? ''}
+      >
+        <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-lg" aria-hidden="true">
+            ${attachment.kind === 'url' ? '🔗' : '⧉'}
+          </span>
+          <div class="min-w-0">
+            <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+            <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+          </div>
+          ${attachment.kind === 'url'
+            ? html`
+                <a
+                  href=${attachment.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="chat-block-artifact-btn shrink-0"
+                  aria-label="${attachment.name} 새 탭에서 열기"
+                >
+                  ↗
+                </a>
+              `
+            : null}
+        </div>
+      </div>
+    `
+  }
 
   return html`
     <div
@@ -2429,6 +2485,7 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
 function userInputMediaKindForAttachment(
   attachment: KeeperConversationAttachment,
 ): Exclude<KeeperUserInputBlock['type'], 'text'> {
+  if (attachment.kind === 'url' || attachment.kind === 'file_id') return 'image'
   if (attachment.type === 'image') return 'image'
   if (attachment.mimeType.startsWith('audio/')) return 'audio'
   return 'document'
@@ -4555,7 +4612,7 @@ export function ChatTranscript({
   const scrollToBottom = () => {
     const el = scrollerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    el.scrollTop = 0
     pinnedRef.current = true
     setUnread(false)
     onSeenBottomRef.current?.()
@@ -4564,7 +4621,9 @@ export function ChatTranscript({
   const handleScroll = () => {
     const el = scrollerRef.current
     if (!el) return
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    // The reversed scroll container has one chronological content child:
+    // zero is the bottom, and history scrolls into negative coordinates.
+    const distance = -el.scrollTop
     const pinned = distance <= STICK_TO_BOTTOM_THRESHOLD_PX
     pinnedRef.current = pinned
     if (pinned) {
@@ -4577,9 +4636,9 @@ export function ChatTranscript({
     const el = scrollerRef.current
     if (!el) return
     if (pinnedRef.current) {
-      const snap = () => { el.scrollTop = el.scrollHeight }
-      snap()
-      requestAnimationFrame(snap)
+      // Zero stays the bottom as deferred rows acquire their measured height.
+      // No forced layout read or uncancelled next-frame correction is needed.
+      el.scrollTop = 0
       // Bottom-pinned with new content arriving means the operator is watching
       // it live — advance the cursor so the divider does not resurrect it.
       onSeenBottomRef.current?.()
@@ -4609,7 +4668,7 @@ export function ChatTranscript({
   return html`
     <div class=${`relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
       <div
-        class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
+        class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col-reverse overflow-y-auto ${
           isPrimary
             ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
             : variant === 'messenger'
@@ -4621,6 +4680,7 @@ export function ChatTranscript({
         ref=${scrollerRef}
         onScroll=${handleScroll}
       >
+        <div class="chat-transcript-content flex grow shrink-0 flex-col" style=${{ gap: 'inherit' }}>
         ${entries.length === 0
           ? html`
               <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
@@ -4642,6 +4702,7 @@ export function ChatTranscript({
               expandAutonomousRuns,
               action,
             })}
+        </div>
       </div>
       ${unread
         ? html`
@@ -4665,6 +4726,9 @@ export const STREAM_STALL_THRESHOLD_S = 15
 export const CHAT_COMPOSER_DEFAULT_KEEPER_LABEL = 'keeper'
 export const CHAT_COMPOSER_COMMAND_HEADER_SUFFIX = '명령'
 export const CHAT_COMPOSER_DROP_PLACEHOLDER = '여기에 놓아 첨부…'
+/** Paste-time guard for URL→reference conversion: only a whole-token URL that
+ *  names an image file is intercepted. Any other pasted URL stays text. */
+export const PASTED_IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:[?#]|$)/i
 
 export function AttachDraftChip({
   attachment,
@@ -4673,6 +4737,31 @@ export function AttachDraftChip({
   attachment: KeeperConversationAttachment
   onRemove: () => void
 }) {
+  // Reference chips (#33728) carry no bytes to thumbnail or size; the label
+  // states who fetches them so "URL 참조" is not mistaken for an upload.
+  if (attachment.kind === 'url' || attachment.kind === 'file_id') {
+    const meta = attachment.kind === 'url' ? 'URL 참조 — provider가 내려받음' : 'file_id 참조'
+    return html`
+      <div class="cdraft att" data-chat-attachment-draft=${attachment.id}>
+        <div class="cdraft-thumb">
+          <span class="cdraft-glyph">${attachment.kind === 'url' ? '🔗' : '⧉'}</span>
+        </div>
+        <div class="cdraft-meta">
+          <span class="cdraft-name mono">${attachment.name}</span>
+          <span class="cdraft-sub mono">${meta}</span>
+        </div>
+        <button
+          type="button"
+          class="cdraft-x"
+          title="첨부 제거"
+          aria-label="${attachment.name} 첨부 제거"
+          onClick=${onRemove}
+        >
+          ✕
+        </button>
+      </div>
+    `
+  }
   const meta = [attachment.dims, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
   return html`
     <div class="cdraft att" data-chat-attachment-draft=${attachment.id}>
@@ -4759,6 +4848,10 @@ export function ChatComposer({
   const [elapsed, setElapsed] = useState(0)
   const [voiceElapsed, setVoiceElapsed] = useState(0)
   const [focus, setFocus] = useState(false)
+  // Inline image-reference entry (#33728): a URL or Files-API id the provider
+  // resolves. Opened from the 🔗 tool; Enter adds the chip, Escape closes.
+  const [refInputOpen, setRefInputOpen] = useState(false)
+  const [refDraft, setRefDraft] = useState('')
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
@@ -4895,6 +4988,21 @@ export function ChatComposer({
     }
   }
 
+  const addImageReference = (raw: string) => {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      showToast(`첨부는 최대 ${MAX_ATTACHMENTS}개까지입니다.`, 'error')
+      return
+    }
+    const result = attachmentFromImageReference(raw)
+    if ('error' in result) {
+      showToast(result.error, 'error')
+      return
+    }
+    setAttachments((prev) =>
+      prev.some((existing) => existing.id === result.attachment.id) ? prev : [...prev, result.attachment],
+    )
+  }
+
   const handlePaste = (event: ClipboardEvent) => {
     const items = event.clipboardData?.items
     if (!items) return
@@ -4910,6 +5018,16 @@ export function ChatComposer({
       const dt = new DataTransfer()
       for (const f of imageFiles) dt.items.add(f)
       void ingestFiles(dt.files)
+      return
+    }
+    // No image bytes: a bare image-extension URL becomes a URL-reference chip
+    // instead of text (#33728). Anything else — URLs inside prose included —
+    // pastes as text.
+    const text = event.clipboardData?.getData('text') ?? ''
+    const url = wholeImageUrl(text)
+    if (url && PASTED_IMAGE_URL_RE.test(url)) {
+      event.preventDefault()
+      addImageReference(url)
     }
   }
 
@@ -4918,6 +5036,27 @@ export function ChatComposer({
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
+      // A reference chip sends its carrier form (#33728): the display block
+      // carries [ref] so a queued resend rebuilds the same reference.
+      if (att.kind === 'url' || att.kind === 'file_id') {
+        blocks.push({
+          t: 'attach',
+          id: att.id,
+          kind: 'image',
+          name: att.name,
+          src: att.kind === 'url' ? att.url : undefined,
+          ph: att.kind === 'file_id' ? att.name : undefined,
+          via: att.kind === 'url' ? 'URL 참조' : 'file_id 참조',
+          mimeType: att.mimeType,
+          ref: att.kind === 'url' ? { kind: 'url', url: att.url } : { kind: 'file_id', fileId: att.fileId },
+        } as ChatBlock)
+        userBlocks.push(
+          att.kind === 'url'
+            ? { type: 'image', url: att.url, ...(att.mimeType ? { mimeType: att.mimeType } : {}) }
+            : { type: 'image', fileId: att.fileId, ...(att.mimeType ? { mimeType: att.mimeType } : {}) },
+        )
+        continue
+      }
       blocks.push({
         t: 'attach',
         id: att.id,
@@ -5047,6 +5186,70 @@ export function ChatComposer({
                 <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
+        ${refInputOpen
+          ? html`
+              <div
+                class="composer-refrow flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-2"
+                data-testid="composer-ref-input"
+              >
+                <span class="text-xs text-[var(--color-fg-secondary)]">🔗 이미지 참조</span>
+                <input
+                  class="composer-refinput mono flex-1 bg-transparent text-sm outline-none"
+                  type="text"
+                  placeholder="이미지 URL 또는 file_id — provider가 직접 받아옵니다"
+                  aria-label="이미지 참조 입력"
+                  value=${refDraft}
+                  disabled=${disabled}
+                  onInput=${(event: Event) => setRefDraft((event.target as HTMLInputElement).value)}
+                  onKeyDown=${(event: KeyboardEvent) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const value = refDraft.trim()
+                      if (value) {
+                        addImageReference(value)
+                        setRefDraft('')
+                        setRefInputOpen(false)
+                      }
+                    }
+                    if (event.key === 'Escape') {
+                      setRefInputOpen(false)
+                      setRefDraft('')
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  class="ctool"
+                  title="참조 추가"
+                  aria-label="참조 추가"
+                  disabled=${disabled || refDraft.trim() === ''}
+                  onClick=${() => {
+                    const value = refDraft.trim()
+                    if (value) {
+                      addImageReference(value)
+                      setRefDraft('')
+                      setRefInputOpen(false)
+                    }
+                  }}
+                >
+                  추가
+                </button>
+                <button
+                  type="button"
+                  class="ctool"
+                  title="참조 입력 닫기"
+                  aria-label="참조 입력 닫기"
+                  disabled=${disabled}
+                  onClick=${() => {
+                    setRefInputOpen(false)
+                    setRefDraft('')
+                  }}
+                >
+                  취소
+                </button>
+              </div>
+            `
+          : null}
         ${attachments.length > 0 || voiceDraft
           ? html`
               <div class="composer-tray">
@@ -5178,6 +5381,19 @@ export function ChatComposer({
                     onClick=${() => fileInputRef.current?.click()}
                   >
                     ⊕
+                  </button>
+                  <button
+                    type="button"
+                    class="ctool"
+                    title="이미지 참조 첨부 (URL · file_id)"
+                    aria-label="이미지 참조 첨부"
+                    disabled=${disabled}
+                    onClick=${() => {
+                      setRefInputOpen((open) => !open)
+                      setRefDraft('')
+                    }}
+                  >
+                    🔗
                   </button>
                   ${voice.supported ? html`
                     <button

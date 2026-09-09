@@ -811,6 +811,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          ; chat_events =
              [ Agent_core_thinking_delta { index; delta = redact_text text } ]
          })
+  | ContentBlockDelta { index; delta = RedactedThinkingSnapshot _ } ->
+      (match
+         reject_non_input_tool_delta ~stream_scope ~index
+           ~delta_kind:"redacted-thinking-snapshot" bridge_state
+       with
+       | Some rejected -> rejected
+       | None ->
+         (* Canonical history owns the opaque carrier; there is no new visible
+            text or signature to publish on the chat surface. *)
+         { bridge_state = occupy_non_tool_index bridge_state index
+         ; chat_events = []
+         })
   | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index

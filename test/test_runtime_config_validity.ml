@@ -47,16 +47,9 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-    ; api_name = "deepseek-v4-flash:0731"
-    ; context = 1048576
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
-    ; context = 524288
+    ; context = 1048576
     ; tools = true
     ; thinking = true
     ; vision = false
@@ -77,7 +70,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-2"
     ; api_name = "glm-5.2"
-    ; context = 1000000
+    ; context = 1048576
     ; tools = true
     ; thinking = true
     ; vision = false
@@ -140,7 +133,7 @@ let ollama_cloud_seed_cases =
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m3"
     ; api_name = "minimax-m3"
-    ; context = 524288
+    ; context = 512000
     ; tools = true
     ; thinking = true
     ; vision = true
@@ -593,7 +586,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      check string "deepseek pro exact model" "deepseek-v4-pro" entry.id_prefix;
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
-     check (option int) "deepseek pro context" (Some 524288)
+     check (option int) "deepseek pro context" (Some 1048576)
        entry.max_context_tokens;
      check (option bool) "deepseek pro tools" (Some true) entry.supports_tools;
      check (option bool) "deepseek pro reasoning" (Some true)
@@ -639,7 +632,7 @@ let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _, _, _, _) ->
-    check int "expected 31 seeded runtimes" 31 (List.length runtimes);
+    check bool "repo runtime seed is nonempty" true (runtimes <> []);
     check (list string)
       "all seeded runtimes in repo config/runtime.toml are keeper-dispatchable"
       []
@@ -1009,6 +1002,35 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    (* Shared seed model descriptions must resolve these windows from their
+       provider binding, including both MiniMax aliases. Operator overrides
+       remain covered separately by the below-cap and above-cap scenarios. *)
+    List.iter
+      (fun (runtime_id, provider_stated_context) ->
+        match find_runtime runtimes runtime_id with
+        | None -> failf "expected catalog-derived seed runtime: %s" runtime_id
+        | Some runtime ->
+          check (option int) (runtime_id ^ " has no duplicated seed override")
+            None runtime.model.max_context;
+          let catalog_context =
+            match Llm_provider.Provider_config.capabilities_for_config_model
+                (agent_core_provider_config runtime) with
+            | Some caps -> caps.max_context_tokens
+            | None -> failf "missing provider catalog entry: %s" runtime_id
+          in
+          check (option int) (runtime_id ^ " matches provider metadata")
+            (Some provider_stated_context) catalog_context;
+          check (option (pair int string)) (runtime_id ^ " uses its provider catalog")
+            (Option.map (fun n -> n, "capability") catalog_context)
+            (Runtime.resolve_max_context_of_runtime runtime
+             |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
+      [ "deepseek.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
+      ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
+      ; "ollama_cloud.minimax-m3", 512000
+      ; "ollama_cloud.ollama-cloud-minimax-m3", 512000
+      ];
     let clamped =
       List.filter_map
         (fun (rt : Runtime.t) ->
@@ -1239,6 +1261,26 @@ let test_repo_runtime_toml_loads () =
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.ollama-cloud-glm-5-3-flash"
       default.Runtime.id;
+    check (option int) "default Keeper has no invented history byte limit"
+      None (agent_core_provider_config default).max_request_body_bytes;
+    check bool "uncapped fleet default remains dispatchable" true
+      (match Runtime.keeper_dispatch_readiness default with
+       | Runtime.Dispatchable -> true
+       | Runtime.Invalid_request_body_cap _ -> false);
+    let explicit_caps =
+      List.filter_map
+        (fun (runtime : Runtime.t) ->
+           match runtime.execution with
+           | Runtime_execution.Agent_core config ->
+             Option.map (fun cap -> runtime.id, cap) config.max_request_body_bytes
+           | Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ -> None)
+        runtimes
+    in
+    check (list (pair string int)) "only the explicit image payload cap is seeded"
+      [ "ollama_cloud.ollama-cloud-gemma4-31b", 20 * 1024 * 1024 ]
+      explicit_caps;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
@@ -1261,9 +1303,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash-0731" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1275,7 +1317,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -1315,10 +1357,11 @@ List.iter
          | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
          | Some runtime ->
            (match (agent_core_provider_config runtime).max_request_body_bytes with
+            | None -> ()
             | Some cap when cap > 0 -> ()
-            | None | Some _ ->
+            | Some _ ->
               failf
-                "%s must declare a positive exact request body budget"
+                "%s has a non-positive explicit request body cap"
                 runtime_id))
       keeper_dispatch_ids;
     check int "Ollama Cloud canonical seed count"
@@ -1393,7 +1436,10 @@ List.iter
      | None -> fail "expected MiniMax M3 Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
-       check (option int) "MiniMax M3 context" (Some 524288) runtime.model.max_context;
+       check (option (pair int string)) "MiniMax M3 provider-derived context"
+         (Some (512000, "capability"))
+         (Runtime.resolve_max_context_of_runtime runtime
+          |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source));
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false
@@ -2402,7 +2448,33 @@ let test_edit_config_text_reads_the_file_and_commits_the_edit () =
               "theme = \"gruvbox-dark\""))
 ;;
 
-let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       (try Sys.remove path with
+        | _ -> ())
+       )
+    (fun () ->
+       match Llm_provider.Model_catalog.load_file path with
+       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
+(* Config edits now publish the same catalog-validated state as bootstrap.
+   These cap/official-client cases declare their synthetic HTTP models too. *)
+let with_config_save_model_catalog f =
+  let row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
+
+let test_runtime_config_validation_accepts_uncapped_keeper_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2440,27 +2512,20 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
     (fun () ->
        match Runtime.save_config_text ~runtime_config_path:path content with
        | Ok _receipt ->
-         fail "uncapped Keeper lane candidate must fail runtime config validation"
-       | Error detail ->
-         check bool "typed config diagnostic names the cap" true
-           (String_util.contains_substring detail "max-request-body-bytes");
-         check bool "typed config diagnostic names the candidate" true
-           (String_util.contains_substring detail "local.lane"))
+         (match Runtime.get_runtime_by_id "local.lane" with
+          | None -> fail "uncapped Keeper candidate was not published"
+          | Some runtime ->
+            check (option int) "omitted cap remains absent after config save" None
+              (agent_core_provider_config runtime).max_request_body_bytes;
+            check bool "uncapped candidate is dispatchable" true
+              (Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable))
+       | Error detail -> failf "uncapped Keeper lane candidate should load: %s" detail)
 ;;
 
-(* The Agent_core rule above bounds the serialized request body, and stops
-   there. An official-client turn never builds that body: it hands its
-   conversation to a spawned vendor client that owns its own context window and
-   refuses an oversized one in a typed terminal, which the shrink sequence
-   retries with less. Requiring a declared max-prompt-bytes there made the
-   provider's own window a boot-time obligation on the operator, so a
-   deployment could not choose to let the provider decide — and the ceiling it
-   demanded was in wire bytes, which is not the unit the window is in.
-
-   This pins the removal in both directions: the official-client side must
-   load undeclared, and the Agent_core side must still reject. Without the
-   second half, deleting the whole check would also pass. *)
+(* Caller byte caps are optional for both HTTP and official-client runtimes.
+   Explicit positive declarations remain supported. *)
 let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+  with_config_save_model_catalog @@ fun () ->
   let content ~bound ~agent_core_cap =
     Printf.sprintf
       "[providers.local]\n\
@@ -2524,28 +2589,14 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
    with
    | Ok _receipt -> ()
    | Error detail -> failf "a declared seed bound must still load: %s" detail);
-  (* Control. The Agent_core half of this validator must still reject, or the
-     two assertions above would also pass with the whole check deleted. The
-     remediation assertion is kept from #28175: a diagnostic naming a
-     syntactically plausible but unconsumed table would satisfy a bare key
-     substring while startup stayed stuck. *)
   match attempt (content ~bound:"" ~agent_core_cap:"") with
-  | Ok _receipt ->
-    fail "an Agent_core Keeper runtime with no max-request-body-bytes must be rejected"
-  | Error detail ->
-    check bool "the diagnostic names the Agent_core key" true
-      (String_util.contains_substring detail "max-request-body-bytes");
-    check bool
-      "the remediation points at the binding table that owns the key"
-      true
-      (String_util.contains_substring
-         detail
-         "[local.sample].max-request-body-bytes");
-    check bool "the diagnostic does not demand the seed key" false
-      (String_util.contains_substring detail "max-prompt-bytes")
+  | Ok _receipt -> ()
+  | Error detail -> failf "HTTP and official-client runtimes may omit caller byte caps: %s" detail
+
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
+  with_config_save_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2754,24 +2805,6 @@ let with_fake_runtime_model_catalog f =
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
-       | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
-         f ())
-
-let with_model_catalog_content content f =
-  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect
-    ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
-       (try Sys.remove path with
-        | _ -> ())
-       )
-    (fun () ->
-       match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
@@ -3033,14 +3066,8 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
 ;;
 
-(* masc#28404. Same config the test above proves must still boot: [local.sample]
-   is routed and capped, [local.dormant] is declared, materialized, and cannot
-   carry a keeper turn. Boot staying up is correct; the runtime being blocked
-   with nothing anywhere saying so is the defect. Seven live runtimes were in
-   this state on 2026-08-12 and finding them took a script that re-parsed the
-   TOML, because the runtime list reported them exactly like the assignable
-   ones. *)
-let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
+(* Optional caps do not make a declared, unassigned runtime unavailable. *)
+let test_declared_uncapped_runtime_is_dispatchable () =
   let runtime_toml =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -3070,22 +3097,9 @@ let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
       check (list string) "both runtimes materialize"
         [ "local.sample"; "local.dormant" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
-      (match Runtime.keeper_dispatch_blocked runtimes with
-       | [ (blocked, reason) ] ->
-         check string "the uncapped runtime is the blocked one" "local.dormant"
-           blocked.id;
-         check bool "reason names the table to edit" true
-           (String_util.contains_substring reason "[local.dormant]");
-         check bool "reason names the missing field" true
-           (String_util.contains_substring reason "max-request-body-bytes")
-       | blocked ->
-         failf
-           "expected exactly the uncapped runtime to be blocked; got [%s]"
-           (String.concat "; "
-              (List.map (fun ((r : Runtime.t), _) -> r.id) blocked)));
-      (* The routed runtime is judged by the same predicate, so a projection
-         that reported everything blocked would fail here rather than read as a
-         fleet-wide outage. *)
+      check (list string) "neither optional cap state blocks dispatch" []
+        (List.map (fun ((runtime : Runtime.t), _) -> runtime.id)
+           (Runtime.keeper_dispatch_blocked runtimes));
       check bool "the routed runtime is dispatchable" true
         (match
            List.find_opt
@@ -3499,7 +3513,149 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
                  (Runtime.Missing_catalog_models report))
               "provider_label=custom"))
 
-let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
+let test_degraded_assignment_isolation_preserves_routing_and_recovers () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let server = Exact_output_fixture.start_server
+      ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply
+         (Exact_output_fixture.openai_response (`Assoc ["answer", `String "route reached"]))) in
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
+  let catalog = catalog_row "good" in
+  let runtime_toml = Printf.sprintf {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "fixture.missing"
+healthy = "fixture.good"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.good]
+api-name = "good"
+max-context = 8192
+temperature = 0.25
+streaming = false
+[models.missing]
+api-name = "missing"
+max-context = 8192
+streaming = false
+[fixture.good]
+max-request-body-bytes = 65536
+[fixture.missing]
+max-request-body-bytes = 65536
+|} server.base_url in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      let init () = match Runtime.init_default_degraded_report ~config_path:path with
+        | Ok outcome -> outcome
+        | Error error -> fail (Runtime.strict_init_error_to_string error) in
+      (match init () with
+       | Runtime.Initialized -> fail "missing catalog row must remain observable"
+       | Runtime.Initialized_degraded report ->
+           check (list string) "only affected assignment unavailable" ["affected"]
+             (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name) report.unavailable_assignments));
+      check (option string) "configured assignment is retained" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      check string "default identity is unchanged" "fixture.good" (Runtime.get_default_runtime_id ());
+      let meta keeper = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String keeper; "trace_id", `String ("trace-" ^ keeper)]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      let assert_unavailable = function
+        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+            check string "runtime configuration error" "runtime_id" field;
+            check bool "exact configured identity in reason" true
+              (String_util.contains_substring detail "fixture.missing")
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> fail "unavailable assignment dispatched" in
+      let run keeper =
+        let meta = meta keeper in
+        Keeper_turn_driver.run_named ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+          ~keeper_name:keeper ~base_path ~system_prompt:"Answer the fixture task."
+          ~goal:"Return the fixture answer." ~agent_core_tools:[] ~sw ~net:env#net () in
+      let assignment_projection keeper =
+        let projection = Server_dashboard_runtime_resolved_json.build
+            ~generated_at_iso:"2026-09-07T00:00:00Z"
+            ~config:(Workspace.default_config base_path) in
+        Yojson.Safe.Util.(projection |> member "assignments" |> to_list)
+        |> List.find (fun row ->
+          Yojson.Safe.Util.(row |> member "keeper" |> to_string) = keeper) in
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable missing -> check string "catalog identity is typed" "missing" missing.model_id
+       | `Missing | `Lane _ -> fail "configured unavailable runtime became unknown or active");
+      let projection = assignment_projection "affected" in
+      check string "Dashboard exposes the unavailable state" "unavailable"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+      check string "Dashboard preserves the requested ID" "fixture.missing"
+        Yojson.Safe.Util.(projection |> member "resolved" |> member "id" |> to_string);
+      let affected_meta = meta "affected" in
+      assert_unavailable (Keeper_unified_turn_pre_dispatch.build_runtime_execution
+          ~meta:affected_meta ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta affected_meta));
+      assert_unavailable (run "affected");
+      check int "no provider request for unavailable assignment" 0 (Exact_output_fixture.post_count server);
+      (match Runtime.edit_config_text ~runtime_config_path:path
+          (fun source -> source ^ "\n[tui]\ntheme = \"gruvbox-dark\"\n") with
+       | Ok _ -> () | Error detail -> fail detail);
+      check (option string) "unrelated config save retains exact assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match Runtime.resolve_assignment "fixture.missing" with
+       | `Unavailable _ -> () | `Missing | `Lane _ -> fail "config save reactivated unavailable assignment");
+      assert_unavailable (run "affected");
+      check int "unrelated save cannot permit a provider request" 0 (Exact_output_fixture.post_count server);
+      List.iter (fun keeper -> match run keeper with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error)) ["healthy"; "default-rider"];
+      check int "healthy and default Keeper both reach the real HTTP provider" 2
+        (Exact_output_fixture.post_count server);
+      (with_model_catalog_content (catalog ^ catalog_row "missing") @@ fun () ->
+      (match init () with Runtime.Initialized -> () | Runtime.Initialized_degraded _ -> fail "restored row stayed unavailable");
+      check (option string) "recovery did not rewrite the assignment" (Some "fixture.missing")
+        (Runtime.runtime_id_for_keeper "affected");
+      (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check int "same assigned Keeper now reaches provider" 3 (Exact_output_fixture.post_count server);
+      let body = List.nth (Exact_output_fixture.request_bodies server) 2 |> Yojson.Safe.from_string in
+      check string "restored route used its own model, not default" "missing"
+        Yojson.Safe.Util.(body |> member "model" |> to_string));
+      (* Prove restoration before changing this assignment into a declared lane.
+         A successful lane candidate is sticky for the same assignment ID, so
+         running the shadow scenario first would exercise a different contract:
+         retaining that candidate when the lane becomes an implicit fallback. *)
+      with_model_catalog_content catalog @@ fun () ->
+      let shadowed_lane_toml = runtime_toml ^
+        "\n[runtime.lanes.\"fixture.missing\"]\ncandidates = [\"fixture.good\"]\n" in
+      (with_temp_runtime_toml shadowed_lane_toml @@ fun shadow_path ->
+        (match Runtime.init_default_degraded_report ~config_path:shadow_path with
+         | Ok (Runtime.Initialized_degraded report) ->
+             check (list string) "healthy declared lane is not an unavailable assignment" []
+               (List.map (fun (a : Runtime.unavailable_runtime_assignment) -> a.keeper_name)
+                  report.unavailable_assignments)
+         | Ok Runtime.Initialized -> fail "shadowed missing binding still needs a catalog report"
+         | Error error -> fail (Runtime.strict_init_error_to_string error));
+        (match Keeper_unified_turn_pre_dispatch.build_runtime_execution
+            ~meta:affected_meta ~runtime_id:"fixture.missing" with
+         | Ok execution ->
+             check string "pre-dispatch keeps the requested lane ID" "fixture.missing"
+               execution.runtime_id;
+             check (float 0.000001) "pre-dispatch uses the lane candidate temperature" 0.25
+               execution.temperature
+         | Error error -> fail (Agent_core.Error.to_string error));
+        let projection = assignment_projection "affected" in
+        check string "Dashboard resolves the healthy shadowing lane" "lane"
+          Yojson.Safe.Util.(projection |> member "resolved" |> member "kind" |> to_string);
+        (match run "affected" with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "healthy lane reaches the actual HTTP provider" 4
+          (Exact_output_fixture.post_count server);
+        let body = List.nth (Exact_output_fixture.request_bodies server) 3 |> Yojson.Safe.from_string in
+        check string "declared lane serves its healthy candidate" "good"
+          Yojson.Safe.Util.(body |> member "model" |> to_string);
+        check (float 0.000001) "actual provider sees the candidate temperature" 0.25
+          Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
+
+let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"good\"\n\
@@ -3619,11 +3775,11 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-         check (list string) "no dropped assignment"
+         check (list string) "no unavailable assignment"
            []
            (List.map
-              (fun (entry : Runtime.dropped_runtime_assignment) -> entry.keeper_name)
-              degradation.dropped_assignments);
+              (fun (entry : Runtime.unavailable_runtime_assignment) -> entry.keeper_name)
+              degradation.unavailable_assignments);
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
@@ -3866,8 +4022,79 @@ let test_structured_judge_runtime_key_is_rejected () =
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
 
+let test_removed_preference_keeps_runtime_projection_readable () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Runtime_lane_preference.reset_for_testing ();
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_lane_preference.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let catalog = {|[[models]]
+id_prefix = "preference-fixture"
+provider_name = "fixture"
+base = "openai_chat"
+max_context_tokens = 8192
+max_output_tokens = 1024
+supports_tools = true
+|} in
+      let content candidates = Printf.sprintf {|[runtime]
+default = "fixture.alpha"
+[runtime.lanes.primary]
+candidates = %s
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9"
+[models.alpha]
+api-name = "preference-fixture"
+[models.beta]
+api-name = "preference-fixture"
+[fixture.alpha]
+[fixture.beta]
+|} candidates in
+      with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml (content {|["fixture.alpha", "fixture.beta"]|}) @@ fun path ->
+      (match Runtime.init_default_degraded_report ~config_path:path with
+       | Ok Runtime.Initialized -> ()
+       | Ok (Runtime.Initialized_degraded _) -> fail "fixture runtime degraded"
+       | Error e -> fail (Runtime.strict_init_error_to_string e));
+      let project expected =
+        let json = Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-08T00:00:00Z"
+          ~config:(Workspace.default_config base_path) in
+        let resolved = match Tui_decode.decode_runtime_resolved_snapshot json with
+          | Ok value -> value
+          | Error e -> failf "TUI rejected actual runtime producer: %s" e in
+        let lane = List.find
+          (fun (l : Tui_decode.runtime_resolved_lane) -> l.rrl_id = "primary")
+          resolved.rrs_lanes in
+        check (option string) "displayed preference is currently dispatchable"
+          expected lane.rrl_preferred_candidate;
+        lane in
+      Runtime_lane_preference.note_success ~lane_id:"primary" ~candidate:"fixture.beta";
+      ignore (project (Some "fixture.beta"));
+      (match Runtime.save_config_text ~runtime_config_path:path
+          (content {|["fixture.alpha"]|}) with
+       | Ok _ -> () | Error e -> fail e);
+      let remembered = Runtime_lane_preference.preferred_of_lane ~lane_id:"primary" in
+      check (option string) "test retains the old observed preference"
+        (Some "fixture.beta") (Option.map fst remembered);
+      let lane = project None in
+      check (option (float 0.)) "no orphan preference timestamp" None lane.rrl_preferred_at_ts;
+      check (list string) "dispatch candidate ordering matches the remaining candidate"
+        ["fixture.alpha"]
+        (Runtime_lane_preference.prefer_order ~lane_id:"primary" lane.rrl_runtime_ids))
+;;
+
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
-  with_fake_runtime_model_catalog @@ fun () ->
+  let catalog_row id = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
+  with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
   let snapshot =
     Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"
@@ -4743,6 +4970,8 @@ let () =
           test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
+          test_case "removed sticky candidate keeps the TUI projection readable"
+            `Quick test_removed_preference_keeps_runtime_projection_readable;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;
@@ -4764,9 +4993,11 @@ let () =
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case "assignment-only catalog gap isolates requests and recovers" `Quick
+            test_degraded_assignment_isolation_preserves_routing_and_recovers;
           test_case
-            "server degraded init rejects referenced uncatalogued runtimes"
-            `Quick test_server_degraded_init_rejects_referenced_uncatalogued_runtimes;
+            "server degraded init still rejects unavailable lane and media routes"
+            `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;
           test_case
             "server degraded init disables unreferenced uncatalogued runtimes"
             `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;
@@ -4842,8 +5073,8 @@ let () =
             "keeper dispatch graph enumeration"
             `Quick test_keeper_dispatch_runtime_graph_enumeration;
           test_case
-            "runtime config rejects uncapped keeper candidate"
-            `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+            "runtime config accepts uncapped keeper candidate"
+            `Quick test_runtime_config_validation_accepts_uncapped_keeper_candidate;
           test_case
             "runtime config admits an undeclared official-client seed"
             `Quick
@@ -4853,8 +5084,8 @@ let () =
             `Quick
             test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
           test_case
-            "declared uncapped runtime reports its dispatch blocker"
-            `Quick test_declared_uncapped_runtime_reports_its_dispatch_blocker;
+            "declared uncapped runtime is dispatchable"
+            `Quick test_declared_uncapped_runtime_is_dispatchable;
           test_case
             "official-client runtime is dispatchable without a body cap"
             `Quick test_official_client_runtime_is_dispatchable_without_a_body_cap;

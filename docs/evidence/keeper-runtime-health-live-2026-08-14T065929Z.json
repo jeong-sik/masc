@@ -54,11 +54,11 @@
       "read_error_count": 0
     },
     "earlier_backlog_sample_0648Z": {
-      "kidsnote_pending": 1,
-      "kidsnote_oldest_age_seconds": 1925.09,
+      "exampleorg_pending": 1,
+      "exampleorg_oldest_age_seconds": 1925.09,
       "sangsu_pending": 2,
       "sangsu_oldest_age_seconds": 2046.86,
-      "note": "kidsnote consumed its event between 06:48Z and this capture; sangsu backlog grew from 2 to 3 and its oldest event kept aging past the 600s stale threshold"
+      "note": "exampleorg consumed its event between 06:48Z and this capture; sangsu backlog grew from 2 to 3 and its oldest event kept aging past the 600s stale threshold"
     }
   },
   "browser": {

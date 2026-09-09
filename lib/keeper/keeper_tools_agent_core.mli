@@ -49,6 +49,9 @@ type attached_surface =
   ; history : Agent_core.Types.message list
         (** The conversation this turn continues, read to find which held
             tools it has already run. *)
+  ; load_receipts : Keeper_tool_load_receipts.restored
+        (** This turn's successful-load state, restored into the same Context
+            that the running agent checkpoints. *)
   }
 
 (** Whether this turn placed a listing tool on the Agent Core surface, and if

@@ -70,10 +70,6 @@ export const boardFlairs = signal<BoardFlair[]>([])
 export const boardFlairsLoading = signal(false)
 export const boardFlairsError = signal(false)
 
-// SubBoard options for post creation dropdown
-export const subBoardOptions = signal<Array<{ slug: string; name: string }>>([])
-export const subBoardOptionsLoading = signal(false)
-export const subBoardOptionsError = signal(false)
 let boardHearthsRequestId = 0
 
 // ── Signals: comments ──────────────────────────────────────────────
@@ -90,7 +86,6 @@ export const feedVisibleLimit = signal(PAGE_SIZE)
 // ── Selection / bulk delete ────────────────────────────────────────
 export const deletingPostId = signal<string | null>(null)
 export const selectedPostIds = signal<Set<string>>(new Set())
-export const bulkDeleting = signal(false)
 
 export async function refreshBoardHearths(): Promise<void> {
   const requestId = ++boardHearthsRequestId

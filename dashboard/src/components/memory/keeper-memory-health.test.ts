@@ -22,6 +22,7 @@ function makeEntry(
   return {
     keeper_id: 'alpha',
     revision: 7,
+    updated_at: 1_699_999_900,
     facts: 10,
     observed_facts: 8,
     derived_facts: 2,
@@ -68,7 +69,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v3',
+    schema: 'keeper.memory_os.current_health.v4',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 3,
     keepers,
@@ -268,6 +269,7 @@ describe('KeeperMemoryHealth', () => {
         derived_facts: 0,
         snapshot_bytes: 0,
         snapshot_present: false,
+        updated_at: null,
         librarian_failures: 4,
         alerts: [alert],
       })],
@@ -303,6 +305,7 @@ describe('KeeperMemoryHealth', () => {
         derived_facts: 0,
         snapshot_bytes: 0,
         snapshot_present: false,
+        updated_at: null,
       })],
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)

@@ -1,0 +1,9 @@
+{
+  "application": "Zen",
+  "version_from_installed_plist": "1.22b",
+  "bundle_build": "126.9.4",
+  "browser_executable_sha256": "37a96397aa2034679ab73be51dab11164fe35195870126a9eb645e4527baef55",
+  "platform": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+  "model_from_actual_raw_traces": "agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash",
+  "note": "Browser version metadata sampled during run; executable recorded, no claim of cross-version or cross-model coverage."
+}

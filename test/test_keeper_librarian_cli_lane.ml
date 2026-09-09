@@ -3,7 +3,7 @@ open Alcotest
 (* CLI lane-slot fallback for librarian_exact (RFC cli-runtimes-as-lane-slots):
    the classified exact-output pass walks the declared cli slots only after
    the catalog reports provider exhaustion, applies the same selection
-   contract to the cli answer, and abandons the fallback on a domain-invalid
+   contract to each cli answer, and advances after a domain-invalid
    one. The runtime table is the fusion panel fixture (command /usr/bin/true)
    so [is_official_client] admits the cli ids without spawning a client. *)
 
@@ -162,10 +162,31 @@ let test_domain_invalid_cli_answer_keeps_the_terminal () =
           (Runtime.For_testing.classified_error_detail error)));
   check
     (list string)
-    "only the first cli slot ran — the walk returns the first JSON answer \
-     and domain validation does not re-enter it"
-    [ Fixture.cli_primary_runtime ]
+    "every declared slot is checked before preserving the terminal"
+    [ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
     !attempts
+;;
+
+let test_domain_invalid_cli_answer_advances_to_valid_selection () =
+  with_eio @@ fun ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  publish_unreachable_lane
+    ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+    ~source:"librarian cli domain failover";
+  let attempts = ref [] in
+  let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    attempts := !attempts @ [runtime_id];
+    if String.equal runtime_id Fixture.cli_primary_runtime then Ok "{}"
+    else Ok (Yojson.Safe.to_string valid_selection_json)
+  in
+  match execute ~net ~clock ~base_path ~runner with
+  | Error error -> fail (Runtime.For_testing.classified_error_detail error)
+  | Ok ((_selection, output), slot, _count) ->
+    check (list string) "domain rejection advances once"
+      [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
+    check string "accepted slot owns selection" Fixture.cli_secondary_runtime slot;
+    check bool "accepted domain output is preserved" true
+      (Yojson.Safe.equal output valid_selection_json)
 ;;
 
 let () =
@@ -173,6 +194,9 @@ let () =
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
       , [ test_case
+            "domain-invalid CLI output advances to a valid selection"
+            `Quick test_domain_invalid_cli_answer_advances_to_valid_selection
+        ; test_case
             "a cli slot answers after catalog exhaustion"
             `Quick
             test_cli_slot_answers_after_catalog_exhaustion

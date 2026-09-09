@@ -138,9 +138,19 @@ type user_media_block = Keeper_multimodal_input.user_media_block = {
   size : int option;
 }
 
+type user_image_reference = Keeper_multimodal_input.user_image_reference = {
+  value : string;
+  mime_type : string option;
+}
+
+type user_image_source = Keeper_multimodal_input.user_image_source =
+  | Attached of user_media_block
+  | Url_ref of user_image_reference
+  | File_id_ref of user_image_reference
+
 type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_text of string
-  | User_image of user_media_block
+  | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
 
@@ -1062,6 +1072,7 @@ let execute_keeper_stream_tool_streaming
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
+      ~operation_id
       ~admission_token
       state
       ~agent_name
@@ -1088,6 +1099,7 @@ let execute_keeper_stream_tool_streaming
       in
       let dispatched =
         Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
+          ~operation_id
           ~admission_token
           ~on_text_delta
           ?on_event
@@ -1970,9 +1982,10 @@ let process_single_turn ~user_row_origin ~submission
             ~start_time
             detail
         in
-        let admission_token =
+        let operation_id, admission_token =
           match submission with
-          | Owner_operation { admission_token; _ } -> admission_token
+          | Owner_operation { operation_id; admission_token; _ } ->
+            operation_id, admission_token
         in
         let payload_identity =
           let direct_target =
@@ -2020,7 +2033,7 @@ let process_single_turn ~user_row_origin ~submission
                 ~on_tool_result_ready
                 ~approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
-                ~admission_token
+                ~operation_id ~admission_token
             in
             match result with `Ran result -> Ok (`Ran result)
           with
@@ -3524,8 +3537,10 @@ let ask_question_json (question : Keeper_ask.question) =
       ( "mode",
         `String (match question.mode with Keeper_ask.Single -> "single" | Keeper_ask.Multi -> "multi") );
       ( "free_text",
+        (* This is the operator's answer capability; the stored author form
+           remains Choices_only when only choices were originally offered. *)
         match question.free_text with
-        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool false) ]
+        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool true) ]
         | Keeper_ask.Free_text_allowed { hint } ->
             `Assoc
               [

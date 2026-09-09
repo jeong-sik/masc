@@ -77,7 +77,7 @@ const failed = {
 
 function payload(entries: unknown[], undecodable = 0) {
   return {
-    keeper: 'kidsnote',
+    keeper: 'exampleorg',
     dashboard_surface: '/api/v1/keepers/:name/memory-journal',
     returned: entries.length,
     undecodable_lines: undecodable,
@@ -88,7 +88,7 @@ function payload(entries: unknown[], undecodable = 0) {
 describe('memory journal', () => {
   it('keeps a commit and a failure as different members', async () => {
     stubFetch(payload([committed, failed]))
-    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
     const [first, second] = journal.entries
     expect(first?.ok).toBe(true)
     expect(first && first.ok && first.outcome).toBe('committed')
@@ -104,7 +104,7 @@ describe('memory journal', () => {
   // Drop reasons ride this line and nothing else stores them.
   it('carries the librarian drop reasons', async () => {
     stubFetch(payload([committed]))
-    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
     const entry = journal.entries[0]
     if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
     expect(entry.sourceKind).toBe('librarian')
@@ -140,7 +140,7 @@ describe('memory journal', () => {
       },
     }
     stubFetch(payload([withBoard]))
-    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
     const entry = journal.entries[0]
     if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
     expect(entry.added[0]?.basis).toEqual({ kind: 'observed', board: { post_id: 'p-abc', comment_id: null } })
@@ -153,7 +153,7 @@ describe('memory journal', () => {
 
   it('keeps explicit retraction as a typed committed source', async () => {
     stubFetch(payload([{ ...committed, source: { kind: 'explicit_retract', trace_id: 'trace-r' } }]))
-    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
     const entry = journal.entries[0]
     if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
     expect(entry.sourceKind).toBe('explicit_retract')
@@ -162,7 +162,7 @@ describe('memory journal', () => {
 
   it('keeps a torn line in place with its reason', async () => {
     stubFetch(payload([committed, { ok: false, error: 'not valid JSON' }], 1))
-    const journal = await fetchKeeperMemoryJournal('kidsnote')
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
     expect(journal.undecodableLines).toBe(1)
     expect(journal.entries[1]).toEqual({ ok: false, error: 'not valid JSON' })
   })
@@ -171,22 +171,22 @@ describe('memory journal', () => {
   // that would describe a pass that never happened.
   it('rejects the payload when an outcome is unknown', async () => {
     stubFetch(payload([{ ...committed, outcome: 'deferred' }]))
-    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
   })
 
   it('rejects a commit whose change block is missing', async () => {
     const { change: _change, ...withoutChange } = committed
     stubFetch(payload([withoutChange]))
-    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
   })
 
   it('rejects a commit whose memory producer is unknown', async () => {
     stubFetch(payload([{ ...committed, source: { ...committed.source, kind: 'legacy_writer' } }]))
-    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
   })
 
   it('rejects an unknown field instead of projecting past a wider journal contract', async () => {
     stubFetch(payload([{ ...committed, future_field: true }]))
-    await expect(fetchKeeperMemoryJournal('kidsnote')).rejects.toThrow('memory journal')
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
   })
 })

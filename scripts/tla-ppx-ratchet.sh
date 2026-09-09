@@ -68,6 +68,29 @@ count_fsm_guard_files() {
   )
 }
 
+# The two counts above are of files. The hint on each says a decrease means a
+# derived ADT was hand-written or an invariant lost, which is a statement
+# about annotations, and a file keeps its place in the count while all but one
+# of its annotations go: 11 files carry 16 [@@deriving tla] and 6 carry 20
+# [@@fsm_guard], so 19 of the 36 could be deleted without either floor
+# noticing. These two count the annotations, and the file counts stay for the
+# breadth they do measure.
+count_deriving_tla_attributes() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    rg -c '\[@@deriving tla\]' lib/ --glob '*.ml' --glob '!*.mli' 2>/dev/null \
+      | awk -F: '{ s += $2 } END { print s + 0 }'
+  )
+}
+
+count_fsm_guard_attributes() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    rg -c '\[@@fsm_guard' lib/ --glob '*.ml' 2>/dev/null \
+      | awk -F: '{ s += $2 } END { print s + 0 }'
+  )
+}
+
 count_lib_subdirs_with_ppx() {
   # Count distinct lib/ subdirectories containing at least one .ml
   # with [@@deriving tla] or [@@fsm_guard]. Higher is better.
@@ -89,6 +112,8 @@ count_lib_subdirs_with_ppx() {
 STRICT_METRICS=(
   "ppx_deriving_tla_modules|count_deriving_tla_modules|Modules using [@@deriving tla]. Decrease means a derived ADT was hand-written or inlined — open a follow-up issue."
   "ppx_fsm_guard_files|count_fsm_guard_files|Files with [@@fsm_guard]. Decrease means runtime invariant coverage shrank — explain in the PR."
+  "ppx_deriving_tla_attributes|count_deriving_tla_attributes|[@@deriving tla] annotations, not the files holding them. Catches the last-but-one being deleted from a file that stays in the count above."
+  "ppx_fsm_guard_attributes|count_fsm_guard_attributes|[@@fsm_guard] annotations, same reason."
 )
 
 DESCRIPTIVE_METRICS=(
@@ -100,18 +125,21 @@ current_value() {
   $fn
 }
 
+# Empty when the file or the key is absent, not 0. A floor of 0 is a floor
+# nothing can fall below: delete this baseline and every strict metric passes,
+# which is the "silent baseline drop" the header names as the anti-pattern
+# this script exists to prevent. --print keeps showing "-" for it; check()
+# stops.
 baseline_value() {
   local name="$1"
-  if [[ -f "$BASELINE_FILE" ]]; then
-    python3 -c "
-import json, sys
+  [[ -f "$BASELINE_FILE" ]] || return 0
+  python3 -c "
+import json
 with open('$BASELINE_FILE') as f:
     data = json.load(f)
-print(data.get('$name', 0))
+value = data.get('$name')
+print('' if value is None else value)
 "
-  else
-    echo 0
-  fi
 }
 
 print_counts() {
@@ -140,26 +168,34 @@ print_counts() {
   done
 }
 
+# Written from the metric tables rather than a list of its own. The list was
+# the three metrics this started with, and when two more joined STRICT_METRICS
+# it kept writing three -- so the first --regenerate would have dropped the
+# new floors to nothing, which is what a missing key means here.
 regenerate() {
-  local d_modules f_files lib_subs
-  d_modules=$(count_deriving_tla_modules)
-  f_files=$(count_fsm_guard_files)
-  lib_subs=$(count_lib_subdirs_with_ppx)
-  python3 - "$BASELINE_FILE" "$d_modules" "$f_files" "$lib_subs" <<'PYEOF'
+  local pairs=()
+  local spec name fn
+  for spec in "${STRICT_METRICS[@]}" "${DESCRIPTIVE_METRICS[@]}"; do
+    name="${spec%%|*}"
+    fn="${spec#*|}"
+    fn="${fn%%|*}"
+    pairs+=("${name}=$($fn)")
+  done
+  python3 - "$BASELINE_FILE" "${pairs[@]}" <<'PYEOF'
 import json, sys
-baseline_file, dm, ff, ls_ = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+baseline_file, pairs = sys.argv[1], sys.argv[2:]
 data = {
     "_comment": "TLA+ PPX adoption baseline. Regenerate with scripts/tla-ppx-ratchet.sh --regenerate.",
     "_metrics": "See scripts/tla-ppx-ratchet.sh STRICT_METRICS / DESCRIPTIVE_METRICS arrays.",
     "_audit": "docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md",
-    "ppx_deriving_tla_modules": dm,
-    "ppx_fsm_guard_files":      ff,
-    "lib_subdirs_with_ppx":     ls_,
 }
+for pair in pairs:
+    name, value = pair.split("=", 1)
+    data[name] = int(value)
 with open(baseline_file, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-print(f"[regenerate] wrote {baseline_file}")
+print(f"[regenerate] wrote {baseline_file} with {len(pairs)} metric(s)")
 PYEOF
 }
 
@@ -173,6 +209,13 @@ check() {
     local current baseline
     current=$(current_value "$fn")
     baseline=$(baseline_value "$name")
+    if [[ -z "$baseline" ]]; then
+      echo "[tla-ppx-ratchet] NO BASELINE: $name is enforced and $BASELINE_FILE does not record it" >&2
+      echo "  A missing entry reads as a floor of zero, which nothing can fall below." >&2
+      echo "  Run --regenerate if the metric is new; if the file is gone, restore it." >&2
+      drift=1
+      continue
+    fi
     # Note: monotonic INCREASE — fail if current < baseline
     if (( current < baseline )); then
       echo "[tla-ppx-ratchet] DRIFT DOWN: $name current=$current baseline=$baseline" >&2

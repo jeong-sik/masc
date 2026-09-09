@@ -13,7 +13,7 @@ related: ["0363", "0351", "0382"]
 ## 0. 한 줄 요약
 
 Keeper 가 부착 서비스를 하나 붙이면 그 서비스의 도구를 **전부** 받는다. 도구
-단위로 고르는 축이 없다. `kidsnote-pr-jira-checker` 는 Confluence 에 한 번도
+단위로 고르는 축이 없다. `exampleorg-pr-jira-checker` 는 Confluence 에 한 번도
 쓴 적이 없는데 Confluence 쓰기 도구 4종 21.3 KB 를 매 턴 보낸다. Keeper 선언에
 정적 허용목록을 추가한다.
 
@@ -25,7 +25,7 @@ Keeper 가 부착 서비스를 하나 붙이면 그 서비스의 도구를 **전
 
 | keeper | 레인 | 도구 | 스키마 | 미호출 | 미호출 바이트 | 비중 |
 |---|---|---|---|---|---|---|
-| kidsnote-pr-jira-checker | claude_code | 122 | 140 KB | 84 | **94.4 KB** | **67%** |
+| exampleorg-pr-jira-checker | claude_code | 122 | 140 KB | 84 | **94.4 KB** | **67%** |
 | lane-smith | antigravity | 135 | 139 KB | 57 | 48.4 KB | 35% |
 | code-reviewer | claude_code | 91 | 89 KB | 26 | 17.5 KB | 20% |
 | pr-updater | agent-core | 64 | 66 KB | 43 | 31.6 KB | 48% |
@@ -43,7 +43,7 @@ Keeper 가 부착 서비스를 하나 붙이면 그 서비스의 도구를 **전
 
 ### 1.1 가장 큰 낭비는 호출 0회짜리다
 
-`kidsnote-pr-jira-checker` 상위 미호출:
+`exampleorg-pr-jira-checker` 상위 미호출:
 
 | 도구 | 스키마 | `tool_calls` 전체 기록 호출 |
 |---|---|---|
@@ -169,7 +169,7 @@ attached_allow = [
 
 ## 4. 검증
 
-### 4.1 실측한 절감 — `kidsnote-pr-jira-checker`
+### 4.1 실측한 절감 — `exampleorg-pr-jira-checker`
 
 라이브 wire 목록(`tools_ref` blob)에 31일치 호출 기록으로 만든 허용목록을
 적용해 계산했다. 배포 전이라 라이브 선언은 넣지 않았다.
@@ -193,7 +193,7 @@ attached_allow = [
 
 | 지표 | 현재 | 목표 |
 |---|---|---|
-| `kidsnote-pr-jira-checker` 부착 도구 / 바이트 | 31 / 51,490 | 선언한 수 / 그만큼 |
+| `exampleorg-pr-jira-checker` 부착 도구 / 바이트 | 31 / 51,490 | 선언한 수 / 그만큼 |
 | 선언 밖 부착 도구 | 26 · 46,990 B | 0 |
 | 선언 없는 Keeper | — | **바이트 변화 0** |
 

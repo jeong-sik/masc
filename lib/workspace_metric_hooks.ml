@@ -306,7 +306,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -386,6 +386,15 @@ let install () =
       on_tool_result ~input:args result;
       result
     in
+    let native_tools =
+      match Standalone_skill_tools.for_workspace
+              ~config:(Workspace.default_config base_path)
+              ~on_result:on_tool_result () with
+      | Ok tools -> tools
+      | Error detail ->
+        Log.Task.warn "verification Skills unavailable: %s" detail;
+        []
+    in
     let apply_review_verdict_output_contract provider_cfg =
       Ok
         (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
@@ -397,7 +406,16 @@ let install () =
           ~runtime_id:evaluator_runtime
           ~base_path
           ~goal:prompt
+          ?goal_blocks
+          (* This reviewer carries its whole instruction in the goal; the
+             review prose lives in config/prompts/verification.md and reaches
+             [prompt]. Empty was the old default, so this is what has been
+             running. It also means an official-client runtime in the
+             verifier_exact slots would be refused at the host (#33862) --
+             today's slots are API providers, so nothing reaches that. *)
+          ~system_prompt:""
           ~masc_tools:(report_tool_schema :: lookup_schemas)
+          ~native_tools
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract
           ~on_runtime_attempt_error

@@ -1,0 +1,20 @@
+name = "selenized-dark"
+light = false
+
+[palette]
+base00 = "103c48"
+base01 = "184956"
+base02 = "2d5b69"
+base03 = "72898f"
+base04 = "72898f"
+base05 = "adbcbc"
+base06 = "cad8d9"
+base07 = "cad8d9"
+base08 = "fa5750"
+base09 = "ed8649"
+base0a = "dbb32d"
+base0b = "75b938"
+base0c = "41c7b9"
+base0d = "4695f7"
+base0e = "af88eb"
+base0f = "f275be"

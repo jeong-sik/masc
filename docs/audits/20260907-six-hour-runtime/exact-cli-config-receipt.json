@@ -1,0 +1,84 @@
+{
+  "at": "2026-09-07T04:25:30.042527+00:00",
+  "before_revision": "e3b7e651754d2caf036ffde6fa4fca26d627c2be1a964228c98622f8432d4735",
+  "after_revision": "5fbae10ebfbb933d5a5513beadf8ffeab8fd155de246e98c2d2517961af0017a",
+  "state": "committed",
+  "commit": {
+    "source_revision": "5fbae10ebfbb933d5a5513beadf8ffeab8fd155de246e98c2d2517961af0017a",
+    "order": "4",
+    "durability": "durable",
+    "warnings": []
+  },
+  "application": {
+    "operation": "raw_save",
+    "routing": {
+      "status": "applied",
+      "requires_restart": false,
+      "applied_at": "2026-09-07T04:25:28Z"
+    },
+    "keeper_overlay": {
+      "status": "applied",
+      "configured_count": 4,
+      "requires_restart": false,
+      "pending_keys": [],
+      "applied_keys": [
+        "health.durable_queue_stale_sec",
+        "wire_capture.enabled",
+        "turn.stream_idle_timeout_sec",
+        "turn.provider_call_deadline_sec"
+      ],
+      "preempted_keys": [],
+      "applied_at": 1788751333.427241
+    },
+    "skills": {
+      "state": "unchanged",
+      "input_source_revision": "5fbae10ebfbb933d5a5513beadf8ffeab8fd155de246e98c2d2517961af0017a",
+      "snapshot_revision": "073e8b168d766a3c950e2b2ddd97b26fea562d2314de5f818cfdfc1982c47789",
+      "catalog_revision": "403e47d73c2ca759d87518533e078cdec042c5512004d55e551236d6db22bb64",
+      "config_state": "configured"
+    }
+  },
+  "exact_output_lanes": {
+    "verifier_exact": {
+      "slots": [
+        "glm-coding.glm-5.3-flash",
+        "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+      ]
+    },
+    "librarian_exact": {
+      "slots": [
+        "glm-coding.glm-5.3-flash",
+        "ollama_cloud.deepseek-v4-flash-0731"
+      ],
+      "cli_slots": [
+        "claude_code.claude-haiku-4-5",
+        "claude_code.claude-sonnet-5",
+        "codex_subscription.gpt-5.6-luna"
+      ]
+    },
+    "hitl_auto_judge": {
+      "slots": [
+        "glm-coding.glm-5.3-flash-nothink",
+        "ollama_cloud.deepseek-v4-flash-0731"
+      ],
+      "cli_slots": [
+        "claude_code.claude-haiku-4-5",
+        "claude_code.claude-sonnet-5",
+        "codex_subscription.gpt-5.6-luna"
+      ]
+    },
+    "board_attention_exact": {
+      "slots": [
+        "glm-coding.glm-5.3-flash",
+        "ollama_cloud.deepseek-v4-flash-0731"
+      ],
+      "cli_slots": [
+        "claude_code.claude-haiku-4-5",
+        "claude_code.claude-sonnet-5",
+        "codex_subscription.gpt-5.6-luna"
+      ]
+    }
+  },
+  "readback_equal": true,
+  "client_cas_supported": false
+}

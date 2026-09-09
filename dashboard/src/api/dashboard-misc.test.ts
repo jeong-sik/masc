@@ -13,12 +13,13 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v3',
+    schema: 'keeper.memory_os.current_health.v4',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 2,
     keepers: [{
       keeper_id: 'healthy',
       revision: 7,
+      updated_at: 1_699_999_900,
       facts: 4,
       observed_facts: 3,
       derived_facts: 1,
@@ -42,6 +43,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
     }, {
       keeper_id: 'broken',
       revision: 0,
+      updated_at: null,
       facts: 0,
       observed_facts: 0,
       derived_facts: 0,
@@ -101,12 +103,13 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v3',
+    schema: 'keeper.memory_os.current_health.v4',
     generated_at: 1_700_000_000,
     cadence_counter_entries: 1,
     keepers: [{
       keeper_id: 'starving',
       revision: 0,
+      updated_at: null,
       facts: 0,
       observed_facts: 0,
       derived_facts: 0,
@@ -174,15 +177,40 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v3')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v4')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
+      updated_at: 1_699_999_900,
       facts: 4,
       snapshot_bytes: 512,
     })
     expect(response.keepers[1]?.read_error).toBe('invalid current snapshot')
+    expect(response.keepers[1]?.updated_at).toBeNull()
     expect(response.alert_summary.snapshot_read_error_keepers).toBe(1)
+  })
+
+  it.each([undefined, '1699999900', -1, NaN, Infinity, null])(
+    'rejects invalid timestamps for a readable snapshot: %s',
+    async (updated_at) => {
+      const payload = keeperMemoryHealthPayload()
+      Object.assign(payload.keepers[0]!, { updated_at })
+      getMock.mockResolvedValue(payload)
+
+      await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+        '유효하지 않은 keeper memory health payload',
+      )
+    },
+  )
+
+  it('rejects a timestamp without a readable snapshot', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[1]!.updated_at = 1_699_999_900
+    getMock.mockResolvedValue(payload)
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
   })
 
   it('rejects a retired Memory health field', async () => {

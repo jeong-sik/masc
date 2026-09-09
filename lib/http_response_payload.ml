@@ -172,3 +172,23 @@ let compress_body ?(level = 3) ?(compress = true) ~accept_encoding body =
       | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
       | Compression_gzip.Compressed payload ->
         (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))
+
+(* Immutable representations of one published response. Preparation belongs
+   on the producer's CPU worker; selection on a request never compresses. *)
+type prepared = {
+  identity : string;
+  zstd : string * (string * string) list;
+  gzip : string * (string * string) list;
+}
+
+let prepare body =
+  { identity = body;
+    zstd = compress_body ~accept_encoding:(Some "zstd") body;
+    gzip = compress_body ~accept_encoding:(Some "gzip") body;
+  }
+
+let select_prepared ~accept_encoding prepared =
+  match negotiate_encoding accept_encoding with
+  | Prefer_zstd -> prepared.zstd
+  | Prefer_gzip -> prepared.gzip
+  | Identity_only -> prepared.identity, [ vary_accept_encoding ]

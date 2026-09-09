@@ -70,6 +70,13 @@ val read_goal_task_links_r :
 val read_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list
 
+val read_goal_task_links_authoritative_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+(** Read only the primary registry. Only absence of both primary and recovery
+    means a new empty registry. A missing, unreadable, or malformed primary is
+    an error when a recovery snapshot exists. Link mutations use this reader. *)
+
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit
@@ -134,3 +141,9 @@ val build_goal_task_index_for_config :
 
 val build_task_goal_index_for_config :
   Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t
+
+(** Remove one Task from every Goal under the links lock. Callers deleting
+    Tasks hold the backlog lock through this operation. Primary-only mutation;
+    missing references are a no-op. *)
+val prune_links_for_task_result :
+  Workspace_utils.config -> task_id:string -> (unit, string) result

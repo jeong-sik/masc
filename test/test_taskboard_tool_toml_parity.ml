@@ -1,12 +1,5 @@
-(** Byte-identity pins for the taskboard tool toml parity declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
-
-    The expected values were read off [Tool_shard_types.taskboard_tools] before any file moved, so this
-    suite passing *before* the TOML replaces a literal is what proves the file
-    says the same thing. Written against the published list rather than a loader
-    module, so it holds across the whole migration: what a Keeper receives must
-    not move whether a declaration lives in OCaml or TOML.
+(** The publication order of [Tool_shard_types.taskboard_tools], and the
+    keeper_tasks_list status enum against [Masc_domain.valid_task_status_strings].
 
     keeper_tasks_list builds its status enum from
     [Masc_domain.valid_task_status_strings] rather than a literal. A TOML
@@ -14,22 +7,13 @@
     pinning the file against its owner, the way
     [test_operator_surface_toml_parity] pins the masc_config category enum.
 
-    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
-    not part of a JSON object's meaning, and TOML cannot place a sub-table
-    before its parent's scalar keys. *)
+    The descriptions and schemas this suite also pinned were literals read off
+    the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself. Those
+    cases are gone; what stays reads the published value. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
 
 (* name, description, input_schema (keys sorted) *)
 let expected =
@@ -39,7 +23,7 @@ let expected =
 
 Use for status updates, announcements, or warnings.|}, {|{"properties":{"content":{"description":"Broadcast body text","minLength":1,"type":"string"},"task_cache_subject_agent":{"description":"Agent whose current-task cache was observed; supply together with task_cache_task_id","minLength":1,"type":"string"},"task_cache_task_id":{"description":"Task ID observed in the subject agent cache; supply together with task_cache_subject_agent","minLength":1,"type":"string"}},"required":["content"],"type":"object"}|}
     ; {|keeper_task_claim|}, {|Claim MASC backlog work. With no task_id, claims the next eligible unclaimed todo task that matches your capabilities. awaiting_verification tasks are pending a verdict from the system LLM agent at the completion-authority boundary and are not claimable Keeper work. Never Read producer sandbox paths directly. With task_id, claims that exact task when a user, mention, board item, or keeper_tasks_list row identifies it; an awaiting_verification task returns the typed pending-verdict refusal. If you already own another Claimed/InProgress task, finish it with keeper_task_done or hand it back with keeper_task_release first; keeper_task_claim does not auto-release active work.|}, {|{"properties":{"task_id":{"description":"Optional exact task id from keeper_tasks_list, board, mention, or user request","minLength":1,"type":"string"}},"type":"object"}|}
-    ; {|keeper_task_done|}, {|Submit your claimed task for verification with a result summary and trusted evidence_refs. The task must be claimed by you. This does not make the task done: it moves to awaiting_verification and waits for a completion authority's verdict, which no Keeper can produce. It also does not hold your next claim while it waits. Every evidence_refs entry must be artifact:<producer-root-relative-path> or note:<text>; this tool refuses any other form at submit. Only an artifact: path is opened and snapshotted for the reviewer — a note: entry is text the reviewer reads but cannot inspect. Pure-placeholder results ('done', 'ok', etc.) are rejected.|}, {|{"properties":{"evidence_refs":{"description":"Trusted references substantiating completion. Every entry must be artifact:<producer-root-relative-path> or note:<text>; nothing else can be read back at review, so this tool refuses it here rather than letting the reviewer see missing evidence. An artifact: path is opened and snapshotted, and that is what satisfies the completion gate. A Board post id, a commit, a PR number, or a file:// URI is narrative until something opens it: pass it as note:<text> next to an artifact: entry, never on its own.","items":{"type":"string"},"minItems":1,"type":"array"},"notes":{"description":"Verification handoff notes (>= 20 chars). For contracted tasks: summarise what changed AND mention each contract.required_evidence entry verbatim. Ignored when the task has no contract.","type":"string"},"result":{"description":"What was done: files changed, tests run, outcome observed","minLength":1,"type":"string"},"task_id":{"description":"Task ID returned by keeper_task_claim","minLength":1,"type":"string"}},"required":["task_id","result","evidence_refs"],"type":"object"}|}
+    ; {|keeper_task_done|}, {|Submit your claimed task for verification with a result summary and trusted evidence_refs. The task must be claimed by you. This does not make the task done: it moves to awaiting_verification and waits for a completion authority's verdict, which no Keeper can produce. It also does not hold your next claim while it waits. Every evidence_refs entry must be artifact:<producer-root-relative-path> or note:<text>; this tool refuses any other form at submit. Only an artifact: path is opened and snapshotted for the reviewer — a note: entry is text the reviewer reads but cannot inspect. Pure-placeholder results ('done', 'ok', etc.) are rejected.|}, {|{"properties":{"evidence_refs":{"description":"Trusted references substantiating completion. Every entry must be artifact:<producer-root-relative-path> or note:<text>; nothing else can be read back at review, so this tool refuses it here rather than letting the reviewer see missing evidence. An artifact: path is opened and snapshotted, and that is what satisfies the completion gate. A Board post id, a commit, a PR number, or a file:// URI is narrative until something opens it: pass it as note:<text> next to an artifact: entry, never on its own.","items":{"type":"string"},"minItems":1,"type":"array"},"notes":{"description":"Optional verification handoff notes, preserved separately from the result summary. Omit when there are no additional notes. A supplied string is kept verbatim; the result summary does not replace it.","type":"string"},"result":{"description":"What was done: files changed, tests run, outcome observed","minLength":1,"type":"string"},"task_id":{"description":"Task ID returned by keeper_task_claim","minLength":1,"type":"string"}},"required":["task_id","result","evidence_refs"],"type":"object"}|}
     ; {|keeper_task_cancel|}, {|Ask for a task you hold to be stopped for good, not handed back.
 
 The work it asks for should not be done. Use this when the premise is gone: the defect was fixed elsewhere, the thing it describes no longer exists, or the task asks for something that cannot be true. This is not for work you merely cannot finish — hand that back with keeper_task_release so someone else can take it. Your request goes to a completion authority the same way a finished task does, and the task ends only when that verdict approves it. A refused request comes back to you with the reason. You must own the task.|}, {|{"properties":{"reason":{"description":"Why this task should stop existing rather than move to someone else. The authority reads this and nothing else. Example: 'the microvm profile was legalised in #32078; the invalid-config the task describes no longer occurs'.","minLength":1,"type":"string"},"task_id":{"description":"Task ID you currently hold","minLength":1,"type":"string"}},"required":["task_id","reason"],"type":"object"}|}
@@ -58,24 +42,6 @@ let find name =
   with
   | Some schema -> schema
   | None -> failwith (name ^ " is absent from Tool_shard_types.taskboard_tools")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
 ;;
 
 (* The order is what a model reads the tool list in, so a reordering is a
@@ -136,13 +102,8 @@ let test_status_enum_still_names_every_task_status () =
 let () =
   run
     "taskboard_tool_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "published order" `Quick test_the_published_order_is_unchanged
         ] )
     ; ( "derivation"
       , [ test_case

@@ -185,16 +185,23 @@ val persist_overrides : string -> (unit, string) result
     Returns an explicit error when the persistence boundary fails. *)
 
 val set_override_persisted :
-  ?expected_contract_revision:string ->
   base_path:string ->
   string ->
   string ->
   (unit, persisted_mutation_error) result
-(** Validate an override, atomically persist the complete candidate table,
-    then commit it to memory.  A persistence failure leaves the live table
-    unchanged. With [expected_contract_revision], the override is refused as
-    a validation error when the prompt's current contract revision differs —
-    the same check the boot-time restore applies. *)
+(** Validate an override the operator is writing now, bind it to the default
+    it replaces at this moment, atomically persist the complete candidate
+    table, then commit it to memory.  A persistence failure leaves the live
+    table unchanged. *)
+
+val restore_persisted_entry :
+  base_path:string ->
+  Prompt_override_persistence.entry ->
+  (unit, persisted_mutation_error) result
+(** The same commit for an entry the operator saved earlier (a preset).  The
+    entry keeps the binding it was written with; it is admitted under the
+    same rule as the boot-time restore, and refused as a validation error
+    only when it does not render under the prompt's current contract. *)
 
 val clear_prompt_override_persisted :
   base_path:string -> string -> (unit, string) result
@@ -207,29 +214,32 @@ val override_entries : unit -> Prompt_override_persistence.entry list
 val persisted_entries : unit -> Prompt_override_persistence.entry list
 (** Everything the operator saved, applied or not.
 
-    An override authored against a default body that has since changed is
-    refused at restore, and refusing it is right. It is still theirs, so this
-    is what the file is written from and what a snapshot has to capture:
-    writing only the entries in force turned "not applied" into "deleted" on
-    the next write of any key, and a preset autosave taken in that state
-    captured nothing to restore. *)
+    An override the restore holds back is still theirs, so this is what the
+    file is written from and what a snapshot has to capture: writing only the
+    entries in force turned "not applied" into "deleted" on the next write of
+    any key, and a preset autosave taken in that state captured nothing to
+    restore. *)
 
 val quarantined_entries : unit -> Prompt_override_persistence.entry list
-(** The saved overrides this process is not applying, so a caller can say so
-    rather than leaving one boot-time ERROR line as the only evidence. *)
-(** The live override table as persistence entries, in no particular order.
-    A preset captures these — the durable operator layer — rather than the
-    managed prompt files, which boot re-syncs from the binary. *)
+(** The saved overrides this process is not applying. *)
+
+val held_back_overrides :
+  unit -> (Prompt_override_persistence.entry * string) list
+(** The same overrides, each with the reason it is not applied, so a caller
+    can say so rather than leaving one boot-time ERROR line as the only
+    evidence. *)
 
 val restore_overrides : string -> unit
-(** Reads
-    [<base_path>/.masc/prompt_overrides.json] and reapplies
-    every entry through {!set_override}'s validation after verifying its
-    contract revision.  The validated candidate set replaces the live table
-    in one mutex transaction, so rejected entries cannot leave stale live
-    overrides behind.  Legacy envelopes, malformed entries, and stale or
-    manually-edited entries are rejected with an observable error and fallback
-    to file content. *)
+(** Reads [<base_path>/.masc/prompt_overrides.json] and reapplies every
+    entry that still renders under its prompt's current contract, keeping
+    the binding each was written with.  A default body that changed since the
+    override was written does not refuse it: the override applies and the
+    catalog reports the default as moved.  The admitted candidate set
+    replaces the live table in one mutex transaction, so refused entries
+    cannot leave stale live overrides behind.  Other envelope versions,
+    malformed entries, and entries naming template variables the prompt no
+    longer declares are refused with an observable error and fall back to
+    file content. *)
 
 val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override

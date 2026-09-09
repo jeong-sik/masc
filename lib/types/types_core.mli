@@ -358,6 +358,17 @@ val default_tempo_config : tempo_config
 val tempo_config_to_yojson : tempo_config -> Yojson.Safe.t
 val tempo_config_of_yojson : Yojson.Safe.t -> (tempo_config, string) result
 
+(** A delivery obligation owned by the same commit as its rejected verdict. *)
+type pending_completion_rejection =
+  { task_id : string
+  ; verification_id : string
+  ; producer : string
+  ; reason : string
+  ; authority : completion_authority
+  ; committed_at : string
+  }
+[@@deriving show]
+
 (** Task backlog snapshot. [version] is the monotonic commit revision —
     stamped +1 per commit by [Workspace_backlog.write_backlog_result] (the
     single commit point; callers never hand-bump). It is the
@@ -369,6 +380,7 @@ val tempo_config_of_yojson : Yojson.Safe.t -> (tempo_config, string) result
     never an ordering input. *)
 type backlog =
   { tasks : task list
+  ; pending_completion_rejections : pending_completion_rejection list
   ; last_updated : string
   ; version : int
   }

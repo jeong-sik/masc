@@ -75,7 +75,7 @@ let test_a_made_memo_reads_back_as_itself () =
       | Error why -> Alcotest.failf "make refused %s" why
       | Ok t ->
         Alcotest.(check string) "trimmed" "the text" t.text;
-        read (Agent_observation.annotation_kind_to_string kind) t ("// " ^ to_body t);
+        read (word_of_kind kind) t ("// " ^ to_body t);
         read "inside a block" t ("(* " ^ to_body t ^ " *)"))
     Agent_observation.all_annotation_kinds;
   Alcotest.(check string) "the plain comment carries no word"

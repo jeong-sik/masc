@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import { assertExhaustive } from '../../lib/exhaustive'
 import { KeeperBadge } from '../keeper-badge'
 import type { LineOwnership } from './keeper-line-ownership-store'
@@ -8,13 +7,12 @@ import type { LineOwnership } from './keeper-line-ownership-store'
 // layerSummary() returned hardcoded literals ('0 anchored' / '0 approval' /
 // '0 hits') with no backing data source, and 'explode' had no render branch
 // anywhere despite its toolbar tooltip promising a per-keeper ghost view.
-const IDE_LAYER_ORDER = ['time', 'parallel', 'notes', 'keeper-trace'] as const
+const IDE_LAYER_ORDER = ['time', 'parallel', 'keeper-trace'] as const
 export type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 const LAYER_LABEL: Record<IdeLayerKind, string> = {
   time: 'Time',
   parallel: 'Parallel',
-  notes: 'Notes',
   'keeper-trace': 'Trace',
 }
 
@@ -63,9 +61,7 @@ export function LayerOverlaySummary(
   activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
-  annotations: ReadonlyArray<IdeAnnotation>,
 ) {
-  const annotationCount = annotations.length
   const latestEdit = latestEditMs(ownership)
   return html`
     <div
@@ -100,7 +96,7 @@ export function LayerOverlaySummary(
           }}
         >
           <span>${layerLabel(kind)}</span>
-          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers, annotationCount)}</span>
+          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers)}</span>
         </span>
       `)}
     </div>
@@ -139,11 +135,10 @@ function layerLabel(kind: IdeLayerKind): string {
   return LAYER_LABEL[kind]
 }
 
-function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>, annotationCount: number = 0): string {
+function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
   switch (kind) {
     case 'time': return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
     case 'parallel': return `${keepers.length} keepers`
-    case 'notes': return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
     case 'keeper-trace': return 'stitched trace'
     default: return assertExhaustive(kind, 'IdeLayerKind')
   }

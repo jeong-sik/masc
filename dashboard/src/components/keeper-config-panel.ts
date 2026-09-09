@@ -1,3 +1,4 @@
+import { KEEPER_ACTIVATION_MODES, KEEPER_ACTIVATION_LABELS, parseKeeperActivationMode, requireKeeperActivationMode, type KeeperActivationMode } from '../lib/keeper-activation-mode'
 // Keeper config panel -- structured config viewer with inline editing.
 // Fetches /api/v1/keepers/:name/config and renders grouped sections.
 // Redesigned: clean section headers, consistent row styling, proper form controls.
@@ -319,14 +320,13 @@ export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDra
 
 export type RuntimeDraft = {
   runtime_id: string
-  autoboot_enabled: boolean
+  activation_mode: KeeperActivationMode
   max_context_override: string
   sandbox_profile: SandboxProfile | null
   mention_targets_text: string
   network_mode: SandboxNetworkMode
   // '' = no endpoint. Only meaningful under remote_ssh; serialised as null.
   remote_endpoint: string
-  proactive_enabled: boolean
   voice_always_allow: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   skill_selection:
@@ -334,75 +334,36 @@ export type RuntimeDraft = {
     | { mode: 'names'; names_text: string }
 }
 
-export type KeeperConfigBooleanProjection =
-  | { kind: 'configured'; configured: boolean; live: boolean }
-  | {
-      kind: 'drift'
-      configured: boolean
-      live: boolean
-      defaultSource: 'toml'
-      defaultManifestPath: string | null
-    }
-  | { kind: 'live-only'; live: boolean }
-  | { kind: 'invalid-evidence'; live: boolean }
+export type KeeperConfigActivationProjection =
+  | { kind: 'configured'; configured: KeeperActivationMode; live: KeeperActivationMode }
+  | { kind: 'drift'; configured: KeeperActivationMode; live: KeeperActivationMode; defaultSource: 'toml'; defaultManifestPath: string | null }
+  | { kind: 'live-only' | 'invalid-evidence'; live: KeeperActivationMode }
 
-type KeeperConfigBooleanField = 'autoboot_enabled' | 'proactive.enabled'
-
-/** Resolve an editable boolean against the same declarative config evidence
- * the PATCH endpoint writes. The top-level value is live-meta state; when a
- * typed source row proves that TOML differs, the editor must start from TOML
- * rather than presenting the stale runtime overlay as the persisted policy. */
-export function keeperConfigBooleanProjection(
-  c: KeeperConfig,
-  field: KeeperConfigBooleanField,
-  live: boolean,
-): KeeperConfigBooleanProjection {
-  const evidence = c.sources.override_field_sources?.find(row => row.field === field)
+export function keeperConfigActivationProjection(c: KeeperConfig): KeeperConfigActivationProjection {
+  const live = c.activation_mode
+  const evidence = c.sources.override_field_sources?.find(row => row.field === 'activation_mode')
   if (!evidence || evidence.default_missing === true) return { kind: 'live-only', live }
-  if (
-    evidence.default_source_kind !== 'toml'
-    || typeof evidence.default_value !== 'boolean'
-    || typeof evidence.live_value !== 'boolean'
-  ) {
+  const configured = parseKeeperActivationMode(evidence.default_value)
+  const observed = parseKeeperActivationMode(evidence.live_value)
+  if (evidence.default_source_kind !== 'toml' || configured === null || observed === null) {
     return { kind: 'invalid-evidence', live }
   }
-  if (evidence.default_value === evidence.live_value) {
-    return { kind: 'configured', configured: evidence.default_value, live: evidence.live_value }
-  }
-  return {
-    kind: 'drift',
-    configured: evidence.default_value,
-    live: evidence.live_value,
-    defaultSource: 'toml',
-    defaultManifestPath: evidence.default_manifest_path,
-  }
+  return configured === observed
+    ? { kind: 'configured', configured, live: observed }
+    : { kind: 'drift', configured, live: observed, defaultSource: 'toml', defaultManifestPath: evidence.default_manifest_path }
 }
 
-function configuredBooleanValue(projection: KeeperConfigBooleanProjection): boolean {
-  return projection.kind === 'configured' || projection.kind === 'drift'
-    ? projection.configured
-    : projection.live
-}
-
-function proactiveConfigProjection(c: KeeperConfig): KeeperConfigBooleanProjection {
-  return keeperConfigBooleanProjection(c, 'proactive.enabled', c.proactive.enabled)
-}
-
-function proactiveConfigValue(c: KeeperConfig): boolean {
-  return configuredBooleanValue(proactiveConfigProjection(c))
-}
-
-function proactiveConfigHint(c: KeeperConfig): string {
-  const projection = proactiveConfigProjection(c)
+function activationConfigHint(c: KeeperConfig): string {
+  const projection = keeperConfigActivationProjection(c)
   if (projection.kind === 'drift') {
-    const configured = projection.configured ? 'ON' : 'OFF'
-    const live = projection.live ? 'ON' : 'OFF'
-    return `유휴 시 keeper 자가 기동 · TOML ${configured} / live meta ${live}`
+    return `TOML ${projection.configured} / live meta ${projection.live}`
   }
-  if (projection.kind === 'invalid-evidence') {
-    return '유휴 시 keeper 자가 기동 · config source evidence invalid'
-  }
-  return '유휴 시 keeper 자가 기동'
+  return '수동 시작 / 시작 시 준비하고 요청에 반응 / 주기적으로 자율 실행'
+}
+
+function activationConfigValue(c: KeeperConfig): KeeperActivationMode {
+  const projection = keeperConfigActivationProjection(c)
+  return projection.kind === 'configured' || projection.kind === 'drift' ? projection.configured : projection.live
 }
 
 type KeeperRuntimeDraftState = {
@@ -486,13 +447,12 @@ export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
-    autoboot_enabled: c.autoboot_enabled,
+    activation_mode: activationConfigValue(c),
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: toSandboxProfile(c.sandbox_profile),
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     remote_endpoint: c.remote_endpoint ?? '',
-    proactive_enabled: proactiveConfigValue(c),
     voice_always_allow: Boolean(c.voice_always_allow),
     skill_selection: c.skills.names === null
       ? { mode: 'all', prior_names_text: '' }
@@ -513,8 +473,8 @@ export function rebaseRuntimeDraftOnFreshConfig(
   const base = initRuntimeDraftFromConfig(seen)
   const rebased = initRuntimeDraftFromConfig(fresh)
   if (draft.runtime_id !== base.runtime_id) rebased.runtime_id = draft.runtime_id
-  if (draft.autoboot_enabled !== base.autoboot_enabled) {
-    rebased.autoboot_enabled = draft.autoboot_enabled
+  if (draft.activation_mode !== base.activation_mode) {
+    rebased.activation_mode = draft.activation_mode
   }
   if (draft.max_context_override !== base.max_context_override) {
     rebased.max_context_override = draft.max_context_override
@@ -528,9 +488,6 @@ export function rebaseRuntimeDraftOnFreshConfig(
   if (draft.network_mode !== base.network_mode) rebased.network_mode = draft.network_mode
   if (draft.remote_endpoint !== base.remote_endpoint) {
     rebased.remote_endpoint = draft.remote_endpoint
-  }
-  if (draft.proactive_enabled !== base.proactive_enabled) {
-    rebased.proactive_enabled = draft.proactive_enabled
   }
   if (draft.voice_always_allow !== base.voice_always_allow) {
     rebased.voice_always_allow = draft.voice_always_allow
@@ -797,14 +754,13 @@ export function keeperConfigControlInventory(
           c,
           tab,
           'kcf-policy-proactive',
-          'Proactive and autoboot',
-          `${configApiSource} proactive.* + autoboot_enabled`,
-          'PATCH /api/v1/keepers/:name/config proactive/autoboot fields',
-          'proactive/autoboot fields',
+          'Activation mode',
+          `${configApiSource} activation_mode`,
+          'PATCH /api/v1/keepers/:name/config activation_mode',
+          'activation_mode',
           [
-            'autoboot_enabled',
-            'proactive.enabled',
-            'sources.override_field_sources',
+            'activation_mode',
+                        'sources.override_field_sources',
           ],
         ),
         keeperRuntimeControlItem(
@@ -1000,7 +956,7 @@ export function buildRuntimePayloadResult(
   const payload: KeeperConfigUpdatePayload = {}
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
-  if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
+  if (draft.activation_mode !== activationConfigValue(orig)) payload.activation_mode = draft.activation_mode
   if (maxContextOverride.ok && maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
@@ -1013,7 +969,6 @@ export function buildRuntimePayloadResult(
   if (endpointDraft !== endpointOrig) {
     payload.remote_endpoint = endpointDraft === '' ? null : endpointDraft
   }
-  if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
   if (draft.voice_always_allow !== Boolean(orig.voice_always_allow)) {
     payload.voice_always_allow = draft.voice_always_allow
   }
@@ -1146,7 +1101,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
   const payload = result.payload
   return {
     runtime_id: 'runtime_id' in payload,
-    autoboot_enabled: 'autoboot_enabled' in payload,
+    activation_mode: 'activation_mode' in payload,
     // An unparseable draft ('abc') cannot reach the payload at all, so its
     // marker falls back to comparing the raw text.
     max_context_override:
@@ -1156,7 +1111,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     remote_endpoint: 'remote_endpoint' in payload,
-    proactive_enabled: 'proactive_enabled' in payload,
     voice_always_allow: 'voice_always_allow' in payload,
     skills: 'skills' in payload,
   }
@@ -1452,7 +1406,7 @@ function ConfigRow({
    the tools do not say it. `gh` cannot reach github.com to check a token, so it
    reports the token as invalid; a Keeper reads that literally and tells its
    owner to re-authenticate, which changes nothing. Seen on
-   kidsnote-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
+   exampleorg-pr-jira-checker, 2026-09-03: a valid token, the right hosts.yml
    mounted into the guest, and three rounds of re-authentication. */
 function NoNetworkCallout() {
   return html`
@@ -2230,10 +2184,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
         ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
-        ...(proactiveConfigProjection(c).kind === 'drift'
+        ...(keeperConfigActivationProjection(c).kind === 'drift'
           ? [[
-              '프로액티브 설정 드리프트',
-              `TOML ${proactiveConfigValue(c) ? 'ON' : 'OFF'} / live meta ${c.proactive.enabled ? 'ON' : 'OFF'}`,
+              '실행 방식 설정 드리프트',
+              `TOML ${activationConfigValue(c)} / live meta ${c.activation_mode}`,
             ] as const]
           : []),
       ]} />
@@ -2324,20 +2278,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     <${BoolRow} label="검증" value=${c.execution.verify} />
     <div class="kcf-dead">☠ 제거됨 · <span class="mono">Handoff_triggered</span> 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.</div>
 
-    <${SectionHeader} title="프로액티브" />
+    <${SectionHeader} title="실행 방식" />
     ${rd && runtimeCanEdit ? html`
-      <${SetRow} label="자동 부팅" hint="서버 시작 시 keeper 등록" dirty=${dirtyFlags.autoboot_enabled}>
-        <${SetToggle} ariaLabel="자동 부팅" on=${rd.autoboot_enabled}
-          onChange=${(v: boolean) => updateRuntimeDraft('autoboot_enabled', v)} />
+      <${SetRow} label="실행 방식" hint=${activationConfigHint(c)} dirty=${dirtyFlags.activation_mode}>
+        <select aria-label="실행 방식" value=${rd.activation_mode}
+          onChange=${(event: Event) => updateRuntimeDraft('activation_mode', requireKeeperActivationMode((event.currentTarget as HTMLSelectElement).value))}>
+          ${KEEPER_ACTIVATION_MODES.map(mode => html`<option value=${mode}>${KEEPER_ACTIVATION_LABELS[mode]}</option>`)}
+        </select>
       </${SetRow}>
-      <${SetRow} label="활성" hint=${proactiveConfigHint(c)} dirty=${dirtyFlags.proactive_enabled}>
-        <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
-          onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
-      </${SetRow}>
-    ` : html`
-      <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
-      <${BoolRow} label="활성" value=${proactiveConfigValue(c)} />
-    `}
+    ` : html`<div>${KEEPER_ACTIVATION_LABELS[c.activation_mode]}</div>`}
 
     <${SectionHeader} title="음성 게이트" />
     ${rd && runtimeCanEdit ? html`
@@ -2594,7 +2543,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     <${KcfSec} title="런타임 상태" desc="이 keeper의 라이브니스 · 등록 · 파이버 진단입니다.">
       <${KcfFacts} rows=${[
         ['일시정지', c.runtime.paused ? 'ON' : 'OFF'],
-        ['자동 부팅 설정', c.autoboot_enabled ? 'ON' : 'OFF'],
+        ['실행 방식', KEEPER_ACTIVATION_LABELS[c.activation_mode]],
         ['레지스트리 등록', c.runtime.registered ? 'ON' : 'OFF'],
         ['킵얼라이브 실행', c.runtime.keepalive_running ? 'ON' : 'OFF'],
         ['레지스트리 상태', c.runtime.registry_state, true],

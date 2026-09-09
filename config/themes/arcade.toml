@@ -1,0 +1,20 @@
+name = "arcade"
+light = false
+
+[palette]
+base00 = "000008"
+base01 = "0a0a18"
+base02 = "141430"
+base03 = "4a4a70"
+base04 = "8a8ab0"
+base05 = "e8e8f8"
+base06 = "f4f4ff"
+base07 = "ffffff"
+base08 = "ff3355"
+base09 = "ff8800"
+base0a = "ffee00"
+base0b = "33ff44"
+base0c = "22ddff"
+base0d = "4477ff"
+base0e = "bb44ff"
+base0f = "ff44bb"

@@ -72,7 +72,7 @@ let project_root_from_executable () =
     walk (Filename.dirname exe))
 ;;
 
-let sidecar_root () = trim_opt (Sys.getenv_opt "MASC_SIDECAR_ROOT")
+let sidecar_root () = Env_setting.String_opt_knob.get Sidecar_root
 
 let sidecar_root_candidates ?sidecar_root ?project_root ~base_path () =
   [ sidecar_root; Some base_path; project_root ]
@@ -242,7 +242,9 @@ let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path i
   let cfg = sidecar_status_config id in
   let env_paths =
     cfg.env_names
-    |> List.find_map (fun name -> trim_opt (Sys.getenv_opt name))
+    (* Same floor as every other read: a sidecar path declared in runtime.toml
+       is as much a declaration as one exported by the parent process. *)
+    |> List.find_map (fun name -> trim_opt (Env_config_core.raw_value_opt name))
     |> Option.map (resolve_relative_path ~roots)
     |> Option.value ~default:[]
   in

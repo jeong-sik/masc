@@ -83,7 +83,25 @@ let test_h1_and_h2_routes_are_registered () =
     (contains h2 "Server_dashboard_fusion_run_projection.detail_response")
 ;;
 
+let with_board f =
+  let base_path = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      cleanup_dir base_path)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_path (fun () ->
+         Eio_main.run @@ fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
+         Board.reset_global_for_test ();
+         Board_dispatch.reset_for_test ();
+         Board_dispatch.init_jsonl ();
+         f ()))
+;;
+
 let test_list_and_unknown_detail_responses () =
+  with_board @@ fun () ->
   let registry = Fusion_run_registry.create () in
   Fusion_run_registry.register_running
     registry
@@ -132,23 +150,6 @@ let test_list_and_unknown_detail_responses () =
     "unknown run is named"
     "no retained fusion run named unknown-fusion-run"
     Yojson.Safe.Util.(json |> member "error" |> to_string)
-;;
-
-let with_board f =
-  let base_path = test_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Board_dispatch.reset_for_test ();
-      Board.reset_global_for_test ();
-      cleanup_dir base_path)
-    (fun () ->
-       with_env "MASC_BASE_PATH" base_path (fun () ->
-         Eio_main.run @@ fun env ->
-         Fs_compat.set_fs (Eio.Stdenv.fs env);
-         Board.reset_global_for_test ();
-         Board_dispatch.reset_for_test ();
-         Board_dispatch.init_jsonl ();
-         f ()))
 ;;
 
 let test_detail_uses_exact_typed_board_origin () =
@@ -302,6 +303,79 @@ let test_detail_uses_exact_typed_board_origin () =
     Yojson.Safe.Util.(post_json |> member "meta" |> member "panel")
 ;;
 
+let test_replay_failure_keeps_historical_evidence_readable () =
+  with_board @@ fun () ->
+  let replay_path = Filename.temp_file "fusion-replay-visibility" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove replay_path) @@ fun () ->
+  let initial = Fusion_run_registry.create ~path:replay_path () in
+  let lost_id = "lost-observation" in
+  Fusion_run_registry.register_running initial ~run_id:lost_id ~keeper:"caller"
+    ~preset:"test" ~topology:Fusion_types.Simple ~started_at:10.;
+  let channel = open_out_gen [Open_append; Open_binary] 0o600 replay_path in
+  output_string channel
+    {|{"event":"complete","id":"lost-observation","completion":null}
+|};
+  close_out channel;
+  let before = Fs_compat.load_file replay_path in
+  let registry = Fusion_run_registry.replay replay_path in
+  let origin : Board.post_origin =
+    { turn_ref = None; source = Some "fusion"; fusion_run_id = Some lost_id } in
+  let post = match Board_dispatch.create_post ~author:"caller"
+      ~content:"The original measured conclusion remains readable."
+      ~post_kind:Board.System_post ~origin () with
+    | Ok post -> post
+    | Error error -> fail (Board.show_board_error error) in
+  (* A text mention and a different source must not become a history entry. *)
+  let wrong_origin = { origin with source = Some "other";
+                                  fusion_run_id = Some "wrong-source" } in
+  (match Board_dispatch.create_post ~author:"caller" ~content:lost_id
+      ~post_kind:Board.System_post ~origin:wrong_origin () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  let response = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry in
+  let open Yojson.Safe.Util in
+  check int "invalid completion never becomes a lifecycle row" 0
+    (response |> member "count" |> to_int);
+  let replay = member "replay" response in
+  check int "startup retains invalid row count" 1
+    (replay |> member "malformed_lines" |> to_int);
+  check int "startup retains omitted worker count" 1
+    (replay |> member "dropped_running" |> to_int);
+  let references = response |> member "historical_evidence" |> to_list in
+  check int "only exact Fusion origin is listed" 1 (List.length references);
+  let reference = List.hd references in
+  check string "reference uses original Board id" (Board.Post_id.to_string post.id)
+    (reference |> member "post_id" |> to_string);
+  check bool "no invented lifecycle or completion timestamp" true
+    (member "status" reference = `Null && member "finished_at" reference = `Null);
+  (match Tui_decode.decode_fusion_snapshot response with
+   | Error detail -> fail detail
+   | Ok snapshot ->
+       check int "TUI can select the historical result" 1
+         (List.length snapshot.fus_historical_evidence);
+       check bool "TUI knows the startup read lost rows" true
+         (match snapshot.fus_replay with
+          | Tui_decode.Fusion_replayed { malformed_lines = 1; dropped_running = 1;
+                                        incomplete = false } -> true
+          | _ -> false));
+  let status, detail = Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:("/api/v1/dashboard/fusion-runs/" ^ lost_id) in
+  check bool "unretained lifecycle remains 404" true (status = `Not_found);
+  check string "404 offers an exact Board reference" (Board.Post_id.to_string post.id)
+    (detail |> member "historical_evidence" |> member "post_id" |> to_string);
+  (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+   | Ok actual -> check string "original result remains readable" post.body actual.body
+   | Error error -> fail (Board.show_board_error error));
+  check string "diagnostic read preserves malformed source" before (Fs_compat.load_file replay_path);
+  Fusion_run_registry.register_running registry ~run_id:lost_id ~keeper:"caller"
+    ~preset:"test" ~topology:Fusion_types.Simple ~started_at:20.;
+  let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry in
+  check int "retained run does not duplicate its Board history" 0
+    (retained |> member "historical_evidence" |> to_list |> List.length)
+;;
+
 let () =
   run
     "dashboard fusion run projection"
@@ -314,6 +388,8 @@ let () =
             test_list_and_unknown_detail_responses
         ; test_case "detail uses exact typed Board origin" `Quick
             test_detail_uses_exact_typed_board_origin
+        ; test_case "replay failure keeps historical evidence readable" `Quick
+            test_replay_failure_keeps_historical_evidence_readable
         ] )
     ]
 ;;

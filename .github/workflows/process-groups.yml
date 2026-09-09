@@ -1,0 +1,50 @@
+name: Process group lifecycle
+on:
+  pull_request:
+    paths:
+      - 'lib/process/**'
+      - 'test/test_posix_spawn_process_mgr.ml'
+      - 'test/test_process_eio_coverage.ml'
+      - '.github/workflows/process-groups.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  process-groups:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install coreutils openssl@3 gmp zstd libpq
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+      - name: Build lifecycle suites
+        run: opam exec -- dune build test/test_posix_spawn_process_mgr.exe test/test_process_eio_coverage.exe
+      - name: Run native and Unix fallback lifecycle suites
+        env:
+          ALCOTEST_VERBOSE: '1'
+        run: |
+          _build/default/test/test_posix_spawn_process_mgr.exe
+          _build/default/test/test_process_eio_coverage.exe

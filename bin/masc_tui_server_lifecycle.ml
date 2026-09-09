@@ -1,6 +1,25 @@
 (* Opt-in, on-demand masc server start from inside the TUI.
    RFC tui-server-lifecycle. See the .mli for the contract. *)
 
+(* What a completed refresh found at the port, in the vocabulary this
+   decision is made in. The TUI reads it off the status the refresh left
+   behind rather than off which message carried it: a refused connection is
+   a handled per-surface error, so it arrives as a completed refresh whose
+   every surface failed, not as a thrown one. Keeping the vocabulary here
+   and the status in the TUI is what lets the rule run under a test with no
+   TTY and no render state. *)
+type contact =
+  | Nothing_answered
+  | Server_reached
+  | Undecided
+      (** Still connecting, booting or reconnecting: the port has not
+          answered the question yet either way. *)
+
+let start_due ~contact ~already_attempted =
+  match contact with
+  | Nothing_answered -> not already_attempted
+  | Server_reached | Undecided -> false
+
 type discovery =
   | Sibling of string
   | On_path of string
@@ -12,7 +31,7 @@ type discovery =
 let server_binary_basename = "masc"
 
 let manual_start_command ~base_path ~host ~port =
-  Printf.sprintf "masc --base-path %s --host %s --port %d" base_path host port
+  Printf.sprintf "masc start --base-path %s --host %s --port %d" base_path host port
 
 let discover_server_binary ~tui_exe ~file_exists ~path_lookup ~base_path ~host
     ~port =

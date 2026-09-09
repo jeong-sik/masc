@@ -19,6 +19,7 @@ let with_test_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
   let tmp_dir = Filename.temp_dir "masc_keeper_task_create_typed_failure_" "" in
   let config = Workspace.default_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some "operator") in
@@ -100,7 +101,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
     | tasks -> failf "expected no persisted task, got %d" (List.length tasks))
 ;;
 
-(* Pure classifier coverage over all six [Workspace_task.add_task_error]
+(* Pure classifier coverage over [Workspace_task.add_task_error]
    variants, constructed directly rather than reproduced end-to-end:
    [keeper_task_create]'s live tool args never set [predecessor_task_id]
    (RFC-0323 W2 scopes that arg to [masc_add_task]), so [Unknown_predecessor]
@@ -138,10 +139,37 @@ let test_task_create_failure_route_splits_workflow_from_runtime () =
     runtime_failure_cases
 ;;
 
+let test_unavailable_goal_is_runtime_failure_without_mutation () =
+  List.iter (fun break_recovery -> with_test_env (fun config ->
+    (match Goal_store.upsert_goal config ~id:"goal-a" ~title:"Goal A"
+       ~metric:"m" ~target_value:"1" () with
+     | Ok _ -> () | Error message -> fail message);
+    let goal_path = Goal_store.goals_path config in
+    let corrupt path = Out_channel.with_open_text path (fun oc -> output_string oc "{broken") in
+    corrupt goal_path;
+    if break_recovery then corrupt (goal_path ^ ".last-good");
+    let bytes path = if Sys.file_exists path then
+      Some (In_channel.with_open_bin path In_channel.input_all) else None in
+    let backlog_path = Workspace.backlog_path config in
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let backlog = bytes backlog_path and links = bytes links_path in
+    let execution = Task.handle_keeper_task_tool_with_outcome ~config
+      ~meta:(keeper_meta ()) ~name:"keeper_task_create"
+      ~args:(`Assoc ["title",`String "No recovered authority";
+        "description",`String "Do not create"; "goal_id",`String "goal-a"]) in
+    (match execution.disposition with
+     | Tool_result.Failed Tool_result.Runtime_failure -> ()
+     | _ -> fail "Goal source failure must be Runtime_failure");
+    check (option string) "no task write" backlog (bytes backlog_path);
+    check (option string) "no link write" links (bytes links_path))) [false; true]
+;;
+
 let () =
   run "keeper task create typed failure"
     [ ( "keeper_task_create"
-      , [ test_case
+      , [ test_case "unavailable Goal rejects without writes" `Quick
+            test_unavailable_goal_is_runtime_failure_without_mutation
+        ; test_case
             "goal-link write failure surfaces as Runtime_failure, not ok:true"
             `Quick
             test_task_create_goal_link_write_failure_returns_typed_failure

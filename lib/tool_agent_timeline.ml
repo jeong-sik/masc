@@ -568,21 +568,9 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
           ] );
     ]
 
-(* Schema for MCP tool registration, read from
-   [config/tools/masc_agent_timeline.toml] (RFC
-   prompts-and-tool-definitions-outside-ocaml §2.2). Decoded once at module
-   initialization; a missing file or a declaration that does not decode
-   refuses the boot rather than advertising a partial surface. *)
-let schema_of_name name : Masc_domain.tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-
-let schemas : Masc_domain.tool_schema list = [ schema_of_name "masc_agent_timeline" ]
+(* The declaration and the closed vocabulary live in
+   [Tool_schemas_agent_timeline], beside every other surface's. *)
+let schemas : Masc_domain.tool_schema list = Tool_schemas_agent_timeline.schemas
 
 (* RFC-0189 PR-1b.13 — typed result. Caller-input violation
    ("agent_name is required") tagged [Workflow_rejection]; success
@@ -620,20 +608,21 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
    telemetry) to [handle_agent_timeline]; no action of its own to instrument. *)
 let dispatch ?load_chat (ctx : context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  match name with
-  | "masc_agent_timeline" ->
+  match Tool_schemas_agent_timeline.operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_agent_timeline.Agent_timeline ->
       Some
         (handle_agent_timeline ?load_chat ~tool_name:name ~start_time:start ctx
            args)
-  | _ -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+(* Registration walks the same list the router resolves against. *)
 let () =
   List.iter
-    (fun (s : Masc_domain.tool_schema) ->
+    (fun (_operation, (s : Masc_domain.tool_schema)) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -642,4 +631,4 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ()))
-    schemas
+    Tool_schemas_agent_timeline.definitions

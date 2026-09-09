@@ -82,7 +82,7 @@ let frame_cases =
   ]
 
 (* The IO path: a runtime.toml under [base]/.masc/config is the same file the
-   server reads, so [theme ~base_path] must resolve to it. A missing file reads
+   server reads, so [load ~base_path] must resolve to it. A missing file reads
    as no choice, not a crash. *)
 let with_temp_base f =
   let base = Filename.temp_file "masc_tui_config_base" "" in
@@ -106,16 +106,37 @@ let write path content =
   close_out oc
 
 let io_cases =
-  [ Alcotest.test_case "reads theme from the base's runtime.toml" `Quick
+  [ Alcotest.test_case "all startup choices come from one retained snapshot" `Quick
+      (fun () ->
+        with_temp_base (fun ~base ~config ->
+          let path = Filename.concat config "runtime.toml" in
+          write path
+            "[tui]\ntheme = \"monokai\"\nboard_sort = \"discussed\"\n\
+             lift_colours = false\ntable_frame = true\nhints_visible = false\n\
+             coalesce_queued_input = true\nvoice_send_on_stop = false\n";
+          let chosen = Config.load ~base_path:base in
+          write path "[tui]\ntheme = \"nord\"\n";
+          check_opt "retained theme" (Some "monokai") chosen.theme;
+          check_opt "retained Board order" (Some "discussed") chosen.board_sort;
+          Alcotest.(check (option bool)) "colours" (Some false) chosen.lift_colours;
+          Alcotest.(check (option bool)) "frame" (Some true) chosen.table_frame;
+          Alcotest.(check (option bool)) "hints" (Some false) chosen.hints_visible;
+          Alcotest.(check (option bool)) "coalesce" (Some true) chosen.coalesce_queued_input;
+          Alcotest.(check (option bool)) "voice consent" (Some false) chosen.voice_send_on_stop;
+          let next = Config.load ~base_path:base in
+          check_opt "new read sees new theme" (Some "nord") next.theme;
+          check_opt "new read sees removed order" None next.board_sort;
+          Alcotest.(check (option bool)) "removed voice setting is absent" None next.voice_send_on_stop))
+  ; Alcotest.test_case "reads theme from the base's runtime.toml" `Quick
       (fun () ->
         with_temp_base (fun ~base ~config ->
             write (Filename.concat config "runtime.toml")
               "[tui]\ntheme = \"monokai\"\n";
-            check_opt "monokai" (Some "monokai") (Config.theme ~base_path:base)))
+            check_opt "monokai" (Some "monokai") (Config.load ~base_path:base).theme))
   ; Alcotest.test_case "a base with no runtime.toml reads as no choice" `Quick
       (fun () ->
         with_temp_base (fun ~base ~config:_ ->
-            check_opt "none" None (Config.theme ~base_path:base)))
+            check_opt "none" None (Config.load ~base_path:base).theme))
   ]
 
 (* Whether footers spell their hints, [tui].hints_visible. Absence must read
@@ -156,6 +177,28 @@ let coalesce_cases =
   ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
         check_coalesce "string" None
           (coalesce_of "[tui]\ncoalesce_queued_input = \"yes\"\n"))
+  ]
+
+(* Whether ^Y also sends, [tui].voice_send_on_stop. Absence must read as None
+   so the caller's default (off) stands: unlike its neighbours this one sends
+   a message without the operator confirming it, and a file that never
+   mentions it is not that operator asking for it. *)
+let send_on_stop_of s = Config.voice_send_on_stop_of_doc (doc_of s)
+
+let voice_send_on_stop_cases =
+  [ Alcotest.test_case "reads [tui] voice_send_on_stop" `Quick (fun () ->
+        Alcotest.(check (option bool)) "true" (Some true)
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = true\n"))
+  ; Alcotest.test_case "false stays false" `Quick (fun () ->
+        Alcotest.(check (option bool)) "false" (Some false)
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = false\n"))
+  ; Alcotest.test_case "absent key -> None (caller keeps the draft)" `Quick
+      (fun () ->
+        Alcotest.(check (option bool)) "none" None
+          (send_on_stop_of "[tui]\ntheme = \"x\"\n"))
+  ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
+        Alcotest.(check (option bool)) "string" None
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = \"yes\"\n"))
   ]
 
 (* The write side of [tui].theme. It is the only key here that changes while
@@ -221,7 +264,14 @@ let write_cases =
    the pick, and the next start reads it back. A [tui] table is not something
    the runtime schema models, so this also answers whether writing one leaves
    a runtime.toml the server still loads -- the write validates the whole file
-   and refuses it otherwise. *)
+   and refuses it otherwise.
+
+   [models.sample] is a model no capability catalog knows, which is the ordinary
+   shape for an operator running their own openai-compatible server. Such a model
+   carries its own [capabilities] table: with none, nothing knows what a request
+   to it may express, and the runtime refuses the file rather than dispatch
+   blind. The table's presence is what makes it declared -- every field inside
+   has a default -- so this one names only what 1024 tokens of context implies. *)
 let storable_runtime =
   "[providers.local]\n\
    protocol = \"openai-compatible-http\"\n\
@@ -230,6 +280,9 @@ let storable_runtime =
    [models.sample]\n\
    api-name = \"sample\"\n\
    max-context = 1024\n\
+   \n\
+   [models.sample.capabilities]\n\
+   max-output-tokens = 1024\n\
    \n\
    [local.sample]\n\
    max-request-body-bytes = 65536\n\
@@ -259,22 +312,33 @@ let store_cases =
         with_storable_base (fun ~base_path ->
             store_or_fail ~base_path (Some "gruvbox-dark");
             check_opt "gruvbox-dark" (Some "gruvbox-dark")
-              (Config.theme ~base_path)))
+              (Config.load ~base_path).theme))
   ; Alcotest.test_case "withdrawing is there on the next read too" `Quick
       (fun () ->
         with_storable_base (fun ~base_path ->
             store_or_fail ~base_path (Some "gruvbox-dark");
             store_or_fail ~base_path None;
-            check_opt "none" None (Config.theme ~base_path)))
+            check_opt "none" None (Config.load ~base_path).theme))
   ]
+
+let board_sort_cases =
+  [ Alcotest.test_case "last Board order survives a new read" `Quick (fun () ->
+        with_storable_base (fun ~base_path ->
+          (match Config.set_board_sort ~base_path "discussed" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "stored order" (Some "discussed") (Config.load ~base_path).board_sort;
+          store_or_fail ~base_path (Some "gruvbox-dark");
+          check_opt "theme update keeps order" (Some "discussed") (Config.load ~base_path).board_sort)) ]
 
 let () =
   Alcotest.run "tui_config"
-    [ ("theme_of_doc", cases)
+    [ ("board_sort", board_sort_cases)
+    ; ("theme_of_doc", cases)
     ; ("table_frame_of_doc", frame_cases)
     ; ( "lift_colours", lift_cases )
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
+    ; ("voice_send_on_stop", voice_send_on_stop_cases)
     ; ("theme_io", io_cases)
     ; ("text_with_theme", write_cases)
     ; ("set_theme", store_cases)

@@ -415,10 +415,6 @@ export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLin
   })
 }
 
-export function logCodeRouteLink(entry: LogEntry): IdeContextRouteLink | null {
-  return logRouteLinks(entry).find(link => link.label === 'Code') ?? null
-}
-
 function renderLogMessage(entry: LogEntry): string {
   const details = entryDetails(entry)
   const message = interpolateStructuredMessage(entry.message, details)
@@ -627,6 +623,7 @@ function renderLogKindGrid(
         row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
         row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
       )}
+      ${codeBlock('실행 확인 근거', details.classification)}
       ${codeBlock('args', details.tool_args ?? details.args ?? details.input)}
       ${codeBlock('result', details.result ?? details.output)}
     `

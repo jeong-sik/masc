@@ -18,7 +18,7 @@
     "range": "2026-07-28T03:57Z ~ 2026-08-18T06:52Z",
     "last_7_days": 41,
     "phase_actors": { "sangsu": 32, "full-cycle-probe": 6, "admin": 5, "rondo": 3, "codex-mcp-client": 3 },
-    "owner_assignees": { "sangsu": 9, "taskmaster": 1, "kidsnote": 1, "analyst": 1, "rw-e0-collab-202608-coord": 1 }
+    "owner_assignees": { "sangsu": 9, "taskmaster": 1, "exampleorg": 1, "analyst": 1, "rw-e0-collab-202608-coord": 1 }
   },
   "transition_history_gap": {
     "goals_with_phase_events": 48,

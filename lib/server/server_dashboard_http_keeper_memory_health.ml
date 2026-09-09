@@ -3,6 +3,7 @@
 type keeper_health =
   { keeper_id : string
   ; revision : int
+  ; updated_at : float option
   ; facts : int
   ; observed_facts : int
   ; derived_facts : int
@@ -161,6 +162,7 @@ let keeper_health ~keepers_dir keeper_id =
   with
   | Ok None ->
     { keeper_id
+    ; updated_at = None
     ; revision = 0
     ; facts = 0
     ; observed_facts = 0
@@ -194,6 +196,7 @@ let keeper_health ~keepers_dir keeper_id =
         snapshot.facts
     in
     { keeper_id
+    ; updated_at = Some snapshot.updated_at
     ; revision = snapshot.revision
     ; facts = List.length snapshot.facts
     ; observed_facts
@@ -218,6 +221,7 @@ let keeper_health ~keepers_dir keeper_id =
     }
   | Error message ->
     { keeper_id
+    ; updated_at = None
     ; revision = 0
     ; facts = 0
     ; observed_facts = 0
@@ -353,6 +357,7 @@ let keeper_health_entry_to_json (h : keeper_health) =
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "revision", `Int h.revision
+    ; "updated_at", (match h.updated_at with None -> `Null | Some ts -> `Float ts)
     ; "facts", `Int h.facts
     ; "observed_facts", `Int h.observed_facts
     ; "derived_facts", `Int h.derived_facts
@@ -411,7 +416,7 @@ let keeper_memory_health_http_json ~base_path =
          all_alerts)
   in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v3"
+    [ "schema", `String "keeper.memory_os.current_health.v4"
     ; "generated_at", `Float generated_at
     ; ( "cadence_counter_entries"
       , `Int (Keeper_librarian_runtime.cadence_counter_entries ()) )

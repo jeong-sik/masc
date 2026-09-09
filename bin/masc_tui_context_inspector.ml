@@ -334,6 +334,7 @@ let prompt_block_label = function
   | Prompt_block_id.Temporal_summary -> "Temporal summary"
   | Prompt_block_id.Memory_os_recall -> "Memory recall"
   | Prompt_block_id.Operator_note -> "Operator note"
+  | Prompt_block_id.Skill_compositions -> "Skill compositions"
 
 let input_component_label = function
   | Turn_record.Prompt_block block -> prompt_block_label block

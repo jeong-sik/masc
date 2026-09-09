@@ -1,0 +1,6 @@
+2026-09-07T07:34:35.9937997Z [targeted] test/test_tool_misc_web_fetch: start 2026-09-07T07:34:35Z
+2026-09-07T07:34:36.1861922Z Test Successful in 0.176s. 14 tests run.
+2026-09-07T07:34:36.1862761Z [targeted] test/test_tool_misc_web_fetch: OK in 1s
+2026-09-07T07:34:36.2172044Z [targeted] test/test_tool_bridge_externalize: start 2026-09-07T07:34:36Z
+2026-09-07T07:34:36.4783784Z Test Successful in 0.237s. 20 tests run.
+2026-09-07T07:34:36.4816540Z [targeted] test/test_tool_bridge_externalize: OK in 0s

@@ -46,10 +46,8 @@ let record_event_queue_stimulus_turn_started =
 
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
-  consumed_stimulus_count : int;
-  consumed_stimuli : Keeper_event_queue.stimulus list;
-  pending_selection : Keeper_event_queue_state.pending_selection option;
-  consumed_selections : Keeper_event_queue_state.pending_selection list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -141,20 +139,31 @@ let decide_keepalive_cycle_action = function
   | Turn_cycle_busy block -> Defer_autonomous_work block
 ;;
 
+(* What a provider retry route asks of the next sleep: how long, and whether
+   a stimulus may cut it short. A rate limit or exhausted quota is the
+   provider's state and waking sooner only re-runs the same failing call, so
+   the sleep runs to its end (#34653). Capacity backpressure also reaches
+   this route from MASC's own slot and client capacity envelopes, which clear
+   on their own, so that sleep stays interruptible (#34663 review). *)
+type provider_backoff =
+  { retry_after_hint : float
+  ; wake_policy : Keeper_keepalive_signal.wake_policy
+  }
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
   stimuli_acked : bool;
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
-  rate_limited_retry_after : float option;
-      (** [Some retry_after] when the cycle's turn failure routed as a
-          provider rate-limit/capacity retry ([Retry_after_observed] with a
-          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
-          carrying the route's own [Retry-After] hint when the provider sent
-          one. The inter-cycle sleep replaces the plain cadence with a
-          capped backoff for such a cycle (#26068); [None] keeps the
-          cadence. *)
+  provider_backoff : provider_backoff option;
+      (** [Some backoff] when the cycle's turn failure routed as a provider
+          retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
+          [Capacity_backpressure] class), carrying the route's own
+          [Retry-After] hint when the provider sent one ([0.0] when it did
+          not) and the wake policy the class implies. The inter-cycle sleep
+          replaces the plain cadence with a capped backoff for such a cycle
+          (#26068); [None] keeps the cadence. *)
 }
 
 let consume_deferred_runtime_lane_hint hint_ref expected =
@@ -173,17 +182,27 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
    turn already produced instead of re-classifying the error text. *)
 let failure_route_rate_limited_backoff_hint
     (failure : Keeper_unified_turn.turn_failure)
+  : provider_backoff option
   =
+  (* A hint of [0.0] means "rate-limited, but the provider sent no usable
+     [Retry-After]": the backoff then takes its bounded default rather than
+     the plain cadence, because the rate-limit signal is real even without a
+     duration. *)
+  let hint = function
+    | Some seconds -> seconds
+    | None -> 0.0
+  in
   match failure.route with
-  | Route.Retry_after_observed
-      { retry_class = Rate_limited | Hard_quota | Capacity_backpressure
-      ; retry_after
-      } ->
-    (* [Some 0.0] means "rate-limited, but the provider sent no usable
-       [Retry-After]": the backoff then takes its bounded default rather
-       than the plain cadence, because the rate-limit signal is real even
-       without a duration. *)
-    Some (Option.value ~default:0.0 retry_after)
+  | Route.Retry_after_observed { retry_class = Rate_limited | Hard_quota; retry_after } ->
+    Some
+      { retry_after_hint = hint retry_after
+      ; wake_policy = Keeper_keepalive_signal.Serve_wakeup_after_duration
+      }
+  | Route.Retry_after_observed { retry_class = Capacity_backpressure; retry_after } ->
+    Some
+      { retry_after_hint = hint retry_after
+      ; wake_policy = Keeper_keepalive_signal.Interrupt_on_wakeup
+      }
   | Route.Retry_after_observed _ | Route.Rotate_now _ | Route.Exhausted_visible_alive _ ->
     None
 ;;
@@ -282,7 +301,7 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
     { meta
     ; cycle_status = Turn_cycle_interrupted
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     })
   else (
     record_crashed_cycle_failure
@@ -292,7 +311,7 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
     { meta
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     })
 ;;
 
@@ -313,18 +332,25 @@ type batch_disposition =
   | Batch_ack_attention_only
   | Batch_no_action
 
-(* A Connector_attention wake retained across a checkpoint-yield turn stays
-   pending until a completing turn settles it with an exact reply or ignore
-   (#32114, #32602). A keeper whose every cycle checkpoint-yields — the
-   repeated tool-call loop guard — never reaches that settlement: four
-   Discord wakes were re-admitted 1,179 times over 14 hours on 2026-09-05,
-   each re-admission spending a full rate-limited turn. Retention is
-   therefore counted on the queue entry and bounded: after this many
-   checkpoint retentions the wake is retired by a plain ack. Normal
-   settlement completes within one or two cycles; eight consecutive
-   checkpoint yields is the degenerate signature. Remeasure after deploy
-   (parity C2 discipline). *)
-let connector_attention_retention_bound = 8
+(* Retention is durable source bookkeeping. It does not prove a reply,
+   ignore, or other terminal effect and cannot authorize acknowledging input. *)
+let retain_connector_attention_sources ~base_path ~keeper_name selections =
+  List.iter
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       match selection.source.payload with
+       | Keeper_event_queue.Connector_attention _ ->
+         (match
+            Keeper_registry_event_queue.note_checkpoint_retention_result
+              ~base_path keeper_name ~selection ()
+          with
+          | Ok _ -> ()
+          | Error detail ->
+            Log.Keeper.error
+              "turn exit: connector attention retention failed event_id=%s keeper=%s: %s"
+              selection.source.post_id keeper_name detail)
+       | _ -> ())
+    selections
+;;
 
 let batch_disposition_of_cycle_outcome
       (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
@@ -336,25 +362,29 @@ let batch_disposition_of_cycle_outcome
      | Keeper_unified_turn.Continuation_route_addressed ->
        Batch_ack_completed
      | Keeper_unified_turn.Continuation_memory_write_completed ->
-       (* The receipt proves a completed non-surface terminal effect.  The
-          external-attention ledger's Ignored reason is narrowly "turn
-          completed without direct reply"; it does not claim model intent. *)
+       (* The receipt proves a completed non-surface terminal effect; it does
+          not claim model intent. *)
        Batch_ack_completed
      | Keeper_unified_turn.Continuation_memory_retract_completed ->
        Batch_ack_completed
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* No exact direct-reply/ignore settlement exists, so connector
-          attention stays pending instead of gaining an evidence-free
-          Ignored label (#32114 kept this narrow claim honest). The rest of
-          the admitted batch is still consumed: the completed turn projected
-          those rows and chose its actions with them in view. The
-          attention-only disposition preserves Connector attention while
-          advancing the rest. Refusing both replayed the same board rows into
-          every later turn — one post re-promoted 297 times and a 10-15s wake
-          churn (#32277). *)
-       Batch_ack_attention_only)
+       (* A completed turn projected every admitted row and chose its actions
+          with them in view; that is what the queue delivered and what the
+          ack records. Connector attention used to be held back here until an
+          exact reply/ignore receipt existed (#32114), which turned "the
+          keeper read this and did not answer" into a wake reason: the same
+          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
+          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
+          minutes on 2026-09-09, #34655), the same way refusing the board ack
+          replayed one post 297 times (#32277). Whether the keeper answered is
+          not the queue's question, and today no store answers it durably:
+          the ack receipt is [Turn_completed] for every route and the
+          reaction ledger's disposition token is "completed" for every route
+          (#34666). The message itself stays in the external-attention
+          store. *)
+       Batch_ack_completed)
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason =
@@ -384,7 +414,7 @@ let batch_disposition_of_cycle_outcome
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
        so an unconsumed grant is retained. Connector attention remains
-       pending until it has an exact reply/ignore settlement. *)
+       pending until the resumed turn completes. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
@@ -398,6 +428,46 @@ let batch_disposition_of_cycle_outcome
 let batch_disposition_records_continuation = function
   | Batch_ack_completed | Batch_ack_attention_only -> true
   | Batch_no_action -> false
+;;
+
+type continuation_settlement =
+  | Continuation_settled_recorded
+  | Continuation_settled_failed of
+      { route : Keeper_runtime_failure_route.route }
+  | Continuation_unsettled
+
+(* How a turn's outcome settles the HITL continuation it was handed. A
+   completed or checkpointed turn records it, through the batch disposition
+   above. A failed turn settles it only when the provider answered the
+   request that carried the replay evidence: the model saw the evidence and
+   what failed came after it (#32956: with no receipt from a failed turn the
+   same approval was re-delivered for 24 turns, each ending at MaxTokens). A
+   failure before any answer leaves the continuation unsettled so the
+   evidence reaches a fresh turn. The queue disposition of a failed turn is
+   unchanged: [Batch_no_action]. *)
+let continuation_settlement_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : continuation_settlement
+  =
+  match cycle_outcome with
+  | Some (Cycle.Failed { failure; meta = _ }) ->
+    if
+      Keeper_runtime_failure_route.response_observed
+        failure.Keeper_unified_turn.route
+    then Continuation_settled_failed { route = failure.Keeper_unified_turn.route }
+    else Continuation_unsettled
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    if
+      batch_disposition_records_continuation
+        (batch_disposition_of_cycle_outcome cycle_outcome)
+    then Continuation_settled_recorded
+    else Continuation_unsettled
 ;;
 
 
@@ -446,9 +516,9 @@ let pending_stimulus_remains ~ctx ~keeper_name =
    climbs like a clock (#26068). [rate_limited_backoff_sec] derives the
    backoff from the route's own [Retry-After] hint when present, else from
    the cadence, and always clamps to the configured cap so a misread hint
-   (or an out-of-range env override) cannot park the lane: the sleep is
-   still [interruptible_sleep], so a queued stimulus wakes it within
-   [sleep_chunk_sec]. *)
+   (or an out-of-range env override) cannot park the lane for longer than
+   the cap. A queued stimulus does not cut it short: the sleep runs under
+   [Serve_wakeup_after_duration] (#34653). *)
 let rate_limited_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
   let cap_sec = Float.max 0.0 cap_sec in
   let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
@@ -485,6 +555,7 @@ let next_keepalive_sleep_duration_sec
 ;;
 
 let run_keepalive_unified_turn
+      ~wake
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
       ~pending_board_events
@@ -503,7 +574,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   else
     match
@@ -512,25 +583,8 @@ let run_keepalive_unified_turn
         ~keeper_name:meta_after_triage.name
         (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
-    let consumed_stimuli = ref [] in
-    let pending_selection
-      : Keeper_event_queue_state.pending_selection option ref
-      =
-      ref None
-    in
-    (* RFC-0377: [pending_selection] above stays the single primary entry
-       (transient-board-withdrawal reporting and pre-dispatch validation are
-       unchanged by batching). [consumed_selections] is the full admitted
-       batch — [[]], a singleton mirroring [pending_selection], or the
-       primary plus every same-conversation Connector_attention companion.
-       Turn completion/failure disposition acks or defers every entry in
-       this list, not just the primary, so a companion is never left
-       durably stuck once its turn has already run. *)
-    let consumed_selections
-      : Keeper_event_queue_state.pending_selection list ref
-      =
-      ref []
-    in
+    let source_batch = ref Keeper_heartbeat_source_batch.empty in
+    let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
     let hitl_resolution_for_cycle = ref None in
     let hitl_continuation_projection_ok = ref true in
@@ -559,7 +613,7 @@ let run_keepalive_unified_turn
     in
     try
       (match
-         Keeper_board_attention_worker.settle_one_completed
+         Keeper_board_attention_worker.settle_completed_snapshot
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
        with
@@ -574,7 +628,7 @@ let run_keepalive_unified_turn
            (Keeper_board_attention_worker.Partition_settled
               { candidate_id; continuation_wake = _ }) ->
          Log.Keeper.info
-           "Board attention completed judgment settled on owner lane keeper=%s candidate=%s"
+           "Board attention completed snapshot settled on owner lane keeper=%s last_candidate=%s"
            meta_after_triage.name
            candidate_id);
       let event_intake =
@@ -583,9 +637,8 @@ let run_keepalive_unified_turn
           ~meta_after_triage
           ~pending_board_events
       in
-      consumed_stimuli := event_intake.consumed_stimuli;
-      pending_selection := event_intake.pending_selection;
-      consumed_selections := event_intake.consumed_selections;
+      source_batch := event_intake.source_batch;
+      diagnostic_selection := event_intake.diagnostic_selection;
       let selected_source_authority () =
         match
           Keeper_meta_store.read_effective_meta
@@ -598,28 +651,14 @@ let run_keepalive_unified_turn
         | Ok (Some current) when current.paused ->
           Error "keeper paused before dispatch"
         | Ok (Some _) ->
-          (* Batch case: validate every admitted selection, not only the
-             primary, so a companion whose durable entry changed out from
-             under this turn is caught before dispatch instead of only at
-             ack time. Falls back to the pre-batch single [pending_selection]
-             when nothing was consumed as a batch (e.g. the transient-board
-             withdrawal case, which never populates [consumed_selections]). *)
-          let selections_to_validate =
-            match !consumed_selections with
-            | [] -> Option.to_list !pending_selection
-            | (_ :: _) as selections -> selections
-          in
-          List.fold_left
-            (fun result selection ->
-               match result with
-               | Error _ as error -> error
-               | Ok () ->
-                 Keeper_registry_event_queue.validate_pending_selection_result
-                   ~base_path:ctx.config.base_path
-                   meta_after_triage.name
-                   ~selection)
-            (Ok ())
-            selections_to_validate
+          Keeper_heartbeat_source_batch.validate
+            ~diagnostic:!diagnostic_selection
+            ~validate_selection:(fun selection ->
+              Keeper_registry_event_queue.validate_pending_selection_result
+                ~base_path:ctx.config.base_path
+                meta_after_triage.name
+                ~selection)
+            !source_batch
       in
       (match
          Keeper_turn_dispatch_authority.install
@@ -645,7 +684,7 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
       in
       let scheduling =
-        decide_keepalive_scheduling
+        decide_keepalive_scheduling ~wake
           ~event_queue_triggers:event_intake.event_queue_triggers
           ~stop
           ~meta:meta_after_triage
@@ -659,7 +698,7 @@ let run_keepalive_unified_turn
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~consumed_stimulus_count:event_intake.consumed_stimulus_count
+          ~consumed_stimulus_count:(Keeper_heartbeat_source_batch.count event_intake.source_batch)
           ~event_queue_intake_error:event_intake.event_queue_intake_error
       in
       let verdict_strs =
@@ -786,7 +825,7 @@ let run_keepalive_unified_turn
           record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
-            !consumed_stimuli;
+            (Keeper_heartbeat_source_batch.stimuli !source_batch);
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
@@ -797,7 +836,7 @@ let run_keepalive_unified_turn
                   match stim.Keeper_event_queue.payload with
                   | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
                   | _ -> None)
-                !consumed_stimuli
+                (Keeper_heartbeat_source_batch.stimuli !source_batch)
             with
             | Some resolution -> Some resolution
             | None ->
@@ -825,20 +864,8 @@ let run_keepalive_unified_turn
                  Some resolution)
           in
           hitl_resolution_for_cycle := hitl_resolution;
-          (* The event intake is the exact turn input. Keep its attribution in
-             the existing wake record even when the cadence, rather than a
-             direct wake signal, discovered it. An empty [Woken] still means a
-             reactive wake with no selected event. *)
-          let wake : Keeper_registry.wake_reason =
-            match !consumed_stimuli, reactive_wake with
-            | _ :: _, _ ->
-              Keeper_registry.Woken
-                (List.map
-                   (fun (stim : Keeper_event_queue.stimulus) ->
-                      stim.Keeper_event_queue.payload)
-                   !consumed_stimuli)
-            | [], true -> Keeper_registry.Woken []
-            | [], false -> Keeper_registry.Proactive_tick
+          let turn_input =
+            Keeper_heartbeat_source_batch.for_turn ~reactive:reactive_wake !source_batch
           in
           let run_fresh_cycle () =
             run_keeper_cycle
@@ -853,7 +880,7 @@ let run_keepalive_unified_turn
               ~obs
               ~turn_decision
               ~shared_context
-              ~wake
+              ~turn_input
               ()
           in
           let run_cycle () = run_fresh_cycle () in
@@ -874,7 +901,7 @@ let run_keepalive_unified_turn
             ~ctx
             ~keeper_name:meta_after_triage.name
             ~disposition:(Cycle.disposition_token cycle_outcome)
-            !consumed_stimuli;
+            (Keeper_heartbeat_source_batch.stimuli !source_batch);
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
@@ -917,11 +944,11 @@ let run_keepalive_unified_turn
       let disposition =
         batch_disposition_of_cycle_outcome !cycle_outcome_ref
       in
-      let disposition_records_continuation =
-        batch_disposition_records_continuation disposition
-      in
-      (match disposition_records_continuation, !hitl_resolution_for_cycle with
-       | true, Some resolution ->
+      (match
+         ( continuation_settlement_of_cycle_outcome !cycle_outcome_ref
+         , !hitl_resolution_for_cycle )
+       with
+       | Continuation_settled_recorded, Some resolution ->
          (match
             Keeper_approval_queue.ensure_settled_continuation_chat_projection
               ~base_path:ctx.config.base_path
@@ -935,7 +962,33 @@ let run_keepalive_unified_turn
             hitl_continuation_projection_ok := false;
             record_event_queue_failure
               ("approval continuation projection failed: " ^ detail))
-       | false, _ | true, None -> ());
+       | Continuation_settled_failed { route }, Some resolution ->
+         (* The failed turn keeps [Batch_no_action] below: only the
+            continuation slot is settled, and the intake retires the queued
+            wake when it reaches it. A grant this turn never spent stays
+            unsettled ([Continuation_projection_not_ready]): the model was not
+            shown its outcome, so the wake is kept. *)
+         (match
+            Keeper_approval_queue.ensure_failed_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+              ~route
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
+          | Error detail ->
+            (* [record_event_queue_failure] keeps no message after a failed
+               turn, so the detail is logged here. *)
+            Log.Keeper.warn
+              ~keeper_name:meta_after_triage.name
+              "approval continuation failure projection failed: %s"
+              detail;
+            record_event_queue_failure
+              ("approval continuation failure projection failed: " ^ detail))
+       | Continuation_unsettled, _
+       | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
+         ());
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
        | Some
@@ -952,7 +1005,7 @@ let run_keepalive_unified_turn
          turn completion acks all of them; a turn failure applies the same
          quarantine/defer/preserve disposition to all of them, so a
          companion is never silently left un-acked while the primary is. *)
-      (match !consumed_selections with
+      (match Keeper_heartbeat_source_batch.selections !source_batch with
        | [] -> ()
        | (_ :: _) as selections ->
            let remove_completed_selections ~should_ack =
@@ -981,63 +1034,13 @@ let run_keepalive_unified_turn
            | Batch_ack_completed ->
              remove_completed_selections ~should_ack:(fun _ -> true)
            | Batch_ack_attention_only ->
-             (* Retention is counted, not unbounded. Each Connector_attention
-                entry this checkpoint-yield keeps takes one durable retention
-                here; at [connector_attention_retention_bound] the wake is
-                retired by a plain ack instead of being re-admitted next
-                cycle. The bump spends the caller's selection snapshot
-                (validation is structural), so the retirement acks with the
-                selection the bump returned. *)
-             let attention_selections =
-               List.filter
-                 (fun selection ->
-                    match selection.Keeper_event_queue_state.source.payload with
-                    | Keeper_event_queue.Connector_attention _ -> true
-                    | _ -> false)
-                 selections
-             in
-             List.iter
-               (fun selection ->
-                  match
-                    Keeper_registry_event_queue
-                    .note_checkpoint_retention_result
-                      ~base_path:ctx.config.base_path
-                      meta_after_triage.name
-                      ~selection
-                      ()
-                  with
-                  | Error detail ->
-                    Log.Keeper.error
-                      "turn exit: checkpoint retention count failed for                        connector attention event_id=%s keeper=%s: %s"
-                      selection.source.Keeper_event_queue.post_id
-                      meta_after_triage.name
-                      detail
-                  | Ok (updated, retentions) ->
-                    if retentions < connector_attention_retention_bound
-                    then
-                      (match
-                         Keeper_registry_event_queue.ack_pending_result
-                           ~base_path:ctx.config.base_path
-                           meta_after_triage.name
-                           ~selection:updated
-                       with
-                       | Ok () ->
-                         Log.Keeper.warn
-                           "turn exit: retired connector attention wake after                             %d checkpoint retentions without a settling turn                             event_id=%s keeper=%s"
-                           retentions
-                           updated.source.Keeper_event_queue.post_id
-                           meta_after_triage.name
-                       | Error detail ->
-                         Log.Keeper.error
-                           "turn exit: retiring retained connector attention                             failed event_id=%s keeper=%s: %s"
-                           updated.source.Keeper_event_queue.post_id
-                           meta_after_triage.name
-                           detail))
-               attention_selections;
-             (* The original attention-only predicate still applies: entries
-                retained below the bound stay pending, and entries retired at
-                the bound were already acked by the pass above, so the
-                terminalize path must not see them. *)
+             retain_connector_attention_sources
+               ~base_path:ctx.config.base_path
+               ~keeper_name:meta_after_triage.name
+               selections;
+             (* Connector sources remain pending until the terminal-receipt
+                path settles them. Already projected non-connector attention
+                still advances through its existing completion path. *)
              remove_completed_selections
                ~should_ack:(fun selection ->
                  match selection.Keeper_event_queue_state.source.payload with
@@ -1048,7 +1051,7 @@ let run_keepalive_unified_turn
       ; cycle_status =
           (if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
-      ; rate_limited_retry_after =
+      ; provider_backoff =
           (match !cycle_outcome_ref with
            | Some (Cycle.Failed { failure; _ }) ->
              failure_route_rate_limited_backoff_hint failure
@@ -1091,20 +1094,20 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Ok (`Busy block) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Error
       (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Error error ->
     Log.Keeper.error
@@ -1114,7 +1117,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
 ;;
 
@@ -1209,6 +1212,10 @@ let run_heartbeat_loop
      wake does not let the GLOBAL task backlog drive a turn on every keeper at
      once. Single-fiber owned, like the other loop-local refs above. *)
   let last_wake_source = ref Keeper_keepalive_signal.Timeout in
+  let cadence_clock = Monotonic_deadline.start () in
+  let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
+  let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
+      (float_of_int (max 0 proactive_warmup_sec))) in
   (* Why the last turn that ran ended before completing now lives in
      [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
      shares — see the note at [run_fresh_cycle]. *)
@@ -1343,13 +1350,19 @@ let run_heartbeat_loop
         in
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
+        let periodic_due = Keeper_keepalive_signal.periodic_is_due
+            ~now:(cadence_now ())
+            ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+            !periodic_cadence in
+        let wake = if periodic_due then Keeper_world_observation.Periodic_tick
+          else Keeper_world_observation.Attention_wake in
         let turn_outcome =
           if not admitted_turn
           then
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
-            ; rate_limited_retry_after = None
+            ; provider_backoff = None
             }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
@@ -1377,7 +1390,7 @@ let run_heartbeat_loop
                 deferred_runtime_lane
             in
             let r =
-              run_keepalive_unified_turn
+              run_keepalive_unified_turn ~wake
                 ~ctx
                 ~meta_after_triage
                 ~pending_board_events
@@ -1490,43 +1503,68 @@ let run_heartbeat_loop
            A rate-limited failure cycle (#26068) instead sleeps the capped
            route backoff: re-running the turn at the plain cadence keeps
            hammering the provider while the crash-accounting streak climbs.
-           The backoff never disables reactivity — [interruptible_sleep] still
-           notices a queued stimulus within [sleep_chunk_sec]. *)
+           Whether a queued stimulus may cut that backoff short is the
+           route's [wake_policy]: not for a rate limit or exhausted quota
+           (#34653), yes for capacity backpressure. *)
         let cadence_sec =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
         in
-        let cycle_sleep_sec =
-          match turn_outcome.rate_limited_retry_after with
-          | Some hint ->
+        if periodic_due then periodic_cadence :=
+          Keeper_keepalive_signal.consume_periodic ~now:(cadence_now ());
+        let cycle_backoff =
+          match turn_outcome.provider_backoff with
+          | Some { retry_after_hint; wake_policy } ->
             let backoff =
               rate_limited_backoff_sec
                 ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-                ~retry_after_hint:(Some hint)
+                ~retry_after_hint:(Some retry_after_hint)
                 ~cadence_sec
+            in
+            (* A stimulus cannot be served while the lane is rate-limited or
+               exhausted: every wake that cut the backoff short re-ran the
+               same failing call (183 failed turns in 41 minutes, median 30 s
+               apart against a declared 600 s, 2026-09-09, #34653). The queue
+               keeps the stimulus; the wakeup is consumed when the backoff
+               ends. *)
+            let stimulus_note =
+              match wake_policy with
+              | Keeper_keepalive_signal.Serve_wakeup_after_duration ->
+                "stimuli queued meanwhile are served when it ends"
+              | Keeper_keepalive_signal.Interrupt_on_wakeup ->
+                "a queued stimulus still wakes it"
             in
             Log.Keeper.warn
               ~keeper_name:m.name
               "%s: rate-limited failure route; backing off next cycle by %.0fs \
-               (cadence %.0fs, cap %.0fs); queued stimuli still wake within \
-               the sleep chunk"
+               (cadence %.0fs, cap %.0fs); %s"
               m.name
               backoff
               cadence_sec
-              Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec;
-            Some backoff
+              Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+              stimulus_note;
+            Some (backoff, wake_policy)
           | None -> None
         in
+        let wake_policy =
+          match cycle_backoff with
+          | Some (_, wake_policy) -> wake_policy
+          | None -> Keeper_keepalive_signal.Interrupt_on_wakeup
+        in
+        (* The cadence handshake stays offered while parked: it is also how
+           [Keeper_status_runtime.keeper_metric_producer_active] knows a
+           failing lane is in its legitimate sleep, and withholding it (#34670)
+           marked the keeper's metric source stale once a park outlived the
+           freshness SLO. A cadence change taken during a park is honoured
+           when the park ends; the producer is told its signal was taken,
+           which is true, only later than the outcome vocabulary can say. *)
         let sleep_duration () =
-          match cycle_sleep_sec with
-          | Some backoff -> backoff
+          match cycle_backoff with
+          | Some (backoff, _) -> backoff
           | None ->
-            next_keepalive_sleep_duration_sec
-              ~proactive_warmup_sec
-              ~proactive_warmup_elapsed
-              ~keepalive_started_ts
-              ~now_ts:(Time_compat.now ())
-              ~cadence_sec
-              ~rate_limited_backoff_sec:cadence_sec
+            Keeper_keepalive_signal.periodic_remaining
+              ~now:(cadence_now ())
+              ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+              !periodic_cadence
         in
         last_wake_source :=
           (if turn_outcome.stimuli_acked
@@ -1535,6 +1573,7 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~wake_policy
                ~clock:ctx.clock
                ~stop
                ~wakeup
@@ -1545,6 +1584,7 @@ let run_heartbeat_loop
 ;;
 
 module For_testing = struct
+  let retain_connector_attention_sources = retain_connector_attention_sources
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation
@@ -1552,4 +1592,5 @@ module For_testing = struct
 
   let rate_limited_backoff_sec = rate_limited_backoff_sec
   let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
+  let failure_route_rate_limited_backoff_hint = failure_route_rate_limited_backoff_hint
 end

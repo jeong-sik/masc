@@ -38,7 +38,17 @@ type phase =
   | Telemetry_filter
   | Telemetry_summary_per_keeper
   | Telemetry_summary_aggregate
+  | Health_build_identity (** Request-local [Build_identity.current]. *)
+  | Health_paths (** Request-local base-path diagnostics. *)
+  | Health_internal_auth (** Internal credential readiness JSON. *)
+  | Health_dashboard_surface (** Dashboard artifact health JSON. *)
+  | Health_response
+      (** Entire request health JSON builder, overlapping its child phases;
+          excludes JSON serialization and background full-health refresh. *)
   | Json_serialize
+  | Mcp_http_auth (** HTTP credential admission, before reading the body. *)
+  | Mcp_identity (** Canonical actor and internal Keeper verification. *)
+  | Mcp_dispatch (** Protocol handler elapsed time; excludes response serialization. *)
   | Custom of string
 
 val phase_token : phase -> string
@@ -52,9 +62,10 @@ val create : unit -> t
 
 val measure : t -> phase -> (unit -> 'a) -> 'a
 (** [measure t phase f] runs [f ()], accumulates the elapsed
-    wall-clock duration under [phase], and returns [f]'s result.  If
+    monotonic duration under [phase], and returns [f]'s result.  If
     [f] raises, the elapsed time is still recorded and the exception
-    re-raised (so failure paths are still attributed). *)
+    re-raised (so failure paths are still attributed). Durations include
+    suspension and rescheduling time; nested phases overlap their parents. *)
 
 val record_ms : t -> phase -> float -> unit
 (** Manually record [ms] under [phase].  Use when a measurement is
@@ -63,8 +74,10 @@ val record_ms : t -> phase -> float -> unit
 
 val to_header_value : t -> string
 (** RFC 8673 [Server-Timing] field value, comma-separated.  Returns
-    [""] if no phases were recorded. *)
+    [""] if no phases were recorded. Durations are milliseconds with
+    three fractional digits. *)
 
 val extra_header : t -> (string * string) list
-(** [\[("Server-Timing", v)\]] when non-empty, otherwise [\[\]].
-    Use directly with [Http.Response.json ~extra_headers]. *)
+(** [\[("server-timing", v)\]] when non-empty, otherwise [\[\]].
+    The lowercase name is valid on both H1 and H2. Use directly with
+    [Http.Response.json ~extra_headers]. *)

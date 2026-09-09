@@ -244,18 +244,25 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
   }
 ;;
 
-let hitl_resolution_stimulus ~approval_id ~arrived_at : Q.stimulus =
-  let resolution : Q.hitl_resolution =
-    { approval_id
-    ; decision = Q.Hitl_approved
-    ; channel = Keeper_continuation_channel.unrouted "test"
-    }
+let approve_grant_exn ~base_path ~keeper_name ~request =
+  let approval_id =
+    match
+      Keeper_approval_queue.submit_pending
+        ~keeper_name ~tool_name:"external-effect"
+        ~input:(`Assoc [ "request", `String request ])
+        ~call_summary:None ~base_path ()
+    with
+    | Ok submission -> submission.approval_id
+    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
   in
-  { Q.post_id = Q.hitl_resolution_post_id resolution
-  ; urgency = Q.Immediate
-  ; arrived_at
-  ; payload = Q.Hitl_resolved resolution
-  }
+  (match
+     Keeper_approval_queue.resolve_with_policy
+       ~base_path ~id:approval_id
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.resolve_error_to_string error));
+  approval_id
 ;;
 
 let connector_event_ids_of_queue queue =
@@ -339,12 +346,12 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
         ~pending_board_events:[]
     in
     check int "all nine ready sources are admitted in one turn" 9
-      intake.consumed_stimulus_count;
+      (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "admission preserves durable urgency then arrival order"
       (List.map (fun (source : Q.stimulus) -> source.post_id) sources)
-      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "five Board and three Schedule observations reach the turn" 8
       (List.length intake.pending_board_events);
     check int "intake alone never ACKs actionable sources" 9
@@ -355,28 +362,54 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
 
 let test_one_intake_admits_only_one_hitl_resolution () =
   with_ctx "hitl-exact-replay-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    let first =
-      hitl_resolution_stimulus ~approval_id:"appr-first" ~arrived_at:1.0
+    (* Intake reconciles approved wakes against the authoritative Gate store.
+       Exercise the real submit/resolve path, including its durable enqueue. *)
+    (match
+       Keeper_owner_registry.install_from_store
+         ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config
+     with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    (match Keeper_owner_registry.create_meta ~base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "HITL fixture metadata disappeared"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+    (match Keeper_approval_queue.install_persistence ~base_path with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+    let first_id = approve_grant_exn ~base_path ~keeper_name ~request:"first" in
+    let second_id = approve_grant_exn ~base_path ~keeper_name ~request:"second" in
+    let first, second =
+      match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+      | Ok queue ->
+        (match Q.to_list queue with
+         | [ first; second ] ->
+           let approval_id (source : Q.stimulus) =
+             match source.payload with
+             | Q.Hitl_resolved resolution -> resolution.approval_id
+             | _ -> fail "resolution enqueued a non-HITL source"
+           in
+           check (list string) "both real grants are queued in resolution order"
+             [ first_id; second_id ] [ approval_id first; approval_id second ];
+           first, second
+         | _ -> fail "two approvals must produce two durable wakes")
+      | Error detail -> fail detail
     in
-    let second =
-      hitl_resolution_stimulus ~approval_id:"appr-second" ~arrived_at:2.0
-    in
-    List.iter (enqueue_exn ~base_path keeper_name) [ first; second ];
     let intake =
       Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "one turn owns one exact HITL grant" 1 intake.consumed_stimulus_count;
+    check int "one turn owns one exact HITL grant" 1 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "the oldest ready approval is the only admitted source"
       [ first.post_id ]
-      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "turn completion can ACK only that exact approval" 1
-      (List.length intake.consumed_selections);
-    (match intake.consumed_selections with
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
+    (match (Keeper_heartbeat_source_batch.selections intake.source_batch) with
      | [ selection ] ->
        (match
           Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -408,7 +441,7 @@ let test_one_intake_admits_only_one_hitl_resolution () =
       (list string)
       "the next turn admits the remaining exact approval"
       [ second.post_id ]
-      (List.map (fun (source : Q.stimulus) -> source.post_id) next.consumed_stimuli))
+      (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli next.source_batch)))
 ;;
 
 (* Adversarial review P1-2: the turn-completion/failure batch disposition
@@ -490,26 +523,27 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
     ]
 ;;
 
-(* #32096: mismatch and missing/inapplicable receipt evidence say nothing
-   about model intent, so the connector-attention row must not be recorded
-   as Ignored — [Batch_ack_attention_only] settles it as
-   [Settle_pending_in_queue]. #32277: refusing the queue ACK as well
-   replayed the same admitted batch into every later turn (one board post
-   re-promoted 297 times, a 10-15s wake churn), so the completed turn still
-   consumes its batch. *)
-let test_batch_disposition_keeps_unsettled_evidence_pending () =
-  let meta = test_meta "batch-disposition-pending" in
+(* #34655: a completed turn acks its connector attention whether or not it
+   produced a reply/ignore receipt. Holding the rows back until an exact
+   receipt existed (#32096) made "read but not answered" a wake reason, and
+   the same Discord rows were re-promoted on every wake (17 rows for a day;
+   3,711 consumption lines on 2026-09-08, 36 turns in thirty minutes on
+   2026-09-09). The turn's disposition stays on the reaction ledger's
+   turn_finished row; the message stays in the external-attention store.
+   #32277 is the same rule for board rows. *)
+let test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt () =
+  let meta = test_meta "batch-disposition-no-receipt" in
   List.iter
     (fun route ->
        match
          Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
            (Some (completed_outcome ~route meta))
        with
-       | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
-       | Keeper_heartbeat_loop.Batch_ack_completed ->
+       | Keeper_heartbeat_loop.Batch_ack_completed -> ()
+       | Keeper_heartbeat_loop.Batch_ack_attention_only ->
          fail
-           "unsettled route evidence must not label the attention row \
-            (no judgement was made)"
+           "a completed turn without a reply receipt retained its connector \
+            attention — the rows come back on every wake (#34655)"
        | Keeper_heartbeat_loop.Batch_no_action ->
          fail
            "a completed turn must consume its admitted batch — leaving it \
@@ -556,21 +590,21 @@ let test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_qu
         ~pending_board_events:[]
     in
     check int "channel A's 3 pending messages are all admitted in one turn" 3
-      intake.consumed_stimulus_count;
+      (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "consumed_stimuli are exactly channel A's, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id; a3.Q.post_id ]
-      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) intake.consumed_stimuli);
+      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "consumed_selections mirrors the same batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     check
       (list string)
       "consumed_selections carries channel A's sources, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id; a3.Q.post_id ]
       (List.map
          (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.Q.post_id)
-         intake.consumed_selections);
+         (Keeper_heartbeat_source_batch.selections intake.source_batch));
     check int "the turn context carries all 3 observations" 3
       (List.length intake.pending_board_events);
     List.iteri
@@ -622,12 +656,12 @@ let test_batch_retires_permanent_board_poison_between_connector_matches () =
         ~pending_board_events:[]
     in
     check int "only the two connector entries are admitted, not the board signal"
-      2 intake.consumed_stimulus_count;
+      2 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
       "batch is exactly the two connector entries, in arrival order"
       [ a1.Q.post_id; a2.Q.post_id ]
-      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) intake.consumed_stimuli);
+      (List.map (fun (s : Q.stimulus) -> s.Q.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> queue
@@ -671,9 +705,9 @@ let test_batch_turn_failure_leaves_every_member_queued () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
+    check int "all 3 admitted as one batch" 3 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check int "consumed_selections mirrors the batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     let failed_cycle_outcome =
       failed_outcome
         ~source_disposition:Keeper_unified_turn.Follow_failure_route
@@ -703,14 +737,60 @@ let test_batch_turn_failure_leaves_every_member_queued () =
       (connector_event_ids_of_queue queued))
 ;;
 
-(* RFC-0377: the completion counterpart to the failure test above — batch
-   admitted, then the turn completes. This is genuinely new coverage: no
-   prior test in this suite exercised the completion-ack path at all.
-   Drives the same real [batch_disposition_of_cycle_outcome] function,
-   then applies its [Batch_ack_completed] action to every
-   [consumed_selections] member the way [remove_completed_selections]
-   does (List.for_all over terminalize_completed_selection), proving a
-   turn completion acks the WHOLE admitted batch, not only the primary. *)
+let test_checkpoint_retention_preserves_unsettled_sources () =
+  with_ctx "connector-retention-settlement" (fun ~base_path ~keeper_name ~meta:_ ~ctx:_ ->
+    let module Persistence = Keeper_event_queue_persistence in
+    let require label = function
+      | Ok value -> value
+      | Error detail -> failf "%s: %s" label detail
+    in
+    let first = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:"chan-retained"
+      ~message_id:"first" ~arrived_at:1.0 ~content:"Still needs a reply" in
+    let second = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:"chan-retained"
+      ~message_id:"second" ~arrived_at:2.0 ~content:"Independent pending reply" in
+    let board = board_distractor_stimulus ~post_id:"board-retained" ~arrived_at:3.0 in
+    List.iter (enqueue_exn ~base_path keeper_name) [first; second; board];
+    let pending () =
+      Persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "reload exact durable sources"
+    in
+    let original = pending () in
+    let identities selections = List.map
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id)
+      selections in
+    (* The first yield and a run longer than the former count boundary must
+       preserve the same requests. These are fixture observations, not gates. *)
+    for cycle = 1 to 12 do
+      Keeper_heartbeat_loop.For_testing.retain_connector_attention_sources
+        ~base_path ~keeper_name (pending ());
+      let retained = pending () in
+      check (list string) "yield retains every exact input identity"
+        (identities original) (identities retained);
+      List.iter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        let expected = match selection.source.payload with
+          | Q.Connector_attention _ -> cycle
+          | _ -> 0 in
+        check int "retention count survives a cold durable reload"
+          expected selection.checkpoint_retentions)
+        retained
+    done;
+    let retained = pending () in
+    let selected = List.find
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id = first.post_id)
+      retained in
+    let (_ : Keeper_registry_event_queue.source_ack_result) =
+      Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:1000.0 ~selection:selected
+      |> require "explicit completion settles the exact source" in
+    check (list string) "completion leaves other outstanding inputs intact"
+      [second.post_id; board.post_id] (identities (pending ())))
+;;
+
+(* A completed, addressed turn settles the entire admitted batch through the
+   existing exact-source terminalization path. *)
 let test_batch_completion_acks_every_member () =
   with_ctx "connector-batch-completion" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
@@ -732,9 +812,9 @@ let test_batch_completion_acks_every_member () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
+    check int "all 3 admitted as one batch" 3 (Keeper_heartbeat_source_batch.count intake.source_batch);
     check int "consumed_selections mirrors the batch" 3
-      (List.length intake.consumed_selections);
+      (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     (match
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
          (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
@@ -753,7 +833,7 @@ let test_batch_completion_acks_every_member () =
               | Ok _ -> true
               | Error detail ->
                 failf "ack failed for %s: %s" selection.source.Q.post_id detail)
-           intake.consumed_selections
+           (Keeper_heartbeat_source_batch.selections intake.source_batch)
        in
        check bool "every batch member acks cleanly" true acked
      | Keeper_heartbeat_loop.Batch_ack_attention_only ->
@@ -769,11 +849,157 @@ let test_batch_completion_acks_every_member () =
       (Q.length queued))
 ;;
 
+let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
+  with_ctx "mixed-scope-transport" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let module Persistence = Keeper_event_queue_persistence in
+    let require label = function
+      | Ok value -> value
+      | Error detail -> failf "%s: %s" label detail
+    in
+    let sources = List.init 3 (fun index ->
+      { Q.post_id = "mixed-" ^ string_of_int index
+      ; urgency = Q.Normal
+      ; arrived_at = Float.of_int index
+      ; payload = Q.Bootstrap }) in
+    List.iter (enqueue_exn ~base_path keeper_name) sources;
+    let initial = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "initial selections" in
+    let first, second = match initial with
+      | first :: second :: _ -> first, second
+      | _ -> fail "fixture did not enqueue three sources"
+    in
+    let direct = Keeper_chat_operation.Operation_id.of_string "originating-direct"
+      |> require "operation ID" |> Keeper_execution_scope_id.direct_operation in
+    let autonomous =
+      match Uuidm.of_string "fde5c983-7a6f-4d87-bdad-53a51316f40d" with
+      | Some id -> Keeper_execution_scope_id.autonomous_admission id
+      | None -> fail "fixture UUID is invalid"
+    in
+    List.iter (fun (selection, scope) ->
+      let (_ : Keeper_event_queue_state.pending_selection list) =
+        Persistence.bind_pending_repetition_scope_result
+          ~base_path ~keeper_name ~selections:[selection] ~scope ()
+        |> require "bind distinct scopes" in
+      ()) [first, direct; second, autonomous];
+    let expected = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "bound selections" in
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check bool "successful intake has no diagnostic authority" true
+      (Option.is_none intake.diagnostic_selection);
+    let input = Batch.for_turn ~reactive:false intake.source_batch in
+    let batch = Batch.sources input in
+    check bool "all exact identities and mixed bindings reach turn input" true
+      (Batch.selections batch = expected);
+    (match Batch.wake input with
+     | Keeper_registry.Woken payloads ->
+       check int "cadence-discovered batch retains reactive payload view" 3 (List.length payloads)
+     | _ -> fail "selected sources became a source-free cadence tick");
+    let checked = ref [] in
+    Keeper_turn_dispatch_authority.run (fun token ->
+      Keeper_turn_dispatch_authority.install token (fun () ->
+        Batch.validate ~diagnostic:intake.diagnostic_selection
+          ~validate_selection:(fun selection ->
+            checked := selection :: !checked;
+            Keeper_registry_event_queue.validate_pending_selection_result
+              ~base_path keeper_name ~selection)
+          batch)
+      |> require "install dispatch authority";
+      Keeper_turn_dispatch_authority.validate token |> require "dispatch validation");
+    check bool "dispatch validates the same complete exact batch" true
+      (List.rev !checked = expected);
+    List.iter (fun selection ->
+      let (_ : Keeper_registry_event_queue.source_ack_result) =
+        Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path keeper_name ~applied_at:1000. ~selection
+        |> require "settle exact source" in
+      ()) (Batch.selections batch);
+    let remaining = Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require "settled queue" in
+    check int "every transported selection was durably settled" 0 (List.length remaining))
+;;
+
+(* A batch wake is one conversation's backlog, so it continues on that
+   conversation. Routing a batch as "not a continuation wake" made
+   [Continuation_route_addressed] unreachable for any batched conversation,
+   and under the rule #34662 removed such rows could never settle. *)
+let wake_channel ~channel_id ~message_id =
+  match
+    Keeper_continuation_channel.discord
+      ~guild_id:(Some "guild-batch")
+      ~channel_id
+      ~parent_channel_id:None
+      ~thread_id:None
+      ~reply_to_message_id:message_id
+      ~user_id:"user-batch"
+      ()
+  with
+  | Ok channel -> channel
+  | Error detail -> failf "channel fixture failed: %s" detail
+;;
+
+let wake_payload ~channel_id ~message_id : Q.stimulus_payload =
+  Q.Connector_attention
+    { event_id = Printf.sprintf "evt-%s-%s" channel_id message_id
+    ; channel = wake_channel ~channel_id ~message_id
+    }
+;;
+
+let test_batch_wake_continues_on_its_newest_member () =
+  let wake =
+    Keeper_registry.Woken
+      [ wake_payload ~channel_id:"C-batch" ~message_id:"m1"
+      ; wake_payload ~channel_id:"C-batch" ~message_id:"m2"
+      ]
+  in
+  match Keeper_unified_turn.continuation_channel_of_wake wake with
+  | None -> fail "a batched conversation wake must continue on its conversation"
+  | Some channel ->
+    check bool "the newest member's route" true
+      (Keeper_continuation_channel.same_route channel
+         (wake_channel ~channel_id:"C-batch" ~message_id:"m2"));
+    check bool "the conversation every member shares" true
+      (Keeper_continuation_channel.same_conversation channel
+         (wake_channel ~channel_id:"C-batch" ~message_id:"m1"))
+;;
+
+let test_single_payload_wake_keeps_its_channel () =
+  match
+    Keeper_unified_turn.continuation_channel_of_wake
+      (Keeper_registry.Woken [ wake_payload ~channel_id:"C-one" ~message_id:"m1" ])
+  with
+  | None -> fail "a single connector payload must continue on its channel"
+  | Some channel ->
+    check bool "same route as the payload" true
+      (Keeper_continuation_channel.same_route channel
+         (wake_channel ~channel_id:"C-one" ~message_id:"m1"))
+;;
+
+let test_batch_spanning_conversations_routes_nowhere () =
+  let none label wake =
+    match Keeper_unified_turn.continuation_channel_of_wake wake with
+    | None -> ()
+    | Some _ -> failf "%s must not route" label
+  in
+  none "two conversations"
+    (Keeper_registry.Woken
+       [ wake_payload ~channel_id:"C-a" ~message_id:"m1"
+       ; wake_payload ~channel_id:"C-b" ~message_id:"m1"
+       ]);
+  none "empty wake" (Keeper_registry.Woken []);
+  none "proactive tick" Keeper_registry.Proactive_tick
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
-      , [ test_case
+      , [ test_case "checkpoint yields preserve requests until exact settlement" `Quick
+            test_checkpoint_retention_preserves_unsettled_sources
+        ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
+            test_exact_mixed_bindings_reach_dispatch_and_settlement
+        ; test_case
             "admits all ready Board, Schedule, and Bootstrap sources in one turn"
             `Quick
             test_one_intake_admits_every_ready_non_connector_in_queue_order
@@ -805,9 +1031,23 @@ let () =
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
         ; test_case
-            "unsettled route evidence stays pending, never Ignored"
+            "a completed turn without a reply receipt acks its connector attention"
             `Quick
-            test_batch_disposition_keeps_unsettled_evidence_pending
+            test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt
+        ] )
+    ; ( "continuation_channel_of_wake"
+      , [ test_case
+            "a batched conversation wake continues on its newest member"
+            `Quick
+            test_batch_wake_continues_on_its_newest_member
+        ; test_case
+            "a single payload wake keeps its channel"
+            `Quick
+            test_single_payload_wake_keeps_its_channel
+        ; test_case
+            "a batch spanning conversations routes nowhere"
+            `Quick
+            test_batch_spanning_conversations_routes_nowhere
         ] )
     ]
 ;;

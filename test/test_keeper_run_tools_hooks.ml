@@ -1097,10 +1097,22 @@ let test_runtime_attempt_clears_previous_runtime_delivery () =
    for whatever the decoder placeholder is: the assertion is about which
    side wins, not about the placeholder's value. *)
 
+(* RFC-0405: a microvm profile is only effective once the TOML names the
+   runtime that supplies the guest, and where it does not the host is asked.
+   macOS answers and Linux does not, so a fixture that leaves it out reads as
+   two different keepers depending on where the suite runs. This one declares
+   a backend, the way a keeper TOML naming microvm has to. *)
 let drift_defaults sandbox =
   { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "keepers/drift.toml"
   ; sandbox_profile = sandbox
+  ; microvm_backend =
+      (match sandbox with
+       | Some Keeper_types_profile_sandbox.Micro_vm ->
+         Some Masc.Keeper_microvm_backend.Microsandbox
+       | Some (Keeper_types_profile_sandbox.Docker
+              | Keeper_types_profile_sandbox.Remote_ssh)
+       | None -> None)
   }
 ;;
 

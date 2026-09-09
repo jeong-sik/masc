@@ -18,7 +18,7 @@ const RT_TCF = {
 const RT_PROVIDERS = [
   { id: 'ollama_cloud', display_name: 'Ollama Cloud', protocol: 'openai-compatible-http', api_format: 'Chat_completions_api', endpoint: 'https://ollama.com/v1', credential: { type: 'env', key: 'OLLAMA_CLOUD_API_KEY' }, caps: { mcpTools: true, toolEvents: true, mcpHeaders: true } },
   { id: 'deepseek', display_name: 'DeepSeek API', protocol: 'openai-compatible-http', api_format: 'Chat_completions_api', endpoint: 'https://api.deepseek.com', credential: { type: 'env', key: 'DEEPSEEK_API_KEY' }, caps: { mcpTools: true, toolEvents: true, mcpHeaders: true } },
-  { id: 'glm-coding', display_name: 'GLM Coding Plan', protocol: 'openai-compatible-http', api_format: 'Chat_completions_api', endpoint: 'https://api.z.ai/api/coding/paas/v4', credential: { type: 'env', key: 'ZAI_API_KEY_SB' }, caps: { mcpTools: true, toolEvents: true, mcpHeaders: true } },
+  { id: 'glm-coding', display_name: 'GLM Coding Plan', protocol: 'openai-compatible-http', api_format: 'Chat_completions_api', endpoint: 'https://api.z.ai/api/coding/paas/v4', credential: { type: 'env', key: 'ZAI_API_KEY' }, caps: { mcpTools: true, toolEvents: true, mcpHeaders: true } },
   { id: 'ollama', display_name: 'Local Ollama', protocol: 'ollama-http', api_format: 'Ollama_api', endpoint: 'http://localhost:11434', credential: null, caps: { mcpTools: false, toolEvents: false, mcpHeaders: false } },
 ];
 

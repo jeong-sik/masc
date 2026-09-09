@@ -280,29 +280,13 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              | Ok _ ->
                Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
                (match
-                  Runtime.commit_keeper_assignment runtime_transaction
+                  Runtime.commit_keeper_assignment ?egress_allow:p.egress_allow_opt runtime_transaction
                     ~runtime_id:p.runtime_id_opt
                 with
                 | Error error ->
                   Keeper_turn_up_config_persistence.Rollback
                     (Error (`Runtime_assignment error))
                 | Ok runtime_write ->
-                (* Same transaction, so a keeper never sits between entering
-                   the policy lane and learning what it may reach. Omitted
-                   leaves any existing allowlist alone; the args parser has
-                   already refused the pair that would not be consulted. *)
-                match
-                  (match p.egress_allow_opt with
-                   | None -> Ok ()
-                   | Some allow ->
-                     Runtime.commit_keeper_egress_allow runtime_transaction
-                       ~allow:(Some allow)
-                     |> Result.map (fun (_ : Runtime.keeper_assignment_write) -> ()))
-                with
-                | Error error ->
-                  Keeper_turn_up_config_persistence.Rollback
-                    (Error (`Runtime_assignment error))
-                | Ok () ->
                   let runtime_warnings =
                     Keeper_turn_up_config_persistence
                     .warnings_of_runtime_assignment_write runtime_write

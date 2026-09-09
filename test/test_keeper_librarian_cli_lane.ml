@@ -54,12 +54,12 @@ let valid_selection_json =
     ]
 ;;
 
-let publish_unreachable_lane ~cli_slot_ids ~source =
+let publish_unreachable_lane ?(cli_only = false) ~cli_slot_ids ~source () =
   ignore
     (Fixture.publish_registry
        ~cli_slot_ids
        ~lane_id:"librarian_exact"
-       ~slot_ids:[ "librarian-cli-unreachable" ]
+       ~slot_ids:(if cli_only then [] else [ "librarian-cli-unreachable" ])
        (Fixture.resolver_snapshot
           ~source
           [ { Fixture.id = "librarian-cli-unreachable"
@@ -101,14 +101,14 @@ let with_eio f =
   f ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ~base_path
 ;;
 
-let test_cli_slot_answers_after_catalog_exhaustion () =
+let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
   with_eio
   @@ fun ~net ~clock ~base_path ->
   Fixture.with_official_client_runtimes
   @@ fun () ->
-  publish_unreachable_lane
+  publish_unreachable_lane ~cli_only
     ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
-    ~source:"librarian cli fallback";
+    ~source:"librarian cli fallback" ();
   let seen = ref None in
   let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
     seen := Some runtime_id;
@@ -145,7 +145,7 @@ let test_domain_invalid_cli_answer_keeps_the_terminal () =
   @@ fun () ->
   publish_unreachable_lane
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
-    ~source:"librarian cli invalid";
+    ~source:"librarian cli invalid" ();
   let attempts = ref [] in
   let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [ runtime_id ];
@@ -172,7 +172,7 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
   Fixture.with_official_client_runtimes @@ fun () ->
   publish_unreachable_lane
     ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
-    ~source:"librarian cli domain failover";
+    ~source:"librarian cli domain failover" ();
   let attempts = ref [] in
   let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     attempts := !attempts @ [runtime_id];
@@ -193,13 +193,15 @@ let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case
+      , [ test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
+          (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
+      ; test_case
             "domain-invalid CLI output advances to a valid selection"
             `Quick test_domain_invalid_cli_answer_advances_to_valid_selection
         ; test_case
             "a cli slot answers after catalog exhaustion"
             `Quick
-            test_cli_slot_answers_after_catalog_exhaustion
+            (fun () -> test_cli_slot_answers_after_catalog_exhaustion ())
         ; test_case
             "a domain-invalid cli answer keeps the terminal"
             `Quick

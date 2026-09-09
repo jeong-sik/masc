@@ -196,6 +196,7 @@ val recovers_from_conflict : action -> step list option
 (** What one step's HTTP answer means to the plan. *)
 type outcome =
   | Accepted of { already_live : bool }
+  | Purge_accepted of { operation_id : string }
       (** 2xx. [already_live] is the server saying a boot found the fiber
           already running and woke it instead of starting a second one. *)
   | Paused_owner_conflict of string
@@ -204,6 +205,9 @@ type outcome =
   | Rejected of { status : int; detail : string }
 
 val classify_response : status:int -> body:string -> outcome
+
+(** A purge acceptance must identify the exact Keeper and durable operation. *)
+val classify_purge_response : keeper_name:string -> status:int -> body:string -> outcome
 (** Read one step's answer. The 409 that routes a boot into its recovery is
     decided by the status code, so a rejection whose prose happens to mention
     pausing is still a rejection. A body that is not the [{ok, error}] shape
@@ -246,3 +250,21 @@ val mint_operation_id : keeper:string -> serial:int -> string
 (** The resume operation id for one attempt. Stable across the steps of that
     attempt, so the resume inside a boot recovery names one operation rather
     than a new one per step. *)
+
+
+type deletion_operation =
+  | Runtime_shutdown of Masc.Keeper_shutdown_types.t
+  | Configuration_removal of Masc.Keeper_configuration_removal.receipt
+
+type deletion_row = {
+  operation : deletion_operation;
+  completed : bool;
+  can_retry : bool;
+}
+
+type deletion_inventory = { operations : deletion_row list; errors : string list }
+val decode_deletion_inventory : Yojson.Safe.t -> (deletion_inventory, string) result
+
+val deletion_keeper_name : deletion_row -> string
+val deletion_operation_id : deletion_row -> Masc.Keeper_shutdown_types.Operation_id.t
+val deletion_json : deletion_row -> Yojson.Safe.t

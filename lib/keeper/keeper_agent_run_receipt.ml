@@ -61,7 +61,7 @@ let finalize
     ~fallback_reason
     ~runtime_rotation_attempts
     ~turn_result
-    ~receipt_turn_count_ref
+    ~receipt_agent_core_turn_count_ref
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
     ~receipt_lane_attempt_index_ref
@@ -126,8 +126,8 @@ let finalize
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; turn_count = !receipt_turn_count_ref
-    ; agent_core_turn_count = !receipt_turn_count_ref
+    ; turn_count = Some manifest_keeper_turn_id
+    ; agent_core_turn_count = !receipt_agent_core_turn_count_ref
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
     ; outcome =
@@ -218,7 +218,7 @@ let finalize
       ]
   in
   let append_receipt_manifest ?status ?decision ~site event =
-    let agent_core_turn_count = receipt.turn_count in
+    let agent_core_turn_count = receipt.agent_core_turn_count in
     let status =
       match status with
       | Some status -> status

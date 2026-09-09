@@ -1,16 +1,20 @@
 (** Typed admission boundary for dashboard-initiated Keeper purge operations.
 
     Resolution never guesses a Keeper from filesystem side effects. The
-    request is normalized once through {!Keeper_identity}; a Keeper target is
-    admitted only when its canonical persisted metadata can be read. A
-    configuration-only or unreadable Keeper remains explicit and cannot fall
+    request is normalized once through the canonical name grammar. A runtime
+    target requires readable canonical metadata. A
+    configuration-only Keeper is a distinct target; unreadable metadata cannot fall
     through to the plain-agent purge path. *)
 
-type target =
+type runtime_target =
   { requested_name : string
   ; keeper_name : string
   ; meta : Keeper_meta_contract.keeper_meta
   }
+
+type target =
+  | Runtime_keeper of runtime_target
+  | Configuration_only of { requested_name : string; keeper_name : string }
 
 type resolve_error =
   | Empty_requested_name
@@ -22,10 +26,6 @@ type resolve_error =
       { keeper_name : string
       ; metadata_path : string
       ; detail : string
-      }
-  | Keeper_metadata_required of
-      { keeper_name : string
-      ; configuration_path : string
       }
   | Keeper_metadata_name_mismatch of
       { expected_keeper_name : string
@@ -51,38 +51,11 @@ type resolve_error =
           an accepted operation told the dashboard a purge was running that
           had already stopped for good. The exit is an operator supersession,
           which releases the fence and lets the purge be reissued. *)
-      (** The lane is still taking turns. Purge deletes the Keeper and every
-          store it owns, so a Keeper that can still execute is refused here
-          rather than raced: stop or pause it first. The dashboard hides the
-          control in the same states, but that is a rendering choice — this is
-          the rule. *)
-  | Keeper_lane_executing of
-      { keeper_name : string
-      ; phase : string
-      ; live_turn_id : int option
-            (** [Some turn_id] when the refusal came from a turn in flight
-                rather than from the phase. The chat lane admits turns without
-                changing phase, so phase alone does not see it.
-
-                The phase arm is checked first, and an autonomous turn sets
-                both signals at once, so [None] here means "the phase refused
-                it", not "no turn is running".
-
-                [current_turn_observation] is in-memory only and is cleared by
-                [mark_turn_finished]. The chat lane swallows
-                [Eio.Cancel.Cancelled] around that call
-                ([keeper_turn.ml:861-865]), so a cancelled chat turn can leave
-                the marker set and keep refusing purges. Recovery is a server
-                restart, which re-registers every Keeper with the field unset,
-                or the supervisor sweep that unregisters an exited lane. There
-                is no per-Keeper reset: [register_restarting] would do it but
-                has no production caller. *)
-      }
 
 val resolve_error_to_string : resolve_error -> string
 
 (** [resolve config requested_name] returns [Ok (Some target)] only for a
-    canonical Keeper backed by readable persisted metadata. [Ok None] means
+    runtime Keeper or an explicit configuration-only target. [Ok None] means
     the request has no Keeper metadata/configuration ownership and may be
     considered by the separate plain-agent boundary. *)
 val resolve :
@@ -102,5 +75,5 @@ val existing_operation :
 val submit :
   config:Workspace.config ->
   actor:string ->
-  target ->
+  runtime_target ->
   (Keeper_shutdown_types.t, Keeper_shutdown_runtime.submit_error) result

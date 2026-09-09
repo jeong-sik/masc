@@ -96,11 +96,19 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 
 [[ -n "$readme_tag" ]] || fail "missing TAG= install pin in README.md"
 [[ -n "$readme_ko_tag" ]] || fail "missing TAG= install pin in README.ko.md"
-# Against the published release, not the package version: the install block
-# fetches a tag from GitHub, and a package version bumped ahead of its tag
-# names a tag that is not there yet.
-[[ "$readme_tag" == "$roadmap_published_release" ]] || \
-  fail "README install TAG ($readme_tag) != latest published release ($roadmap_published_release)"
+# A literal install pin names the published release, or an explicitly
+# announced current release target whose availability the reader must check.
+# A version bump alone does not authorize advertising an unpublished tag.
+if [[ "$readme_tag" != "$roadmap_published_release" ]]; then
+  # A release candidate may document its own pinned installation before tag
+  # publication, but it must explicitly name that target and ask the reader
+  # to check availability. Published-release metadata remains factual.
+  [[ "$readme_tag" == "$package_version" ]] || \
+    fail "README install TAG ($readme_tag) is neither the published release nor the current package"
+  for readme in README.md README.ko.md; do
+    require_contains "$readme" "> Installation target: v$readme_tag (check tag availability on GitHub Releases)."
+  done
+fi
 [[ "$readme_ko_tag" == "$readme_tag" ]] || \
   fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
 

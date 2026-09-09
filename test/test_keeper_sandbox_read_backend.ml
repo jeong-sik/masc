@@ -252,7 +252,7 @@ let test_read_outside_playground_returns_mapping_error () =
       ~host_path:"/etc/passwd" ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected mapping error for /etc/passwd"
-  | Error msg ->
+  | Error (Keeper_sandbox_read_backend.Read_failed msg) ->
       Alcotest.(check bool) "error mentions playground" true
         (let needle = "playground" in
          let nlen = String.length needle in
@@ -263,6 +263,8 @@ let test_read_outside_playground_returns_mapping_error () =
            else loop (i + 1)
          in
          loop 0)
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
 
 let test_read_missing_file_preflight_errors () =
   let base, config, meta = setup_config "acme-sandbox" in
@@ -274,7 +276,7 @@ let test_read_missing_file_preflight_errors () =
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected missing-file preflight error"
-  | Error msg ->
+  | Error (Keeper_sandbox_read_backend.Missing_file msg) ->
       Alcotest.(check bool) "error mentions path_not_found" true
         (let needle = "path_not_found" in
          let nlen = String.length needle in
@@ -292,6 +294,8 @@ let test_read_missing_file_preflight_errors () =
            (Keeper_types_profile_sandbox.sandbox_profile_to_string
               meta.Masc.Keeper_meta_contract.sandbox_profile
             ^ "_read_failed"))
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
 
 (* Read on a directory must point the keeper at a tool that actually
    exists. The old message said "use the currently exposed read/listing
@@ -309,13 +313,15 @@ let test_read_directory_names_a_real_listing_tool () =
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected path_is_directory error for a directory"
-  | Error msg ->
+  | Error (Keeper_sandbox_read_backend.Not_a_file msg) ->
       Alcotest.(check bool) "error reports path_is_directory" true
         (String_util.contains_substring msg "path_is_directory");
       Alcotest.(check bool)
         "error names a real listing command"
         true
         (String_util.contains_substring msg "argv=['ls'")
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
 
 (* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)
@@ -615,7 +621,8 @@ remote_endpoint = "fixture"
     Keeper_sandbox_read_backend.read_file ~config ~meta
       ~host_path:missing_host_path ~max_bytes:4096 ~timeout_sec:2.0 ()
   with
-  | Error error -> Alcotest.fail error
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
   | Ok content ->
     Alcotest.(check string) "remote content" "remote-file-content" content
 

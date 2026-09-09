@@ -9,19 +9,21 @@ const mocks = await vi.hoisted(async () => ({
   shutdownKeeper: vi.fn(),
   showToast: vi.fn(),
   markKeeperPurgePending: vi.fn(),
+  refreshKeeperDeletions: vi.fn(async () => undefined),
 }))
 
 vi.mock('../../api/keeper-lifecycle', () => ({
   purgeKeeper: mocks.purgeKeeper,
+  KEEPER_PURGE_ARTIFACTS: ['설정', '대화 기록'],
   shutdownKeeper: mocks.shutdownKeeper,
 }))
-vi.mock('../../store', () => ({ markKeeperPurgePending: mocks.markKeeperPurgePending }))
+vi.mock('../../store', () => ({ markKeeperPurgePending: mocks.markKeeperPurgePending, refreshKeeperDeletions: mocks.refreshKeeperDeletions }))
 vi.mock('../common/toast', () => ({ showToast: mocks.showToast }))
 vi.mock('../keeper-badge', () => ({
   KeeperBadge: ({ id }: { id: string }) => h('span', { 'data-testid': 'keeper-badge' }, id),
 }))
 
-const { RegistryDeregister, deregisterNeedsDrain } = await import('./registry-deregister')
+const { RegistryDeregister, deregisterStopsRunningKeeper } = await import('./registry-deregister')
 
 function keeper(overrides: Partial<Keeper> = {}): Keeper {
   return { name: 'alpha', status: 'idle', ...overrides }
@@ -35,12 +37,12 @@ async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
-describe('deregisterNeedsDrain', () => {
+describe('deregisterStopsRunningKeeper', () => {
   it('requires drain for running and stuck keepers only', () => {
-    expect(deregisterNeedsDrain(stateFor(keeper()))).toBe(true)
-    expect(deregisterNeedsDrain(stateFor(keeper({ runtime_blocker_class: 'runtime_exhausted' })))).toBe(true)
-    expect(deregisterNeedsDrain(stateFor(keeper({ paused: true })))).toBe(false)
-    expect(deregisterNeedsDrain(stateFor(keeper({ phase: 'Offline' })))).toBe(false)
+    expect(deregisterStopsRunningKeeper(stateFor(keeper()))).toBe(true)
+    expect(deregisterStopsRunningKeeper(stateFor(keeper({ runtime_blocker_class: 'runtime_exhausted' })))).toBe(true)
+    expect(deregisterStopsRunningKeeper(stateFor(keeper({ paused: true })))).toBe(false)
+    expect(deregisterStopsRunningKeeper(stateFor(keeper({ phase: 'Offline' })))).toBe(false)
   })
 })
 
@@ -81,7 +83,7 @@ describe('RegistryDeregister', () => {
     expect(onCloseCalls).toBe(1)
   })
 
-  it('drains a running keeper before purging', async () => {
+  it('submits one purge operation that owns running Keeper shutdown', async () => {
     const k = keeper()
     render(h(RegistryDeregister, { keeper: k, state: stateFor(k), onClose }), container)
 
@@ -90,20 +92,20 @@ describe('RegistryDeregister', () => {
     container.querySelector<HTMLButtonElement>('[data-testid="registry-deregister-drain"]')!.click()
     await flush()
 
-    expect(mocks.shutdownKeeper).toHaveBeenCalledWith('alpha')
+    expect(mocks.shutdownKeeper).not.toHaveBeenCalled()
     expect(mocks.purgeKeeper).toHaveBeenCalledWith('alpha')
     expect(onCloseCalls).toBe(1)
   })
 
-  it('stays open and reports when drain fails, without purging', async () => {
-    mocks.shutdownKeeper.mockResolvedValue({ ok: false, error: 'busy lane' })
+  it('stays open and reports when purge admission fails', async () => {
+    mocks.purgeKeeper.mockRejectedValue(new Error('busy lane'))
     const k = keeper()
     render(h(RegistryDeregister, { keeper: k, state: stateFor(k), onClose }), container)
 
     container.querySelector<HTMLButtonElement>('[data-testid="registry-deregister-drain"]')!.click()
     await flush()
 
-    expect(mocks.purgeKeeper).not.toHaveBeenCalled()
+    expect(mocks.purgeKeeper).toHaveBeenCalledWith('alpha')
     expect(mocks.showToast).toHaveBeenCalledWith('busy lane', 'error')
     expect(onCloseCalls).toBe(0)
   })

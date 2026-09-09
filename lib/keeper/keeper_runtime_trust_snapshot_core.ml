@@ -4,8 +4,8 @@ type approval_queue =
 
 type raw =
   { approval_queue : approval_queue
-  ; runtime_blocker_class : string option
-  ; runtime_blocker_summary : string option
+  ; runtime_blocker_class :
+      (Keeper_meta_contract.blocker_class, string) result option
   ; receipt_operator_disposition : (string * string) option
   ; attention_needs_attention : bool
   ; attention_reason : string option
@@ -24,32 +24,17 @@ type t =
   }
 
 let fallback_disposition raw =
-  let sandbox_summary =
-    match raw.runtime_blocker_summary with
-    | Some summary when String_util.contains_substring_ci summary "sandbox" ->
-      Some ("Alert", "sandbox_violation")
-    | Some _ | None -> None
-  in
   match raw.approval_queue with
   | Approval_queue_unavailable -> "Alert", "approval_queue_unavailable"
   | Approval_queue_available pending_approval_count when pending_approval_count > 0 ->
     "Alert", "pending_operator_decision"
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
-     | Some raw_blocker_class ->
-       (match
-          Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class
-        with
-        | Some (Keeper_meta_contract.Runtime_exhausted _) ->
-          "Alert", "runtime_exhausted"
-        | Some _ | None ->
-          (match sandbox_summary with
-           | Some disposition -> disposition
-           | None -> "Alert", "critical_block"))
-     | None ->
-       (match sandbox_summary with
-        | Some disposition -> disposition
-        | None -> "Pass", "healthy"))
+     | Some (Ok (Keeper_meta_contract.Runtime_exhausted _)) ->
+       "Alert", "runtime_exhausted"
+     | Some (Ok _) -> "Alert", "critical_block"
+     | Some (Error _) -> "Alert", "unknown_runtime_blocker"
+     | None -> "Pass", "healthy")
 ;;
 
 let operator_disposition_of_display ~disposition ~disposition_reason =
@@ -66,7 +51,7 @@ let display_disposition_requires_attention = function
 
 let effective_disposition raw ~fallback_disposition ~fallback_reason =
   match raw.approval_queue, raw.receipt_operator_disposition with
-  | Approval_queue_available _, Some (operator_disposition, operator_reason) ->
+  | Approval_queue_available 0, Some (operator_disposition, operator_reason) ->
     let disposition, disposition_reason =
       Keeper_operator_disposition_display.of_wire
         ~operator_disposition
@@ -74,7 +59,7 @@ let effective_disposition raw ~fallback_disposition ~fallback_reason =
     in
     disposition, disposition_reason, operator_disposition, operator_reason
   | Approval_queue_unavailable, _
-  | Approval_queue_available _, None ->
+  | Approval_queue_available _, _ ->
     let operator_disposition, operator_disposition_reason =
       operator_disposition_of_display
         ~disposition:fallback_disposition

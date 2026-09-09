@@ -55,10 +55,15 @@ type 'callback_error execution_error =
   | Provenance_mismatch of string
   | Domain_output_invalid of string
 
+type prepared_transport =
+  | Http_flow of Exact_output.flow_attempt
+  | Cli_only
+
 type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
   ; net : Eio_context.eio_net
-  ; attempt : Exact_output.flow_attempt
+  ; transport : prepared_transport
+  ; base_path : string
   ; cli_slots : string list
         (** Carried from the same lane resolution the catalog slots came from,
             so the tail cannot drift from the flow it follows. *)
@@ -152,33 +157,27 @@ let prepare ~base_path ~keeper_name ~net candidate =
       |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
     in
     let* candidates = flow_candidates resolved.selected_slots in
-    (match candidates with
-     | [] -> Error Lane_resolved_without_slots
-     | first :: rest ->
-       let requirement =
-         Exact_output.make_output_requirement
-           ~schema:
-             Keeper_structured_output_schema
-             .board_attention_judgment_batch_output_schema
-           ~minimum_guarantee:Exact_output.Json_syntax
-       in
-       let* snapshot =
-         Exact_output.snapshot_flow ~first ~rest ~messages requirement
-         |> Result.map_error (fun _ -> Flow_snapshot_failed)
-       in
-       let* attempt =
-         Exact_output.start_flow snapshot
-         |> Result.map_error (fun _ -> Flow_start_failed)
-       in
-       Ok
-         { candidate
-         ; net
-         ; attempt
-         ; cli_slots = resolved.cli_slots
-         ; prompt
-         ; request
-         ; requirement
-         })
+    let requirement =
+      Exact_output.make_output_requirement
+        ~schema:Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
+        ~minimum_guarantee:Exact_output.Json_syntax
+    in
+    let* transport =
+      match candidates, resolved.cli_slots with
+      | [], [] -> Error Lane_resolved_without_slots
+      | [], _ :: _ -> Ok Cli_only
+      | first :: rest, _ ->
+        let* snapshot =
+          Exact_output.snapshot_flow ~first ~rest ~messages requirement
+          |> Result.map_error (fun _ -> Flow_snapshot_failed)
+        in
+        Exact_output.start_flow snapshot
+        |> Result.map (fun attempt -> Http_flow attempt)
+        |> Result.map_error (fun _ -> Flow_start_failed)
+    in
+    Ok { candidate; net; transport; base_path; cli_slots = resolved.cli_slots;
+         prompt; request; requirement }
+
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -373,6 +372,10 @@ type cli_tail_error =
   | No_cli_slots
   | Cli_slots_exhausted of Keeper_lane_cli_oneshot.failure list
 
+let has_http_flow prepared =
+  match prepared.transport with Http_flow _ -> true | Cli_only -> false
+;;
+
 let cli_slots prepared = prepared.cli_slots
 
 let cli_tail_error_to_string = function
@@ -453,7 +456,7 @@ let observe_terminal prepared result =
     (result |> terminal_outcome |> terminal_outcome_to_string)
 ;;
 
-let execute_current ?clock ~before_dispatch ~before_advance prepared =
+let execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
   let started_at = Time_compat.now () in
@@ -465,9 +468,12 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     ~started_at
     ~input:(Exact_lane_run_registry.Exact_input prepared.request);
   let bound = ref None in
+  let cli_selected_slot = ref None in
   let complete outcome output =
     let selected_slot =
-      Option.map (fun (provenance : attempt_provenance) -> provenance.slot_id) !bound
+      match !bound with
+      | Some (provenance : attempt_provenance) -> Some provenance.slot_id
+      | None -> !cli_selected_slot
     in
     match
       Exact_lane_run_registry.mark_completed
@@ -544,6 +550,12 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
   in
   let result =
     try
+      match prepared.transport with
+      | Cli_only ->
+        (match run_cli_tail ?runner:cli_runner ~base_path:prepared.base_path prepared with
+         | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
+         | Error _ -> Error (Exact_execution_failed []))
+      | Http_flow attempt ->
       match
         Exact_output.execute_flow_once
           ~net:prepared.net
@@ -553,7 +565,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
           ~before_dispatch:agent_core_before_dispatch
           ~before_advance:agent_core_before_advance
           ~validate
-          prepared.attempt
+          attempt
       with
       | Ok success -> Ok success.accepted
       | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
@@ -592,6 +604,6 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
   result
 ;;
 
-let execute ?clock ~before_dispatch ~before_advance prepared =
-  execute_current ?clock ~before_dispatch ~before_advance prepared
+let execute ?cli_runner ?clock ~before_dispatch ~before_advance prepared =
+  execute_current ?cli_runner ?clock ~before_dispatch ~before_advance prepared
 ;;

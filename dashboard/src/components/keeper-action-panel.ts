@@ -38,6 +38,7 @@ import { keeperActionVisibility } from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
+
 function afterAction(): void {
   // Reconcile the optimistic patch against the authoritative server
   // snapshots that drive status UI: execution rows for the roster and light
@@ -165,7 +166,7 @@ export async function runKeeperAction(
     const confirmed = await requestConfirm({
       title: '키퍼 영구 제거',
       message:
-        `${name} 키퍼를 영구 제거합니다. 되돌릴 수 없습니다.\n\n`
+        `${name} 키퍼를 종료한 뒤 영구 제거합니다. 실행 중인 작업은 종료 절차를 거치며, 종료 확인 전에는 파일을 지우지 않습니다. 되돌릴 수 없습니다.\n\n`
         + `함께 삭제되는 항목:\n`
         + KEEPER_PURGE_ARTIFACTS.map(item => `  · ${item}`).join('\n'),
       confirmText: '영구 제거',
@@ -174,10 +175,8 @@ export async function runKeeperAction(
     if (!confirmed) return
     try {
       const result = await purgeKeeper(name)
-      // The row stays until a refresh stops returning this keeper. Mark it
-      // pending first so the operator sees the submit land instead of an
-      // unchanged row — the refresh below still returns the keeper, because
-      // the server deletes asynchronously.
+      // Show acceptance immediately; the deletion inventory supplies progress
+      // and completion even after the Keeper leaves the roster.
       markKeeperPurgePending(name)
       showToast(`${name} ${noun} 요청됨 (operation ${result.operation_id})`, 'success')
       afterAction()
@@ -329,6 +328,7 @@ export function KeeperActionButtons({
             testId="keeper-action-purge"
           >${purgePending ? KEEPER_PURGE_PENDING_LABEL.compact : text('purge')}<//>`
         : null}
+
     </div>
   `
 }

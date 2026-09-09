@@ -7,6 +7,29 @@ describe('keeper lifecycle control boundary', () => {
     vi.unstubAllGlobals()
   })
 
+  it('accepts only a purge receipt bound to the requested Keeper', async () => {
+    const accepted = { ok: true, accepted: true, target_kind: 'keeper', keeper_name: 'alpha', operation_id: 'shutdown-alpha' }
+    const fetchControlPlane = vi.fn()
+    vi.doMock('./core', async (importOriginal) => ({
+      ...await importOriginal<typeof import('./core')>(), fetchControlPlane,
+    }))
+    const { purgeKeeper } = await import('./keeper-lifecycle')
+    for (const payload of [
+      { ok: true },
+      { ...accepted, keeper_name: 'another-keeper' },
+      { ...accepted, operation_id: '' },
+      { ...accepted, accepted: false },
+      { ...accepted, target_kind: 'agent' },
+    ]) {
+      fetchControlPlane.mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 202 }))
+      await expect(purgeKeeper('alpha')).rejects.toThrow('키퍼 삭제 접수 응답')
+    }
+    fetchControlPlane.mockResolvedValueOnce(new Response(JSON.stringify(accepted), { status: 202 }))
+    await expect(purgeKeeper('alpha')).resolves.toEqual(accepted)
+    expect(fetchControlPlane).toHaveBeenLastCalledWith('/api/v1/dashboard/agents/purge',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ agent_name: 'alpha' }) }))
+  })
+
   it('does not synthesize a client deadline for boot actions', async () => {
     const fetchControlPlane = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {

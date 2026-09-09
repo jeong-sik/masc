@@ -1,8 +1,12 @@
-type target =
+type runtime_target =
   { requested_name : string
   ; keeper_name : string
   ; meta : Keeper_meta_contract.keeper_meta
   }
+
+type target =
+  | Runtime_keeper of runtime_target
+  | Configuration_only of { requested_name : string; keeper_name : string }
 
 type resolve_error =
   | Empty_requested_name
@@ -14,10 +18,6 @@ type resolve_error =
       { keeper_name : string
       ; metadata_path : string
       ; detail : string
-      }
-  | Keeper_metadata_required of
-      { keeper_name : string
-      ; configuration_path : string
       }
   | Keeper_metadata_name_mismatch of
       { expected_keeper_name : string
@@ -37,11 +37,6 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
-  | Keeper_lane_executing of
-      { keeper_name : string
-      ; phase : string
-      ; live_turn_id : int option
-      }
 
 let resolve_error_to_string = function
   | Keeper_purge_blocked { keeper_name; operation_id; detail } ->
@@ -52,21 +47,6 @@ let resolve_error_to_string = function
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
       keeper_name
       detail
-  | Keeper_lane_executing { keeper_name; phase; live_turn_id } ->
-    (match live_turn_id with
-     | None ->
-       Printf.sprintf
-         "dashboard Keeper purge refused while the lane is executing: \
-          keeper=%s phase=%s. Stop or pause the Keeper first."
-         keeper_name
-         phase
-     | Some turn_id ->
-       Printf.sprintf
-         "dashboard Keeper purge refused while a turn is in flight: keeper=%s \
-          phase=%s turn=%d. Let the turn finish, or stop the Keeper first."
-         keeper_name
-         phase
-         turn_id)
   | Empty_requested_name -> "dashboard Keeper purge requires a non-empty target name"
   | Invalid_requested_name { requested_name; detail } ->
     Printf.sprintf
@@ -79,11 +59,6 @@ let resolve_error_to_string = function
       keeper_name
       metadata_path
       detail
-  | Keeper_metadata_required { keeper_name; configuration_path } ->
-    Printf.sprintf
-      "dashboard Keeper purge requires persisted owner metadata before removing a configured Keeper: keeper=%s config=%s"
-      keeper_name
-      configuration_path
   | Keeper_metadata_name_mismatch
       { expected_keeper_name; persisted_keeper_name } ->
     Printf.sprintf
@@ -134,34 +109,17 @@ let resolve (config : Workspace.config) requested_name =
           ~base_path:config.base_path
           keeper_name
       in
-      (match Keeper_meta_store.read_meta config keeper_name with
-       | Error detail ->
+      (match Keeper_meta_store.read_meta_file_path_read_only
+         ~ownership_root:config.base_path metadata_path with
+       | Error (Keeper_meta_store.Unreadable detail | Not_current detail) ->
          Error
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->
-         (* Two signals, because the two lanes admit turns differently. The
-            autonomous cycle only enters through a phase [can_execute_turn]
-            admits, but the chat lane runs
-            [run_keeper_invocation_turn_admitted] and never changes phase —
-            [mark_turn_started] writes [current_turn_observation] and leaves
-            [phase] alone. A phase-only guard therefore reads a Paused
-            Keeper answering a chat message as purgeable. *)
-         (match Keeper_registry.get ~base_path:config.base_path keeper_name with
-          | Some entry when Keeper_state_machine.can_execute_turn entry.phase ->
-            Error
-              (Keeper_lane_executing
-                 { keeper_name
-                 ; phase = Keeper_state_machine.phase_to_string entry.phase
-                 ; live_turn_id = None
-                 })
-          | Some { current_turn_observation = Some observation; phase; _ } ->
-            Error
-              (Keeper_lane_executing
-                 { keeper_name
-                 ; phase = Keeper_state_machine.phase_to_string phase
-                 ; live_turn_id = Some observation.turn_id
-                 })
-          | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
+         (* The durable shutdown operation fences admission, joins the exact
+            lane and settles tasks before deleting artifacts. Resolution only
+            identifies the owner; it must not require the operator to race a
+            separate stop request against the next turn. *)
+         Ok (Some (Runtime_keeper { requested_name; keeper_name; meta }))
        | Ok (Some meta) ->
          Error
            (Keeper_metadata_name_mismatch
@@ -170,9 +128,7 @@ let resolve (config : Workspace.config) requested_name =
               })
        | Ok None ->
          (match configuration_path with
-          | Some configuration_path ->
-            Error
-              (Keeper_metadata_required { keeper_name; configuration_path })
+          | Some _ -> Ok (Some (Configuration_only { requested_name; keeper_name }))
           | None -> Ok None))
 ;;
 
@@ -181,9 +137,18 @@ let existing_operation (config : Workspace.config) requested_name =
   | Error _ as error -> error
   | Ok keeper_name ->
     let snapshot =
-      Keeper_owner_registry.shutdown_operation_id
+      match Keeper_owner_registry.shutdown_operation_id
         ~base_path:config.base_path
         ~keeper_name
+      with
+      | Error (Keeper_owner_registry.Owner_not_found _) ->
+        (* Finalization can remove the Owner before artifact delivery. The
+           independent intake reservation still names that durable operation.
+           A plain Agent or never-started configuration has no Owner either;
+           absence is not an unavailable inventory. *)
+        Ok (Keeper_shutdown_intake_fence.shutdown_operation_id
+          ~base_path:config.base_path ~keeper_name)
+      | result -> result
     in
     (match snapshot with
      | Error error ->
@@ -233,7 +198,7 @@ let existing_operation (config : Workspace.config) requested_name =
            | Supervisor_cleanup -> Ok None)))
 ;;
 
-let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =
+let submit ~config ~actor ({ requested_name; keeper_name; meta } : runtime_target) =
   let context : Keeper_shutdown_types.dashboard_purge_context = { requested_name } in
   let request : Keeper_shutdown_prepare_join.request =
     { actor

@@ -354,7 +354,7 @@ let execute_with_observers_with_authority
              @ invocation_fields));
       set_truncation_info ~original_bytes:(String.length projected_result);
       { tool_result = observed_result
-      ; failure_effect_disposition = None
+      ; failure_effect_disposition = Some result.failure_effect_disposition
       ; deferred_kind = result.deferred_kind
       ; terminal_effect_receipt = None
       }

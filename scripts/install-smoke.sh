@@ -44,6 +44,7 @@ ASSETS=(
   "masc-dashboard-$ARCH.tar.gz"
   "masc-release-dashboard-bundle-$ARCH.py"
 )
+case "$ARCH" in macos-*) ASSETS+=("masc-runtime-$ARCH.tar.gz") ;; esac
 for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
 done
@@ -105,6 +106,10 @@ MASC_RELEASE_BASE_URL="file://$work/release" \
     --prefix "$prefix" \
     --base-path "$base" \
     --no-wizard $SHIM_FLAG
+
+case "$ARCH" in
+  macos-*) PATH="$(dirname "$(readlink "$prefix/masc")")/python/bin:$PATH"; export PATH ;;
+esac
 
 for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }

@@ -62,6 +62,7 @@ jobs:
           python3 test/test_installer_wizard.py
           python3 test/test_installer_upgrade.py
           python3 test/test_installer_uninstall.py
+          python3 test/test_package_macos_runtime.py
           python3 test/test_installer_dependencies.py
 
       - name: Setup OCaml
@@ -247,15 +248,32 @@ jobs:
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
 
+      - name: Bundle relocatable macOS libraries and Python
+        if: runner.os == 'macOS'
+        run: |
+          python3 scripts/package-macos-runtime.py --dist dist \
+            --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
+            --source-commit "$(git rev-parse HEAD)"
+
       - name: Package binary-matched dashboard distribution
         run: |
           git diff --exit-code
+          runtime_args=()
+          if [ "${{ runner.os }}" = macOS ]; then
+            runtime_args=(--runtime-archive "dist/masc-runtime-${{ matrix.arch }}.tar.gz"
+                          --runtime-root "$RUNNER_TEMP/masc-portable-stage")
+          fi
           python3 scripts/release-dashboard-bundle.py package \
             --binary "dist/masc-${{ matrix.arch }}" \
             --binary-asset "masc-${{ matrix.arch }}" \
             --assets assets/dashboard \
             --source-commit "$(git rev-parse HEAD)" \
-            --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz"
+            --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz" \
+            --companion masc-tui "dist/masc-tui-${{ matrix.arch }}" \
+            --companion masc-browser-host "dist/masc-browser-host-${{ matrix.arch }}" \
+            --companion masc-deployment-preflight-helper "dist/masc-deployment-preflight-helper-${{ matrix.arch }}" \
+            --companion masc-check-runtime-deployment-preflight "dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}" \
+            ${runtime_args[@]+"${runtime_args[@]}"}
           cp scripts/release-dashboard-bundle.py \
             "dist/masc-release-dashboard-bundle-${{ matrix.arch }}.py"
 
@@ -336,7 +354,12 @@ jobs:
           if [ "${{ runner.os }}" = Linux ]; then
             install_args+=("masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}")
           fi
-          scripts/install-smoke.sh "${install_args[@]}"
+          if [ "${{ runner.os }}" = macOS ]; then
+            /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))' \
+              /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash scripts/install-smoke.sh "${install_args[@]}"
+          else
+            scripts/install-smoke.sh "${install_args[@]}"
+          fi
 
       # A build runner has development libraries that a fresh user host lacks.
       - name: Fresh Ubuntu installation (no OCaml or checkout dependencies)
@@ -402,6 +425,11 @@ jobs:
               fi
               cp "dist/$asset" "release-assets/$asset"
             done
+          done
+          for arch in macos-arm64 macos-x64; do
+            asset="masc-runtime-$arch.tar.gz"
+            test -f "dist/$asset"
+            cp "dist/$asset" "release-assets/$asset"
           done
           # The exec shim (RFC-0427 B-1): one static Linux binary per guest
           # architecture, named by the shim's own convention.

@@ -277,12 +277,17 @@ module For_testing : sig
       [No_capable_runtime], returns [first_candidate_id]/[first_candidate]
       unchanged and logs nothing (the caller reports the degrade). *)
 
+  val modality_reroute_candidates :
+    deferred_runtime_lane:deferred_runtime_lane option ->
+    remaining_runtimes:Runtime.t list ->
+    Runtime.t list
+
   val lane_modality_reroute_decision :
     checkpoint_messages:Agent_core.Types.message list ->
     initial_messages:Agent_core.Types.message list ->
     goal_blocks:Agent_core.Types.content_block list ->
     first_candidate:Runtime.t ->
-    remaining_runtimes:Runtime.t list ->
+    candidates:Runtime.t list ->
     Runtime.t Runtime_agent.reroute_decision
 
   val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list

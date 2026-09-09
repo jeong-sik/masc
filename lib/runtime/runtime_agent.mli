@@ -248,6 +248,24 @@ val caps_admit_required_modalities :
     media-capable runtimes must use this instead of re-deriving checks from
     individual capability booleans. *)
 
+val media_candidates_of :
+  lane:Runtime.t list ->
+  runtimes:Runtime.t list ->
+  media_failover:string list ->
+  Runtime.t list
+(** RFC-0440 media candidate set, pure over its inputs: [lane] in its own
+    order, then [media_failover] resolved against [runtimes] in declared order
+    (ids that resolve to nothing are skipped), then every other runtime in
+    [runtimes] in declaration order. Ids are unique; the first occurrence wins.
+    No capability or execution filter: callers admit by
+    [caps_admit_required_modalities] over [input_capabilities_of_runtime]. *)
+
+val media_candidates : lane:Runtime.t list -> Runtime.t list
+(** [media_candidates_of] over the loaded runtime state
+    ([Runtime.runtimes_and_media_failover]). The keeper modality reroute and
+    the vision tool both read this set, so a runtime that can take an image for
+    one of them is offered to the other. *)
+
 val decide_modality_reroute_for_runtime_candidates :
   assigned:Runtime.t ->
   candidates:Runtime.t list ->
@@ -255,9 +273,10 @@ val decide_modality_reroute_for_runtime_candidates :
   ?initial_messages:Agent_core.Types.message list ->
   Agent_core.Types.content_block list ->
   Runtime.t reroute_decision
-(** Keeper-dispatch variant for scoped candidate sets such as explicit runtime
-    lanes. Preserves the caller-provided candidate order and does not consult
-    global [runtime.media_failover]. Removes [assigned] from [candidates] before
+(** Keeper-dispatch variant over an explicit candidate list. Preserves the
+    caller-provided candidate order; the keeper driver passes [media_candidates]
+    so the set spans the lane, [runtime.media_failover], and the remaining
+    declared runtimes (RFC-0440). Removes [assigned] from [candidates] before
     selecting, and returns the selected [Runtime.t] itself rather than its id, so
     the caller dispatches to the runtime the decision picked without a second
     lookup. Required modalities are read from [blocks] together with

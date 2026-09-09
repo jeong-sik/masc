@@ -17,7 +17,8 @@ let checkpoint bytes = Keeper_checkpoint_ref.create
     ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require
 let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
     ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "original tool input" |> to_hex)) |> require
-let waiting = Semantic.gate_wait ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
+let channel_scope = Semantic.session_scope ["channels"; "original-channel"] |> require
+let waiting = Semantic.gate_wait ~session_scope:channel_scope ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
 let rec remove path = match Unix.lstat path with
   | {Unix.st_kind=Unix.S_DIR; _} -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
@@ -50,6 +51,9 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
   with_store path (fun store ->
     Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
     check bool "complete original input survives owner restart" true ((get store).input = Some input);
+    let restored = Store.direct_gate_state store ~operation_id:original |> ok in
+    check bool "actual channel scope survives SQLite restart" true
+      (match restored with Some state -> state.waiting.session_scope = channel_scope | None -> false);
     let wrong = Semantic.gate_obligation ~approval_id:"unrelated-approval" ~tool_name:obligation.tool_name
       ~input_hash:obligation.input_hash |> require in
     rejected (Store.resolve_direct_gate store ~now:7. ~operation_id:original
@@ -60,7 +64,10 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     Store.resolve_direct_gate store ~now:8. ~operation_id:original ~resolution |> ok |> ignore;
     let operation = match claim store with Some value -> value | None -> fail "exact resolution did not requeue original input" in
     check bool "same original request resumes" true (Operation.Operation_id.equal original operation.operation_id);
-    let changed = Semantic.gate_wait ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
+    let wrong_scope = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> require)
+      ~checkpoint:waiting.checkpoint ~obligations:[obligation] |> require in
+    rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:wrong_scope ~resolution);
+    let changed = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> Result.get_ok) ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:changed ~resolution);
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting ~resolution |> ok;
@@ -103,7 +110,12 @@ let test_unconfirmed_checkpoint_survives_restart () = with_path (fun path ->
     check bool "independent work remains claimable" true
       (match claim store with Some operation -> Operation.Operation_id.equal other operation.operation_id | None -> false)))
 
+let test_session_scope_validation () =
+  List.iter (fun components -> rejected (Semantic.session_scope components))
+    [[".."]; ["channels"; "../other"]; [""]; ["."]; ["/absolute"]; ["nul\000byte"]; ["a\\b"]]
+
 let () = run "direct Gate waiting" ["journal", [
+  test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
   test_case "unconfirmed checkpoint preserves input and effects across restart" `Quick test_unconfirmed_checkpoint_survives_restart;
   test_case "approval resumes same request after independent work and restart" `Quick (test_wait_restart_resolution Semantic.Gate_approved);
   test_case "denial remains explicit and cannot imply task success" `Quick (test_wait_restart_resolution (Semantic.Gate_denied "operator declined"));

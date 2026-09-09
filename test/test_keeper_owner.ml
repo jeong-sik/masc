@@ -1195,7 +1195,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
     ~turn_count:2 ~canonical_checkpoint_bytes:"original Gate checkpoint" |> Result.get_ok in
   let obligation = Keeper_semantic_execution.gate_obligation ~approval_id:"owner-gate-approval"
     ~tool_name:"tool_execute" ~input_hash:(String.make 64 'a') |> Result.get_ok in
-  let waiting = Keeper_semantic_execution.gate_wait ~checkpoint ~obligations:[obligation] |> Result.get_ok in
+  let waiting = Keeper_semantic_execution.gate_wait ~session_scope:(Keeper_semantic_execution.session_scope [] |> Result.get_ok) ~checkpoint ~obligations:[obligation] |> Result.get_ok in
   let operation_id = operation_id "kmsg-owner-gate-wait" in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     incr attempts;

@@ -7669,7 +7669,7 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
-let test_direct_gate_current_history_resume ?(checkpoint_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) decision () =
   with_exec_fixture "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -7699,7 +7699,9 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) decision
       let session_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let root = Masc.Keeper_fs.session_base_dir config in
       ignore (Masc.Keeper_fs.ensure_dir root);
-      let session_dir = Filename.concat root session_id in
+      let session_root = if channel_session then Filename.concat (Filename.concat root "channels") "original-channel" else root in
+      ignore (Masc.Keeper_fs.ensure_dir session_root);
+      let session_dir = Filename.concat session_root session_id in
       ignore (Masc.Keeper_fs.ensure_dir session_dir);
       let context = Agent_core.Context.create_sync () in
       let scope = Masc.Keeper_execution_scope_id.direct_operation operation_id in
@@ -7789,6 +7791,8 @@ let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("direct_gate_resume", [
+      test_case "channel-scoped Gate resumes original input with current channel history" `Quick
+        (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "checkpoint retention failure preserves nonterminal original input" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "approved Gate resumes same input with newer history and exact replay" `Quick

@@ -41,8 +41,24 @@ let rec original_prefix original current = match original, current with
   | first :: rest, current :: tail when first = current -> original_prefix rest tail
   | _ :: _, [] | _ :: _, _ :: _ -> false
 
+(* The scope is captured from the admitted session directory, never reconstructed
+   from a trace ID or from the operation's untyped source metadata. *)
+let session_scope ~config ~session_dir ~session_id =
+  let root = Keeper_fs.session_base_dir config in
+  let prefix = root ^ Filename.dir_sep in
+  if not (String.starts_with ~prefix session_dir) then Error "Gate session is outside the session root"
+  else
+    let relative = String.sub session_dir (String.length prefix) (String.length session_dir - String.length prefix) in
+    match List.rev (String.split_on_char '/' relative) with
+    | actual_id :: reversed_scope when actual_id = session_id -> Semantic.session_scope (List.rev reversed_scope)
+    | _ -> Error "Gate session directory does not match its checkpoint identity"
+
+let scoped_session_dir ~config scope session_id =
+  List.fold_left Filename.concat (Keeper_fs.session_base_dir config)
+    (Semantic.session_scope_components scope @ [session_id])
+
 let retained ~config ~operation_id (waiting : Semantic.gate_wait) =
-  let session_dir = Filename.concat (Keeper_fs.session_base_dir config)
+  let session_dir = scoped_session_dir ~config waiting.session_scope
     (Keeper_id.Trace_id.to_string waiting.checkpoint.trace_id) in
   let* original = Checkpoint.load_retained_exact_snapshot ~session_dir ~reference:waiting.checkpoint
     |> Result.map_error (fun _ -> "original Gate checkpoint is not retained") in
@@ -53,7 +69,9 @@ let retained ~config ~operation_id (waiting : Semantic.gate_wait) =
     Ok original
   | Some _ | None -> Error "retained checkpoint does not own this original direct operation"
 
-let current_with_original ~config ~operation_id ~session_dir ~session_id waiting =
+let current_with_original ~config ~operation_id ~session_dir ~session_id (waiting : Semantic.gate_wait) =
+  let* scope = session_scope ~config ~session_dir ~session_id in
+  let* () = if scope = waiting.session_scope then Ok () else Error "Gate session scope changed" in
   let* original = retained ~config ~operation_id waiting in
   let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
     |> Result.map_error (fun _ -> "current Keeper checkpoint is unavailable") in
@@ -80,12 +98,12 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path and keeper_name = meta.name in
   let* waits = Owner.direct_gate_waits ~base_path ~keeper_name |> owner in
   let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let session_dir = Filename.concat (Keeper_fs.session_base_dir config) session_id in
   List.fold_left (fun result (operation_id, state) ->
     let* () = result in
     match state.Semantic.resolution with
     | Some _ -> Ok ()
     | None ->
+      let session_dir = scoped_session_dir ~config state.waiting.session_scope session_id in
       let rec first_resolved = function
         | [] -> Ok ()
         | obligation :: remaining ->
@@ -109,6 +127,7 @@ let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approva
   | [] -> Ok false
   | _ ->
     let prepare () =
+    let* session_scope = session_scope ~config ~session_dir ~session_id in
     let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
     let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
@@ -119,7 +138,7 @@ let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approva
     let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed" in
-    let* waiting = Semantic.gate_wait ~checkpoint:(Checkpoint.exact_snapshot_reference snapshot) ~obligations in
+    let* waiting = Semantic.gate_wait ~checkpoint:(Checkpoint.exact_snapshot_reference snapshot) ~session_scope ~obligations in
     let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
     match operation with
     | None -> Error "original Gate operation disappeared"

@@ -57,18 +57,26 @@ let gate_obligation ~approval_id ~tool_name ~input_hash =
   if String.trim approval_id = "" || String.trim tool_name = "" then Error "Gate identity is blank"
   else if not (canonical_sha input_hash) then Error "Gate input hash is invalid"
   else Ok {approval_id; tool_name; input_hash}
+type session_scope = Session_scope of string list
+let session_scope components =
+  if List.exists (fun component -> component = "" || component = "." || component = ".."
+      || String.contains component '/' || String.contains component '\\'
+      || String.contains component '\000') components
+  then Error "invalid relative session scope"
+  else Ok (Session_scope components)
+let session_scope_components (Session_scope components) = components
 type gate_wait =
-  { checkpoint : Keeper_checkpoint_ref.t; obligations : gate_obligation list }
-let gate_wait ~checkpoint ~obligations =
+  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list }
+let gate_wait ~checkpoint ~session_scope ~obligations =
   if obligations = [] then Error "Gate waiting requires an obligation"
   else if List.length (List.sort_uniq String.compare (List.map (fun row -> row.approval_id) obligations))
           <> List.length obligations then Error "duplicate Gate obligation"
-  else Ok {checkpoint; obligations}
+  else Ok {checkpoint; session_scope; obligations}
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
 let equal_gate_wait left right = Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
-  && left.obligations = right.obligations
+  && left.session_scope = right.session_scope && left.obligations = right.obligations
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -347,6 +355,7 @@ let checkpoint_json checkpoint =
 let gate_obligation_json value = `Assoc ["approval_id", `String value.approval_id;
   "tool_name", `String value.tool_name; "input_hash", `String value.input_hash]
 let gate_wait_json value = `Assoc ["checkpoint", checkpoint_json value.checkpoint;
+  "session_scope", `List (List.map (fun value -> `String value) (session_scope_components value.session_scope));
   "obligations", `List (List.map gate_obligation_json value.obligations)]
 let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json value.obligation;
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
@@ -452,12 +461,17 @@ let gate_obligation_of_json json =
   let* input_hash = string "input_hash" fields in
   gate_obligation ~approval_id ~tool_name ~input_hash
 let gate_wait_of_json json =
-  let* fields = exact ["checkpoint";"obligations"] json in
+  let* fields = exact ["checkpoint";"session_scope";"obligations"] json in
   let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
   let* obligations = match field "obligations" fields with
     | `List rows -> decode_list gate_obligation_of_json rows
     | _ -> Error "Gate obligations must be a list" in
-  gate_wait ~checkpoint ~obligations
+  let* session_scope = match field "session_scope" fields with
+    | `List rows ->
+      let* components = decode_list (function `String value -> Ok value | _ -> Error "invalid session component") rows in
+      session_scope components
+    | _ -> Error "Gate session scope must be a list" in
+  gate_wait ~checkpoint ~session_scope ~obligations
 let gate_resolution_of_json json =
   let* fields = exact ["obligation";"decision"] json in
   let* obligation = gate_obligation_of_json (field "obligation" fields) in

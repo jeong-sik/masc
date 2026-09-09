@@ -162,6 +162,7 @@ jobs:
               files[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
           (out / 'manifest.json').write_text(json.dumps({
               'commit': os.environ['PROBE_COMMIT'], 'arch': os.environ['PROBE_ARCH'],
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
               'release_validated': False, 'sha256': files,
           }, indent=2) + '\n')
           PYCODE
@@ -170,7 +171,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
-          name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}
+          name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: runtime-probe/
           if-no-files-found: error
           retention-days: 7

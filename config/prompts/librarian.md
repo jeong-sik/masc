@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, turn_tool_observations]
+template_variables: [current_memory, conversation_history, counterpart_observations, keeper_instructions, turn_tool_observations, goal_context]
 ---
 
 당신은 Keeper의 장기 기억을 선별하는 Librarian입니다. 아래 자료를 읽고,
@@ -142,6 +142,14 @@ template_variables: [current_memory, conversation_history, counterpart_observati
 
 ### 대상 Keeper의 역할 자료
 {{keeper_instructions}}
+
+### 현재 Task에 연결된 Goal 기준
+{{goal_context}}
+
+목표의 성공 조건을 참고해 아직 필요한 증거와 이어갈 작업을 기억하세요.
+목표 자체를 완료 증거로 취급하지 마세요. phase가 completed 또는 dropped인
+목표는 과거 작업의 맥락이며 새 실행 의무가 아닙니다. unavailable은 조회 실패이며 목표가
+없다는 뜻이 아닙니다. no_task는 이번 입력에 연결된 Task가 없다는 뜻입니다.
 
 ### 정확한 현재 기억
 {{current_memory}}

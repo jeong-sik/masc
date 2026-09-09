@@ -44,6 +44,7 @@ export interface PromptDestination {
 
 const LIBRARIAN_INPUT_CONTRACT: ReadonlyArray<{ name: string; meaning: string }> = [
   { name: 'keeper_instructions', meaning: '이 Keeper의 현재 instructions 원문' },
+  { name: 'goal_context', meaning: '턴 종료 시점 Task의 연결 Goal 성공 조건과 조회 상태' },
   { name: 'current_memory', meaning: 'commit 직전의 complete current-memory snapshot' },
   { name: 'conversation_history', meaning: 'cadence 시점에 선택된 bounded recent message window' },
   { name: 'counterpart_observations', meaning: 'host provenance가 붙은 최근 상대 관측' },

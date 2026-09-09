@@ -5445,10 +5445,3 @@
  (action
   (run python3 %{dep:test_docker_observe_transport.py}
    %{exe:test_docker_observe_transport.exe})))
-
-(rule
- (alias runtest-test_docker_observe_transport)
- (deps test_docker_observe_transport.py)
- (action
-  (run python3 %{dep:test_docker_observe_transport.py}
-   %{exe:test_docker_observe_transport.exe})))

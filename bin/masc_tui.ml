@@ -1717,6 +1717,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
+  | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
@@ -3164,6 +3165,46 @@ let launch_verification_evidence_load state ~mailbox task_id =
 (* The MCP resource inventory, and one resource's text. Each operation
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
+let launch_keeper_deletions state ~mailbox ?retry () =
+  if not state.keeper_deletions_loading then (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    let generation = state.keeper_deletions_generation in
+    let host, port = server_peer_host, state.port in
+    let run () =
+      let result =
+        try
+          let ( let* ) = Result.bind in
+          let* () = match retry with
+            | None -> Ok ()
+            | Some (row : Keeper_control.deletion_row) ->
+              let keeper_name = Keeper_control.deletion_keeper_name row in
+              let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
+              let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
+                "operation_id", `String operation_id]) in
+              let path = match row.operation with
+                | Keeper_control.Runtime_shutdown _ -> "/api/v1/dashboard/keepers/deletions/retry"
+                | Configuration_removal _ -> "/api/v1/dashboard/keepers/configuration-deletions/retry" in
+              let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
+                ~host ~port ~path ~body in
+              (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
+               | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
+               | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
+               | _ -> Error "deletion retry response did not identify the requested operation")
+          in
+          let* json = Masc_tui_http.get_json ~host ~port
+            ~path:"/api/v1/dashboard/keepers/deletions" in
+          Keeper_control.decode_deletion_inventory json
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_deletions_loaded (generation, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> enqueue_async mailbox (Keeper_deletions_loaded
+        (generation, Error "Eio switch is unavailable")))
+
 let launch_resources_list state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -9326,8 +9367,11 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
         match perform step with
         | Error transport -> Error transport
         | Ok (status, body) -> (
-            match Keeper_control.classify_response ~status ~body with
-            | Keeper_control.Accepted _ as outcome ->
+            let outcome = match step with
+              | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
+              | Keeper_control.Lifecycle _ | Keeper_control.Directive _ -> Keeper_control.classify_response ~status ~body in
+            match outcome with
+            | (Keeper_control.Accepted _ | Keeper_control.Purge_accepted _) as outcome ->
                 walk ~recovery_available (Some outcome) rest
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
@@ -9345,6 +9389,10 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
 let apply_keeper_action_result state ~base_path keeper_name action result =
   state.keeper_action_inflight <- None;
   (match result with
+   | Ok (Keeper_control.Purge_accepted { operation_id }) ->
+       add_event state "system"
+         (Printf.sprintf "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed"
+            keeper_name operation_id)
    | Ok (Keeper_control.Accepted { already_live = true }) ->
        add_event state "system"
          (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"
@@ -10000,7 +10048,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
                before its own purge. *)
             if action = Keeper_control.Delete then
               add_event state "system"
-                ("Delete removes: "
+                ("Delete stops the Keeper and waits for lane shutdown before removing: "
                  ^ String.concat ", " Keeper_control.purge_artifacts)
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
@@ -10810,6 +10858,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       apply_board_post_load state request result
   | Board_post_refresh_failed (request, err) ->
       apply_board_post_load state request (Error err)
+  | Keeper_deletions_loaded (generation, result) ->
+      if generation = state.keeper_deletions_generation then (
+        state.keeper_deletions_loading <- false;
+        let selected = match state.keeper_deletions with
+          | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+          | _ -> None in
+        state.keeper_deletions <- Some result;
+        match result with
+        | Error _ -> ()
+        | Ok inventory ->
+          let same_operation row = match selected with
+            | None -> false
+            | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+                (Keeper_control.deletion_operation_id row) (Keeper_control.deletion_operation_id previous) in
+          let rec find i = function
+            | [] -> None | row :: rest -> if same_operation row then Some i else find (i + 1) rest in
+          state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+            | Some i -> i | None -> 0))
   | Keeper_action_done (keeper_name, action, result) ->
       apply_keeper_action_result state ~base_path keeper_name action result;
       (* The roster is the half of the row this refresh cannot read from disk,
@@ -14903,6 +14969,7 @@ and is loaded on demand through keeper_skill.
           composer's and mean nothing in a field a single row high. A copied
           secret carries the newline that ended it, and a field is not a
           place for one. *)
+       | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
              Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
@@ -15025,7 +15092,7 @@ and is loaded on demand through keeper_skill.
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))
          when (not dismissed_image) && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -15044,7 +15111,7 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press (row, _column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -15061,7 +15128,7 @@ and is loaded on demand through keeper_skill.
               && state.lanes_mode = Lanes_overview
               && (not dismissed_image)
               && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -15121,7 +15188,12 @@ and is loaded on demand through keeper_skill.
            if cancelled [ "y"; "Y"; "n"; "N" ] then
              state.pending_approval_action <- None
        | Keepers _ ->
-           if cancelled [ "s"; "S" ] then state.keeper_action_pending <- None
+           (match state.keeper_action_pending with
+            | None -> ()
+            | Some pending ->
+              let confirm = Keeper_control.action_key pending.pending_action in
+              if cancelled [confirm; String.uppercase_ascii confirm]
+              then state.keeper_action_pending <- None)
        | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
        | Planning ->
            if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
@@ -15152,7 +15224,7 @@ and is loaded on demand through keeper_skill.
          appeared. The chat surface is excluded — it draws its own composer. *)
       let composer_claimed =
         (not compact_viewport)
-        && (not state.help_open)
+        && ((not state.help_open && not state.keeper_deletions_open))
         && (not state.agenda_open)
         && (not state.context_inspector_open)
         && (not state.palette_open)
@@ -15306,7 +15378,7 @@ and is loaded on demand through keeper_skill.
        | Some _ when compact_viewport -> ()
        | Some k
          when String.equal k toggle_browser_lane_key
-              && not state.palette_open && not state.help_open
+              && not state.palette_open && (not state.help_open && not state.keeper_deletions_open)
               && not state.agenda_open && not state.answering_open
               && not state.context_inspector_open
               && not state.patch_modal_open && not state.link_modal_open
@@ -15636,6 +15708,30 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
+       | Some k when state.keeper_deletions_open ->
+           (match k with
+            | "esc" | "D" -> state.keeper_deletions_open <- false
+            | "r" -> launch_keeper_deletions state ~mailbox:async_messages ()
+            | "j" | "down" | "k" | "up" ->
+              let count = match state.keeper_deletions with
+                | Some (Ok inventory) -> List.length inventory.operations | _ -> 0 in
+              let delta = if k = "j" || k = "down" then 1 else -1 in
+              state.keeper_deletions_cursor <- max 0 (min (count - 1) (state.keeper_deletions_cursor + delta));
+              state.keeper_deletions_scroll <- 0
+            | "J" | "K" | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
+              let count, height = Masc_tui_render.keeper_deletions_viewport state in
+              let delta = match k with "J" | "wheel-down" -> 1 | "K" | "wheel-up" -> -1
+                | "pagedown" -> height | _ -> -height in
+              state.keeper_deletions_scroll <- Masc_tui_scroll.normalize ~count ~height
+                (state.keeper_deletions_scroll + delta)
+            | "t" ->
+              (match state.keeper_deletions with
+               | Some (Ok inventory) ->
+                 (match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+                  | Some row when row.can_retry -> launch_keeper_deletions state ~mailbox:async_messages ~retry:row ()
+                  | _ -> ())
+               | _ -> ())
+            | _ -> ())
        | Some k when state.help_open && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
@@ -19628,11 +19724,13 @@ and is loaded on demand through keeper_skill.
                        open_repository_change_diff state
                          ~mailbox:async_messages ~scope change)
                | _ -> ()))
-       (* Delete is the one keeper action with no inverse, so it is dispatched
-          here rather than through the toggle key: [Keeper_control.available]
-          offers it only where the roster shows no fiber, and
-          [gate_transition] holds the first press as an arm. *)
-       | Some "x"
+       | Some "D" when (match state.view with
+           | Keepers (Keeper_list | Keeper_detail) -> true | _ -> false) ->
+           state.keeper_deletions_open <- true;
+           state.keeper_deletions_scroll <- 0;
+           launch_keeper_deletions state ~mailbox:async_messages ()
+       (* Confirmed deletion owns shutdown and cleanup as one operation. *)
+       | Some "x" | Some "X"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true
                | _ -> false) ->

@@ -396,7 +396,7 @@ let handle_read_file_with_outcome
                ~timeout_sec
                ()
            with
-           | Error err when String_util.contains_substring err "path_not_found:" ->
+           | Error (Keeper_sandbox_read_backend.Missing_file err) ->
              Ok
                (Read_failed_payload
                   (missing_file_error_json
@@ -404,7 +404,8 @@ let handle_read_file_with_outcome
                      ~raw_path:(Some path)
                      ~target
                      ~error:err))
-           | Error err -> Error err
+           | Error err ->
+             Error (Keeper_sandbox_read_backend.read_error_to_string err)
            | Ok body ->
              let scan_complete = String.length body < fetch_bytes in
              Ok

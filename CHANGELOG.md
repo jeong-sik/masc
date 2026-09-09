@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.35.0] - 2026-09-08
+## [0.35.0] - 2026-09-09
 
 ### Fresh state required
 
@@ -23,10 +23,14 @@ binary starts.
 
 ### Installation and setup
 
+- Add `masc setup` to prepare the default Docker image, verify workspace server identity, authenticate the local operator, start the existing `imp`, and open the TUI. Preserve the Keeper manifest and stop only a server started by setup; `--no-tui` leaves it running.
+- Bind the selected runtime to internal helper lanes for single-runtime installations, including CLI-only Claude Code and Codex judgment paths with durable provenance. Use installed catalog context sizes for known CLI models.
+- Add a real-model onboarding acceptance runner that checks conversation, persisted Board posts and Tasks, sandbox directory execution receipts, and web fetch results. Keep these evidence checks separate from release publication and final native artifact acceptance; adding the runner does not establish either result.
+
 - Include the corrected macOS dependency bootstrap, Python executable selection, and loader diagnostics in the same source release as the binaries.
 - Ask for a workspace on terminal installs; preserve explicit paths and existing workspaces. Add program-only uninstall, explicit workspace data removal, and dry-run.
 - Ship a disabled starter Keeper (`imp`) for manual activation after model and sandbox setup.
-- Add explicit llama.cpp, vLLM, Claude Code, Codex, and Antigravity setup choices using operator-supplied model metadata; validate staged configuration before publishing it.
+- Add explicit llama.cpp, vLLM, Claude Code, Codex, and Antigravity setup choices using catalog metadata for known CLI models and explicit metadata for other connections; validate staged configuration before applying it.
 - Validate runtime default changes with the same workspace capability catalog and overlay used by server startup.
 - Run documentation and installer checks without waiting for OCaml preparation; new global tags no longer invalidate checks on unchanged branches.
 

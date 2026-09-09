@@ -254,6 +254,9 @@ let cleanup_evidence_to_json evidence =
 ;;
 
 let completion_receipt_to_json = function
+  | Completion_delivery_failed { action; detail } ->
+    `Assoc ["kind", `String "delivery_failed";
+      "action", `String (completion_action_to_string action); "detail", `String detail]
   | Completion_not_requested -> `Assoc [ "kind", `String "not_requested" ]
   | Completion_pending action ->
     `Assoc
@@ -595,6 +598,12 @@ let completion_receipt_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "not_requested" -> Ok Completion_not_requested
+  | "delivery_failed" ->
+    let* action_wire = string "action" json in
+    let* action = completion_action_of_string action_wire
+      |> Result.map_error (fun detail -> Decode_error detail) in
+    let* detail = string "detail" json in
+    Ok (Completion_delivery_failed { action; detail })
   | "pending" ->
     let* action_wire = string "action" json in
     let* action =
@@ -906,20 +915,19 @@ type terminal_delete_outcome =
   | Terminal_deleted
   | Terminal_retained
 
-(* Durable intake is authorized by current metadata alone
-   ([authorize_durable_intake_owner]), so a settled operation record has no
-   reader left and keeping it only makes boot recovery walk the same
-   settled operation forever. A [Completion_pending] receipt is still owed
-   to its consumer; [requires_admission_fence] already keeps such an
-   operation out of the reclaim call sites, and this predicate refuses it
-   independently. *)
+(* Unsettled completion retains its admission fence. Dashboard deletion
+   records additionally remain as operator-visible receipts after delivery. *)
 let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
-  match operation.phase with
+  match operation.cleanup_intent.reason, operation.phase with
+  (* The operator-facing deletion inventory consumes these receipts after
+     the Keeper itself disappears, including across server restarts. *)
+  | Dashboard_keeper_purge _, _ -> false
+  | _, phase -> match phase with
   | Keeper_shutdown_types.Owner_absent _
   | Keeper_shutdown_types.Operator_absence_acknowledged _ -> false
   | Keeper_shutdown_types.Superseded _ -> true
   | Keeper_shutdown_types.Finalized
-      { completion = Keeper_shutdown_types.Completion_pending _; _ } -> false
+      { completion = (Keeper_shutdown_types.Completion_pending _ | Completion_delivery_failed _); _ } -> false
   | Keeper_shutdown_types.Finalized
       { completion =
           ( Keeper_shutdown_types.Completion_not_requested

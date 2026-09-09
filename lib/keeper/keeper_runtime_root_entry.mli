@@ -21,3 +21,8 @@ val keeper_basename : keeper_name:string -> keeper_artifact -> string
 (** Exact metadata interpretation, independent of overlapping artifact
     suffixes. *)
 val metadata_keeper_name : string -> string option
+
+
+(** All canonical interpretations of a producer-owned root filename,
+    including numbered log rotations. No filesystem access is performed. *)
+val classify_basename : string -> t list

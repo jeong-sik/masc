@@ -48,11 +48,14 @@ val attach_artifact_manifest :
 
 val maybe_externalize :
   ?base_path:string ->
+  ?stored_preview:string ->
   ?mime:string ->
   ?threshold_bytes:int ->
   string ->
   (string, externalization_error) result
-(** Externalize when over threshold and a blob store is available;
+(** [stored_preview] supplies immediate context on stored references without
+    changing their exact payload bytes.
+    Externalize when over threshold and a blob store is available;
     pass through otherwise. Storage failures remain typed instead of putting
     the oversized payload back on the provider wire. *)
 

@@ -166,9 +166,9 @@ let admit_lane_slots resolver_snapshot admitted_by_id
                 rejected_slots
                 rest))
   in
-  match lane.slot_ids with
-  | [] -> Error (Empty_lane { lane_id = lane.id })
-  | slot_ids -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
+  match lane.slot_ids, lane.cli_slot_ids with
+  | [], [] -> Error (Empty_lane { lane_id = lane.id })
+  | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
 let admit_lanes ~admitted_by_id resolver_snapshot lanes =
@@ -209,6 +209,7 @@ let rec same_lane_declarations left_lanes right_lanes =
   | left :: left_rest, right :: right_rest ->
     String.equal left.Runtime_schema.id right.Runtime_schema.id
     && same_slot_ids left.slot_ids right.slot_ids
+    && same_slot_ids left.cli_slot_ids right.cli_slot_ids
     && same_lane_declarations left_rest right_rest
   | [], _ :: _ | _ :: _, [] -> false
 ;;
@@ -222,8 +223,9 @@ let validate_required_lanes required_lane_ids admitted_lanes =
            (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
            admitted_lanes
        with
-       | Some { slots = _ :: _; _ } -> loop rest
-       | Some { slots = []; _ } | None ->
+       | Some { slots = _ :: _; _ }
+       | Some { cli_slots = _ :: _; _ } -> loop rest
+       | Some { slots = []; cli_slots = []; _ } | None ->
          Error (Required_lane_unavailable { lane_id }))
   in
   loop required_lane_ids

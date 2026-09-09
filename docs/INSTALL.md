@@ -2,11 +2,9 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.34.0**. The latest published
-version is on [GitHub Releases](https://github.com/jeong-sik/masc/releases/latest).
-The `v0.34.0` downloads below point at the tag published on 2026-09-08. Where a
-`main` source build differs from 0.34.0 (the default Keeper `imp`), the body
-notes it separately.
+This document is the installation contract for **0.35.0**. Check tag and asset
+availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
+The download commands below select `v0.35.0` and its matching installer.
 
 ## Platforms and prerequisites
 
@@ -62,7 +60,7 @@ why. Check the raw stderr, such as `dyld: Library not loaded`, and the path of
 the executable that failed. The exit signal alone does not establish that a
 library is missing.
 
-The Mach-O minimum OS of the 0.34.0 release files is **macOS 14.0** on Apple
+The minimum supported OS is **macOS 14.0** on Apple
 Silicon and **macOS 15.0** on Intel. Prepare the dependencies in the default
 Homebrew prefix for that CPU (Apple Silicon `/opt/homebrew`, Intel
 `/usr/local`).
@@ -81,7 +79,7 @@ and does not fix loader or OS compatibility problems.
 ## Install
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -156,11 +154,10 @@ does not change existing Keeper configuration in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.0 binary** installs one `imp` with autoboot off and the
+The **0.35.0 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
-installer takes its configuration from the binary; the earlier 0.34.0 binary
-shipped an empty roster. The instructions are a starting point; edit them directly. Model weights,
+installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
 model CLIs, API keys, Docker, Apple Container, SSH servers,
 browsers/extensions, Slack/Discord accounts, and autostart services are not
 installed. Detecting which execution environments are available does not
@@ -174,12 +171,14 @@ Besides the existing API and Ollama settings, the terminal wizard offers
 tool is not installed, and a local server may point at an endpoint on
 another machine.
 
-Only the connection you pick is added. Enter the model id and context size
-that match your actual server or CLI setting. Turn on tool calling and
-streaming only where you have confirmed them: a model name is not evidence
-of image, reasoning, or tool support. An HTTP model also gets a capability
-overlay that applies to that provider alone. For an API key you give the
-environment variable name, not the value.
+Only the connection you pick is added. For Claude Code and Codex, enter the
+model id; the installed model catalog supplies its context size when known,
+and the CLI connection enables tools and streaming without a capability quiz.
+An unknown model still asks for its context size. For HTTP connections, enter
+the context size and explicitly confirm tool calling and streaming supported
+by your server. The HTTP capability overlay applies only to that provider.
+API credentials are environment variable names, never values; the seeded Z.AI
+connection reads `ZAI_API_KEY` from the shell that starts MASC.
 
 The setting is written only after it passes the same binary's runtime check
 in a temporary workspace. If that check fails, or the original changes
@@ -195,91 +194,53 @@ to the OAuth file its CLI wrote, and a request timeout. `Configure later`
 defers the model connection, and the default Keeper does not start on its
 own. To run this again in an existing workspace, use `--wizard`.
 
-## First run and what you can do
+## First conversation with `imp` (0.35.0)
+
+This is the 0.35.0 installation contract. Check the release tag and asset
+availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
+
+1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
+   the model runtime you own. Runtime setup binds that selection to the helper
+   lanes with `--setup-lanes`; you do not need a second model subscription.
+2. Authenticate that runtime before starting MASC. For Claude Code or Codex,
+   install its CLI and complete its own login, then confirm it can answer a
+   prompt in this terminal. For an API runtime, export the credential variable
+   named by the wizard in this terminal. For a local model, start its server
+   and load a model that supports tool calls. MASC does not install or log in
+   to these model runtimes.
+3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
+   `docker info` must succeed as your current user. Then run:
 
 ```bash
-masc --base-path "$HOME/masc-workspace"
+masc setup --base-path "$HOME/masc-workspace"
 ```
 
-On a terminal this opens the TUI and starts the server when nothing is on the
-port. To run only the HTTP server, use the following command.
+`setup` seeds missing configuration, checks Docker, builds the default sandbox
+image, starts or connects to the server for this workspace, logs in as
+`local-admin`, starts the existing `imp`, and opens the TUI. It preserves the
+Keeper manifest. The default `imp` has `activation_mode = "manual"`,
+`sandbox_profile = "docker"`, and `network_mode = "inherit"`.
+If another workspace occupies the port, choose a free one with `--port 8936`.
+On exit, setup stops a server it started itself. Use `--no-tui` to leave that
+server running and connect to it separately.
 
-```bash
-masc start --base-path "$HOME/masc-workspace"
-```
+In the TUI, select **Keepers → imp** and send these requests one at a time:
 
-The server runs in the foreground. Check its state from another terminal.
+- “Hello. Please reply so I can check our conversation.”
+- “Create a Board post titled First conversation and show its id.”
+- “Create a Task titled Explore my sandbox, with a description, and show its id.”
+- “Run `pwd` and `ls` in your sandbox and show the directory listing.”
+- “Use web_fetch to read https://example.com and tell me its page title.”
 
-```bash
-curl http://127.0.0.1:8935/health
-curl 'http://127.0.0.1:8935/health?full=1'
-```
+Confirm the reply, persisted Board post and Task, and successful sandbox and
+web tool results. This checks conversation and basic capabilities; Task
+completion is a separate workflow. Web fetch does not require a search API
+key; web search needs its own configured search provider. If a tool is waiting
+for approval, inspect its pending request in the chat or **Approvals** view.
+Do not interpret a pending request or a listening HTTP server as successful
+model inference or tool execution.
 
-A `/health` response means the HTTP listener is open. Before creating the
-first Keeper, also check that `startup.state_ready` in the full health is
-`true`. Early in boot the listener answers first while internal state
-initialization may still be in progress.
-
-Open `http://127.0.0.1:8935/dashboard/` in a browser. The dashboard picks the
-installed bundle on its own, so there is no need to start from a source
-directory. Set up write access as described in the
-[authentication guide](LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
-
-MCP clients connect to `http://127.0.0.1:8935/mcp` with a bearer. Use the
-`masc login ... --shell` command the install script prints and the
-[client setup](../README.md#mcp-client-setup).
-External agents can register and claim tasks and share goals, board posts,
-comments, and execution evidence. In that case an external agent uses its own
-model, even with no model connected to MASC itself.
-
-To run a Keeper, prepare both a model source and a tool execution environment.
-
-1. Select a model in `runtime.toml`. For an API provider, export its credential
-   environment variable in the shell that starts the server. For a CLI
-   provider, install that CLI separately and sign in.
-2. For Docker, start the Docker daemon and prepare the default execution image
-   with `masc sandbox-image`. microVM/remote SSH each need their own backend
-   configuration.
-3. Create a Keeper from the TUI Keepers screen or with `masc keeper-create --help`.
-   For a preconfigured team, use `--team classic --sandbox docker` at install
-   time. The team files boot their Keepers automatically at the next server
-   start, so prepare the model and sandbox first.
-
-With the server running and the Docker image and model prepared, you can
-create the first Keeper explicitly from another terminal. `login` and
-`keeper-create` use the same base path, agent, and host/port.
-
-```bash
-masc login --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
-  --agent local-admin --role admin --no-expiry --json
-masc keeper-create --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
-  --agent local-admin --name scout --sandbox-profile docker --network-mode none \
-  --no-skills --no-autoboot --no-proactive \
-  --instructions 'Carry out the given task and report with actual tool results as evidence.'
-```
-
-The create request boots the Keeper immediately. `--no-autoboot` turns off
-automatic boot at later server restarts, and `--no-proactive` turns off
-self-initiated activity. Send `scout` a task from the TUI or the dashboard.
-The `none` in this example blocks the guest's outbound network, so web and
-remote Git work needs a network setting that fits the task, such as
-`inherit`. Running it again with the same name reconfigures the existing
-Keeper.
-
-If the first tool run waits, check the pending tool approval in the chat and
-answer it. Tool approval in the Keeper chat (Auto/Yolo and per-tool approval)
-is separate from the workspace Gate's `auto_judge`/`manual` and from the
-external-service approval path. Setting the per-Keeper Gate to `always_allow`
-does not relax the workspace's `auto_judge`. Check each approval state so that
-a pending approval is not mistaken for a model connection or install failure.
-
-A Keeper runs turns with the configured model, executes tools in the sandbox,
-and collaborates through tasks, the board, and chat. Scheduled runs, approval
-judgement, external connectors, and browser control need their
-runtime/credential/backend configuration. The browser follows the separate
-[native host connection guide](../connectors/browser/host/README.md).
-The server install smoke does not prove model responses or long sustained
-Keeper runs.
+For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and follow the [client setup](../README.md#mcp-client-setup).
 
 ## Images and the Linux/microVM boundary
 
@@ -314,7 +275,7 @@ selected backend to the server, and it is stored in the Keeper TOML.
 masc keeper-create --base-path "$HOME/masc-workspace" \
   --agent local-admin --name linux-worker \
   --sandbox-profile microvm --microvm-backend nerdctl_kata \
-  --network-mode none --no-autoboot --no-proactive \
+  --network-mode none --activation-mode manual \
   --instructions "Carry out the assigned task and report the execution results and evidence."
 ```
 
@@ -359,9 +320,7 @@ image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers
 
-The published 0.34.0 binary creates no Keeper and prepares only the built-in
-skill `browser-lanes`. A `main` source build after it, and the next release,
-also prepare **one Keeper, `imp`, that does not start on its own** and the
+The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
 built-in skills `browser-lanes`, `browser-design`, `frontend-implement`,
 `frontend-verify`, and `evidence-review`. Configure a model and a sandbox,
 then start the Keeper.
@@ -424,9 +383,9 @@ Choosing `--team classic` adds the following four Keeper TOMLs.
 | `frontend` | Frontend implementation and verification |
 | `qa` | Tests and verification against the requirements |
 
-이 preset은 `activation_mode="autonomous"`, `sandbox_profile="docker"`,
-`network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
-컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
+This preset uses `activation_mode="autonomous"`, `sandbox_profile="docker"`,
+and `network_mode="inherit"`, and follows the default model. Role instructions
+do not install compilers, credentials, or additional skill packages.
 
 The skill search path is declared by `[[skills.sources]]` in `runtime.toml`.
 The default order is `<base-path>/.masc/skills`, `<base-path>/.agents/skills`,
@@ -494,7 +453,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.34.0` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.0` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

@@ -203,12 +203,8 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
     canWake:     keeperCanWakeup(keeper),
     canBoot:     isOffline && !isPaused,
     canShutdown: isRunning || isPaused,
-    // Purge deletes the keeper and every store it owns, permanently, so it
-    // is offered only for a keeper that is not taking turns: paused (the
-    // scenario harnesses leave their keepers here) or offline (finished
-    // canaries). A healthy running keeper must be paused or shut down first,
-    // so the button can never be a one-click loss of working state.
-    canPurge:    isPaused || isOffline,
+    // The confirmed purge request performs durable shutdown before cleanup.
+    canPurge:    true,
   }
 }
 

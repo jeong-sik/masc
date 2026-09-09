@@ -369,6 +369,8 @@ let test_required_without_properties_rejects_schema () =
       ()
   with
   | Error result ->
+    Alcotest.(check bool) "schema fault belongs to the runtime" true
+      (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "reason is malformed_schema" true
       (string_contains msg "malformed_schema")
@@ -2367,6 +2369,70 @@ let test_oneof_null_const_matches_non_null_branch () =
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
+let test_schema_fault_is_distinct_from_argument_range_error () =
+  let schema minimum =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc
+          [ "limit", `Assoc [ "type", `String "integer"; "minimum", minimum ] ]
+      ]
+  in
+  let check minimum expected =
+    match Tool_input_validation.validate_args ~schema:(schema minimum)
+            ~name:"range_contract" ~args:(`Assoc [ "limit", `Int 0 ]) () with
+    | Ok _ -> Alcotest.fail "invalid declaration or argument must be rejected"
+    | Error result ->
+      Alcotest.(check bool) "typed failure class identifies the faulty side" true
+        (Tool_result.failure_class result = Some expected);
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "wire class agrees with typed result"
+        (Tool_result.tool_failure_class_to_string expected)
+        (Tool_result.data result |> member "failure_class" |> to_string)
+  in
+  check (`String "invalid-bound") Tool_result.Runtime_failure;
+  check (`Int 1) Tool_result.Policy_rejection
+;;
+
+let test_oneof_empty_array_presence () =
+  let schema minimum =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties",
+        `Assoc
+          [ "items", `Assoc
+              ([ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
+               @ minimum)
+          ; "query", `Assoc [ "type", `String "string" ]
+          ; "context", `Assoc [ "type", `String "string" ]
+          ]
+      ; "oneOf", `List
+          [ `Assoc [ "required", `List [ `String "items" ] ]
+          ; `Assoc [ "required", `List [ `String "query" ] ]
+          ]
+      ]
+  in
+  let args = `Assoc [ "items", `List [] ] in
+  (match Tool_input_validation.validate_args ~schema:(schema [])
+           ~name:"collection_request" ~args () with
+   | Ok forwarded ->
+     Alcotest.(check bool) "empty collection reaches the tool unchanged" true
+       (Yojson.Safe.equal args forwarded)
+   | Error result -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data result)));
+  (match Tool_input_validation.validate_args
+           ~schema:(schema [ "minItems", `Int 1 ])
+           ~name:"collection_request" ~args () with
+   | Ok _ -> Alcotest.fail "declared minimum must still reject an empty collection"
+   | Error result ->
+     Alcotest.(check bool) "present collection is not reported missing" false
+       (string_contains (Yojson.Safe.to_string (Tool_result.data result)) "exactly one of"));
+  match Tool_input_validation.validate_args ~schema:(schema [])
+          ~name:"collection_request" ~args:(`Assoc [ "context", `String "audit" ]) () with
+  | Ok _ -> Alcotest.fail "absent alternative fields must be rejected"
+  | Error result ->
+    assert_contains "missing alternatives are identified"
+      (Yojson.Safe.to_string (Tool_result.data result)) "exactly one of"
+;;
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -2374,6 +2440,10 @@ let test_oneof_null_const_matches_non_null_branch () =
 let () =
   Alcotest.run "Tool_input_validation (AGENT_CORE delegation)" [
     ("required", [
+      Alcotest.test_case "schema faults differ from invalid arguments" `Quick
+        test_schema_fault_is_distinct_from_argument_range_error;
+      Alcotest.test_case "oneOf distinguishes empty collections from absent fields" `Quick
+        test_oneof_empty_array_presence;
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;
       Alcotest.test_case "missing multiple" `Quick test_required_missing_multiple;

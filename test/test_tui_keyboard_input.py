@@ -15115,6 +15115,26 @@ def run_msx_background_poll_regression(executable: str) -> None:
             return failed()
         return 503, {"error": "unexpected automatic mutation retry"}
 
+    def kitty_rgb_transfers(wire):
+        transfers = []
+        chunks = None
+        geometry = None
+        for match in re.finditer(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\", wire):
+            fields = dict(field.split(b"=", 1) for field in match[1].split(b",") if b"=" in field)
+            if fields.get(b"f") == b"24":
+                assert chunks is None, "new image interrupted a pending transfer"
+                chunks = []
+                geometry = (int(fields[b"s"]), int(fields[b"v"]))
+            if chunks is not None:
+                chunks.append(match[2])
+                if fields.get(b"m", b"0") == b"0":
+                    rgb = base64.b64decode(b"".join(chunks), validate=True)
+                    assert len(rgb) == geometry[0] * geometry[1] * 3
+                    transfers.append((geometry, rgb))
+                    chunks = None
+        assert chunks is None, "incomplete Kitty RGB transfer"
+        return transfers
+
     def interact(process, master, slave, output, _base):
         def await_marker(marker, start):
             wait_for_output(process, master, output, marker, start=start, timeout=2.0)
@@ -15164,6 +15184,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert len(get_frames) > before_get, "reopening skipped fresh observation"
             start = key(b"\r", b"F8: disk")
             assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
+            expected_frame = 100 + len(get_frames)
             assert wait_for_fixture_event(process, master, output, failed.requested, timeout=5.0)
             start = len(output)
             failed.release.set()
@@ -15171,13 +15192,21 @@ def run_msx_background_poll_regression(executable: str) -> None:
             observe_for(0.8)
             failure_output = bytes(output[start:])
             assert len(calls) == 2, f"failed mutation retried automatically: {len(calls)}"
-            assert b"d=I,i=32" not in failure_output and b"f=24" not in failure_output, "failure discarded/replaced cached image"
+            # The notice adds a header row, legitimately relocating/repainting
+            # the image. Verify its contents and frame, not absence of commands.
+            repaints = kitty_rgb_transfers(failure_output)
+            assert repaints, "notice relayout did not repaint the cached image"
+            expected_pixels = ((original["width"], original["height"]),
+                               base64.b64decode(original["rgb_base64"]))
+            assert all(pixels == expected_pixels for pixels in repaints), "failure repaint changed cached RGB"
+            assert f"frame {expected_frame} ".encode() in failure_output, "failure lost cached frame identity"
             assert b"frame 999 " not in failure_output, "failure resurrected stale response"
             key(b"\x1b", b"MASC Overview")
             before_get = len(get_frames)
             key(b":go msx\r", b"watch split.rom")
             assert len(get_frames) > before_get, "failure recovery skipped fresh GET"
             assert len(calls) == 2, "menu entry advanced the machine"
+            key(b"\x1b", b"F8: disk")
             key(b"\x1b", b"MASC Overview")
             os.write(master, b"q")
             print(json.dumps({"result": "PASS", "tick_calls": len(calls),

@@ -1280,11 +1280,29 @@ let keeper_fleet_safety_health_json
     ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
+      (* [backlog_observation_degraded] belongs here because [status] above
+         already counts it. The dashboard reads this schema through an
+         equality, not two independent fields: store-normalizers.ts:594 asserts
+         [operator_action_required === (status !== 'ok')] and, when the two
+         disagree, discards the whole payload for a synthesized row reading
+         status "blocked" with blocker "current_fact_invalid" -- a severity the
+         fleet never reported and a blocker name the server never sends, with
+         every real count replaced by null.
+
+         That disagreement is reachable on its own. The term is true when the
+         active-task-owner scan carries a "backlog" error, and one of those is
+         raised on a *successful* mirror recovery (:947-953), where
+         [observation.recovered_from] is [Some _] because the primary backlog
+         file could not be read. Every Keeper can be healthy and this term
+         still fires alone, leaving the other five false. It is worth an
+         operator's attention on its own terms: the primary backlog is
+         unreadable, and the recovery path already logs a warning. *)
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
            || configuration_blocked_count > 0
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
-           || active_task_owner_without_executable_fiber) )
+           || active_task_owner_without_executable_fiber
+           || backlog_observation_degraded) )
     ]

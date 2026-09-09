@@ -99,7 +99,7 @@ class ReleaseBinarySmokeTests(unittest.TestCase):
     def test_current_readme_build_example_passes(self):
         result = self.smoke(
             (ROOT / "README.md").read_text(),
-            ["start", "init", "mcp-config", "login", "token", "sandbox-image", "keeper-create"],
+            ["start", "init", "setup", "mcp-config", "login", "token", "sandbox-image", "keeper-create"],
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

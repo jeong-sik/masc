@@ -23,9 +23,9 @@ type detached_devnull_handle = {
   devnull_started_at : float;
 }
 
-let rec retry_eintr operation =
+let rec resume_syscall operation =
   try operation () with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> retry_eintr operation
+  | Unix.Unix_error (Unix.EINTR, _, _) -> resume_syscall operation
 
 (* A returned PGID must already name the child's own process group. The
    close-on-exec pipe is private to this fork; EOF before the readiness byte
@@ -46,13 +46,17 @@ let fork_session_ready ~child_setup ~child_exec =
          group (including descendants), then the child itself in case setsid
          never established that group. Reap only this owned PID. *)
       let kill_owned target =
-        try retry_eintr (fun () -> Unix.kill target Sys.sigkill) with
+        try resume_syscall (fun () -> Unix.kill target Sys.sigkill) with
         | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
       in
       kill_owned (-pid);
       kill_owned pid;
-      (try ignore (retry_eintr (fun () -> Unix.waitpid [] pid)) with
-       | Unix.Unix_error (Unix.ECHILD, _, _) -> ());
+      (try
+         (* The rejected handle has no status consumer. Waiting still owns
+            the reap; only ECHILD means there is nothing left to collect. *)
+         let _reaped_pid, _terminal_status = resume_syscall (fun () -> Unix.waitpid [] pid) in
+         ()
+       with Unix.Unix_error (Unix.ECHILD, _, _) -> ());
       child_pid := None
   in
   Fun.protect
@@ -62,10 +66,11 @@ let fork_session_ready ~child_setup ~child_exec =
       | 0 ->
         close_reader ();
         (try
-           ignore (retry_eintr Unix.setsid);
+           let session_id = resume_syscall Unix.setsid in
+           if session_id <> Unix.getpid () then Unix._exit 126;
            child_setup ();
            let ready = Bytes.of_string "R" in
-           if retry_eintr (fun () -> Unix.write ready_w ready 0 1) <> 1
+           if resume_syscall (fun () -> Unix.write ready_w ready 0 1) <> 1
            then Unix._exit 126
          with
          (* This is the fork child, not the parent's Eio fiber. Unwinding
@@ -81,7 +86,7 @@ let fork_session_ready ~child_setup ~child_exec =
         close_writer ();
         (try
            let ready = Bytes.create 1 in
-           let count = retry_eintr (fun () -> Unix.read ready_r ready 0 1) in
+           let count = resume_syscall (fun () -> Unix.read ready_r ready 0 1) in
            if count <> 1 || Bytes.get ready 0 <> 'R'
            then failwith "child exited before detached session setup was ready";
            child_pid := None;
@@ -128,10 +133,10 @@ let spawn_detached ~argv ~env ~cwd =
          in
          let pid = fork_session_ready
            ~child_setup:(fun () ->
-             if cwd <> "" then retry_eintr (fun () -> Unix.chdir cwd);
-             retry_eintr (fun () -> Unix.dup2 devnull Unix.stdin);
-             retry_eintr (fun () -> Unix.dup2 out_w Unix.stdout);
-             retry_eintr (fun () -> Unix.dup2 err_w Unix.stderr);
+             if cwd <> "" then resume_syscall (fun () -> Unix.chdir cwd);
+             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdin);
+             resume_syscall (fun () -> Unix.dup2 out_w Unix.stdout);
+             resume_syscall (fun () -> Unix.dup2 err_w Unix.stderr);
              close_quietly out_r; close_quietly err_r;
              close_quietly out_w; close_quietly err_w; close_quietly devnull)
            ~child_exec:(fun () -> Unix.execvpe bin (Array.of_list argv) env)
@@ -183,10 +188,10 @@ let spawn_detached_devnull ~argv ~env ~cwd =
          devnull_ref := Some devnull;
          let pid = fork_session_ready
            ~child_setup:(fun () ->
-             if cwd <> "" then retry_eintr (fun () -> Unix.chdir cwd);
-             retry_eintr (fun () -> Unix.dup2 devnull Unix.stdin);
-             retry_eintr (fun () -> Unix.dup2 devnull Unix.stdout);
-             retry_eintr (fun () -> Unix.dup2 devnull Unix.stderr);
+             if cwd <> "" then resume_syscall (fun () -> Unix.chdir cwd);
+             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdin);
+             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdout);
+             resume_syscall (fun () -> Unix.dup2 devnull Unix.stderr);
              close_quietly devnull)
            ~child_exec:(fun () -> Unix.execvpe bin (Array.of_list argv) env)
          in

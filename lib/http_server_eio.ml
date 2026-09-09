@@ -138,8 +138,8 @@ module Response = struct
     match (status, !timeout_envelope_recognizer) with
     | (None | Some `OK), Some recognizes when recognizes json ->
       `Gateway_timeout
-    | Some status -> status
-    | None -> `OK
+    | (Some status, _) -> status
+    | (None, _) -> `OK
 
   let rev_prepend_headers headers acc =
     List.fold_left (fun acc header -> header :: acc) acc headers

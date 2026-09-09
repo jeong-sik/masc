@@ -327,15 +327,21 @@ let test_an_absolute_cwd_goes_through_the_capability () =
     call ctx ~name:"keeper_spawn"
       (`Assoc [ "argv", `List [ `String "pwd" ]; "cwd", `String "/" ])
   in
+  (* A bypass is the failure this case is about: [pwd] running in / and
+     answering. So the refusal is what is read, and it is read as the tool
+     result rather than as the sentence Eio put in it.
+
+     That sentence used to be checked for "Capabilities insufficient", which
+     is Eio's own wording and not the same on every backend. The eio_linux
+     path resolves under RESOLVE_BENEATH, so a path leaving the capability's
+     root comes back from openat2 as EXDEV and the message reads "Eio.Io Fs
+     Permission_denied Unix_error (Invalid cross-device link, \"openat2\",
+     \"\")". Same refusal, different words, and the case was red on Linux
+     for the words. *)
   Alcotest.(check bool)
-    "the capability answered, not a bypass"
+    ("the capability answered, not a bypass -- got: " ^ error_message result)
     true
-    (Tool_result.is_failed result);
-  let message = error_message result in
-  Alcotest.(check bool)
-    ("the capability refusal is named -- got: " ^ message)
-    true
-    (Astring.String.is_infix ~affix:"Capabilities insufficient" message)
+    (Tool_result.is_failed result)
 ;;
 
 (* A blank [cwd] is refused rather than read as "use the default": a caller

@@ -23,9 +23,9 @@ let emit fields =
 
 let nullable encode = function None -> `Null | Some x -> encode x
 
-let sample ~sw ~net ~scenario ~sample_index ~runtime_id =
+let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
   let report status fields =
-    emit (("sample_index", `Int sample_index) :: ("runtime_id", `String runtime_id)
+    emit (("run_id", `String run_id) :: ("sample_index", `Int sample_index) :: ("runtime_id", `String runtime_id)
           :: ("status", `String status) :: fields)
   in
   let failure ?turn kind detail =
@@ -88,13 +88,29 @@ let sample ~sw ~net ~scenario ~sample_index ~runtime_id =
 
 let run ~config_path ~scenario_path ~runtime_ids =
   let scenario =
-    try parse_scenario (Yojson.Safe.from_file scenario_path) with
+    try
+      let source = In_channel.with_open_bin scenario_path In_channel.input_all in
+      Result.map (fun scenario -> source, scenario)
+        (parse_scenario (Yojson.Safe.from_string source))
+    with
     | Sys_error detail | Yojson.Json_error detail -> Error detail
   in
   match scenario with
   | Error detail -> Log.Runtime.error "runtime-token-sample: %s" detail; 1
-  | Ok scenario ->
-      match Runtime.load_config_observation ~runtime_config_path:config_path () with
+  | Ok (scenario_source, scenario) ->
+      let observation =
+        try
+          let (_ : string option) =
+            Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+          in
+          let (_ : string option) =
+            Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+              ~config_root:(Filename.dirname config_path) ()
+          in
+          Runtime.load_config_observation ~runtime_config_path:config_path ()
+        with Env_config_core.Config_error detail -> Error detail
+      in
+      match observation with
       | Error detail -> Log.Runtime.error "runtime-token-sample: %s" detail; 1
       | Ok observation ->
           match Runtime.init_default_degraded_observation observation with
@@ -104,8 +120,17 @@ let run ~config_path ~scenario_path ~runtime_ids =
                 | Runtime.Initialized -> None
                 | Runtime.Initialized_degraded degradation -> Some degradation
               in
+              let identity = Masc.Build_identity.current () in
+              let run_id = identity.runtime_instance_id in
               emit
                 [ "kind", `String "manifest"
+                ; "run_id", `String run_id
+                ; "binary_commit", nullable (fun s -> `String s) identity.binary_commit
+                ; "executable_sha256", nullable (fun s -> `String s) identity.executable_sha256
+                ; "provenance_source", `String identity.provenance_source
+                ; "source_fingerprint", nullable (fun s -> `String s) identity.source_fingerprint
+                ; "started_at", `String identity.started_at
+                ; "scenario_source_sha256", `String Digestif.SHA256.(to_hex (digest_string scenario_source))
                 ; "schema_version", `Int 1
                 ; "config_revision", `String (Runtime.config_source_revision_to_string observation.source_revision)
                 ; "startup_degradation", Runtime.startup_degradation_to_yojson degradation
@@ -123,5 +148,5 @@ let run ~config_path ~scenario_path ~runtime_ids =
                   Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
                   let outcomes = List.mapi
                     (fun index runtime_id -> sample ~sw ~net:(Eio.Stdenv.net env)
-                        ~scenario ~sample_index:(index + 1) ~runtime_id) runtime_ids in
+                        ~scenario ~run_id ~sample_index:(index + 1) ~runtime_id) runtime_ids in
                   if List.for_all Fun.id outcomes then 0 else 1))

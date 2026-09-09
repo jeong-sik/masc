@@ -215,6 +215,7 @@ describe('PromptRegistryPanel', () => {
     expect(preview.querySelector('script')).toBeNull()
     expect(preview.querySelector('[data-preset-prompt="missing-text"]')?.textContent).toContain('원문을 불러올 수 없습니다.')
     expect(preview.querySelector('[data-preset-prompt="keeper"] pre')?.textContent).toBe('override world')
+    expect(preview.querySelector('[data-preset-prompt="keeper"]')?.textContent).toContain('기준 파일을 수정해도 오버라이드를 해제하기 전에는 이 원문이 유지됩니다.')
     expect(editor.value).toBe('unsaved draft')
     expect(mocks.savePromptOverride).not.toHaveBeenCalled()
     expect(mocks.clearPromptOverride).not.toHaveBeenCalled()

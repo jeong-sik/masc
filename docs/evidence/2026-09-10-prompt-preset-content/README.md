@@ -32,3 +32,18 @@ Remaining acceptance: CI and browser interaction against the built change,
 including keyboard scrolling, mobile layout and switching presets. The
 baseline screenshot and component tests do not prove deployed UI completion.
 The TUI counterpart and the other product acceptance rows remain open.
+
+## Runtime configuration observation
+
+A subsequent read of `/api/v1/prompts` found the live `keeper` source was
+`override`, with effective SHA-256
+`efb476e71b57c193e9e79ae9aa95f90535ef2244ea4c70ff15b65016e8c76272`.
+It did not contain the newly merged purposeful-work sections. Updating the
+base markdown alone would therefore leave this effective body unchanged.
+The preset view now explains this precedence for every overridden entry.
+
+Two attempted update requests were rejected with HTTP 401 (`missing_token`).
+No runtime update was confirmed or applied by these requests. The user then
+specified worktree-only work; implementation and validation continue in this
+branch. The runtime observation is evidence of a configuration mismatch, not
+proof of new Keeper behavior.

@@ -449,6 +449,11 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
               <div class="my-1 break-all text-xs text-[var(--color-fg-muted)]">
                 출처: ${SOURCE_LABELS[prompt.source]} · 기준 파일: ${prompt.file_path ?? '파일 경로 없음'}
               </div>
+              ${prompt.source === 'override' ? html`
+                <p class="my-2 text-xs text-[var(--color-status-warn)]">
+                  저장된 오버라이드가 적용 중입니다. 기준 파일을 수정해도 오버라이드를 해제하기 전에는 이 원문이 유지됩니다.
+                </p>
+              ` : null}
               ${prompt.source === 'missing'
                 ? html`<p role="status">원문을 불러올 수 없습니다.</p>`
                 : html`<pre tabIndex=${0} role="region" aria-label=${`${prompt.key} 원문`} class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-3 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">${prompt.effective === '' ? '(빈 원문)' : prompt.effective}</pre>`}

@@ -19,7 +19,7 @@ module Upload_lease = Browser_upload_lease
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
 
-type interaction = Click of string | Fill of { selector : string; text : string }
+type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
@@ -65,6 +65,7 @@ let verb_to_string = function
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let fields = match action with
+    | Activate_tab -> ["action",`String "activate_tab"]
     | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]

@@ -18,6 +18,9 @@ let test_session_lifecycle () =
       | _ -> fail ("unexpected request: " ^ path)
     in
     let driver = Driver.create ~start_downloads ~request () in
+    (match Driver.execute driver (Lane.Page_interact {tab_id=7;expected_url=Some "https://example.org";action=Lane.Activate_tab}) with
+     | Lane.Rejected_before_effect _ -> () | _ -> fail "live-only activation must reject before selecting a WebDriver tab");
+    check int "unsupported activation makes no backend request" 0 (List.length !calls);
     (match Driver.execute driver Lane.Tabs_list with
      | Lane.Refused _ -> () | _ -> fail "closed session must refuse reads");
     check int "closed read never contacted driver" 0 (List.length !calls);

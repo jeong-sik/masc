@@ -159,3 +159,18 @@ const uncertain=await command(dispatchedFollow);
 assert.equal(uncertain.ok,false);
 assert.equal(uncertain.effectPhase,undefined,'failure after navigation starts must remain unknown');
 console.log('PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure');
+
+const updates=[];
+let activeTab={id:7,url:'https://example.org/channel',title:'Channel',active:false};
+browser.tabs.get=async id=>{assert.equal(id,7);return {...activeTab};};
+browser.tabs.update=async(id,changes)=>{assert.equal(id,7);assert.deepEqual(JSON.parse(JSON.stringify(changes)),{active:true});updates.push(changes);activeTab.active=true;return {...activeTab};};
+assert.equal((await command({tabId:7,action:'activate_tab'})).error,'activate_tab_requires_expected_url');
+assert.equal((await command({tabId:7,action:'activate_tab',expectedUrl:'https://example.org/wrong'})).error,'page_url_changed');
+assert.equal(updates.length,0);
+const priorExecutions=executions;
+const activation=await command({tabId:7,action:'activate_tab',expectedUrl:activeTab.url});
+assert.equal(activation.ok,true,JSON.stringify(activation));
+assert.equal(activation.data.active,true);assert.equal(activation.data.tabId,7);
+assert.equal(activation.data.url,activeTab.url);assert.equal(updates.length,1);
+assert.equal(executions,priorExecutions,'activation does not inject or navigate the page');
+console.log('PASS: activation checks explicit tab URL then updates only active and verifies receipt');

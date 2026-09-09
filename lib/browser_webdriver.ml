@@ -441,6 +441,8 @@ let execute_unlocked t = function
 let execute t verb =
   with_session_lock t (fun () ->
     match verb with
+    | Browser_lane.Page_interact {action=Browser_lane.Activate_tab;_} ->
+      Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
     | Browser_lane.Page_act action ->
       (match execute_action t action with
        | Ok data, _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])

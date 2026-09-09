@@ -45,6 +45,12 @@ let parse = function
         let* target = node_target () in
         (match target with Some target -> Ok (Browser_lane.Follow_link target)
          | None -> Error "follow_link requires an observed documentId/nodeId")
+      | Some (`String "activate_tab") ->
+        let* () = excludes ["selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "activate_tab requires expectedUrl" in
+        let* () = match base.source with Browser_surface.Live -> Ok ()
+          | Automation -> Error "activate_tab requires live lane" in
+        Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* target = node_target () in
@@ -80,7 +86,7 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be click, follow_link, fill, scroll, click_at, scroll_at or drag" in
+      | _ -> Error "action must be activate_tab, click, follow_link, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 

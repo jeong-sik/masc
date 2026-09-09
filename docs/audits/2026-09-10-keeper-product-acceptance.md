@@ -99,6 +99,28 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
   at 22:23:47Z. There is no completed whole-corpus synthesis to accept. The live
   process was not restarted because of elapsed time or slow output.
 
+## Measured continuation at 2026-09-09T23:05Z
+
+- The same whole-corpus process handle remained live. Its first Keeper group
+  finished at 22:33:59Z with 75,340 chunks, 4,562 content characters and
+  219,399 thinking characters. The 4,563-byte result has SHA-256
+  `09438670ab80d991bab0cc8a9b80efc869a45401c875d312767dba13e01a6b83`;
+  its parsed structure contains two shared claims, one excluded source and no
+  conflicts. These are structural observations, not semantic acceptance.
+  The second group was receiving at 23:05:33Z; one of eighteen groups had
+  completed. No whole-workspace synthesis or publication is claimed.
+- The isolated PDF Keeper's previous operation was independently read as
+  `Succeeded`, but its script still used `re.search` without importing `re`.
+  Script SHA-256 was
+  `b13c313f35c6d92ca0a4505defdcb22f23e8988f6b96767d919b816d8b639feb`.
+  A correction request was admitted as
+  `kmsg-e4bbdde95378d90cc8d90f8e459d32e3`; admission is not a repaired PDF.
+- #34980 contains twelve completed operator-initiated Kimi turns and actual
+  final recall of the initial home and time after ten intervening turns.
+  This short, single-runtime observation does not prove autonomous behavior,
+  failover, compaction or hour-scale continuity. Its recorder was subsequently
+  corrected to reject evidence directories bound to a different scenario.
+
 ## Acceptance matrix
 
 | # | Requirement | Evidence needed to close | Current state / next work |
@@ -135,7 +157,8 @@ At each boundary use CI, then keep working on an independent slice instead of
 watching CI. Review implementation and compare deployed bytes before claiming
 runtime behavior. Capture logs and browser screenshots. Run continuity scenarios
 for 10+ turns and 1h/2h/4h/24h across available runtimes, including failover and
-memory of earlier actions. None of those longitudinal checks has run in this pass.
+memory of earlier actions. A short twelve-turn single-runtime recall observation
+is recorded in #34980; hour-scale and cross-runtime checks remain unproven.
 
 Reference: [Anthropic, Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
 describes dynamically scoped delegation and result synthesis. The intervention

@@ -16,7 +16,22 @@ The workspace has one machine shared with the TUI and other Keepers. Agree on a 
 - `masc_msx_change_disk` changes the floppy without rebooting and preserves modified media in checkpoints. Follow the game's disk prompt and confirm it with the key the game requests. Read the requested disk letter from the current image before choosing a catalog entry. An unchanged screen, missing prompt, or guessed transition is not a disk-change request. Preserve a fresh checkpoint before changing media; replacing it can invalidate open game files even though the CPU keeps running. If the requested letter is unreadable, retain that uncertainty and obtain a clearer observation instead of trying disks.
 - `masc_msx_load` boots a new cartridge or disk and replaces the current machine/ledger. Calling it without `cart` still boots the BIOS: it is not a read-only inventory query. Read the inventory through the available inventory surface, or use already supplied media names. Do not load just to discover what is running.
 
+- `masc_msx_peek` reads bytes at a logical address (`address` as hex like "e000", `length` up to 256) and returns hex pairs; it also takes the 64K snapshot that the diff below compares against. Read-only by design: there is no write tool, and writing memory is the cheat the lane refuses.
+- `masc_msx_ram_diff` reports what changed since the last peek: consecutive differing bytes as runs with address, length and before/after hex, capped at 64 runs (`truncated` says more existed). The snapshot survives a machine swap, so a reload after a peek reads as wholesale change — which it is.
+
 Use the `observe-act-verify` Skill for unfamiliar screens: capture, identify the prompt, choose an action, then verify the resulting screen and values. A successful key call proves delivery, not that the requested action succeeded. All key edges are retained in the machine ledger with their frame and caller. After a transport timeout, observe before retrying; a changed screen alone cannot identify whose input caused it when another driver may be active. Consult the caller-tagged ledger when accessible, or retain that uncertainty and coordinate before further input.
+
+## Finding state in memory
+
+The screen is the expensive way to ask what changed; memory answers in bytes. To locate where a game keeps a value:
+
+1. `masc_msx_peek` any address to take the snapshot.
+2. Make exactly one meaningful input — one menu choice, one command — with `sequence=true` where a path is involved.
+3. `masc_msx_ram_diff`: the changed runs are candidates for that action's state.
+4. Confirm meaning against the screen (artifact reading): the run whose before/after matches the visible change — a menu id, a cursor, gold — is that state's address.
+5. Record confirmed addresses in keeper memory as the game's address table. A few peeked bytes then answer routine questions; image reads stay for evidence, unfamiliar screens and periodic confirmation.
+
+Re-verify a saved address after a reload or restore: the layout is usually the same, but confirm with one diff before trusting the table. If a diff after a clearly one-step action shows wholesale change, someone else drove the machine — treat the snapshot as lost and take a fresh peek.
 
 ## Sangokushi II: observed starting procedure
 

@@ -336,10 +336,10 @@ let test_unknown_ledger_field_is_a_decode_error () =
       (String_util.contains_substring msg "surprise_field")
 ;;
 
-let test_retired_human_confirmation_state_is_a_decode_error () =
+let test_human_confirmation_requires_bound_verdict () =
   with_workspace
   @@ fun config ->
-  (match Goal_verification.mark_proof_pending config ~goal_id:"goal-no-human-legacy" ~criterion:isolated_criterion with
+  (match Goal_verification.mark_proof_pending config ~goal_id:"goal-human-missing-verdict" ~criterion:isolated_criterion with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let path = Goal_verification.verifications_path config in
@@ -367,11 +367,11 @@ let test_retired_human_confirmation_state_is_a_decode_error () =
   in
   Yojson.Safe.to_file path poisoned;
   Yojson.Safe.to_file (path ^ ".last-good") poisoned;
-  match Goal_verification.get_record config ~goal_id:"goal-no-human-legacy" with
-  | Ok _ -> fail "retired human confirmation state decoded silently"
+  match Goal_verification.get_record config ~goal_id:"goal-human-missing-verdict" with
+  | Ok _ -> fail "human confirmation without proof decoded silently"
   | Error msg ->
-    check bool "the retired state is rejected as unknown" true
-      (String_util.contains_substring msg "human_confirmed")
+    check bool "the missing bound verdict is rejected" true
+      (String_util.contains_substring msg "goal_verification.verdict")
 ;;
 
 (* Observability: the read surfaces join the ledger *)
@@ -1174,8 +1174,8 @@ let () =
             test_undecodable_ledger_fails_closed_and_loud
         ; test_case "unknown ledger field is a decode error" `Quick
             test_unknown_ledger_field_is_a_decode_error
-        ; test_case "retired human confirmation state is a decode error" `Quick
-            test_retired_human_confirmation_state_is_a_decode_error
+        ; test_case "human confirmation requires a bound verdict" `Quick
+            test_human_confirmation_requires_bound_verdict
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick

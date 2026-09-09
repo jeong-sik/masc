@@ -2367,6 +2367,46 @@ let test_oneof_null_const_matches_non_null_branch () =
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
+let test_oneof_empty_array_presence () =
+  let schema minimum =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties",
+        `Assoc
+          [ "items", `Assoc
+              ([ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
+               @ minimum)
+          ; "query", `Assoc [ "type", `String "string" ]
+          ; "context", `Assoc [ "type", `String "string" ]
+          ]
+      ; "oneOf", `List
+          [ `Assoc [ "required", `List [ `String "items" ] ]
+          ; `Assoc [ "required", `List [ `String "query" ] ]
+          ]
+      ]
+  in
+  let args = `Assoc [ "items", `List [] ] in
+  (match Tool_input_validation.validate_args ~schema:(schema [])
+           ~name:"collection_request" ~args () with
+   | Ok forwarded ->
+     Alcotest.(check bool) "empty collection reaches the tool unchanged" true
+       (Yojson.Safe.equal args forwarded)
+   | Error result -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data result)));
+  (match Tool_input_validation.validate_args
+           ~schema:(schema [ "minItems", `Int 1 ])
+           ~name:"collection_request" ~args () with
+   | Ok _ -> Alcotest.fail "declared minimum must still reject an empty collection"
+   | Error result ->
+     Alcotest.(check bool) "present collection is not reported missing" false
+       (string_contains (Yojson.Safe.to_string (Tool_result.data result)) "exactly one of"));
+  match Tool_input_validation.validate_args ~schema:(schema [])
+          ~name:"collection_request" ~args:(`Assoc [ "context", `String "audit" ]) () with
+  | Ok _ -> Alcotest.fail "absent alternative fields must be rejected"
+  | Error result ->
+    assert_contains "missing alternatives are identified"
+      (Yojson.Safe.to_string (Tool_result.data result)) "exactly one of"
+;;
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -2374,6 +2414,8 @@ let test_oneof_null_const_matches_non_null_branch () =
 let () =
   Alcotest.run "Tool_input_validation (AGENT_CORE delegation)" [
     ("required", [
+      Alcotest.test_case "oneOf distinguishes empty collections from absent fields" `Quick
+        test_oneof_empty_array_presence;
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;
       Alcotest.test_case "missing multiple" `Quick test_required_missing_multiple;

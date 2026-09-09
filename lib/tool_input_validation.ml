@@ -259,21 +259,16 @@ let one_of_required_shape_error schema = function
     if branches = []
     then None
     else (
-      let has_present name =
-        match List.assoc_opt name fields with
-        | None -> false
-        | Some `Null -> false
-        | Some (`List []) -> false
-        | Some _ -> true
-      in
-      let key_is_present name = Option.is_some (List.assoc_opt name fields) in
+      (* JSON Schema required checks key presence. Nullability and collection
+         length belong to the field schema, not alternative selection. *)
+      let key_is_present name = List.mem_assoc name fields in
       let const_field_matches name expected =
         match List.assoc_opt name fields with
         | Some actual -> Yojson.Safe.equal actual expected
         | None -> true (* const is optional; absence does not disqualify *)
       in
       let branch_matches branch =
-        List.for_all has_present branch.required
+        List.for_all key_is_present branch.required
         && not (List.exists key_is_present branch.forbidden_required)
         && List.for_all
              (fun (name, expected) -> const_field_matches name expected)

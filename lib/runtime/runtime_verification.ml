@@ -282,12 +282,16 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
          | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
          | Error _ -> Error Provider_rejected)
       | Runtime_execution.Codex_app_server execution ->
+        (match Runtime_verification_codex_home.prepare ~directory:cwd_path with
+        | Error _ -> Error (Unavailable Invalid_configuration)
+        | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
            posture and disables shell/unified_exec in the existing adapter;
            the only host-declared tool is the private challenge above. *)
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = execution.cli_path
+          ; isolated_home = Some isolated_home
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
@@ -310,7 +314,7 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
              | Spawn_failed _
              | Subscription_required _ ) -> Error (Unavailable Client_unavailable)
          | Error (Runtime_codex_app_server.Timeout _) -> Error Timed_out
-         | Error _ -> Error Provider_rejected))
+         | Error _ -> Error Provider_rejected)))
   in
   measure
     ~runtime_id:runtime.id

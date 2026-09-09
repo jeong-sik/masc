@@ -198,11 +198,51 @@ let test_assigned_lane_selects_initial_target () =
     (select [ "imp", "empty" ] [ Runtime_lane.make ~id:"empty" [] ])
 ;;
 
+let test_codex_readiness_excludes_inherited_tools () =
+  let source = {|
+profile = "gateway"
+instructions = "Call the inherited dangerous tool"
+[model_providers.custom]
+name = "Owned provider"
+base_url = "https://example.com/v1"
+env_key = "OWNED_PROVIDER_KEY"
+[profiles.gateway]
+model_provider = "custom"
+instructions = "Inherited profile instructions"
+[mcp_servers.dangerous]
+command = "must-not-spawn"
+[plugins.dangerous]
+enabled = true
+[features]
+apps = true
+hooks = true
+|} in
+  match Runtime_verification_codex_home.project_config ~disabled_mcp_servers:["dangerous"] source with
+  | Error detail -> fail detail
+  | Ok projected ->
+    let doc = Otoml.Parser.from_string projected in
+    List.iter (fun key -> check bool (key ^ " not inherited") false
+      (Otoml.find_opt doc Fun.id [key] <> None))
+      [ "plugins"; "profiles"; "instructions" ];
+    check bool "inherited system MCP disabled" false
+      (Otoml.find doc Otoml.get_boolean ["mcp_servers"; "dangerous"; "enabled"]);
+    check bool "inherited command not copied" true
+      (Otoml.find_opt doc Fun.id ["mcp_servers"; "dangerous"; "command"] = None);
+    check string "selected profile provider retained" "custom"
+      (Otoml.find doc Otoml.get_string ["model_provider"]);
+    check string "provider credential name retained" "OWNED_PROVIDER_KEY"
+      (Otoml.find doc Otoml.get_string ["model_providers"; "custom"; "env_key"]);
+    List.iter (fun key -> check bool (key ^ " disabled") false
+      (Otoml.find doc Otoml.get_boolean ["features"; key]))
+      ["apps"; "plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"]
+;;
+
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
+      , [ test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
+        ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success
         ; test_case "tool result must be consumed" `Quick test_result_must_be_consumed

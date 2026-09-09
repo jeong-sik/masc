@@ -33,8 +33,8 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 > **개발 상태.** 1.0 이전이고, 믿을 수 있는 내 컴퓨터 안에서 쓰는 걸 전제로
 > 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate와 샌드박스는 특정
 > 작업을 막지만, 사람이 보지 않는 사이 에이전트가 하는 위험한 일을 전부 막지는
-> 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 최신 릴리스는
-> [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)(2026-09-08)입니다.
+> 못합니다. 설치 계약은 0.35.0 기준입니다. 제공되는 바이너리는
+> [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -48,7 +48,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 |---|---|---|
 | **TUI** | Keeper를 지켜보고 지시하고, Gate에 답하고, 도구 호출과 코드, diff, blame, 메모리를 볼 때 | 터미널에서 `masc`. 이름으로 부르면 `masc-tui` |
 | **MCP** | 내가 쓰는 에이전트를 작업 공간에 넣을 때. 작업을 잡고, 보드에 쓰고, 증거를 남깁니다 | MCP 클라이언트로 `http://127.0.0.1:8935/mcp`에 bearer와 함께 |
-| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/`. 0.34.0 설치 스크립트는 바이너리와 일치하는 번들을 설치합니다 |
+| **대시보드** | 같은 상태를 브라우저에서 볼 때 | 같은 서버의 `/dashboard/`. 0.35.0 설치 스크립트는 바이너리와 일치하는 번들을 설치합니다 |
 
 셋 다 같은 `.masc/`를 읽고 씁니다. 운영자용 새 기능은 TUI에 먼저 들어갑니다.
 대시보드는 빌드되고 사실을 보여 주는 상태로 유지하지만, 제품이 자라는 곳은
@@ -56,7 +56,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ## 설치
 
-### 첫 대화: 0.35.0 후보
+### 첫 대화: 0.35.0
 
 설치 마법사에서 보유 모델을 고른 뒤 해당 CLI에 로그인하거나 API 인증 환경변수를
 설정하고 Docker를 시작하세요. 다음 명령으로 기존 `imp`를 시작합니다.
@@ -72,15 +72,17 @@ masc setup --base-path "$HOME/masc-workspace"
 기본 이미지를 준비하고 작업 공간 서버와 `imp`를 시작한 뒤 TUI를 엽니다.
 대화 응답, Board 글·Task 생성, 샌드박스 디렉터리 조회, web_fetch로
 https://example.com 읽기를 확인하세요. [첫 대화 절차](docs/INSTALL.ko.md)를 따르세요.
-이 명령은 후보 바이너리에 포함됩니다. 0.35.0은 아직 게시되지 않았습니다.
+바이너리 제공 여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
+> Installation target: v0.35.0 (check tag availability on GitHub Releases).
+
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -88,13 +90,13 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
-0.35.0 후보의 마법사는 기존 모델을 선택하거나 보유한 Claude Code·Codex·HTTP
+0.35.0의 마법사는 기존 모델을 선택하거나 보유한 Claude Code·Codex·HTTP
 런타임을 설정합니다. 기본 모델을 기록하고 새 작업 공간에서는 보조 판단 레인도
 연결합니다. API 키 값은 묻지 않고 환경변수 이름만 받으며 서버는 시작된 환경에서
 키를 읽습니다. `--provider <id>`로 기존 프로바이더를 선택할 수 있습니다.
 기본 `imp`는 Docker를 설치·시작한 뒤 `masc setup`으로 이미지를 준비하고 실행합니다.
 
-릴리스 **0.34.0**은 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
+릴리스 **0.35.0**은 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
 대시보드 번들을 포함하고 `--force` 재설치에서 기존 설정을 보존합니다.
 설치 스크립트가 macOS 호환성을 확인하고 누락된 Homebrew 실행 의존성을
 자동 설치합니다. Homebrew가 없으면 대화형 터미널에서 공식 설치 절차를
@@ -148,7 +150,7 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | `masc` | 터미널에서는 TUI를 엽니다. 포트에 아무도 없으면 서버부터 띄웁니다. 터미널이 아닌 곳(파이프, 유닛 파일, 컨테이너, CI)에서는 서버가 뜹니다 |
 | `masc start --base-path <dir>` | 터미널이든 아니든 서버를 띄웁니다 |
 | `masc-tui --base-path <dir>` | TUI를 이름으로 엽니다 |
-| `masc setup --base-path <dir>` | Docker를 준비하고 기존 `imp`를 시작한 뒤 TUI를 엽니다(0.35.0 후보) |
+| `masc setup --base-path <dir>` | Docker를 준비하고 기존 `imp`를 시작한 뒤 TUI를 엽니다(0.35.0) |
 | `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. Keeper `imp` 하나가 `activation_mode = "manual"`로 들어갑니다 |
 
 `--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 없으면
@@ -309,8 +311,7 @@ Keeper는 `<base-path>/.masc/config/keepers/` 아래 TOML 파일 하나입니다
 돌리고, Keeper가 쉬기 전에 그 턴의 기록을 `.masc/` 아래에 씁니다. 새 루트에는
 Keeper `imp` 하나가 들어 있습니다. 설치 스크립트도 `masc init`도 서버도
 바이너리의 `keepers-default/`에서 그 하나를 시드합니다. `activation_mode = "manual"`로 들어오므로 모델과 샌드박스를 갖추고 직접 시작하거나 `activation_mode = "autonomous"`로 바꾸기
-전에는 아무것도 돌지 않습니다. 공개된 v0.34.0 바이너리는 이 시드보다 앞서
-만들어져 `keepers/`를 비워 둡니다.
+전에는 아무것도 돌지 않습니다. `masc setup`으로 준비하고 시작할 수 있습니다.
 
 ```toml
 [keeper]
@@ -414,7 +415,7 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 
 ## 대시보드
 
-서버가 `/dashboard/`에 TypeScript/Preact SPA를 제공합니다. 0.34.0 설치
+서버가 `/dashboard/`에 TypeScript/Preact SPA를 제공합니다. 0.35.0 설치
 스크립트는 실행 파일 prefix 아래에 같은 소스 커밋의 대시보드 번들을 설치하고
 커밋과 파일 체크섬을 검증합니다. 사용하려고 Node.js나 소스를 설치하거나
 프론트엔드를 빌드할 필요가 없습니다. 이미 실행 중인 서버는 재시작할 때 새
@@ -488,7 +489,7 @@ masc/
 
 패키지 버전은 `dune-project`에 있고 `masc.opam`으로 생성됩니다.
 `CHANGELOG.md`가 소스 릴리스 이력을 적고, 바이너리의 정답은 GitHub
-Releases입니다. 현재 릴리스 계열은 **0.34.0**입니다.
+Releases입니다. 현재 릴리스 계열은 **0.35.0**입니다.
 1.0 전에는 API와 설정이 바뀔 수 있습니다.
 
 ## 라이선스

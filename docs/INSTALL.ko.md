@@ -2,12 +2,9 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.34.0** 설치 계약입니다. 공개된 최신 버전은
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/latest)에서 확인합니다.
-아래 `v0.34.0` 다운로드는 2026-09-08에 게시된 태그를 가리킵니다. `main` 소스
-빌드가 0.34.0과 다른 점(기본 Keeper `imp`)은 본문에 따로 적었습니다.
-
-아래 `masc setup` 첫 대화 경로는 **0.35.0 후보**용입니다. 기존 공개 버전 다운로드 예제의 바이너리는 이 명령을 제공하지 않습니다.
+이 문서는 **0.35.0 설치 계약**입니다. 태그와 자산 제공 여부는
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
+아래 다운로드 명령은 `v0.35.0`과 같은 버전의 설치기를 선택합니다.
 
 ## 플랫폼과 준비물
 
@@ -59,7 +56,7 @@ Apple Silicon의 Intel Homebrew 등 다른 prefix로 연결된 환경은 다운�
 `dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
 종료 신호만으로 누락 라이브러리라고 단정하지 않습니다.
 
-0.34.0 배포 파일의 Mach-O 최소 OS는 Apple Silicon **macOS 14.0**,
+지원하는 최소 OS는 Apple Silicon **macOS 14.0**,
 Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
 (Apple Silicon `/opt/homebrew`, Intel `/usr/local`)에 의존성을 준비합니다.
 
@@ -76,7 +73,7 @@ uname -m
 ## 설치
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -143,10 +140,9 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.0 후보 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.0 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
-설치기는 설정을 바이너리에서 가져옵니다. 이전 0.34.0 바이너리의 기본 명단은
-비어 있습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -176,10 +172,10 @@ timeout까지 적어야 합니다. `Configure later`로 모델 연결을 미룰 
 Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설정하려면 `--wizard`를
 쓰세요.
 
-## `imp`와 첫 대화 (0.35.0 후보)
+## `imp`와 첫 대화 (0.35.0)
 
-이 경로는 `masc setup`이 포함된 **0.35.0 후보** 바이너리용입니다. 0.35.0이
-이미 게시되었다는 뜻은 아닙니다. 다운로드할 때 릴리스 태그를 확인하세요.
+이 경로는 `masc setup`이 포함된 **0.35.0 설치 계약**입니다. 다운로드 전에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
 1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
    런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
@@ -390,7 +386,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.34.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

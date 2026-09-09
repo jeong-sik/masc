@@ -150,6 +150,10 @@ def measure(args):
                     platform=run('uname', '-sm').strip(), fixture_model=False,
                     approval_overrides=False, keeper='imp', completed_chats=len(prompts),
                     successful_tools=sorted(required)), indent=2))
+                if args.playwright_module:
+                    run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
+                        str(base / '.masc/auth/local-admin.token'), str(output),
+                        args.playwright_module, args.browser_executable)
                 print('Acceptance evidence:', output, flush=True)
             finally:
                 server.terminate()
@@ -168,4 +172,9 @@ if __name__ == '__main__':
     parser.add_argument('--context', required=True, type=int)
     parser.add_argument('--work-parent', default=str(Path.home()))
     parser.add_argument('--output', required=True)
-    measure(parser.parse_args())
+    parser.add_argument('--playwright-module')
+    parser.add_argument('--browser-executable')
+    args = parser.parse_args()
+    if bool(args.playwright_module) != bool(args.browser_executable):
+        parser.error("--playwright-module and --browser-executable must be supplied together")
+    measure(args)

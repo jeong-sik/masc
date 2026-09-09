@@ -35,8 +35,8 @@ Three things it does:
 > **Status.** Pre-1.0, for local, trusted environments. Not a production
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
-> unsafe action. `main` moves faster than the published binaries; the latest
-> release is [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0) (2026-09-08).
+> unsafe action. The installation contract targets 0.35.0; check
+> [GitHub Releases](https://github.com/jeong-sik/masc/releases) for available binaries.
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -50,7 +50,7 @@ and the capture metadata are in the same directory.
 |---|---|---|
 | **TUI** | Watch and steer Keepers, answer the Gate, read tool calls, browse code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claims a task, posts to the board, records evidence | Any MCP client at `http://127.0.0.1:8935/mcp` with a bearer |
-| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.34.0 installer includes a binary-matched bundle |
+| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.35.0 installer includes a binary-matched bundle |
 
 All three read and write the same `.masc/`. New operator work lands in the
 TUI. The dashboard is kept building and truthful, but it is not where the
@@ -58,7 +58,7 @@ product grows (see [Dashboard](#dashboard)).
 
 ## Start here
 
-### First conversation: 0.35.0 candidate
+### First conversation: 0.35.0
 
 After selecting your model in the installer wizard, authenticate its CLI or export
 its API credential and start Docker. Then run:
@@ -73,16 +73,18 @@ masc setup --base-path "$HOME/masc-workspace"
 
 Setup prepares the default image, starts the workspace server and `imp`, and opens
 the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
-and read https://example.com with web_fetch. Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0350-candidate).
-This command requires the candidate binary; 0.35.0 has not yet been published.
+and read https://example.com with web_fetch. Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0350).
+Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary availability.
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.0).
 It verifies and installs the assets for the selected release.
 
+> Installation target: v0.35.0 (check tag availability on GitHub Releases).
+
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -90,7 +92,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a one-time wizard (`--no-wizard` skips it). The 0.35.0 candidate wizard
+and runs a one-time wizard (`--no-wizard` skips it). The 0.35.0 wizard
 selects an existing model or configures your Claude Code, Codex, or HTTP runtime.
 It writes the selected default and configures helper lanes during fresh setup.
 It asks for API credential variable names, never their secret values; the server
@@ -98,7 +100,7 @@ reads those variables from its startup environment. `--provider <id>` selects
 an existing provider without prompting. For the default `imp`, `masc setup`
 prepares the Docker image after you install and start Docker.
 
-Release **0.34.0** includes Intel macOS, `masc-browser-host`, and the matched
+Release **0.35.0** includes Intel macOS, `masc-browser-host`, and the matched
 dashboard, and preserves configuration during `--force` reinstalls.
 The release installer checks macOS compatibility and installs missing Homebrew
 runtime dependencies. Without Homebrew, an interactive terminal enters its
@@ -156,7 +158,7 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.0 candidate) |
+| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.0) |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
@@ -326,8 +328,8 @@ runs each turn in a sandbox, and writes the turn's records under `.masc/`
 before the Keeper goes idle. A fresh root starts with one Keeper, `imp`: the
 installer, `masc init`, and the server all seed it from the binary's
 `keepers-default/`. It ships with `activation_mode = "manual"`, so nothing runs
-until a model and a sandbox exist and you start it or set `activation_mode = "autonomous"`. The
-published v0.34.0 binary predates this seed and leaves `keepers/` empty.
+until a model and a sandbox exist and you start it with `masc setup` or set
+`activation_mode = "autonomous"`.
 
 ```toml
 [keeper]
@@ -435,7 +437,7 @@ says which prompt file each reader gets.
 
 ## Dashboard
 
-The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.34.0 release
+The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.35.0 release
 installer installs the matching dashboard beneath the binary prefix and verifies
 its source commit and file checksums. No Node.js, source checkout or frontend build
 is needed to use it. An already running server keeps its original bundle until
@@ -513,7 +515,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.34.0`.
+  line is `0.35.0`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

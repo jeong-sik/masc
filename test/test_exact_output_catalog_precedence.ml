@@ -459,7 +459,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
-     (match Masc.Runtime.verifier_exact_lane_slot_ids () with
+     (match Runtime.verifier_exact_lane_slot_ids () with
       | Ok slots -> Alcotest.(check (list string)) "completion authority receives CLI runtimes" cli slots
       | Error detail -> Alcotest.fail detail));
   (match Registry.publish

@@ -2,13 +2,9 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.34.0**. The latest published
-version is on [GitHub Releases](https://github.com/jeong-sik/masc/releases/latest).
-The `v0.34.0` downloads below point at the tag published on 2026-09-08. Where a
-`main` source build differs from 0.34.0 (the default Keeper `imp`), the body
-notes it separately.
-
-The `masc setup` first-conversation path below targets the **0.35.0 candidate**; the older published download examples do not provide this command.
+This document is the installation contract for **0.35.0**. Check tag and asset
+availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
+The download commands below select `v0.35.0` and its matching installer.
 
 ## Platforms and prerequisites
 
@@ -64,7 +60,7 @@ why. Check the raw stderr, such as `dyld: Library not loaded`, and the path of
 the executable that failed. The exit signal alone does not establish that a
 library is missing.
 
-The Mach-O minimum OS of the 0.34.0 release files is **macOS 14.0** on Apple
+The minimum supported OS is **macOS 14.0** on Apple
 Silicon and **macOS 15.0** on Intel. Prepare the dependencies in the default
 Homebrew prefix for that CPU (Apple Silicon `/opt/homebrew`, Intel
 `/usr/local`).
@@ -83,7 +79,7 @@ and does not fix loader or OS compatibility problems.
 ## Install
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -158,11 +154,10 @@ does not change existing Keeper configuration in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.0 candidate binary** installs one `imp` with `activation_mode = "manual"` and the
+The **0.35.0 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
-installer takes its configuration from the binary; the earlier 0.34.0 binary
-shipped an empty roster. The instructions are a starting point; edit them directly. Model weights,
+installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
 model CLIs, API keys, Docker, Apple Container, SSH servers,
 browsers/extensions, Slack/Discord accounts, and autostart services are not
 installed. Detecting which execution environments are available does not
@@ -199,10 +194,10 @@ to the OAuth file its CLI wrote, and a request timeout. `Configure later`
 defers the model connection, and the default Keeper does not start on its
 own. To run this again in an existing workspace, use `--wizard`.
 
-## First conversation with `imp` (0.35.0 candidate)
+## First conversation with `imp` (0.35.0)
 
-This path requires a 0.35.0 candidate binary with `masc setup`; it is not a
-claim that 0.35.0 has been published. Check the release tag before downloading.
+This is the 0.35.0 installation contract. Check the release tag and asset
+availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
 1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
    the model runtime you own. Runtime setup binds that selection to the helper
@@ -325,9 +320,7 @@ image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers
 
-The published 0.34.0 binary creates no Keeper and prepares only the built-in
-skill `browser-lanes`. A `main` source build after it, and the next release,
-also prepare **one Keeper, `imp`, that does not start on its own** and the
+The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
 built-in skills `browser-lanes`, `browser-design`, `frontend-implement`,
 `frontend-verify`, and `evidence-review`. Configure a model and a sandbox,
 then start the Keeper.
@@ -460,7 +453,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.34.0` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.0` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

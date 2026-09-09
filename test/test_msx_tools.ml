@@ -473,9 +473,23 @@ let test_disk_backup_failure_preserves_machine () =
   read_guest_disk '~'
 ;;
 
+(* Bitmap modes draw into pixels, so their name table is noise; the
+   observation sends an empty screen_text there instead of ~2 KB of it. The
+   classification is what the diet hangs on, so pin the mode names. *)
+let test_bitmap_mode_classification () =
+  check bool "GRAPHIC4 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC4");
+  check bool "GRAPHIC6 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC6");
+  check bool "GRAPHIC7 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC7");
+  check bool "undefined combinations count as bitmap" true
+    (Msx_lane.is_bitmap_mode "UNDEFINED(0x1c)");
+  check bool "a font mode is not bitmap" false (Msx_lane.is_bitmap_mode "GRAPHIC1");
+  check bool "a tile mode is not bitmap" false (Msx_lane.is_bitmap_mode "GRAPHIC2");
+  check bool "text mode is not bitmap" false (Msx_lane.is_bitmap_mode "TEXT1")
+;;
+
 let test_key_vocabulary () =
   let named =
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f1"; "f5"; "a"; "M"; "7" ]
   in
   List.iter
     (fun n ->
@@ -484,13 +498,13 @@ let test_key_vocabulary () =
   List.iter
     (fun n ->
       check bool ("key " ^ n ^ " is refused") true (Result.is_error (Msx_lane.key_of_string n)))
-    [ ""; "f6"; "shift"; "banana"; "ab" ];
+    [ ""; "f6"; "banana"; "ab" ];
   List.iter
     (fun n ->
       match Msx_lane.key_of_string n with
       | Ok k -> check string ("round trip " ^ n) n (Msx_lane.key_to_string k)
       | Error m -> fail m)
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "f3"; "m" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f3"; "m" ]
 ;;
 
 let test_registration () =
@@ -651,6 +665,7 @@ let () =
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
+        ; test_case "bitmap mode classification" `Quick test_bitmap_mode_classification
         ; test_case "registration" `Quick test_registration
         ; test_case "xspelunker: two presses reach the level card" `Quick
             test_xspelunker_two_presses

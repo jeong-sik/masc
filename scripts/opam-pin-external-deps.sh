@@ -96,7 +96,8 @@ readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # 4e2799a = ocaml-msx #21: slot-aware disk BIOS dispatch and random reads;
 # retains DOS save-file writes, disk swapping and machine snapshots.
 # 27706b9 adds Backspace matrix input and replay support (ocaml-msx #25).
-readonly OCAML_MSX_SHA="27706b93cd182670b48d0988f65c2d793ee07098"
+# a754105 adds joystick-1 directions, SHIFT/CTRL/GRAPH modifiers (ocaml-msx #22, #23).
+readonly OCAML_MSX_SHA="a754105fde711dd351afaca90d03f3d750bc4f87"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

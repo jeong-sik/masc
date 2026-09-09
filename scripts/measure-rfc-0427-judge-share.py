@@ -138,8 +138,8 @@ SELFTEST_LOG = """\
 {"ts":"2026-09-05T16:22:00Z","message":"external effect authorized operation=tool_execute source=observed_in_box"}
 {"ts":"2026-09-05T16:23:00Z","message":"observe run refused operation=tool_execute exit=1 stderr_bytes=110; the judge decides"}
 {"ts":"2026-09-05T16:24:00Z","message":"observe run unavailable operation=tool_execute reason=docker_observe_unsupported: ..."}
-{"ts":"2026-09-05T16:25:00Z","message":"keeper:x tool_call tool=Execute source=- params=[cwd] outcome=error error_preview={\\"error\\":\\"cwd_not_directory: /Users/x/y (directory does not exist)\\"}"}
-{"ts":"2026-09-05T16:27:00Z","message":"keeper:x tool_call tool=Execute source=- outcome=ok out_len=3"}
+{"ts":"2026-09-05T16:25:00Z","message":"keeper:x tool_call tool=Execute params=[cwd] outcome=error error_preview={\\"error\\":\\"cwd_not_directory: /Users/x/y (directory does not exist)\\"}"}
+{"ts":"2026-09-05T16:27:00Z","message":"keeper:x tool_call tool=Execute outcome=ok out_len=3"}
 {"ts":"2026-09-05T16:19:59Z","message":"external effect authorized operation=tool_execute source=one_shot_resolution"}
 {"ts":"2026-09-07T16:20:00Z","message":"external effect authorized operation=tool_execute source=one_shot_resolution"}
 not json at all

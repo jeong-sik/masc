@@ -53,7 +53,7 @@ let test_the_published_list_is_the_one_execute_tool () =
 
 (* Properties are serialized in [[params]] file order, and that order is the
    order a model reads them in. *)
-let test_properties_are_the_five_fields_in_order () =
+let test_properties_are_the_six_fields_in_order () =
   let properties =
     match member execute_schema.input_schema "properties" with
     | `Assoc fields -> List.map fst fields
@@ -62,7 +62,7 @@ let test_properties_are_the_five_fields_in_order () =
   check
     (list string)
     "properties in order"
-    [ "argv"; "script"; "shell"; "cwd"; "timeout_sec" ]
+    [ "argv"; "script"; "shell"; "cwd"; "timeout_sec"; "intent" ]
     properties;
   check
     bool
@@ -123,12 +123,14 @@ let test_serialized_schema_carries_no_retired_name () =
     [ "pipeline"; "then"; "stdin"; "stdout"; "stderr"; "env" ]
 ;;
 
-(* Four sentences, under 700 bytes. The three phrases are what
+(* Six sentences, under 800 bytes: #34469 added the sentence on what an
+   enforced Observe run returns and the one on intent=request_effect, and
+   the description measured 752 bytes after it. The three phrases are what
    test_keeper_tool_descriptor_registry_integrity,
    test_keeper_tool_execute_descriptor_variant and
    scripts/check-execute-async-surface.sh read; a rewrite that keeps them
    keeps those in step. *)
-let description_ceiling_bytes = 700
+let description_ceiling_bytes = 800
 
 let test_description_is_short_and_keeps_its_stable_phrases () =
   let description = execute_schema.description in
@@ -162,9 +164,9 @@ let () =
             `Quick
             test_the_published_list_is_the_one_execute_tool
         ; test_case
-            "properties are the five fields in order"
+            "properties are the six fields in order"
             `Quick
-            test_properties_are_the_five_fields_in_order
+            test_properties_are_the_six_fields_in_order
         ; test_case "oneOf is argv xor script" `Quick test_one_of_is_argv_xor_script
         ; test_case
             "serialized schema carries no retired name"

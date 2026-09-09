@@ -33,8 +33,8 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 > **개발 상태.** 1.0 이전이고, 믿을 수 있는 내 컴퓨터 안에서 쓰는 걸 전제로
 > 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate와 샌드박스는 특정
 > 작업을 막지만, 사람이 보지 않는 사이 에이전트가 하는 위험한 일을 전부 막지는
-> 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 공개 빌드는
-> [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인합니다.
+> 못합니다. `main`은 공개 바이너리보다 빠르게 움직입니다. 최신 릴리스는
+> [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)(2026-09-08)입니다.
 
 ![MASC 터미널 UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -58,7 +58,7 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
 ```bash
@@ -70,23 +70,17 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
-기존 공급자를 고르거나 llama.cpp, vLLM, 다른 OpenAI-compatible endpoint,
-Claude Code, Codex, Antigravity 연결을 설정합니다. 새 연결은 입력한 모델 정보로
-검증한 뒤 provider/model 바인딩과 기본 runtime을 저장합니다. API 키 값은
-묻거나 저장하지 않으며 HTTP 인증은 환경변수 이름으로 지정합니다.
+마법사는 이 컴퓨터에 뭐가 있는지 보고하고, 딱 하나만 씁니다. `runtime.toml`의
+`[runtime].default`입니다. API 키는 묻지도 저장하지도 않습니다. 서버는 자기가
+시작된 환경에서 키를 읽습니다.
 
 마법사가 보고하는 축은 둘입니다.
 
-- **모델 출처.** 시드된 `runtime.toml`에는 프로바이더 다섯이 들어 있습니다.
-  Ollama Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, 로컬 Ollama.
-  클라우드 프로바이더는 환경 변수 이름으로, 로컬 서버는 헬스체크 경로를 찔러
-  `reachable`/`authentication required`/`unreachable`로 보여 줍니다.
-  llama-server, vLLM, MLX 와 구독형 CLI(Claude Code, Codex, Antigravity)는 같은
-  파일에 주석 처리된 템플릿으로 있습니다. 주석을 풀면 마법사 목록에 오르고 CLI 는
-  `PATH`에 있으면 `installed`, 자체 로그인 확인을 통과하면 `signed in`으로
-  보입니다. 모델 바인딩이 둘 이상인 템플릿(Claude Code)은 그중 하나에
-  `wizard-default = true`를 달아야 하고, 없으면 마법사가 건너뜁니다. Anthropic 과
-  OpenAI 는 아직 시드 블록이 없습니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
+- **모델 출처.** 마법사는 `.masc/config/runtime.toml`이 선언한 것을 보여 줍니다.
+  거기 시드된 프로바이더와, 주석을 푼 템플릿입니다. 각각은 응답했는지, 자격
+  증명이 아직 필요한지, 아예 없는지로 표시됩니다. 프로바이더 목록과 각각이 읽는
+  환경 변수, 템플릿은 전부 그 파일에 있고 마법사가 따로 만들어 넣지 않습니다.
+  `--provider <id>`를 주면 묻지 않고 고릅니다.
 - **실행 샌드박스.** `docker`, `microvm`, `remote_ssh` 중 이 컴퓨터가 줄 수
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.

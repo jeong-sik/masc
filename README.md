@@ -35,8 +35,8 @@ Three things it does:
 > **Status.** Pre-1.0, for local, trusted environments. Not a production
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
-> unsafe action. `main` moves faster than the published binaries; available
-> builds are listed in [GitHub Releases](https://github.com/jeong-sik/masc/releases).
+> unsafe action. `main` moves faster than the published binaries; the latest
+> release is [v0.34.0](https://github.com/jeong-sik/masc/releases/tag/v0.34.0) (2026-09-08).
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
 
@@ -60,7 +60,7 @@ product grows (see [Dashboard](#dashboard)).
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0).
 It verifies and installs the assets for the selected release.
 
 ```bash
@@ -72,26 +72,18 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a setup wizard (`--no-wizard` skips it). Choose an existing provider or
-configure llama.cpp, vLLM, another OpenAI-compatible endpoint, Claude Code, Codex,
-or Antigravity. New connections use your model metadata and are validated before
-saving provider/model bindings and the default runtime. API key values are never
-requested or stored; HTTP credentials use environment variable names.
+and runs a one-time wizard (`--no-wizard` skips it). The wizard reports what the host has and writes exactly one thing,
+`[runtime].default` in `runtime.toml`. It never asks for an API key and never
+stores one; the server reads keys from the environment it is started in.
 
 The wizard reports two axes:
 
-- **Model source.** The seeded `runtime.toml` carries five providers: Ollama
-  Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, and a local Ollama. A
-  cloud provider is keyed by its environment variable; the local server is
-  probed at its health path and shown `reachable`, `authentication required`,
-  or `unreachable`. Templates for llama-server, vLLM, MLX, and the
-  subscription CLIs (Claude Code, Codex, Antigravity) sit commented out in the
-  same file. Uncomment one and the wizard lists it, showing a CLI as
-  `installed` when it is on `PATH` and `signed in` when its own login check
-  passes; a template with more than one model binding (Claude Code) also needs
-  `wizard-default = true` on one of them, or the wizard skips it. Anthropic and
-  OpenAI have no seeded block yet. `--provider <id>` picks one without
-  prompting.
+- **Model source.** The wizard lists what `.masc/config/runtime.toml`
+  declares: the providers seeded there, plus any commented-out template you
+  uncomment. Each is shown with whether it answered, whether it still wants a
+  credential, or whether it is not there at all. That file holds the provider
+  list, the environment variable each one reads, and the templates — the
+  wizard adds none of its own. `--provider <id>` picks one without prompting.
 - **Execution sandbox.** Which of `docker`, `microvm`, and `remote_ssh` this
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.
@@ -510,7 +502,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.35.0`.
+  line is `0.34.0`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

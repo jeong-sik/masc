@@ -121,15 +121,39 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
   failover, compaction or hour-scale continuity. Its recorder was subsequently
   corrected to reject evidence directories bound to a different scenario.
 
+## Verified delivery and artifact update at 2026-09-09T23:30Z
+
+- Goal confirmation core #34976, UI #34979, and actual API proof #34982 are
+  merged. Their reviewed heads passed PR checks. The isolated API proof used a
+  synthetic verifier provider with a real file-read tool, then real authenticated
+  confirmation POST/GET and exact binding checks. It does not prove semantic
+  LLM judgment or the production deployment. Browser evidence uses CI-built UI
+  with synthetic HTTP fixtures, separately from the actual backend proof.
+- #34980 is merged: twelve operator-initiated Kimi turns and scoped recall
+  evidence, not an hour-scale or autonomous continuity result.
+- The actual Keeper produced a readable three-page PDF; all three v4 pages were
+  independently rendered and read, then reviewed by a second coding agent.
+  Its hash is `74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0`.
+  See [PDF evidence and historical failures](../evidence/2026-09-10-keeper-pdf-review/README.md).
+  The real Task verifier rejected an earlier submission for missing evidence.
+  A subsequent run persisted a new PDF, verification summary and three PNGs;
+  request `vrf-29d7aa6e465b7e1b5acd86f7305120f0` was observed awaiting verification.
+  Its snapshot contains the summary but names PDF/PNG only in notes, so complete
+  evidence transfer and Task/Goal completion remain unproven.
+- Fusion decision attribution #34981 and original input context #34983 remain
+  open. Source review confirms Task contracts and Goal criteria are captured,
+  original turn is retained, and the question is no longer duplicated in model
+  input. No real autonomous Fusion decision-use result is claimed.
+
 ## Acceptance matrix
 
 | # | Requirement | Evidence needed to close | Current state / next work |
 |---|---|---|---|
 | 1 | Goal/Task focus | Autonomous action receipts linked to assigned goal and remaining acceptance criteria across turns | Prompt section found in measured agent input (#34938); autonomous scenario still needed |
 | 2 | Important decisions use Fusion and are recorded | Real decision request, durable run, result, adopted/rejected reasons linked to work | Durable deliberation runs exist; originating work and Keeper decision-use attribution are missing; implementation and behavior proof pending |
-| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context and actual creation/readback proven; human final confirmation implementation #34976 is under CI repair; live recovery/continuity pending |
-| 4 | Keepers do non-code work | Research and creative tasks completed with independent verification | No current scenario proof |
-| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Creative image tools and actual Keeper image adoption proven (#34974); PDF remains rejected; useful document/image/audio/video outputs still required |
+| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context, actual creation/readback and authenticated final confirmation API proven within their fixtures; #34976/#34979/#34982 merged; real semantic judgment, autonomous recovery and long continuity pending |
+| 4 | Keepers do non-code work | Research and creative tasks completed with independent verification | Actual Keeper PDF independently rendered/read; Task evidence rejection and resubmission observed; full completion and broader research scenarios pending |
+| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Creative image tools and actual image adoption proven (#34974); one readable three-page Keeper PDF proven; Task evidence delivery and other document/image/audio/video outputs remain incomplete |
 | 6 | Initiative | Role-appropriate autonomous work initiated and advanced without repeated user nudges | Prompt intervention; live sequence pending |
 | 7 | Requests to owner/operator | Specific actionable ask, answer, resumed dependent work, independent progress while waiting | Prompt intervention; live ask lifecycle pending |
 | 8 | Keeper delegation | Scoped assignment, recipient action, evidence returned and integrated, no duplicate ownership | Prompt intervention; two-Keeper scenario pending |

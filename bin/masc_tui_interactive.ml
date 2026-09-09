@@ -53,6 +53,8 @@ let msx ~fetch ~press =
     (* The spectator feed arrives by poll, so there is nothing to pause or
        push yet; the real-time ticker will make these mean something. *)
     let focus_changed _focused = ()
+
+    (* fire-and-forget: no ticker payload yet; see the module comment above. *)
     let tick ~dt = ignore dt
     let stop () = ()
   end : S)

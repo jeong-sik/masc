@@ -334,6 +334,23 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
 
 
+def approvals_header(count: int) -> re.Pattern[bytes]:
+    """The Approvals title and the number of asks on it.
+
+    What follows the number inside the parens is where those asks came from --
+    held calls, Gate rows, operator entries -- and the renderer writes that
+    breakdown whenever the count is above zero. Spelling the header as
+    "(3)" asserted the parenthesis closes right after the number, which is a
+    fact about that breakdown rather than about how many asks are waiting.
+    """
+    return re.compile(
+        re.escape(b"MASC Approvals")
+        + rb"(?:\x1b\[[0-9;]*m)* \("
+        + str(count).encode()
+        + rb"[ )]"
+    )
+
+
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     """The highlighted list row for `post_id`, whatever sits in the gutter.
 
@@ -3529,9 +3546,7 @@ def approval_selection_identity_interaction(
             process,
             master_fd,
             output,
-            screen_header(
-                b"MASC Approvals", b" (3)"
-            ),
+            approvals_header(3),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
@@ -3553,15 +3568,11 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"r",
-            screen_header(
-                b"MASC Approvals", b" (4)"
-            ),
+            approvals_header(4),
         )
         refreshed_frame = frame_containing(
             refreshed,
-            screen_header(
-                b"MASC Approvals", b" (4)"
-            ),
+            approvals_header(4),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
         if not re.search(

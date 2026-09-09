@@ -3067,13 +3067,19 @@ module Browser_lane_view = struct
          | Error detail -> {t with scene = None; load = Failed detail})
     | _ -> t
 
+  (* Deduplicate through a table rather than [List.mem] over what has been
+     seen. A scene carries up to 200 nodes (browser_scene_script.ml's
+     nodeLimit), and the membership walk made this quadratic in a function
+     the page projection then called once per node. *)
   let scene_targets t = match t.scene with
     | None -> []
     | Some scene ->
-        let _, nodes = List.fold_left (fun (seen, nodes) (node : Masc.Browser_scene.node) ->
-          if List.mem node.node_id seen then seen, nodes
-          else node.node_id :: seen, node :: nodes) ([], []) scene.content.nodes in
-        List.rev nodes
+        let seen = Hashtbl.create 64 in
+        List.filter
+          (fun (node : Masc.Browser_scene.node) ->
+             if Hashtbl.mem seen node.node_id then false
+             else (Hashtbl.add seen node.node_id (); true))
+          scene.content.nodes
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
@@ -3156,16 +3162,23 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
     |> List.concat_map (fun line -> if line = "" then [""] else
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
   match view.scene with
-  | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
-      let rec index i = function
-        | [] -> None
-        | (candidate : Masc.Browser_scene.node) :: rest ->
-            if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+  | Some scene ->
+    (* The target index came from re-scanning [scene_targets] for every node,
+       and [scene_targets] rebuilt its whole list on each of those scans. The
+       index is what the dedup already knows, so it is read once into a table
+       keyed by node id. *)
+    let target_index = Hashtbl.create 64 in
+    List.iteri
+      (fun i (node : Masc.Browser_scene.node) ->
+         if not (Hashtbl.mem target_index node.node_id)
+         then Hashtbl.add target_index node.node_id i)
+      (Browser_lane_view.scene_targets view);
+    List.concat_map (fun (node : Masc.Browser_scene.node) ->
       let label = match node.kind with
         | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
         | Control {disabled=true;_} -> "disabled"
         | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
-      let prefix = match index 0 (Browser_lane_view.scene_targets view) with
+      let prefix = match Hashtbl.find_opt target_index node.node_id with
         | None -> ""
         | Some i -> Printf.sprintf "[%s%d %s] "
             (if i = view.scene_cursor then ">" else "") (i + 1) label in

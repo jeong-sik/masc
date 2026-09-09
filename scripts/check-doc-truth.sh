@@ -202,5 +202,32 @@ if ((${#missing_refs[@]} > 0)); then
   exit 1
 fi
 
+# A translated pair is two files carrying one document. Prose wraps differently
+# in each language, so line counts say nothing -- but a heading, a command
+# block and a table row are the same countable things on both sides. An edit
+# that lands in one file only changes one of those counts, which is the drift
+# that leaves a reader of the other language without a section that exists.
+#
+# This counts shapes, not sentences: a stale sentence translated years ago
+# still passes. It catches the coarse case, where one language is simply
+# missing something the other has.
+check_translation_shape() {
+  local english="$1"
+  local translated="$2"
+  local label pattern
+  for label in headings:'^#' commands:'^```' table-rows:'^|'; do
+    pattern="${label#*:}"
+    label="${label%%:*}"
+    local a b
+    a="$(grep -c -- "$pattern" "$english" || true)"
+    b="$(grep -c -- "$pattern" "$translated" || true)"
+    [[ "$a" == "$b" ]] || \
+      fail "$translated has $b $label but $english has $a -- an edit reached one language only"
+  done
+}
+
+check_translation_shape README.md README.ko.md
+check_translation_shape docs/INSTALL.md docs/INSTALL.ko.md
+
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
 

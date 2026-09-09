@@ -109,12 +109,38 @@ let script = {js|function interactInPage(args) {
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
         throw new Error('scroll_coordinates_must_be_integers');
-      // document.elementFromPoint retargets shadow descendants to their host.
-      // Find the innermost accessible hit before walking scroll ancestors.
-      while (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
-        const inner = element.shadowRoot.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-        if (!inner || inner === element) break;
-        element = inner;
+      // Hit testing stops at shadow hosts and frame elements. Resolve both
+      // before scrolling; never redirect an inaccessible frame hit to its page.
+      let hitWindow = window, hitX = point.x * innerWidth, hitY = point.y * innerHeight;
+      for (;;) {
+        if (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+          const inner = element.shadowRoot.elementFromPoint(hitX, hitY);
+          if (inner && inner !== element) { element = inner; continue; }
+        }
+        if (element.localName !== 'iframe' && element.localName !== 'frame') break;
+        let childDocument;
+        try { childDocument = element.contentDocument; }
+        catch { throw new Error('scroll_frame_inaccessible'); }
+        if (!childDocument || !childDocument.defaultView) throw new Error('scroll_frame_inaccessible');
+        // A bounding rectangle cannot invert rotation, skew or perspective.
+        // Reject transformed frames/ancestors before either scroll axis acts.
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          if (style.transform !== 'none' || style.perspective !== 'none'
+              || (style.rotate && style.rotate !== 'none')
+              || (style.scale && style.scale !== 'none')
+              || (style.translate && style.translate !== 'none')
+              || (style.zoom && style.zoom !== 'normal' && Number(style.zoom) !== 1))
+            throw new Error('scroll_frame_geometry_unsupported');
+        }
+        const rect = element.getBoundingClientRect(), style = hitWindow.getComputedStyle(element);
+        hitX -= rect.left + element.clientLeft + Number.parseFloat(style.paddingLeft);
+        hitY -= rect.top + element.clientTop + Number.parseFloat(style.paddingTop);
+        hitWindow = childDocument.defaultView;
+        if (hitX < 0 || hitY < 0 || hitX >= hitWindow.innerWidth || hitY >= hitWindow.innerHeight)
+          throw new Error('scroll_point_outside_frame_content');
+        element = childDocument.elementFromPoint(hitX, hitY);
+        if (!element) throw new Error('point_has_no_element');
       }
       // Follow actual scroll containers under the pointer. Slack's message
       // pane scrolls independently of document.body and its channel sidebar.
@@ -122,7 +148,7 @@ let script = {js|function interactInPage(args) {
         if (delta === 0) return;
         const vertical = axis === 'y';
         for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
-          const style = getComputedStyle(node);
+          const style = hitWindow.getComputedStyle(node);
           const overflow = vertical ? style.overflowY : style.overflowX;
           const position = vertical ? node.scrollTop : node.scrollLeft;
           const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
@@ -136,7 +162,7 @@ let script = {js|function interactInPage(args) {
             if (chain === 'contain' || chain === 'none') return;
           }
         }
-        window.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+        hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
       };
       scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
     }

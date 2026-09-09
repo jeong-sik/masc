@@ -114,6 +114,24 @@ try:
  js(scene+interaction,[{'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':js('return location.href;'),'x':0,'y':120}])
  positions=js('return {pane:shadowPane.scrollTop,root:scrollY};')
  check('nested open shadow roots scroll the internal pane without moving the page',positions=={'pane':120,'root':0})
+ # Same-origin frame inside an open shadow tree, with another frame nested inside.
+ js("""document.body.innerHTML='<div id=host></div><div style=height:3000px>Outer document</div>';const r=document.querySelector('#host').attachShadow({mode:'open'});r.innerHTML='<iframe style="width:500px;height:300px;border:7px solid"></iframe>';window.frame=r.querySelector('iframe');const d=frame.contentDocument;d.open();d.write('<body style=margin:0><iframe id=nested style="width:400px;height:220px;border:5px solid"></iframe>');d.close();window.nested=frame.contentDocument.querySelector('#nested');const n=nested.contentDocument;n.open();n.write('<body style=margin:0><div id=pane style="overflow:auto;height:150px"><div style=height:1600px>Frame channel</div></div><div style=height:2000px>Frame root</div>');n.close();window.scrollTo(0,0);""")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const a=frame.getBoundingClientRect(),b=nested.getBoundingClientRect();return {x:(a.left+frame.clientLeft+b.left+nested.clientLeft+30)/innerWidth,y:(a.top+frame.clientTop+b.top+nested.clientTop+30)/innerHeight};")
+ frame_args={'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':js('return location.href;'),'x':0,'y':120}
+ js(scene+interaction,[frame_args])
+ check('nested same-origin frames inside shadow root scroll only the pointed pane',js("return {pane:nested.contentDocument.querySelector('#pane').scrollTop,inner:nested.contentWindow.scrollY,frame:frame.contentWindow.scrollY,outer:scrollY};")=={'pane':120,'inner':0,'frame':0,'outer':0})
+ js("nested.contentDocument.querySelector('#pane').style.overflow='hidden';")
+ js(scene+interaction,[frame_args])
+ check('frame fallback scrolls deepest document only',js('return {inner:nested.contentWindow.scrollY,frame:frame.contentWindow.scrollY,outer:scrollY};')=={'inner':120,'frame':0,'outer':0})
+ js("frame.style.transform='rotate(5deg)';")
+ try:js(scene+interaction,[frame_args]);raise AssertionError('transformed frame accepted')
+ except RuntimeError as e:check('transformed frame rejects without outer scroll','scroll_frame_geometry_unsupported' in str(e) and js('return scrollY;')==0)
+ js("frame.style.transform='none';frame.setAttribute('sandbox','');frame.srcdoc='<div style=height:3000px>Opaque frame</div>';")
+ # WebDriver's async callback follows the frame load; no guessed settling sleep.
+ call('POST','/session/'+sid+'/execute/async',{'script':"const done=arguments[arguments.length-1];if(!frame.contentDocument)done();else frame.addEventListener('load',()=>done(),{once:true});",'args':[]})
+ try:js(scene+interaction,[frame_args]);raise AssertionError('opaque frame accepted')
+ except RuntimeError as e:check('inaccessible frame rejects without outer scroll','scroll_frame_inaccessible' in str(e) and js('return scrollY;')==0)
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

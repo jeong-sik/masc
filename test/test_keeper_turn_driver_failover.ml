@@ -1540,7 +1540,9 @@ let test_lane_media_reroute_prefers_lane_candidate () =
           ~first_candidate
           ~candidates:
             (Driver.For_testing.modality_reroute_candidates
+               ~now:(Unix.gettimeofday ())
                ~deferred_runtime_lane:None
+               ~first_candidate
                ~remaining_runtimes)
       with
       | Runtime_agent.Reroute { target; _ } ->
@@ -1578,7 +1580,9 @@ let test_lane_media_reroute_reaches_media_failover () =
          ~first_candidate:(runtime "primary.text_model")
          ~candidates:
            (Driver.For_testing.modality_reroute_candidates
+              ~now:(Unix.gettimeofday ())
               ~deferred_runtime_lane:None
+              ~first_candidate:(runtime "primary.text_model")
               ~remaining_runtimes:[])
      with
      | Runtime_agent.Reroute { target; _ } ->
@@ -1604,8 +1608,128 @@ let test_lane_media_reroute_reaches_media_failover () =
       (List.map
          (fun (runtime : Runtime.t) -> runtime.Runtime.id)
          (Driver.For_testing.modality_reroute_candidates
+            ~now:(Unix.gettimeofday ())
             ~deferred_runtime_lane:(Some deferred)
+            ~first_candidate:(runtime "primary.text_model")
             ~remaining_runtimes:[ runtime "lanevision.vision_model" ])))
+
+(* RFC-0440 §3: a candidate whose account answered a hard quota rejection moves
+   behind the live candidates, so the reroute picks a live one and the image
+   walk visits the exhausted one last. A text turn keeps its lane order. *)
+let test_lane_media_reroute_walks_past_exhausted_candidate () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let runtime id =
+        match Runtime.get_runtime_by_id id with
+        | Some runtime -> runtime
+        | None -> Alcotest.failf "missing runtime %s" id
+      in
+      let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+      let head = runtime "primary.text_model" in
+      let lanevision = runtime "lanevision.vision_model" in
+      Runtime_quota_window.note_observed_exhausted
+        ~scope:(Runtime.quota_scope_of_runtime lanevision);
+      let candidates =
+        Driver.For_testing.modality_reroute_candidates
+          ~now:(Unix.gettimeofday ())
+          ~deferred_runtime_lane:None
+          ~first_candidate:head
+          ~remaining_runtimes:[ lanevision ]
+      in
+      Alcotest.(check (list string))
+        "the exhausted lane candidate moves behind media_failover"
+        [ "primary.text_model"
+        ; "outsidevision.vision_model"
+        ; "lanevision.vision_model"
+        ]
+        (ids candidates);
+      let image_block =
+        Agent_core.Types.Image
+          { media_type = "image/png"
+          ; data = Base64.encode_string "image"
+          ; source_type = Agent_core.Types.Base64
+          }
+      in
+      let first_runtime =
+        match
+          Driver.For_testing.lane_modality_reroute_decision
+            ~checkpoint_messages:[]
+            ~initial_messages:[]
+            ~goal_blocks:[ image_block ]
+            ~first_candidate:head
+            ~candidates
+        with
+        | Runtime_agent.Reroute { target; _ } ->
+          Alcotest.(check string)
+            "the reroute picks the live candidate"
+            "outsidevision.vision_model"
+            target.Runtime.id;
+          target
+        | Runtime_agent.No_reroute_needed ->
+          Alcotest.fail "a text-only head must reroute an image turn"
+        | Runtime_agent.No_capable_runtime _ ->
+          Alcotest.fail "two image-capable candidates are declared"
+      in
+      let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
+      Alcotest.(check (list string))
+        "the image walk holds the image-capable candidates, live first"
+        [ "outsidevision.vision_model"; "lanevision.vision_model" ]
+        (ids media_walk);
+      Alcotest.(check (list string))
+        "the turn walks the live candidate, then the exhausted one"
+        [ "outsidevision.vision_model"; "lanevision.vision_model" ]
+        (ids
+           (Driver.For_testing.attempt_runtimes_for_turn
+              ~media_walk
+              ~first_runtime
+              ~remaining_runtimes:[ lanevision ]));
+      Alcotest.(check (list string))
+        "a text turn keeps the lane order"
+        [ "primary.text_model"; "lanevision.vision_model" ]
+        (ids
+           (Driver.For_testing.attempt_runtimes_for_turn
+              ~media_walk:
+                (Runtime_agent.media_walk ~candidates
+                   [ Agent_core.Types.Text "hello" ])
+              ~first_runtime:head
+              ~remaining_runtimes:[ lanevision ]))))
+
+(* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
+   the next candidate in the same turn and does not call the first one again. *)
+let test_attempt_loop_moves_past_payment_required () =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "dead.vision_model" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Llm_provider.Retry.PaymentRequired
+                     { message = "Insufficient Balance" })))
+            None
+        | "live.vision_model" -> attempt_without_effect (Ok runtime_id) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "dead.vision_model"; "live.vision_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "the live candidate answers" "live.vision_model" runtime_id
+   | Error error ->
+     Alcotest.failf
+       "the walk stopped at the 402: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check (list string))
+    "each candidate is called once, in order"
+    [ "dead.vision_model"; "live.vision_model" ]
+    !attempts
 
 let test_runtime_dedupe_preserves_first_occurrence () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
@@ -3224,6 +3348,14 @@ let () =
             "lane media reroute reaches media_failover"
             `Quick
             test_lane_media_reroute_reaches_media_failover;
+          Alcotest.test_case
+            "lane media reroute walks past an exhausted candidate"
+            `Quick
+            test_lane_media_reroute_walks_past_exhausted_candidate;
+          Alcotest.test_case
+            "attempt loop moves past a 402"
+            `Quick
+            test_attempt_loop_moves_past_payment_required;
           Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick

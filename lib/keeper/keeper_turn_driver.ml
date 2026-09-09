@@ -565,16 +565,36 @@ let dedupe_runtimes_preserve_order runtimes =
   in
   loop [] [] runtimes
 
-(* RFC-0440: a live lane reroutes over its remaining candidates, then
-   [runtime.media_failover], then the other declared runtimes, so an image turn
-   on a lane whose capable head is down reaches a capable runtime declared
-   elsewhere. A deferred lane offers no candidates: its walk dispatches the
-   frozen suffix ([lane_candidate_ids] in [run_agent_turn]), so a decision that
-   moved the head would be recorded as a reroute the walk never performs. *)
-let modality_reroute_candidates ~deferred_runtime_lane ~remaining_runtimes =
+(* RFC-0440: a live lane reroutes over the lane, then [runtime.media_failover],
+   then the other declared runtimes, so an image turn on a lane whose capable
+   head is down reaches a capable runtime declared elsewhere. The set is held
+   in the same quota and backpressure order the lane itself uses
+   ([demote_unavailable_candidates]): a candidate whose account answered a hard
+   quota rejection earlier moves behind the live ones, so the reroute picks a
+   live candidate instead of the first declared one. A deferred lane offers no
+   candidates: its walk dispatches the frozen suffix ([lane_candidate_ids] in
+   [run_agent_turn]), so a decision that moved the head would be recorded as a
+   reroute the walk never performs. *)
+let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
+    ~remaining_runtimes =
   match deferred_runtime_lane with
   | Some _ -> []
-  | None -> Runtime_agent.media_candidates ~lane:remaining_runtimes
+  | None ->
+    Runtime_agent.media_candidates ~lane:(first_candidate :: remaining_runtimes)
+    |> demote_unavailable_candidates
+         ~now
+         ~quota_scope_of:(fun (runtime : Runtime.t) ->
+           Some (Runtime.quota_scope_of_runtime runtime))
+         ~candidate_preference_of:(fun (runtime : Runtime.t) ->
+           Some runtime.Runtime.candidate_preference)
+
+(* RFC-0440 §3: the runtime the decision dispatches first, then the rest of the
+   media walk (every candidate that takes the media, live ones first), then the
+   lane's remaining candidates as the degrade tail — per-attempt projection
+   drops the image there (PR-C replaces this tail with delegation). A text turn
+   has an empty media walk and keeps [first_runtime :: remaining_runtimes]. *)
+let attempt_runtimes_for_turn ~media_walk ~first_runtime ~remaining_runtimes =
+  dedupe_runtimes_preserve_order (first_runtime :: (media_walk @ remaining_runtimes))
 
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~goal_blocks ~first_candidate ~candidates =
@@ -1044,14 +1064,22 @@ let run_named
      [run_attempt] below), because the walk crosses runtimes with different
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
+  let reroute_candidates =
+    modality_reroute_candidates
+      (* NDT-OK: quota windows compare a stored expiry with wall clock; the
+         ordering read receives one explicit [now], as the lane's does above. *)
+      ~now:(Unix.gettimeofday ())
+      ~deferred_runtime_lane
+      ~first_candidate
+      ~remaining_runtimes
+  in
   let reroute_decision =
     lane_modality_reroute_decision
       ~checkpoint_messages
       ~initial_messages
       ~goal_blocks:current_goal_blocks
       ~first_candidate
-      ~candidates:
-        (modality_reroute_candidates ~deferred_runtime_lane ~remaining_runtimes)
+      ~candidates:reroute_candidates
   in
   let first_runtime =
     snd
@@ -1059,7 +1087,15 @@ let run_named
          ~first_candidate_id ~first_candidate reroute_decision)
   in
   let attempt_runtimes =
-    dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
+    attempt_runtimes_for_turn
+      ~media_walk:
+        (Runtime_agent.media_walk
+           ~candidates:reroute_candidates
+           ~checkpoint_messages
+           ~initial_messages
+           current_goal_blocks)
+      ~first_runtime
+      ~remaining_runtimes
   in
   let attempt_candidates =
     match deferred_runtime_lane with
@@ -1758,6 +1794,7 @@ module For_testing = struct
     first_runtime_after_modality_reroute
 
   let modality_reroute_candidates = modality_reroute_candidates
+  let attempt_runtimes_for_turn = attempt_runtimes_for_turn
   let lane_modality_reroute_decision = lane_modality_reroute_decision
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
   let resolve_runtime_candidates = resolve_runtime_candidates

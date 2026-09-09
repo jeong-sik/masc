@@ -76,7 +76,7 @@ class Setup(unittest.TestCase):
                 (base / '.masc').symlink_to(volume, target_is_directory=True)
             config = base / '.masc/config'
             for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
-                (config / name).write_bytes((ROOT / 'scripts/fixtures/release-evidence' / name).read_bytes())
+                (config / name).write_bytes((ROOT / 'scripts/fixtures/release-evidence' / name).read_bytes().replace(b'ollama_cloud', b'setup_fixture'))
             # This model exists only in this workspace's overlay. Setup must
             # load the same catalog the wizard validated, not an embedded alias.
             runtime = config / 'runtime.toml'
@@ -86,7 +86,7 @@ class Setup(unittest.TestCase):
                 stream.write('''
 [[models]]
 id_prefix = "setup-fixture-owned-model"
-provider_name = "ollama_cloud"
+provider_name = "setup_fixture"
 base = "openai_chat"
 max_context_tokens = 32768
 supports_tools = true
@@ -94,7 +94,7 @@ supports_native_streaming = true
 ''')
             if missing_key:
                 runtime = config / 'runtime.toml'
-                runtime.write_text(runtime.read_text() + '\n[providers.ollama_cloud.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
+                runtime.write_text(runtime.read_text() + '\n[providers.setup_fixture.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
             manifest = config / 'keepers/imp.toml'
             original = manifest.read_bytes()
             if stale_token:
@@ -169,16 +169,16 @@ supports_native_streaming = true
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
                 try:
-                    verification = run('runtime-verify','ollama_cloud.setup-fixture-owned-model')
+                    verification = run('runtime-verify','setup_fixture.setup-fixture-owned-model')
                     receipt = json.loads(verification.stdout)
                     self.assertEqual(receipt['schema'],'masc.runtime_verification.v1')
-                    self.assertEqual(receipt['runtime_id'],'ollama_cloud.setup-fixture-owned-model')
+                    self.assertEqual(receipt['runtime_id'],'setup_fixture.setup-fixture-owned-model')
                     if missing_key:
                         self.assertEqual(verification.returncode,2,verification.stderr)
                         self.assertEqual(receipt['status'],'unavailable')
                         self.assertEqual(receipt['failure']['code'],'missing_credential')
                     else:
-                        self.assertEqual(verification.returncode,0,verification.stderr)
+                        self.assertEqual(verification.returncode,0,verification.stdout+verification.stderr)
                         self.assertEqual(receipt['status'],'verified')
                         self.assertEqual(receipt['model'],'setup-fixture-owned-model')
                         self.assertEqual(receipt['observed_model'],'setup-fixture-owned-model')

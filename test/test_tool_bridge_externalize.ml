@@ -284,6 +284,31 @@ let test_to_agent_core_typed_error_ignores_json_metadata () =
        | Some Agent_core.Types.Unknown -> ()
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
 
+let test_failure_recovery_data_reaches_model () =
+  let data = `Assoc
+      [ "recovery_id", `String "recovery-7"
+      ; "next_call", `Assoc [ "tool", `String "status"; "id", `String "recovery-7" ] ]
+  in
+  List.iter (fun metadata ->
+    let result = Tool_result.make_err ~tool_name:"publish"
+        ~class_:Tool_result.Workflow_rejection ~start_time:0.0
+        ~data ?metadata "publication needs recovery" in
+    match B.to_agent_core_typed_result result with
+    | Ok _ -> Alcotest.fail "expected failure"
+    | Error { message; _ } ->
+      let open Yojson.Safe.Util in
+      let payload = Yojson.Safe.from_string message in
+      Alcotest.(check bool) "recovery payload reaches model content" true
+        (Yojson.Safe.equal data (payload |> member "data"));
+      Alcotest.(check string) "typed failure stays explicit" "workflow_rejection"
+        (payload |> member "failure_class" |> to_string);
+      match metadata with
+      | None -> ()
+      | Some expected ->
+        Alcotest.(check bool) "independent metadata is retained" true
+          (Yojson.Safe.equal expected (payload |> member "masc.payload")))
+    [ None; Some (`Assoc [ "gate", `String "allowed" ]) ]
+
 let test_to_agent_core_typed_error_preserves_explicit_metadata () =
   let metadata = `Assoc [ "gate", `Assoc [ "decision", `String "allow" ] ] in
   let tr =
@@ -650,6 +675,8 @@ let () =
             test_to_agent_core_typed_error_ignores_json_metadata;
           Alcotest.test_case "error preserves explicit metadata" `Quick
             test_to_agent_core_typed_error_preserves_explicit_metadata;
+          Alcotest.test_case "failure recovery data reaches model" `Quick
+            test_failure_recovery_data_reaches_model;
           Alcotest.test_case "typed workflow rejection is deterministic" `Quick
             test_to_agent_core_typed_result_preserves_workflow_rejection;
           Alcotest.test_case "dependency failure carries no replay hint" `Quick

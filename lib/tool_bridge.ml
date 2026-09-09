@@ -344,17 +344,27 @@ let to_agent_core_typed_result
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_core.Types.content; _meta = Some metadata })
-  | Tool_result.Failed { class_; message; metadata; _ } ->
+  | Tool_result.Failed { class_; message; data; metadata; _ } ->
     let failure_class = Tool_result.tool_failure_class_to_string class_ in
     let next_move = failure_next_move class_ in
+    (* Keep producer recovery details in model content. Data already carried
+       verbatim by the message or metadata needs no second copy. *)
+    let model_data =
+      match data with
+      | `Null -> None
+      | `String text when String.equal text message -> None
+      | _ when Option.fold ~none:false ~some:(Yojson.Safe.equal data) metadata -> None
+      | _ when String.equal (Yojson.Safe.to_string data) message -> None
+      | _ -> Some data
+    in
     let message =
-      match metadata with
-      | None ->
+      match metadata, model_data with
+      | None, None ->
         (match next_move with
          | Some next_move ->
            Printf.sprintf "%s\nfailure_class=%s — %s" message failure_class next_move
          | None -> Printf.sprintf "%s\nfailure_class=%s" message failure_class)
-      | Some metadata ->
+      | metadata, model_data ->
         Yojson.Safe.to_string
           (`Assoc
               ([ "message", `String message
@@ -364,7 +374,12 @@ let to_agent_core_typed_result
                @ (match next_move with
                   | Some next_move -> [ "next_move", `String next_move ]
                   | None -> [])
-               @ [ "masc.payload", metadata ]))
+               @ (match model_data with
+                  | Some data -> [ "data", data ]
+                  | None -> [])
+               @ (match metadata with
+                  | Some metadata -> [ "masc.payload", metadata ]
+                  | None -> [])))
     in
     project_result
       ?base_path

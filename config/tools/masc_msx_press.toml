@@ -1,5 +1,7 @@
 name = "masc_msx_press"
 description = """
+Press keys on the shared MSX machine.
+
 Press keys on the shared MSX machine and return the observation (see \
 masc_msx_screen). By default keys are held together as a chord for \
 hold_frames, then frames runs out released -- use this for a modifier or a \

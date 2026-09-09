@@ -8,37 +8,48 @@ open Workspace_backlog
 
 include Workspace_task_transitions
 
-(** Delete one Task under the canonical backlog lock and clear any agent cache
-    that still points at it in the same commit boundary. *)
-let delete_task_r config ~task_id : unit Masc_domain.masc_result =
+type task_delete_outcome =
+  | Task_deleted
+  | Task_already_absent
+  | Task_delete_cleanup_failed of string list
+
+(** The primary backlog commit decides whether deletion happened. Settlement
+    keeps backlog -> links order and survives cancellation after that commit.
+    Failures after commit are returned, not folded into successful deletion. *)
+let delete_task_r config ~task_id : task_delete_outcome Masc_domain.masc_result =
   with_file_lock_r config (backlog_lock_path config) (fun () ->
     let open Result.Syntax in
-    let* backlog =
-      read_backlog_r config
-      |> Result.map_error (fun message ->
-        Masc_domain.System (Masc_domain.System_error.IoError message))
-    in
-    let task_opt =
-      List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks
-    in
-    let tasks =
-      List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks
-    in
-    let status =
-      match task_opt with
-      | Some task -> task.task_status
-      | None -> Masc_domain.Todo
-    in
-    let after_commit () =
-      Task_cache_invariant.clear_stale_agent_task_for_task
-        config
-        ~cause:Task_cache_invariant.After_commit
-        ~task_id
-        ~status
-        ~module_name:"workspace_task.delete_task_r"
-    in
-    write_backlog ~after_commit config { backlog with tasks };
-    Ok ())
+    let* backlog = read_backlog_r config |> Result.map_error (fun message ->
+      Masc_domain.System (Masc_domain.System_error.IoError message)) in
+    let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
+    let settle f = match Eio_guard.execution_context () with
+      | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+      | Eio_guard.Non_eio -> f () in
+    settle (fun () ->
+      let* commit_errors = match task with
+        | None -> Ok (match repair_backlog_copies_result config backlog with
+            | Ok () -> [] | Error message -> [message])
+        | Some _ ->
+          let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
+          (match write_backlog_result config {backlog with tasks} with
+           | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
+           | Ok receipt -> Ok (List.filter_map Fun.id
+               [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error])) in
+      let cleanup_errors = match Workspace_goal_index.prune_links_for_task_result config ~task_id with
+        | Ok () -> [] | Error message -> [message] in
+      let cache_errors =
+        try
+          Task_cache_invariant.clear_stale_agent_task_for_task config
+            ~cause:Task_cache_invariant.After_commit ~task_id
+            ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
+            ~module_name:"workspace_task.delete_task_r";
+          []
+        with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | error -> [Printexc.to_string error] in
+      match commit_errors @ cleanup_errors @ cache_errors with
+      | [] -> Ok (match task with Some _ -> Task_deleted | None -> Task_already_absent)
+      | errors -> Ok (Task_delete_cleanup_failed errors)))
   |> Workspace_task_verification.flatten_lock_result
 ;;
 

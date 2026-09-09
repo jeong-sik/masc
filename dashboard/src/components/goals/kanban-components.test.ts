@@ -7,6 +7,8 @@ import { executionError, executionLoaded, executionLoading, tasks } from '../../
 import { resetTaskSearch, expandedTasks } from './goal-helpers'
 import type { Task } from '../../types'
 import * as actions from '../../api/actions'
+import * as store from '../../store'
+import * as confirmation from '../common/confirm-dialog'
 
 function makeDoneTask(index: number): Task {
   const day = String(26 - index).padStart(2, '0')
@@ -44,6 +46,22 @@ describe('TaskBacklog', () => {
     executionError.value = null
     resetTaskSearch()
     resetTaskBacklogState()
+  })
+
+  it('keeps cleanup retry available after the deleted Task card disappears', async () => {
+    tasks.value = [{ id: 'cleanup-target', title: 'Cleanup target', status: 'todo', priority: 3 }]
+    vi.spyOn(confirmation, 'requestConfirm').mockResolvedValue(true)
+    const remove = vi.spyOn(actions, 'deleteTask')
+      .mockResolvedValueOnce({ status: 'cleanup_failed', taskId: 'cleanup-target', errors: ['primary link store unreadable'] })
+      .mockResolvedValueOnce({ status: 'already_absent', taskId: 'cleanup-target' })
+    vi.spyOn(store, 'refreshExecution').mockImplementation(async () => { tasks.value = [] })
+    render(h(TaskBacklog, {}))
+    fireEvent.click(screen.getByRole('button', { name: '태스크 삭제: Cleanup target' }))
+    await waitFor(() => expect(screen.queryByText('Cleanup target')).not.toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('cleanup-target')
+    fireEvent.click(screen.getByRole('button', { name: '삭제 후 정리 재시도' }))
+    await waitFor(() => expect(remove).toHaveBeenNthCalledWith(2, 'cleanup-target'))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
   it('loads the complete description only when a summary card expands', async () => {

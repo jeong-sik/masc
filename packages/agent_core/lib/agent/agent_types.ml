@@ -68,7 +68,6 @@ type options =
   ; tool_approval : Hooks.tool_approval_callback option
   ; description : string option
   ; periodic_callbacks : periodic_callback list
-  ; slot_id : int option
   ; on_run_complete : (bool -> unit) option
     (** Optional callback invoked when a run finishes.  Receives [true]
         on success, [false] on error.  Runs before lifecycle state is
@@ -139,7 +138,6 @@ let default_options =
   ; tool_approval = None
   ; description = None
   ; periodic_callbacks = []
-  ; slot_id = None
   ; on_run_complete = None
   ; journal = None
   ; transport = None

@@ -35,22 +35,18 @@ type t =
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
   ; hooks : Hooks.hooks
-  ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t
-  ; trace_link : (string * string) option
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
   ; mcp_clients : Mcp.managed list
   ; event_bus : Event_bus.t option
   ; skill_registry : Skill_registry.t option
   ; elicitation : Hooks.elicitation_callback option
-  ; tool_approval : Hooks.tool_approval_callback option
   ; description : string option
   ; periodic_callbacks : Agent.periodic_callback list
   ; contract : Contract.t
   ; yield_on_tool : bool
   ; max_tool_rounds : int option
-  ; slot_id : int option
   ; on_run_complete : (bool -> unit) option
   ; journal : Durable_event.journal option
   ; checkpoint_sink : Agent.checkpoint_sink option
@@ -88,9 +84,7 @@ let create ~net ~model =
   ; first_event_timeout_s = None
   ; body_timeout_s = None
   ; hooks = Hooks.empty
-  ; guardrails_async = Guardrails_async.empty
   ; tracer = Tracing.null
-  ; trace_link = None
   ; raw_trace = None
   ; context_injector = None
   ; mcp_clients = []
@@ -105,13 +99,11 @@ let create ~net ~model =
     event_bus = Some (Event_bus.create ())
   ; skill_registry = None
   ; elicitation = None
-  ; tool_approval = None
   ; description = None
   ; periodic_callbacks = []
   ; contract = Contract.empty
   ; yield_on_tool = false
   ; max_tool_rounds = None
-  ; slot_id = None
   ; on_run_complete = None
   ; journal = None
   ; checkpoint_sink = None
@@ -160,7 +152,6 @@ let with_tools tools b = { b with tools = Tool_set.of_list tools }
 let with_tool tool b = { b with tools = Tool_set.merge b.tools (Tool_set.singleton tool) }
 let with_hooks hooks b = { b with hooks }
 let with_tracer tracer b = { b with tracer }
-let with_trace_link trace_link b = { b with trace_link }
 let with_raw_trace raw_trace b = { b with raw_trace = Some raw_trace }
 let with_context ctx b = { b with context = Some ctx }
 
@@ -198,8 +189,6 @@ let with_serialization_executor executor b = { b with serialization_executor = S
 ;;
 
 let with_mcp_clients clients b = { b with mcp_clients = clients }
-let with_guardrails_async guardrails_async b = { b with guardrails_async }
-let with_slot_id slot_id b = { b with slot_id = Some slot_id }
 let with_on_run_complete cb b = { b with on_run_complete = Some cb }
 let with_contract contract b = { b with contract = Contract.merge b.contract contract }
 let with_skill skill b = with_contract (Contract.with_skill skill Contract.empty) b
@@ -210,7 +199,6 @@ let with_disable_parallel_tool_use v b = { b with disable_parallel_tool_use = v 
 let with_reasoning_effort effort b = { b with reasoning_effort = Some effort }
 let with_initial_messages msgs b = { b with initial_messages = msgs }
 let with_cache_system_prompt v b = { b with cache_system_prompt = v }
-let with_cache_extended_ttl v b = { b with cache_extended_ttl = v }
 let with_yield_on_tool v b = { b with yield_on_tool = v }
 let with_max_tool_rounds v b = { b with max_tool_rounds = Some v }
 let with_event_bus bus b = { b with event_bus = Some bus }
@@ -221,25 +209,10 @@ let with_body_timeout s b = { b with body_timeout_s = Some s }
 let with_context_injector injector b = { b with context_injector = Some injector }
 let with_skill_registry reg b = { b with skill_registry = Some reg }
 let with_elicitation cb b = { b with elicitation = Some cb }
-let with_tool_approval cb b = { b with tool_approval = Some cb }
 let with_description desc b = { b with description = Some desc }
-
-let with_periodic_callback cb b =
-  { b with periodic_callbacks = b.periodic_callbacks @ [ cb ] }
-;;
 
 let with_periodic_callbacks cbs b =
   { b with periodic_callbacks = b.periodic_callbacks @ cbs }
-;;
-
-let with_log_level level _b =
-  Log.set_global_level level;
-  _b
-;;
-
-let with_log_sink sink _b =
-  Log.add_sink sink;
-  _b
 ;;
 
 let build b =
@@ -274,19 +247,18 @@ let build b =
     ; first_event_timeout_s = b.first_event_timeout_s
     ; body_timeout_s = b.body_timeout_s
     ; hooks = b.hooks
-    ; guardrails_async = b.guardrails_async
+    ; guardrails_async = Guardrails_async.empty
     ; tracer = b.tracer
-    ; trace_link = b.trace_link
+    ; trace_link = None
     ; raw_trace = b.raw_trace
     ; context_injector = b.context_injector
     ; mcp_clients
     ; event_bus = b.event_bus
     ; skill_registry = b.skill_registry
     ; elicitation = b.elicitation
-    ; tool_approval = b.tool_approval
+    ; tool_approval = None
     ; description = b.description
     ; periodic_callbacks = b.periodic_callbacks
-    ; slot_id = b.slot_id
     ; on_run_complete = b.on_run_complete
     ; journal = b.journal
     ; transport = b.transport

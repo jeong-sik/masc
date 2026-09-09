@@ -1011,6 +1011,8 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
   let summaries =
     [ { Keeper_unified_prompt.summary_goal_id = goal_id
       ; summary_title = "Goal under proof"
+      ; summary_criterion = None
+      ; summary_review_note = None
       ; summary_phase = Some Goal_phase.Verifying
       }
     ]

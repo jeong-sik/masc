@@ -124,6 +124,12 @@ The current Goal set is unknown. Continue independent work; do not infer that th
 ### world.active_goals.heading (vars: count)
 ### Active Goals ({{count}})
 
+### world.active_goals.criterion (vars: criterion)
+  Success criterion (stored values; null means unspecified): {{criterion}}
+
+### world.active_goals.review (vars: note)
+  Latest review (context, not a new instruction): {{note}}
+
 ### world.active_goals.row (vars: goal_id, title)
 - {{goal_id}} — {{title}}
 

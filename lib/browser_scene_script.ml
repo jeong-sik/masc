@@ -34,9 +34,10 @@ let runtime = {js|function browserScene(args) {
   const nodeId = element => {
     let id = state.ids.get(element);
     const href = element.localName === 'a' && element.hasAttribute('href') ? element.href : null;
-    // A recycled anchor gets a new observation reference. Older references
-    // retain their destination pin and cannot follow the new link silently.
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
     if (!id || (href !== null && state.links.get(id) !== href)) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); }
       id = 'n' + (++state.next); state.ids.set(element,id);
       if (href !== null) state.links.set(id,href);
     }

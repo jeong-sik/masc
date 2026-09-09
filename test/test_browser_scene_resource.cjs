@@ -54,10 +54,18 @@ recycled.link.href='http://example.test/recycled';
 assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_link_destination_changed/);
 const reread=recycled.read();
 assert.notEqual(reread.nodes[0].nodeId,observed.nodes[0].nodeId);
-assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_link_destination_changed/,
-  'a newer read must not overwrite the old reference destination');
+assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/,
+  'a newer read retires the old reference instead of repinning it');
 recycled.context.reference.nodeId=reread.nodes[0].nodeId;
 assert.equal(vm.runInContext('browserScene(reference)',recycled.context),recycled.link);
+for (let revision=0;revision<100;revision++) {
+  recycled.link.href='http://example.test/revision/'+revision;
+  recycled.read();
+}
+const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v2')]",recycled.context);
+assert.equal(registry.nodes.size,1,'connected recycled anchor retains only its latest reference');
+assert.equal(registry.links.size,1,'superseded href pins are retired');
+assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/);
 
 for (const [name, alter] of [
   ['UTF-8 title', f => { f.document.title = '🙂'.repeat(300000); }],

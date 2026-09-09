@@ -1554,9 +1554,9 @@ let test_x10_and_sgr_agree_on_the_wheel () =
    unmodified press answers -- a release would act twice per click, and a
    chord or drag is a gesture, not a choice. *)
 let test_sgr_left_press_reports_the_row_and_column () =
-  check bool "release reaches screenshot gesture handling" true
+  Alcotest.check Alcotest.bool "release reaches screenshot gesture handling" true
     (Tui_decode.sgr_left_release "<0;10;5" 'm' = Some (5,10));
-  check bool "press cannot also become release" true
+  Alcotest.check Alcotest.bool "press cannot also become release" true
     (Tui_decode.sgr_left_release "<0;10;5" 'M' = None);
   match Tui_decode.sgr_left_press "<0;10;5" 'M' with
   | Some (5, 10) -> ()

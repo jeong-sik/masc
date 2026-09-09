@@ -127,6 +127,7 @@ let () =
   let content : Masc.Browser_scene.t = {
     document_id = "doc"; url = "https://example.org/doc"; title = "Doc";
     width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Content; scope = None;
     nodes = [node "a" "first"; node "b" "second"; node "a" "first again"; node "c" "third"] } in
   let view = { (Lane.create ()) with
     scene = Some { source = Live; client_id = None; tab_id = 1; content; elapsed_ms = 1. };

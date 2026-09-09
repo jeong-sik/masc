@@ -14065,7 +14065,7 @@ def run_browser_pointer_regression(executable: str) -> None:
             wait_for_output(process, master, output, b"Esc: back", start=start, timeout=3)
             return bytes(output[start:])
         image = image_input(b"\x0f")
-        assert b"f=100,a=T,r=24," in image, "unexpected screenshot placement geometry"
+        assert b"f=100,a=T,r=25," in image, "fullscreen screenshot must use all 30 physical terminal rows"
         # Caption clicks are consumed without dispatch; no double action on press.
         os.write(master, b"\x1b[<0;2;1M\x1b[<0;2;1m")
         wait_for_terminal_input_consumed(slave)

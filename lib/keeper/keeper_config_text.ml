@@ -48,7 +48,6 @@ let invalid_name_error name =
 
 (* ── Configuration constants ────────────────────────────────── *)
 
-let default_proactive_enabled = true
 
 (* Environment-configurable caps. Defaults were raised from 480/320 to 4096
    because silent truncation in the dashboard made operators think edits were

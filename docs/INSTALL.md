@@ -392,10 +392,9 @@ Choosing `--team classic` adds the following four Keeper TOMLs.
 | `frontend` | Frontend implementation and verification |
 | `qa` | Tests and verification against the requirements |
 
-This preset uses `autoboot_enabled=true`, `sandbox_profile="docker"`, and
-`network_mode="inherit"` and follows the fleet default model. The role
-instructions install no compiler or authentication and add no individual
-`skills` package.
+이 preset은 `activation_mode="autonomous"`, `sandbox_profile="docker"`,
+`network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
+컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
 
 The skill search path is declared by `[[skills.sources]]` in `runtime.toml`.
 The default order is `<base-path>/.masc/skills`, `<base-path>/.agents/skills`,

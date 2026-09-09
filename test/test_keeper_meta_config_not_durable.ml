@@ -5,7 +5,7 @@
     the way out, so [meta_to_json] does not write these fields and
     [meta_of_json] fills them from placeholders.
 
-    The record does not say so. [{ meta with autoboot_enabled = false }]
+    The record does not say so. [{ meta with activation_mode = Masc.Keeper_activation_mode.Manual }]
     compiles, stores nothing and reads back [true], which cost three wrong
     root-cause guesses on one test failure (#27357). Splitting config out of
     [keeper_meta] is the fix. Until then this suite states the contract, so the
@@ -31,7 +31,7 @@ let test_config_writes_are_dropped () =
   let meta = base_meta () in
   let written =
     { meta with
-      autoboot_enabled = not meta.autoboot_enabled
+      activation_mode = Masc.Keeper_activation_mode.Manual
     ; mention_targets = [ "someone" ]
     ; always_allow = Some true
     ; voice_always_allow = Some true
@@ -39,11 +39,10 @@ let test_config_writes_are_dropped () =
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 7
     ; sandbox_image = Some "written-image"
-    ; proactive = { enabled = not meta.proactive.enabled }
     }
   in
   let decoded = round_trip written in
-  Alcotest.(check bool) "autoboot_enabled is not durable" true decoded.autoboot_enabled;
+  Alcotest.(check bool) "autoboot_enabled is not durable" true (Masc.Keeper_activation_mode.restore_owner decoded.activation_mode);
   Alcotest.(check (list string)) "mention_targets is not durable" [] decoded.mention_targets;
   Alcotest.(check bool) "always_allow is not durable" true (decoded.always_allow = None);
   Alcotest.(check bool) "voice_always_allow is not durable" true (decoded.voice_always_allow = None);

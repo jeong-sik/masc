@@ -20,8 +20,10 @@ TELEMETRY = '/api/v1/dashboard/telemetry/summary'
 
 
 class ResponseLatencyProbeTest(unittest.TestCase):
-    def run_probe(self, tools_payloads, *, compressed=False, extra_args=(), identity_changes=False):
+    def run_probe(self, tools_payloads, *, compressed=False, extra_args=(), identity_changes=False, concurrent_gate=False, mcp_session=False):
         counts = {}
+        session_headers = []
+        gate = threading.Barrier(2) if concurrent_gate else None
         responses = {
             TOOLS: tools_payloads,
             SHELL: [{'status': 'initializing'}, {'status': 'ready'}],
@@ -36,13 +38,15 @@ class ResponseLatencyProbeTest(unittest.TestCase):
             def log_message(self, *_args):
                 pass
 
-            def reply(self, value, *, use_gzip=False):
+            def reply(self, value, *, use_gzip=False, headers=()):
                 body = json.dumps(value).encode()
                 if use_gzip:
                     body = gzip.compress(body)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
+                for name, value in headers:
+                    self.send_header(name, value)
                 if use_gzip:
                     self.send_header('Content-Encoding', 'gzip')
                 self.end_headers()
@@ -59,6 +63,12 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                                                 if identity_changes else 'fake-runtime'),
                     }})
                     return
+                if gate is not None:
+                    try:
+                        gate.wait(timeout=2)
+                    except threading.BrokenBarrierError:
+                        self.reply({'error': 'requests did not overlap'})
+                        return
                 sequence = responses[self.path]
                 ordinal = counts.get(self.path, 0)
                 counts[self.path] = ordinal + 1
@@ -68,9 +78,27 @@ class ResponseLatencyProbeTest(unittest.TestCase):
 
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                # A valid initialization without a session keeps this fixture
-                # focused on dashboard samples, with no synthetic Keeper work.
-                self.reply({'jsonrpc': '2.0', 'id': request['id'], 'result': {}})
+                method = request['method']
+                counts[method] = counts.get(method, 0) + 1
+                headers = ()
+                if mcp_session:
+                    if method == 'initialize':
+                        headers = (('Mcp-Session-Id', 'fixture-session'),)
+                    else:
+                        session_headers.append(self.headers.get('Mcp-Session-Id'))
+                    if method == 'ping' and gate is not None:
+                        try:
+                            gate.wait(timeout=2)
+                        except threading.BrokenBarrierError:
+                            self.reply({'error': 'GET and MCP ping did not overlap'})
+                            return
+                self.reply({'jsonrpc': '2.0', 'id': request.get('id'), 'result': {}},
+                           headers=headers)
+
+            def do_DELETE(self):
+                counts['cleanup'] = counts.get('cleanup', 0) + 1
+                session_headers.append(self.headers.get('Mcp-Session-Id'))
+                self.reply({})
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'result.json'
@@ -95,11 +123,48 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 self.assertEqual(evidence['same_runtime'], not identity_changes)
                 self.assertTrue(evidence['mcp_initialize']['valid'])
                 self.assertFalse(evidence['authenticated'])
+                if mcp_session:
+                    self.assertEqual(counts.get('initialize'), 1)
+                    self.assertEqual(counts.get('notifications/initialized'), 1)
+                    self.assertEqual(counts.get('ping'), 2)
+                    self.assertEqual(counts.get('cleanup'), 1)
+                    self.assertEqual(session_headers, ['fixture-session'] * 4)
+                    self.assertTrue(printed['mcp_available'])
                 return evidence
             finally:
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=2)
+
+    def test_concurrent_requests_overlap_and_keep_invalid_samples(self):
+        evidence = self.run_probe([{'status': 'warming'}, {'status': 'ready'}],
+            compressed=True, concurrent_gate=True,
+            extra_args=('--concurrent', '--path', TOOLS, '--path', TELEMETRY))
+        self.assertTrue(evidence['concurrent'])
+        self.assertEqual(evidence['summary'][TOOLS]['valid'], 1)
+        self.assertFalse(evidence['summary'][TOOLS]['all_samples_within_target'])
+        self.assertEqual(evidence['summary'][TELEMETRY]['valid'], 2)
+        for ordinal in range(2):
+            rows = [row for row in evidence['samples'] if row['ordinal'] == ordinal]
+            self.assertEqual(len(rows), 2)
+            self.assertLess(max(row['start_offset_ms'] for row in rows),
+                            min(row['wire_end_offset_ms'] for row in rows))
+        self.assertTrue(all(row['content_encoding'] == 'gzip'
+                            for row in evidence['samples'] if row['label'] == TOOLS))
+
+    def test_concurrent_mcp_session_ping_overlaps_get_and_cleans_up(self):
+        evidence = self.run_probe([{'loaded': True}], compressed=True,
+            concurrent_gate=True, mcp_session=True,
+            extra_args=('--concurrent', '--path', TOOLS, '--require-json', '/loaded=true'))
+        self.assertEqual(set(evidence['summary']), {TOOLS, 'mcp_ping'})
+        self.assertEqual(evidence['summary']['mcp_ping']['valid'], 2)
+        self.assertEqual(evidence['summary'][TOOLS]['valid'], 2)
+        for ordinal in range(2):
+            rows = [row for row in evidence['samples'] if row['ordinal'] == ordinal]
+            self.assertEqual({row['label'] for row in rows}, {TOOLS, 'mcp_ping'})
+            self.assertTrue(all(row['valid'] for row in rows))
+            self.assertLess(max(row['start_offset_ms'] for row in rows),
+                            min(row['wire_end_offset_ms'] for row in rows))
 
     def test_selected_get_json_requirement_excludes_unloaded_without_affecting_identity_or_mcp(self):
         evidence = self.run_probe([{'loaded': False}, {'loaded': True}],

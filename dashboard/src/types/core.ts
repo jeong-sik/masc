@@ -1,3 +1,4 @@
+import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
 import type { KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
@@ -47,6 +48,9 @@ export interface Agent {
 }
 
 export interface Task {
+  /** Summary rows require a detail read before rendering complete task fields. */
+  detail_level?: 'summary' | 'full'
+  description_revision?: string
   id: string
   title: string
   goal_id?: string | null
@@ -1357,7 +1361,7 @@ export interface Keeper {
   heartbeat_stale_after_s?: number | null
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
-  proactive_enabled?: boolean
+  activation_mode?: KeeperActivationMode
   pause_state?: KeeperPauseState | null
   runtime_blocker_state?: KeeperRuntimeBlockerState | null
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
@@ -1538,9 +1542,6 @@ interface KeeperConfigExecution {
   runtime_ref?: RuntimeRef | null
 }
 
-interface KeeperConfigProactive {
-  enabled: boolean
-}
 
 export interface KeeperConfigSkills {
   /** null inherits every published Skill; [] explicitly selects none. */
@@ -1689,7 +1690,7 @@ export interface KeeperConfig {
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
   config_transaction_warnings?: KeeperManifestWarning[]
-  autoboot_enabled: boolean
+  activation_mode: KeeperActivationMode
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder
@@ -1707,7 +1708,6 @@ export interface KeeperConfig {
   sandbox_roots: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
-  proactive: KeeperConfigProactive
   skills: KeeperConfigSkills
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime

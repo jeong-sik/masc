@@ -308,7 +308,7 @@ installed_version="$(capture_installed_version)"
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_KEEPER_BOOTSTRAP_ENABLED=false \
+  MASC_KEEPER_AUTONOMOUS_ENABLED=false \
   "$installed_bin" --base-path "$base_path" --port "$PORT") >"$server_log" 2>&1 &
 SERVER_PID=$!
 

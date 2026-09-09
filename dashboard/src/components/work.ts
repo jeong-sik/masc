@@ -8,7 +8,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers, executionTaskTotal } from '../store'
-import { goalTreeData } from '../goal-tree-state'
+import { goalTreeData, goalTreeError } from '../goal-tree-state'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { BoardSurface } from './board/board-surface'
@@ -1178,7 +1178,7 @@ function WorkAside({
         <span class="wka-bar-t">운영 상태</span>
         <span class="wka-bar-live">
           <span class="wka-livedot" aria-hidden="true"></span>
-          ${counts.active} active
+          ${goalTreeError.value ? '목표 확인 불가' : `${counts.active} active`}
         </span>
         <button
           type="button"
@@ -1216,7 +1216,9 @@ function WorkAside({
             지금 상황
             ${flagged.length > 0 ? html`<span class="wka-h-n bad">${flagged.length}</span>` : null}
           </div>
-          ${flagged.length === 0
+          ${goalTreeError.value
+            ? html`<div role="alert" data-testid="wka-goal-source-error">목표 상태 확인 불가 · ${goalTreeError.value}</div>`
+            : flagged.length === 0
             ? html`<div class="wka-calm mono" data-testid="wka-flagged-calm">주의 목표 없음 · 정상 순환</div>`
             : html`
               <div class="wka-list" data-testid="wka-flagged-list">
@@ -1327,6 +1329,7 @@ function WorkSurfaceV2() {
   const goalList = goals.value
   const executionTasks = tasks.value
   const goalTreeSnapshot = goalTreeData.value
+  const goalSourceError = goalTreeError.value
   const goalStoreTasks = useMemo(
     () => collectGoalTreeTasks(goalTreeSnapshot?.tree ?? []),
     [goalTreeSnapshot],
@@ -1649,10 +1652,11 @@ function WorkSurfaceV2() {
           </div>
         </header>
 
+          ${goalSourceError ? html`<div role="alert" data-testid="work-goal-source-error">목표 데이터를 읽을 수 없습니다 · ${goalSourceError}</div>` : null}
           <section class="wk-kpis" data-testid="work-kpis">
             <div class="wk-kpi primary">
               <div class="wk-kpi-k">활성 목표</div>
-              <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
+              <div class="wk-kpi-v brass" data-testid="kpi-goals">${goalSourceError ? '—' : totals.goals}</div>
             </div>
             <div class="wk-kpi">
               <div class="wk-kpi-k">전체 작업</div>

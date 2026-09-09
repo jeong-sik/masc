@@ -52,9 +52,8 @@ type profile_update =
   ; microvm_backend : Keeper_microvm_backend.t option
   ; network_mode : Keeper_types_profile.network_mode
   ; mention_targets : string list
-  ; proactive_enabled : bool
   ; max_context_override : int option
-  ; autoboot_enabled : bool
+  ; activation_mode : Keeper_activation_mode.t
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
@@ -75,8 +74,8 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Set_autoboot of
-      { enabled : bool
+  | Set_activation_mode of
+      { mode : Keeper_activation_mode.t
       ; updated_at : string
       }
   | Update_profile of profile_update

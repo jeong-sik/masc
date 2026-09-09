@@ -249,10 +249,6 @@ let writes_to_file flag =
   String.equal flag "-o" || String.starts_with ~prefix:"--output" flag
 ;;
 
-let rg_flag_runs_preprocessor flag =
-  String.equal flag "--pre" || String.starts_with ~prefix:"--pre-" flag
-;;
-
 let sets_system_time flag =
   String.equal flag "-s" || String.equal flag "--set" || String.starts_with ~prefix:"--set=" flag
 ;;
@@ -295,6 +291,9 @@ let classify_git_argv argv =
   globals argv
 ;;
 
+(* rg and sort use the ordinary execution-observation path. Their option
+   languages may execute helpers or write files; the enforced box, rather
+   than an incomplete local option parser, owns that boundary. *)
 let classify_argv argv =
   match argv with
   | [] | "" :: _ -> Needs_observation Unproven_request
@@ -305,8 +304,7 @@ let classify_argv argv =
       (match command with
        | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
        | "find" -> not (rejected find_flag_writes_or_execs)
-       | "sort" | "diff" -> not (rejected writes_to_file)
-       | "rg" -> not (rejected rg_flag_runs_preprocessor)
+       | "diff" -> not (rejected writes_to_file)
        | "date" -> not (rejected sets_system_time)
        | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && String.sub flag 0 1 = "-") rest
        (* uniq writes its second operand to a file; one operand is a read. *)

@@ -517,6 +517,16 @@ let list_goals config ?phase () =
          | Some phase -> goal.phase = phase)
   |> sort_goals
 
+let list_goals_result config ?phase () =
+  match load_primary_state config with
+  | Undecodable detail -> Error detail
+  | Loaded state ->
+      Ok (state.goals
+          |> List.filter (fun goal -> match phase with
+              | None -> true
+              | Some phase -> goal.phase = phase)
+          |> sort_goals)
+
 let blank_opt = function
   | None -> true
   | Some raw -> String.trim raw = ""

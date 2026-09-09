@@ -37,7 +37,7 @@ val keeper_count : Workspace.config -> int
 val configured_keeper_count : Workspace.config -> int
 (** Number of distinct keeper names discovered from [*.toml] in the keepers
     config dir. Every file counts, including ones that fail to load (their name
-    falls back to the filename stem); no filename or [autoboot_enabled]
+    falls back to the filename stem); no filename or [activation_mode]
     filtering happens here. The materializability-filtered view is
     [materializable_configured_keeper_names] in
     [server_routes_http_runtime_fleet_scan]. *)

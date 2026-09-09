@@ -305,8 +305,7 @@ false`로 들어오므로 모델과 샌드박스를 갖추고 직접 시작하�
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"

@@ -62,7 +62,10 @@ type source =
     each other; saying it here too makes "both" and "neither" unrepresentable
     rather than something {!validate} has to catch. *)
 
+type intent = Auto | Request_effect
+
 type execute_input = {
+  intent : intent;
   source : source;
   cwd : string option;
   timeout_sec : float option;

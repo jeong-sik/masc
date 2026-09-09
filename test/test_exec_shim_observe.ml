@@ -75,6 +75,17 @@ let test_observe_discard_without_persistent_effects () =
                "ordinary discard redirection works"
                true
                (snd (Unix.waitpid [] shell) = Unix.WEXITED 0);
+             let diff_status right =
+               let git = Unix.create_process "git"
+                 [| "git"; "diff"; "--no-index"; "--no-ext-diff";
+                    "--no-textconv"; "--exit-code"; persistent; right |]
+                 Unix.stdin Unix.stdout Unix.stderr in
+               snd (Unix.waitpid [] git)
+             in
+             check bool "unchanged diff is payload exit zero" true
+               (diff_status persistent = Unix.WEXITED 0);
+             check bool "changed diff is payload exit one under the same Observe policy" true
+               (diff_status "/dev/null" = Unix.WEXITED 1);
              List.iter
                (fun path ->
                   assert_denied "persistent write" Unix.EACCES (fun () ->

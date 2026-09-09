@@ -314,9 +314,8 @@ let profile_update_command (meta : keeper_meta) =
     ; microvm_backend = meta.microvm_backend
     ; network_mode = meta.network_mode
     ; mention_targets = meta.mention_targets
-    ; proactive_enabled = meta.proactive.enabled
     ; max_context_override = meta.max_context_override
-    ; autoboot_enabled = meta.autoboot_enabled
+    ; activation_mode = meta.activation_mode
     ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
@@ -436,11 +435,11 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok network_mode ->
-  let autoboot_enabled =
-    match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
+  let activation_mode =
+    match p.activation_mode_opt, p.profile_defaults.activation_mode with
     | Some value, _ -> value
     | None, Some value -> value
-    | None, None -> old.autoboot_enabled
+    | None, None -> old.activation_mode
   in
   let mention_targets =
     resolve_mention_targets
@@ -470,7 +469,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
        | None -> old.sandbox_image);
     network_mode;
     microvm_backend = p.profile_defaults.microvm_backend;
-    autoboot_enabled;
+    activation_mode;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;
     runtime = source_meta.runtime;
@@ -485,15 +484,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
       Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
     voice_always_allow =
       Dashboard_utils.first_some p.profile_defaults.voice_always_allow old.voice_always_allow;
-    proactive = {
-      enabled =
-        (match p.proactive_enabled_opt with
-         | Some v -> v
-         | None ->
-             (match p.profile_defaults.proactive_enabled with
-              | Some v -> v
-              | None -> old.proactive.enabled));
-    };
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt
        else old.max_context_override);

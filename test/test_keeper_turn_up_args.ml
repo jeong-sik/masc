@@ -1841,8 +1841,8 @@ let test_parse_rejects_unknown_keys () =
     ];
   check (list string) "known set is exactly the parse-consumed keys"
     (List.sort String.compare
-       [ "name"; "runtime_id"; "autoboot_enabled"; "mention_targets"
-       ; "max_context_override"; "proactive_enabled"; "sandbox_profile"
+       [ "name"; "runtime_id"; "activation_mode"; "mention_targets"
+       ; "max_context_override"; "sandbox_profile"
        ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
        ; "instructions"
        ])

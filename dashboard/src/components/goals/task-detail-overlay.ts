@@ -16,6 +16,8 @@ import { selectedTask } from './task-detail-selection'
 import { tasks } from '../../store'
 import {
   closeTaskDetail,
+  taskDetailsState,
+  retryTaskDetails,
   openTaskDetail,
   taskEvents,
   taskEventsLoading,
@@ -413,7 +415,11 @@ function HandoffSection({ task }: { task: Task }) {
 
 export function TaskDetailOverlay() {
   const task = selectedTask.value
+  const details = taskDetailsState.value
   if (!task) return null
+  const activityAvailable = details.kind === 'ready'
+    && task.detail_level !== 'summary' && hasActivityTab(task)
+  const showingActivity = activeTab.value === 'activity' && activityAvailable
 
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `task-detail-title-${task.id}`
@@ -455,6 +461,7 @@ export function TaskDetailOverlay() {
             <button
               key=${tab}
               type="button"
+              disabled=${tab === 'activity' && !activityAvailable}
               class="v2-workspace-action px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
                   ? 'border-[var(--accent-40)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
@@ -468,7 +475,12 @@ export function TaskDetailOverlay() {
 
       ${'' /* Body */}
       <div class="flex flex-col gap-5 p-6">
-        ${activeTab.value === 'overview' ? html`
+        ${!showingActivity ? details.kind === 'loading'
+          ? html`<${LoadingState}>작업 상세 불러오는 중...<//>`
+          : details.kind === 'error'
+            ? html`<${ErrorState} message=${details.message} />
+                <button type="button" class="v2-workspace-action cursor-pointer px-3 py-2" onClick=${retryTaskDetails}>다시 시도</button>`
+            : html`
           ${'' /* Description */}
           ${task.description ? html`
             <div>

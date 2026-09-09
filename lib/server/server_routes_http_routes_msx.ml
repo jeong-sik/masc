@@ -180,6 +180,24 @@ let recent_players ~now =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
+(* The lane owns immutable RGB snapshots and reuses their identity until a
+   machine mutation. Cache only pixel encoding: clock and player metadata must
+   remain live. One entry bounds retained memory across load/restore/eject.
+   Stdlib mutex: this pure serializer also runs outside Eio in route tests;
+   neither the protected lookup nor Base64 encoding performs I/O or yields. *)
+let encoded_pixels_mutex = Mutex.create ()
+let encoded_pixels : (string * string) option ref = ref None
+
+let frame_rgb_base64 rgb =
+  Mutex.lock encoded_pixels_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock encoded_pixels_mutex) (fun () ->
+    match !encoded_pixels with
+    | Some (previous, encoded) when previous == rgb -> encoded
+    | None | Some _ ->
+        let encoded = Base64.encode_string rgb in
+        encoded_pixels := Some (rgb, encoded);
+        encoded)
+
 let frame_json () : Yojson.Safe.t =
   match Msx_lane.frame () with
   | None -> `Assoc [ ("loaded", `Bool false) ]
@@ -193,7 +211,7 @@ let frame_json () : Yojson.Safe.t =
       ; ( "cartridge"
         , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
       ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
-      ; ("rgb_base64", `String (Base64.encode_string f.Msx_lane.rgb))
+      ; ("rgb_base64", `String (frame_rgb_base64 f.Msx_lane.rgb))
       ; ( "players"
         , `List
             (List.map
@@ -322,7 +340,7 @@ let add_routes router =
   |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
        with_public_read
          (fun _state req reqd ->
-           Http.Response.json_value ~compress:true ~request:req (frame_json ()) reqd)
+           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
          request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read

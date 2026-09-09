@@ -57,7 +57,7 @@ describe('ToolMonitorReactivityBoard', () => {
           read_errors: [],
           details: [{
             name: 'nick0cave',
-            autoboot_enabled: true,
+            activation_mode: 'autonomous',
             pause_kind: 'blocked',
             paused_elapsed_sec: 265,
             missing_pause_root_cause: false,

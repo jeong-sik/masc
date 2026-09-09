@@ -807,7 +807,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("keeper_keepalive_interval_s", `Float keepalive_interval_s);
               ("keeper_snapshot_interval_s", `Float snapshot_interval_s);
               ("heartbeat_stale_after_s", `Float heartbeat_stale_after_s);
-              ("autoboot_enabled", `Bool m.autoboot_enabled);
+              ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
               ( "status",
                 `String
                   (Keeper_status_runtime.keeper_surface_status ~diagnostic) );
@@ -834,8 +834,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ~some:Keeper_usage_resolution.to_json
                   m.runtime.last_usage_resolution );
               ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
-              ("autoboot_enabled", `Bool m.autoboot_enabled);
-              ("proactive_enabled", `Bool m.proactive.enabled);
+              ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);

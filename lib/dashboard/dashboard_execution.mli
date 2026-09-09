@@ -19,6 +19,13 @@ val task_json :
   Masc_domain.task ->
   Yojson.Safe.t
 
+(** List projection. Long descriptions become UTF-8-safe previews marked
+    [detail_level=summary] with the full description SHA-256 revision. Other
+    fields remain complete; {!task_json} still returns the full description. *)
+val task_list_json :
+  goal_task_index:(string, string list) Hashtbl.t ->
+  Masc_domain.task -> Yojson.Safe.t
+
 (** How many terminal tasks inside the recency window the execution payload
     carries. *)
 val recent_terminal_limit : int

@@ -671,8 +671,8 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);
-          Alcotest.(check bool) "has autoboot_enabled" true
-            (List.mem_assoc "autoboot_enabled" props)
+          Alcotest.(check bool) "has activation_mode" true
+            (List.mem_assoc "activation_mode" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 (* ============================================================ *)

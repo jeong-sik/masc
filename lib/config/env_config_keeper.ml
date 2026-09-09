@@ -17,7 +17,7 @@ open Env_config_core
 
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
-  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every

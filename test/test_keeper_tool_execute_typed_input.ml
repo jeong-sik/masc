@@ -13,7 +13,7 @@ let typed_ok input =
 ;;
 
 let mk_argv ?cwd ?timeout_sec argv : Execute_input.execute_input =
-  { source = Argv argv; cwd; timeout_sec }
+  { source = Argv argv; cwd; timeout_sec; intent = Auto }
 ;;
 
 let mk_exec executable argv = mk_argv (executable :: argv)
@@ -1102,6 +1102,16 @@ let test_a_representable_costume_has_nothing_to_say () =
   | _ -> Alcotest.fail "a representable costume has no rewrite to offer"
 ;;
 
+let test_execute_intent_is_typed_and_defaults_to_auto () =
+  let parse fields = parse_json_exn (`Assoc (("argv", `List [ `String "ls" ]) :: fields)) in
+  Alcotest.(check bool) "default is Auto" true ((parse []).intent = Execute_input.Auto);
+  Alcotest.(check bool) "effect request survives parsing" true
+    ((parse [ "intent", `String "request_effect" ]).intent = Execute_input.Request_effect);
+  Alcotest.(check bool) "unknown intent is refused" true
+    (Result.is_error (Execute_input.of_json
+      (`Assoc [ "argv", `List [ `String "ls" ]; "intent", `String "allow" ])))
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1328,4 +1338,6 @@ let suite =
       ])
 ;;
 
-let () = Alcotest.run "Keeper_tool_execute_typed_input typed" [ suite ]
+let () = Alcotest.run "Keeper_tool_execute_typed_input typed"
+  [ suite; "intent", [ Alcotest.test_case "explicit intent never means permission" `Quick
+      test_execute_intent_is_typed_and_defaults_to_auto ] ]

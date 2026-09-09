@@ -115,8 +115,8 @@ let item ~(config : Workspace.config) requested_name =
   let runtime_status = runtime_meta |> Option.map (status ~config) in
   let autoboot_enabled =
     match runtime_meta with
-    | Some meta -> Some meta.autoboot_enabled
-    | None -> defaults.autoboot_enabled
+    | Some meta -> Some (Keeper_activation_mode.restore_owner meta.activation_mode)
+    | None -> Option.map Keeper_activation_mode.restore_owner defaults.activation_mode
   in
   let paused = runtime_meta |> Option.map (fun meta -> meta.paused) in
   let dormant_autoboot_disabled =

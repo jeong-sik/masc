@@ -196,15 +196,14 @@ that prompt into its ephemeral base path from the explicit root.
    (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the AGENT_CORE catalog
    (the AGENT_CORE embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
    the provider `endpoint` at the local mock.
-2. **The keeper TOML must opt into autoboot.** Declarative keepers are excluded by design unless the
-   `[keeper]` section sets `autoboot_enabled = true` (`keeper_runtime.ml:154`) **and**
-   `proactive_enabled = true` (`keeper_activation_readiness.ml:16`, with `paused` false). A copied
-   live config (e.g. `analyst.toml`, which ships `autoboot_enabled = false`) yields `0 keeper(s) to
-   boot`.
+2. **The keeper TOML must select autonomous activation.** Set
+   `[keeper] activation_mode = "autonomous"` to restore the owner and produce
+   spontaneous turns. `on_demand` restores the owner for requested work;
+   `manual` waits for an explicit start. Paused keepers remain paused.
 3. **The keeper TOML must set `sandbox_profile = "docker"`** — boot rejects without it, and the
    `"local"` playground profile is fail-closed by default (RFC-0394). Dev/test harnesses may lift
    the gate per process with `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`.
-4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
+4. Boot env: `MASC_KEEPER_AUTONOMOUS_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
 5. Every generated Keeper has a non-empty

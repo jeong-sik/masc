@@ -140,7 +140,7 @@ let test_installed_keeper_rides_as_an_idle_row () =
             (`Assoc
               [ ("name", `String keeper_name)
               ; ("trace_id", `String "trace-keeper-turns-route")
-              ; ("autoboot_enabled", `Bool false)
+              ; ("activation_mode", `String "manual")
               ])
         with
         | Ok meta -> meta

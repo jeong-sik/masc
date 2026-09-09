@@ -34,9 +34,8 @@ let init_unified_tool_registry () =
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let fixture_config_keys =
     [ "mention_targets"
-    ; "proactive_enabled"
     ; "always_allow"
-    ; "autoboot_enabled"
+    ; "activation_mode"
     ; "telemetry_feedback_enabled"
     ; "telemetry_feedback_window_hours"
     ]
@@ -148,9 +147,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     let apply_bool_opt key current =
       match bool_opt key with Some _ as v -> v | None -> current
     in
-    let apply_bool key current =
-      match bool_opt key with Some v -> v | None -> current
-    in
     let apply_string_list key current =
       match Safe_ops.json_string_list key fixture_json with
       | [] -> current
@@ -159,12 +155,14 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     Ok
       { meta with
         mention_targets = apply_string_list "mention_targets" meta.mention_targets
-      ; proactive =
-          (match bool_opt "proactive_enabled" with
-           | Some enabled -> { enabled }
-           | None -> meta.proactive)
+      ; activation_mode =
+          (match Safe_ops.json_string_opt "activation_mode" fixture_json with
+           | None -> meta.activation_mode
+           | Some raw ->
+             match Masc.Keeper_activation_mode.of_string raw with
+             | Some mode -> mode
+             | None -> invalid_arg "invalid fixture activation_mode")
       ; always_allow = apply_bool_opt "always_allow" meta.always_allow
-      ; autoboot_enabled = apply_bool "autoboot_enabled" meta.autoboot_enabled
       ; telemetry_feedback_enabled =
           apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
       ; telemetry_feedback_window_hours =

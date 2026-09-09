@@ -82,7 +82,7 @@ let with_source_terminal_lane f =
            (`Assoc
               [ "name", `String keeper_name
               ; "trace_id", `String "trace-paused-source-terminal-owner"
-              ; "autoboot_enabled", `Bool false
+              ; "activation_mode", `String "manual"
               ])
          |> require_ok "parse Keeper metadata fixture"
        in

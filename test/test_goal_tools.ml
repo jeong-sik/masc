@@ -459,23 +459,33 @@ let test_operator_confirmation_binds_current_proof () =
   let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
     | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
     | _ -> fail "missing current proof" in
-  let confirm ?(request_id=verdict.request_id) () =
+  let confirm ?(request_id=verdict.request_id) ?(run_id=verdict.verification_run_id)
+      ?(operator_id="authenticated-operator") () =
     Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
-      ~config ~operator_id:"authenticated-operator" (`Assoc ["goal_id", `String goal.id;
+      ~config ~operator_id (`Assoc ["goal_id", `String goal.id;
         "criterion_revision", `String goal.criterion_revision; "request_id", `String request_id;
-        "verification_run_id", `String verdict.verification_run_id]) in
+        "verification_run_id", `String run_id]) in
   (match confirm ~request_id:"another-request" () with
    | Error _ -> () | Ok _ -> fail "stale request accepted");
+  (match confirm ~run_id:"another-run" () with
+   | Error _ -> () | Ok _ -> fail "wrong verifier run accepted");
   (* Simulate the narrow crash boundary after durable confirmation but before
      the goal phase write, then retry the actual application operation. *)
   (match Goal_verification.record_human_confirmation config ~goal_id:goal.id verdict
       ~operator_id:"authenticated-operator" with
    | Ok _ -> () | Error detail -> fail detail);
-  let first = match confirm () with Ok json -> json | Error detail -> fail detail in
+  let first = match confirm ~operator_id:"another-operator" () with Ok json -> json | Error detail -> fail detail in
   check string "operator confirmation completes" "completed"
     Yojson.Safe.Util.(member "goal" first |> member "phase" |> to_string);
   let history_path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   let history = Fs_compat.load_file history_path in
+  let completion_events = String.split_on_char '\n' history
+    |> List.filter (fun line -> line <> "") |> List.map Yojson.Safe.from_string
+    |> List.filter (fun json -> Yojson.Safe.Util.(member "payload" json |> member "phase") = `String "completed") in
+  (match completion_events with
+   | [event] -> check string "crash retry event credits persisted first operator" "authenticated-operator"
+       Yojson.Safe.Util.(member "payload" event |> member "actor" |> to_string)
+   | _ -> fail "expected one completion event");
   let second_operator = Workspace_goals.confirm_completion config ~goal_id:goal.id
     ~operator_id:"another-operator" ~criterion_revision:goal.criterion_revision
     ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id in

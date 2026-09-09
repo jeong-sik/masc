@@ -151,12 +151,13 @@ Besides the existing API and Ollama settings, the terminal wizard offers
 tool is not installed, and a local server may point at an endpoint on
 another machine.
 
-Only the connection you pick is added. For Claude Code and Codex, enter the
-model id; the installed model catalog supplies its context size when known,
-and the CLI connection enables tools and streaming without a capability quiz.
-An unknown model still asks for its context size. For HTTP connections, enter
-the context size and explicitly confirm tool calling and streaming supported
-by your server. The HTTP capability overlay applies only to that provider.
+Only the connection you pick is added. Choose a model by number from the
+available list, or enter a custom model ID. The wizard fills known context
+limits and displays their source; an unknown limit needs the documented or
+server-configured value. Claude Code and Codex enable tools and streaming
+without a capability quiz. HTTP connections ask you to confirm that the server
+supports tool calling and streaming. The HTTP capability overlay applies only
+to that provider.
 API credentials are environment variable names, never values; the seeded Z.AI
 connection reads `ZAI_API_KEY` from the shell that starts MASC.
 

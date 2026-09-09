@@ -1739,7 +1739,6 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "max_context", Json_util.int_opt_to_json rt.model.max_context
           ; "thinking_support", `Bool rt.model.thinking_support
           ; "preserve_thinking", Json_util.bool_opt_to_json rt.model.preserve_thinking
-          ; "max_thinking_budget", Json_util.int_opt_to_json rt.model.max_thinking_budget
           ; "streaming", `Bool rt.model.streaming
           ; "temperature", Json_util.float_opt_to_json rt.model.temperature
           ; "top_p", Json_util.float_opt_to_json rt.model.top_p

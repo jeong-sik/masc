@@ -155,7 +155,6 @@ type model_spec =
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
   ; preserve_thinking : bool option
-  ; max_thinking_budget : int option
   ; streaming : bool
   ; temperature : float option
   ; top_p : float option

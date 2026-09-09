@@ -1158,9 +1158,6 @@ let parse_model (id : string) (tbl : Otoml.t)
     let preserve_thinking_result =
       typed_find "a boolean" path tbl "preserve-thinking" Otoml.get_boolean
     in
-    let max_thinking_budget_result =
-      typed_find "an integer" path tbl "max-thinking-budget" Otoml.get_integer
-    in
     let streaming_result =
       typed_find_or "a boolean" path tbl "streaming" Otoml.get_boolean ~default:true
     in
@@ -1185,7 +1182,6 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* tools_support = tools_support_result in
     let* thinking_support = thinking_support_result in
     let* preserve_thinking = preserve_thinking_result in
-    let* max_thinking_budget = max_thinking_budget_result in
     let* streaming = streaming_result in
     let* max_context = max_context_result in
     let* capabilities = capabilities_result in
@@ -1207,7 +1203,6 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; max_context
         ; thinking_support
         ; preserve_thinking
-        ; max_thinking_budget
         ; streaming
         ; temperature
         ; top_p

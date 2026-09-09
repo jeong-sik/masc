@@ -772,6 +772,7 @@ val set_runtime_default :
 val set_first_run_runtime :
   ?runtime_config_path:string ->
   ?fallback_runtime_ids:string list ->
+  ?bind_imp:bool ->
   runtime_id:string ->
   unit ->
   (config_commit_receipt, string) result
@@ -781,7 +782,8 @@ val set_first_run_runtime :
     by [fallback_runtime_ids], in order. Exact-output lanes remain primary-only:
     HTTP runtimes use catalog slots; official clients use CLI slots. All candidates
     must be distinct, enabled, materialized runtime IDs. Keeper assignments are
-    preserved. Intended
+    preserved unless [bind_imp] explicitly selects this lane for imp (default false).
+    Other Keeper assignments are always preserved. Intended
     for an explicit first-install setup action, since existing lane choices
     are replaced. Validation failures leave the configuration unchanged. *)
 

@@ -309,14 +309,32 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 
+(* RFC-0377 admits a whole conversation backlog as one wake, so a batch is
+   every pending payload of one connector conversation. A batch used to route
+   as "not a continuation wake", so a reply to a batched conversation could
+   never be [Continuation_route_addressed], and under the rule #34662 removed
+   its rows could never settle (#34662 review). The newest member names the
+   conversation; [Keeper_surface_post.matches_continuation_route] compares
+   the conversation, not the message. Members that are not the same
+   conversation are not one continuation and route nowhere. *)
 let continuation_channel_of_wake = function
-  | Keeper_registry.Woken [ payload ] ->
-    (match Keeper_event_queue.continuation_channel_of_payload payload with
-     | Some channel when Keeper_continuation_channel.is_routable channel ->
-       Some channel
-     | Some _ | None -> None)
+  | Keeper_registry.Woken (_ :: _ as payloads) ->
+    let routable payload =
+      match Keeper_event_queue.continuation_channel_of_payload payload with
+      | Some channel when Keeper_continuation_channel.is_routable channel ->
+        Some channel
+      | Some _ | None -> None
+    in
+    (match List.rev_map routable payloads with
+     | Some newest :: older
+       when List.for_all
+              (function
+                | Some channel ->
+                  Keeper_continuation_channel.same_conversation channel newest
+                | None -> false)
+              older -> Some newest
+     | Some _ :: _ | None :: _ | [] -> None)
   | Keeper_registry.Woken []
-  | Keeper_registry.Woken (_ :: _ :: _)
   | Keeper_registry.Proactive_tick
   | Keeper_registry.Chat_request -> None
 ;;
@@ -1358,7 +1376,8 @@ let run_keeper_cycle
                              (Keeper_tool_execution.Surface_post_completed _) ) ->
                          (* A terminal surface post landed on a different channel
                             than the one that woke this turn. Not a judgement to
-                            ignore: leave it pending for investigation. *)
+                            ignore; the batch is still acked on completion
+                            (#34662) and the route names what happened. *)
                          Continuation_route_mismatch
                        | ( Some _
                          , Some

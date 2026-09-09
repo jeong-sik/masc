@@ -62,17 +62,18 @@ def main():
                     primary_count += 1
                 if index == 0:
                     names = [t['function']['name'] for t in body.get('tools', [])]
-                    if 'Execute' not in names:
-                        response = {'error': {'message': 'Fixture requires actual Execute schema', 'type': 'invalid_request_error'}}
+                    if not {'Write', 'Execute'}.issubset(names):
+                        response = {'error': {'message': 'Fixture requires actual Write and Execute schemas', 'type': 'invalid_request_error'}}
                         status = 400
                     else:
                         save(root / 'execute-schema.json', next(t for t in body['tools'] if t['function']['name'] == 'Execute'))
+                        save(root / 'write-schema.json', next(t for t in body['tools'] if t['function']['name'] == 'Write'))
                         command = "from pathlib import Path; p=Path('gate-effect.txt'); p.open('a').write('one real gate effect\\n'); print('gate-effect-written', str(p.resolve()))"
-                        response = {'id': 'fixture-gate-request', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'gate-effect-once', 'type': 'function', 'function': {'name': 'Execute', 'arguments': json.dumps({'argv': ['python3', '-c', command], 'intent': 'request_effect'})}}]}, 'finish_reason': 'tool_calls'}]}
+                        response = {'id': 'fixture-gate-request', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'completed-before-gate', 'type': 'function', 'function': {'name': 'Write', 'arguments': json.dumps({'file_path': 'pre-gate-effect.txt', 'content': 'completed before Gate approval\n'})}}, {'id': 'gate-effect-once', 'type': 'function', 'function': {'name': 'Execute', 'arguments': json.dumps({'argv': ['python3', '-c', command], 'intent': 'request_effect'})}}]}, 'finish_reason': 'tool_calls'}]}
                         status = 200
                 elif index == 1:
-                    response = {'id': 'fixture-yield', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'The requested effect is waiting for its durable Gate resolution.'}, 'finish_reason': 'stop'}]}
-                    status = 200
+                    response = {'error': {'message': 'Synthetic rate limit after a completed effect and a new Gate obligation', 'type': 'rate_limit_error'}}
+                    status = 429
                 elif not approval_resolved.is_set():
                     response = {'error': {'message': 'Unexpected model invocation before authoritative Gate resolution', 'type': 'invalid_request_error'}}
                     status = 400
@@ -95,8 +96,8 @@ def main():
             if streaming:
                 choice = response['choices'][0]
                 delta = choice['message']
-                for tool in delta.get('tool_calls', []):
-                    tool['index'] = 0
+                for tool_index, tool in enumerate(delta.get('tool_calls', [])):
+                    tool['index'] = tool_index
                 chunk = {'id': response['id'], 'object': 'chat.completion.chunk', 'model': 'resume-fixture', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
                 stop = {'id': response['id'], 'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': choice['finish_reason']}], 'usage': response['usage']}
                 raw = ('data: ' + json.dumps(chunk) + '\n\n' + 'data: ' + json.dumps(stop) + '\n\ndata: [DONE]\n\n').encode()
@@ -239,6 +240,12 @@ def main():
         obligations = waiting['phase']['origin']['waiting']['obligations']
         if len(obligations) != 1:
             raise AssertionError('Expected one actual producer Gate obligation')
+        retry = waiting['phase']['origin']['waiting'].get('runtime_retry')
+        if retry is None or retry['next_runtime_id'] != 'alternate.sample':
+            raise AssertionError('Gate wait lost the simultaneous frozen runtime retry')
+        completed = list((base / '.masc/playground').rglob('pre-gate-effect.txt'))
+        if len(completed) != 1 or completed[0].read_bytes() != b'completed before Gate approval\n':
+            raise AssertionError('The initial completed effect is absent before Gate approval')
         approval_id = obligations[0]['approval_id']
         gate = http('/api/v1/dashboard/gate?force=true')
         save(root / 'gate-before-resolution.json', gate)
@@ -258,8 +265,10 @@ def main():
         save(root / 'terminal-observation.json', observed)
         if observed['state'] != 'Succeeded':
             raise AssertionError('Original operation did not succeed')
-        if len(events) != 3 or [e['response_status'] for e in events] != [200, 200, 200]:
-            raise AssertionError('Expected tool request, pending yield, and approved same-operation continuation')
+        if len(events) != 3 or [e['response_status'] for e in events] != [200, 429, 200]:
+            raise AssertionError('Expected completed effect/new Gate request, rate limit, and approved frozen-runtime continuation')
+        if not events[2]['path'].startswith('/alternate'):
+            raise AssertionError('Approved operation did not use its frozen alternate runtime')
         original = events[0]['body']['messages']
         resumed = events[2]['body']['messages']
         for message in [m for m in original if m['role'] == 'user']:
@@ -272,6 +281,11 @@ def main():
             raise AssertionError('The real approved effect did not execute exactly once')
         effect = effects[0]
         save(root / 'effect.json', {'path': str(effect.relative_to(base)), 'sha256': hashlib.sha256(effect.read_bytes()).hexdigest(), 'bytes': effect.read_text()})
+        rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines()]
+        writes = [row for row in rows if row.get('keeper') == keeper and row.get('tool') == 'Write']
+        if len(writes) != 1 or writes[0]['success'] is not True:
+            raise AssertionError('The completed pre-Gate effect was replayed or lost')
+        save(root / 'completed-before-gate.json', writes[0])
         transcript = [json.loads(line) for line in (base / '.masc/keeper_chat' / (keeper + '.jsonl')).read_text().splitlines()]
         if any(row['delivery_key']['operation_id'] != operation_id for row in transcript):
             raise AssertionError('Transcript changed operation identity')

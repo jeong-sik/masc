@@ -21,12 +21,12 @@ missing input snippets, explicit persistence/retrieval failure, retry, keyboard
 focus, CRLF changes, a final-newline-only diff, cancellation before computation,
 and worker termination on close/reopen/unmount. Component tests simulate the
 worker transport while executing the real jsdiff engine; actual browser worker
-loading remains pending CI artifact verification.
-No local build was run. CI build and browser screenshots are still pending.
+loading was subsequently verified in the CI artifact scenario below.
+No local build was run. CI-built browser screenshots are recorded below.
 
 ## Remaining acceptance work
 
-Objective 15 still requires CI-built browser proof and deployed Keeper edits. Non-UTF-8 data cannot round-trip through this
+Objective 15 still requires deployed Keeper edits and full-chat integration proof. Non-UTF-8 data cannot round-trip through this
 JSON text endpoint and fails byte verification. Endpoint-owned remote edits are
 outside the current backend producer coverage. LSP observation is independent
 and remains unverified.
@@ -52,7 +52,18 @@ artifact responses, and exercises the actual browser worker. It checks CRLF and
 final-newline changes, full originals, visible persistence failure, corruption
 rejection, focus, and mobile overflow; it writes desktop/mobile screenshots and
 a receipt. These are synthetic HTTP records, not a deployed autonomous edit.
-The harness is implemented; screenshots have not yet been produced.
+Browser run passed at 2026-09-09T17:21:54.684Z using artifact 10116348739
+from CI run 34382147967, PR source 3c5388a76d9dc2cda2d6e0cab618559a79dd2550,
+checkout 30b9aa691b2f92f1bb64d902dfcf13ebeb7a5897. The run was later cancelled
+by a newer push; this is artifact execution proof, not an overall green CI claim.
+The dashboard source and dependency files were unchanged between this artifact
+source and verification-time head 5053d8677247bdcf64db64cd84c69f2061525355.
+All manifest files passed SHA-256 verification before serving.
+
+Three scenarios passed with one actual browser worker and zero page errors.
+Screenshots were visually inspected at 1440x1000 and 390x844; the mobile document
+had no horizontal overflow. Evidence: [desktop](browser/desktop.png),
+[mobile](browser/mobile.png), [receipt](browser/receipt.json).
 
 Backend targeted CI run 34380660903 exposed a missing artifact-reference carrier
 at the ordinary tool hook. #34924 commit c797dd4e6c repairs that path; targeted

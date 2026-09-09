@@ -491,9 +491,9 @@ let pending_stimulus_remains ~ctx ~keeper_name =
    climbs like a clock (#26068). [rate_limited_backoff_sec] derives the
    backoff from the route's own [Retry-After] hint when present, else from
    the cadence, and always clamps to the configured cap so a misread hint
-   (or an out-of-range env override) cannot park the lane: the sleep is
-   still [interruptible_sleep], so a queued stimulus wakes it within
-   [sleep_chunk_sec]. *)
+   (or an out-of-range env override) cannot park the lane for longer than
+   the cap. A queued stimulus does not cut it short: the sleep runs under
+   [Serve_wakeup_after_duration] (#34653). *)
 let rate_limited_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
   let cap_sec = Float.max 0.0 cap_sec in
   let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
@@ -1497,14 +1497,24 @@ let run_heartbeat_loop
             Log.Keeper.warn
               ~keeper_name:m.name
               "%s: rate-limited failure route; backing off next cycle by %.0fs \
-               (cadence %.0fs, cap %.0fs); queued stimuli still wake within \
-               the sleep chunk"
+               (cadence %.0fs, cap %.0fs); stimuli queued meanwhile are served \
+               when it ends"
               m.name
               backoff
               cadence_sec
               Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec;
             Some backoff
           | None -> None
+        in
+        (* A stimulus cannot be served while the lane is rate-limited or
+           exhausted: every wake that cut the backoff short re-ran the same
+           failing call (183 failed turns in 41 minutes, median 30 s apart
+           against a declared 600 s, 2026-09-09, #34653). The queue keeps
+           the stimulus; the wakeup is consumed when the backoff ends. *)
+        let wake_policy =
+          match cycle_sleep_sec with
+          | Some _ -> Keeper_keepalive_signal.Serve_wakeup_after_duration
+          | None -> Keeper_keepalive_signal.Interrupt_on_wakeup
         in
         let sleep_duration () =
           match cycle_sleep_sec with
@@ -1522,6 +1532,7 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~wake_policy
                ~clock:ctx.clock
                ~stop
                ~wakeup

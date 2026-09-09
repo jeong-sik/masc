@@ -350,8 +350,16 @@ def main():
             raise AssertionError('The completed pre-Gate effect was replayed or lost')
         save(root / 'completed-before-gate.json', writes[0])
         transcript = [json.loads(line) for line in (base / '.masc/keeper_chat' / (keeper + '.jsonl')).read_text().splitlines()]
-        if any(row['delivery_key']['operation_id'] != operation_id for row in transcript):
-            raise AssertionError('Transcript changed operation identity')
+        for row in transcript:
+            key = row['delivery_key']
+            if key['kind'] in ['operation', 'operation_checkpoint']:
+                if key['operation_id'] != operation_id:
+                    raise AssertionError('Transcript changed operation identity')
+            elif key['kind'] == 'approval_lifecycle':
+                if key['approval_id'] != approval_id or row['role'] != 'system':
+                    raise AssertionError('Transcript contains an unrelated approval lifecycle')
+            else:
+                raise AssertionError('Unexpected transcript provenance in this isolated operation')
         if sum(row['role'] == 'user' for row in transcript) != 1 or sum(row['role'] == 'assistant' for row in transcript) != 1:
             raise AssertionError('Duplicate user or terminal assistant row')
         save(root / 'transcript.json', transcript)

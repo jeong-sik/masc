@@ -160,7 +160,7 @@ let test_scoped_scene_acknowledgement () =
       check bool "connector ignoring region view must fail" true
         (Result.is_error (Masc.Browser_scene.read ~view:Browser_lane.Regions (request (Some 7)) ~max_chars:1000));
       check bool "duplicate scope fields rejected" true (Result.is_error (Masc.Browser_scene.scope_of_json
-        (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"]))))
+        (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"])))))
 
 let () = run "browser surface" ["behavior",[
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;

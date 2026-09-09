@@ -7312,6 +7312,52 @@ let composable_output_probes =
            in
            `Assoc [ "sha256", `String reference.Tool_output.sha256 ])
     }
+    (* The filesystem probes chain on disk state, so their order in this list
+       is load-bearing: Write creates the file the later three observe. Paths
+       are relative to the keeper's default write root, the same spelling
+       test_model_visible_local_tools_dispatch_to_runtime_handlers uses. *)
+  ; { tool_name = "Write"
+    ; needs_sandbox = false
+    ; prepare =
+        (fun ~config ~meta ->
+           (* Nothing else in this probe run opens the playground before the
+              write's confinement resolution opens the directory, so force the
+              bundle into existence the same way
+              test_model_visible_local_tools_dispatch_to_runtime_handlers does
+              ahead of its Write: keeper_default_write_root runs
+              ensure_sandbox_bundle as a side effect. *)
+           ignore (KES.keeper_default_write_root ~config ~meta);
+           `Assoc
+             [ "file_path", `String "composable-output-probe.txt"
+             ; "content", `String "composable output probe\n"
+             ])
+    }
+    (* Read and Grep route through the backend read runner for every
+       sandbox profile (Keeper_sandbox_read_backend.should_route_read), so
+       they can no more report on a host without the guest image than
+       Execute can. *)
+  ; probe
+      ~needs_sandbox:true
+      "Read"
+      (`Assoc [ "file_path", `String "composable-output-probe.txt" ])
+  ; probe
+      ~needs_sandbox:true
+      "Grep"
+      (`Assoc
+         [ "pattern", `String "composable output probe"
+         ; "path", `String "composable-output-probe.txt"
+         ])
+    (* Edit's public surface is patch-only: the translator pins mode=patch
+       and the closed input schema admits exactly file_path/old_string/
+       new_string/replace_all, so a mode or content key would be rejected
+       before the producer ran. *)
+  ; probe
+      "Edit"
+      (`Assoc
+         [ "file_path", `String "composable-output-probe.txt"
+         ; "old_string", `String "composable output probe"
+         ; "new_string", `String "composable output probe (edited)"
+         ])
   ]
 
 let test_every_composable_tool_has_an_output_probe () =

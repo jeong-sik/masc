@@ -419,6 +419,97 @@ let test_malformed_declared_output_stops_before_consumer () =
        fail "malformed producer did not retain its typed validation cause")
 ;;
 
+let test_typed_output_flows_to_consumer_dispatch_input () =
+  Eio_main.run @@ fun _env ->
+  let read_id = node_id "read" in
+  let pointer value =
+    match Plan.Json_pointer.of_string value with
+    | Ok pointer -> pointer
+    | Error _ -> failf "unexpected invalid JSON pointer: %S" value
+  in
+  let template fields =
+    match Plan.Json_template.object_ fields with
+    | Ok template -> template
+    | Error (Plan.Json_template.Duplicate_field name) ->
+      failf "unexpected duplicate template field: %S" name
+  in
+  let read_node =
+    Plan.node
+      ~id:read_id
+      ~tool_name:"Read"
+      ~input:(template [ "file_path", Plan.Json_template.literal (`String "a.ml") ])
+      ()
+  in
+  let grep_node =
+    Plan.node
+      ~id:(node_id "grep")
+      ~tool_name:"Grep"
+      ~input:
+        (template
+           [ "pattern", Plan.Json_template.literal (`String "probe")
+           ; ( "path"
+             , Plan.Json_template.output ~node_id:read_id ~pointer:(pointer "/path") )
+           ])
+      ()
+  in
+  let plan =
+    match
+      Plan.create
+        ~descriptors:[ canonical_descriptor "Read"; canonical_descriptor "Grep" ]
+        [ read_node; grep_node ]
+    with
+    | Ok plan -> plan
+    | Error error ->
+      fail ("Read -> Grep executor plan was rejected: " ^ Plan.error_to_string error)
+  in
+  let captured_grep_input = ref None in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+    match node_name node with
+    | "read" ->
+      Executor.dispatch_result
+        (completed
+           ~tool_name:"Read"
+           ~data:
+             (`Assoc
+                [ "ok", `Bool true
+                ; "path", `String "/keeper/probe/a.ml"
+                ; "bytes", `Int 5
+                ; "truncated", `Bool false
+                ; "offset", `Int 1
+                ; "returned_lines", `Int 1
+                ; "content", `String "probe"
+                ]))
+    | "grep" ->
+      captured_grep_input := Some input;
+      Executor.dispatch_result
+        (completed
+           ~tool_name:"Grep"
+           ~data:
+             (`Assoc
+                [ "ok", `Bool true
+                ; "op", `String "rg"
+                ; "path", `String "/keeper/probe/a.ml"
+                ; "pattern", `String "probe"
+                ; "via", `String "host"
+                ; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
+                ; "matches", `List [ `String "a.ml:1:probe" ]
+                ]))
+    | name -> failf "unexpected dispatched node: %s" name
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Error _ -> fail "typed Read -> Grep chain did not complete"
+  | Ok _ ->
+    (match !captured_grep_input with
+     | Some (`Assoc fields) ->
+       check
+         string
+         "Grep dispatch input carries Read's path"
+         "/keeper/probe/a.ml"
+         Yojson.Safe.Util.(List.assoc "path" fields |> to_string)
+     | Some _ -> fail "Grep dispatch input lost its object shape"
+     | None -> fail "Grep node was never dispatched")
+;;
+
 let test_outer_completion_owns_terminal_boundary () =
   let terminal_descriptor = canonical_descriptor "keeper_surface_post" in
   let terminal_node =
@@ -478,6 +569,10 @@ let () =
             "malformed producer stops consumers"
             `Quick
             test_malformed_declared_output_stops_before_consumer
+        ; test_case
+            "typed output flows to consumer dispatch input"
+            `Quick
+            test_typed_output_flows_to_consumer_dispatch_input
         ; test_case
             "outer completion owns terminal boundary"
             `Quick

@@ -313,7 +313,7 @@ let resolve_read_file_target
 ;;
 
 type read_file_attempt =
-  | Read_succeeded of string
+  | Read_succeeded of Yojson.Safe.t
   | Read_failed_payload of string
   | Read_failed_message of string
 
@@ -366,17 +366,16 @@ let handle_read_file_with_outcome
             ]
         in
         Read_succeeded
-          (Yojson.Safe.to_string
-             (`Assoc
-                 ([ "ok", `Bool true
-                  ; "path", `String target
-                  ; "bytes", `Int (String.length slice.window_content)
-                  ; "truncated", `Bool slice.window_truncated
-                  ; "offset", `Int window.start_line
-                  ; "returned_lines", `Int slice.returned_lines
-                  ; "content", `String slice.window_content
-                  ]
-                  @ optional_fields)))
+          (`Assoc
+              ([ "ok", `Bool true
+               ; "path", `String target
+               ; "bytes", `Int (String.length slice.window_content)
+               ; "truncated", `Bool slice.window_truncated
+               ; "offset", `Int window.start_line
+               ; "returned_lines", `Int slice.returned_lines
+               ; "content", `String slice.window_content
+               ]
+               @ optional_fields))
     in
     let run_read () =
          (* RFC-0006 Phase B-1: Docker keepers are always contained to their
@@ -444,7 +443,7 @@ let handle_read_file_with_outcome
                   content))
     in
     (match run_read () with
-     | Ok (Read_succeeded json) -> Keeper_tool_execution.success json
+     | Ok (Read_succeeded json) -> Keeper_tool_execution.success_data json
      | Ok (Read_failed_payload payload) -> Keeper_tool_execution.failure payload
      | Ok (Read_failed_message msg) ->
        Keeper_tool_execution.failure
@@ -652,19 +651,18 @@ let handle_owned_read_file_with_outcome
                  else [])
               ]
           in
-          Keeper_tool_execution.success
-            (Yojson.Safe.to_string
-               (`Assoc
-                   ([ "ok", `Bool true
-                    ; "path", `String target
-                    ; "bytes", `Int (String.length slice.window_content)
-                    ; "file_bytes", `Int prefix.file_size
-                    ; "truncated", `Bool slice.window_truncated
-                    ; "offset", `Int window.start_line
-                    ; "returned_lines", `Int slice.returned_lines
-                    ; "content", `String slice.window_content
-                    ]
-                    @ optional_fields)))))
+          Keeper_tool_execution.success_data
+            (`Assoc
+                ([ "ok", `Bool true
+                 ; "path", `String target
+                 ; "bytes", `Int (String.length slice.window_content)
+                 ; "file_bytes", `Int prefix.file_size
+                 ; "truncated", `Bool slice.window_truncated
+                 ; "offset", `Int window.start_line
+                 ; "returned_lines", `Int slice.returned_lines
+                 ; "content", `String slice.window_content
+                 ]
+                 @ optional_fields))))
 ;;
 
 (* RFC-0378 §5.1 — resolve a write's file path to its attribution.
@@ -1468,7 +1466,7 @@ let confined_write_is_keeper_playground
 
 type file_write_attempt =
   | Write_succeeded of
-      { payload : string
+      { payload : Yojson.Safe.t
       ; file_change_evidence : Keeper_file_change_evidence.t option
       }
   | Write_authorized of Keeper_gate.authorization * file_write_attempt
@@ -1976,7 +1974,7 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 
 let rec file_write_attempt_to_execution = function
   | Write_succeeded { payload; file_change_evidence } ->
-    let execution = Keeper_tool_execution.success payload in
+    let execution = Keeper_tool_execution.success_data payload in
     (match file_change_evidence with
      | Some evidence ->
        Keeper_tool_execution.with_file_change_evidence evidence execution
@@ -2445,14 +2443,13 @@ let handle_file_write_with_outcome
       Ok
         (Write_succeeded
            { payload =
-               Yojson.Safe.to_string
-                 (`Assoc
-                     ([ "ok", `Bool true
-                      ; "path", `String target
-                      ; "mode", `String mode_label
-                      ; "bytes_written", `Int (String.length content)
-                      ]
-                      @ via_field))
+               `Assoc
+                   ([ "ok", `Bool true
+                    ; "path", `String target
+                    ; "mode", `String mode_label
+                    ; "bytes_written", `Int (String.length content)
+                    ]
+                    @ via_field)
            ; file_change_evidence =
                (match mode with
                 | Overwrite -> Some (Keeper_file_change_evidence.written content)
@@ -2825,17 +2822,16 @@ let handle_file_write_with_outcome
                   Ok
                     (Write_succeeded
                        { payload =
-                           Yojson.Safe.to_string
-                             (`Assoc
-                                 ([ "ok", `Bool true
-                                  ; "path", `String target
-                                  ; "mode", `String "patch"
+                           `Assoc
+                               ([ "ok", `Bool true
+                                ; "path", `String target
+                                ; "mode", `String "patch"
+                                ]
+                                @ operation_fields
+                                @ [ "occurrences", `Int occurrence_count
+                                  ; "bytes_written", `Int (String.length updated)
                                   ]
-                                  @ operation_fields
-                                  @ [ "occurrences", `Int occurrence_count
-                                    ; "bytes_written", `Int (String.length updated)
-                                    ]
-                                  @ via_field))
+                                @ via_field)
                        ; file_change_evidence =
                            Some
                              (match line_occurrences with

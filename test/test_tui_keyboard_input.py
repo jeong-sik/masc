@@ -15167,7 +15167,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert wait_for_fixture_event(process, master, output, failed.requested, timeout=5.0)
             start = len(output)
             failed.release.set()
-            await_marker(b"Refresh failed; reopen", start)
+            await_marker(b"Refresh outcome unknown; reopen", start)
             observe_for(0.8)
             failure_output = bytes(output[start:])
             assert len(calls) == 2, f"failed mutation retried automatically: {len(calls)}"

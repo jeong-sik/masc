@@ -353,7 +353,12 @@ let execute_unlocked t = function
             | _ -> pointer_actions in
           (* Release even if transport cancellation interrupts a pressed gesture.
              The enclosing session lock remains held throughout cleanup. *)
-          let applied, released =
+          let applied, released = match action with
+            | Browser_lane.Scroll_at _ ->
+                (* Wheel actions do not press buttons. Session acquisition
+                   already recovers any older pending pointer release. *)
+                call t session `POST "/actions" (Some actions), Ok `Null
+            | _ ->
             let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->

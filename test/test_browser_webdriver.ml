@@ -168,7 +168,7 @@ let test_download_setup_cancellation () =
 let test_selected_binary () =
   Eio_main.run (fun _ ->
     let requests = ref [] in
-    let request ~method_ ~path ~body =
+    let request ~method_ ~path ~body:_ =
       match method_, path with
       | `POST, "/session" ->
         requests := body :: !requests;
@@ -262,15 +262,20 @@ let test_session_status_answers_while_closed () =
 
 let test_pointer_release_recovery () =
   Eio_main.run (fun _ ->
-    let release_fails = ref true and gestures = ref 0 and releases = ref 0 in
-    let request ~method_ ~path ~body:_ = match method_, path with
+    let release_fails = ref true and gestures = ref 0 and releases = ref 0 and wheels = ref 0 in
+    let request ~method_ ~path ~body = match method_, path with
       | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
           "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
       | `GET, "/session/owned/window" -> Ok (`String "tab")
       | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
       | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
-      | `POST, "/session/owned/actions" -> incr gestures; Error (Driver.Transport "response lost after pointerDown")
+      | `POST, "/session/owned/actions" ->
+          let kind = match body with
+            | Some json -> Yojson.Safe.Util.(json |> member "actions" |> to_list |> List.hd |> member "type" |> to_string)
+            | None -> fail "actions require a body" in
+          if kind = "wheel" then (incr wheels; Ok `Null)
+          else (incr gestures; Error (Driver.Transport "response lost after pointerDown"))
       | `DELETE, "/session/owned/actions" -> incr releases;
           if !release_fails then Error (Driver.Transport "release unavailable") else Ok `Null
       | _ -> fail ("unexpected pointer request: " ^ path) in
@@ -281,14 +286,23 @@ let test_pointer_release_recovery () =
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
     let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Click_at {point;viewport}} in
+    let wheel = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Scroll_at {point;viewport;x=0;y=120}} in
+    check bool "successful wheel is not overridden by failing release endpoint" true
+      (match Driver.execute driver wheel with Lane.Answered _ -> true | _ -> false);
+    check int "wheel dispatch occurs once" 1 !wheels;
+    check int "wheel requires no pointer cleanup" 0 !releases;
     ignore (Driver.execute driver click);
     check int "cleanup attempted after lost gesture response" 1 !releases;
-    ignore (Driver.execute driver click);
+    ignore (Driver.execute driver wheel);
+    check int "unreleased pointer prevents a new wheel" 1 !wheels;
     check int "unreleased input prevents a subsequent gesture" 1 !gestures;
     check int "recovery retries release, not the gesture" 2 !releases;
     release_fails := false;
-    ignore (Driver.execute driver Lane.Tabs_list);
-    check int "read recovers only after remote release succeeds" 3 !releases;
+    check bool "wheel recovers older pointer release before dispatch" true
+      (match Driver.execute driver wheel with Lane.Answered _ -> true | _ -> false);
+    check int "successful recovery permits one new wheel" 2 !wheels;
+    check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)
 
 let () = run "native Firefox lane" ["behavior", [

@@ -56,10 +56,18 @@
 # file does not list: 89 under test/, 13 under packages/agent_core/test/,
 # 220 failing cases in all. That number is #33782's to answer; this change is
 # only the four the runner asked for by name.
+#
+# The 09-09 run (34296943348, commit 0b034fae) finished in 1021s and named one
+# more: test_fs_compat_capability_write. #34519 replaced that suite's exact
+# backtrace equality with a prefix assertion earlier the same day. Dispatched
+# alone on main it reports 50 tests run, so the sweep and the alone run agree
+# and the row is gone below. Its two neighbours were dispatched in the same
+# batch and still fail on an assertion -- exact_read on "fatal callback helper
+# exited with code 4", directory_durability on "ordinary observer exception
+# raw backtrace" -- so they stay.
 
 # --- assertions that fail -------------------------------------------------
 test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation [2026-09-07 alone: fails, run 34136506495]
-test/test_fs_compat_capability_write              # publication: replace fatal and cancellation [2026-09-07 alone: fails, run 34136509328]
 test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
 
 # --- cannot be exercised where it stands ----------------------------------

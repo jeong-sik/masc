@@ -312,6 +312,7 @@ let test_response_and_settlement_accounting () =
     H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
       ~keeper_turn_id:7 ~agent_core_turn_ordinal:2 ~model:"model"
       ~response_id:id ~usage_projection:projection
+      ~runtime_attempt:("routing-run", "runtime-a", 1)
       ~input_tokens:input ~output_tokens:12 ~cost_usd:0.0
       ~cache_creation_input_tokens:creation ~cache_read_input_tokens:read
       ~usage_missing:missing ()
@@ -327,6 +328,14 @@ let test_response_and_settlement_accounting () =
   let settled = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
       Cost_ledger.Resolved_delta in
   check_null_field settled "response_id";
+  List.iter (check_null_field settled)
+    [ "routing_run_id"; "runtime_id"; "lane_attempt_index" ];
+  check string "response joins its lane walk" "routing-run"
+    (string_field raw "routing_run_id");
+  check string "actual runtime rather than assignment alias" "runtime-a"
+    (string_field raw "runtime_id");
+  check int "response retains failed or successful attempt index" 1
+    (int_field raw "lane_attempt_index");
   check string "settlement is never disguised as another response" "resolved_delta"
     (string_field settled "usage_projection");
   let missing = response "reply-2" ~creation:0 ~read:0 ~input:0 ~missing:true

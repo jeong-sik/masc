@@ -61,6 +61,7 @@ let assemble_cost_event_payload
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
     ?response_id
+    ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -146,6 +147,15 @@ let assemble_cost_event_payload
     then `Null
     else `Int (input_tokens - cache_read_input_tokens)
   in
+  let attempt_fields =
+    match usage_projection, runtime_attempt with
+    | Cost_ledger.Raw_observation, Some (run_id, runtime_id, index) ->
+        [ "routing_run_id", `String run_id
+        ; "runtime_id", `String runtime_id
+        ; "lane_attempt_index", `Int index ]
+    | Cost_ledger.Raw_observation, None | Cost_ledger.Resolved_delta, _ ->
+        [ "routing_run_id", `Null; "runtime_id", `Null; "lane_attempt_index", `Null ]
+  in
   let response_id =
     match usage_projection, response_id with
     | Cost_ledger.Raw_observation, Some id ->
@@ -212,6 +222,7 @@ let assemble_cost_event_payload
          (* Pricing-observation firewall: a usage-missing turn has no
             token or cost observation in the current row. *)
          ]
+         @ attempt_fields
          @ Keeper_usage_trust.json_fields usage_trust
          @ cache_token_fields
          @ wall_tok_s_fields
@@ -238,6 +249,7 @@ let cost_event_payload
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
     ?response_id
+    ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -256,6 +268,7 @@ let cost_event_payload
      ~cost_usd
      ~usage_projection
      ?response_id
+     ?runtime_attempt
      ~cache_creation_input_tokens
      ~cache_read_input_tokens
      ~usage_missing
@@ -276,6 +289,7 @@ let emit_cost_event
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
     ?response_id
+    ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -296,6 +310,7 @@ let emit_cost_event
       ~cost_usd
       ~usage_projection
       ?response_id
+      ?runtime_attempt
       ~cache_creation_input_tokens
       ~cache_read_input_tokens
       ~usage_missing

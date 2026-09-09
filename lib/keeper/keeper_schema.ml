@@ -2,12 +2,6 @@
 
 open Masc_domain
 
-(** Network mode strings exposed only by explicit sandbox-management tools.
-    Keeper creation/update no longer accepts sandbox posture knobs. *)
-let network_mode_enum_strings =
-  Keeper_types_profile_sandbox.valid_network_mode_strings
-;;
-
 (* One schema per Tool_name.Keeper_name constructor. The list used to be
    written out by hand next to two dispatchers that matched the same names as
    strings, so the three were kept in step by hand. *)

@@ -96,6 +96,7 @@ val cost_event_payload :
   cost_usd:float ->
   ?usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
+  ?runtime_attempt:(string * string * int) ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -103,7 +104,9 @@ val cost_event_payload :
   ?telemetry:Agent_core.Types.inference_telemetry -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it.
     [response_id] is the opaque AGENT_CORE/CLI response identity, not necessarily
-    a vendor request ID. It is emitted only for raw observations; settlements
+    a vendor request ID. [runtime_attempt] is (routing_run_id, runtime_id,
+    lane_attempt_index), captured from the materialized candidate. Both identities
+    are emitted only for raw observations; settlements
     may aggregate multiple responses and carry null. [non_cached_input_tokens]
     includes cache creation and is null for missing/invalid input partitions. *)
 
@@ -120,6 +123,7 @@ val emit_cost_event :
   cost_usd:float ->
   ?usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
+  ?runtime_attempt:(string * string * int) ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -168,6 +172,7 @@ val make_hooks :
   keeper_turn_id:int ->
   on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
+  ?current_runtime_attempt:(unit -> (string * string * int) option) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->

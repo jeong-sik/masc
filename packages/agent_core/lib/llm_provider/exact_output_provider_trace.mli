@@ -16,4 +16,3 @@ val of_evidence
 val fingerprint : t -> string
 val equal : t -> t -> bool
 val raw_response : Exact_output_execution.raw_response_evidence -> raw_response
-val record_once : t option Atomic.t -> t -> unit

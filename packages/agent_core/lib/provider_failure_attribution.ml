@@ -136,17 +136,6 @@ let of_provider_configuration_error error =
   }
 ;;
 
-let of_runtime_binding_error ~binding error =
-  { error
-  ; provider_failure =
-      Some
-        { ownership = Runtime_binding
-        ; binding = Some binding
-        ; evidence = Provider_configuration
-        }
-  }
-;;
-
 let of_attempt_error ~binding ~evidence error =
   { error
   ; provider_failure =

@@ -20,7 +20,6 @@ val create
   -> (t, create_error) result
 
 val create_error_to_string : create_error -> string
-val pp_create_error : Format.formatter -> create_error -> unit
 val stats : t -> stats
 
 (** Internal execution boundary hidden by the top-level {!Agent_core} export.

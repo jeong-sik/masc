@@ -27,7 +27,6 @@ type response_phase =
   | Final_answer
 
 val response_phase_metadata : response_phase -> string * Yojson.Safe.t
-val responses_tool_json : Yojson.Safe.t -> Yojson.Safe.t
 
 type request_artifact
 

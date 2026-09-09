@@ -87,10 +87,6 @@ let trim_non_empty_opt = function
   | Some s -> trim_non_empty s
 ;;
 
-let json_member_str key json =
-  Yojson.Safe.Util.(json |> member key |> to_string_option) |> Option.value ~default:""
-;;
-
 let json_member_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool_option) |> Option.value ~default:false
 ;;

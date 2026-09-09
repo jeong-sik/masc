@@ -18,6 +18,16 @@ val create : unit -> state
 val inside : state -> bool
 (** [true] while the stream sits between an open and a close tag. *)
 
+type segment = Text of string | Reasoning of string
+
+val feed_segments : state -> string -> segment list
+(** Ordered, nonempty typed segments. Tag fragments are retained across calls.
+    Adjacent same-channel segments may span transport deltas; their bytes and
+    channel order do not depend on delta partitioning. *)
+
+val flush_segments : state -> segment list
+(** Release pending bytes in their current channel, exactly once. *)
+
 type piece =
   { reasoning : string
   ; text : string

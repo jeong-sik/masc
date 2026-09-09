@@ -207,6 +207,10 @@ let equal_rule_host left right =
   | Exact _, Subdomains_of _ | Subdomains_of _, Exact _ -> false
 ;;
 
+let equal_rule left right =
+  Int.equal left.port right.port && equal_rule_host left.rule_host right.rule_host
+;;
+
 let pp_rule formatter rule = Format.pp_print_string formatter (rule_to_string rule)
 
 (* Suffix comparison on labels, not on the string. [notexample.com] shares no

@@ -89,10 +89,46 @@ let with_ws name fn =
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail ("keeper meta fixture write failed: " ^ detail));
-      (match Masc.Keeper_meta_store.read_effective_meta config meta.name with
-       | Ok (Some _) -> ()
-       | Ok None -> fail "producer effective metadata fixture is missing"
-       | Error detail -> fail ("producer effective metadata fixture is invalid: " ^ detail));
+      let meta =
+        match Masc.Keeper_meta_store.read_effective_meta config meta.name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "producer effective metadata fixture is missing"
+        | Error detail -> fail ("producer effective metadata fixture is invalid: " ^ detail)
+      in
+      (* A registered Keeper owns a sandbox tree even when the controlled
+         reviewer never dispatches its lookup tools. Resolve from effective
+         TOML metadata, exactly as the production verification surface does. *)
+      let producer_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      Fs_compat.mkdir_p producer_root;
+      let lookup_tools =
+        match Masc.Verification_authority_tools.create ~config ~producer:meta.name with
+        | Ok tools -> tools
+        | Error detail -> fail ("verification lookup fixture is invalid: " ^ detail)
+      in
+      let root_layout =
+        match Masc.Verification_authority_tools.root_layout lookup_tools with
+        | Ok layout -> layout
+        | Error detail -> fail ("verification root fixture is unreadable: " ^ detail)
+      in
+      let lookup = AR.Lookup_tools
+        { schemas = Masc.Verification_authority_tools.schemas lookup_tools
+        ; dispatch = Masc.Verification_authority_tools.dispatch lookup_tools
+        ; root_layout
+        }
+      in
+      (* Preflight the same prompt contract as the daemon before waiting for
+         an asynchronous verdict. No evidence files are fabricated: these
+         tests submit notes, and an empty producer tree is valid evidence. *)
+      (match AR.build_prompt
+        ~question:{ completion_contract = None; required_evidence = [];
+                    evidence_posture = AR.Note_only; few_shot_block = "" }
+        ~lookup
+        { task_title = "Completion fixture preflight"; task_description = "Controlled verdict dispatch";
+          completion_notes = "Fixture notes"; agent_name = meta.name; task_id = "fixture-preflight";
+          evidence_refs = []; evidence_images = [] } with
+       | Ok prompt when String.trim prompt <> "" -> ()
+       | Ok _ -> fail "completion review fixture rendered an empty prompt"
+       | Error detail -> fail ("completion review prompt fixture is unavailable: " ^ detail));
       (match
          Masc.Keeper_owner_registry.install_from_store
            ~sw
@@ -563,6 +599,9 @@ let test_legitimate_claim_succeeds () =
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
 let () =
+  let prompt_dir = Masc_test_deps.source_path "config/prompts" in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir;
   Masc.Workspace_metric_hooks.install ();
   Masc.Keeper_task_owner_backend.install_hooks ();
   Masc_test_deps.init_unified_tool_registry ();

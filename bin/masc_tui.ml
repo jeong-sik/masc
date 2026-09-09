@@ -1707,7 +1707,7 @@ type identity_login_result =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { view : unit ref; port : int }
+type msx_poll_request = { poll_view : unit ref; poll_port : int }
 let msx_poll_view = ref (ref ())
 type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
@@ -2548,11 +2548,11 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
   match !msx_pending_poll with
   | Poll_pending _ | Poll_failed -> ()
   | Poll_idle ->
-      let request = { view = !msx_poll_view; port = state.port } in
+      let request = { poll_view = !msx_poll_view; poll_port = state.port } in
       msx_pending_poll := Poll_pending request;
       let run () =
         let frame =
-          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.port with
+          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (Printexc.to_string exn)
@@ -11739,7 +11739,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
            (match result with
-            | Error _ when request.port <> state.port ->
+            | Error _ when request.poll_port <> state.port ->
                 msx_pending_poll := Poll_idle
             | Error detail ->
                 (* A lost HTTP response does not prove the server stopped its
@@ -11755,7 +11755,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       ~connection:state.connection_status state.msx_frame
             | Ok frame ->
                 msx_pending_poll := Poll_idle;
-                if request.view == !msx_poll_view && request.port = state.port
+                if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();

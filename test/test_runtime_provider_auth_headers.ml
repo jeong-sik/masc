@@ -726,7 +726,6 @@ streaming = true
 max-output-tokens = 384000
 supports-tool-choice = true
 supports-extended-thinking = true
-supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
 supports-response-format-json = true
 supports-structured-output = true
@@ -1178,14 +1177,12 @@ provider_name = "runpod_mtp"
 supports_system_prompt = true
 max_output_tokens = 32768
 supports_reasoning = true
-supports_reasoning_budget = true
 thinking_control_format = "ollama_think"
 |}
     (fun () ->
        let runtime_caps =
          { Runtime_schema.model_capabilities_default with
-           supports_reasoning_budget = false
-         ; thinking_control_format = Runtime_schema.No_thinking_control
+           thinking_control_format = Runtime_schema.No_thinking_control
          ; declared_thinking_control_format = Some Runtime_schema.No_thinking_control
          ; reasoning_streaming_format =
              Some (Runtime_schema.Delta_reasoning_field "reasoning_content")
@@ -1217,7 +1214,6 @@ thinking_control_format = "ollama_think"
          check bool "declared thinking control wins" true
            (caps.thinking_control_format
             = Llm_provider.Capabilities.No_thinking_control);
-         check bool "declared reasoning budget wins" false caps.supports_reasoning_budget;
          check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
          check bool "declared transport stream parser wins" true
            (caps.reasoning_streaming_format

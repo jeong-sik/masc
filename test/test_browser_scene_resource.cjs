@@ -12,8 +12,9 @@ assert.ok(readFileSync(path.join(root, 'connectors/browser/extension/background.
 const limit = 1024 * 1024;
 const rect = {x:0, y:0, width:10, height:10, right:10, bottom:10};
 
-function fixture() {
-  const document = {title:'ordinary HTTP page', documentElement:{}, body:{childNodes:[]}};
+function fixture({extraNodes = () => [], extraGlobals = {}} = {}) {
+  const document = {title:'ordinary HTTP page', documentElement:{}, body:{childNodes:[]},
+    baseURI:'http://example.test/path'};
   const style = {display:'block', visibility:'visible', opacity:'1', color:'rgb(0, 0, 0)',
     fontSize:'16px', fontWeight:'400', whiteSpace:'normal'};
   const link = {nodeType:1, localName:'a', innerText:'A', parentElement:null,
@@ -22,7 +23,8 @@ function fixture() {
     getClientRects:() => [rect], click:() => {}};
   link.href='http://example.test/observed';
   document.body.childNodes.push(link);
-  const context = vm.createContext({document, window:{},
+  for (const node of extraNodes(document)) document.body.childNodes.push(node);
+  const context = vm.createContext({document, window:{}, ...extraGlobals,
     location:{href:'http://example.test/path?identity=exact#fragment'},
     innerWidth:800, innerHeight:600, scrollX:0, scrollY:0,
     getComputedStyle:() => style, HTMLInputElement:class {}, HTMLTextAreaElement:class {},
@@ -44,6 +46,39 @@ assert.ok(Buffer.byteLength(JSON.stringify(first), 'utf8') <= limit);
 const oldId = first.documentId;
 normal.document.documentElement = {};
 assert.notEqual(normal.read().documentId, oldId, 'new document gets fresh random identity');
+
+// XLink is the SVG spelling of href. An HTML anchor that carries only an
+// xlink:href has an empty .href, and resolving "" against baseURI advertised
+// the current page as the destination -- selecting that control reloaded the
+// page instead of following anything.
+class SVGAElement {}
+const xlinkNode = (document, {svg, id}) => {
+  const node = {nodeType:1, localName:'a', innerText:id, parentElement:null,
+    isConnected:true, ownerDocument:document, childNodes:[],
+    hasAttribute:() => false,
+    hasAttributeNS:(ns, name) =>
+      ns === 'http://www.w3.org/1999/xlink' && name === 'href',
+    getAttribute:() => null, matches:selector => selector !== ':disabled',
+    getClientRects:() => [rect]};
+  if (!svg) { node.href = ''; return node; }
+  return Object.assign(new SVGAElement(),
+    {...node, href:{baseVal:'http://example.test/svg-destination'}});
+};
+const xlink = fixture({
+  extraGlobals:{SVGAElement},
+  extraNodes:document =>
+    [xlinkNode(document, {svg:false, id:'H'}), xlinkNode(document, {svg:true, id:'S'})],
+});
+const withXlink = vm.runInContext("browserScene({mode:'read',maxChars:1000})", xlink.context);
+assert.equal(withXlink.nodes.length, 3, 'both XLink anchors stay observed controls');
+const [, htmlXlink, svgXlink] = withXlink.nodes;
+assert.equal('href' in htmlXlink, false,
+  'an HTML anchor with only xlink:href advertises no destination');
+assert.equal(svgXlink.href, 'http://example.test/svg-destination',
+  'an SVG anchor is still followed through XLink');
+assert.equal(
+  vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')].links.size", xlink.context), 2,
+  'the HTML XLink anchor never enters the link map');
 
 // A recycled anchor remains the same DOM object, but not the same observation.
 const recycled = fixture();

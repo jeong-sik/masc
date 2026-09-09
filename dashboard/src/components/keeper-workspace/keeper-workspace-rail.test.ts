@@ -286,7 +286,6 @@ describe('KeeperWorkspaceRail', () => {
           supports_image_input: false,
           supports_audio_input: true,
           supports_video_input: false,
-          supports_reasoning_budget: true,
           thinking_control_format: 'reasoning-effort',
           parameter_policy: {
             reasoning_toggle_wire: 'chat_template_kwargs',
@@ -349,7 +348,6 @@ describe('KeeperWorkspaceRail', () => {
             supports_video_input: false,
             supports_reasoning: true,
             supports_extended_thinking: true,
-            supports_reasoning_budget: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
             thinking_control_format: 'chat-template-kwargs',
             preserve_thinking_control_format: 'always-preserved',
@@ -414,7 +412,6 @@ describe('KeeperWorkspaceRail', () => {
                 supports_named_tool_choice: true,
                 supports_parallel_tool_calls: true,
                 supports_extended_thinking: true,
-                supports_reasoning_budget: true,
                 thinking_control_format: 'reasoning-effort',
                 supports_image_input: false,
                 supports_audio_input: false,
@@ -505,10 +502,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('headers:1')
     expect(container.textContent).toContain('temp:0.65')
     expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
-    expect(container.textContent).toContain('budget:32768')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
     expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
@@ -517,7 +513,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('modality:visual-first')
     expect(container.textContent).toContain('tool-content:null')
     expect(container.textContent).toContain('extended-thinking')
-    expect(container.textContent).toContain('reasoning-budget')
     expect(container.textContent).toContain('effort:low,medium,high')
     expect(container.textContent).toContain('wire:chat-template-kwargs')
     expect(container.textContent).toContain('preserve:always-preserved')
@@ -542,7 +537,6 @@ describe('KeeperWorkspaceRail', () => {
           supports_image_input: false,
           supports_audio_input: false,
           supports_video_input: false,
-          supports_reasoning_budget: false,
           thinking_control_format: 'none',
           models: ['gemma'],
         },
@@ -587,7 +581,6 @@ describe('KeeperWorkspaceRail', () => {
           streaming: true,
           effective_capabilities: {
             supports_reasoning: true,
-            supports_reasoning_budget: false,
             accepted_reasoning_efforts: null,
             thinking_control_format: null,
             ignored_sampling_parameters: [],
@@ -628,7 +621,6 @@ describe('KeeperWorkspaceRail', () => {
           effective_capabilities: {
             source: 'agent-core-provider-config-model',
             supports_reasoning: true,
-            supports_reasoning_budget: false,
             accepted_reasoning_efforts: null,
             thinking_control_format: 'ollama-think',
             ignored_sampling_parameters: [],
@@ -653,7 +645,7 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(multimodalFlag?.className).toContain('na')
 
-    // ... but effort is known and fixed (no reasoning-budget, no accepted list).
+    // ... but effort is known and fixed (no accepted list).
     const effort = container.querySelector('[data-effort-mode="ollama-think"]')
     expect(effort?.textContent).toContain('ollama-think')
     expect(effort?.textContent).toContain('고정')

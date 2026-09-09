@@ -282,7 +282,16 @@ module For_testing : sig
       unchanged and logs nothing (the caller reports the degrade). *)
 
   val modality_reroute_candidates :
+    now:float ->
     deferred_runtime_lane:deferred_runtime_lane option ->
+    first_candidate:Runtime.t ->
+    remaining_runtimes:Runtime.t list ->
+    Runtime.t list
+
+  val attempt_runtimes_for_turn :
+    media_walk:Runtime.t list ->
+    assigned_runtime:Runtime.t ->
+    first_runtime:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
     Runtime.t list
 

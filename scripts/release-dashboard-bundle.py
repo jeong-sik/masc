@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package/install a binary-matched dashboard. This is distribution metadata,
+"""Package/install an immutable native release and dashboard. This is distribution metadata,
 not run-local executable provenance: it claims no checkout device or inode.
 """
 import argparse
@@ -18,9 +18,62 @@ import subprocess
 import tarfile
 import tempfile
 
-SCHEMA = "masc.installed-release.v1"
+SCHEMA = "masc.installed-release.v2"
 RECEIPT = "release.json"
 TRANSACTION = ".masc-install-transaction"
+COMPANIONS = {"masc-tui", "masc-browser-host", "masc-deployment-preflight-helper",
+              "masc-check-runtime-deployment-preflight"}
+
+
+def runtime_members(archive):
+    with tarfile.open(archive, "r:gz") as source:
+        entries = {}
+        for member in source.getmembers():
+            name = str(relative(member.name))
+            if (not member.isfile() or name in entries or
+                    not (name.startswith(("lib/", "python/", "licenses/")) or name == "runtime-provenance.json") or
+                    member.mode not in (0o644, 0o755)):
+                fail("unsafe runtime archive member")
+            data = source.extractfile(member).read()
+            entries[name] = ({"path": name, "sha256": digest(data), "size": len(data),
+                              "mode": member.mode}, data)
+        if not {"runtime-provenance.json", "python/bin/python3"} <= entries.keys():
+            fail("runtime bootstrap or provenance missing")
+        return entries
+
+
+def validate_runtime(receipt):
+    if not isinstance(receipt["companions"], dict) or not set(receipt["companions"]) <= COMPANIONS:
+        fail("invalid companion receipt")
+    for value in receipt["companions"].values():
+        hex_value(value, 64)
+    runtime = receipt["runtime"]
+    if runtime is None:
+        if receipt["binary_asset"].startswith("masc-macos-"):
+            fail("macOS receipt requires bundled runtime")
+        return
+    exact_fields(runtime, ["asset", "sha256", "files"])
+    if str(relative(runtime["asset"])) != "masc-runtime-" + receipt["binary_asset"][5:] + ".tar.gz":
+        fail("runtime asset differs")
+    hex_value(runtime["sha256"], 64)
+    if not isinstance(runtime["files"], list):
+        fail("invalid runtime file list")
+    names = set()
+    for entry in runtime["files"]:
+        exact_fields(entry, ["path", "sha256", "size", "mode"])
+        name = str(relative(entry["path"]))
+        if name in names or not (name.startswith(("lib/", "python/", "licenses/")) or name == "runtime-provenance.json"):
+            fail("invalid runtime receipt path")
+        names.add(name)
+        if name == "python/bin/python3" and entry["mode"] != 0o755:
+            fail("runtime interpreter must be executable")
+        hex_value(entry["sha256"], 64)
+        if (type(entry["size"]) is not int or entry["size"] < 0 or
+                type(entry["mode"]) is not int or entry["mode"] not in (0o644, 0o755)):
+            fail("invalid runtime receipt metadata")
+    if not {"runtime-provenance.json", "python/bin/python3"} <= names:
+        fail("runtime receipt bootstrap or provenance missing")
+
 
 
 def digest(data):
@@ -60,9 +113,10 @@ def parse_json(data):
 
 
 def validate_receipt(receipt, asset):
-    exact_fields(receipt, ["schema", "source_commit", "binary_asset", "binary_sha256", "files"])
+    exact_fields(receipt, ["schema", "source_commit", "binary_asset", "binary_sha256", "files", "companions", "runtime"])
     if receipt["schema"] != SCHEMA or receipt["binary_asset"] != asset:
         fail("bundle schema or binary asset differs")
+    validate_runtime(receipt)
     hex_value(receipt["source_commit"], 40)
     hex_value(receipt["binary_sha256"], 64)
     if not isinstance(receipt["files"], list):
@@ -107,9 +161,14 @@ def stamp_valid(data):
         fail("dashboard build stamp requires a timezone")
 
 
-def package(binary, assets, source_commit, asset, archive):
+def package(binary, assets, source_commit, asset, archive, companions=(), runtime_archive=None, runtime_root=None):
     binary = binary.resolve(strict=True)
-    if binary_commit(binary) != source_commit:
+    probe = binary
+    if runtime_archive is not None:
+        if runtime_root is None or digest((runtime_root / "masc").read_bytes()) != digest(binary.read_bytes()):
+            fail("portable package requires byte-matching staged executable")
+        probe = (runtime_root / "masc").resolve(strict=True)
+    if binary_commit(probe) != source_commit:
         fail("binary embedded commit differs from requested source commit")
     files, payloads = [], {}
     for entry in sorted(assets.rglob("*")):
@@ -123,7 +182,18 @@ def package(binary, assets, source_commit, asset, archive):
         files.append({"path": name, "sha256": digest(data), "size": len(data), "mtime": entry.stat().st_mtime})
         payloads["dashboard/" + name] = data
     receipt = {"schema": SCHEMA, "source_commit": source_commit, "binary_asset": asset,
-               "binary_sha256": digest(binary.read_bytes()), "files": files}
+               "binary_sha256": digest(binary.read_bytes()), "files": files,
+               "companions": {name: digest(Path(path).read_bytes()) for name, path in companions},
+               "runtime": None}
+    if len(receipt["companions"]) != len(companions):
+        fail("duplicate companion name")
+    if runtime_archive is not None:
+        entries = runtime_members(runtime_archive)
+        provenance = parse_json(entries["runtime-provenance.json"][1])
+        if provenance.get("source_commit") != source_commit or provenance.get("platform") != asset[5:]:
+            fail("runtime source or platform differs")
+        receipt["runtime"] = {"asset": runtime_archive.name, "sha256": digest(runtime_archive.read_bytes()),
+                              "files": [entry for _, (entry, _) in sorted(entries.items())]}
     validate_receipt(receipt, asset)
     stamp_valid(payloads["dashboard/.build-stamp"])
     archive.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +264,18 @@ def verify_tree(root, asset):
         if (not target.is_file() or digest(target.read_bytes()) != entry["sha256"]
                 or target.stat().st_mtime != entry["mtime"]):
             fail("installed dashboard digest or build mtime differs")
+    for name, expected in receipt["companions"].items():
+        target = root / name
+        if target.is_symlink() or not target.is_file() or digest(target.read_bytes()) != expected:
+            fail("installed companion digest differs")
+    if receipt["runtime"] is not None:
+        for entry in receipt["runtime"]["files"]:
+            target = root / entry["path"]
+            if any(p.is_symlink() for p in [target, *target.parents] if p != root and root in p.parents):
+                fail("installed runtime contains a symlink")
+            if (not target.is_file() or target.stat().st_size != entry["size"] or
+                    target.stat().st_mode & 0o777 != entry["mode"] or digest(target.read_bytes()) != entry["sha256"]):
+                fail("installed runtime digest or mode differs")
     return receipt
 
 
@@ -258,11 +340,10 @@ def commit(prefix):
     shutil.rmtree(journal)
 
 
-def install(binary, archive, prefix, asset, companions=()):
+def install(binary, archive, prefix, asset, companions=(), runtime_archive=None):
     names = set()
     for name, source in companions:
-        if name not in {"masc-tui", "masc-browser-host", "masc-deployment-preflight-helper",
-                        "masc-check-runtime-deployment-preflight"} or name in names:
+        if name not in COMPANIONS or name in names:
             fail("unsupported or duplicate companion name")
         names.add(name)
         if not Path(source).is_file():
@@ -279,6 +360,27 @@ def install(binary, archive, prefix, asset, companions=()):
     with tempfile.TemporaryDirectory(prefix=".stage-", dir=releases) as tmp:
         stage = Path(tmp)
         receipt = extract_verified(archive, stage, asset)
+        if names != set(receipt["companions"]):
+            fail("provided companions differ from receipt")
+        for name, source in companions:
+            if digest(Path(source).read_bytes()) != receipt["companions"][name]:
+                fail("companion digest differs from receipt")
+            shutil.copy2(source, stage / name)
+            (stage / name).chmod(0o755)
+        runtime = receipt["runtime"]
+        if (runtime is None) != (runtime_archive is None):
+            fail("runtime archive presence differs from receipt")
+        if runtime is not None:
+            if digest(runtime_archive.read_bytes()) != runtime["sha256"]:
+                fail("runtime archive digest differs")
+            entries = runtime_members(runtime_archive)
+            if [entry for _, (entry, _) in sorted(entries.items())] != runtime["files"]:
+                fail("runtime file set differs from receipt")
+            for name, (entry, data) in entries.items():
+                target = stage / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                target.chmod(entry["mode"])
         identity = digest((stage / RECEIPT).read_bytes())
         installed = releases / identity
         if installed.is_symlink():
@@ -319,10 +421,7 @@ def install(binary, archive, prefix, asset, companions=()):
                 for name, source in companions:
                     entry = companion_journal / name
                     entry.mkdir()
-                    shutil.copy2(source, entry / "next")
-                    (entry / "next").chmod(0o755)
-                    with (entry / "next").open("rb") as stream:
-                        os.fsync(stream.fileno())
+                    (entry / "next").symlink_to(installed / name)
                     save_previous(prefix / name, entry)
                     (entry / "ready").touch()
                     fsync_dir(entry)
@@ -348,18 +447,22 @@ def main():
         pack.add_argument("--" + name, type=Path, required=True)
     pack.add_argument("--source-commit", required=True)
     pack.add_argument("--binary-asset", required=True)
+    pack.add_argument("--companion", nargs=2, action="append", default=[])
+    pack.add_argument("--runtime-archive", type=Path)
+    pack.add_argument("--runtime-root", type=Path)
     inst = commands.add_parser("install")
     for name in ("binary", "archive", "prefix"):
         inst.add_argument("--" + name, type=Path, required=True)
     inst.add_argument("--binary-asset", required=True)
+    inst.add_argument("--runtime-archive", type=Path)
     inst.add_argument("--companion", nargs=2, action="append", default=[], metavar=("NAME", "PATH"))
     for name in ("commit", "rollback"):
         commands.add_parser(name).add_argument("--prefix", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "package":
-        package(args.binary, args.assets, args.source_commit, args.binary_asset, args.archive)
+        package(args.binary, args.assets, args.source_commit, args.binary_asset, args.archive, args.companion, args.runtime_archive, args.runtime_root)
     elif args.command == "install":
-        install(args.binary, args.archive, args.prefix, args.binary_asset, args.companion)
+        install(args.binary, args.archive, args.prefix, args.binary_asset, args.companion, args.runtime_archive)
     elif args.command == "commit":
         commit(args.prefix.resolve())
     else:

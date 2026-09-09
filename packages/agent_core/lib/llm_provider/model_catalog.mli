@@ -25,7 +25,6 @@ type model_entry =
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
-  ; supports_reasoning_budget : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option

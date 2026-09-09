@@ -18,7 +18,7 @@
 #   --dry-run          Print what would happen, do not write
 #   --uninstall        Remove installed executables/releases; stop MASC first
 #   --purge-data       Also remove <base-path>/.masc; requires --uninstall and
-#                      an explicit --base-path. Homebrew dependencies remain.
+#                      an explicit --base-path. External runtime installations remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
 #   --no-wizard        Skip the provider setup wizard
@@ -1023,7 +1023,7 @@ uninstall_masc() {
     fi
   done
   [ "$PURGE_DATA" -eq 1 ] || log "workspace .masc data preserved (use --purge-data --base-path PATH to remove it)"
-  log "Homebrew and runtime dependencies preserved"
+  log "external runtime installations preserved"
 }
 
 if [ "$UNINSTALL" -eq 1 ]; then
@@ -1060,138 +1060,54 @@ fi
 
 choose_install_base_path
 
-# --- macOS dependency bootstrap ---
+# macOS uses a checksummed private runtime, before invoking any Python (the
+# system python3 may be a Command Line Tools installer stub).
 installer_python_ready() {
   "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
 }
-
-macos_formula_ready() {
-  local brew_prefix="$1" formula="$2"
-  case "$formula" in
-    openssl@3) [ -r "$brew_prefix/opt/openssl@3/lib/libssl.3.dylib" ] &&
-               [ -r "$brew_prefix/opt/openssl@3/lib/libcrypto.3.dylib" ] ;;
-    gmp) [ -r "$brew_prefix/opt/gmp/lib/libgmp.10.dylib" ] ;;
-    zstd) [ -r "$brew_prefix/opt/zstd/lib/libzstd.1.dylib" ] ;;
-    python) command -v python3 >/dev/null 2>&1 &&
-            installer_python_ready python3 >/dev/null 2>&1 ;;
-    *) return 1 ;;
-  esac
-}
-
-activate_macos_python() {
-  local brew_prefix="$1" python_prefix bin_dir
-  # Installing a new executable does not invalidate Bash's cached command path.
-  hash -r
-  macos_formula_ready "$brew_prefix" python && return 0
-  python_prefix=$(brew --prefix python) || return 1
-  # Formula-local commands also work when Homebrew's global links are absent.
-  for bin_dir in "$python_prefix/bin" "$python_prefix/libexec/bin"; do
-    if [ -x "$bin_dir/python3" ] && installer_python_ready "$bin_dir/python3" >/dev/null 2>&1; then
-      PATH="$bin_dir:$PATH"
-      export PATH
-      hash -r
-      return 0
-    fi
-  done
-  return 1
-}
-
-bootstrap_macos_homebrew() (
-  local installer
-  installer=$(mktemp) || die "cannot create Homebrew installer download"
-  trap 'rm -f "$installer"' EXIT
-  curl -fL --max-time "$MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S" \
-    --retry "$MASC_INSTALL_CURL_RETRIES" \
-    https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
-    -o "$installer" || die "could not download the official Homebrew installer"
-  # Homebrew owns its interactive confirmation and administrator prompt.
-  /bin/bash "$installer"
-)
-
-ensure_macos_dependencies() {
-  [ "$(uname -s)" = Darwin ] || return 0
-  local arch os_version major minimum brew_prefix actual_prefix formula
-  arch=$(uname -m)
-  case "$arch" in
-    arm64) minimum=14; brew_prefix=/opt/homebrew ;;
-    x86_64) minimum=15; brew_prefix=/usr/local ;;
-    *) die "unsupported macOS architecture: $arch" ;;
-  esac
-  os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
-  major=${os_version%%.*}
-  case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
-  [ "$major" -ge "$minimum" ] ||
-    die "macOS $os_version is below the released $arch binary minimum macOS $minimum.0"
-  if ! command -v brew >/dev/null 2>&1; then
-    if [ -x "$brew_prefix/bin/brew" ]; then
-      PATH="$brew_prefix/bin:$PATH"
-      export PATH
-    elif [ "$DRY_RUN" -eq 1 ]; then
-      log "[dry-run] would install official Homebrew at $brew_prefix, then missing macOS dependencies"
-      return 0
-    elif is_tty; then
-      log "installing Homebrew from its official installer; Homebrew will ask for confirmation and any administrator password"
-      bootstrap_macos_homebrew || die "Homebrew setup failed; see its diagnostic above and https://brew.sh/"
-      [ -x "$brew_prefix/bin/brew" ] || die "Homebrew setup did not provide $brew_prefix/bin/brew"
-      PATH="$brew_prefix/bin:$PATH"
-      export PATH
-    else
-      die "Homebrew is required at $brew_prefix for macOS $arch dependencies. Run this installer in a terminal for guided Homebrew setup, or install it from https://brew.sh/ first."
-    fi
-  fi
-  actual_prefix=$(brew --prefix) || die "cannot determine Homebrew prefix"
-  [ "$actual_prefix" = "$brew_prefix" ] ||
-    die "Homebrew prefix $actual_prefix does not match macOS $arch ($brew_prefix). Use the native architecture Homebrew in PATH and rerun."
-  # Default Homebrew prefixes are part of the published Mach-O load paths.
-  # Inspect installed dylibs directly: a complete offline install needs no
-  # brew update or formula download. Do not alter shell startup files.
-  PATH="$brew_prefix/bin:$PATH"
-  export PATH
-  activate_macos_python "$brew_prefix" || true
-  local missing=()
-  for formula in openssl@3 gmp zstd python; do
-    if ! macos_formula_ready "$brew_prefix" "$formula"; then
-      missing+=("$formula")
-    fi
-  done
-  if [ "${#missing[@]}" -eq 0 ]; then
-    log "macOS dependencies ready ($arch, $brew_prefix)"
-    return 0
-  fi
-  if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would run: brew install ${missing[*]}"
-    return 0
-  fi
-  log "installing missing macOS dependencies: ${missing[*]}"
-  brew install "${missing[@]}" || die "Homebrew dependency installation failed; see its diagnostic above"
-  if ! activate_macos_python "$brew_prefix"; then
-    warn "Python startup failed at $(command -v python3 || printf 'python3 not found'); diagnostic follows"
-    installer_python_ready python3 || true
-    die "installed Python cannot run the installer; see its startup error above"
-  fi
-  for formula in "${missing[@]}"; do
-    macos_formula_ready "$brew_prefix" "$formula" ||
-      die "dependency $formula is still unavailable at $brew_prefix; inspect Homebrew output and repair it with brew reinstall $formula"
-  done
-}
-# --- end macOS dependency bootstrap ---
-
 require() { command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"; }
 require curl
 require uname
 require chmod
 require mkdir
 require mktemp
-ensure_macos_dependencies
-if [ "$DRY_RUN" -eq 1 ] && ! macos_formula_ready "" python; then
-  log "[dry-run] remaining installation checks require the planned Python dependency; no files changed"
-  exit 0
+RUNTIME_STAGE=""
+RUNTIME_ARCHIVE=""
+RUNTIME_ARGS=()
+DRY_RUN_WITHOUT_PYTHON=0
+if [ "$(uname -s)" = Darwin ]; then
+  case "$(uname -m)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
+  os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
+  major=${os_version%%.*}
+  case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
+  [ "$major" -ge "$minimum" ] || die "macOS $os_version is below the released binary minimum macOS $minimum.0"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would verify and install bundled macOS libraries and Python; no Homebrew or Command Line Tools required"
+    # Prefer the installed private interpreter, then a usable non-system
+    # interpreter. Never probe Apple's python3/CLT shim.
+    dry_python=""
+    installed_target=$(readlink "$PREFIX/masc" 2>/dev/null || true)
+    if [ -n "$installed_target" ]; then
+      case "$installed_target" in /*) ;; *) installed_target="$PREFIX/$installed_target" ;; esac
+      candidate="$(dirname "$installed_target")/python/bin/python3"
+      if [ -x "$candidate" ] && installer_python_ready "$candidate" >/dev/null 2>&1; then
+        dry_python="$candidate"
+      fi
+    fi
+    if [ -z "$dry_python" ]; then
+      candidate=$(command -v python3 || true)
+      case "$candidate" in
+        ''|/usr/bin/python3|/Library/Developer/*|/Applications/Xcode.app/*) ;;
+        *) if installer_python_ready "$candidate" >/dev/null 2>&1; then dry_python="$candidate"; fi ;;
+      esac
+    fi
+    if [ -n "$dry_python" ]; then
+      PATH="$(dirname "$dry_python"):$PATH"; export PATH; hash -r
+    else
+      DRY_RUN_WITHOUT_PYTHON=1
+    fi
+  fi
 fi
-require python3
-PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
-BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
-log "workspace: $BASE_PATH"
-log "configuration and data: $BASE_PATH/.masc"
 
 # --- checksum helpers ---------------------------------------------------------
 has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
@@ -1293,6 +1209,7 @@ cleanup_install_temp_files() {
     python3 "$BUNDLE_HELPER" rollback --prefix "$PREFIX" \
       || printf '%s\n' "binary/dashboard rollback failed; inspect $PREFIX/.masc-install-transaction" >&2
   fi
+  [ -z "$RUNTIME_STAGE" ] || rm -rf "$RUNTIME_STAGE"
   rm -f "$CHECKSUMS_FILE"
   [ -z "${CATALOG_FILE:-}" ] || rm -f "$CATALOG_FILE"
   local partial
@@ -1327,6 +1244,51 @@ fetch_release_checksums() {
     die "could not fetch release checksums ($CHECKSUMS_URL); refusing unverified install (pass --allow-unverified or set MASC_ALLOW_UNVERIFIED=1 to override)"
   fi
 }
+
+# Bootstrap only release-checksummed regular files into a fresh private tree.
+# Even --allow-unverified never authorizes executing an unchecked interpreter.
+if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
+  require tar
+  fetch_release_checksums
+  [ "$CHECKSUMS_AVAILABLE" -eq 1 ] || die "bundled Python requires release checksums"
+  runtime_asset="masc-runtime-$PLATFORM_SUFFIX.tar.gz"
+  runtime_expected=$(expected_hash "$runtime_asset")
+  [ -n "$runtime_expected" ] || die "bundled Python checksum missing: $runtime_asset"
+  RUNTIME_STAGE=$(mktemp -d)
+  RUNTIME_ARCHIVE="$RUNTIME_STAGE/runtime.tar.gz"
+  curl -fL --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" --retry "$MASC_INSTALL_CURL_RETRIES" \
+    -o "$RUNTIME_ARCHIVE" "$RELEASE_BASE_URL/$VERSION/$runtime_asset" || die "could not download bundled macOS runtime"
+  [ "$(sha256_file "$RUNTIME_ARCHIVE")" = "$runtime_expected" ] || die "bundled Python checksum differs"
+  tar -tzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/members" || die "invalid runtime archive"
+  tar -tvzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/types" || die "invalid runtime archive types"
+  LC_ALL=C awk 'substr($0,1,1) != "-" {exit 1}' "$RUNTIME_STAGE/types" || die "runtime archive contains non-regular members"
+  LC_ALL=C awk '
+    !/^(lib\/|python\/|licenses\/|runtime-provenance\.json$)/ {exit 1}
+    /[^A-Za-z0-9_.+\/-]/ || /(^|\/)\.\.?($|\/)/ || /\/\// {exit 1}
+    seen[$0]++ {exit 1}
+  ' "$RUNTIME_STAGE/members" || die "unsafe runtime archive paths"
+  mkdir "$RUNTIME_STAGE/root"
+  tar -xzf "$RUNTIME_ARCHIVE" -C "$RUNTIME_STAGE/root" || die "could not extract bundled runtime"
+  [ -x "$RUNTIME_STAGE/root/python/bin/python3" ] || die "bundled Python missing"
+  PATH="$RUNTIME_STAGE/root/python/bin:$PATH"
+  export PATH
+  unset PYTHONHOME PYTHONPATH
+  hash -r
+  installer_python_ready python3 || die "bundled Python cannot start"
+  RUNTIME_ARGS=(--runtime-archive "$RUNTIME_ARCHIVE")
+fi
+if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
+  case "$PREFIX" in '~') PREFIX="$HOME" ;; '~/'*) PREFIX="$HOME/${PREFIX#\~/}" ;; esac
+  case "$BASE_PATH" in '~') BASE_PATH="$HOME" ;; '~/'*) BASE_PATH="$HOME/${BASE_PATH#\~/}" ;; esac
+  case "$PREFIX" in /*) ;; *) PREFIX="$PWD/$PREFIX" ;; esac
+  case "$BASE_PATH" in /*) ;; *) BASE_PATH="$PWD/$BASE_PATH" ;; esac
+else
+require python3
+PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
+BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+fi
+log "workspace: $BASE_PATH"
+log "configuration and data: $BASE_PATH/.masc"
 
 # --- 3. download binary -------------------------------------------------------
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
@@ -1374,6 +1336,30 @@ masc_reported_version() {
   run_masc_with_install_env "$bin" --version 2>/dev/null | tail -n1
 }
 
+# Automatic upgrades apply only to ordered stable release versions. Unknown
+# development/prerelease strings and downgrades still require an explicit force.
+is_stable_upgrade() {
+  # Keep version planning available before the private Python bootstrap.
+  # Decimal components are compared without shell integer overflow.
+  local installed="$1" requested="${2#v}" left right index
+  local LC_ALL=C
+  local installed_parts requested_parts
+  [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  IFS=. read -r -a installed_parts <<< "$installed"
+  IFS=. read -r -a requested_parts <<< "$requested"
+  for index in 0 1 2; do
+    left="${installed_parts[$index]}"; right="${requested_parts[$index]}"
+    while [ "${#left}" -gt 1 ] && [[ "$left" = 0* ]]; do left="${left#0}"; done
+    while [ "${#right}" -gt 1 ] && [[ "$right" = 0* ]]; do right="${right#0}"; done
+    [ "${#left}" -lt "${#right}" ] && return 0
+    [ "${#left}" -gt "${#right}" ] && return 1
+    [[ "$left" < "$right" ]] && return 0
+    [[ "$left" > "$right" ]] && return 1
+  done
+  return 1
+}
+
 SKIP_DL=0
 if [ -e "$DEST" ]; then
   # The pipeline `... | tail -n1` masks the binary's own exit status, so
@@ -1385,6 +1371,8 @@ if [ -e "$DEST" ]; then
       SKIP_DL=1
     elif [ "$existing_ver" = "${VERSION#v}" ]; then
       warn "existing $DEST already reports $existing_ver; refreshing because --force is set"
+    elif [ "$FORCE" -eq 0 ] && is_stable_upgrade "$existing_ver" "$VERSION"; then
+      log "upgrading $DEST from $existing_ver to ${VERSION#v}; preserving workspace config"
     elif [ "$FORCE" -eq 0 ]; then
       warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; pass --force to overwrite"
       exit 1
@@ -1403,6 +1391,7 @@ install_release_companion() {
   local asset="$1" dest="$2"
   local url="$RELEASE_BASE_URL/$VERSION/$asset"
   if [ "$SKIP_DL" -eq 1 ] && [ -x "$dest" ]; then
+    COMPANION_ARGS+=(--companion "${dest##*/}" "$dest")
     log "release companion already present: $dest"
     return 0
   fi
@@ -1528,7 +1517,7 @@ else
   # Diagnose the executable itself before fetching the dashboard. This also
   # exposes dyld/loader stderr when installing an older release bundle helper.
   if [ "$SKIP_DL" -ne 1 ]; then chmod +x "$binary_input"; fi
-  if ! run_masc_with_install_env "$binary_input" build-commit; then
+  if [ -z "$RUNTIME_ARCHIVE" ] && ! run_masc_with_install_env "$binary_input" build-commit; then
     die "downloaded executable cannot start; see loader stderr above (check OS/CPU and native runtime dependencies)"
   fi
   BUNDLE_HELPER="$(mktemp)"
@@ -1538,7 +1527,7 @@ else
   fetch_bundle_asset "$DASHBOARD_ASSET" "$bundle_archive"
   DASHBOARD_ASSETS_DIR="$(python3 "$BUNDLE_HELPER" install \
     --binary "$binary_input" --archive "$bundle_archive" \
-    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"})" \
+    --prefix "$PREFIX" --binary-asset "$ASSET" ${COMPANION_ARGS[@]+"${COMPANION_ARGS[@]}"} ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"})" \
     || die "binary/dashboard installation rejected"
   BUNDLE_TRANSACTION_ACTIVE=1
   log "installed verified binary/dashboard: $DEST"
@@ -1588,7 +1577,15 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 
 # --- 4b. first-run wizard ------------------------------------------------------
-maybe_run_wizard "$BASE_PATH"
+if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
+  if [ -n "$WIZARD_PROVIDER" ]; then
+    log "[dry-run] requested provider: $WIZARD_PROVIDER; catalog validation and runtime selection require the planned bundled Python and installed binary"
+  elif [ "$WIZARD" != 0 ]; then
+    log "[dry-run] provider wizard requires the planned bundled Python and installed binary"
+  fi
+else
+  maybe_run_wizard "$BASE_PATH"
+fi
 
 # --- 4c. keeper team preset ----------------------------------------------------
 # Seeds presets/<preset>/keepers into the config root (verified via

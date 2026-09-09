@@ -10,7 +10,7 @@ let rec remove path =
   match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
-let with_fixture ?(change_receipt = Fun.id) f =
+let with_fixture ?(change_receipt = Fun.id) ?(companions = []) ?(runtime_files = []) f =
   let temp = Filename.temp_file "installed dashboard spaces " "" in
   Unix.unlink temp; Unix.mkdir temp 0o700;
   Fun.protect ~finally:(fun () -> remove temp) (fun () ->
@@ -25,7 +25,23 @@ let with_fixture ?(change_receipt = Fun.id) f =
     List.iter (fun (name, body) -> write (Filename.concat stage ("assets/dashboard/" ^ name)) body) files;
     write (Filename.concat stage "masc") "fixture binary";
     Unix.chmod (Filename.concat stage "masc") 0o755;
-    let receipt = `Assoc ["schema", `String "masc.installed-release.v1";
+    List.iter (fun (name, body) ->
+      write (Filename.concat stage name) body;
+      Unix.chmod (Filename.concat stage name) 0o755) companions;
+    if runtime_files <> [] then (
+      mkdir "python"; mkdir "python/bin"; mkdir "lib"; mkdir "licenses");
+    List.iter (fun (path, body, mode) ->
+      write (Filename.concat stage path) body;
+      Unix.chmod (Filename.concat stage path) mode) runtime_files;
+    let runtime = if runtime_files = [] then `Null else `Assoc [
+      "asset", `String "masc-runtime-linux-x64.tar.gz";
+      "sha256", `String (sha "fixture runtime archive");
+      "files", `List (List.map (fun (path, body, mode) -> `Assoc [
+        "path", `String path; "sha256", `String (sha body);
+        "size", `Int (String.length body); "mode", `Int mode]) runtime_files)] in
+    let receipt = `Assoc ["schema", `String "masc.installed-release.v2";
+      "companions", `Assoc (List.map (fun (name, body) -> name, `String (sha body)) companions);
+      "runtime", runtime;
       "source_commit", `String commit; "binary_asset", `String "masc-linux-x64";
       "binary_sha256", `String (sha "fixture binary");
       "files", `List (List.map (fun (path, body) -> `Assoc ["path", `String path;
@@ -154,7 +170,7 @@ let test_traversal () =
     check bool "untrusted path rejected" true (match inspect binary with
       | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
 let test_duplicate_fields () =
-  with_fixture ~change_receipt:(function `Assoc fields -> `Assoc (("schema", `String "masc.installed-release.v1") :: fields) | json -> json)
+  with_fixture ~change_receipt:(function `Assoc fields -> `Assoc (("schema", `String "masc.installed-release.v2") :: fields) | json -> json)
     (fun _ _ binary _ -> check bool "duplicate fields rejected" true (match inspect binary with
       | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
 let test_receipt_identity () = with_fixture (fun _ root binary _ ->
@@ -229,8 +245,88 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
       List.iter (fun dir -> Unix.chmod dir 0o555) dirs;
       check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
         (Installed.load (bound binary) "index.html")))
+let companion_fixture = ["masc-tui", "fixture tui"; "masc-browser-host", "fixture browser";
+  "masc-deployment-preflight-helper", "fixture preflight";
+  "masc-check-runtime-deployment-preflight", "fixture gate"]
+let runtime_fixture = ["python/bin/python3", "fixture interpreter", 0o755;
+  "runtime-provenance.json", "{}", 0o644; "lib/runtime.dylib", "fixture library", 0o755]
+let with_payload_fixture ?(change_receipt = Fun.id) f =
+  with_fixture ~change_receipt ~companions:companion_fixture ~runtime_files:runtime_fixture f
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | json -> json
+let map_runtime transform = function
+  | `Assoc fields -> `Assoc (List.map (function
+      | "runtime", value -> "runtime", transform value
+      | field -> field) fields)
+  | json -> json
+let map_runtime_files transform = map_runtime (function
+  | `Assoc fields -> `Assoc (List.map (function
+      | "files", `List files -> "files", `List (transform files)
+      | field -> field) fields)
+  | json -> json)
+let test_v2_payload_contract () =
+  with_payload_fixture (fun _ _ binary _ ->
+    check (result string error) "runtime-bearing distribution serves verified dashboard"
+      (Ok "<p>exact release</p>") (Installed.load (bound binary) "index.html"));
+  with_fixture ~change_receipt:(function
+    | `Assoc fields -> `Assoc (("schema", `String "masc.installed-release.v1") ::
+        List.filter (fun (name, _) -> not (List.mem name ["schema"; "companions"; "runtime"])) fields)
+    | json -> json) (fun _ _ binary _ ->
+      check bool "new binary rejects old schema" true (match inspect binary with
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false));
+  List.iter (fun binary_asset ->
+    with_fixture ~change_receipt:(replace_field "binary_asset" (`String binary_asset))
+      (fun _ _ binary _ -> check bool "macOS requires bundled runtime" true (match inspect binary with
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)))
+    ["masc-macos-arm64"; "masc-macos-x64"]
+let test_invalid_v2_payload_metadata () =
+  let invalid name change_receipt = with_payload_fixture ~change_receipt (fun _ _ binary _ ->
+    check bool name true (match inspect binary with
+      | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)) in
+  List.iter (fun (name, change) -> invalid name change)
+    ["unknown companion", replace_field "companions" (`Assoc ["masc", `String (sha "x")]);
+     "invalid companion digest", replace_field "companions" (`Assoc ["masc-tui", `String "wrong"]);
+     "duplicate companion", replace_field "companions" (`Assoc ["masc-tui", `String (sha "x"); "masc-tui", `String (sha "x")]);
+     "wrong runtime asset", map_runtime (replace_field "asset" (`String "masc-runtime-macos-arm64.tar.gz"));
+     "runtime archive digest", map_runtime (replace_field "sha256" (`String "wrong"));
+     "runtime unknown field", map_runtime (function `Assoc f -> `Assoc (("extra", `Null) :: f) | j -> j);
+     "runtime missing bootstrap", map_runtime_files (List.filter (function
+       | `Assoc fields -> List.assoc_opt "path" fields <> Some (`String "python/bin/python3") | _ -> true));
+     "duplicate runtime file", map_runtime_files (function first :: rest -> first :: first :: rest | [] -> []);
+     "runtime path traversal", map_runtime_files (List.map (replace_field "path" (`String "python/../escape")));
+     "runtime path outside payload", map_runtime_files (List.map (replace_field "path" (`String "assets/index.html")));
+     "runtime bad digest", map_runtime_files (List.map (replace_field "sha256" (`String "wrong")));
+     "runtime negative size", map_runtime_files (List.map (replace_field "size" (`Int (-1))));
+     "runtime interpreter must be executable", map_runtime_files (List.map (function
+       | `Assoc fields as json when List.assoc_opt "path" fields = Some (`String "python/bin/python3") ->
+         replace_field "mode" (`Int 0o644) json
+       | json -> json));
+     "runtime float mode", map_runtime_files (List.map (replace_field "mode" (`Float 493.)));
+     "runtime unsafe mode", map_runtime_files (List.map (replace_field "mode" (`Int 0o777)))]
+let test_v2_payload_corruption () =
+  List.iter (fun path -> with_payload_fixture (fun temp root binary _ ->
+    let target = Filename.concat root path in
+    let outside = Filename.concat temp "outside-runtime" in
+    let input = open_in_bin target in
+    let body = Fun.protect ~finally:(fun () -> close_in input)
+      (fun () -> really_input_string input (in_channel_length input)) in
+    write outside body;
+    Unix.unlink target; Unix.symlink outside target;
+    check bool (path ^ " symlink rejected") true (unavailable (inspect binary))))
+    ["masc-tui"; "python/bin/python3"; "runtime-provenance.json"];
+  List.iter (fun path -> with_payload_fixture (fun _ root binary _ ->
+    write (Filename.concat root path) "changed bytes";
+    check bool (path ^ " corruption rejected") true (unavailable (inspect binary))))
+    ["masc-browser-host"; "lib/runtime.dylib"; "runtime-provenance.json"];
+  with_payload_fixture (fun _ root binary _ ->
+    Unix.chmod (Filename.concat root "python/bin/python3") 0o644;
+    check bool "runtime mode change rejected" true (unavailable (inspect binary)))
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)
-  ["health rechecks installed files", test_health_rechecks_installed_files;
+  ["v2 payload contract", test_v2_payload_contract;
+   "invalid v2 payload metadata", test_invalid_v2_payload_metadata;
+   "v2 payload corruption", test_v2_payload_corruption;
+   "health rechecks installed files", test_health_rechecks_installed_files;
    "malformed numeric fields", test_invalid_numeric_receipt;
    "civil-time boundaries", test_civil_time_boundaries;
    "read-only installed files", test_read_only_install;

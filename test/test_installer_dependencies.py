@@ -1,178 +1,129 @@
-"""Hermetic tests of the installer's native dependency bootstrap (no real brew)."""
+"""Run the macOS installer bootstrap with poisoned host Python/Brew commands."""
 import os
 from pathlib import Path
-import subprocess
-import sys
 import shlex
-import tempfile
+import subprocess
 import unittest
+import test_release_dashboard_bundle as fixtures
 
 INSTALLER = Path(__file__).resolve().parents[1] / 'scripts/install.sh'
 
 
-class MacDependencies(unittest.TestCase):
-    def run_bootstrap(self, *, system='Darwin', arch='arm64', version='14.0',
-                      prefix='/opt/homebrew', ready=True, brew=True, dry=False, interactive=False):
-        source = INSTALLER.read_text().split('# --- macOS dependency bootstrap ---', 1)[1].split(
-            '# --- end macOS dependency bootstrap ---', 1)[0]
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            calls = root / 'calls'
-            # shell functions shadow external commands; all brew invocations are
-            # recorded and never reach the host's package manager.
-            script = '''set -eu
-log() { printf '%s\\n' "$*"; }
-die() { printf '%s\\n' "$*" >&2; exit 1; }
-uname() { if [ "${1:-}" = -m ]; then printf '%s\\n' "$FAKE_ARCH"; else printf '%s\\n' "$FAKE_SYSTEM"; fi; }
-sw_vers() { printf '%s\\n' "$FAKE_VERSION"; }
-'''
-            script += '''brew() {
-  printf '%s\\n' "$*" >> "$CALLS"
-  case "${1:-}" in --prefix) printf '%s\\n' "$FAKE_PREFIX" ;; install) FAKE_READY=1 ;; *) return 0 ;; esac
-}
-'''
-            if not brew:
-                # Override command discovery only for brew, delegating every
-                # other lookup to Bash's builtin with the real PATH.
-                script += '''[() { if builtin [ "${1:-}" = -x ] && [[ "${2:-}" == */bin/brew ]]; then builtin [ "${BOOTSTRAPPED:-0}" = 1 ]; return; fi; builtin [ "$@"; }
-command() { if [ "${1:-}" = -v ] && [ "${2:-}" = brew ]; then [ "${BOOTSTRAPPED:-0}" = 1 ]; return; fi; builtin command "$@"; }
-'''
-            script += source + '''
-is_tty() { [ "$FAKE_INTERACTIVE" = 1 ]; }
-bootstrap_macos_homebrew() { echo bootstrap >> "$CALLS"; BOOTSTRAPPED=1; }
-macos_formula_ready() { [ "$FAKE_READY" = 1 ]; }
-ensure_macos_dependencies
-'''
-            env = dict(os.environ, FAKE_SYSTEM=system, FAKE_ARCH=arch, FAKE_VERSION=version,
-                       FAKE_INTERACTIVE=str(int(interactive)), FAKE_PREFIX=prefix, FAKE_READY=str(int(ready)), DRY_RUN=str(int(dry)), CALLS=str(calls))
-            result = subprocess.run(['/bin/bash', '-c', script], env=env, capture_output=True, text=True, timeout=10)
-            return result, calls.read_text().splitlines() if calls.exists() else []
+class PortableBootstrap(unittest.TestCase):
+    def setUp(self):
+        self.fixture = fixtures.Distribution('test_round_trip_keeps_exact_pair_and_build_time_after_source_removal')
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        f = self.fixture
+        f.arch, f.asset = 'macos-arm64', 'masc-macos-arm64'
+        self.bin = f.root / 'host-bin'
+        self.bin.mkdir()
+        self.calls = f.root / 'forbidden-calls'
+        def command(name, body):
+            path = self.bin / name
+            path.write_text('#!/bin/sh\n' + body + '\n')
+            path.chmod(0o755)
+        command('uname', 'case "$1" in -m) echo arm64 ;; *) echo Darwin ;; esac')
+        command('sw_vers', 'echo "${TEST_MACOS_VERSION:-14.0}"')
+        command('python3', 'exit 98')
+        for name in ('brew', 'xcode-select'):
+            command(name, 'echo ' + name + ' >> ' + shlex.quote(str(self.calls)) + '; exit 98')
+        self.env = dict(os.environ, PATH=str(self.bin) + ':/usr/bin:/bin:/usr/sbin:/sbin', MASC_WIZARD='0')
 
-    def test_missing_formulas_are_installed(self):
-        result, calls = self.run_bootstrap(ready=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any(c.startswith('install ') for c in calls), calls)
+    def run_installer(self, args, mirror=None, **env):
+        values = dict(self.env, **env)
+        if mirror is not None:
+            values['MASC_RELEASE_BASE_URL'] = mirror.parent.as_uri()
+        result = subprocess.run(['/bin/bash', str(INSTALLER), '--prefix', str(self.fixture.prefix),
+                                 '--base-path', str(self.fixture.root / 'workspace'), *args],
+                                env=values, capture_output=True, text=True, timeout=60)
+        self.assertFalse(self.calls.exists(), self.calls.read_text() if self.calls.exists() else '')
+        return result
 
-    def test_complete_installation_does_not_mutate(self):
-        result, calls = self.run_bootstrap()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(any(c.startswith('install ') for c in calls), calls)
-
-    def test_dry_run_does_not_mutate(self):
-        result, calls = self.run_bootstrap(ready=False, dry=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(any(c.startswith('install ') for c in calls), calls)
-
-    def test_wrong_homebrew_prefix_is_rejected(self):
-        result, calls = self.run_bootstrap(prefix='/usr/local', ready=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('/opt/homebrew', result.stdout + result.stderr)
-        self.assertFalse(any(c.startswith('install ') for c in calls))
-
-    def test_old_macos_is_rejected_before_install(self):
-        result, calls = self.run_bootstrap(version='13.6', ready=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(any(c.startswith('install ') for c in calls))
-
-    def test_linux_does_not_call_brew(self):
-        result, calls = self.run_bootstrap(system='Linux', ready=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, [])
-
-    def test_missing_homebrew_interactive_bootstraps(self):
-        result, calls = self.run_bootstrap(brew=False, ready=False, interactive=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls.count('bootstrap'), 1)
-        self.assertTrue(any(c.startswith('install ') for c in calls))
-
-    def test_missing_homebrew_dry_run_never_bootstraps(self):
-        result, calls = self.run_bootstrap(brew=False, ready=False, dry=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, [])
-
-    def test_missing_homebrew_has_actionable_error(self):
-        result, calls = self.run_bootstrap(brew=False, ready=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('brew.sh', result.stdout + result.stderr)
-        self.assertEqual(calls, [])
-
-
-
-class PythonActivation(unittest.TestCase):
-    def exercise(self, unlinked):
-        source = INSTALLER.read_text().split('# --- macOS dependency bootstrap ---', 1)[1].split(
-            '# --- end macOS dependency bootstrap ---', 1)[0]
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            prefix = root / 'brew'
-            old = root / 'old'
-            old.mkdir()
-            (prefix / 'bin').mkdir(parents=True)
-            formula = prefix / 'opt/python'
-            destination = formula / 'libexec/bin' if unlinked else prefix / 'bin'
-            destination.mkdir(parents=True, exist_ok=True)
-            stale = old / 'python3'
-            stale.write_text('#!/bin/sh\nexit 1\n')
-            stale.chmod(0o755)
-            good = root / 'good-python'
-            good.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n')
-            good.chmod(0o755)
-            # Map only the platform installation root into this fixture. The
-            # Python readiness body and activation logic remain production code.
-            source = source.replace('/opt/homebrew', str(prefix))
-            source = source.replace('macos_formula_ready() {', 'actual_formula_ready() {', 1)
-            script = source + r"""
-log() { :; }
-die() { echo "$*" >&2; exit 1; }
-is_tty() { return 1; }
-uname() { if [ "${1:-}" = -m ]; then echo arm64; else echo Darwin; fi; }
-sw_vers() { echo 14.0; }
-macos_formula_ready() {
-  if [ "$2" = python ]; then actual_formula_ready "$@"; else return 0; fi
-}
-brew() {
-  case "$1" in
-    --prefix) if [ "${2:-}" = python ]; then echo "$FORMULA"; else echo "$PREFIX_FIXTURE"; fi ;;
-    install)
-      [ "$2" = python ] || exit 91
-      # The failed readiness probe executed the stale interpreter. Prove the
-      # shell cache is populated before installing the new executable.
-      [ "$(hash -t python3)" = "$OLD_PYTHON" ] || exit 92
-      /bin/cp "$GOOD_PYTHON" "$DESTINATION/python3"
-      ;;
-    *) exit 93 ;;
-  esac
-}
-ensure_macos_dependencies
-actual_formula_ready "$PREFIX_FIXTURE" python
-[ "$(command -v python3)" = "$DESTINATION/python3" ]
-"""
-            env = dict(os.environ, PATH=str(prefix / 'bin') + ':' + str(old) + ':/usr/bin:/bin',
-                       DRY_RUN='0', FORMULA=str(formula), PREFIX_FIXTURE=str(prefix),
-                       OLD_PYTHON=str(stale), GOOD_PYTHON=str(good), DESTINATION=str(destination))
-            result = subprocess.run(['/bin/bash', '-eu', '-c', script], env=env,
-                                    text=True, capture_output=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_readiness_does_not_require_unused_tomllib(self):
-        source = INSTALLER.read_text().split('# --- macOS dependency bootstrap ---', 1)[1].split(
-            '# --- end macOS dependency bootstrap ---', 1)[0]
-        with tempfile.TemporaryDirectory() as directory:
-            interpreter = Path(directory) / 'python3'
-            interpreter.write_text('#!/bin/sh\ncase "$*" in *tomllib*) exit 42 ;; esac\nexec ' +
-                                   shlex.quote(sys.executable) + ' "$@"\n')
-            interpreter.chmod(0o755)
-            result = subprocess.run(['/bin/bash', '-eu', '-c', source +
-                                     '\nmacos_formula_ready /unused python\n'],
-                env=dict(os.environ, PATH=directory + ':/usr/bin:/bin'),
-                capture_output=True, text=True, timeout=10)
+    def test_help_and_dry_run_never_launch_brew_or_xcode(self):
+        for args in (['--help'], ['--dry-run', '--version', 'v9.9.9']):
+            result = self.run_installer(args)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_newly_linked_python_replaces_cached_old_interpreter(self):
-        self.exercise(unlinked=False)
+    def test_dry_run_without_python_reports_force_and_provider_plan(self):
+        binary = self.fixture.prefix / 'masc'
+        binary.write_bytes(self.fixture.binary.read_bytes())
+        binary.chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--force', '--provider', 'codex'], MASC_WIZARD='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('refreshing because --force is set', result.stdout + result.stderr)
+        self.assertIn('requested provider: codex; catalog validation', result.stdout)
+        self.assertIn('[dry-run] would download to', result.stdout)
 
-    def test_unlinked_formula_libexec_python_is_selected(self):
-        self.exercise(unlinked=True)
+    def test_dry_run_uses_available_non_system_python_for_full_planning(self):
+        import sys
+        marker = self.fixture.root / "python-used"
+        interpreter = self.bin / "python3"
+        interpreter.write_text("#!/bin/sh\necho used >> " + shlex.quote(str(marker)) +
+                               "\nexec " + shlex.quote(sys.executable) + ' "$@"\n')
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreater(len(marker.read_text().splitlines()), 1)
+        self.assertIn('[dry-run] would install verified binary/dashboard bundle', result.stdout)
+
+    def test_dry_run_upgrades_stable_release_without_usable_python(self):
+        binary = self.fixture.prefix / 'masc'
+        old_bytes = b'#!/bin/sh\necho 0.34.0\n'
+        binary.write_bytes(old_bytes)
+        binary.chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v0.35.1',
+                                     '--no-wizard', '--no-seed', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('from 0.34.0 to 0.35.1; preserving workspace config', result.stdout)
+        self.assertIn('[dry-run] would download to', result.stdout)
+        self.assertEqual(binary.read_bytes(), old_bytes)
+        self.assertFalse((self.fixture.root / 'workspace').exists())
+
+    def test_dry_run_preserves_version_conflict(self):
+        self.fixture.old()
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pass --force', result.stderr)
+
+    def test_old_macos_fails_before_download(self):
+        result = self.run_installer(['--version', 'v9.9.9'], TEST_MACOS_VERSION='13.6')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('minimum macOS 14.0', result.stderr)
+
+    def test_offline_uninstall_needs_no_interpreter(self):
+        self.fixture.old()
+        result = self.run_installer(['--uninstall'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.fixture.prefix / 'masc').exists())
+
+    def test_explicit_version_bootstraps_without_host_python(self):
+        mirror = self.fixture.mirror()
+        result = self.run_installer(['--version', 'v9.9.9', '--no-seed', '--no-guest-shim', '--no-wizard'], mirror)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = (self.fixture.prefix / 'masc').resolve().parent
+        fixtures.bundle.verify_tree(installed, self.fixture.asset)
+        self.assertTrue((installed / 'python/bin/python3').is_file())
+
+    def test_latest_resolution_precedes_python_bootstrap(self):
+        mirror = self.fixture.mirror()
+        # Stub only the public latest metadata response; every asset download,
+        # checksum, extraction and interpreter execution remains real.
+        curl = self.bin / 'curl'
+        curl.write_text('#!/bin/sh\ncase "$*" in *api.github.com*/releases/latest*) '
+                        'echo \'{"tag_name":"v9.9.9"}\' ;; *) exec /usr/bin/curl "$@" ;; esac\n')
+        curl.chmod(0o755)
+        result = self.run_installer(['--no-seed', '--no-guest-shim', '--no-wizard'], mirror)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unverified_override_cannot_execute_tampered_python(self):
+        mirror = self.fixture.mirror()
+        runtime = mirror / 'masc-runtime-macos-arm64.tar.gz'
+        runtime.write_bytes(runtime.read_bytes() + b'tampered')
+        result = self.run_installer(['--version', 'v9.9.9', '--allow-unverified', '--no-guest-shim'], mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('bundled Python checksum differs', result.stderr)
+        self.assertFalse((self.fixture.prefix / 'masc').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

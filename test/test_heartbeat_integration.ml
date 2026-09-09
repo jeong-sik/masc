@@ -3239,6 +3239,46 @@ let test_configuration_removal_retries_exact_revision_without_runtime () =
     check int "completed receipt does not replay cleanup" 2 !calls)
 ;;
 
+(* [Keeper_dashboard_purge.resolve] runs before [submit] and outside its durable
+   lock, so two delete requests can both see the manifest and then serialize
+   here. The second one finds the manifest gone and its own deletion already
+   recorded. Reaching submit at all means resolve saw a manifest, because it
+   answers [Ok None] once the manifest is gone, so this arm is the race and
+   nothing else. *)
+let test_configuration_removal_replays_a_completed_deletion () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  let base_dir = temp_dir "keeper-configuration-removal-replay" in
+  Fun.protect ~finally:(fun () -> R.For_testing.clear (); cleanup_dir base_dir) (fun () ->
+    let config = Masc.Workspace.default_config base_dir in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    Eio.Switch.run @@ fun sw ->
+    install_owner_inventory_exn ~sw config;
+    let module Removal = Masc.Keeper_configuration_removal in
+    let keeper_name = "raced-away" in
+    let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base_dir)
+      (keeper_name ^ ".toml") in
+    write_file path "[keeper]\nautoboot = false\n";
+    let cleanups = ref 0 in
+    let submit () = Removal.submit ~config ~keeper_name ~actor:"operator"
+      ~cleanup:(fun _ -> incr cleanups; Ok ()) in
+    let first = match submit () with
+      | Ok receipt -> receipt | Error error -> fail (Removal.error_to_string error) in
+    (match first.state with Removed -> () | _ -> fail "the first delete did not complete");
+    check bool "manifest is gone" false (Sys.file_exists path);
+    (match submit () with
+     | Ok receipt ->
+       check bool "the race loser is answered with the completed deletion" true
+         (Shutdown_types.Operation_id.equal receipt.operation_id first.operation_id);
+       (match receipt.state with Removed -> ()
+         | _ -> fail "the replayed receipt is not the completed one")
+     | Error error ->
+       failf "a completed deletion was reported as an error: %s"
+         (Removal.error_to_string error));
+    check int "the replay runs no second cleanup" 1 !cleanups)
+;;
+
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
   install_test_env env;
@@ -5227,6 +5267,8 @@ let () =
         test_dashboard_purge_resolution_is_fail_closed;
       test_case "configuration removal survives failure and protects replacement" `Quick
         test_configuration_removal_retries_exact_revision_without_runtime;
+      test_case "a completed configuration removal answers the race loser" `Quick
+        test_configuration_removal_replays_a_completed_deletion;
       test_case "Librarian rejection unregisters with lifecycle authority" `Quick
         test_librarian_rejection_unregisters_with_lifecycle_authority;
       test_case "shutdown prepare joins idle lane" `Quick

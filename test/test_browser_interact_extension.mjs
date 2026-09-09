@@ -102,11 +102,15 @@ class Anchor {
   click() {throw new Error('follow must not run window.open handlers');}
 }
 let followed, assigned = [];
+// Styles are per node so an ancestor can withdraw the anchor the way a page
+// does, which is what the scene's `rendered` walk already accounts for.
+const followStyles = new Map();
 const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL, window:{},
   browserScene: () => followed,
   location:{href:'https://example.org/source',assign:url=>assigned.push(url)},
   document:{title:'Still source',querySelector:()=>null},scrollX:0,scrollY:0,
-  getComputedStyle:()=>({display:'block',visibility:'visible'})});
+  getComputedStyle:node =>
+    followStyles.get(node) ?? {display:'block',visibility:'visible',opacity:'1'}});
 followPage.window.top=followPage.window;
 vm.runInContext(driverFunction,followPage);
 const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
@@ -121,6 +125,30 @@ const receipt=follow();
 assert.equal(receipt.destinationUrl,'https://example.org/destination');
 assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
 assert.deepEqual(assigned,['https://example.org/destination']);
+
+// A page can withdraw the observed link between the read and the follow. The
+// scene stops admitting it -- `rendered` walks ancestors for display and
+// opacity -- so the follow has to stop too, or it navigates to a link the
+// operator can no longer see.
+{
+  const wrapper = {};
+  followed = new Anchor();
+  followed.parentElement = wrapper;
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'0'});
+  const before = assigned.length;
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with opacity 0 withdraws the link');
+  assert.equal(assigned.length,before,'a withdrawn link never navigates');
+  followStyles.set(wrapper, {display:'none',visibility:'visible',opacity:'1'});
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with display none withdraws the link');
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'1'});
+  assert.equal(follow().destinationUrl,'https://example.org/destination',
+    'a rendered ancestor still follows');
+  followStyles.delete(wrapper);
+  followed.parentElement = undefined;
+}
+console.log('PASS: a link withdrawn by an ancestor is not followed');
 
 // Exercise the actual native message dispatch and injected scene resolver.
 page.HTMLAnchorElement=Anchor;page.URL=URL;
@@ -191,3 +219,33 @@ for (const policy of ['rel','referrerpolicy']) {
   assert.equal(follow().interactionFailure.effectStarted,false);assert.equal(assigned.length,count);
 }
 console.log('PASS: top-document parent/top targets accepted and link-specific referrer policies reject pre-effect');
+
+const updates=[];
+let activeTab={id:7,url:'https://example.org/channel',title:'Channel',active:false};
+browser.tabs.get=async id=>{assert.equal(id,7);return {...activeTab};};
+browser.tabs.update=async(id,changes)=>{assert.equal(id,7);assert.deepEqual(JSON.parse(JSON.stringify(changes)),{active:true});updates.push(changes);activeTab.active=true;return {...activeTab};};
+assert.equal((await command({tabId:7,action:'activate_tab'})).error,'activate_tab_requires_expected_url');
+assert.equal((await command({tabId:7,action:'activate_tab',expectedUrl:'https://example.org/wrong'})).error,'page_url_changed');
+assert.equal(updates.length,0);
+const priorExecutions=executions;
+const activation=await command({tabId:7,action:'activate_tab',expectedUrl:activeTab.url});
+assert.equal(activation.ok,true,JSON.stringify(activation));
+assert.equal(activation.data.active,true);assert.equal(activation.data.tabId,7);
+assert.equal(activation.data.url,activeTab.url);assert.equal(updates.length,1);
+assert.equal(executions,priorExecutions,'activation does not inject or navigate the page');
+console.log('PASS: activation checks explicit tab URL then updates only active and verifies receipt');
+
+const activationArgs={tabId:7,action:'activate_tab',expectedUrl:activeTab.url};
+assert.equal((await command({...activationArgs,expectedUrl:'https://example.org/stale'})).effectPhase,'not_started');
+assert.equal((await command({...activationArgs,tabId:-1})).effectPhase,'not_started');
+assert.equal((await command({tabId:7,action:'activate_tab'})).effectPhase,'not_started');
+const getTab=browser.tabs.get,updateTab=browser.tabs.update;
+browser.tabs.get=async()=>{throw new Error('closed before activation');};
+assert.equal((await command(activationArgs)).effectPhase,'not_started');
+browser.tabs.get=getTab;
+browser.tabs.update=async()=>{throw new Error('activation transport outcome unknown');};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'dispatch failure must not authorize effect replay');
+browser.tabs.update=async(...args)=>{const result=await updateTab(...args);browser.tabs.get=async()=>{throw new Error('closed after activation');};return result;};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'post-activation verification failure is not pre-effect');
+browser.tabs.get=getTab;browser.tabs.update=updateTab;
+console.log('PASS: native dispatch distinguishes activation pre-effect failures from unknown effect outcomes');

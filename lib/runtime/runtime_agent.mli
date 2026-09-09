@@ -265,6 +265,18 @@ val media_candidates : lane:Runtime.t list -> Runtime.t list
     the vision tool both read this set, so a runtime that can take an image for
     one of them is offered to the other. *)
 
+val media_walk :
+  candidates:Runtime.t list ->
+  ?checkpoint_messages:Agent_core.Types.message list ->
+  ?initial_messages:Agent_core.Types.message list ->
+  Agent_core.Types.content_block list ->
+  Runtime.t list
+(** RFC-0440 walk for a run that carries media: the [candidates] whose effective
+    input capabilities admit every modality the run requires (goal blocks plus
+    the checkpoint and initial history), in [candidates] order. [[]] when the
+    run requires no media: a text run has no media walk and keeps its lane
+    order. *)
+
 val decide_modality_reroute_for_runtime_candidates :
   assigned:Runtime.t ->
   candidates:Runtime.t list ->

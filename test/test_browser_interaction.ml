@@ -16,6 +16,17 @@ let test_typed_actions () =
   check bool "live interactions admitted" true (Browser_lane.verb_allowed_on_live verb);
   check bool "interactions are writes" false (Browser_lane.verb_is_read verb);
   check string "closed wire verb" "page.interact" (Browser_lane.verb_to_string verb)
+let test_activate_tab () =
+  let args = fields "activate_tab" @ ["lane",`String "live";"expectedUrl",`String "https://example.org"] in
+  let request = parsed args in
+  check bool "activation is a typed live action" true (request.action=Browser_lane.Activate_tab);
+  let wire = Browser_lane.interaction_args ~tab_id:7 ~expected_url:request.expected_url request.action in
+  check bool "wire pins tab URL and activation only" true
+    (wire = `Assoc ["tabId",`Int 7;"action",`String "activate_tab";"expectedUrl",`String "https://example.org"]);
+  List.iter (fun input -> check bool "activation rejects missing URL, unrelated inputs and automation" true
+    (Result.is_error (Interaction.parse (`Assoc input))))
+    [fields "activate_tab"; args @ ["selector",`String "button"];
+     fields "activate_tab" @ ["lane",`String "automation";"expectedUrl",`String "https://example.org"]]
 let test_scene_reference () =
   let target : Browser_lane.node_ref = {document_id="doc";node_id="node"} in
   let reference = ["documentId",`String "doc";"nodeId",`String "node"] in
@@ -79,6 +90,7 @@ let test_pointer_actions () =
      `Assoc ["x",`Float nan;"y",`Float 0.];
      `Assoc ["x",`Int 0;"y",`Int 0;"x",`Int 0]]
 let () = run "browser interaction" ["typed boundary", [
+  test_case "explicit live tab activation" `Quick test_activate_tab;
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;

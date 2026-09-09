@@ -160,6 +160,7 @@ let emit_stream_event on_stream_event event =
 type history_role =
   | User
   | Assistant
+  | Developer
 
 type history_message =
   { role : history_role
@@ -1113,6 +1114,7 @@ let history_item (message : history_message) =
     match message.role with
     | User -> "user", "input_text"
     | Assistant -> "assistant", "output_text"
+    | Developer -> "developer", "input_text"
   in
   `Assoc
     [ "type", `String "message"
@@ -1128,7 +1130,7 @@ let history_item (message : history_message) =
 ;;
 
 let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
+    ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
@@ -1195,10 +1197,14 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
            expected
            thread_id)
   in
+  let messages_to_inject =
+    (match thread_mode with Start -> history | Resume _ -> [])
+    @ List.map (fun text -> { role = Developer; text }) developer_context
+  in
   let turn_request_id =
-    match thread_mode, history with
-    | Resume _, _ | Start, [] -> Ok 4
-    | Start, messages ->
+    match messages_to_inject with
+    | [] -> Ok 4
+    | messages ->
       send_request io ~id:4 ~method_:"thread/inject_items"
         ~params:
           (`Assoc
@@ -1479,7 +1485,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
-    ~reasoning_effort ~thread_mode ~history ~prompt ~images ~on_thread_ready
+    ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event =
   with_spawned_client
     ~mgr
@@ -1499,6 +1505,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~reasoning_effort
       ~thread_mode
       ~history
+      ~developer_context
       ~prompt
       ~images
       ~on_thread_ready:(fun ~thread_id ->
@@ -1614,6 +1621,7 @@ let probe_subscription ~mgr ~clock ~cwd config =
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
+    ?(developer_context = [])
     ?(on_prompt_sent = fun () -> ())
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
@@ -1657,6 +1665,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~reasoning_effort
               ~thread_mode
               ~history
+              ~developer_context
               ~prompt
               ~images
               ~on_thread_ready

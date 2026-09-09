@@ -2,9 +2,9 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.35.0 설치 계약**입니다. 태그와 자산 제공 여부는
+이 문서는 **0.35.1 설치 계약**입니다. 태그와 자산 제공 여부는
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-아래 다운로드 명령은 `v0.35.0`과 같은 버전의 설치기를 선택합니다.
+아래 다운로드 명령은 `v0.35.1`과 같은 버전의 설치기를 선택합니다.
 
 ## 플랫폼과 준비물
 
@@ -21,9 +21,10 @@
 Container 기반 microVM을 제공하지 않으므로 Docker 또는 remote SSH를 선택합니다.
 Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images)을 따릅니다.
 
-설치 스크립트는 Bash, curl, Python 3, `sha256sum` 또는 `shasum`을 사용합니다.
+설치 스크립트는 Bash, curl, tar, `sha256sum` 또는 `shasum`을 사용합니다.
+macOS는 Python과 실행 라이브러리를 함께 제공하므로 Homebrew나 별도 Python 설치가
+필요하지 않습니다. Linux는 아래 Python 3 및 시스템 패키지를 사용합니다.
 OCaml/opam/Dune, Node.js/pnpm은 **바이너리 설치에 필요하지 않습니다**.
-공유 라이브러리는 OS에 설치되어 있어야 합니다.
 
 Ubuntu 24.04:
 
@@ -33,53 +34,30 @@ sudo apt-get install -y ca-certificates curl python3 libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
-macOS ([Homebrew 설치 조건](https://docs.brew.sh/Installation)):
+macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
 
-```bash
-brew install python gmp libpq openssl@3 zstd
-```
+기본 sandbox에는 실행 중인 Docker 엔진이 필요하며, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. `masc setup` 전에 준비해 주세요.
 
-개선된 macOS 설치기는 다운로드 전에 OS 버전과 Homebrew 런타임 의존성을
-확인하고, 없는 패키지만 설치합니다. Homebrew가 없는 터미널에서는 공식
-Homebrew 설치 프로그램으로 이어지며, 그 프로그램의 확인·암호 입력을 거칩니다.
-비대화형 실행에서는 Homebrew를 미리 준비해야 합니다. `--dry-run`은 패키지를
-설치하지 않습니다. Linux 시스템 패키지는 위 명령으로 준비합니다.
-
-macOS의 Homebrew 라이브러리 경로는 해당 CPU의 기본 prefix를 사용합니다.
-Apple Silicon의 Intel Homebrew 등 다른 prefix로 연결된 환경은 다운로드 전에
-원인을 안내합니다. 패키지 설치 후에도 바이너리가 시작되지 않으면 설치기가
-실행 파일의 stderr 원문을 바로 표시합니다.
-
-### macOS에서 `SIGABRT` 또는 `build-commit` 실패
-
-`SIGABRT`는 프로세스의 종료 신호이며, 그 자체로 원인을 알려주지 않습니다.
-`dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
-종료 신호만으로 누락 라이브러리라고 단정하지 않습니다.
-
-지원하는 최소 OS는 Apple Silicon **macOS 14.0**,
-Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
-(Apple Silicon `/opt/homebrew`, Intel `/usr/local`)에 의존성을 준비합니다.
-
-```bash
-brew install python gmp libpq openssl@3 zstd
-sw_vers -productVersion
-uname -m
-```
-
-`otool -L <실패한-실행파일>`로 실제 연결 라이브러리 경로를 확인할 수 있습니다.
-의존성과 OS 조건을 맞춘 뒤에도 중단되면 종료 신호와 stderr 원문을 함께 보고하세요.
-`--force`는 재다운로드 옵션이며 loader나 OS 호환성 문제를 해결하지 않습니다.
+시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
 ## 설치
 
 ```bash
-TAG=v0.35.0
+TAG=v0.35.1
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
+
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
 `.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
@@ -93,6 +71,12 @@ export PATH="$HOME/.local/bin:$PATH"
 `--no-wizard`는 모델 선택을 건너뜁니다. `--provider <id>`는
 `runtime.toml`의 공급자 catalog에서 선택합니다. 마법사는 사용 가능한 모델 서버와
 CLI 인증 상태를 탐지하고 `[runtime].default`를 선택하며 API 키는 저장하지 않습니다.
+모델 설정은 CLI의 로컬 모델 목록이나 HTTP 서버의 `/models` 응답을 번호로 보여 줍니다.
+CLI 목록이 없으면 설치된 MASC 모델 catalog를 사용합니다. 번호를 선택하거나 정확한
+모델 ID를 입력하세요. 빈 입력으로 모델을 자동 선택하지 않으며, 목록에 있다는 사실이
+계정의 사용 권한을 보장하지는 않습니다. context window는 선택한 항목에서 자동으로
+채우고 출처를 표시합니다. Codex가 관측한 실제 context 한도가 있으면 catalog 값보다
+우선합니다. 한도를 알 수 없을 때만 문서나 서버 설정에 있는 토큰 수를 묻습니다.
 모델이 없어도 서버 설치와 상태 화면 사용은 가능합니다.
 
 ## 첫 설치 마법사
@@ -140,7 +124,7 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.0 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.1 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
@@ -153,11 +137,11 @@ Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 �
 설치돼 있지 않아도 선택지가 사라지지 않고, 로컬 서버는 다른 컴퓨터의 endpoint를
 가리킬 수도 있습니다.
 
-고른 연결만 추가합니다. Claude Code·Codex는 모델 ID를 입력하면 설치된 모델
-카탈로그에서 context 크기를 가져오고 도구 호출·streaming 질문은 생략합니다.
-카탈로그에 없는 모델만 context 크기를 직접 입력합니다. HTTP 연결은 서버의
-context 크기와 도구 호출·streaming 지원 여부를 직접 확인해 입력합니다.
-HTTP capability overlay는 해당 provider에만 적용됩니다. API 키는 값이 아니라
+고른 연결만 추가합니다. 목록에서 모델 번호를 선택하거나 원하는 모델 ID를 직접
+입력합니다. 알려진 context 한도는 출처와 함께 자동 적용하며, 한도를 모를 때만
+문서나 서버 설정의 값을 입력합니다. Claude Code·Codex는 도구 호출·streaming
+질문을 생략합니다. HTTP 연결은 서버의 도구 호출·streaming 지원 여부를 확인하며,
+capability overlay는 해당 provider에만 적용됩니다. API 키는 값이 아니라
 환경변수 이름을 적습니다. 기본 Z.AI 연결은 MASC를 시작하는 shell의
 `ZAI_API_KEY`를 읽습니다.
 
@@ -172,9 +156,9 @@ timeout까지 적어야 합니다. `Configure later`로 모델 연결을 미룰 
 Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설정하려면 `--wizard`를
 쓰세요.
 
-## `imp`와 첫 대화 (0.35.0)
+## `imp`와 첫 대화 (0.35.1)
 
-이 경로는 `masc setup`이 포함된 **0.35.0 설치 계약**입니다. 다운로드 전에
+이 경로는 `masc setup`이 포함된 **0.35.1 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
 1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
@@ -387,7 +371,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.35.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.1` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

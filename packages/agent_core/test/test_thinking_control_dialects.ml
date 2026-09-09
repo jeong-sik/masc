@@ -137,7 +137,6 @@ let declared_qwen_openai_compat_capabilities =
   { CAP.openai_compat_chat_capabilities with
     supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = true
   ; thinking_control_format = CAP.Chat_template_kwargs
   ; preserve_thinking_control_format = CAP.Chat_template_kwargs_preserve_thinking
   ; reasoning_streaming_format = CAP.Delta_reasoning_field "reasoning_content"

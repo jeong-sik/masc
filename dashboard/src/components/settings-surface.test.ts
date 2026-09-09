@@ -1080,7 +1080,6 @@ describe('SettingsSurface', () => {
           supports_image_input: true,
           supports_audio_input: true,
           supports_video_input: false,
-          supports_reasoning_budget: true,
           supports_response_format_json: true,
           supports_structured_output: true,
           supports_system_prompt: true,
@@ -1152,7 +1151,6 @@ describe('SettingsSurface', () => {
             supports_structured_output: true,
             supports_reasoning: true,
             supports_extended_thinking: true,
-            supports_reasoning_budget: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
             thinking_control_format: 'reasoning-effort',
             preserve_thinking_control_format: 'always-preserved',
@@ -1218,7 +1216,6 @@ describe('SettingsSurface', () => {
                 supports_named_tool_choice: true,
                 supports_parallel_tool_calls: true,
                 supports_extended_thinking: true,
-                supports_reasoning_budget: true,
                 thinking_control_format: 'chat-template-kwargs',
                 supports_image_input: true,
                 supports_audio_input: false,
@@ -1315,7 +1312,6 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
       expect(cards[0]?.textContent).toContain('extended-thinking')
-      expect(cards[0]?.textContent).toContain('reasoning-budget')
       expect(cards[0]?.textContent).toContain('effort:low,medium,high')
       expect(cards[0]?.textContent).toContain('wire:reasoning-effort')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
@@ -1326,7 +1322,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

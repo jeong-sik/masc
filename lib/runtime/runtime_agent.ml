@@ -779,6 +779,28 @@ let media_candidates ~lane =
   let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
   media_candidates_of ~lane ~runtimes ~media_failover
 
+(* RFC-0440 §3: an image turn walks the candidates that take the image, in the
+   order the candidate set gives them. A text-only candidate is not part of
+   that walk; the driver appends the lane's text candidates after it as the
+   degrade tail until delegation replaces that tail (PR-C). A run that
+   requires no media has no media walk at all and keeps its lane order. *)
+let media_walk ~(candidates : Runtime.t list)
+    ?(checkpoint_messages = [])
+    ?(initial_messages = [])
+    (blocks : Agent_core.Types.content_block list) : Runtime.t list =
+  match
+    required_modalities_for_run_with_checkpoint ~checkpoint_messages
+      ~initial_messages ~goal_blocks:blocks
+  with
+  | [] -> []
+  | required_modalities ->
+    List.filter
+      (fun (runtime : Runtime.t) ->
+        caps_admit_required_modalities
+          (input_capabilities_of_runtime runtime)
+          required_modalities)
+      candidates
+
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
     ~(config : config)

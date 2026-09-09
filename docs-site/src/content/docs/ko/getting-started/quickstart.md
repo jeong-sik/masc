@@ -4,22 +4,30 @@ description: 보유 런타임을 연결하고 기본 샌드박스의 imp와 대�
 ---
 
 macOS·Linux용 바이너리를 설치합니다. OCaml·Node.js 빌드 도구는 필요 없습니다.
-이 안내는 **0.35.0** 기준입니다. 게시 여부는
+이 안내는 **0.35.1** 기준입니다. 게시 여부는
 [Releases](https://github.com/jeong-sik/masc/releases)에서 확인하고 바이너리와
 같은 태그에 첨부된 설치기를 사용하세요.
 
 ```bash
-TAG=v0.35.0
+TAG=v0.35.1
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## `imp`와 첫 대화 (0.35.0)
+선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
 
-이 경로는 `masc setup`이 포함된 **0.35.0 설치 계약**입니다. 다운로드 전에
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
+
+## `imp`와 첫 대화 (0.35.1)
+
+이 경로는 `masc setup`이 포함된 **0.35.1 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
 1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
@@ -32,9 +40,10 @@ export PATH="$HOME/.local/bin:$PATH"
 3. macOS에서는 Docker Desktop, Linux에서는 Docker Engine을 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
 
-Claude Code·Codex는 알려진 모델의 context 크기를 설치된 카탈로그에서 읽고
-CLI 도구 호출·streaming을 자동 설정합니다. 미등록 모델만 context 크기를
-입력합니다. Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다.
+모델 번호를 고르거나 정확한 모델 ID를 입력하세요. 마법사는 context 한도의
+출처를 표시하며, Codex에서 관측한 클라이언트 한도를 카탈로그보다 우선합니다.
+한도를 알 수 없을 때만 문서에 명시된 값을 입력합니다. Claude Code·Codex는
+도구 호출·streaming을 자동 설정합니다. Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다.
 
 ```bash
 masc setup --base-path "$HOME/masc-workspace"

@@ -476,7 +476,6 @@ let capability_fields =
   ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "supports_extended_thinking"
-  ; "supports_reasoning_budget"
   ; "accepted_reasoning_efforts"
   ; "thinking_control_format"
   ; "thinking_control_token"

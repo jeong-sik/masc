@@ -26,6 +26,9 @@ on:
       - 'scripts/probe-firefox-controls.py'
       - 'scripts/fixtures/firefox_controls_probe.ml'
       - 'test/test_browser_native_host.py'
+      - 'test/test_browser_activation.py'
+      - 'connectors/browser/extension/background.js'
+      - 'connectors/browser/extension/manifest.json'
       - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
   # Weekly on main so main holds a macOS opam switch in the cache store.
@@ -108,6 +111,13 @@ jobs:
             --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
             --compiled-probe _build/default/test/firefox_controls_probe.exe \
             --out proof/firefox
+
+      - name: Exercise explicit live tab activation
+        run: |
+          python3 test/test_browser_activation.py \
+            --driver "$(command -v geckodriver)" \
+            --browser /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/activation
 
       - name: Package verified executable and identity
         working-directory: proof

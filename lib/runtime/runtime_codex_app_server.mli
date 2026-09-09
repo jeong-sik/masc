@@ -155,6 +155,7 @@ type stream_event =
 type history_role =
   | User
   | Assistant
+  | Developer
 
 type history_message =
   { role : history_role
@@ -242,6 +243,12 @@ val run_turn :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   ?history:history_message list ->
+  ?developer_context:string list ->
+  (* Explicit developer items appended on Start and Resume before turn/start.
+     They retain developer authority and persist in the thread; this is not
+     a temporary context replacement or an idempotent delivery API. Callers
+     own retry/reconciliation and must not infer token savings from IPC bytes.
+     Empty by default; Keeper production projection is unchanged. *)
   ?on_prompt_sent:(unit -> unit) ->
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for

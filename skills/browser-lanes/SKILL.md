@@ -163,3 +163,17 @@ old document; different-URL SPA navigation may retain its document identity.
 
 Keep navigationSource when omitting expectedUrl to inspect a possible redirect;
 a source-URL observation from the original document is still pending.
+
+## Explicit live tab activation
+
+When an observed live tab is inactive and its body still shows pending or previous
+content after a channel transition, `BrowserInteract action=activate_tab` can select
+that exact tab. This requires extension 0.6.0 or newer and the currently advertised
+action schema. Preserve the observed clientId, tabId and expectedUrl. This is an
+explicit action, not an automatic step in every read or composition. It does not
+focus the browser window, change the URL or reload. Automation rejects this action.
+
+An active=true receipt confirms tab selection only. Read the same tab again and
+verify the requested channel body and scope before collecting context. If activation
+fails after dispatch, inspect the tab state before retrying; do not replay a prior
+link click or follow merely because the subsequent observation is unavailable.

@@ -72,7 +72,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = false
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_streaming_format = "delta:reasoning_content"

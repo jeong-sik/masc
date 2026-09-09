@@ -94,7 +94,6 @@ let test_anthropic_capabilities () =
   check bool "has tools" true c.supports_tools;
   check bool "has parallel tools" true c.supports_parallel_tool_calls;
   check bool "has extended thinking" true c.supports_extended_thinking;
-  check bool "has reasoning budget" true c.supports_reasoning_budget;
   check bool "has image" true c.supports_image_input;
   check bool "has caching" true c.supports_caching;
   check bool "has computer use" true c.supports_computer_use;
@@ -590,7 +589,6 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
     check bool (label ^ " named tool_choice disabled") false c.supports_named_tool_choice;
     check bool (label ^ " reasoning") true c.supports_reasoning;
     check bool (label ^ " extended thinking") true c.supports_extended_thinking;
-    check bool (label ^ " reasoning budget disabled") false c.supports_reasoning_budget;
     check
       bool
       (label ^ " chat_template_token thinking control")
@@ -678,7 +676,6 @@ let test_lookup_minimax_m3_official_chat_dialect () =
     check bool "rejects named forced tool_choice" false c.supports_named_tool_choice;
     check bool "reasoning" true c.supports_reasoning;
     check bool "extended thinking" true c.supports_extended_thinking;
-    check bool "no reasoning depth budget" false c.supports_reasoning_budget;
     check_thinking_control
       "uses MiniMax adaptive thinking object"
       Capabilities.Thinking_object_adaptive
@@ -884,11 +881,6 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
          check bool (model_id ^ " tools") true c.supports_tools;
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
          check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
-         check
-           bool
-           (model_id ^ " no reasoning budget control")
-           false
-           c.supports_reasoning_budget;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -983,11 +975,6 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
   | Some c ->
     check bool "qwen3.5:397b reasoning" true c.supports_reasoning;
     check bool "qwen3.5:397b extended thinking" true c.supports_extended_thinking;
-    check
-      bool
-      "qwen3.5:397b no reasoning budget control"
-      false
-      c.supports_reasoning_budget;
     check_thinking_control
       "qwen3.5:397b reasoning rides the /v1 effort control"
       Capabilities.Reasoning_effort
@@ -1019,11 +1006,6 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
        | Some c ->
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
          check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
-         check
-           bool
-           (model_id ^ " no reasoning budget control")
-           false
-           c.supports_reasoning_budget;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -2747,7 +2729,6 @@ let test_manifest_and_catalog_common_override_parity () =
             "assistant_tool_content_format": "empty_string",
             "supports_reasoning": true,
             "supports_extended_thinking": true,
-            "supports_reasoning_budget": true,
             "accepted_reasoning_efforts": ["low", "medium"],
             "supports_response_format_json": true,
             "supports_structured_output": true,
@@ -2791,7 +2772,6 @@ supports_parallel_tool_calls = true
 assistant_tool_content_format = "empty_string"
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
 accepted_reasoning_efforts = ["low", "medium"]
 supports_response_format_json = true
 supports_structured_output = true
@@ -2926,27 +2906,17 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
-(* Until 2026-09-09 the provider-wide base was consulted before the model's
-   own bare row, so the bare row -- the only lookup that applies prefix
-   matching -- was unreachable wherever the base answered.
+(* A model's own bare row outranks the provider-wide base, and the bare row is
+   the only lookup that applies prefix matching, so a base that answered first
+   would make it unreachable.
 
-   Which labels those are is narrower than it looks. [provider_base_label]
-   goes through [Model_catalog.provider_entry_for_label], which returns [None]
-   for every wire-kind label ([anthropic], [kimi], [openai_compat], [ollama],
-   [gemini], [glm]). So for a label naming a wire kind the base never answered,
-   before this change or after; the reorder is observable only for a label
-   that names a [[providers]] entry and nothing else -- [glm-coding],
-   [ollama_cloud], [openrouter] and the rest.
-
-   The discriminator is a field the row sets and the provider base does not:
-   [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
-   what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
-   thinking-control contract" -- so [Some _] here means the row was read.
-
-   Only gemini bare rows declare that field; no glm bare row does, and
-   [glm-4.6v] additionally carries a [provider_name = "glm"] row, which an
-   exact provider-scoped lookup reads before any fallback. So glm cannot be
-   expressed with this discriminator and is not listed here. *)
+   The two tests below need a label the base actually answers for.
+   [provider_base_label] goes through [Model_catalog.provider_entry_for_label],
+   which returns [None] for every wire-kind label ([anthropic], [kimi],
+   [openai_compat], [ollama], [gemini], [glm]), so the ordering is observable
+   only for a label that names a [[providers]] entry. That is what
+   [with_precedence_catalog] declares. The discriminator is a field the row
+   sets and the base leaves [None]: [accepted_reasoning_efforts]. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows

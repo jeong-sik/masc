@@ -1686,7 +1686,6 @@ let runtime_declared_model_capabilities_json
       ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
       ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
       ; "supports_extended_thinking", `Bool caps.supports_extended_thinking
-      ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
       ; "supports_image_input", `Bool caps.supports_image_input
       ; "supports_audio_input", `Bool caps.supports_audio_input
@@ -1811,7 +1810,6 @@ let effective_capabilities_json (rt : Runtime.t) =
         , `String (assistant_tool_content_format_wire caps.assistant_tool_content_format) )
       ; "supports_reasoning", `Bool caps.supports_reasoning
       ; "supports_extended_thinking", `Bool caps.supports_extended_thinking
-      ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
       ; "accepted_reasoning_efforts", accepted_reasoning_efforts
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
       ; ( "preserve_thinking_control_format"
@@ -1962,7 +1960,6 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "supports_image_input", `Bool caps.supports_image_input
     ; "supports_audio_input", `Bool caps.supports_audio_input
     ; "supports_video_input", `Bool caps.supports_video_input
-    ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
     ; "supports_response_format_json", `Bool caps.supports_response_format_json
     ; "supports_structured_output", `Bool caps.supports_structured_output

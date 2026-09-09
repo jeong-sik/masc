@@ -2,9 +2,9 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.35.0**. Check tag and asset
+This document is the installation contract for **0.35.1**. Check tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
-The download commands below select `v0.35.0` and its matching installer.
+The download commands below select `v0.35.1` and its matching installer.
 
 ## Platforms and prerequisites
 
@@ -22,9 +22,10 @@ versions above are not covered by these binaries. An Intel Mac offers no Apple
 Container based microVM, so choose Docker or remote SSH there. Runner names
 follow the [official GitHub list](https://github.com/actions/runner-images).
 
-The install script uses Bash, curl, Python 3, and `sha256sum` or `shasum`.
+The install script uses Bash, curl, tar, and `sha256sum` or `shasum`.
+macOS includes its Python and shared-library runtime; Homebrew and a preinstalled
+Python are not required. Linux uses Python 3 and the system packages below.
 OCaml/opam/Dune and Node.js/pnpm are **not needed for a binary install**.
-The shared libraries have to be installed on the OS.
 
 Ubuntu 24.04:
 
@@ -34,58 +35,30 @@ sudo apt-get install -y ca-certificates curl python3 libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
-macOS ([Homebrew installation requirements](https://docs.brew.sh/Installation)):
+macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.
 
-```bash
-brew install python gmp libpq openssl@3 zstd
-```
+The default sandbox still requires a running Docker engine, and the model connection requires its own CLI sign-in or API credential. Install these before running `masc setup`.
 
-The improved macOS installer checks the OS version and the Homebrew runtime
-dependencies before downloading, and installs only the packages that are
-missing. On a terminal without Homebrew it hands over to the official Homebrew
-installer and goes through that program's confirmation and password prompts.
-A noninteractive run needs Homebrew prepared beforehand. `--dry-run` installs
-no packages. Linux system packages are prepared with the command above.
-
-On macOS the Homebrew library path is the default prefix for that CPU. An
-environment linked to another prefix, such as Intel Homebrew on Apple Silicon,
-is told the cause before the download. If the binary still does not start
-after the packages are installed, the installer shows the executable's raw
-stderr right away.
-
-### `SIGABRT` or `build-commit` failure on macOS
-
-`SIGABRT` is the signal the process exited with, and by itself it does not say
-why. Check the raw stderr, such as `dyld: Library not loaded`, and the path of
-the executable that failed. The exit signal alone does not establish that a
-library is missing.
-
-The minimum supported OS is **macOS 14.0** on Apple
-Silicon and **macOS 15.0** on Intel. Prepare the dependencies in the default
-Homebrew prefix for that CPU (Apple Silicon `/opt/homebrew`, Intel
-`/usr/local`).
-
-```bash
-brew install python gmp libpq openssl@3 zstd
-sw_vers -productVersion
-uname -m
-```
-
-`otool -L <failed-executable>` shows the library paths actually linked. If it
-still aborts after the dependencies and OS requirements are met, report the
-exit signal together with the raw stderr. `--force` is a re-download option
-and does not fix loader or OS compatibility problems.
+If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
 ## Install
 
 ```bash
-TAG=v0.35.0
+TAG=v0.35.1
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+After installation, run this separate command to update PATH in the current terminal.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
+
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 `--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
 for the workspace path that will hold `.masc`. For a new workspace it
@@ -102,8 +75,15 @@ checksum stops the install.
 `--no-wizard` skips model selection. `--provider <id>` selects from the
 provider catalog in `runtime.toml`. The wizard detects the model servers that
 are available and the sign-in state of CLIs, selects `[runtime].default`, and
-stores no API key. Without a model, installing the server and using the status
-screens still works.
+stores no API key. Model setup shows numbered choices from the CLI's local
+model list, the HTTP server's `/models` response, or the installed MASC catalog
+when a CLI list is unavailable. Select a number or enter an exact model ID;
+blank input does not select a model. Listed models are suggestions, not proof
+that your account can use them. The wizard fills the context window from the
+selected entry and shows its source; Codex's observed effective context takes
+precedence over a catalog limit. If no limit is known, it asks for the documented
+or server-configured token count. Without a model, installing the server and
+using the status screens still works.
 
 ## First-install wizard
 
@@ -154,7 +134,7 @@ does not change existing Keeper configuration in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.0 binary** installs one `imp` with `activation_mode = "manual"` and the
+The **0.35.1 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
@@ -171,12 +151,13 @@ Besides the existing API and Ollama settings, the terminal wizard offers
 tool is not installed, and a local server may point at an endpoint on
 another machine.
 
-Only the connection you pick is added. For Claude Code and Codex, enter the
-model id; the installed model catalog supplies its context size when known,
-and the CLI connection enables tools and streaming without a capability quiz.
-An unknown model still asks for its context size. For HTTP connections, enter
-the context size and explicitly confirm tool calling and streaming supported
-by your server. The HTTP capability overlay applies only to that provider.
+Only the connection you pick is added. Choose a model by number from the
+available list, or enter a custom model ID. The wizard fills known context
+limits and displays their source; an unknown limit needs the documented or
+server-configured value. Claude Code and Codex enable tools and streaming
+without a capability quiz. HTTP connections ask you to confirm that the server
+supports tool calling and streaming. The HTTP capability overlay applies only
+to that provider.
 API credentials are environment variable names, never values; the seeded Z.AI
 connection reads `ZAI_API_KEY` from the shell that starts MASC.
 
@@ -194,9 +175,9 @@ to the OAuth file its CLI wrote, and a request timeout. `Configure later`
 defers the model connection, and the default Keeper does not start on its
 own. To run this again in an existing workspace, use `--wizard`.
 
-## First conversation with `imp` (0.35.0)
+## First conversation with `imp` (0.35.1)
 
-This is the 0.35.0 installation contract. Check the release tag and asset
+This is the 0.35.1 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
 1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
@@ -454,7 +435,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.35.0` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.1` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

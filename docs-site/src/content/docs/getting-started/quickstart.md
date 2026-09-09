@@ -4,22 +4,30 @@ description: Connect your model runtime and talk to imp in its default sandbox.
 ---
 
 Install the prebuilt binary for macOS or Linux; no OCaml or Node.js build tools
-are required. This guide targets the **0.35.0**. Check publication on
+are required. This guide targets the **0.35.1**. Check publication on
 [Releases](https://github.com/jeong-sik/masc/releases) and use the installer
 attached to the same tag as your binary.
 
 ```bash
-TAG=v0.35.0
+TAG=v0.35.1
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+After installation, run this separate command to update PATH in the current terminal.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## First conversation with `imp` (0.35.0)
+Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
 
-This is the 0.35.0 installation contract. Check the release tag and asset
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
+
+## First conversation with `imp` (0.35.1)
+
+This is the 0.35.1 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
 1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
@@ -34,9 +42,10 @@ availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) be
 3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
    `docker info` must succeed as your current user. Then run:
 
-For Claude Code and Codex, the wizard uses the installed catalog for known
-model context sizes and enables CLI tools and streaming automatically. Unknown
-models ask for their context size. Z.AI credentials use `ZAI_API_KEY`.
+Choose a numbered model or enter an exact model ID. The wizard shows the source
+of its context limit; Codex's observed client limit takes precedence over the
+catalog. If no limit is known, enter the documented value. Claude Code and Codex
+enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
 
 ```bash
 masc setup --base-path "$HOME/masc-workspace"

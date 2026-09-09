@@ -142,6 +142,57 @@ class ExistingWorkspace(unittest.TestCase):
             self.assertNotIn(str(base), json.dumps(receipt))
             self.assertFalse((output / 'receipt.json').exists())
 
+    def test_prior_history_rejected_before_server_or_reconfiguration(self):
+        for kind in ('raw-traces', 'turn-records', 'execution-receipts'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                args, base, _home, output = self.seed(Path(directory))
+                history = base / '.masc/keepers/imp' / kind / 'prior.jsonl'
+                history.parent.mkdir(parents=True)
+                history.write_text(json.dumps(dict(record_type='tool_execution_finished',
+                    tool_name='WebFetch', tool_error=False)) + '\n')
+                before = acceptance.configuration_hashes(base)
+                with patch.object(acceptance.subprocess, 'Popen') as start:
+                    with self.assertRaisesRegex(RuntimeError, 'prior imp history'):
+                        acceptance.measure(args)
+                    start.assert_not_called()
+                self.assertEqual(acceptance.configuration_hashes(base), before)
+                self.assertFalse((output / 'receipt.json').exists())
+
+    def test_each_invocation_gets_distinct_request_ids(self):
+        all_ids = set()
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as directory:
+                args, _base, _home, output = self.seed(Path(directory))
+                with patch.object(acceptance.subprocess, 'Popen', side_effect=RuntimeError('stop')):
+                    with self.assertRaisesRegex(RuntimeError, 'stop'):
+                        acceptance.measure(args)
+                record = json.loads((output / 'invocation.json').read_text())
+                ids = record['request_ids']
+                self.assertEqual(len(set(ids)), 4)
+                self.assertTrue(all(record['invocation_id'] in value for value in ids))
+                self.assertFalse(set(ids) & all_ids)
+                all_ids.update(ids)
+
+    def test_observed_model_requires_each_prompt_and_rejects_mismatch(self):
+        prompts = ['hello', 'fetch']
+        traces = [dict(record_type='run_started', prompt=prompt, model='chosen-model')
+                  for prompt in prompts]
+        self.assertEqual(acceptance.observed_model(traces, prompts, 'chosen-model'), 'chosen-model')
+        for rows in (traces[:1], traces + [dict(record_type='run_started',
+                prompt='fetch', model='other-model')],
+                [dict(row, model=None) for row in traces]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, 'observed imp runtime'):
+                acceptance.observed_model(rows, prompts, 'chosen-model')
+
+    def test_existing_board_and_tasks_are_captured_before_new_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _args, base, _home, _output = self.seed(Path(directory))
+            self.assertEqual(acceptance.persisted_ids(base), (set(), set()))
+            (base / '.masc/board_posts.jsonl').write_text('{"id":"old-post"}\n')
+            (base / '.masc/tasks').mkdir()
+            (base / '.masc/tasks/backlog.json').write_text('{"tasks":[{"id":"old-task"}]}')
+            self.assertEqual(acceptance.persisted_ids(base), ({'old-post'}, {'old-task'}))
+
     def test_required_config_mutation_fails_but_generated_resources_do_not(self):
         with tempfile.TemporaryDirectory() as directory:
             args, base, _home, output = self.seed(Path(directory))

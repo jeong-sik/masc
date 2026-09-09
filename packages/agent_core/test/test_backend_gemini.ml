@@ -218,7 +218,6 @@ let test_native_effort_requires_reasoning_support () =
       ; "models", `List [ `Assoc
           [ "id_prefix", `String "native-effort-fixture"
           ; "supports_reasoning", `Bool supports_reasoning
-          ; "supports_reasoning_budget", `Bool false
           ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
     let capabilities = match Capability_manifest.of_json manifest with
       | Ok [ entry ] -> Capabilities.apply_manifest_entry entry

@@ -378,24 +378,11 @@ let model_capabilities_override_of_model_spec
      | Some runtime_caps ->
        (match
           runtime_caps.declared_thinking_control_format,
-          runtime_caps.declared_supports_reasoning_budget,
           runtime_caps.reasoning_streaming_format,
           runtime_caps.max_output_tokens
         with
-        | None, None, None, None -> None
-        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format,
-          max_output_tokens ->
-          let effective_reasoning_budget =
-            match thinking_control_format with
-            (* A concrete transport-control declaration owns the associated
-               budget bit as one contract. In particular, explicit [none]
-               must not retain a catalog budget that this wire cannot encode. *)
-            | Some _ -> runtime_caps.supports_reasoning_budget
-            | None ->
-              Option.value
-                supports_reasoning_budget
-                ~default:catalog_caps.supports_reasoning_budget
-          in
+        | None, None, None -> None
+        | thinking_control_format, reasoning_streaming_format, max_output_tokens ->
           Some
             { catalog_caps with
               max_output_tokens =
@@ -406,7 +393,6 @@ let model_capabilities_override_of_model_spec
                 (match thinking_control_format with
                  | Some format -> agent_core_thinking_control_format format
                  | None -> catalog_caps.thinking_control_format)
-            ; supports_reasoning_budget = effective_reasoning_budget
             ; reasoning_streaming_format =
                 Option.value
                   reasoning_streaming_format
@@ -426,7 +412,6 @@ let model_capabilities_override_of_model_spec
          ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
          ; supports_reasoning = spec.thinking_support
          ; supports_extended_thinking = caps.supports_extended_thinking
-         ; supports_reasoning_budget = caps.supports_reasoning_budget
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format
          ; reasoning_streaming_format =

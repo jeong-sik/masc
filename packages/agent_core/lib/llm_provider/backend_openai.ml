@@ -69,7 +69,6 @@ let deepseek_v4_capabilities =
   ; supports_named_tool_choice = false
   ; supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = false
   ; accepted_reasoning_efforts = Some [ Reasoning_effort.High; Reasoning_effort.Max ]
   ; thinking_control_format = Capabilities.Thinking_object
   ; supports_response_format_json = true
@@ -1211,7 +1210,6 @@ let ollama_cloud_reasoning_effort_capabilities =
   { Capabilities.openai_compat_chat_capabilities with
     supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = false
   ; thinking_control_format = Capabilities.Reasoning_effort
   ; accepted_reasoning_efforts = Some [ Reasoning_effort.None_; Reasoning_effort.High ]
   }

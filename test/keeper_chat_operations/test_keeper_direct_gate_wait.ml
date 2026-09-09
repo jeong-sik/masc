@@ -114,8 +114,37 @@ let test_session_scope_validation () =
   List.iter (fun components -> rejected (Semantic.session_scope components))
     [[".."]; ["channels"; "../other"]; [""]; ["."]; ["/absolute"]; ["nul\000byte"]; ["a\\b"]]
 
+let test_fresh_gate_and_runtime_retry_restart () = with_path (fun path ->
+  let reference = checkpoint "same original input completed effects and frozen runtime suffix" in
+  let retry = Semantic.runtime_retry ~checkpoint:reference ~assignment_id:"original-runtime-assignment"
+    ~failed_runtime_id:"primary" ~next_runtime_id:"alternate" ~later_runtime_ids:["last"] |> require in
+  let waiting = Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope:(Semantic.session_scope [] |> require) ~obligations:[obligation]
+    ~runtime_retry:retry |> require in
+  rejected (Semantic.gate_wait_with_runtime_retry ~checkpoint:(checkpoint "different input") ~session_scope:(Semantic.session_scope [] |> require)
+    ~obligations:[obligation] ~runtime_retry:retry);
+  with_store path (fun store ->
+    let operation = admit store in
+    Store.defer_direct_gate store ~now:3. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~waiting |> ok |> ignore;
+    check bool "runtime retry cannot bypass pending Gate" true (claim store = None));
+  with_store path (fun store ->
+    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    let observed = match Store.direct_gate_state store ~operation_id:original |> ok with
+      | Some state -> state | None -> fail "simultaneous obligations lost on restart" in
+    check bool "frozen checkpoint and runtime assignment survive restart" true
+      (Semantic.equal_gate_wait waiting observed.waiting);
+    check bool "original input retained" true ((get store).input=Some input);
+    check bool "restart does not bypass Gate" true (claim store = None);
+    let resolution = {Semantic.obligation; decision=Semantic.Gate_approved} in
+    Store.resolve_direct_gate store ~now:5. ~operation_id:original ~resolution |> ok |> ignore;
+    ignore (claim store);
+    Store.resume_direct_gate store ~now:6. ~operation_id:original ~waiting ~resolution |> ok;
+    check bool "Gate effect identity survives runtime admission" true
+      ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation])))
+
 let () = run "direct Gate waiting" ["journal", [
   test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
+  test_case "fresh Gate and frozen runtime retry survive restart together" `Quick test_fresh_gate_and_runtime_retry_restart;
   test_case "unconfirmed checkpoint preserves input and effects across restart" `Quick test_unconfirmed_checkpoint_survives_restart;
   test_case "approval resumes same request after independent work and restart" `Quick (test_wait_restart_resolution Semantic.Gate_approved);
   test_case "denial remains explicit and cannot imply task success" `Quick (test_wait_restart_resolution (Semantic.Gate_denied "operator declined"));

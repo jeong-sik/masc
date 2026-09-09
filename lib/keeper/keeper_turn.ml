@@ -485,6 +485,10 @@ let run_keeper_invocation_turn_admitted_inner
       let gate_resume = match direct_resume with
         | Some (Keeper_agent_run.Gate_continuation admission) -> Some admission
         | Some (Keeper_agent_run.Runtime_continuation _) | None -> None in
+      let resume_lane = match runtime_resume, gate_resume with
+        | Some admission, _ -> Some (Keeper_direct_runtime_continuation.lane admission)
+        | None, Some admission -> Keeper_direct_gate_continuation.runtime_lane admission
+        | None, None -> None in
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
@@ -523,9 +527,9 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = match runtime_resume with
+      let selected_runtime = match resume_lane with
         | None -> resolve_turn_runtime_id meta
-        | Some admission -> Ok (Keeper_direct_runtime_continuation.lane admission).next_runtime_id in
+        | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id in
       match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
@@ -810,7 +814,7 @@ let run_keeper_invocation_turn_admitted_inner
                                         Keeper_direct_gate_continuation.discharge ~config:ctx.config
                                           ~keeper_name:meta.name ~operation_id ~user_message:message
                                           ~checkpoint admission) gate_resume)
-                                      ?deferred_runtime_lane:(Option.map Keeper_direct_runtime_continuation.lane runtime_resume)
+                                      ?deferred_runtime_lane:resume_lane
                                       ~on_runtime_retry_deferred:(fun lane -> deferred_lane := Some lane)
 			                                ~config:ctx.config
 			                                ~meta
@@ -842,11 +846,10 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
-                let gate_wait = match run_result, !deferred_lane with
-                  | Error _, Some _ -> Ok false
-                  | (Ok _ | Error _), _ -> Keeper_direct_gate_continuation.suspend
+                let gate_wait = Keeper_direct_gate_continuation.suspend
+                      ?runtime_lane:!deferred_lane
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id
-                      ~session_dir ~session_id ~approval_ids:!gate_ids in
+                      ~session_dir ~session_id ~approval_ids:!gate_ids () in
                 match gate_wait with
                 | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
                 | Ok true ->

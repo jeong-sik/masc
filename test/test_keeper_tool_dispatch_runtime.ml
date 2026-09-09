@@ -7669,7 +7669,7 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
-let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) decision () =
+let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) decision () =
   with_exec_fixture "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -7717,8 +7717,13 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
         let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
         output_string channel "retention destination is not a directory";
         close_out channel);
+      let runtime_lane = if runtime_failure then Some
+        (Masc.Keeper_turn_driver.restore_deferred_runtime_lane ~assignment_id:"frozen-direct-assignment"
+          ~failed_runtime_id:"primary.fixture" ~next_runtime_id:"alternate.fixture"
+          ~later_runtime_ids:["final.fixture"]
+          ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
       check bool "actual yield parks the same operation" true
-        (Gate.suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id]
+        (Gate.suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] ()
          |> require "suspend");
       check bool "unresolved request is not claimable" true
         ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
@@ -7752,6 +7757,13 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
         (Masc.Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
       let admission = match Gate.load ~config ~meta ~operation_id ~session_dir |> require "admit current history" with
         | Some value -> value | None -> fail "missing Gate admission" in
+      (match runtime_lane, Gate.runtime_lane admission with
+       | None, None -> ()
+       | Some expected, Some actual ->
+         check string "same frozen runtime assignment survives approval" expected.assignment_id actual.assignment_id;
+         check bool "frozen candidate suffix survives approval" true
+           (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
+       | None, Some _ | Some _, None -> fail "simultaneous Gate/runtime obligation lost");
       let checkpoint = Gate.checkpoint admission in
       check bool "newer history survives" true
         (List.mem (Agent_core.Types.user_msg "Independent newer user context") checkpoint.messages);
@@ -7793,6 +7805,8 @@ let () =
     ("direct_gate_resume", [
       test_case "channel-scoped Gate resumes original input with current channel history" `Quick
         (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "new Gate and runtime failure retain both obligations" `Quick
+        (test_direct_gate_current_history_resume ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "checkpoint retention failure preserves nonterminal original input" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "approved Gate resumes same input with newer history and exact replay" `Quick

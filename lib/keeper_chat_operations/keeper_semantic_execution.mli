@@ -40,9 +40,11 @@ type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
 type gate_wait = private
-  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list }
+  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   (gate_wait, string) result
+val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
+  runtime_retry:runtime_retry -> (gate_wait, string) result
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }

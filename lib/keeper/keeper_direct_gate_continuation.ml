@@ -8,9 +8,11 @@ type admission =
   { checkpoint : Agent_core.Checkpoint.t
   ; source_reference : Keeper_checkpoint_ref.t
   ; selected : Semantic.gate_resolution
+  ; runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; resolution : Keeper_event_queue.hitl_resolution
   }
 let checkpoint value = value.checkpoint
+let runtime_lane value = value.runtime_lane
 let resolution value = value.resolution
 let source_reference value = value.source_reference
 let owner result = Result.map_error Owner.command_error_to_string result
@@ -116,7 +118,7 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
               ~resolution:(resolution_of_observation obligation decision) |> owner |> Result.map (fun _ -> ()) in
       first_resolved state.waiting.obligations) (Ok ()) waits
 
-let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids =
+let suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
   let base_path = config.Workspace.base_path in
   let* existing = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
   let* obligations = List.fold_left (fun result approval_id ->
@@ -138,7 +140,13 @@ let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approva
     let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed" in
-    let* waiting = Semantic.gate_wait ~checkpoint:(Checkpoint.exact_snapshot_reference snapshot) ~session_scope ~obligations in
+    let reference = Checkpoint.exact_snapshot_reference snapshot in
+    let* waiting = match runtime_lane with
+      | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
+      | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
+        let* runtime_retry = Semantic.runtime_retry ~checkpoint:reference ~assignment_id:lane.assignment_id
+          ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
+        Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
     let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
     match operation with
     | None -> Error "original Gate operation disappeared"
@@ -200,7 +208,13 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
        decision=(match selected.decision with Semantic.Gate_approved -> Keeper_event_queue.Hitl_approved
          | Semantic.Gate_denied detail -> Keeper_event_queue.Hitl_rejected detail);
        channel=observed.waiting_request.continuation_channel} in
-    Ok (Some {checkpoint; source_reference=waiting.checkpoint; selected; resolution})
+    let runtime_lane = Option.map (fun (retry : Semantic.runtime_retry) ->
+      Keeper_turn_driver.restore_deferred_runtime_lane ~assignment_id:retry.assignment_id
+        ~failed_runtime_id:retry.failed_runtime_id ~next_runtime_id:retry.next_runtime_id
+        ~later_runtime_ids:retry.later_runtime_ids
+        ~failure:(Agent_core.Error.Internal "restored Gate and runtime continuation")
+      |> Keeper_turn_driver.quota_ordered_deferred_runtime_lane ~now:(Time_compat.now ())) waiting.runtime_retry in
+    Ok (Some {checkpoint; source_reference=waiting.checkpoint; selected; resolution; runtime_lane})
 
 let discharge ~config ~keeper_name ~operation_id ~user_message ~checkpoint admission =
   let* identity, message = match admission.selected.decision with

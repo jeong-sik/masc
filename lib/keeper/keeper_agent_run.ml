@@ -767,6 +767,7 @@ let run_turn
       ?degraded_retry_runtime
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
+      ?direct_resume
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_deferred_runtime_consumed
@@ -855,6 +856,16 @@ let run_turn
       ?shared_context
       ()
   in
+  let ctx = match direct_resume with
+    | None -> ctx
+    | Some admission ->
+      let checkpoint = Keeper_direct_runtime_continuation.checkpoint admission in
+      { ctx with Keeper_run_context.ctx_work =
+          Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
+      ; resume_agent_core_checkpoint = Some checkpoint
+      ; loaded_checkpoint_present = true
+      ; start_turn_count = checkpoint.turn_count }
+  in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let context_injector = ctx.context_injector in
@@ -904,9 +915,9 @@ let run_turn
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
-    match hitl_resolution with
-    | Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
-    | None -> user_turn_record
+    match direct_resume, hitl_resolution with
+    | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
+    | None, None -> user_turn_record
   in
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
@@ -1010,6 +1021,9 @@ let run_turn
     match admission with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok admitted_checkpoint ->
+    let admitted_checkpoint = match direct_resume with
+      | Some admission -> Some (Keeper_direct_runtime_continuation.checkpoint admission)
+      | None -> admitted_checkpoint in
     let continue_from_checkpoint = Option.is_some admitted_checkpoint in
     let ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks =
       match admitted_checkpoint with

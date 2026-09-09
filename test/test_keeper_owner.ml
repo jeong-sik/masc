@@ -741,6 +741,7 @@ let test_stopping_cancels_and_joins_active_child () =
       detail
   | Some (_, None, _) -> fail "settle hook fired without a claimed operation id"
   | Some (_, _, Owner.Operation_succeeded _) -> fail "cancelled turn settled as success"
+  | Some (_, _, Owner.Operation_deferred) -> fail "cancelled turn settled as deferred"
   | None -> fail "settle hook did not fire before stop completed"
 ;;
 
@@ -1181,6 +1182,67 @@ let test_health_state_change_observer_failure_is_isolated () =
          fail
            ("observer failure altered terminal result: "
             ^ Chat_operation.state_to_string state))
+;;
+
+let test_runtime_deferred_child_keeps_same_operation_and_drains () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let settled, resolve_settled = Eio.Promise.create () in
+  let attempts = ref [] in
+  let source = `Assoc ["kind", `String "keeper"; "asked_by", `String "requester"] in
+  let input = `Assoc ["message", `String "finish the original task";
+    "task_id", `String "original-task"; "attachments", `List [`String "original-attachment"];
+    "turn_instructions", `String "retain original context"] in
+  let input = Keeper_chat_operation.canonical_json input |> Result.get_ok in
+  let source = Keeper_chat_operation.canonical_json source |> Result.get_ok in
+  let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "trace-direct-resume" |> Result.get_ok)
+      ~turn_count:3 ~canonical_checkpoint_bytes:"owner fixture checkpoint" |> Result.get_ok in
+  let continuation = Keeper_semantic_execution.runtime_retry ~checkpoint
+      ~assignment_id:"frozen-lane" ~failed_runtime_id:"primary.test_model"
+      ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation : Chat_operation.t = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "same-operation continuation disappeared" in
+    check (option json) "original input survives each claim" (Some input) operation.input;
+    check json "original channel survives each claim" source operation.source;
+    attempts := operation.operation_id :: !attempts;
+    match owner_ok (Owner.direct_runtime_retry owner ~operation_id:operation.operation_id) with
+    | None ->
+      ignore (owner_ok (Owner.defer_direct_runtime_retry owner
+        ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest ~continuation));
+      Owner.Operation_deferred
+    | Some observed ->
+      check bool "frozen alternate runtime survives" true
+        (Keeper_semantic_execution.equal_runtime_retry continuation observed);
+      owner_ok (Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id ~observed);
+      Owner.Operation_succeeded {outcome_ref="alternate-runtime-completed"}
+  in
+  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution =
+    match execution with
+    | Owner.Operation_deferred -> ()
+    | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_settled ()
+    | Owner.Operation_failed {detail; _} -> fail detail in
+  let owner = start_owner_with_executor ~on_execution_settled ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_executor:(Some execute) ~keeper_name:"direct-resume"
+      ~initial_meta:(Some (make_meta "direct-resume")) () |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  let id = operation_id "kmsg-direct-runtime-resume" in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:id ~source ~input));
+  Eio.Promise.await settled;
+  check int "deferred and completed children" 2 (List.length !attempts);
+  check bool "both children claim the same original operation" true
+    (List.for_all (Chat_operation.Operation_id.equal id) !attempts);
+  let operation = match owner_ok (Owner.exact_operation owner id) with
+    | Some operation -> operation | None -> fail "completed operation disappeared" in
+  match operation.state with
+  | Chat_operation.Succeeded {outcome_ref; _} ->
+    check string "alternate result owns completion" "alternate-runtime-completed" outcome_ref
+  | Chat_operation.Queued | Chat_operation.Running _ | Chat_operation.Failed _ | Chat_operation.Cancelled _ ->
+    fail "same direct operation did not complete"
 ;;
 
 let test_operation_executor_claims_latest_input_and_drains_fifo () =
@@ -3124,6 +3186,8 @@ let () =
             "startup Queued waits for runner readiness"
             `Quick
             test_startup_queued_waits_for_runner_readiness
+        ; test_case "runtime-deferred child drains the same original operation" `Quick
+            test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case
             "operation store failure fences owner mutations"
             `Quick

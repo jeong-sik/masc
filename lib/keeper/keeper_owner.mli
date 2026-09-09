@@ -122,6 +122,7 @@ type error =
   | Owner_closed
 
 type operation_execution =
+  | Operation_deferred
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
       { kind : Chat_operation.failure_kind

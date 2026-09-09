@@ -257,6 +257,7 @@ val run_turn
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
+  -> ?direct_resume:Keeper_direct_runtime_continuation.admission
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_runtime_retry_deferred:
        (Keeper_turn_driver.deferred_runtime_lane -> unit)

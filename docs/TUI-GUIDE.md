@@ -318,7 +318,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
  >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
     ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
    OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
-  j/k move  p pause  w wake  s shutdown  g yolo  c chat  right/enter detail
+  j/k move  p pause  w wake  s shutdown  x delete  g yolo  c chat  right/enter detail
 ```
 
 `A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a

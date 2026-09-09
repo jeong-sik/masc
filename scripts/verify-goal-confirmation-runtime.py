@@ -170,8 +170,10 @@ model_id = "goal-fixture"
                 health = http('/health?full=1')
                 if health['startup']['state_ready']:
                     break
-            except URLError:
-                pass
+            except (URLError, ConnectionError) as error:
+                save(out / f'readiness-observation-error-{counter:03}.json',
+                     {'error': str(error), 'server_pid': server.pid,
+                      'action': 'continue_read_observation_on_same_server'})
             time.sleep(0.2)
         assert health['build']['binary_commit'] == a.expected_commit
         assert Path(health['paths']['effective_base_path']).resolve() == base
@@ -182,7 +184,16 @@ model_id = "goal-fixture"
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'request_complete'})
         path = '/api/v1/goals/confirmation?goal_id=' + goal_id
         while True:
-            evidence = http(path)
+            try:
+                evidence = http(path)
+            except (URLError, ConnectionError) as error:
+                save(out / f'proof-observation-error-{counter:03}.json',
+                     {'path': path, 'error': str(error), 'server_pid': server.pid,
+                      'action': 'continue_read_observation_on_same_server'})
+                if server.poll() is not None:
+                    raise RuntimeError('Server exited during proof observation') from error
+                time.sleep(0.5)
+                continue
             if evidence['goal']['phase'] == 'awaiting_confirmation':
                 break
             time.sleep(0.5)

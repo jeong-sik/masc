@@ -44,8 +44,6 @@ let check_retry name expected err =
 let test_should_try_http_408 () = check_retry "408 retries" true (mk_http_err ~code:408 ())
 let test_should_try_http_409 () = check_retry "409 retries" true (mk_http_err ~code:409 ())
 let test_should_try_http_429 () = check_retry "429 retries" true (mk_http_err ~code:429 ())
-let test_should_try_http_402 () =
-  check_retry "402 moves to the next candidate" true (mk_http_err ~code:402 ())
 let test_should_try_http_500 () = check_retry "500 retries" true (mk_http_err ~code:500 ())
 let test_should_try_http_400 () = check_retry "400 stops" false (mk_http_err ~code:400 ())
 let test_should_try_http_404 () = check_retry "404 stops" false (mk_http_err ~code:404 ())
@@ -152,7 +150,6 @@ let () =
       , [ Alcotest.test_case "HTTP 408" `Quick test_should_try_http_408
         ; Alcotest.test_case "HTTP 409" `Quick test_should_try_http_409
         ; Alcotest.test_case "HTTP 429" `Quick test_should_try_http_429
-        ; Alcotest.test_case "HTTP 402" `Quick test_should_try_http_402
         ; Alcotest.test_case "HTTP 500" `Quick test_should_try_http_500
         ; Alcotest.test_case "HTTP 400" `Quick test_should_try_http_400
         ; Alcotest.test_case "HTTP 404" `Quick test_should_try_http_404

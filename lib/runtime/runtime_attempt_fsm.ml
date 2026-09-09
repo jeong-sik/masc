@@ -17,12 +17,8 @@ type decision =
   | Try_next of { last_err : Llm_provider.Http_client.http_error option }
   | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
 
-(* 402 is this candidate's account that cannot pay; a different declared
-   candidate can serve the same request (RFC-0440 §3). It stays non-retryable
-   for the same candidate ([Error_domain.is_retryable]); only the walk moves. *)
 let should_try_next = function
-  | Llm_provider.Http_client.HttpError { code; _ } ->
-    code = 402 || code = 408 || code = 409 || code = 429 || code >= 500
+  | Llm_provider.Http_client.HttpError { code; _ } -> code = 408 || code = 409 || code = 429 || code >= 500
   | Llm_provider.Http_client.NetworkError _
   | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.ProviderFailure _ ->

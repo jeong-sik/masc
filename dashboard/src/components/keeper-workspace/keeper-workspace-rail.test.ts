@@ -347,7 +347,6 @@ describe('KeeperWorkspaceRail', () => {
             supports_audio_input: true,
             supports_video_input: false,
             supports_reasoning: true,
-            supports_extended_thinking: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
             thinking_control_format: 'chat-template-kwargs',
             preserve_thinking_control_format: 'always-preserved',
@@ -407,7 +406,6 @@ describe('KeeperWorkspaceRail', () => {
                 supports_required_tool_choice: true,
                 supports_named_tool_choice: true,
                 supports_parallel_tool_calls: true,
-                supports_extended_thinking: true,
                 thinking_control_format: 'reasoning-effort',
                 supports_image_input: false,
                 supports_audio_input: false,
@@ -495,7 +493,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
+      'controls:tool-choice,required,named,parallel,system-prompt,prompt-cache,usage',
     )
     expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
@@ -503,7 +501,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('input:multimodal,image,audio')
     expect(container.textContent).toContain('modality:visual-first')
     expect(container.textContent).toContain('tool-content:null')
-    expect(container.textContent).toContain('extended-thinking')
     expect(container.textContent).toContain('effort:low,medium,high')
     expect(container.textContent).toContain('wire:chat-template-kwargs')
     expect(container.textContent).toContain('preserve:always-preserved')

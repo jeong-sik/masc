@@ -71,7 +71,6 @@ max_context_tokens = <slot-ctx>          # -c/-np, 모델 카드가 아니라 �
 supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_streaming_format = "delta:reasoning_content"

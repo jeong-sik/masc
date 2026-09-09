@@ -125,7 +125,6 @@ type capabilities =
         schemas to the allowed subset. *)
   ; (* Thinking / reasoning *)
     supports_reasoning : bool
-  ; supports_extended_thinking : bool
   ; accepted_reasoning_efforts : Reasoning_effort.t list option
     (** Model/provider-specific subset of canonical reasoning efforts accepted
         by the request wire format. [None] means no subset is declared and the
@@ -166,10 +165,6 @@ type capabilities =
   ; supports_min_p : bool
   ; supports_seed : bool
     (** Deterministic seed for reproducible sampling.
-      @since 0.185.0 *)
-    (** Whether seed determinism is maintained when image inputs are present.
-      Local providers (Ollama) achieve near-perfect reproducibility; cloud
-      providers (Openai, Gemini) do not guarantee it.
       @since 0.185.0 *)
   ; ignored_sampling_parameters : sampling_parameter list
     (** Request sampling parameters that must not be serialized for this

@@ -72,7 +72,6 @@ type entry =
     (** Wire shape for assistant messages that contain tool calls but no visible
         text (null / empty_string). *)
   ; supports_reasoning : bool option
-  ; supports_extended_thinking : bool option
   ; accepted_reasoning_efforts : string list option
     (** Optional subset of canonical reasoning effort values this model accepts
         (none / minimal / low / medium / high / xhigh). *)

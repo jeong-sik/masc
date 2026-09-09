@@ -896,7 +896,6 @@ let resolved_replay_policy config =
 let clear_thinking_capabilities preserve_thinking_control_format =
   { Capabilities.default_capabilities with
     supports_reasoning = true
-  ; supports_extended_thinking = true
   ; preserve_thinking_control_format
   }
 ;;

@@ -869,7 +869,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_required_tool_choice = b "supports-required-tool-choice" in
   let* supports_named_tool_choice = b "supports-named-tool-choice" in
   let* supports_parallel_tool_calls = b "supports-parallel-tool-calls" in
-  let* supports_extended_thinking = b "supports-extended-thinking" in
   let* supports_image_input = b "supports-image-input" in
   let* supports_audio_input = b "supports-audio-input" in
   let* supports_video_input = b "supports-video-input" in
@@ -888,7 +887,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; supports_required_tool_choice
     ; supports_named_tool_choice
     ; supports_parallel_tool_calls
-    ; supports_extended_thinking
     ; thinking_control_format
     ; declared_thinking_control_format =
         (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with

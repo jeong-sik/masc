@@ -149,7 +149,6 @@ type capabilities =
         dispatcher's [[params]] validation remains the authority. *)
   ; (* ── Thinking / reasoning ──────────────────────────── *)
     supports_reasoning : bool (** Any form of reasoning/thinking *)
-  ; supports_extended_thinking : bool (** budget_tokens / reasoning_effort *)
   ; accepted_reasoning_efforts : Reasoning_effort.t list option
     (** Model/provider-specific subset of canonical reasoning efforts accepted
         by the request wire format. [None] means no subset is declared and the
@@ -158,7 +157,7 @@ type capabilities =
   ; thinking_control_format : thinking_control_format
     (** Wire-format for thinking control on OpenAI-compat backends.
         Determines which JSON shape the backend emits for enable_thinking.
-        Only meaningful when [supports_reasoning] or [supports_extended_thinking]
+        Only meaningful when [supports_reasoning]
         is true and the request goes through backend_openai.
         @since 0.184.0 *)
   ; preserve_thinking_control_format : preserve_thinking_control_format
@@ -216,11 +215,6 @@ type capabilities =
     supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool (** Deterministic seed for reproducible sampling. *)
-    (** Whether the provider respects [seed] deterministically when
-      image inputs are present.  Local providers (Ollama, llama-server)
-      achieve near-perfect determinism on identical hardware; cloud
-      providers (Openai, Gemini) do not guarantee deterministic output
-      when images are in the prompt. *)
   ; ignored_sampling_parameters : sampling_parameter list
     (** Request sampling parameters that must not be serialized for this
         provider/model even when a caller supplied them. This is catalog data,
@@ -251,7 +245,6 @@ let default_capabilities =
   ; chat_output_budget_field = Chat_max_tokens
   ; tool_schema_conformance = Rich_json_schema
   ; supports_reasoning = false
-  ; supports_extended_thinking = false
   ; accepted_reasoning_efforts = None
   ; thinking_control_format = No_thinking_control
   ; preserve_thinking_control_format = No_preserve_thinking_control
@@ -372,7 +365,6 @@ let anthropic_capabilities =
   ; supports_named_tool_choice = true
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
-  ; supports_extended_thinking = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
   ; supports_image_input = true
@@ -425,7 +417,6 @@ let kimi_capabilities =
     supports_named_tool_choice = false
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
-  ; supports_extended_thinking = true
   ; thinking_control_format = No_thinking_control
   ; preserve_thinking_control_format = Always_preserved_thinking
   ; reasoning_replay_override =
@@ -485,7 +476,6 @@ let openai_compat_chat_capabilities =
 let openai_compat_chat_extended_capabilities =
   { openai_compat_chat_capabilities with
     supports_reasoning = true
-  ; supports_extended_thinking = true
   ; thinking_control_format = Reasoning_effort
   ; supports_top_k = true
   ; supports_min_p = true
@@ -497,7 +487,6 @@ let mimo_capabilities =
     max_context_tokens = Some 1_000_000
   ; max_output_tokens = Some 128_000
   ; supports_reasoning = true
-  ; supports_extended_thinking = true
   ; thinking_control_format = Thinking_object_only
   ; content_inline_reasoning = No_content_inline_reasoning
   ; reasoning_output_format = Split_reasoning_fields
@@ -638,7 +627,6 @@ let glm_capabilities =
   ; supports_named_tool_choice = false
   ; assistant_tool_content_format = Assistant_tool_content_empty_string
   ; supports_reasoning = true
-  ; supports_extended_thinking = true
   ; supports_response_format_json = true
   ; (* Z.AI's current official docs describe JSON mode via
      response_format={"type":"json_object"} plus prompt/schema-in-text
@@ -671,7 +659,6 @@ let gemini_capabilities =
   ; supports_required_tool_choice = true
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
-  ; supports_extended_thinking = true
   ; supports_response_format_json = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
@@ -906,7 +893,6 @@ type declarative_capability_overrides =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
-  ; supports_extended_thinking : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -948,7 +934,6 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; chat_output_budget_field = entry.chat_output_budget_field
   ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
-  ; supports_extended_thinking = entry.supports_extended_thinking
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
@@ -1063,8 +1048,6 @@ let apply_declarative_capability_overrides overrides =
        | None -> base.tool_schema_conformance)
   ; supports_reasoning =
       override_bool base.supports_reasoning overrides.supports_reasoning
-  ; supports_extended_thinking =
-      override_bool base.supports_extended_thinking overrides.supports_extended_thinking
   ; accepted_reasoning_efforts =
       (match overrides.accepted_reasoning_efforts with
        | Some values ->
@@ -1263,7 +1246,6 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; chat_output_budget_field = entry.chat_output_budget_field
   ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
-  ; supports_extended_thinking = entry.supports_extended_thinking
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
@@ -1450,7 +1432,6 @@ let%test "for_model_id glm-4.5 has reasoning" =
   match for_model_id "glm-4.5" with
   | Some c ->
     c.supports_reasoning
-    && c.supports_extended_thinking
     && c.max_context_tokens = Some 128_000
     && c.max_output_tokens = Some 96_000
   | None -> false
@@ -1498,7 +1479,6 @@ let%test "for_model_id glm-4.7-flashx has GLM-4.7 thinking limits" =
   match for_model_id "glm-4.7-flashx" with
   | Some c ->
     c.supports_reasoning
-    && c.supports_extended_thinking
     && c.max_context_tokens = Some 200_000
     && c.max_output_tokens = Some 128_000
     && c.supports_tools
@@ -1515,7 +1495,6 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
   match for_model_id "glm-4.5-flash" with
   | Some c ->
     c.supports_reasoning
-    && c.supports_extended_thinking
     && c.max_context_tokens = Some 128_000
     && c.max_output_tokens = Some 96_000
     && c.supports_tools
@@ -1548,7 +1527,6 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; chat_output_budget_field = None
   ; tool_schema_conformance = None
   ; supports_reasoning = None
-  ; supports_extended_thinking = None
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
@@ -1595,7 +1573,6 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; chat_output_budget_field = None
   ; tool_schema_conformance = None
   ; supports_reasoning = None
-  ; supports_extended_thinking = None
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
@@ -1679,7 +1656,6 @@ let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =
   ; supports_required_tool_choice = Some true
   ; supports_named_tool_choice = Some true
   ; supports_reasoning = Some true
-  ; supports_extended_thinking = Some true
   ; thinking_control_format = Some Chat_template_kwargs
   ; preserve_thinking_control_format = Some "chat_template_kwargs_preserve_thinking"
   ; supports_native_streaming = Some true
@@ -1696,7 +1672,6 @@ let glm_thinking_test_entry id_prefix ~ctx ~out : Model_catalog.model_entry =
   ; supports_required_tool_choice = Some false
   ; supports_named_tool_choice = Some false
   ; supports_reasoning = Some true
-  ; supports_extended_thinking = Some true
   ; supports_native_streaming = Some true
   }
 ;;
@@ -1717,7 +1692,6 @@ let deepseek_v4_test_entry id_prefix : Model_catalog.model_entry =
        required vs named capability. *)
     supports_named_tool_choice = Some false
   ; supports_reasoning = Some true
-  ; supports_extended_thinking = Some true
   ; thinking_control_format = Some Thinking_object
   ; supports_native_streaming = Some true
   }
@@ -1823,7 +1797,6 @@ let test_catalog_entries =
     ; supports_tool_choice = Some false
     ; supports_named_tool_choice = Some false
     ; supports_reasoning = Some true
-    ; supports_extended_thinking = Some true
     ; thinking_control_format = Some (Chat_template_token "<|think|>")
     ; supports_multimodal_inputs = Some true
     ; supports_image_input = Some true
@@ -1837,7 +1810,6 @@ let test_catalog_entries =
     ; supports_tool_choice = Some false
     ; supports_named_tool_choice = Some false
     ; supports_reasoning = Some true
-    ; supports_extended_thinking = Some true
     ; thinking_control_format = Some (Chat_template_token "<|think|>")
     ; supports_multimodal_inputs = Some true
     ; supports_image_input = Some true
@@ -1872,7 +1844,6 @@ let%test "for_model_id_catalog qwen3 has extended thinking" =
     match for_model_id_catalog "qwen3-32b" with
     | Some c ->
       c.supports_reasoning
-      && c.supports_extended_thinking
       && c.supports_tools
       && c.supports_native_streaming
     | None -> false)
@@ -1881,7 +1852,7 @@ let%test "for_model_id_catalog qwen3 has extended thinking" =
 let%test "for_model_id_catalog qwen3.5 routes to Qwen_3 family" =
   with_test_catalog (fun () ->
     match for_model_id_catalog "qwen3.5" with
-    | Some c -> c.supports_extended_thinking && c.max_output_tokens = Some 81_920
+    | Some c -> c.max_output_tokens = Some 81_920
     | None -> false)
 ;;
 
@@ -1889,14 +1860,7 @@ let%test "for_model_id_catalog qwen36 model routes to Qwen_3 family" =
   with_test_catalog (fun () ->
     match for_model_id_catalog "qwen36-35b-a3b-mtp" with
     | Some c ->
-      c.supports_extended_thinking && c.thinking_control_format = Chat_template_kwargs
-    | None -> false)
-;;
-
-let%test "for_model_id_catalog qwen-3-7b prefix variant resolves" =
-  with_test_catalog (fun () ->
-    match for_model_id_catalog "qwen-3-7b-instruct" with
-    | Some c -> c.supports_extended_thinking
+      c.thinking_control_format = Chat_template_kwargs
     | None -> false)
 ;;
 
@@ -1905,7 +1869,6 @@ let%test "for_model_id_catalog glm-5-turbo has GLM-5 thinking limits" =
     match for_model_id_catalog "glm-5-turbo" with
     | Some c ->
       c.supports_reasoning
-      && c.supports_extended_thinking
       && c.max_context_tokens = Some 200_000
       && c.max_output_tokens = Some 128_000
     | None -> false)
@@ -1916,7 +1879,6 @@ let%test "for_model_id_catalog glm-5.1 full model (reasoning + extended thinking
     match for_model_id_catalog "glm-5.1" with
     | Some c ->
       c.supports_reasoning
-      && c.supports_extended_thinking
       && c.max_output_tokens = Some 128_000
     | None -> false)
 ;;
@@ -1926,7 +1888,6 @@ let%test "for_model_id_catalog bare glm-5 full model (reasoning + extended think
     match for_model_id_catalog "glm-5" with
     | Some c ->
       c.supports_reasoning
-      && c.supports_extended_thinking
       && c.max_output_tokens = Some 128_000
     | None -> false)
 ;;
@@ -2046,7 +2007,7 @@ let%test "for_model_id qwen3 has chat_template_kwargs thinking control" =
   (* Qwen3.x OpenAI-compatible llama.cpp/llama-server deployments return
      [reasoning_content] when thinking is enabled through
      {"chat_template_kwargs": {"enable_thinking": bool}}.  Without this
-     format, [supports_extended_thinking = true] never reaches the wire. *)
+     format, a declared thinking capability never reaches the wire. *)
   match for_model_id "qwen3.5" with
   | Some c -> c.thinking_control_format = Chat_template_kwargs
   | None -> false
@@ -2083,7 +2044,6 @@ let%test "for_model_id hf.co/unsloth Gemma 4 QAT uses template token thinking" =
   match for_model_id "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL" with
   | Some c ->
     c.supports_reasoning
-    && c.supports_extended_thinking
     && c.thinking_control_format = Chat_template_token "<|think|>"
     && c.modality_priority = Modality.Visual_first
   | None -> false
@@ -2105,7 +2065,6 @@ let%test "for_model_id hf.co/google Gemma 4 QAT uses template token thinking" =
   match for_model_id "hf.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf" with
   | Some c ->
     c.supports_reasoning
-    && c.supports_extended_thinking
     && c.thinking_control_format = Chat_template_token "<|think|>"
   | None -> false
 ;;
@@ -2125,7 +2084,7 @@ let%test "for_model_id google/gemma-4-31b-it resolves" =
 let%test "for_model_id Qwen org-prefixed Qwen3.6 uses chat_template_kwargs" =
   match for_model_id "Qwen/Qwen3.6-35B-A3B" with
   | Some c ->
-    c.supports_extended_thinking && c.thinking_control_format = Chat_template_kwargs
+    c.thinking_control_format = Chat_template_kwargs
   | None -> false
 ;;
 
@@ -2156,13 +2115,13 @@ let%test
     List.for_all
       (fun (m, e) -> check m e)
       [ ( "glm-4.7-flash-turbo"
-        , fun c -> c.max_output_tokens = Some 128_000 && c.supports_extended_thinking )
+        , fun c -> c.max_output_tokens = Some 128_000 )
       ; ( "glm-4.5-flash-test"
-        , fun c -> c.max_output_tokens = Some 96_000 && c.supports_extended_thinking )
+        , fun c -> c.max_output_tokens = Some 96_000 )
       ; ( "glm-5-turbo-latest"
-        , fun c -> c.max_output_tokens = Some 128_000 && c.supports_extended_thinking )
+        , fun c -> c.max_output_tokens = Some 128_000 )
       ; ( "glm-5-turbo-latest"
-        , fun c -> c.max_output_tokens = Some 128_000 && c.supports_extended_thinking )
+        , fun c -> c.max_output_tokens = Some 128_000 )
       ; ("glm-4.6v-plus", fun c -> c.supports_image_input && c.supports_reasoning)
       ; ( "glm-4.7-flash-test"
         , fun c -> c.max_output_tokens = Some 128_000 && c.supports_reasoning )
@@ -2221,7 +2180,7 @@ let%test
       ; ( "Qwen/Qwen3.6-35B-A3B"
         , fun c ->
             c.thinking_control_format = Chat_template_kwargs
-            && c.supports_extended_thinking )
+            )
       ; ( "deepseek-v4-pro-test"
         , fun c ->
             c.thinking_control_format = Thinking_object

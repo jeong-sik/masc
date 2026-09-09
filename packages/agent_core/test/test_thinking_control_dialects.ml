@@ -136,7 +136,6 @@ let declared_catalog_openai_compat_config
 let declared_qwen_openai_compat_capabilities =
   { CAP.openai_compat_chat_capabilities with
     supports_reasoning = true
-  ; supports_extended_thinking = true
   ; thinking_control_format = CAP.Chat_template_kwargs
   ; preserve_thinking_control_format = CAP.Chat_template_kwargs_preserve_thinking
   ; reasoning_streaming_format = CAP.Delta_reasoning_field "reasoning_content"
@@ -943,7 +942,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
 ;;
 
 let keep_all_axis_manifest =
-  {|{"schema_version":1,"models":[{"id_prefix":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"supports_extended_thinking":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
+  {|{"schema_version":1,"models":[{"id_prefix":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
 ;;
 
 let test_thinking_object_keep_all_axis_uses_keep_all () =
@@ -1228,7 +1227,6 @@ let test_ollama_chat_template_token_uses_catalog_token () =
 id_prefix = "local-token-model"
 base = "ollama"
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|custom_think|>"
 |}
@@ -1272,7 +1270,6 @@ let test_ollama_chat_template_token_missing_token_fails_closed () =
 id_prefix = "tokenless-template-model"
 base = "ollama"
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_token"
 |};
        close_out oc;

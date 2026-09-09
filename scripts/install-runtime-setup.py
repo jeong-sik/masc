@@ -29,7 +29,7 @@ CHOICES = {
 }
 UNVERIFIED_CAPABILITIES = (
     'supports_tool_choice', 'supports_required_tool_choice', 'supports_named_tool_choice',
-    'supports_parallel_tool_calls', 'supports_reasoning', 'supports_extended_thinking',
+    'supports_parallel_tool_calls', 'supports_reasoning',
     'supports_response_format_json', 'supports_structured_output',
     'supports_multimodal_inputs', 'supports_image_input', 'supports_audio_input',
     'supports_video_input', 'supports_document_input',

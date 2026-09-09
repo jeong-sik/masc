@@ -6844,7 +6844,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         (Printf.sprintf "the terminal draws %s and this is %s"
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
-      let rows, columns = get_terminal_size () in
+      let rows, columns = Masc_tui_ansi.get_terminal_size () in
       (* Header rows -- the title, then one row per caption line (description,
          site, URL). The image starts below the header and the footer sits on
          the last row, so the picture never overlaps the text. With no caption
@@ -16380,7 +16380,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()

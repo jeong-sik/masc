@@ -53,11 +53,15 @@ val success_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
 (** Typed deferral. [metadata] is an opaque one-way AGENT_CORE projection, never a
     source from which MASC recovers the disposition. *)
-val deferred_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+val deferred_data :
+  ?effect_disposition:Tool_result.failure_effect_disposition ->
+  ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
 (** Typed deferral for an external effect whose durable resolution resumes the
     Keeper later. *)
-val deferred_external_effect_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+val deferred_external_effect_data :
+  ?effect_disposition:Tool_result.failure_effect_disposition ->
+  ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
 val failure
   :  ?class_:Tool_result.tool_failure_class

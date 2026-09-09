@@ -320,9 +320,13 @@ def main():
             raise AssertionError('Approved operation did not use its frozen alternate runtime')
         original = events[0]['body']['messages']
         resumed = events[2]['body']['messages']
-        for message in [m for m in original if m['role'] == 'user']:
-            if resumed.count(message) != original.count(message):
-                raise AssertionError('Original user input changed or duplicated')
+        # Provider requests also contain refreshed system-context observations
+        # projected as User messages. They are not the admitted human input.
+        original_user = {'role': 'user', 'content': prompt}
+        if original.count(original_user) != 1 or resumed.count(original_user) != 1:
+            raise AssertionError('Original admitted user request changed or duplicated')
+        if waiting['input']['payload']['message'] != prompt:
+            raise AssertionError('Waiting operation lost its original request body')
         output_ref = json.loads((root / 'approved-output-ref.json').read_text())
         if output_ref['sha256'] not in json.dumps(resumed):
             raise AssertionError('Resumed model input lacks usable complete output_ref')

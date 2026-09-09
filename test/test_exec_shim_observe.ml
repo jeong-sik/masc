@@ -127,10 +127,55 @@ let test_observe_discard_without_persistent_effects () =
           %!")
 ;;
 
+let test_git_status_fsmonitor_is_confined () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  check bool "Observe boundary available" true (Exec_shim.observe_supported ());
+  let root = Filename.temp_dir "masc-status-observe-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
+  let scratch = Filename.concat root "scratch" in
+  Unix.mkdir scratch 0o700;
+  let git_env = [| "PATH=" ^ Sys.getenv "PATH"; "HOME=" ^ root;
+    "GIT_CONFIG_NOSYSTEM=1"; "GIT_CONFIG_GLOBAL=/dev/null" |] in
+  let git args =
+    let argv = Array.of_list (["git"; "-C"; root] @ args) in
+    let pid = Unix.create_process_env "git" argv git_env Unix.stdin Unix.stdout Unix.stderr in
+    snd (Unix.waitpid [] pid) in
+  let git_ok args = check bool "Git fixture command succeeds" true (git args = Unix.WEXITED 0) in
+  git_ok ["-c"; "init.templateDir="; "init"; "--quiet"];
+  Fs_compat.save_file (Filename.concat root "tracked.txt") "tracked\n";
+  git_ok ["add"; "tracked.txt"];
+  let hook = Filename.concat root ".git/fsmonitor-probe" in
+  Fs_compat.save_file hook "#!/bin/sh\nprintf invoked > 'scratch/fsmonitor-invoked'\nprintf observed > '.git/fsmonitor-invoked'\nprintf \"token\\000\"\n";
+  Unix.chmod hook 0o700;
+  git_ok ["config"; "core.fsmonitor"; hook];
+  git_ok ["status"; "--short"];
+  let marker = Filename.concat root ".git/fsmonitor-invoked" in
+  check string "plain status invokes a writing repository hook" "observed" (Fs_compat.load_file marker);
+  let invocation_marker = Filename.concat scratch "fsmonitor-invoked" in
+  check string "baseline hook also records invocation" "invoked" (Fs_compat.load_file invocation_marker);
+  Sys.remove marker;
+  Sys.remove invocation_marker;
+  flush_all ();
+  let pid = Unix.fork () in
+  if pid = 0 then (
+    let exit_code = try
+      restrict_self scratch true true;
+      git_ok ["status"; "--short"];
+      0
+    with error -> prerr_endline (Printexc.to_string error); 1 in
+    flush_all (); Unix._exit exit_code);
+  check bool "status remains executable under enforced Observe" true
+    (snd (Unix.waitpid [] pid) = Unix.WEXITED 0);
+  check string "confined hook actually executed" "invoked" (Fs_compat.load_file invocation_marker);
+  check bool "Observe prevents fsmonitor persistent write" false (Sys.file_exists marker)
+;;
+
 let () =
   run
     "exec shim Observe"
-    [ ( "discard device"
+    [ ( "Git repository hooks", [test_case "status fsmonitor effects stay confined" `Quick test_git_status_fsmonitor_is_confined] )
+    ; ( "discard device"
       , [ test_case
             "discard output without persistent effects"
             `Quick

@@ -336,7 +336,42 @@ activation_mode = "on_demand"
        | None -> fail "materialized Keeper has no running lane")
 ;;
 
+let with_boot_runtime_catalog f =
+  let path = Filename.temp_file "keeper-boot-runtime-catalog" ".toml" in
+  let previous = Llm_provider.Model_catalog.global () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      (match previous with
+       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+       | None -> Llm_provider.Model_catalog.clear_global ());
+      Sys.remove path)
+    (fun () ->
+      write_file path
+        {|[[models]]
+id_prefix = "test-model"
+provider_name = "test_provider"
+base = "openai_chat"
+max_context_tokens = 8192
+supports_tools = true
+
+[[models]]
+id_prefix = "other-model"
+provider_name = "test_provider"
+base = "openai_chat"
+max_context_tokens = 8192
+supports_tools = true
+|};
+      match Llm_provider.Model_catalog.load_file path with
+      | Error detail -> failf "boot fixture catalog rejected: %s" detail
+      | Ok catalog ->
+        Llm_provider.Model_catalog.set_global catalog;
+        f ())
+;;
+
 let check_config_boot_runtime_assignment ~requested_runtime ~expected_runtime () =
+  with_boot_runtime_catalog @@ fun () ->
   with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
   let keeper_name = "imp" in
   let toml_path = Filename.concat keepers_dir "imp.toml" in

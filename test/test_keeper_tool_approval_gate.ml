@@ -92,26 +92,15 @@ let test_execute_hook_delegates_without_interactive_wait () =
       check int "no duplicate interactive wait" 0 (List.length (Registry.pending registry));
       check (list string) "no duplicate approval event" [] (event_labels events))
 
-let test_an_edit_asks () =
-  with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
-      let edit_event () =
-        pre_tool_use_event ~tool_name:"Edit"
-          ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
-      in
-      check string "the question names the file the call would change"
-        "ask:Run Edit on lib/a.ml?"
-        (decision_to_string (gate.Gate.pre_tool_use (edit_event ())));
-      (* The because the policy computed is the thing an operator reads when
-         deciding; asking without it forces a blind yes. *)
-      let why =
-        match gate.Gate.pre_tool_use (edit_event ()) with
-        | Agent_core.Hooks.ElicitToolApproval { question; because } ->
-            Printf.sprintf "ask:%s because=%s" question because
-        | other -> "not-an-ask: " ^ decision_to_string other
-      in
-      check string "the ask carries why this call was held"
-        "ask:Run Edit on lib/a.ml? because=this call reaches outside masc"
-        why)
+let test_filesystem_hook_delegates_without_interactive_wait () =
+  with_gate ~timeout_sec:180.0 (fun ~clock:_ ~registry ~events ~gate ->
+    List.iter (fun tool_name ->
+      check string "filesystem call reaches its resolved authorization owner" "continue"
+        (decision_to_string (gate.Gate.pre_tool_use
+          (pre_tool_use_event ~tool_name ~input:(`Assoc ["file_path", `String "result.txt"])))))
+      ["Write"; "Edit"; "tool_write_file"; "tool_edit_file"];
+    check int "no native wait created" 0 (List.length (Registry.pending registry));
+    check (list string) "no native approval event" [] (event_labels events))
 
 let test_other_stages_pass_through () =
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
@@ -211,7 +200,7 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
       Masc.Keeper_tool_composition_plan_index.record
         gate.Gate.composition_plan_index
         ~composition:"keeper_compose_gate_fixture"
-        ~node_tools:[ "Read"; "Edit"; "Grep" ];
+        ~node_tools:[ "Read"; "unclassified_fixture_tool"; "Grep" ];
           match gate.Gate.pre_tool_use (pre_tool_use_event
                  ~tool_name:"keeper_compose_gate_fixture"
                  ~input:(`Assoc [])) with
@@ -227,7 +216,7 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
               in
               check bool "a composition's because names the node that asks"
                 true
-                (has_affix "node Edit:" because)
+                (has_affix "node unclassified_fixture_tool:" because)
           | other ->
               Alcotest.fail
                 ("composition should ask, got: " ^ decision_to_string other))
@@ -239,7 +228,7 @@ let () =
             test_a_read_runs_without_asking
         ; test_case "Execute delegates without duplicate interactive wait" `Quick
             test_execute_hook_delegates_without_interactive_wait
-        ; test_case "an edit asks" `Quick test_an_edit_asks
+        ; test_case "filesystem calls delegate without native wait" `Quick test_filesystem_hook_delegates_without_interactive_wait
         ; test_case "a synthetic composition asks with its node name" `Quick
             test_a_synthetic_composition_asks_with_its_node_name
         ; test_case "other stages pass through" `Quick

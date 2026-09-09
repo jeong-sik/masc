@@ -276,3 +276,7 @@ let pending ~base_path ~keeper_name ~operation_id =
         | Some {Keeper_chat_operation.state=(Keeper_chat_operation.Running _ | Keeper_chat_operation.Succeeded _
             | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _); _}
         | None -> Ok None
+
+let record_completed ~config ~keeper_name admission =
+  Keeper_approval_queue.ensure_settled_continuation_chat_projection
+    ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution

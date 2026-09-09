@@ -7813,6 +7813,22 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
         ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry";
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
+      (match Gate.record_completed ~config ~keeper_name admission |> require "completed direct continuation receipt" with
+       | Masc.Keeper_approval_queue.Continuation_projection_recorded -> ()
+       | Masc.Keeper_approval_queue.Continuation_projection_not_ready -> fail "successful direct continuation remained unresolved");
+      let selections = Masc.Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> require "remaining approval wake" in
+      let approval_selection = List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        match selection.source.payload with
+        | Keeper_event_queue.Hitl_resolved resolution -> resolution.approval_id = approval_id
+        | _ -> false) selections in
+      (match approval_selection with
+       | None -> fail "fixture lost its pending Gate wake before reconciliation"
+       | Some selection ->
+         match Masc.Keeper_heartbeat_stimulus_intake.reconcile_spent_selection ~config ~keeper_name selection
+           |> require "retire completed direct continuation wake" with
+         | Masc.Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
+         | Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable
+         | Masc.Keeper_heartbeat_stimulus_intake.Absent_grant_retired _ -> fail "completed Gate requested another model turn");
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
         |> require "same operation completion" |> ignore))
 ;;

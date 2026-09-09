@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import socket
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -35,6 +36,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--ci-run', type=int, required=True)
     p.add_argument('--arch', default='macos-arm64')
+    p.add_argument('--artifact-cache', type=Path, help='Previously downloaded CI artifact directory with sibling ci-provenance.json')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--base', type=Path, help='Fresh isolated runtime base on a filesystem shared with the sandbox daemon')
     p.add_argument('--expected-commit', required=True)
@@ -184,7 +186,13 @@ def main():
     artifact_list = json.loads(subprocess.check_output(['gh', 'api', f'repos/jeong-sik/masc/actions/runs/{args.ci_run}/artifacts?per_page=100']))
     artifact = next(a for a in artifact_list['artifacts'] if a['name'] == artifact_name and not a['expired'])
     binary_dir = root / 'ci-binary'
-    subprocess.run(['gh', 'run', 'download', str(args.ci_run), '-R', 'jeong-sik/masc', '--name', artifact_name, '--dir', str(binary_dir)], check=True)
+    if args.artifact_cache:
+        cached_provenance = json.loads((args.artifact_cache.parent / 'ci-provenance.json').read_text())
+        if cached_provenance['run_id'] != args.ci_run or cached_provenance['head_sha'] != args.expected_commit or cached_provenance['artifact']['id'] != artifact['id']:
+            raise ValueError('Cached artifact provenance differs from the selected CI artifact')
+        shutil.copytree(args.artifact_cache, binary_dir)
+    else:
+        subprocess.run(['gh', 'run', 'download', str(args.ci_run), '-R', 'jeong-sik/masc', '--name', artifact_name, '--dir', str(binary_dir)], check=True)
     manifest = json.loads((binary_dir / 'manifest.json').read_text())
     args.binary = binary_dir / 'main_eio.exe'
     binary_sha = hashlib.sha256(args.binary.read_bytes()).hexdigest()
@@ -362,6 +370,8 @@ def main():
                 raise AssertionError('Unexpected transcript provenance in this isolated operation')
         if sum(row['role'] == 'user' for row in transcript) != 1 or sum(row['role'] == 'assistant' for row in transcript) != 1:
             raise AssertionError('Duplicate user or terminal assistant row')
+        if not any(row.get('approval_lifecycle', {}).get('approval_id') == approval_id and row.get('approval_lifecycle', {}).get('phase') == 'continuation_recorded' for row in transcript):
+            raise AssertionError('Successful direct continuation did not settle its pending Gate wake')
         save(root / 'transcript.json', transcript)
         admissions = json.loads((root / 'resumed-admission-operations.json').read_text())
         if len(admissions) != 1 or admissions[0]['operation_id'] != operation_id or admissions[0]['state'] != 'running':
@@ -402,6 +412,14 @@ def main():
             server.wait()
         provider.shutdown()
         log.close()
+        save(root / 'post-shutdown-observation.json', {'provider_requests': len(events),
+            'operation_verification_provider_requests': receipt.get('provider_requests'),
+            'operation_state': observed.get('state') if 'observed' in locals() else None})
+        if receipt.get('status') == 'verified' and len(events) != receipt['provider_requests']:
+            receipt.update(status='failed', error='Additional provider turn observed after direct operation verification',
+                           provider_requests_after_shutdown=len(events))
+            save(root / 'receipt.json', receipt)
+            raise AssertionError(receipt['error'])
 
 
 if __name__ == '__main__':

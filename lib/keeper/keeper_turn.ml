@@ -846,6 +846,14 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
+                let () = match run_result, gate_resume with
+                  | Ok _, Some admission ->
+                    (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
+                     | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+                     | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+                       Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
+                     | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
+                  | Error _, _ | Ok _, None -> () in
                 let gate_wait = Keeper_direct_gate_continuation.suspend
                       ?runtime_lane:!deferred_lane
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id

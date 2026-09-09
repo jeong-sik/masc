@@ -709,7 +709,7 @@ let error_row name = Printf.sprintf
     {|{"status":"error","runtime_class":"keeper","name":%S,
        "keepalive_running":false,
        "meta":null,"created_at":null,"updated_at":null}|}
-    name name
+    name
 
 let test_roster_decodes_an_error_row_without_refusing_the_rest () =
   let json =

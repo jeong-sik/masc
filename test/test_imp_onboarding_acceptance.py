@@ -232,5 +232,19 @@ class ExistingWorkspace(unittest.TestCase):
             self.assertTrue(source.exists())
 
 
+class SiblingBrowserOracle(unittest.TestCase):
+    def test_custom_oracle_directory_selects_its_own_browser_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / 'custom-oracles'
+            folder.mkdir()
+            script = folder / 'imp-onboarding-acceptance.py'
+            script.write_bytes(Path(acceptance.__file__).read_bytes())
+            selected = importlib.util.spec_from_file_location('relocated_acceptance', script)
+            relocated = importlib.util.module_from_spec(selected)
+            selected.loader.exec_module(relocated)
+            self.assertEqual(relocated.BROWSER_SCRIPT, folder / 'imp-onboarding-browser.cjs')
+            self.assertNotEqual(relocated.BROWSER_SCRIPT, Path(directory) / 'scripts/imp-onboarding-browser.cjs')
+
+
 if __name__ == '__main__':
     unittest.main()

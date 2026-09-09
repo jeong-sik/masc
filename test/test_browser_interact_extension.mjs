@@ -110,3 +110,21 @@ const receipt=follow();
 assert.equal(receipt.destinationUrl,'https://example.org/destination');
 assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
 assert.deepEqual(assigned,['https://example.org/destination']);
+
+// Exercise the actual native message dispatch and injected scene resolver.
+page.HTMLAnchorElement=Anchor;page.URL=URL;
+page.getComputedStyle=()=>({display:'block',visibility:'visible'});
+page.document.querySelector=()=>null;
+page.location.assign=url=>assigned.push(url);
+page.followAnchor=new Anchor('_blank');
+page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
+vm.runInContext("window[Symbol.for('masc.browser.scene.v1')].nodes.set('follow-link',new WeakRef(followAnchor))",page);
+const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
+assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
+page.followAnchor.target='_self';
+const dispatchedReceipt=await command(dispatchedFollow);
+assert.equal(dispatchedReceipt.ok,true,JSON.stringify(dispatchedReceipt));
+assert.equal(dispatchedReceipt.data.tabId,7);
+assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
+assert.equal(dispatchedReceipt.data.action,'follow_link');
+console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');

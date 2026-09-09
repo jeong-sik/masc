@@ -2,6 +2,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
+import { SkillSourceInspector } from './skill-source-inspector'
 import {
   classifySkillEditorError,
   createSkill,
@@ -749,7 +750,7 @@ export function SkillsPanel() {
             return html`
               <tr key=${rowKey} data-testid=${`skill-row-${row.name}`}>
                 <td>
-                  <button class="text-left" type="button" onClick=${() => { expanded.value = isExpanded ? null : rowKey }}><strong>${isExpanded ? '▾' : '▸'} ${row.name}</strong></button><div class="ss-muted">${row.description}</div>
+                  <button class="text-left" type="button" aria-expanded=${isExpanded} aria-label=${`Read instructions for ${row.name}`} onClick=${() => { expanded.value = isExpanded ? null : rowKey }}><strong>${isExpanded ? '▾' : '▸'} ${row.name}</strong><span class="ss-muted ml-2">Read instructions</span></button><div class="ss-muted">${row.description}</div>
                   ${row.diagnostics.map(
                     diagnostic => html`<div class="mt-1 text-3xs text-[var(--color-status-warn)]">⚠ ${diagnostic}</div>`,
                   )}
@@ -764,6 +765,8 @@ export function SkillsPanel() {
               </tr>
               ${isExpanded ? html`
                 <tr key=${`${rowKey}-detail`}><td colspan="5">
+                  ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
+                    : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>

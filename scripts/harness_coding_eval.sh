@@ -229,10 +229,6 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
-    # RFC-0394 turned the local playground fail-closed; the eval harness is
-    # exactly the dev/test caller that knob exists for. Episodes edit files
-    # only inside run workspaces this script creates and owns.
-    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
@@ -258,10 +254,6 @@ start_live_server() {
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
-    # RFC-0394 turned the local playground fail-closed; the eval harness is
-    # exactly the dev/test caller that knob exists for. Episodes edit files
-    # only inside run workspaces this script creates and owns.
-    export MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"

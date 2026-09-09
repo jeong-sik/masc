@@ -50,7 +50,7 @@ instructions = """
 |---|---:|---|
 | `activation_mode` | — | 수동 시작(`manual`), 요청 시 실행(`on_demand`), 주기 자율 실행(`autonomous`) |
 | `instructions` | 11/11 | Keeper 의 프롬프트 전부. 비면 거부됩니다 |
-| `sandbox_profile` | 11/11 | `docker` 는 컨테이너에서 실행. `local`(호스트 실행)은 기본 비활성 — fail-closed, RFC-0394 |
+| `sandbox_profile` | 11/11 | `docker`, `microvm`, `remote_ssh` 중 하나. Keeper 는 그 안에서 돌거나 아예 돌지 않습니다 |
 | `mention_targets` | 7/11 | 보드에서 이 Keeper 를 부르는 이름들 |
 | `network_mode` | 6/11 | 샌드박스에서 네트워크가 닿는 범위 |
 | `name` | 5/11 | 파일 이름과 표시 이름이 다를 때 |
@@ -58,10 +58,6 @@ instructions = """
 
 앞의 셋은 그 런타임의 모든 Keeper 가 씁니다. 나머지는 실제로 겪어 본 문제에 대한
 답일 때만 넣으세요.
-
-`local` 프로필이 꼭 필요한 개발·테스트 프로세스만 `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1` 로
-게이트를 해제할 수 있습니다. 해제 상태에서 실행이 디스패치되면 Keeper 이름이 들어간
-경고 로그를 남깁니다.
 
 모르는 키가 있으면 거부합니다. 항목 전체 규칙은
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md) 에 있습니다.

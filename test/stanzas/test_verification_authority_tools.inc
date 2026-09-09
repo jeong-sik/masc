@@ -4,11 +4,6 @@
 (test
  (name test_verification_authority_tools)
  (modules test_verification_authority_tools)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries
   masc_test_deps
   ;; The producer runs on the remote_ssh profile: the fixture endpoint row is

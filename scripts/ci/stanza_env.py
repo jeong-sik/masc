@@ -313,7 +313,7 @@ FIXTURE_PLAIN = """
  (name test_alpha)
  (modules test_alpha)
  (action
-  (setenv MASC_EXEC_ALLOW_LOCAL_PLAYGROUND true
+  (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false
    (setenv MASC_BASE_PATH /tmp/test-alpha
     (setenv MASC_BASE_PATH_INPUT /tmp/test-alpha
      (run %{test})))))
@@ -378,7 +378,7 @@ def self_test() -> int:
         "nested setenv keeps source order",
         env,
         [
-            ("MASC_EXEC_ALLOW_LOCAL_PLAYGROUND", "true"),
+            ("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
             ("MASC_BASE_PATH", "/tmp/test-alpha"),
             ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha"),
         ],
@@ -502,7 +502,7 @@ def self_test() -> int:
         text, own_file = stanza_text("test_alpha", fixture)
         env, _ = suite_env("test_alpha", text, own_file=own_file)
         check("shared-file sibling environment does not leak", env,
-              [("MASC_EXEC_ALLOW_LOCAL_PLAYGROUND", "true"),
+              [("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
                ("MASC_BASE_PATH", "/tmp/test-alpha"),
                ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha")])
         write("stanzas/nested/group.inc", "(include ../shared.inc)")
@@ -533,7 +533,6 @@ def self_test() -> int:
             "the real stanza reads what test.yml hardcoded",
             env,
             [
-                ("MASC_EXEC_ALLOW_LOCAL_PLAYGROUND", "true"),
                 ("MASC_BASE_PATH", "/tmp/test-heartbeat-integ"),
                 ("MASC_BASE_PATH_INPUT", "/tmp/test-heartbeat-integ"),
             ],

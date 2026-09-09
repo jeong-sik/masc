@@ -299,28 +299,34 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
         (fun ~worker ~relative ->
            let module Store = Workspace_verification_store in
            let max_bytes = Store.verification_evidence_max_bytes in
+           let format = Store.binary_format_of_path relative in
+           let image_media_type = Store.image_media_type_of_binary_format format in
+           let read_max_bytes =
+             match image_media_type with Some _ -> max_bytes + 1 | None -> max_bytes
+           in
            match
              Keeper_sandbox_read_backend.read_file ~config ~meta
-               ~host_path:relative ~max_bytes ~timeout_sec:30. ()
+               (* One byte of lookahead distinguishes a complete artifact from
+                  the backend's capped prefix; partial images cannot be proof. *)
+               ~host_path:relative ~max_bytes:read_max_bytes ~timeout_sec:30. ()
            with
            | Error reason ->
                Error
                  (Store.Evidence_read_error
                     (Printf.sprintf "sandbox_backend_read: %s: %s" worker
                        (Keeper_sandbox_read_backend.read_error_to_string reason)))
+           | Ok content when String.length content > max_bytes ->
+               Error (Store.Evidence_read_error
+                 (Printf.sprintf "image exceeds capture limit %d bytes; submit a complete smaller rendering" max_bytes))
            | Ok content -> (
                (* The reader classifies its bytes with the store's own scan:
                    text answers as text, and non-text bytes become a binary
                    payload -- hash, size, format -- instead of being dropped
                    (RFC-0436 §4.1). *)
-               match Store.scan_utf8 content with
-               | Store.Utf8_valid ->
+               match image_media_type, Store.scan_utf8 content with
+               | None, Store.Utf8_valid ->
                    Ok (Store.Text_payload (content, String.length content, false))
                | _ ->
-                   let format =
-                     let ext = String.lowercase_ascii (Filename.extension relative) in
-                     if ext = "" then "unknown" else ext
-                   in
                    let sha256 =
                      Digestif.SHA256.(digest_string content |> to_hex)
                    in

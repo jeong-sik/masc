@@ -624,7 +624,39 @@ remote_endpoint = "fixture"
   | Error error ->
       Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
   | Ok content ->
-    Alcotest.(check string) "remote content" "remote-file-content" content
+    Alcotest.(check string) "remote content" "remote-file-content" content;
+    let module Store = Masc.Workspace_verification_store in
+    let png = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC" in
+    let endpoint_file = Filename.concat base "endpoint-render.bin" in
+    write_file endpoint_file png;
+    let script = "#!/bin/sh\ncat " ^ Filename.quote endpoint_file ^ "\n" in
+    with_fake_ssh script @@ fun () ->
+    let reader = match Masc.Keeper_tool_task_runtime.evidence_artifact_reader
+        ~config ~meta () with
+      | Some reader -> reader | None -> Alcotest.fail "expected endpoint reader" in
+    let artifact_read = Some reader in
+    let snapshot = Store.snapshot_submitted_evidence_json ?artifact_read
+        ~request_id:"vrf-endpoint-image" ~base_path:base ~worker:meta.name
+        ["artifact:render.PNG"] in
+    let open Yojson.Safe.Util in
+    let item = snapshot |> to_list |> List.hd in
+    Alcotest.(check string) "endpoint image is binary" "artifact_binary"
+      (item |> member "kind" |> to_string);
+    Alcotest.(check string) "canonical endpoint format" "png"
+      (item |> member "format" |> to_string);
+    let body = item |> member "body" |> to_string in
+    Alcotest.(check string) "endpoint image body survives snapshot" png
+      (read_file (Filename.concat (Workspace.masc_root_dir config) body));
+    write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
+    (match reader ~worker:meta.name ~relative:"render.PNG" with
+     | Error (Store.Evidence_read_error _) -> ()
+     | _ -> Alcotest.fail "partial endpoint image must not be filed as complete");
+    write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
+    (match reader ~worker:meta.name ~relative:"summary.txt" with
+     | Ok (Store.Text_payload (text, _, _)) ->
+       Alcotest.(check int) "existing text prefix behavior remains"
+         Store.verification_evidence_max_bytes (String.length text)
+     | _ -> Alcotest.fail "text prefix behavior changed")
 
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\

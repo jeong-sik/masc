@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -79,6 +80,51 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_incompatible_workspace_selection_happens_before_installer_seed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / 'old workspace'
+            state = base / '.masc/config/keepers/imp.toml'
+            state.parent.mkdir(parents=True)
+            state.write_bytes(b'[keeper]\nautoboot_enabled = true\n')
+            before = (state.read_bytes(), state.stat().st_ino, state.stat().st_mtime_ns)
+            calls = root / 'calls.jsonl'
+            binary = root / 'masc'
+            binary.write_text('#!' + sys.executable + '\n' + '''import json,sys
+from pathlib import Path
+base=Path(sys.argv[sys.argv.index('--base-path')+1])
+with Path(''' + repr(str(calls)) + ''').open('a') as stream:
+ stream.write(json.dumps([sys.argv[1],str(base)])+'\\n')
+if sys.argv[1]=='setup-preflight':
+ old=base/'.masc/config/keepers/imp.toml'
+ print(json.dumps(dict(status='needs_attention' if old.exists() else 'ready',read_only=True,
+  scope='keeper_goal_state_schema',issues=[dict(path=str(old),detail='old state')] if old.exists() else [])))
+ sys.exit(1 if old.exists() else 0)
+assert sys.argv[1]=='init'
+config=base/'.masc/config';config.mkdir(parents=True,exist_ok=True)
+(config/'runtime.toml').write_text('[runtime]\\n')
+(config/'agent-core-models-overlay.toml').write_text('')
+print('init complete')
+''')
+            binary.chmod(0o755)
+            helper = ROOT / 'scripts/install-runtime-setup.py'
+            before_wizard = SCRIPT.split('# Check persisted state before init',1)[1].split('# --- 4b. first-run wizard',1)[0]
+            body = ('\nDRY_RUN=0\nSEED_CONFIG=1\nexport TERM=dumb\nBASE_PATH=' + shlex.quote(str(base)) +
+                    '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' +
+                    shlex.quote(str(helper)) + ' "$2"; }\n# Check persisted state before init' + before_wizard +
+                    '\nprintf "chosen=%s\\n" "$BASE_PATH"\n')
+            result, terminal = run_shell(body,b'\n')
+            self.assertEqual(result.returncode,0,terminal)
+            chosen = Path(str(base) + '-new').resolve()
+            self.assertIn('chosen='+str(chosen),result.stdout)
+            import json
+            observed = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(observed,[['setup-preflight',str(base.resolve())],
+                                       ['setup-preflight',str(chosen)],['init',str(chosen)]])
+            self.assertEqual((state.read_bytes(),state.stat().st_ino,state.stat().st_mtime_ns),before)
+            self.assertFalse((base/'.masc/config/runtime.toml').exists())
+            self.assertTrue((chosen/'.masc/config/runtime.toml').exists())
+
     def test_selection_helper_keeps_terminal_input_and_captures_only_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             helper = Path(temporary) / 'helper.py'

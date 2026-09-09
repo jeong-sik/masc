@@ -523,11 +523,94 @@ let test_counts_snapshot_read_site_failures () =
     (list_field "alerts" keeper |> List.map (string_field "code"))
 ;;
 
+let test_workspace_context_preserves_sources_and_failures () =
+  let base = fresh_dir "workspace-memory-context" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    let first = write_snapshot ~keepers_dir ~keeper_id:"writer" [ fact "Chapter one is drafted" ] in
+    let second = write_snapshot ~keepers_dir ~keeper_id:"reviewer" [ fact "Chapter one needs revision" ] in
+    Fs_compat.save_file
+      (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"unreadable") "{broken";
+    let context = Health.workspace_memory_context_http_json ~base_path:base in
+    Alcotest.(check (list string)) "all owners remain separate"
+      [ "reviewer"; "unreadable"; "writer" ] (keeper_ids context);
+    let field name json = Yojson.Safe.Util.member name json in
+    let writer = keeper_obj "writer" context |> field "ordinary" in
+    Alcotest.(check string) "available" "available" (string_field "status" writer);
+    Alcotest.(check string) "exact writer snapshot" (Yojson.Safe.to_string (Current.to_json first))
+      (Yojson.Safe.to_string (field "snapshot" writer));
+    Alcotest.(check string) "conflicting reviewer claim preserved"
+      (Yojson.Safe.to_string (Current.to_json second))
+      (Yojson.Safe.to_string (keeper_obj "reviewer" context |> field "ordinary" |> field "snapshot"));
+    Alcotest.(check string) "corrupt is unavailable" "unavailable"
+      (keeper_obj "unreadable" context |> field "ordinary" |> string_field "status");
+    Alcotest.(check string) "absent source store is missing" "missing"
+      (keeper_obj "writer" context |> field "source_bound" |> string_field "status");
+    Alcotest.(check string) "no current source validation claim" "stored_bindings_not_revalidated"
+      (string_field "source_validation" context))
+;;
+
+let test_workspace_context_path_errors_and_source_snapshot () =
+  let base = fresh_dir "workspace-memory-context-paths" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    write_keeper_config ~keepers_dir ~keeper_id:"loop" ();
+    let ordinary_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"loop" in
+    let source_path = SourceCurrent.path_for_keepers_dir ~keepers_dir ~keeper_id:"loop" in
+    Unix.symlink (Filename.basename ordinary_path) ordinary_path;
+    Unix.symlink (Filename.basename source_path) source_path;
+    write_source_snapshot ~keepers_dir ~keeper_id:"source-only"
+      ~facts:[ { SourceCurrent.claim = "Keep the source attribution"
+               ; first_seen = test_now
+               ; source = { path = "evidence/current.txt"; sha256 = source_sha256 } } ]
+      ~invalidations:[ { SourceCurrent.source_path = "evidence/old.txt"
+                       ; invalidated_at = test_now
+                       ; reason = SourceCurrent.Source_changed } ];
+    let expected_source =
+      Fs_compat.load_file (SourceCurrent.path_for_keepers_dir ~keepers_dir ~keeper_id:"source-only")
+      |> Yojson.Safe.from_string
+    in
+    let context = Health.workspace_memory_context_http_json ~base_path:base in
+    let field = Yojson.Safe.Util.member in
+    List.iter (fun store ->
+      let unavailable = keeper_obj "loop" context |> field store in
+      Alcotest.(check string) (store ^ " loop is unavailable") "unavailable"
+        (string_field "status" unavailable);
+      Alcotest.(check bool) "failure detail retained" true
+        (String.length (string_field "detail" unavailable) > 0)) [ "ordinary"; "source_bound" ];
+    let source = keeper_obj "source-only" context |> field "source_bound" in
+    Alcotest.(check string) "source snapshot available" "available" (string_field "status" source);
+    Alcotest.(check string) "all source bindings and invalidations preserved"
+      (Yojson.Safe.to_string expected_source)
+      (Yojson.Safe.to_string (field "snapshot" source));
+    (* Remove the deliberately malformed links before recursive cleanup. *)
+    Unix.unlink ordinary_path;
+    Unix.unlink source_path)
+;;
+
+let test_workspace_context_discovery_not_directory () =
+  let base = fresh_dir "workspace-memory-context-directory" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    Fs_compat.mkdir_p (Filename.dirname keepers_dir);
+    Fs_compat.save_file keepers_dir "not a directory";
+    let context = Health.workspace_memory_context_http_json ~base_path:base in
+    Alcotest.(check string) "invalid discovery path is unavailable" "unavailable"
+      (Yojson.Safe.Util.member "discovery" context |> string_field "status");
+    Alcotest.(check (list string)) "no invented owners" [] (keeper_ids context))
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "explicit base path" `Quick
+      , [ Alcotest.test_case "workspace context malformed paths and source snapshot" `Quick
+            test_workspace_context_path_errors_and_source_snapshot
+        ; Alcotest.test_case "workspace context discovery not directory" `Quick
+            test_workspace_context_discovery_not_directory
+        ; Alcotest.test_case "workspace context preserves sources and failures" `Quick
+            test_workspace_context_preserves_sources_and_failures
+        ; Alcotest.test_case "explicit base path" `Quick
             test_uses_explicit_base_path_not_ambient_resolver
         ; Alcotest.test_case "revision bytes and delta" `Quick
             test_reports_revision_snapshot_bytes_and_latest_delta

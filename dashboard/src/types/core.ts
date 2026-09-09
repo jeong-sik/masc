@@ -975,6 +975,7 @@ export type ChatBlock =
   | ChatFusionBlock
   | ChatStatusBlock
 export type KeeperConversationStreamState =
+  | 'cancelling'
   | 'opening'
   | 'thinking'
   | 'streaming'

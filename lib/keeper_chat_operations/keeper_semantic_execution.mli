@@ -21,12 +21,24 @@ val source_projection : original:source_member -> observed:source_member ->
   bound_scope:Keeper_execution_scope_id.t -> (source_projection, string) result
 (** Caller re-reads the selected queue entry and verifies its durable binding.
     The original admission stays immutable when queue priority/revision changes. *)
+type runtime_retry = private
+  { checkpoint : Keeper_checkpoint_ref.t
+  ; assignment_id : string
+  ; failed_runtime_id : string
+  ; next_runtime_id : string
+  ; later_runtime_ids : string list
+  }
+val runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> assignment_id:string ->
+  failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list ->
+  (runtime_retry, string) result
+val equal_runtime_retry : runtime_retry -> runtime_retry -> bool
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
   | Confirmed_undispatched
   | Checkpointed of Keeper_checkpoint_ref.t
   | Interrupted_execution
+  | Runtime_retry of runtime_retry
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -61,6 +73,8 @@ type action =
   | Record_observation of Keeper_repetition_snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
+  | Suspend_runtime_retry of runtime_retry
+  | Resume_runtime_retry of runtime_retry
   | Settle of terminal
 
 val error_to_string : error -> string

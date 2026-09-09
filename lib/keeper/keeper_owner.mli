@@ -277,6 +277,14 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.runtime_retry option, error) result
+val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
+  (Chat_operation.t, error) result
+val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
+
 val interrupt_running_operation
   :  t
   -> Chat_operation.Operation_id.t

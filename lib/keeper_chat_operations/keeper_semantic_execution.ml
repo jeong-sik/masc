@@ -31,12 +31,33 @@ let source_projection ~original ~observed ~bound_scope =
     Error "source projection changed the admitted source identity"
   else Ok { original; observed; bound_scope }
 
+type runtime_retry =
+  { checkpoint : Keeper_checkpoint_ref.t
+  ; assignment_id : string
+  ; failed_runtime_id : string
+  ; next_runtime_id : string
+  ; later_runtime_ids : string list
+  }
+let runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
+  if List.exists (fun value -> String.trim value = "")
+      (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
+  then Error "runtime retry identities must be nonblank"
+  else Ok {checkpoint; assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids}
+
+let equal_runtime_retry left right =
+  Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
+  && left.assignment_id = right.assignment_id
+  && left.failed_runtime_id = right.failed_runtime_id
+  && left.next_runtime_id = right.next_runtime_id
+  && left.later_runtime_ids = right.later_runtime_ids
+
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
   | Confirmed_undispatched
   | Checkpointed of Keeper_checkpoint_ref.t
   | Interrupted_execution
+  | Runtime_retry of runtime_retry
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -67,6 +88,8 @@ type action =
   | Record_observation of Snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
+  | Suspend_runtime_retry of runtime_retry
+  | Resume_runtime_retry of runtime_retry
   | Settle of terminal
 
 let error_to_string = function
@@ -163,7 +186,7 @@ let apply ~now action current =
                (match recovery.origin with
                 | Unconfirmed_sources -> recheck Preparing
                 | Confirmed_undispatched -> recheck Ready
-                | Checkpointed _ | Interrupted_execution -> reject ())
+                | Checkpointed _ | Interrupted_execution | Runtime_retry _ -> reject ())
            | Running | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
           let resume expected =
@@ -175,7 +198,7 @@ let apply ~now action current =
            | Recovering recovery ->
                (match recovery.origin with
                 | Checkpointed expected -> resume expected
-                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution -> reject ())
+                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ -> reject ())
            | Preparing | Ready | Running | Settled _ -> reject ())
       | Record_observation observation ->
           (match current.phase with
@@ -188,6 +211,16 @@ let apply ~now action current =
           (match current.phase with
            | Running -> unchanged (Suspended checkpoint)
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Suspend_runtime_retry retry ->
+          (match current.phase with
+           | Running -> unchanged (Recovering {origin = Runtime_retry retry;
+               diagnostic = "checkpointed runtime retry awaits its frozen continuation"})
+           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Resume_runtime_retry observed ->
+          (match current.phase with
+           | Recovering {origin = Runtime_retry expected; _}
+             when equal_runtime_retry expected observed -> unchanged Running
+           | Preparing | Ready | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Require_reconciliation diagnostic ->
           if String.trim diagnostic = "" then reject ()
           else (match recovery_origin current.phase with
@@ -230,6 +263,13 @@ let recovery_origin_json = function
   | Unconfirmed_sources -> `Assoc ["kind", `String "unconfirmed_sources"]
   | Confirmed_undispatched -> `Assoc ["kind", `String "confirmed_undispatched"]
   | Interrupted_execution -> `Assoc ["kind", `String "interrupted_execution"]
+  | Runtime_retry retry ->
+      `Assoc [ "kind", `String "runtime_retry"
+             ; "checkpoint", checkpoint_json retry.checkpoint
+             ; "assignment_id", `String retry.assignment_id
+             ; "failed_runtime_id", `String retry.failed_runtime_id
+             ; "next_runtime_id", `String retry.next_runtime_id
+             ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids) ]
   | Checkpointed checkpoint ->
       `Assoc ["kind", `String "checkpointed"; "checkpoint", checkpoint_json checkpoint]
 let phase_json = function
@@ -313,6 +353,20 @@ let recovery_origin_of_json json =
       Ok (if kind = "unconfirmed_sources" then Unconfirmed_sources
           else if kind = "confirmed_undispatched" then Confirmed_undispatched
           else Interrupted_execution)
+  | "runtime_retry" ->
+      let* fields = exact ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
+          "next_runtime_id"; "later_runtime_ids"] json in
+      let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
+      let* assignment_id = string "assignment_id" fields in
+      let* failed_runtime_id = string "failed_runtime_id" fields in
+      let* next_runtime_id = string "next_runtime_id" fields in
+      let* later_runtime_ids = match field "later_runtime_ids" fields with
+        | `List values ->
+          List.fold_right (fun value result -> let* ids = result in match value with
+            | `String id -> Ok (id :: ids) | _ -> Error "runtime suffix identity must be a string") values (Ok [])
+        | _ -> Error "runtime suffix must be a list" in
+      runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
+      |> Result.map (fun retry -> Runtime_retry retry)
   | "checkpointed" ->
       let* fields = exact ["kind";"checkpoint"] json in
       checkpoint_of_json (field "checkpoint" fields) |> Result.map (fun checkpoint -> Checkpointed checkpoint)
@@ -390,7 +444,8 @@ let of_json json =
       | Recovering recovery ->
           (match recovery.origin with
            | Unconfirmed_sources | Confirmed_undispatched -> revision >= 1L && observations = []
-           | Checkpointed _ | Interrupted_execution -> revision >= 2L)
+           | Checkpointed _ | Interrupted_execution -> revision >= 2L
+           | Runtime_retry _ -> revision >= 3L)
       | Settled _ -> revision >= 1L in
     let* () = if coherent then Ok ()
       else Error "execution phase, revision and initial frame are incoherent" in

@@ -4,7 +4,10 @@
 MASC's existing Agent Core runtime executor. It reads one immutable runtime.toml
 observation and emits its revision before executing. Provider credentials,
 inference settings, model capabilities and transport come from the existing
-runtime resolver. It does not modify runtime.toml or create Keepers.
+runtime resolver. Before runtime initialization it loads the explicit full catalog
+replacement and the runtime config directory's capability overlay through the
+same bootstrap functions as the server. Invalid catalogs stop the sample before
+any model dispatch. It does not modify runtime.toml or create Keepers.
 
 After installing a build containing this command:
 

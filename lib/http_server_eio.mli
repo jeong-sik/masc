@@ -48,6 +48,28 @@ type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
     [httpun] streaming API.  Every helper closes the response
     body except the 304 path in [html_cached]. *)
 module Response : sig
+  (** [#28400] Register the dashboard timeout-envelope recognizer (installed
+      by [Dashboard_cache] at library init). Once registered, [json_value]
+      and [json_value_on_cpu] reclassify a detected envelope as 504
+      [Gateway_timeout] instead of echoing it as HTTP 200 data. No recognizer
+      registered (a build that links no dashboard producer) leaves every
+      response untouched. *)
+  val register_timeout_envelope_recognizer : (Yojson.Safe.t -> bool) -> unit
+
+  (** The installed recognizer, exposed for tests that must save/restore the
+      registration state around a check. Production code registers once at
+      library init and never reads this. *)
+  val timeout_envelope_recognizer : (Yojson.Safe.t -> bool) option ref
+
+  (** Resolve the status for a JSON value response: [Some `OK] or [None]
+      (the default) plus a registered recognizer match reclassifies the
+      response to 504 [Gateway_timeout]; any other explicit status wins.
+      Exposed for unit tests of the [#28400] out-of-band contract. *)
+  val timeout_envelope_status_override
+    :  ?status:Httpun.Status.t
+    -> Yojson.Safe.t
+    -> Httpun.Status.t
+
   (** JSON response content type used by {!json} and header-order
       regression tests. *)
   val json_content_type : string

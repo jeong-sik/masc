@@ -4,7 +4,7 @@
 
     - live_turn [selected_model] / [active_tool_count] (G2)
     - [last_skip] {ts, reasons} (G5)
-    - [board_cursor] {ts, post_id} and [board_wakeups] count (G10)
+    - [board_cursor] {ts, post_id} (G10)
 
     Each case drives the registry through its public mutators, then asserts
     the projected JSON. The observer is a pure projection, so these tests
@@ -110,7 +110,7 @@ let test_last_skip_surfaced () =
     (match J.member "ts" skip with `Float _ -> true | _ -> false)
 ;;
 
-(* ── G10: board cursor + wakeup ledger cardinality ──────────────────── *)
+(* ── G10: board cursor ────────────────────────────────────── *)
 
 let test_board_cursor_and_wakeups () =
   let base = temp_base () in
@@ -120,21 +120,14 @@ let test_board_cursor_and_wakeups () =
       ~setup:(fun () ->
         Keeper_registry.set_board_cursor ~base_path:base name 1234.5
           (Some "post-42");
-        ignore
-          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
-             ~dedup_key:"fingerprint-a" ~debounce_sec:60.0);
-        ignore
-          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
-             ~dedup_key:"fingerprint-b" ~debounce_sec:60.0))
+        ())
       ()
   in
   let cursor = J.member "board_cursor" json in
   check (float 1e-6) "board_cursor.ts surfaced" 1234.5
     (J.member "ts" cursor |> J.to_float);
   check string "board_cursor.post_id surfaced" "post-42"
-    (J.member "post_id" cursor |> J.to_string);
-  check int "board_wakeups counts distinct dedup keys" 2
-    (J.member "board_wakeups" json |> J.to_int)
+    (J.member "post_id" cursor |> J.to_string)
 ;;
 
 (* ── #16 (38-bug campaign PR-5): run_state / wake surfacing ──────────── *)
@@ -277,9 +270,7 @@ let test_idle_defaults_are_null_or_zero () =
   check (float 1e-6) "board_cursor.ts defaults to 0.0" 0.0
     (J.member "ts" cursor |> J.to_float);
   check bool "board_cursor.post_id null before consumption" true
-    (match J.member "post_id" cursor with `Null -> true | _ -> false);
-  check int "board_wakeups defaults to 0" 0
-    (J.member "board_wakeups" json |> J.to_int)
+    (match J.member "post_id" cursor with `Null -> true | _ -> false)
 ;;
 
 let () =

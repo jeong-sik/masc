@@ -131,3 +131,5 @@ The builtin browser-design, frontend-implement and frontend-verify packages cove
 visual intent, verified source editing and browser evidence. They are discoverable
 skills; users need not name a skill for an ordinary UI request. Newly built MASC
 installs seed missing packages through the existing builtin-skill installer.
+
+스크린샷에서 마우스 휠은 포인터 아래의 스크롤 영역을 움직인다. 따라서 메시지 목록과 사이드바가 따로 스크롤되는 페이지에서도 해당 영역을 선택할 수 있다. `j/k`와 위·아래 키는 화면 중앙의 영역을 움직인다. 자동화 Lane은 브라우저의 네이티브 wheel 입력을 사용하고, Live Lane은 포인터 아래 DOM의 스크롤 가능한 조상을 찾는다. 스크롤 뒤 같은 탭을 다시 캡처한다.

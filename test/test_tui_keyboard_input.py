@@ -13918,7 +13918,9 @@ def run_browser_viewport_regression(executable: str) -> None:
     def scroll(body):
         request = json.loads(body)
         actions.append(request)
-        assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=120)
+        expected_point = {"x":0.5,"y":0.5} if len(actions)==1 else {"x":9.5/60,"y":6.5/30}
+        assert request == dict(target, expectedUrl=url, action="scroll_at", x=0, y=120,
+            point=expected_point,viewport={"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0})
         if len(actions) == 2:
             blocked.set()
             if not release.wait(timeout=10):
@@ -13984,7 +13986,7 @@ def run_browser_viewport_regression(executable: str) -> None:
     try:
         run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
             interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
-            preload_input=GRAPHICS_SUPPORTED_REPLY)
+            preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
 

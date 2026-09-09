@@ -49,6 +49,14 @@ let parse = function
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
+      | Some (`String "scroll_at") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"from";"to"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
+        let value key = Option.value ~default:`Null (List.assoc_opt key fields) in
+        let* viewport = Browser_lane.Pointer.viewport_of_json (value "viewport") in
+        let* point = Browser_lane.Pointer.point_of_json (value "point") in
+        let* x = integer "x" in let* y = integer "y" in
+        Ok (Browser_lane.Scroll_at {point;viewport;x;y})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
@@ -62,7 +70,7 @@ let parse = function
           let* from = Browser_lane.Pointer.point_of_json (value "from") in
           let* to_ = Browser_lane.Pointer.point_of_json (value "to") in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be click, fill, scroll, click_at or drag" in
+      | _ -> Error "action must be click, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -80,7 +88,7 @@ let script = {js|function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
-  if (args.action === "click_at") {
+  if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
       throw new Error('observed_viewport_changed');
@@ -89,9 +97,38 @@ let script = {js|function interactInPage(args) {
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
     const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
-    if (element.matches(':disabled')) throw new Error('element_disabled');
-    element.click();
+    if (!element) throw new Error('point_has_no_element');
+    if (args.action === 'click_at') {
+      if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+      if (element.matches(':disabled')) throw new Error('element_disabled');
+      element.click();
+    } else {
+      if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+        throw new Error('scroll_coordinates_must_be_integers');
+      // Follow actual scroll containers under the pointer. Slack's message
+      // pane scrolls independently of document.body and its channel sidebar.
+      const scrollAxis = (delta, axis) => {
+        if (delta === 0) return;
+        const vertical = axis === 'y';
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = getComputedStyle(node);
+          const overflow = vertical ? style.overflowY : style.overflowX;
+          const position = vertical ? node.scrollTop : node.scrollLeft;
+          const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
+          if ((overflow === 'auto' || overflow === 'scroll') && maximum > 0) {
+            node.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+            const after = vertical ? node.scrollTop : node.scrollLeft;
+            // Reverse-flow chat and RTL scrollers may have negative positions.
+            // The browser's actual movement establishes consumption, not a range guess.
+            if (after !== position) return;
+            const chain = vertical ? style.overscrollBehaviorY : style.overscrollBehaviorX;
+            if (chain === 'contain' || chain === 'none') return;
+          }
+        }
+        window.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+      };
+      scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
+    }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");

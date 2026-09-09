@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
 const background = readFileSync(new URL('../connectors/browser/extension/background.js', import.meta.url), 'utf8');
 const ocaml = readFileSync(new URL('../lib/browser_interaction.ml', import.meta.url), 'utf8');
 const extensionFunction = background.slice(background.indexOf('function interactInPage'), background.indexOf('async function pageInteract')).trim();
@@ -61,3 +62,23 @@ closed = true;
 assert.equal((await command({tabId: 7, action: 'click', selector: '#button'})).ok, false);
 assert.equal(clicked, 1, 'closed tab cannot redirect action to another page');
 console.log('PASS: shared script, explicit tab, unique selector, URL precondition, literal fill, no Enter/submit, rejected number, readonly, scroll, closed tab');
+
+closed = false;
+Object.assign(page,{crypto:webcrypto,innerWidth:800,innerHeight:600,scrollX:0,scrollY:0});
+page.document.documentElement = {};
+page.document.elementFromPoint = (x,y) => {assert.equal(x,200);assert.equal(y,300);return button;};
+// Obtain the same lightweight viewport identity used by capture, inside this page.
+vm.runInContext(background.slice(0,background.indexOf('async function pageScene')), page);
+const viewport = vm.runInContext("browserScene({mode:'viewport'})",page);
+const point = {x:0.25,y:0.5}, observed = {tabId:7,expectedUrl:page.location.href,viewport,point};
+assert.equal((await command({...observed,action:'click_at'})).ok,true);
+assert.equal(clicked,2);
+assert.equal((await command({...observed,action:'click_at',viewport:{...viewport,height:700}})).error,'observed_viewport_changed');
+assert.equal((await command({...observed,action:'drag',from:point,to:point})).error,'trusted_drag_requires_automation');
+const pane = {scrollTop:0,scrollLeft:0,scrollHeight:1000,clientHeight:200,scrollWidth:100,clientWidth:100,
+  parentElement:null,getRootNode:()=>({}),scrollBy({top}) {this.scrollTop=Math.max(-800,Math.min(0,this.scrollTop+top));}};
+button.parentElement=pane;
+page.getComputedStyle = el => ({display:'block',visibility:'visible',overflowY:el===pane?'auto':'visible',overflowX:'visible'});
+const nested = await command({...observed,action:'scroll_at',x:0,y:-120});
+assert.equal(nested.ok,true);assert.equal(pane.scrollTop,-120);
+console.log('PASS: extension dispatches screenshot point click, rejects stale viewport and unsupported drag, scrolls reverse-flow pane');

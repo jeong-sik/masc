@@ -2851,7 +2851,6 @@ module Browser_lane_view = struct
     | Scene_read of int
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
     | Viewport_refresh of { tab_id : int; expected_url : string }
-    | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type t = {
@@ -2894,7 +2893,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -3088,17 +3087,17 @@ module Browser_lane_view = struct
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 
-  let viewport_request ~tab_id ~expected_url ~y t =
-    `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
-       "action", `String "scroll"; "expectedUrl", `String expected_url;
-       "x", `Int 0; "y", `Int y]
-      @ (match client_id t with None -> [] | Some id -> ["clientId", `String id]))
+  let viewport_request ~tab_id ~expected_url ~action t =
+    let fields = match Browser_lane.interaction_args ~tab_id ~expected_url:(Some expected_url) action with
+      | `Assoc fields -> fields | _ -> [] in
+    `Assoc (("lane",`String (source_name t.source)) :: fields @
+      (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
   (* Settle the browser operation even when a later key cancelled opening the
      image. The caller separately checks image intent before drawing. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -3106,7 +3105,7 @@ module Browser_lane_view = struct
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
-                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_scroll {expected_url;_})) -> screenshot.url = expected_url
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
                                   | _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None

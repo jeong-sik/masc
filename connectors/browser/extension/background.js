@@ -256,7 +256,7 @@ function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
-  if (args.action === "click_at") {
+  if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
       throw new Error('observed_viewport_changed');
@@ -265,9 +265,38 @@ function interactInPage(args) {
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
     const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
-    if (element.matches(':disabled')) throw new Error('element_disabled');
-    element.click();
+    if (!element) throw new Error('point_has_no_element');
+    if (args.action === 'click_at') {
+      if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+      if (element.matches(':disabled')) throw new Error('element_disabled');
+      element.click();
+    } else {
+      if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+        throw new Error('scroll_coordinates_must_be_integers');
+      // Follow actual scroll containers under the pointer. Slack's message
+      // pane scrolls independently of document.body and its channel sidebar.
+      const scrollAxis = (delta, axis) => {
+        if (delta === 0) return;
+        const vertical = axis === 'y';
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = getComputedStyle(node);
+          const overflow = vertical ? style.overflowY : style.overflowX;
+          const position = vertical ? node.scrollTop : node.scrollLeft;
+          const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
+          if ((overflow === 'auto' || overflow === 'scroll') && maximum > 0) {
+            node.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+            const after = vertical ? node.scrollTop : node.scrollLeft;
+            // Reverse-flow chat and RTL scrollers may have negative positions.
+            // The browser's actual movement establishes consumption, not a range guess.
+            if (after !== position) return;
+            const chain = vertical ? style.overscrollBehaviorY : style.overscrollBehaviorX;
+            if (chain === 'contain' || chain === 'none') return;
+          }
+        }
+        window.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+      };
+      scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
+    }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
@@ -318,10 +347,9 @@ function interactInPage(args) {
     title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
 }
 
-
 async function pageInteract(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'fill', 'scroll', 'click_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  if (!['click', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,

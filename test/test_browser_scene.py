@@ -82,6 +82,32 @@ try:
  try:js(scene+guard,[args]);raise AssertionError('reloaded screenshot accepted')
  except RuntimeError as e:check('reload invalidates native pointer gesture','observed_viewport_changed' in str(e))
 
+ js("document.body.innerHTML='<h1>Nested browser panes</h1><section id=messages style=\"position:absolute;left:20px;top:100px;width:350px;height:220px;overflow:auto\"></section><section id=sidebar style=\"position:absolute;left:450px;top:100px;width:350px;height:220px;overflow:auto\"></section>';for(const id of ['messages','sidebar'])document.getElementById(id).innerHTML=Array.from({length:80},(_,i)=>'<p>'+id+' message '+i+'</p>').join('');")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=document.querySelector('#messages').getBoundingClientRect();return {x:(r.x+r.width/2)/innerWidth,y:(r.y+r.height/2)/innerHeight};")
+ args={'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':latest['url'],'x':0,'y':120}
+ js(scene+interaction,[args])
+ positions=js("return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY};")
+ check('live point scroll moves only the selected nested pane',positions=={'messages':120,'sidebar':0,'root':0})
+ js("document.querySelector('#messages').scrollTop=0;window.wheelTrusted=false;document.addEventListener('wheel',e=>window.wheelTrusted=e.isTrusted);")
+ js(scene+guard,[args])
+ call('POST','/session/'+sid+'/actions',{'actions':[{'type':'wheel','id':'masc-browser-wheel','actions':[{'type':'scroll','duration':0,'origin':'viewport','x':int(point['x']*viewport['width']),'y':int(point['y']*viewport['height']),'deltaX':0,'deltaY':160}]}]})
+ call('DELETE','/session/'+sid+'/actions')
+ # Match production: guard, wheel, release, page metadata, capture, metadata.
+ js('return {url:location.href,title:document.title};')
+ js(scene+"\nreturn browserScene({mode:'viewport'});")
+ wheel_png=call('GET','/session/'+sid+'/screenshot')
+ js('return {url:location.href,title:document.title};')
+ js(scene+"\nreturn browserScene({mode:'viewport'});")
+ positions=js("return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY,trusted:wheelTrusted};")
+ check('native wheel scroll is trusted and targets the nested pane',positions['messages']>0 and positions['sidebar']==0 and positions['root']==0 and positions['trusted'])
+ # Exercise negative scroll positions used by reverse-flow chat timelines.
+ js("const p=document.querySelector('#messages');p.style.display='flex';p.style.flexDirection='column-reverse';for(const n of p.children)n.style.flexShrink='0';p.scrollTop=0;")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ args.update(viewport=viewport,y=-120)
+ js(scene+interaction,[args])
+ reverse=js("return {pane:document.querySelector('#messages').scrollTop,root:scrollY};")
+ check('reverse-flow chat scroll consumes negative position in its own pane',reverse['pane']==-120 and reverse['root']==0)
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

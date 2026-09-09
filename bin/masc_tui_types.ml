@@ -2843,7 +2843,7 @@ module Browser_lane_view = struct
   }
   type screenshot = {
     source : source; client_id : string option; tab_id : int; title : string; url : string;
-    data : string; elapsed_ms : float;
+    data : string; elapsed_ms : float; viewport : Browser_lane.Pointer.viewport;
   }
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
@@ -2852,6 +2852,7 @@ module Browser_lane_view = struct
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
+    | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
@@ -2893,7 +2894,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -3031,9 +3032,10 @@ module Browser_lane_view = struct
       let* url = get string "url" value in
       let* mime = get string "mimeType" value in
       let* data = get string "data" value in
+      let* viewport = get Browser_lane.Pointer.viewport_of_json "viewport" value in
       let* elapsed_ms = get milliseconds "elapsed_ms" value in
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
-      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
+      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms; viewport }
 
   let decode_scene json =
     let* ok = get boolean "ok" json in
@@ -3096,7 +3098,7 @@ module Browser_lane_view = struct
      image. The caller separately checks image intent before drawing. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source

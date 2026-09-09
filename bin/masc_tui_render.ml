@@ -13822,6 +13822,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
+        | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_scroll _) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()

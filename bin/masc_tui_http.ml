@@ -2621,10 +2621,21 @@ let click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expecte
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
 
+let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
+  let open Masc_tui_types.Browser_lane_view in
+  let fields = match Browser_lane.interaction_args ~tab_id ~expected_url:(Some expected_url) action with
+    | `Assoc fields -> fields | _ -> [] in
+  let fields = ("lane",`String (source_name view.source)) :: fields @
+    (match client_id view with None -> [] | Some id -> ["clientId",`String id]) in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/interact" ~body:(Yojson.Safe.to_string (`Assoc fields)) in
+  let* ok = get boolean "ok" json in
+  if ok then Ok () else let* detail = get string "error" json in Error detail
+
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

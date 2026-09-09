@@ -270,11 +270,22 @@ let test_image_fits_terminal_geometry () =
     (Masc_tui_graphics.fit_rows ~cell_pixels:None ~image_pixels:(Some (1600, 800)) ~columns:40 ~rows:30)
 ;;
 
+let test_image_pointer_geometry () =
+  let region : Masc_tui_graphics.image_region =
+    {top=4;left=1;width_cells=80.;height_cells=20.} in
+  let point = Masc_tui_graphics.image_point region in
+  check (option (pair (float 0.000001) (float 0.000001))) "cell center maps to image fraction"
+    (Some (0.00625,0.025)) (point ~row:4 ~column:1);
+  List.iter (fun (row,column) ->
+    check bool "captions and unused margins never target page" true
+      (point ~row ~column = None)) [(3,1);(24,1);(4,81);(4,0)]
+
 let () =
   run
     "tui_graphics"
     [ ( "place"
-      , [ test_case "viewport fits terminal geometry" `Quick test_image_fits_terminal_geometry
+      , [ test_case "screenshot pointer excludes text and padding" `Quick test_image_pointer_geometry
+        ; test_case "viewport fits terminal geometry" `Quick test_image_fits_terminal_geometry
         ; test_case "the payload is the file" `Quick
             test_the_payload_is_the_file
         ; test_case "every chunk but the last says more" `Quick

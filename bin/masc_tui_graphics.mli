@@ -118,3 +118,8 @@ val tmux_wrapped : string -> string
 (** Wrap escapes so tmux forwards them to the terminal underneath instead of
     eating them. Only correct inside tmux, and only with
     [allow-passthrough on]; the caller decides whether it is in tmux. *)
+
+type image_region = { top : int; left : int; width_cells : float; height_cells : float }
+val image_point : image_region -> row:int -> column:int -> (float * float) option
+(** Maps the center of a reported terminal cell to a normalized image position.
+    Padding and captions return None. The caller supplies measured placement. *)

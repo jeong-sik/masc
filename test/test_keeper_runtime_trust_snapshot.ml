@@ -135,7 +135,7 @@ let test_active_blocker_overrides_success_until_cleared () =
       Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name
         (Some (Masc.Keeper_registry.Exception "scope fixture failure"));
       let store = Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name in
-      let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let observe receipt_trace turn =
         Dated_jsonl.append store
           (`Assoc

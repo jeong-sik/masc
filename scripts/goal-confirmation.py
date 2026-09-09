@@ -6,8 +6,13 @@ is operator authority; this does not attest physical human presence.
 import argparse
 import json
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.parse import urlencode
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--url', required=True)
@@ -33,7 +38,7 @@ else:
     path += '?' + urlencode({'goal_id': a.goal_id})
 request = Request(a.url.rstrip('/') + path, data=body,
     headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-with urlopen(request) as response:
+with build_opener(NoRedirect).open(request) as response:
     raw = response.read().decode()
 if token in raw:
     raise ValueError('Credential echo withheld')

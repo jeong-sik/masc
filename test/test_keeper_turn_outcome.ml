@@ -1224,10 +1224,8 @@ let spoken_row name ~turn_outcome ~spoken expected =
   | `Assistant_row observed -> check string name expected observed
   | `Tool_calls_only -> fail (name ^ ": the keeper's words were dropped")
 
-(* The defect this pins: all three of these outcomes wrote [content = ""]
-   whether or not the turn had spoken, so an operator who asked a direct
-   question received an empty assistant row while the raw trace still held the
-   reply (masc #32727, #32660). *)
+(* Pending control boundaries retain the response while execution continues.
+   Completed terminal tools own their delivery instead. *)
 let test_control_turn_keeps_spoken_words () =
   let words = "I read the file; the clone failed on DNS." in
   spoken_row "continuation checkpoint keeps the words"
@@ -1235,10 +1233,60 @@ let test_control_turn_keeps_spoken_words () =
     ~spoken:(Some words) words;
   spoken_row "pending external effect keeps the words"
     ~turn_outcome:Masc.Keeper_turn_outcome.Awaiting_gate_approval
-    ~spoken:(Some words) words;
-  spoken_row "completed external effect keeps the words"
-    ~turn_outcome:Masc.Keeper_turn_outcome.Terminal_effect_settled
     ~spoken:(Some words) words
+
+let test_terminal_tool_owns_public_reply () =
+  let diagnostic = "I should explain the operator's intent before ending the turn." in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"terminal-tool-ownership" ~absolute_turn:5 in
+  let receipt_key = Masc.Keeper_surface_post.delivery_target_wire_key in
+  let source_payload =
+    `Assoc
+      [ "reply", `String diagnostic
+      ; TO.wire_key, `String (TO.to_label TO.Terminal_effect_settled)
+      ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+      ; receipt_key, `Assoc [ "kind", `String "dashboard" ]
+      ]
+  in
+  let body = Yojson.Safe.to_string source_payload in
+  let canonical =
+    match Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id body with
+    | Ok canonical -> canonical
+    | Error error ->
+      fail (Stream.canonical_reply_payload_error_to_string error)
+  in
+  check string "source diagnostics remain intact" diagnostic
+    Yojson.Safe.Util.(source_payload |> member "reply" |> to_string);
+  check outcome "settled ownership is preserved" TO.Terminal_effect_settled
+    canonical.turn_outcome;
+  check string "terminal Reply_details source contains no second reply" ""
+    canonical.visible_reply;
+  check string "HTTP polling contains no second reply" ""
+    Yojson.Safe.Util.(Yojson.Safe.from_string canonical.poll_body |> member "reply" |> to_string);
+  check bool "delivery receipt remains available" true
+    (canonical.external_effect_target = Some Masc.Keeper_surface_post.Delivered_to_dashboard);
+  let ordinary_body =
+    `Assoc
+      [ "reply", `String diagnostic
+      ; TO.wire_key, `String (TO.to_label TO.Visible_reply)
+      ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+      ]
+    |> Yojson.Safe.to_string
+  in
+  (match Stream.For_testing.canonical_reply_payload_of_body
+           ~redact_text:Fun.id ordinary_body with
+   | Ok ordinary ->
+     check string "identical words remain public for a reply-owned outcome"
+       diagnostic ordinary.visible_reply
+   | Error error -> fail (Stream.canonical_reply_payload_error_to_string error));
+  (* Even an unprojected source string cannot bypass the persistence decision. *)
+  (match Stream.For_testing.control_turn_delivery
+           ~turn_outcome:canonical.turn_outcome ~spoken:(Some diagnostic) with
+   | `Tool_calls_only -> ()
+   | `Assistant_row _ -> fail "terminal tool delivery manufactured another assistant row");
+  match Masc.Keeper_chat_blocks.connector_projection
+          ~turn_outcome:canonical.turn_outcome ~reply:(Some diagnostic) with
+  | Masc.Keeper_chat_blocks.Connector_no_visible_reply -> ()
+  | _ -> fail "connector and HTTP disagree on terminal tool reply ownership"
 
 let test_wordless_control_turn_delivery () =
   (* A wordless checkpoint still writes its row: the typed status block is the
@@ -1475,6 +1523,8 @@ let () =
             test_terminal_commit_error_cannot_become_delivery_success;
           test_case "control turn keeps the keeper's words" `Quick
             test_control_turn_keeps_spoken_words;
+          test_case "terminal tool owns the public reply" `Quick
+            test_terminal_tool_owns_public_reply;
           test_case "wordless control turn delivery" `Quick
             test_wordless_control_turn_delivery;
           test_case "media-only queued reply uses delivery path" `Quick

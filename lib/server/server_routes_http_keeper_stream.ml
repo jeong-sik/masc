@@ -1251,6 +1251,15 @@ let assoc_replace key value fields =
   :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
 ;;
 
+(* This is the public HTTP/chat projection, not the provider response or replay
+   policy. A settled terminal tool owns delivery; its receipt remains public,
+   while the model's accompanying words remain in the source run diagnostics. *)
+let public_reply_of_outcome ~turn_outcome ~reply =
+  match (turn_outcome : Keeper_turn_outcome.t) with
+  | Terminal_effect_settled -> None
+  | Visible_reply | Continuation_checkpoint | Awaiting_gate_approval
+  | No_visible_reply -> Some reply
+
 let canonical_reply_payload_of_body ~redact_text body =
   let ( let* ) = Result.bind in
   let* fields =
@@ -1353,7 +1362,9 @@ let canonical_reply_payload_of_body ~redact_text body =
         (Duplicate_payload_field Keeper_surface_post.delivery_target_wire_key)
   in
   let visible_reply =
-    strip_keeper_visible_reply reply_raw |> redact_text |> String.trim
+    match public_reply_of_outcome ~turn_outcome ~reply:reply_raw with
+    | None -> "" (* The public wire requires a reply string beside its typed outcome. *)
+    | Some reply -> strip_keeper_visible_reply reply |> redact_text |> String.trim
   in
   let payload_json =
     `Assoc (assoc_replace "reply" (`String visible_reply) fields)
@@ -1541,25 +1552,14 @@ let empty_reply_delivery_plan ~has_visible_blocks ~has_tool_calls =
   then `Tool_calls_only
   else `Failure
 
-(* What a turn writes when its outcome is a control boundary or an external
-   effect rather than a plain reply. [spoken] is the turn's words, already
-   trimmed, and [None] means the model produced none.
-
-   Words are kept on every outcome. They used to be dropped on all three of
-   these: the operator who asked a direct question got a status row and an
-   empty assistant row, while the raw trace still held the reply. The replay
-   decision -- whether these words re-enter model history -- is answered
-   separately by the stop reason and never by discarding the string here
-   (masc #32727, #32660).
-
-   Only a wordless [External_effect_completed] writes no assistant row: the
-   typed tool-call record is the whole of what that turn did. *)
+(* A settled terminal tool already owns the delivery. Its tool record is
+   persisted without a second assistant row, even when the source run contains
+   diagnostic prose. Pending control boundaries still preserve their words. *)
 let control_turn_delivery ~turn_outcome ~spoken =
   match (turn_outcome : Keeper_turn_outcome.t), spoken with
   | (Continuation_checkpoint | Awaiting_gate_approval), spoken ->
     `Assistant_row (Option.value spoken ~default:"")
-  | Terminal_effect_settled, Some words -> `Assistant_row words
-  | Terminal_effect_settled, None -> `Tool_calls_only
+  | Terminal_effect_settled, _ -> `Tool_calls_only
   | (Visible_reply | No_visible_reply), spoken ->
     (* Reached by their own arms, which carry the same answer for words. *)
     `Assistant_row (Option.value spoken ~default:"")

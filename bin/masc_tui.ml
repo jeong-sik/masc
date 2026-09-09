@@ -7259,7 +7259,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:("  " ^ pointer_hint ^ "   wheel / j k: scroll   r: refresh   Esc: back") bytes;
+    ~footer:("  Esc: back   r:refresh   wheel / j k:scroll   " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.

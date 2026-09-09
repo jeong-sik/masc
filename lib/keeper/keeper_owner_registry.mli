@@ -148,6 +148,17 @@ val exact_operation
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
 
+val direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.runtime_retry option, command_error) result
+val defer_direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  continuation:Keeper_semantic_execution.runtime_retry ->
+  (Keeper_chat_operation.t, command_error) result
+val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.runtime_retry ->
+  (unit, command_error) result
+
 val interrupt_running_operation
   :  base_path:string
   -> keeper_name:string

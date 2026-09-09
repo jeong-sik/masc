@@ -141,6 +141,15 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Direct_runtime_retry : Operation_id.t ->
+      (Keeper_semantic_execution.runtime_retry option, error) result command
+  | Defer_direct_runtime_retry :
+      { operation_id : Operation_id.t; execution_digest : string;
+        continuation : Keeper_semantic_execution.runtime_retry } ->
+      (Chat_operation.t, error) result command
+  | Resume_direct_runtime_retry :
+      { operation_id : Operation_id.t; observed : Keeper_semantic_execution.runtime_retry } ->
+      (unit, error) result command
   | Interrupt_running_operation :
       Operation_id.t -> (operation_interrupt_result, error) result command
   | Submit_operation :
@@ -845,6 +854,23 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Direct_runtime_retry operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct runtime continuation" (fun () ->
+            Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Defer_direct_runtime_retry {operation_id; execution_digest; continuation}, resolve) ->
+          let response = run_operation_command t ~label:"defer direct runtime continuation" (fun () ->
+            Chat_operation_store.defer_direct_runtime_retry t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~continuation) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Resume_direct_runtime_retry {operation_id; observed}, resolve) ->
+          let response = run_operation_command t ~label:"resume direct runtime continuation" (fun () ->
+            Chat_operation_store.resume_direct_runtime_retry t.operation_store ~now:(t.now ())
+              ~operation_id ~observed) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Interrupt_running_operation expected, resolve) ->
           let inventory = Atomic.get t.operation_projection in
           let response =
@@ -1174,6 +1200,12 @@ let start
 
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
+let direct_runtime_retry t ~operation_id = request t (Direct_runtime_retry operation_id)
+let defer_direct_runtime_retry t ~operation_id ~execution_digest ~continuation =
+  request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation})
+let resume_direct_runtime_retry t ~operation_id ~observed =
+  request t (Resume_direct_runtime_retry {operation_id; observed})
+
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)

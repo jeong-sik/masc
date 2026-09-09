@@ -2,6 +2,7 @@ module Operation = Keeper_chat_operation
 
 type command =
   | Start of { started_at : float }
+  | Requeue_runtime_retry
   | Edit_queued of
       { input : Yojson.Safe.t
       ; execution_digest : string
@@ -19,6 +20,7 @@ type command =
 
 type persistence_intent =
   | Persist_running
+  | Persist_runtime_retry
   | Persist_queued_edit
   | Persist_queued_move
   | Persist_terminal
@@ -67,6 +69,8 @@ let apply (operation : Operation.t) command =
          (transition
             { operation with state = Running { started_at } }
             Persist_running))
+  | Requeue_runtime_retry, Running _ ->
+    Ok (transition { operation with state = Queued } Persist_runtime_retry)
   | Edit_queued { input; execution_digest }, Queued ->
     if String.length execution_digest <> 64
     then Error (Invalid_input "execution_digest must be lowercase SHA-256 hex")
@@ -125,7 +129,7 @@ let apply (operation : Operation.t) command =
   | (Start _ | Edit_queued _ | Move_queued _ | Cancel_queued _),
     (Running _ | Succeeded _ | Failed _ | Cancelled _) ->
     Error Not_queued
-  | (Succeed_running _ | Fail_running _),
+  | (Succeed_running _ | Fail_running _ | Requeue_runtime_retry),
     (Queued | Succeeded _ | Failed _ | Cancelled _) ->
     Error Not_running
 ;;

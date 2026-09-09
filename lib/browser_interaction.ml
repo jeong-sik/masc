@@ -32,6 +32,12 @@ let parse = function
     let excludes keys =
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
+    let required key = match List.assoc_opt key fields with
+      | Some value -> Ok value
+      | None -> Error ("pointer action requires " ^ key) in
+    let geometry parser key =
+      let* value = required key in
+      parser value in
     let* action = match List.assoc_opt "action" fields with
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -52,23 +58,21 @@ let parse = function
       | Some (`String "scroll_at") ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"from";"to"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
-        let value key = Option.value ~default:`Null (List.assoc_opt key fields) in
-        let* viewport = Browser_lane.Pointer.viewport_of_json (value "viewport") in
-        let* point = Browser_lane.Pointer.point_of_json (value "point") in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         let* x = integer "x" in let* y = integer "y" in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
-        let value key = match List.assoc_opt key fields with Some json -> json | None -> `Null in
-        let* viewport = Browser_lane.Pointer.viewport_of_json (value "viewport") in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         if action = "click_at" then
-          let* point = Browser_lane.Pointer.point_of_json (value "point") in
+          let* point = geometry Browser_lane.Pointer.point_of_json "point" in
           Ok (Browser_lane.Click_at {point;viewport})
         else
-          let* from = Browser_lane.Pointer.point_of_json (value "from") in
-          let* to_ = Browser_lane.Pointer.point_of_json (value "to") in
+          let* from = geometry Browser_lane.Pointer.point_of_json "from" in
+          let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
       | _ -> Error "action must be click, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }

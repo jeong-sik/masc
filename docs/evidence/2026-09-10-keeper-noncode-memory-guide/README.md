@@ -51,3 +51,48 @@ difference in those three source files. This binds the source diagnosis to the
 reported binary source identity but does not identify every internal event of
 this failed operation. The measured receipt remains the evidence that only one
 attempt ran and no fallback was applied. A separate repair is in progress.
+
+## Work before failure
+
+The complete paginated journal has 6,139 events, including three tool calls and
+three result-ready references before the terminal rate-limit event. Tools were
+Board search, Execute and keeper_skill. The Execute request inspected available
+Python/PDF/image packages, renderers and Korean fonts, plus temporary-directory
+writability. The skill request selected diagram-in-chat. This shows attempted
+non-code preparation before failure; result-ready references are not independent
+proof of command success or completed artifacts. The selected non-thinking events
+and full private-capture hash are in `pre-failure-tool-events.json`.
+
+Resume must account for the already-started tools and checkpoint rather than
+treating the operation as a request that never began. Raw model stream content
+remains outside Git. No repeated request was sent during this observation.
+
+## Isolated home-workspace follow-up
+
+Candidate `c08357ea1f78f1a04564cc96dbd2f38eb8c4e857` ran a separate
+`memory-guide-proof` request against the public synthetic memory proposal.
+`home-guide-dual-approval.json` records a Write request for an SVG that timed out
+in the direct-turn interactive approval path. The earlier Execute inspection
+was independently autoapproved by Host Gate; its replay was not observed at
+this capture, while server logs reported the chat operation holding the Owner.
+These are distinct calls, and approving Execute does not authorize Write.
+
+The Keeper then called `masc_ask` to request the specific missing file-write and
+Python execution permissions. It omitted `question_id` initially and corrected
+its own next call. `home-guide-operator-ask.json` contains both actual calls, the
+scoped operator answer, and API readback. The answer was recorded and its wake
+reported delivered. This proves one requested-scenario permission escalation,
+not general spontaneous proactivity or completed follow-through. No PDF/SVG
+creation or rendered-artifact validation is claimed by these receipts.
+
+## Subsequent artifact and replay verification
+
+The SVG was subsequently created and rendered in Chromium; see
+[the first-draft review](svg-first-draft/README.md). Its producer receipt joins
+a successful Keeper Write path and byte count to independently retrieved SVG
+bytes. The input log is truncated, so no full logged-input hash match is claimed.
+The draft is semantically rejected and a correction is queued.
+
+`home-guide-replay-results.json` verifies approved Execute output blobs.
+The two package probes reached Docker but exited 1 because PDF packages were
+absent. Gate `applied` proves replay, not package import or PDF creation.

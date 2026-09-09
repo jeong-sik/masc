@@ -1,0 +1,101 @@
+{
+  "current_svg": {
+    "bytes": 8888,
+    "sha256": "6e4ce656cccfb4bc1508e9c56437c8162f0bd60ef07941c0c96d4767f1a0b3f1"
+  },
+  "edit_receipts": [
+    {
+      "ts": 1788986176.348098,
+      "execution_id": "exec-1788986176348-0013",
+      "tool_use_id": "call_bf014b52952644d7866abc27",
+      "success": false,
+      "output": "tool output artifact storage failed",
+      "file_change_evidence": {
+        "kind": "edit",
+        "occurrence_count": 1,
+        "occurrences": [
+          {
+            "old_range": {
+              "start_line": 40,
+              "end_line": 41
+            },
+            "new_range": {
+              "start_line": 40,
+              "end_line": 41
+            }
+          }
+        ]
+      }
+    },
+    {
+      "ts": 1788986268.394327,
+      "execution_id": "exec-1788986268394-0014",
+      "tool_use_id": "call_3b01e5ced29d4d48b0e314a3",
+      "success": false,
+      "output": "tool output artifact storage failed",
+      "file_change_evidence": {
+        "kind": "edit",
+        "occurrence_count": 1,
+        "occurrences": [
+          {
+            "old_range": {
+              "start_line": 84,
+              "end_line": 85
+            },
+            "new_range": {
+              "start_line": 84,
+              "end_line": 85
+            }
+          }
+        ]
+      }
+    },
+    {
+      "ts": 1788986310.860859,
+      "execution_id": "exec-1788986310860-0015",
+      "tool_use_id": "call_41debccfcdc642ceaa7caaa2",
+      "success": false,
+      "output": "tool output artifact storage failed",
+      "file_change_evidence": {
+        "kind": "edit",
+        "occurrence_count": 1,
+        "occurrences": [
+          {
+            "old_range": {
+              "start_line": 94,
+              "end_line": 94
+            },
+            "new_range": {
+              "start_line": 94,
+              "end_line": 94
+            }
+          }
+        ]
+      }
+    },
+    {
+      "ts": 1788986401.650861,
+      "execution_id": "exec-1788986401650-0016",
+      "tool_use_id": "call_7ec04dbb7a564624a123dd11",
+      "success": false,
+      "output": "tool output artifact storage failed",
+      "file_change_evidence": {
+        "kind": "edit",
+        "occurrence_count": 1,
+        "occurrences": [
+          {
+            "old_range": {
+              "start_line": 101,
+              "end_line": 101
+            },
+            "new_range": {
+              "start_line": 101,
+              "end_line": 101
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "interpretation": "File changes committed despite error result. Tool result metadata omitted required artifact manifest; this does not prove blob writes failed. Independent root review requested corrections; not autonomous self-correction."
+}

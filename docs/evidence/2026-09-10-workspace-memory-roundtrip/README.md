@@ -78,3 +78,14 @@ original text. The full proposal still contains ordinary-source facts; a follow-
 asks the Keeper to inspect by ID and reconsider. That follow-up is not yet counted
 as successful. The first cloud provider hit a weekly quota; an explicit operator
 runtime switch preceded this success, not automatic failover.
+
+## Correction after full-source retrieval
+
+Follow-up operation `kmsg-323fee895f2a4d65a6ff582ee6338496` succeeded. Its
+actual tool receipt uses the exact proposal ID and returns all four original
+source texts. The answer explicitly retracts the earlier inference that source
+text was unavailable, distinguishes missing source_bound stores from available
+ordinary facts, and keeps authored claims separate from independent verification.
+The full-read operation, tool response and corrected answer are retained. This
+is one operator-prompted correction in a synthetic-content scenario, not evidence
+of autonomous error detection or broad semantic quality.

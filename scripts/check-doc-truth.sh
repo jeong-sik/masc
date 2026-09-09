@@ -104,6 +104,19 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 [[ "$readme_ko_tag" == "$readme_tag" ]] || \
   fail "README.ko install TAG ($readme_ko_tag) != README install TAG ($readme_tag)"
 
+# The same copy-paste block, in the guide the README sends installers to three
+# times over. It was left out when the pin above was added, so the lesson in
+# the comment there -- a block naming the release before the one the page
+# announces -- still had somewhere to happen. Both files are checked against
+# README rather than each other: a pair that agrees on a tag nobody published
+# still hands the reader a 404.
+for install_doc in docs/INSTALL.md docs/INSTALL.ko.md; do
+  install_tag="$(extract_single '^TAG=v\([^ ]*\)$' "$install_doc")"
+  [[ -n "$install_tag" ]] || fail "missing TAG= install pin in $install_doc"
+  [[ "$install_tag" == "$readme_tag" ]] || \
+    fail "$install_doc install TAG ($install_tag) != README install TAG ($readme_tag)"
+done
+
 # PR checks compare checked-in documents only. Repository-global tags can
 # change after this commit without changing its documentation. The release
 # workflow validates its explicit tag with check-version-truth.sh --tag.

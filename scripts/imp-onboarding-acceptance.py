@@ -2,10 +2,13 @@
 """Measure a real default imp in an isolated home, using an authenticated Codex CLI.
 
 Requires an installed release prefix and an already authenticated Codex auth.json.
-Copies only that credential into a private disposable CLI home, never into evidence.
-No fixture model, approval bypass, or existing workspace configuration is used.
+Fresh mode copies that credential into a disposable CLI home, never into evidence.
+Existing mode reuses an explicitly supplied workspace and authenticated home without
+reconfiguring their runtime or imp. No fixture model or approval bypass is used.
 """
 import argparse
+from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -159,19 +162,74 @@ def directory_execution(traces):
     raise RuntimeError('no matched Execute input/output proves the current path and directory listing in the Docker sandbox')
 
 
+PRESERVED_CONFIGURATION = ('runtime.toml', 'agent-core-models-overlay.toml', 'keepers/imp.toml')
+
+
+def configuration_hashes(base):
+    base = base.resolve()
+    config = base / '.masc/config'
+    hashes = {}
+    for name in PRESERVED_CONFIGURATION:
+        path = config / name
+        if (not path.is_file() or path.is_symlink()
+                or not path.resolve().is_relative_to(base)
+                or path.stat().st_uid != os.getuid()):
+            raise RuntimeError('existing workspace requires an owned configuration file: ' + name)
+        hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
+@contextmanager
+def acceptance_workspace(args, output):
+    existing_base = getattr(args, 'existing_base', None)
+    existing_home = getattr(args, 'existing_home', None)
+    if bool(existing_base) != bool(existing_home):
+        raise RuntimeError('--existing-base and --existing-home must be supplied together')
+    if existing_base:
+        base, home = Path(existing_base).resolve(), Path(existing_home).resolve()
+        if any(not path.is_dir() or path.stat().st_uid != os.getuid() for path in (base, home)):
+            raise RuntimeError('existing workspace and home must be owned directories')
+        auth = home / '.codex/auth.json'
+        if (not auth.is_file() or auth.is_symlink()
+                or not auth.resolve().is_relative_to(home)
+                or auth.stat().st_uid != os.getuid()):
+            raise RuntimeError('existing home requires its already copied Codex authentication')
+        before = configuration_hashes(base)
+        continuity = dict(existing_workspace=True, configuration_preserved=False,
+                          workspace_base_path_sha256=hashlib.sha256(str(base).encode()).hexdigest())
+        (output / 'configuration-continuity.json').write_text(json.dumps(
+            dict(continuity, sha256_before=before, sha256_after=None), indent=2))
+        try:
+            yield base, home, continuity
+        finally:
+            after = configuration_hashes(base)
+            continuity['configuration_preserved'] = before == after
+            (output / 'configuration-continuity.json').write_text(json.dumps(
+                dict(continuity, sha256_before=before, sha256_after=after), indent=2))
+            if before != after:
+                raise RuntimeError('acceptance changed the supplied runtime or imp configuration')
+    else:
+        if not args.codex_auth:
+            raise RuntimeError('--codex-auth is required for fresh workspace acceptance')
+        with tempfile.TemporaryDirectory(prefix='masc-imp-', dir=args.work_parent) as directory:
+            base = Path(directory).resolve()
+            home = base / 'home'
+            auth = home / '.codex/auth.json'
+            auth.parent.mkdir(parents=True, mode=0o700)
+            shutil.copyfile(args.codex_auth, auth)
+            auth.chmod(0o600)
+            yield base, home, dict(existing_workspace=False, configuration_preserved=False,
+                workspace_base_path_sha256=hashlib.sha256(str(base).encode()).hexdigest())
+
+
 def measure(args):
     binary = str(Path(args.binary).resolve())
     output = Path(args.output).resolve()
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise RuntimeError('evidence output must be a new or empty directory: ' + str(output))
     output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='masc-imp-', dir=args.work_parent) as directory:
-        base = Path(directory).resolve()
-        home = base / 'home'
+    with acceptance_workspace(args, output) as (base, home, continuity):
         auth = home / '.codex/auth.json'
-        auth.parent.mkdir(parents=True, mode=0o700)
-        shutil.copyfile(args.codex_auth, auth)
-        auth.chmod(0o600)
         env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')}
         env.update(HOME=str(home), CODEX_HOME=str(auth.parent))
         def run(*argv):
@@ -179,12 +237,13 @@ def measure(args):
             if result.returncode:
                 raise RuntimeError(result.stderr + result.stdout)
             return result.stdout
-        run(binary, 'init', '--base-path', str(base))
-        config_spec = dict(choice='codex', model=args.model, max_context=args.context, tools=True, streaming=True)
-        spec_path = base / 'runtime-spec.json'
-        spec_path.write_text(json.dumps(config_spec))
-        run('python3', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', binary,
-            '--base-path', str(base), '--spec', str(spec_path))
+        if not continuity['existing_workspace']:
+            run(binary, 'init', '--base-path', str(base))
+            config_spec = dict(choice='codex', model=args.model, max_context=args.context, tools=True, streaming=True)
+            spec_path = base / 'runtime-spec.json'
+            spec_path.write_text(json.dumps(config_spec))
+            run('python3', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', binary,
+                '--base-path', str(base), '--spec', str(spec_path))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -201,6 +260,9 @@ def measure(args):
                     try:
                         health = request(url + '/health?full=1')
                         if health.get('startup', {}).get('state_ready') is True:
+                            observed_base = health.get('paths', {}).get('effective_base_path')
+                            if not isinstance(observed_base, str) or not observed_base or Path(observed_base).resolve() != base:
+                                raise RuntimeError('ready server workspace identity does not match supplied base')
                             break
                     except OSError:
                         pass
@@ -283,12 +345,11 @@ def measure(args):
                     run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
                         str(base / '.masc/auth/local-admin.token'), str(output),
                         args.playwright_module, args.browser_executable)
-                (output / 'receipt.json').write_text(json.dumps(dict(
+                receipt = dict(
                     source=run(binary, 'build-commit').strip(), model=args.model,
                     platform=run('uname', '-sm').strip(), fixture_model=False,
                     approval_overrides=False, keeper='imp', completed_chats=len(prompts),
-                    successful_tools=sorted(required)), indent=2))
-                print('Acceptance evidence:', output, flush=True)
+                    successful_tools=sorted(required))
             finally:
                 # SSE streams already live in output. Copy raw records even if
                 # curl times out, a verdict fails, or browser verification fails.
@@ -301,12 +362,16 @@ def measure(args):
                         server.wait()
                 finally:
                     snapshot_evidence(base, output)
+    (output / 'receipt.json').write_text(json.dumps(dict(receipt, **continuity), indent=2))
+    print('Acceptance evidence:', output, flush=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
-    parser.add_argument('--codex-auth', required=True)
+    parser.add_argument('--codex-auth')
+    parser.add_argument('--existing-base')
+    parser.add_argument('--existing-home')
     parser.add_argument('--model', required=True)
     parser.add_argument('--context', required=True, type=int)
     parser.add_argument('--work-parent', default=str(Path.home()))
@@ -316,4 +381,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if bool(args.playwright_module) != bool(args.browser_executable):
         parser.error("--playwright-module and --browser-executable must be supplied together")
+    if bool(args.existing_base) != bool(args.existing_home):
+        parser.error('--existing-base and --existing-home must be supplied together')
+    if not args.existing_base and not args.codex_auth:
+        parser.error('--codex-auth is required without --existing-base')
     measure(args)

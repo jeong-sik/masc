@@ -89,7 +89,6 @@ type request_control_artifact =
   }
 
 type request_control_rejection =
-  | Thinking_budget_unsupported
   | Reasoning_effort_unsupported
   | Reasoning_effort_value_unsupported of Reasoning_effort.t
 

@@ -46,7 +46,7 @@ let assoc_keys_sorted j =
 (* Session JSON helper — minimal shape that the compactor
    navigates through. *)
 let keeper_fixture ?(name = "k-1") ?(status = "active")
-    ?(agent_name = "claude-1") ?(generation = 2) ?(context_ratio = 0.42)
+    ?(context_ratio = 0.42)
     ?(current_task = "do thing") ?(last_reply_status = "replied")
     ?(last_reply_preview = "preview text")
     () =
@@ -54,7 +54,6 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
     [
       ("name", json_string name);
       ("status", json_string status);
-      ("agent_name", json_string agent_name);
       ("context_ratio", `Float context_ratio);
       ("last_turn_ago_s", `Float 30.0);
       ("handoff_count_total", `Int 0);
@@ -97,7 +96,7 @@ let test_compact_keeper_strict_keys () =
   let expected_keys =
     List.sort compare
       [
-        "name"; "status"; "agent_name"; "generation"; "context_ratio";
+        "name"; "status"; "generation"; "context_ratio";
         "last_turn_ago_s"; "handoff_count_total";
         "current_task"; "last_reply_status"; "last_reply_preview";
       ]
@@ -141,7 +140,10 @@ let test_compact_keeper_missing_scalars_are_null () =
   match out with
   | `Assoc kv ->
       assert (List.assoc_opt "status" kv = Some `Null);
-      assert (List.assoc_opt "agent_name" kv = Some `Null);
+      (* #31279 purged the echo keys RFC-0393 left behind, so this compactor
+         emits no [agent_name] at all -- not a null one. A keeper is named by
+         [name]. Asserting absence is what keeps a re-added echo key visible. *)
+      assert (List.assoc_opt "agent_name" kv = None);
       assert (List.assoc_opt "current_task" kv = Some `Null);
       assert (List.assoc_opt "last_reply_status" kv = Some `Null);
       assert (List.assoc_opt "last_reply_preview" kv = Some `Null)

@@ -152,6 +152,7 @@ let keeper_world_frame_frame = "keeper.world.frame.frame"
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"
 let keeper_world_transcript_intro = "keeper.world.transcript.intro"
+let keeper_world_active_goals_unavailable = "keeper.world.active_goals.unavailable"
 let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"
 let keeper_world_active_goals_row = "keeper.world.active_goals.row"
 let keeper_world_active_goals_row_untitled = "keeper.world.active_goals.row_untitled"

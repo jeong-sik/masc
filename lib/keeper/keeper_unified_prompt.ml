@@ -1177,14 +1177,14 @@ let active_goal_summaries_for_task
     | Keeper_world_observation_inputs.Current_task_unavailable _ -> None
   in
   match task_id with
-  | None -> []
+  | None -> Ok []
   | Some task_id ->
     let linked =
       Workspace_goal_index.goals_for_task
         (Workspace_goal_index.build_task_goal_index_for_config config)
         ~task_id
     in
-    List.filter_map
+    Result.map (List.filter_map
       (fun (goal : Goal_store.goal) ->
          if List.exists (String.equal goal.id) linked
             && Goal_phase.admits_self_directed_progress goal.phase
@@ -1195,7 +1195,7 @@ let active_goal_summaries_for_task
              ; summary_phase = Some goal.phase
              }
          else None)
-      (Goal_store.list_goals config ())
+      ) (Goal_store.list_goals_result config ())
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
@@ -1299,7 +1299,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
-    ?(active_goal_summaries : goal_summary list option)
+    ?(active_goal_summaries : (goal_summary list, string) result option)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1430,28 +1430,23 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
-      let count, body =
-        match active_goal_summaries with
-        | Some summaries -> List.length summaries, format_goal_summaries summaries
-        (* No goals, not every goal. The caller resolves the goals linked to
-           this turn's task ({!active_goal_summaries_for_task}); a Keeper
-           holding no task has none, and that is the answer. Reading
-           [observation.active_goals] here answered with the workspace's whole
-           open-goal list instead -- the same list #32665 took out of the
-           system prompt, back in the turn context for anyone who omits the
-           argument. *)
-        | None -> 0, ""
+      let source =
+        match observation.active_goals, active_goal_summaries with
+        | Error detail, _ | _, Some (Error detail) -> Error detail
+        | Ok _, Some (Ok summaries) -> Ok summaries
+        | Ok _, None -> Ok []
       in
-      if count = 0
-      then None
-      else
-        Some
-          (render_fragment
-             Prompt_names.keeper_world_active_goals_heading
-             [ "count", string_of_int count ]
-           ^ "\n"
-           ^ body
-           ^ "\n\n")
+      (match source with
+       | Error detail ->
+         Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
+                 [ "detail", detail ] ^ "\n\n")
+       | Ok [] -> None
+       | Ok summaries ->
+         Some
+           (render_fragment
+              Prompt_names.keeper_world_active_goals_heading
+              [ "count", string_of_int (List.length summaries) ]
+            ^ "\n" ^ format_goal_summaries summaries ^ "\n\n"))
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

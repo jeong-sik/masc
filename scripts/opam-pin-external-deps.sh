@@ -99,7 +99,11 @@ readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # a754105 adds joystick-1 directions, SHIFT/CTRL/GRAPH modifiers (ocaml-msx #22, #23).
 # 3133d7c adds disk HLE boot for Rune Master II (NMS8250 slot layout, page-0
 # vectors, BDOS _DIRIN), the VDP FH/IE1 gate and the Select key (ocaml-msx #26).
-readonly OCAML_MSX_SHA="3133d7c5bff436abf2e7c36ce2b7fa61333f7146"
+# 870e610 keeps the interface ROM unmounted during the warm-up replay: a
+# C-BIOS boot that found it leaked game code into the 720-frame warm-up and
+# the replay landed on that polluted state (Sangokushi II cold-boot stall
+# pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
+readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

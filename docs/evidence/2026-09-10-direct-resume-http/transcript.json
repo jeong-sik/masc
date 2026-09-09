@@ -1,0 +1,70 @@
+[
+  {
+    "id": "msg-1788990042481808-0",
+    "role": "user",
+    "content": "Synthetic continuation probe: record the supplied one-time file effect, then complete this exact original request.",
+    "ts": 1788990042.481808,
+    "surface": {
+      "kind": "agent"
+    },
+    "speaker_authority": "owner",
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-8bd843aa06f30b87d263cd001679832d"
+    },
+    "transcript_slot": {
+      "kind": "accepted_user"
+    }
+  },
+  {
+    "id": "msg-1788990042717237-1",
+    "role": "tool",
+    "content": "{\"file_path\": \"effect.txt\", \"content\": \"one real filesystem effect\\n\"}",
+    "ts": 1788990042.717237,
+    "tool_call_id": "effect-once",
+    "execution_id": "exec-1788990042540-0001",
+    "tool_call_name": "Write",
+    "surface": {
+      "kind": "agent"
+    },
+    "turn_ref": "trace-1788990042430-00000#1",
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-8bd843aa06f30b87d263cd001679832d"
+    },
+    "transcript_slot": {
+      "kind": "tool_call",
+      "execution_id": "exec-1788990042540-0001",
+      "ordinal": 0
+    }
+  },
+  {
+    "id": "msg-1788990042775537-3",
+    "role": "assistant",
+    "content": "Synthetic continuation completed from the saved tool receipt.",
+    "ts": 1788990042.775537,
+    "surface": {
+      "kind": "agent"
+    },
+    "blocks": [
+      {
+        "t": "p",
+        "html": "Synthetic continuation completed from the saved tool receipt."
+      }
+    ],
+    "turn_ref": "trace-1788990042430-00000#1",
+    "stream_lifecycle": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-8bd843aa06f30b87d263cd001679832d"
+    },
+    "transcript_slot": {
+      "kind": "terminal_assistant"
+    }
+  }
+]

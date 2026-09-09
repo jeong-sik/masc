@@ -602,9 +602,20 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
    every image turn hit it first again. When the head is live it is the walk's
    own head, so leading with the walk changes nothing; after a reroute the
    target is the walk head for the same reason, and the dedupe drops the second
-   mention either way. *)
-let attempt_runtimes_for_turn ~media_walk ~first_runtime ~remaining_runtimes =
-  dedupe_runtimes_preserve_order (media_walk @ (first_runtime :: remaining_runtimes))
+   mention either way.
+
+   [assigned_runtime] closes the list. A reroute replaces the head with an
+   out-of-lane media runtime, so on a single-candidate text lane the assigned
+   runtime appeared nowhere: every media candidate answering 402 exhausted the
+   loop into an error instead of reaching the assigned runtime, whose
+   per-attempt projection is what drops the image and delegates. It is the last
+   entry because it is the degrade, not a candidate for the media. Whenever it
+   is already the head or already in the walk the dedupe drops this mention, so
+   a text turn and an un-rerouted media turn keep the list they had. *)
+let attempt_runtimes_for_turn ~media_walk ~assigned_runtime ~first_runtime
+    ~remaining_runtimes =
+  dedupe_runtimes_preserve_order
+    (media_walk @ (first_runtime :: remaining_runtimes) @ [ assigned_runtime ])
 
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~goal_blocks ~first_candidate ~candidates =
@@ -1104,6 +1115,7 @@ let run_named
            ~checkpoint_messages
            ~initial_messages
            current_goal_blocks)
+      ~assigned_runtime:first_candidate
       ~first_runtime
       ~remaining_runtimes
   in

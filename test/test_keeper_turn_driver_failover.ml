@@ -1675,14 +1675,34 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
         "the image walk holds the image-capable candidates, live first"
         [ "outsidevision.vision_model"; "lanevision.vision_model" ]
         (ids media_walk);
+      (* The assigned text-only runtime closes the list. The reroute took it out
+         of the head, and without the tail a lane whose media candidates all
+         answer 402 would exhaust into an error instead of reaching the runtime
+         whose per-attempt projection drops the image and delegates. *)
       Alcotest.(check (list string))
-        "the turn walks the live candidate, then the exhausted one"
-        [ "outsidevision.vision_model"; "lanevision.vision_model" ]
+        "the turn walks the live candidate, then the exhausted one, then degrades"
+        [ "outsidevision.vision_model"
+        ; "lanevision.vision_model"
+        ; "primary.text_model"
+        ]
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
+              ~assigned_runtime:head
               ~first_runtime
               ~remaining_runtimes:[ lanevision ]));
+      Alcotest.(check (list string))
+        "a single-candidate lane still reaches its assigned runtime"
+        [ "outsidevision.vision_model"
+        ; "lanevision.vision_model"
+        ; "primary.text_model"
+        ]
+        (ids
+           (Driver.For_testing.attempt_runtimes_for_turn
+              ~media_walk
+              ~assigned_runtime:head
+              ~first_runtime
+              ~remaining_runtimes:[]));
       Alcotest.(check (list string))
         "a text turn keeps the lane order"
         [ "primary.text_model"; "lanevision.vision_model" ]
@@ -1691,6 +1711,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
               ~media_walk:
                 (Runtime_agent.media_walk ~candidates
                    [ Agent_core.Types.Text "hello" ])
+              ~assigned_runtime:head
               ~first_runtime:head
               ~remaining_runtimes:[ lanevision ]))))
 
@@ -1756,6 +1777,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
+              ~assigned_runtime:assigned
               ~first_runtime:assigned
               ~remaining_runtimes:[ text_only ]))))
 

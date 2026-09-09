@@ -3111,6 +3111,12 @@
    (run %{test}))))
 
 (test
+ (name test_exec_ssh_bootstrap)
+ (modules test_exec_ssh_bootstrap)
+ (libraries alcotest ast_grep compiler-libs.common masc.string_util)
+ (deps (source_tree ../bin)))
+
+(test
  (name test_tui_http_ast)
  (modules test_tui_http_ast)
  (libraries alcotest ast_grep compiler-libs.common)

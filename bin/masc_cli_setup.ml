@@ -20,12 +20,12 @@ let validate_run_log body =
   |> List.fold_left (fun result (line_number, line) ->
     Result.bind result (fun () ->
       if String.trim line = "" then Ok () else
-        validate_json Goal_verification_run_registry.validate_event_json line
+        validate_json Masc.Goal_verification_run_registry.validate_event_json line
         |> Result.map_error (fun detail -> Printf.sprintf "line %d: %s" line_number detail))) (Ok ())
 
 let validate_keeper_profile body =
   Result.bind (Keeper_toml_loader.parse_toml body) (fun doc ->
-    Result.map (fun _ -> ()) (Keeper_types_profile_toml_parser.profile_defaults_of_toml doc))
+    Result.map (fun _ -> ()) (Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc))
 
 let preflight_base_path base_path =
   let normalized = Env_config.normalize_masc_base_path_input base_path in
@@ -68,7 +68,7 @@ let workspace_preflight ~base_path =
   in
   let stores = ["goals.json", validate_json Goal_store.validate_state_json;
                 "goal_verifications.json", validate_json Goal_verification.validate_state_json;
-                Goal_verification_run_registry.storage_filename, validate_run_log] in
+                Masc.Goal_verification_run_registry.storage_filename, validate_run_log] in
   let store_issues = List.concat_map (fun (name, validate) ->
     let path = Filename.concat root name in
     let mirror = path ^ ".last-good" in

@@ -101,6 +101,9 @@ mkdir -p "$repo_root/dist"
 stage="$(mktemp -d "$repo_root/dist/shim-static.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/src" "$stage/out"
+# The isolated artifact directory is written by the image user, whose uid
+# can differ from the Linux CI host user. Sources remain read-only.
+chmod a+rwx "$stage/out"
 
 for source in "${shim_sources[@]}"; do
   cp "$repo_root/$source" "$stage/src/"

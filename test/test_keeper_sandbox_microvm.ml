@@ -1654,7 +1654,8 @@ let test_running_guest_is_a_remote_endpoint () =
           reaching the exec rather than a value the prefix invented. *)
        Alcotest.(check bool) "execs as the runtime's uid:gid" true
          (adjacent ~flag:"--user" ~value:"0:0" argv)
-     | Masc.Keeper_sandbox_remote.Openssh _ -> Alcotest.fail "a guest is not an OpenSSH endpoint");
+     | Masc.Keeper_sandbox_remote.Openssh _ | Masc.Keeper_sandbox_remote.Docker_exec _ ->
+       Alcotest.fail "a microvm guest must retain its own transport");
     let docker =
       Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
         ~config ~meta:(docker_meta ~name:"lane-smith") ~state:(Running { container_name })

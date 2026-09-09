@@ -1,29 +1,8 @@
-(** Transport-neutral runner for the remote execution lane.
-
-    A remote endpoint is a machine that owns the keeper's working tree and
-    runs [masc-exec-shim]. The keeper side frames one request onto the shim's
-    stdin ({!Exec_ssh_protocol}), streams the payload's stdout and stderr
-    back, and reads the result trailer off stderr. Nothing in that exchange
-    depends on how the bytes reach the shim, so the transport is a value:
-
-    - {!Openssh}: the pinned OpenSSH argv of RFC-0395, for an endpoint
-      declared in [runtime.toml];
-    - {!Container_exec}: one microVM runtime's exec into a guest that owns
-      its tree on a named volume (RFC-0400), ending at [masc-exec-shim]. The
-      guest runs on this host, so there is no key, no pinned host key and no
-      sshd: the CLI is the channel. The prefix arrives already built,
-      because which flags spell it is the declaring runtime's business
-      ({!Keeper_sandbox_microvm.shim_exec_prefix_for}) and one of the three
-      cannot spell it at all.
-
-    Error codes carry the lane, [remote_ssh_*] for OpenSSH and
-    [microvm_remote_*] for the guest, so a log line names the transport that
-    failed. Codes the shim mints on the endpoint
-    ([remote_ssh_path_jail_violation], [remote_ssh_shim_config_error]) and
-    the transport-neutral preflight codes ([remote_git_unavailable],
-    [remote_ripgrep_unavailable], [remote_shim_version_skew],
-    [remote_github_identity_missing], [remote_github_unreachable]) pass
-    through unchanged. *)
+(** Framed exec-shim transport for OpenSSH, MicroVM container exec, and
+    Docker Observe. Transport identity remains explicit in reports and errors.
+    Docker uses already mapped guest paths and preserves its output paths;
+    its shared host mounts permit only the filesystem-and-network Observe
+    mode through this transport. *)
 
 let ( let* ) = Result.bind
 
@@ -45,6 +24,7 @@ type container_exec =
 type transport =
   | Openssh of openssh
   | Container_exec of container_exec
+  | Docker_exec of container_exec
 
 (* The remote command is always this literal. Request data travels only in
    the framed stdin protocol, never in the transport argv. *)
@@ -54,6 +34,7 @@ let probe_flag = "--probe"
 let lane_prefix = function
   | Openssh _ -> "remote_ssh"
   | Container_exec _ -> "microvm_remote"
+  | Docker_exec _ -> "docker_observe"
 ;;
 
 (* ── What the lane last did (RFC-0427 D-1) ──────────────────────────────
@@ -220,6 +201,30 @@ let of_container_exec
   }
 ;;
 
+let of_docker_exec
+      ~base_path
+      ~keeper_name
+      ~remote_root
+      ~gh_config_dir
+      ~injected_env
+      ~env_allowlist
+      ~connect_timeout_sec
+      ~max_concurrent_sessions
+      (c : container_exec)
+  =
+  { name = c.container_name
+  ; transport = Docker_exec c
+  ; remote_root
+  ; env_allowlist
+  ; connect_timeout_sec
+  ; gh_config_dir
+  ; injected_env
+  ; base_path
+  ; keeper_name
+  ; shared = shared_state ~base_path ~name:c.container_name ~max_concurrent_sessions
+  }
+;;
+
 (* ── Transport argv ──────────────────────────────────────────────────── *)
 
 let openssh_prefix (o : openssh) =
@@ -270,7 +275,7 @@ let openssh_prefix (o : openssh) =
 let transport_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ]
-  | Container_exec c -> c.prefix @ [ c.shim_path ]
+  | Container_exec c | Docker_exec c -> c.prefix @ [ c.shim_path ]
 ;;
 
 (* OpenSSH hands the remote command to a shell, so the probe is one word; a
@@ -278,7 +283,7 @@ let transport_argv t =
 let probe_argv t =
   match t.transport with
   | Openssh o -> openssh_prefix o @ [ shim_command ^ " " ^ probe_flag ]
-  | Container_exec c ->
+  | Container_exec c | Docker_exec c ->
     let prefix = Option.value c.probe_prefix ~default:c.prefix in
     prefix @ [ c.shim_path; probe_flag ]
 ;;
@@ -286,7 +291,7 @@ let probe_argv t =
 let host_label t =
   match t.transport with
   | Openssh o -> o.endpoint.host
-  | Container_exec c -> c.container_name
+  | Container_exec c | Docker_exec c -> c.container_name
 ;;
 
 (* ── Error codes ─────────────────────────────────────────────────────── *)
@@ -446,7 +451,12 @@ let remote_cwd t cwd =
      Keeper_remote_path.normalize_remote). *)
   let normalized = Keeper_remote_path.normalize_remote cwd in
   let endpoint_root = Keeper_remote_path.normalize_remote t.remote_root in
-  if String.equal normalized endpoint_root
+  if (match t.transport with Docker_exec _ -> true | Openssh _ | Container_exec _ -> false)
+  then
+    if Filename.is_relative normalized
+    then Error "docker_observe_cwd_requires_guest_absolute_path"
+    else Ok normalized
+  else if String.equal normalized endpoint_root
   then Ok endpoint_root
   else
     Keeper_remote_path.host_to_remote ~base_path:t.base_path
@@ -461,7 +471,7 @@ let remote_cwd t cwd =
 let transport_failure t status =
   match t.transport, status with
   | Openssh _, Unix.WEXITED 255 -> Some "ssh client exited 255"
-  | (Openssh _ | Container_exec _), _ -> None
+  | (Openssh _ | Container_exec _ | Docker_exec _), _ -> None
 ;;
 
 let log_first_dispatch t =
@@ -473,6 +483,10 @@ let log_first_dispatch t =
   | Container_exec c ->
     Log.Keeper.info
       "remote microvm dispatch enabled container=%s shim=%s"
+      c.container_name c.shim_path
+  | Docker_exec c ->
+    Log.Keeper.info
+      "Docker Observe dispatch enabled container=%s shim=%s"
       c.container_name c.shim_path
 ;;
 
@@ -648,7 +662,11 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     let observation = ref (Execution_unavailable Request_not_sent) in
     let result =
-    match wire_env t env with
+    match (match t.transport, mode with
+      | Docker_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local) ->
+        Error "docker_observe_mode_required: Docker host mounts require the filesystem and network Observe box"
+      | Docker_exec _, Exec_ssh_protocol.Observe
+      | (Openssh _ | Container_exec _), _ -> wire_env t env) with
     | Error error -> transport_failed error
     | Ok env ->
       let injected = injected_env t in
@@ -685,21 +703,25 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
            Eio.Switch.on_release sw (fun () ->
              Eio.Semaphore.release t.shared.semaphore);
            let path_stream emit =
-             Keeper_remote_path.stream ~base_path:t.base_path
-               ~remote_root:t.remote_root ~keeper:t.keeper_name ~emit
+             match t.transport with
+             | Docker_exec _ -> emit, (fun () -> ())
+             | Openssh _ | Container_exec _ ->
+               let stream = Keeper_remote_path.stream ~base_path:t.base_path
+                 ~remote_root:t.remote_root ~keeper:t.keeper_name ~emit in
+               Keeper_remote_path.rewrite_stream_chunk stream,
+               (fun () -> Keeper_remote_path.finish_stream stream)
            in
            let stdout_path_stream = Option.map path_stream on_stdout_chunk in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =
-             { callback =
-                 Option.map Keeper_remote_path.rewrite_stream_chunk
-                   stderr_path_stream
-             ; tail = ""
-             }
+             { callback = Option.map fst stderr_path_stream; tail = "" }
            in
            let rewrite text =
-             Keeper_remote_path.rewrite_output ~base_path:t.base_path
-               ~remote_root:t.remote_root ~keeper:t.keeper_name text
+             match t.transport with
+             | Docker_exec _ -> text
+             | Openssh _ | Container_exec _ ->
+               Keeper_remote_path.rewrite_output ~base_path:t.base_path
+                 ~remote_root:t.remote_root ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
            observation := Execution_unavailable Transport_unavailable;
@@ -708,13 +730,12 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
                ~timeout_sec:budget
                ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
                ?on_stdout_chunk:
-                 (Option.map Keeper_remote_path.rewrite_stream_chunk
-                    stdout_path_stream)
+                 (Option.map fst stdout_path_stream)
                ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
                ~stdin_content:frame
                (transport_argv t)
            in
-           Option.iter Keeper_remote_path.finish_stream stdout_path_stream;
+           Option.iter (fun (_, finish) -> finish ()) stdout_path_stream;
            let local_timed_out =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in
@@ -739,7 +760,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
            match split_final_trailer raw_stderr with
            | Error detail ->
              flush_stderr_payload stderr_stream stderr_stream.tail;
-             Option.iter Keeper_remote_path.finish_stream stderr_path_stream;
+             Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let failure, error =
                if local_timed_out
                then Local_timeout, local_timeout_error t budget
@@ -755,7 +776,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
                | Error _ -> stderr_stream.tail
              in
              flush_stderr_payload stderr_stream streamed_payload;
-             Option.iter Keeper_remote_path.finish_stream stderr_path_stream;
+             Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let stdout = rewrite stdout in
              let payload_stderr = rewrite payload_stderr in
              (match local_timed_out, transport_failure t status with
@@ -814,7 +835,7 @@ let preflight_cache_mu = Stdlib.Mutex.create ()
 let transport_key t =
   match t.transport with
   | Openssh o -> o.ssh_bin
-  | Container_exec c -> c.container_name
+  | Container_exec c | Docker_exec c -> c.container_name
 ;;
 
 let preflight_cache_key t =

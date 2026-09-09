@@ -2926,6 +2926,27 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
+(* Until 2026-09-09 the provider-wide base was consulted before the model's
+   own bare row, so the bare row -- the only lookup that applies prefix
+   matching -- was unreachable wherever the base answered.
+
+   Which labels those are is narrower than it looks. [provider_base_label]
+   goes through [Model_catalog.provider_entry_for_label], which returns [None]
+   for every wire-kind label ([anthropic], [kimi], [openai_compat], [ollama],
+   [gemini], [glm]). So for a label naming a wire kind the base never answered,
+   before this change or after; the reorder is observable only for a label
+   that names a [[providers]] entry and nothing else -- [glm-coding],
+   [ollama_cloud], [openrouter] and the rest.
+
+   The discriminator is a field the row sets and the provider base does not:
+   [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
+   what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
+   thinking-control contract" -- so [Some _] here means the row was read.
+
+   Only gemini bare rows declare that field; no glm bare row does, and
+   [glm-4.6v] additionally carries a [provider_name = "glm"] row, which an
+   exact provider-scoped lookup reads before any fallback. So glm cannot be
+   expressed with this discriminator and is not listed here. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows
@@ -2999,19 +3020,25 @@ let test_a_bare_row_outranks_the_provider_base () =
            "%s/%s fell through to the provider base; the bare row naming it was not read"
            label
            model_id)
-    [ "gemini", "gemini-3-flash-preview"; "glm", "glm-4.6v" ]
+    [ "gemini", "gemini-3-flash-preview" ]
 ;;
 
 (* The reorder is gated on [allow_bare_fallback]: a config that named a
    [provider_id] must not pick up a bare row, because a scoped provider's base
-   can deliberately differ from the provider-independent value. *)
+   can deliberately differ from the provider-independent value.
+
+   [glm-coding] is a [[providers]] entry and not a wire kind, so it is a label
+   the base actually answers for; [glm-4.5v] has a bare row and no
+   [glm-coding]-scoped twin, so the base is what is left once the bare row is
+   refused. A wire-kind label would prove nothing here: the base never answers
+   for one, so the result would be [None] whatever the gate did. *)
 let test_a_named_provider_still_refuses_the_bare_row () =
   match
     Capabilities.for_provider_model_id
       ~wire:None
       ~allow_bare_fallback:false
-      ~provider_label:"gemini"
-      ~model_id:"gemini-3-flash-preview"
+      ~provider_label:"glm-coding"
+      ~model_id:"glm-4.5v"
   with
   | None -> failf "the provider base should still answer here"
   | Some (c : Capabilities.capabilities) ->

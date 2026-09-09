@@ -197,11 +197,19 @@ let advance config receipt state =
 
 let finish config receipt ~cleanup =
   let* () = require_configuration_only config receipt.keeper_name in
-  let* source = read_regular receipt.source_path in
-  let* () = match source, receipt.state with
-    | None, Artifacts_removed -> Ok ()
-    | Some source, _ when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
-    | _ -> Error (Conflict "configuration source changed since deletion was requested") in
+  (* [Removed] is terminal, so replaying it answers from the receipt without
+     reading the source at all. Reading it first made the reply depend on what
+     is at that path now: normally nothing, which fell through to [Conflict]
+     and reported a finished removal as a failed retry, and a same-name
+     manifest created since would change the answer again. *)
+  let* () = match receipt.state with
+    | Removed -> Ok ()
+    | Prepared | Cleanup_required _ | Artifacts_removed ->
+      let* source = read_regular receipt.source_path in
+      (match source, receipt.state with
+       | None, Artifacts_removed -> Ok ()
+       | Some source, _ when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
+       | _ -> Error (Conflict "configuration source changed since deletion was requested")) in
   let* receipt = match receipt.state with
     | Prepared | Cleanup_required _ ->
       (match protect (fun () -> cleanup receipt.keeper_name |> Result.map_error (fun detail -> Storage_error detail)) with

@@ -89,6 +89,32 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
+(* Receipt disposition is tested with a live keeper. Without an entry the
+   status bridge correctly reports keepalive_stopped even for a Pass receipt. *)
+let snapshot_with_running_keeper ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  (* Observe both phases immediately; the public snapshot has a short-lived
+     cache keyed to turn and approval state, not registry transitions. *)
+  let snapshot () = K.For_testing.snapshot_json_inner_with_pending_reader
+    ~read_pending:Masc.Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config ~meta in
+  let stopped = snapshot () in
+  Alcotest.(check bool) "a stopped keeper still requires attention" true
+    Yojson.Safe.Util.(stopped |> member "needs_attention" |> to_bool);
+  Alcotest.(check string) "stopped attention has its own cause" "keepalive_stopped"
+    Yojson.Safe.Util.(stopped |> member "attention_reason" |> to_string);
+  let entry =
+    Masc.Keeper_registry.For_testing.register
+      ~base_path:config.base_path meta.name meta
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      Alcotest.(check bool) "fixture keeper is Running" true
+        (Masc.Keeper_registry.is_running ~base_path:config.base_path meta.name);
+      snapshot ())
+;;
+
 let test_trust_blocker_uses_structured_state () =
   let module Core = Masc.Keeper_runtime_trust_snapshot_core in
   let decide blocker =
@@ -118,6 +144,7 @@ let test_trust_blocker_uses_structured_state () =
 let test_active_blocker_overrides_success_until_cleared () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
   let base_dir = temp_dir () in
   let config = Masc.Workspace.default_config base_dir in
   let initial = make_meta "runtime-trust-receipt-scope" in
@@ -363,7 +390,7 @@ let test_observation_not_dispatched_receipt_remains_non_blocking () =
              ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "not_dispatched"
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
@@ -571,7 +598,7 @@ let test_no_visible_output_no_work_receipt_does_not_mark_attention () =
              ; "current_task_id", `Null
              ; "goal_ids", `List []
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
@@ -621,7 +648,7 @@ let test_no_visible_output_active_receipt_does_not_mark_attention () =
              ; "current_task_id", `String "task-1844"
              ; "goal_ids", `List [ `String "goal-pm-flow" ]
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"

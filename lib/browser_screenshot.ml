@@ -22,6 +22,20 @@ let persist ~keeper_name json =
          Ok ["clientId", `String (Browser_lane.client_id_to_string id)]
        | Some _ -> Error "invalid screenshot clientId")
     | _ -> Error "screenshot must be an object" in
+  let* observation_fields = match json with
+    | `Assoc fields ->
+      let* viewport_fields = match List.assoc_opt "viewport" fields with
+        | None -> Ok []
+        | Some value ->
+          let* viewport = Browser_lane.Pointer.viewport_of_json value in
+          Ok ["viewport", Browser_lane.Pointer.viewport_to_json viewport] in
+      let* source_fields = match List.assoc_opt "source" fields with
+        | None -> Ok []
+        | Some (`String ("live" | "automation" as source)) ->
+          Ok ["source", `String source]
+        | Some _ -> Error "invalid screenshot source" in
+      Ok (source_fields @ viewport_fields)
+    | _ -> Error "screenshot must be an object" in
   let max_bytes = Keeper_vision_tool.max_image_bytes () in
   if String.length encoded > ((max_bytes + 2) / 3) * 4 then Error "screenshot exceeds Vision image size limit"
   else
@@ -35,7 +49,7 @@ let persist ~keeper_name json =
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_artifact
           ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes in
-      Ok (`Assoc (client_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+      Ok (`Assoc (client_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;
         "bytes", `Int (String.length bytes); "scope", `String "viewport"]))

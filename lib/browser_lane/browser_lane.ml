@@ -12,12 +12,15 @@
     gate learned the hard way (#33638). *)
 
 open Time_compat
+module Pointer = Browser_pointer
 module Action = Browser_action
 module Upload_lease = Browser_upload_lease
 
 type node_ref = { document_id : string; node_id : string }
 type interaction = Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
+  | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
   | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
 type verb =
@@ -59,6 +62,11 @@ let verb_to_string = function
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let fields = match action with
+    | Click_at {point;viewport} -> ["action", `String "click_at";
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
+    | Drag {from;to_;viewport} -> ["action", `String "drag";
+        "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
+        "viewport", Pointer.viewport_to_json viewport]
     | Click selector -> ["action", `String "click"; "selector", `String selector]
     | Fill {selector; text} -> ["action", `String "fill"; "selector", `String selector; "text", `String text]
     | Click_node target -> ("action",`String "click") :: node_fields target

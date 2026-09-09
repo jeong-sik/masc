@@ -260,8 +260,40 @@ let test_session_status_answers_while_closed () =
     check bool "status is not offered on the live lane" false
       (Lane.verb_allowed_on_live Lane.Session_status))
 
+let test_pointer_release_recovery () =
+  Eio_main.run (fun _ ->
+    let release_fails = ref true and gestures = ref 0 and releases = ref 0 in
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `POST, "/session/owned/actions" -> incr gestures; Error (Driver.Transport "response lost after pointerDown")
+      | `DELETE, "/session/owned/actions" -> incr releases;
+          if !release_fails then Error (Driver.Transport "release unavailable") else Ok `Null
+      | _ -> fail ("unexpected pointer request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+    let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+    let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Click_at {point;viewport}} in
+    ignore (Driver.execute driver click);
+    check int "cleanup attempted after lost gesture response" 1 !releases;
+    ignore (Driver.execute driver click);
+    check int "unreleased input prevents a subsequent gesture" 1 !gestures;
+    check int "recovery retries release, not the gesture" 2 !releases;
+    release_fails := false;
+    ignore (Driver.execute driver Lane.Tabs_list);
+    check int "read recovers only after remote release succeeds" 3 !releases;
+    check int "recovery never replays previous input" 1 !gestures)
+
 let () = run "native Firefox lane" ["behavior", [
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
+  test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
   test_case "session status answers while closed" `Quick test_session_status_answers_while_closed;

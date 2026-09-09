@@ -4,7 +4,7 @@ type request = { source : Browser_surface.source; tab_id : int; client_id : Brow
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -34,12 +34,12 @@ let parse = function
       then Error "arguments do not match the selected interaction action" else Ok () in
     let* action = match List.assoc_opt "action" fields with
       | Some (`String "click") ->
-        let* () = excludes ["text"; "x"; "y"] in
+        let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* target = node_target () in
         (match target with Some target -> Ok (Browser_lane.Click_node target)
          | None -> let* selector = selector () in Ok (Browser_lane.Click selector))
       | Some (`String "fill") ->
-        let* () = excludes ["x"; "y"] in
+        let* () = excludes ["x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* target = node_target () in
         (match List.assoc_opt "text" fields with
          | Some (`String text) -> (match target with
@@ -47,9 +47,22 @@ let parse = function
              | None -> let* selector = selector () in Ok (Browser_lane.Fill {selector;text}))
          | _ -> Error "fill requires string text (empty text clears the input)")
       | Some (`String "scroll") ->
-        let* () = excludes ["selector"; "text"; "documentId"; "nodeId"] in
+        let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
-      | _ -> Error "action must be click, fill, or scroll" in
+      | Some (`String ("click_at" | "drag" as action)) ->
+        let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
+          if action = "click_at" then ["from"; "to"] else ["point"]) in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
+        let value key = match List.assoc_opt key fields with Some json -> json | None -> `Null in
+        let* viewport = Browser_lane.Pointer.viewport_of_json (value "viewport") in
+        if action = "click_at" then
+          let* point = Browser_lane.Pointer.point_of_json (value "point") in
+          Ok (Browser_lane.Click_at {point;viewport})
+        else
+          let* from = Browser_lane.Pointer.point_of_json (value "from") in
+          let* to_ = Browser_lane.Pointer.point_of_json (value "to") in
+          Ok (Browser_lane.Drag {from;to_;viewport})
+      | _ -> Error "action must be click, fill, scroll, click_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -66,7 +79,20 @@ let script = {js|function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
-  if (args.action === "scroll") {
+  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
+  if (args.action === "click_at") {
+    const current = browserScene({mode:'viewport'}), expected = args.viewport;
+    if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
+      throw new Error('observed_viewport_changed');
+    const point = args.point;
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+        || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
+      throw new Error('invalid_viewport_point');
+    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+    if (element.matches(':disabled')) throw new Error('element_disabled');
+    element.click();
+  } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
@@ -117,4 +143,13 @@ let script = {js|function interactInPage(args) {
 }
 
 return interactInPage(arguments[0]);
+|js}
+
+let pointer_guard_script = {js|
+const args = arguments[0];
+if (args.expectedUrl !== location.href) throw new Error('page_url_changed');
+const current = browserScene({mode:'viewport'}), expected = args.viewport;
+if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
+  throw new Error('observed_viewport_changed');
+return {url:location.href,title:document.title,scrollX,scrollY};
 |js}

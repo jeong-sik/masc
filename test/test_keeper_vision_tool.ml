@@ -1952,6 +1952,24 @@ let test_browser_screenshot_reaches_vision_reader () =
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let viewport = `Assoc ["documentId", `String "captured-document";
+        "width", `Float 800.; "height", `Float 600.;
+        "scrollX", `Float 0.; "scrollY", `Float 120.] in
+      let verify_pointer_receipt source data =
+        let field key = Yojson.Safe.Util.member key data in
+        assert (assoc_string "source" data = source);
+        assert (field "viewport" = viewport);
+        let route = match field "clientId" with `String _ as id -> ["clientId", id] | _ -> [] in
+        let request = Masc.Browser_interaction.parse (`Assoc (route @ [
+          "lane", field "source"; "tabId", field "tabId";
+          "expectedUrl", field "url"; "viewport", field "viewport";
+          "action", `String "click_at";
+          "point", `Assoc ["x", `Float 0.5; "y", `Float 0.25]])) in
+        match request with
+        | Ok {action = Browser_lane.Click_at {viewport = observed; _}; _} ->
+          assert (observed.document_id = "captured-document");
+          assert (observed.scroll_y = 120.)
+        | _ -> failwith "persisted screenshot cannot address its observed viewport" in
       let seen_image = ref false in
       let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
         seen_image := List.exists (fun (message : Agent_core.Types.message) ->
@@ -1966,7 +1984,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
                 (`Assoc ["ok",`Bool true;"data",`Assoc [
                   "tabId",`Int 73;"url",`String "https://example.org/form";
-                  "title",`String "Form";"mimeType",`String "image/png";"data",`String encoded]])
+                  "title",`String "Form";"mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]])
             | _ -> failwith "unexpected screenshot command"));
           Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
@@ -1974,6 +1992,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (result.disposition = Tool_result.Completed ());
           let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
           assert (not (String_util.contains_substring result.raw_output encoded));
+          verify_pointer_receipt "automation" data;
           let handle = assoc_string "artifact" data in
           let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
@@ -2001,7 +2020,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Ok (Some command) -> command | _ -> failwith "selected live client received no command" in
             let data = if mode = "screenshot" then `Assoc ["tabId",`Int 73;
               "url",`String "https://example.org/form";"title",`String "Form";
-              "mimeType",`String "image/png";"data",`String encoded]
+              "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
               else `Assoc ["tabId",`Int 73;"elements",`List []] in
             assert (Browser_lane.deliver_result ~client_id:first.client_id ~id:command.id
               ~payload:(`Assoc ["ok",`Bool true;"data",data]) = Ok ());
@@ -2009,7 +2028,8 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Ok result -> result | Error exn -> raise exn in
             assert (result.disposition = Tool_result.Completed ());
             let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
-            assert (assoc_string "clientId" data = client_id)) ["elements";"screenshot"]))))
+            assert (assoc_string "clientId" data = client_id);
+            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.
@@ -2035,6 +2055,19 @@ let test_browser_screenshot_rejects_invalid_client () =
     | Error ("invalid_client_id" | "invalid screenshot clientId") -> ()
     | _ -> failwith "malformed routing identity must fail before pixel persistence")
     [`String "not-a-client"; `Int 73]
+
+let test_browser_screenshot_rejects_invalid_observation () =
+  with_temp_base (fun _ ->
+    let pixels = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    List.iter (fun metadata ->
+      let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-observation"
+        (`Assoc (metadata @ ["tabId", `Int 73; "url", `String "https://example.org";
+          "title", `String "Page"; "data", `String pixels])) in
+      assert (Result.is_error result))
+      [["source", `String "unknown"];
+       ["viewport", `Null];
+       ["viewport", `Assoc ["documentId", `String "doc"; "width", `Int 0;
+          "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0]]])
 
 let test_artifact_failures_are_classified () =
   with_temp_base (fun _ ->
@@ -2062,6 +2095,7 @@ let test_artifact_failures_are_classified () =
 let () =
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
+  test_browser_screenshot_rejects_invalid_observation ();
   test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();

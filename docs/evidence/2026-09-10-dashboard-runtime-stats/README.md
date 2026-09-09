@@ -59,3 +59,16 @@ The metric responses are explicit synthetic fixtures over a live backend, not
 measured production usage. The visible build mismatch warning is expected because
 CI frontend assets run over the separately deployed server. This is not a
 production deployment or proof of actual ledger totals.
+
+## Actual backend data rendered
+
+`verify-runtime-stats-live-preview.mjs` renders the same hash-verified CI assets
+while reading the actual authenticated metrics endpoint. Seven runtime rows
+were returned; every displayed row identity and input/output token value matched
+that response. Desktop/mobile screenshots were visually inspected and no page
+errors occurred. `live-browser/receipt.json` retains the observed response.
+The token is read only from a supplied file and is not part of the evidence.
+
+This confirms API-to-screen values, not independent reconciliation against raw
+ledger rows or production deployment. The API currently uses opaque runtime-lane
+IDs; translating those to usable provider/runtime identities remains a UX gap.

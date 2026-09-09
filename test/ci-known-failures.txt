@@ -66,8 +66,11 @@
 # exited with code 4", directory_durability on "ordinary observer exception
 # raw backtrace" -- so they stay.
 
+# The complete root sweep at e069d02d3e (34329933400, 2026-09-09)
+# finished in 1253s and reported capability_exact_read as passing. Remove
+# its exemption so a future failure is visible to this ratchet.
+
 # --- assertions that fail -------------------------------------------------
-test/test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation [2026-09-07 alone: fails, run 34136506495]
 test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
 
 # --- cannot be exercised where it stands ----------------------------------

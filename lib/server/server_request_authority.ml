@@ -6,6 +6,16 @@ type trust_class =
   | Configured_bind
   | Explicit_trusted_host
 
+type listener_scope =
+  | Loopback_listener
+  | Network_listener
+
+let listener_scope_of_host host =
+  if Masc_network_defaults.is_loopback_host host
+  then Loopback_listener
+  else Network_listener
+;;
+
 type host_port =
   { host : string
   ; port : int option
@@ -16,6 +26,7 @@ type authority =
   ; port : int option
   ; scheme : scheme
   ; trust_class : trust_class
+  ; listener_scope : listener_scope
   }
 
 type trusted_identity =
@@ -26,6 +37,7 @@ type trusted_identity =
 type trust_policy =
   { configured_bind : trusted_identity
   ; explicit_trusted_host : trusted_identity option
+  ; listener_scope : listener_scope
   }
 
 type trust_policy_error =
@@ -267,6 +279,7 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
   (* A wildcard is a socket bind address, never a wire authority. Keep the
      listener's local identity reachable when a distinct public base URL is
      also configured by folding it through the shared advertised-host rule. *)
+  let listener_scope = listener_scope_of_host bind_host in
   let configured_host = Masc_network_defaults.normalize_advertised_host bind_host in
   match host_port_of_parts ~host:configured_host ~port:(Some bind_port) with
   | None -> Error Malformed_bind_authority
@@ -275,7 +288,7 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
       { authority = bind_authority; scheme = Http }
     in
     (match explicit_base_url with
-     | None -> Ok { configured_bind; explicit_trusted_host = None }
+     | None -> Ok { configured_bind; explicit_trusted_host = None; listener_scope }
      | Some raw ->
        (match explicit_identity_of_base_url raw with
         | None -> Error Malformed_explicit_base_url
@@ -283,6 +296,7 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
           Ok
             { configured_bind
             ; explicit_trusted_host = Some explicit_trusted_host
+            ; listener_scope
             }))
 ;;
 
@@ -296,6 +310,7 @@ let projection_context (trust_policy : trust_policy) : authority =
   ; port = identity.authority.port
   ; scheme = identity.scheme
   ; trust_class
+  ; listener_scope = trust_policy.listener_scope
   }
 ;;
 
@@ -316,6 +331,7 @@ let admit_authority
         ; port = parsed.port
         ; scheme = wire_scheme
         ; trust_class = Explicit_trusted_host
+        ; listener_scope = trust_policy.listener_scope
         }
     | Some _ | None -> None
   in
@@ -328,6 +344,7 @@ let admit_authority
         ; port = parsed.port
         ; scheme = Http
         ; trust_class = Configured_bind
+        ; listener_scope = trust_policy.listener_scope
         }
     else None
   in
@@ -354,6 +371,7 @@ let admit_http1_authority
       ; port = parsed.port
       ; scheme = Https
       ; trust_class = Explicit_trusted_host
+      ; listener_scope = trust_policy.listener_scope
       }
   | Some _ | None ->
     (match admit_authority ~trust_policy ~wire_scheme:Http parsed with
@@ -370,6 +388,7 @@ let admit_http1_authority
             ; port = parsed.port
             ; scheme = trusted.scheme
             ; trust_class = Explicit_trusted_host
+            ; listener_scope = trust_policy.listener_scope
             }
         | Some _ | None -> None))
 ;;
@@ -438,6 +457,12 @@ let classify_h2_request ~(trust_policy : trust_policy) request =
 let host (authority : authority) = authority.host
 let port (authority : authority) = authority.port
 let scheme (authority : authority) = authority.scheme
+let listener_is_loopback (authority : authority) =
+  match authority.listener_scope with
+  | Loopback_listener -> true
+  | Network_listener -> false
+;;
+
 let trust_class (authority : authority) = authority.trust_class
 
 let port_or_default (authority : authority) =
@@ -463,6 +488,7 @@ let of_host_port ~host ~port =
        ; port = authority.port
        ; scheme = Http
        ; trust_class = Configured_bind
+       ; listener_scope = listener_scope_of_host host
        }
         : authority)
   | None -> Error `Malformed

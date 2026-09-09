@@ -290,6 +290,29 @@ let test_single_long_line_stays_partial_but_advances () =
     (parse_int "next_offset" raw)
 ;;
 
+let test_complete_lines_survive_scan_boundaries () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  List.iter
+    (fun (name, body, expected, truncated) ->
+      write_file (Filename.concat playground ("repos/masc/" ^ name)) body;
+      let raw =
+        read ~config ~meta
+          (`Assoc [ "path", `String ("repos/masc/" ^ name)
+                  ; "max_bytes", `Int 512 ])
+      in
+      if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+      Alcotest.(check (option string)) name (Some expected) (parse_string "content" raw);
+      Alcotest.(check bool) "complete final line is not partial" false
+        (parse_bool "last_line_partial" raw);
+      Alcotest.(check bool) "scan completeness is preserved" truncated
+        (parse_bool "truncated" raw))
+    [ "unterminated.txt", "complete at EOF", "complete at EOF", false
+    ; "boundary.txt", String.make 511 'x' ^ "\nmore\n",
+      String.make 511 'x' ^ "\n", true
+    ]
+;;
+
 (* The verification snapshot and the judge's live read cap bytes with two
    independent literals. They agree today only because #29407 moved the
    snapshot cap from 20_000 to 200_000 while the tool ceiling already sat
@@ -412,6 +435,8 @@ let () =
             "single long line stays partial but advances"
             `Quick
             test_single_long_line_stays_partial_but_advances
+        ; Alcotest.test_case "complete lines survive scan boundaries" `Quick
+            test_complete_lines_survive_scan_boundaries
         ; Alcotest.test_case
             "a live read cannot outrun the evidence snapshot"
             `Quick

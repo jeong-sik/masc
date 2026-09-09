@@ -235,7 +235,17 @@ let submit ~config ~keeper_name ~actor ~cleanup =
       let source_path = manifest_path config keeper_name in
       let* source = read_regular source_path in
       match source with
-      | None -> Error (Invalid_request "Keeper configuration does not exist")
+      | None ->
+        (* No manifest and nothing pending: either this removal already
+           finished and the client is repeating a submission whose response it
+           lost, or there was never a configuration here. Answer the finished
+           one with its own receipt instead of "does not exist", which read as
+           a failure for work that succeeded. *)
+        (match List.filter (fun receipt -> receipt.state = Removed) inventory.receipts with
+         | [ receipt ] -> Ok receipt
+         | [] -> Error (Invalid_request "Keeper configuration does not exist")
+         | _ :: _ :: _ ->
+           Error (Conflict "multiple completed configuration removals require reconciliation"))
       | Some bytes ->
         let now = Masc_domain.now_iso () in
         let* receipt = save config {operation_id=Id.generate (); keeper_name; actor;

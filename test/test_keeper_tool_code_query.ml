@@ -100,7 +100,7 @@ let args ?(question = "hover") ?(line = 1) ?(symbol = "x") ?occurrence path =
    a file written beside .masc is refused as outside, and that refusal is what
    the sandbox test above asserts. *)
 let write ~config rel contents =
-  let root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config (meta ()) in
+  let root = Keeper_sandbox.host_root_abs_of_meta ~config (meta ()) in
   let path = Filename.concat root rel in
   Fs_compat.mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc contents);
@@ -285,7 +285,7 @@ let dune_present () = Executable_path.path_has_executable "dune"
 let test_references_answers_across_files_once_the_index_exists () =
   with_env_workspace (fun env config ->
     Eio_context.set_env env;
-    let root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config (meta ()) in
+    let root = Keeper_sandbox.host_root_abs_of_meta ~config (meta ()) in
     let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
     let _ = write ~config "lib/dune" "(library (name probe_lib))\n" in
     let path = write ~config "lib/a.ml" "let shared_name x = x + 1\n" in

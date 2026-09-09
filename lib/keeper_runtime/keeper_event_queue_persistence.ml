@@ -1717,18 +1717,14 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     | Ok path -> path
     | Error _ -> base_path
   in
-  let operator_action_required =
-    read_errors <> []
-    || outbox_count > 0
-    || recoverable.pending_count > 0
-    || retained_disabled.pending_count > 0
-    || paused_dead.pending_count > 0
-    || shutdown_fenced.pending_count > 0
-  in
+  (* This summary counts the durable queue; it does not judge it. The health
+     surface holds the only verdict, because it is the only place that knows
+     which parts of the backlog an operator can act on: a retained-disabled or
+     paused-dead entry is the operator's own standing decision, not a prompt.
+     Emitting a verdict here too produced two answers for one question, and the
+     surface then read this one back and cancelled its own policy. *)
   `Assoc
     [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
-    ; "status", `String (if operator_action_required then "degraded" else "ok")
-    ; "operator_action_required", `Bool operator_action_required
     ; "base_path", `String projection_base_path
     ; ( "keepers_runtime_dir"
       , `String (Common.keepers_runtime_dir_of_base ~base_path:projection_base_path) )

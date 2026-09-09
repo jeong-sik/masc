@@ -22,7 +22,8 @@ const browser = {
       if (closed) throw new Error('Invalid tab ID');
       return {url: navigated && captureCalls.length ? 'https://example.org/after' : 'https://example.org/before', title: 'Fixture'};
     },
-    executeScript: async id => {
+    executeScript: async (id, options) => {
+      assert.equal(options.runAt, "document_end");
       assert.equal(id, 7);
       return [{documentId:'fixture',width:800,height:600,scrollX:0,scrollY:changedViewport && captureCalls.length ? 120 : 0}];
     },

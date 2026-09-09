@@ -184,7 +184,8 @@ Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설
    응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
    터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
    모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
-3. macOS에서는 Docker Desktop, Linux에서는 Docker Engine을 설치하고 시작합니다.
+3. macOS에서는 [Docker Desktop 설치 안내](https://docs.docker.com/desktop/setup/install/mac-install/),
+   Linux에서는 [Docker Engine 설치 안내](https://docs.docker.com/engine/install/)를 따라 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
 
 ```bash
@@ -205,7 +206,7 @@ TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세�
 - “Board에 첫 대화라는 글을 작성하고 글 id를 알려줘.”
 - “내 샌드박스 살펴보기라는 Task를 설명과 함께 만들고 id를 알려줘.”
 - “네 샌드박스 안에서 `pwd`와 `ls`를 실행하고 디렉터리 목록을 보여줘.”
-- “web_fetch로 https://example.com 을 읽고 페이지 제목을 알려줘.”
+- “WebFetch로 지금 https://example.com 을 가져와서 HTTP 상태와 페이지 제목을 알려줘.”
 
 답변, 저장된 Board 글과 Task, 샌드박스·웹 도구의 성공 결과를 확인하세요.
 여기서는 대화와 기본 기능을 확인하며 Task 완료는 별도 절차입니다. Web fetch는

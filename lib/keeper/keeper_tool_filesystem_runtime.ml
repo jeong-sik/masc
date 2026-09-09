@@ -169,13 +169,22 @@ let slice_read_window ~(window : read_line_window) ~max_bytes ~scan_complete con
         advance start lines
     in
     let raw = String.sub content start (stop - start) in
+    let raw_length = String.length raw in
+    (* A prefix ending at the scan horizon may cut a line even when it fits
+       the response budget. Only EOF or a newline proves that final line is
+       complete; earlier requested line boundaries are already complete. *)
+    let incomplete_scan_tail =
+      not scan_complete && stop = len && raw_length > 0
+      && raw.[raw_length - 1] <> '\n'
+    in
     let capped, last_line_partial =
-      if String.length raw <= max_bytes
+      if raw_length <= max_bytes && not incomplete_scan_tail
       then raw, false
       else (
-        match String.rindex_from_opt raw (max_bytes - 1) '\n' with
+        let capped_length = min raw_length max_bytes in
+        match String.rindex_from_opt raw (capped_length - 1) '\n' with
         | Some nl -> String.sub raw 0 (nl + 1), false
-        | None -> String.sub raw 0 max_bytes, true)
+        | None -> String.sub raw 0 capped_length, true)
     in
     let returned_lines = count_returned_lines capped in
     let consumed_to = start + String.length capped in

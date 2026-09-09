@@ -6,7 +6,7 @@ module Stage = Masc.Keeper_tool_execute_observe
 module Gate = Masc.Keeper_gate
 module AQ = Masc.Keeper_approval_queue
 
-let run ~base_path ~container ~missing_container ~receipt_path =
+let run ~base_path ~container ~missing_container ~receipt_path ~workdir =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -23,7 +23,7 @@ let run ~base_path ~container ~missing_container ~receipt_path =
    | Ok _ -> () | Error error -> fail error);
   let make_endpoint container =
     Remote.of_docker_exec ~base_path ~keeper_name:"docker-probe"
-      ~remote_root:"/workspace" ~gh_config_dir:"/workspace/.config/gh"
+      ~remote_root:workdir ~gh_config_dir:(Filename.concat workdir ".config/gh")
       ~injected_env:[] ~env_allowlist:[] ~connect_timeout_sec:10
       ~max_concurrent_sessions:1
       { prefix = ["docker"; "exec"; "-i"; container]
@@ -43,8 +43,8 @@ let run ~base_path ~container ~missing_container ~receipt_path =
       let bin = match Masc_exec.Exec_program.of_string program with
         | Ok bin -> bin | Error _ -> fail "invalid scenario program" in
       let ir = Keeper_tooling.Execute_shell_ir.simple_bin
-        ~cwd_raw:"/workspace" ~sandbox bin args in
-      Keeper_tooling.Execute_shell_ir.dispatch ~workdir:"/workspace" ~sandbox ir
+        ~cwd_raw:workdir ~sandbox bin args in
+      Keeper_tooling.Execute_shell_ir.dispatch ~workdir ~sandbox ir
     in
     let stage = Stage.create ~execution_evidence:(fun () -> List.rev !receipts)
       ~route:(fun () -> Target.observe_route_for_endpoint
@@ -91,7 +91,7 @@ let run ~base_path ~container ~missing_container ~receipt_path =
   let rg = execute "code_search" ["rg"; "-n"; "keep"; "sentinel.txt"] in
   check string "rg output" "1:keep\n" rg.stdout;
   let pwd = execute "guest_path_preserved" ["/bin/pwd"] in
-  check string "Docker output remains a guest path" "/workspace\n" pwd.stdout;
+  check string "Docker output remains a guest path" (workdir ^ "\n") pwd.stdout;
   let compiled = execute "file_compile_write_denied" ["/usr/bin/file"; "-C"; "-m"; "probe.magic"] in
   check bool "file compile was denied" true (compiled.status <> Unix.WEXITED 0);
   let fsmonitor = execute "fsmonitor_write_denied" ["/usr/bin/git"; "status"; "--porcelain"] in
@@ -104,7 +104,7 @@ let run ~base_path ~container ~missing_container ~receipt_path =
     let receipts = ref [] in
     let outcome = Remote.runner ~mode ~on_receipt:(fun r -> receipts := r :: !receipts)
       ~timeout_sec:30. endpoint ~on_stdout_chunk:None ~on_stderr_chunk:None
-      ~stdin_content:None ~argv:["touch"; "/workspace/forbidden-mode"] ~env:[||] ~cwd:(Some "/workspace") in
+      ~stdin_content:None ~argv:["touch"; Filename.concat workdir "forbidden-mode"] ~env:[||] ~cwd:(Some workdir) in
     (match outcome with
      | Masc_exec.Sandbox_target.Transport_failed _ -> ()
      | Masc_exec.Sandbox_target.Ran _ -> fail "Docker unboxed mode executed");
@@ -136,5 +136,5 @@ let run ~base_path ~container ~missing_container ~receipt_path =
   print_endline "PASS Docker Observe: real receipts, one dispatch, no Judge, no effect replay"
 
 let () =
-  if Array.length Sys.argv <> 5 then fail "expected base_path container missing_container receipt_path";
-  run ~base_path:Sys.argv.(1) ~container:Sys.argv.(2) ~missing_container:Sys.argv.(3) ~receipt_path:Sys.argv.(4)
+  if Array.length Sys.argv <> 6 then fail "expected base_path container missing_container receipt_path workdir";
+  run ~base_path:Sys.argv.(1) ~container:Sys.argv.(2) ~missing_container:Sys.argv.(3) ~receipt_path:Sys.argv.(4) ~workdir:Sys.argv.(5)

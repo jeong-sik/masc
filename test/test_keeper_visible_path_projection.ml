@@ -263,7 +263,10 @@ let test_repository_checkout_projection_shares_inspection_budget () =
   let fake_bin = Filename.concat playground "fake-bin" in
   ensure_dir fake_bin;
   let fake_git = Filename.concat fake_bin "git" in
-  write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+  let calls_path = Filename.concat playground "git-calls" in
+  write_file fake_git
+    ("#!/bin/sh\nprintf 'called\\n' >> " ^ Filename.quote calls_path
+     ^ "\nexec sleep 30\n");
   Unix.chmod fake_git 0o755;
   List.iter
     (fun name ->
@@ -274,14 +277,12 @@ let test_repository_checkout_projection_shares_inspection_budget () =
     ~finally:(fun () -> Unix.putenv "PATH" old_path)
     (fun () ->
        Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
-       let started_at = Unix.gettimeofday () in
        let projection =
          Keeper_sandbox_control.For_testing.repository_checkouts_json_with_budget
            ~inspection_budget_sec:0.2
            ~config
            ~meta
        in
-       let elapsed = Unix.gettimeofday () -. started_at in
        Alcotest.(check string)
          "projection reports the exhausted request budget"
          "inspection_budget_exhausted"
@@ -290,10 +291,12 @@ let test_repository_checkout_projection_shares_inspection_budget () =
          "both checkout identities remain visible"
          2
          (projection |> Json.member "entries" |> Json.to_list |> List.length);
-       Alcotest.(check bool)
-         "two stalled checkouts share one wall-clock budget"
-         true
-         (elapsed < 1.0))
+       (* Child cancellation includes its own termination grace. Count actual
+          inspections to prove the shared budget without timing that cleanup. *)
+       Alcotest.(check string)
+         "one stalled Git process exhausts the budget for both checkouts"
+         "called\n"
+         (Fs_compat.load_file calls_path))
 ;;
 
 let test_repository_checkout_budget_starts_after_discovery () =

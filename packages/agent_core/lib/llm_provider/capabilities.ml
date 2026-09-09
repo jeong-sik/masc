@@ -1223,11 +1223,11 @@ let apply_declarative_capability_overrides overrides =
        | None -> base.reasoning_replay_override)
     }
   in
-  if
-    (not capabilities.supports_reasoning)
-    || capabilities.thinking_control_format = No_thinking_control
-  then { capabilities with accepted_reasoning_efforts = None }
-  else capabilities
+  (* Native adapters own their wire format, so [No_thinking_control] does not
+     erase an enabled model's effort vocabulary. An explicit lack of reasoning
+     support still invalidates it before native request validation. *)
+  if capabilities.supports_reasoning then capabilities
+  else { capabilities with accepted_reasoning_efforts = None }
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =

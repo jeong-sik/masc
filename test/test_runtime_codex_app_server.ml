@@ -981,6 +981,123 @@ let test_server_request_fails_closed () =
       | Ok _ -> fail "unsupported server request incorrectly admitted")
 ;;
 
+let elicitation_request ~mode ?turn_id () =
+  let payload =
+    match mode with
+    | "url" -> [ "url", `String "https://example.com/input"; "elicitationId", `String "elicit-1" ]
+    | _ -> [ "requestedSchema", `Assoc ["type", `String "object"; "properties", `Assoc []] ]
+  in
+  `Assoc [ "id", `String "elicitation-1"; "method", `String "mcpServer/elicitation/request";
+    "params", `Assoc ([ "threadId", `String "thread-1";
+      "serverName", `String "fixture-mcp"; "mode", `String mode;
+      "message", `String "This server requires input." ]
+      @ Option.to_list (Option.map (fun value -> "turnId", value) turn_id) @ payload) ]
+;;
+
+let test_elicitation_cancel_then_dynamic_tool () =
+  List.iter (fun (mode, turn_id) ->
+    let response_path = Filename.temp_file "codex-elicitation-response-" ".jsonl" in
+    let path = Filename.temp_file "codex-elicitation-peer-" ".sh" in
+    Fun.protect ~finally:(fun () -> Sys.remove response_path; Sys.remove path) (fun () ->
+      Out_channel.with_open_bin path (fun output ->
+        let send line = output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n") in
+        let receive () = output_string output "IFS= read -r request || exit 61\n" in
+        let capture () =
+          receive ();
+          output_string output ("printf '%s\\n' \"$request\" >> " ^ shell_quote response_path ^ "\n") in
+        output_string output "#!/bin/sh\ncase \"$1\" in --masc-warmup) exit 0 ;; esac\n";
+        receive (); send init_result;
+        receive (); receive (); send account_chatgpt;
+        receive (); send thread_result;
+        receive (); send turn_result;
+        send (Yojson.Safe.to_string (elicitation_request ~mode ?turn_id ()));
+        capture ();
+        (* No MASC call is released until the host answers the elicitation. *)
+        send tool_call_request; capture ();
+        send item_completed; send turn_completed;
+        output_string output "while IFS= read -r ignored; do :; done\n");
+      Unix.chmod path 0o700;
+      warm_fresh_executable path;
+      let calls = ref 0 and observed = ref [] in
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "MASC tool after unavailable host input";
+          input_schema = `Assoc ["type", `String "object"];
+          call = (fun ~call_id:_ _ -> incr calls;
+            { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None }) } in
+      (match run_fixture ~dynamic_tools:[tool]
+        ~on_stream_event:(fun event -> observed := event :: !observed) path with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result -> check int "subsequent MASC tool completed" 1 result.dynamic_tool_calls);
+      check int "host executed the dynamic tool once" 1 !calls;
+      let responses = In_channel.with_open_bin response_path (fun input ->
+        In_channel.input_lines input |> List.map Yojson.Safe.from_string) in
+      (match responses with
+       | cancelled :: tool_result :: [] ->
+         check string "protocol cancellation, never acceptance or user denial"
+           {|{"id":"elicitation-1","result":{"action":"cancel","content":null}}|}
+           (Yojson.Safe.to_string cancelled);
+         check bool "dynamic tool response still succeeds" true
+           (Yojson.Safe.Util.(tool_result |> member "result" |> member "success" |> to_bool))
+       | _ -> fail "expected elicitation and dynamic-tool responses");
+      check bool "truthful host input unavailable event" true
+        (List.exists (function
+          | Runtime_codex_app_server.Elicitation_cancelled
+              { server_name = "fixture-mcp"; reason = Host_input_unavailable; _ } -> true
+          | _ -> false) !observed)))
+    [ "form", Some (`String "turn-1"); "form", Some `Null; "form", None;
+      "openai/form", Some `Null; "openaiForm", Some `Null; "url", Some `Null ]
+;;
+
+let test_invalid_elicitation_keeps_protocol_error () =
+  let original = elicitation_request ~mode:"form" ~turn_id:(`String "turn-1") () in
+  let change key value = match original with
+    | `Assoc outer ->
+      let fields = Yojson.Safe.Util.(original |> member "params" |> to_assoc) in
+      `Assoc (("params", `Assoc ((key, value) :: List.remove_assoc key fields))
+              :: List.remove_assoc "params" outer)
+    | _ -> fail "elicitation fixture must be an object" in
+  List.iter (fun request ->
+    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+                  Yojson.Safe.to_string request; item_completed; turn_completed]
+      (fun path -> match run_fixture path with
+       | Error (Runtime_codex_app_server.Protocol_error {stage; _}) ->
+         check string "validation stage" "mcpServer/elicitation/request" stage
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "invalid elicitation passed identity/shape validation"))
+    [ change "threadId" (`String "other-thread"); change "turnId" (`String "other-turn");
+      change "turnId" (`Int 1); change "mode" (`String "unknown");
+      change "requestedSchema" `Null;
+      change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
+;;
+
+let test_native_read_disables_host_shell_argv () =
+  List.iter (fun native ->
+    let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
+    Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
+      with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
+        (fun path ->
+          let original = In_channel.with_open_bin path In_channel.input_all in
+          let lines = String.split_on_char '\n' original in
+          let instrumented = match lines with
+            | shebang :: warmup :: rest ->
+              String.concat "\n" (shebang :: warmup ::
+                ("printf '%s\\n' \"$@\" > " ^ shell_quote argv_path) :: rest)
+            | _ -> fail "invalid fixture script" in
+          Out_channel.with_open_bin path (fun output -> output_string output instrumented);
+          (match run_fixture ~native path with
+           | Ok _ -> ()
+           | Error error -> fail (Runtime_codex_app_server.error_to_string error)));
+      let argv = In_channel.with_open_bin argv_path In_channel.input_lines in
+      let expected = ["app-server"; "--stdio"] @
+        (match native with
+         | Runtime_native_tools.Native_read ->
+           ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
+         | Native_full -> []
+         | Native_none -> fail "none is not part of this fixture") in
+      check (list string) "same process receives posture-scoped config overrides" expected argv))
+    [Runtime_native_tools.Native_read; Runtime_native_tools.Native_full]
+;;
+
 (* A live keeper failed every turn on a context overflow the server reported,
    and the receipt carried only the sentence: nothing downstream could tell that
    failure class from any other Turn_failed (#28071). The server's own error
@@ -4215,6 +4332,12 @@ let () =
             `Quick
             test_notification_without_params_fails_closed
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
+        ; test_case "MCP cancellation continues to MASC dynamic tools" `Quick
+            test_elicitation_cancel_then_dynamic_tool
+        ; test_case "MCP elicitation identity and form validation" `Quick
+            test_invalid_elicitation_keeps_protocol_error
+        ; test_case "read posture disables native host shell only" `Quick
+            test_native_read_disables_host_shell_argv
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick

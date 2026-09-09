@@ -31,8 +31,8 @@ val spawn_detached :
   env:string array ->
   cwd:string ->
   (detached_handle, string) result
-(** Fork a child in its own process group and return immediately with
-    a handle containing PID, PGID, and the caller-owned read ends of
+(** Fork a child and wait for its session, working directory, and descriptor
+    setup before returning a handle containing PID, PGID, and the caller-owned read ends of
     stdout/stderr. The child runs until it exits or is signaled — it
     does NOT die with the current Eio switch.
 
@@ -42,6 +42,10 @@ val spawn_detached :
 
     Bypasses the [proc_mgr] so the child is not tracked by Eio;
     callers are responsible for [Unix.waitpid] reaping.
+
+    Setup failure returns [Error] after reaping the child. Exec failure after
+    readiness remains a child exit status of 127. Readiness does not promise
+    that the executable has started or that the application is healthy.
 
     The argv-only API is intentional: no shell interpolation,
     matching the rest of this module. *)

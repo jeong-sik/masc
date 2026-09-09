@@ -3,6 +3,11 @@ import importlib.util
 import io
 import hashlib
 import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 import tarfile
 import tempfile
@@ -118,6 +123,37 @@ class BinaryPublication(unittest.TestCase):
             self.assertEqual(destination.stat().st_mode & 0o777, 0o755)
             self.assertEqual(target.read_bytes(), b'external old executable')
             self.assertEqual(target.stat().st_mode & 0o777, 0o444)
+
+
+class StableBytecode(unittest.TestCase):
+    def test_relocated_sources_keep_bytecode_bytes_for_all_optimizations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / 'stage'
+            binary = stage / 'python/bin/python3'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n')
+            binary.chmod(0o755)
+            library = stage / 'python/lib'
+            library.mkdir()
+            (library / 'probe.py').write_text('value = 42\n')
+            package.freeze_python_bytecode(stage)
+            relocated = root / 'installed'
+            shutil.copytree(stage, relocated)
+            for source in relocated.rglob('*.py'):
+                os.utime(source, (1, 1))
+            def snapshot():
+                return {p.relative_to(relocated).as_posix(): p.read_bytes()
+                        for p in relocated.rglob('*.pyc')}
+            before = snapshot()
+            self.assertEqual(len(before), 3)
+            self.assertTrue(all(int.from_bytes(data[4:8], 'little') == 3 for data in before.values()))
+            command = 'import sys; sys.path.insert(0,sys.argv[1]); import probe; assert probe.value == 42'
+            for optimization in ([], ['-O'], ['-OO']):
+                for _ in range(2):
+                    subprocess.run([str(relocated / 'python/bin/python3'), '-I', *optimization,
+                                    '-c', command, str(relocated / 'python/lib')], check=True)
+                    self.assertEqual(snapshot(), before)
 
 
 if __name__ == '__main__':

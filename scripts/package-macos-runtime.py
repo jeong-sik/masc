@@ -140,6 +140,21 @@ def publish_binary(source, destination):
         temporary.unlink(missing_ok=True)
 
 
+
+def freeze_python_bytecode(stage):
+    # Runtime extraction changes source mtimes. Timestamp-based bytecode then
+    # rewrites itself on import, invalidating the immutable release receipt.
+    # Compile with the shipped interpreter and source hashes instead, including
+    # both optimized variants so ordinary -O/-OO use also remains read-only.
+    python = stage / 'python'
+    for bytecode in python.rglob('*.pyc'):
+        bytecode.unlink()
+    subprocess.run([str((python / 'bin/python3').resolve()), '-I', '-m', 'compileall',
+                    '-q', '-f', '--invalidation-mode', 'checked-hash',
+                    '-o', '0', '-o', '1', '-o', '2', '-s', str(stage.resolve()),
+                    '-p', '', str(python.resolve())], check=True)
+
+
 def package(dist, stage, platform, commit, lock_path):
     if stage.exists():
         raise ValueError('runtime stage must be new')
@@ -220,6 +235,7 @@ def package(dist, stage, platform, commit, lock_path):
                     [str(stage.resolve() / 'python/bin/python3'), '-I', '-c',
                      'import json,tarfile,ssl,urllib.request; assert urllib.request.urlopen("https://example.com",timeout=30).status == 200']):
         subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, *command], env=clean, check=True)
+    freeze_python_bytecode(stage)
     provenance = {'schema': 'masc.macos-runtime.v1', 'source_commit': commit, 'platform': platform,
                   'minimum_macos': '14.0' if platform == 'macos-arm64' else '15.0',
                   'python': dict(pinned, release=lock['release'], upstream=lock['upstream']),

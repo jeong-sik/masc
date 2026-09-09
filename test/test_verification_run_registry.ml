@@ -123,16 +123,36 @@ let test_outcome_detail_reaches_the_surface () =
            ("evaluator_runtime " ^ label)
            (Some "judge-runtime")
            (str json "evaluator_runtime");
-         (* Every outcome carries an operator-readable cause, never a bare
-            label — an approval included. The fixture builds this one with an
-            empty reason, which is the shape a reviewer that stated nothing
-            produces, so the field is present and blank rather than absent. *)
+         (* An outcome that is a judgement carries an operator-readable cause,
+            never a bare label — an approval included. The fixture builds that
+            one with an empty reason, which is the shape a reviewer that
+            stated nothing produces, so the field is present and blank rather
+            than absent. *)
          let cause =
            match str json "reason", str json "detail" with
            | Some value, _ | _, Some value -> Some value
            | None, None -> None
          in
-         check bool ("cause present for " ^ label) true (Option.is_some cause))
+         match outcome with
+         | E.Approved _
+         | E.Rejected _
+         | E.Infrastructure_unavailable _
+         | E.Not_reviewed _
+         | E.Commit_failed _
+         | E.Raised _
+         | E.Review_cancelled _ ->
+           check bool ("cause present for " ^ label) true (Option.is_some cause)
+         (* The one outcome whose label is the whole message. A cancel claim
+            has no review prompt at all -- RFC-0417 4.1 gives that authority
+            to the operator's click -- so there is no judgement and nothing a
+            row could state about one. The consumer reads it that way too:
+            tui_decode gives operator_routed its own arm and answers "not a
+            decision" rather than looking for a cause. Written out rather
+            than skipped, so the absence is the claim; and spelled per
+            constructor with no wildcard, so an outcome added later has to
+            say which of the two it is. *)
+         | E.Operator_routed ->
+           check bool ("no cause for " ^ label) true (Option.is_none cause))
     all_outcomes
 ;;
 

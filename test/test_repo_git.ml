@@ -180,10 +180,17 @@ let test_get_origin_url_times_out_on_stalled_config () =
           | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
           | Error (Repo_git.Origin_lookup_timed_out error) ->
               let elapsed = Unix.gettimeofday () -. started_at in
+              (* Not the timeout's number. #28651 stopped repo_git from
+                 reading Process_eio's, because the two modules agreed by
+                 coincidence -- the variant is how a timeout is identified
+                 and [git_failure_detail] carries the call, not a duration
+                 (a killed process reads as "signal 15"). Asking here for a
+                 number this module does not produce is the same mistake on
+                 the test side. The duration is bounded below. *)
               Alcotest.(check bool)
-                "reports timeout"
+                "the detail names the call that timed out"
                 true
-                (String_util.contains_substring error "timeout after 5s");
+                (String_util.contains_substring error "git remote get-url origin");
               Alcotest.(check bool)
                 "returns within a bounded interval"
                 true

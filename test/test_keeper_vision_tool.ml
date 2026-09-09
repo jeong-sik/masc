@@ -722,6 +722,42 @@ let test_run_vision_invalid_structured_response_is_typed () =
       assert (String_util.contains_substring detail "JSON parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
+let test_explicit_vision_runtime_selection () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-selected" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let run selected response =
+          let calls = ref [] in
+          let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+            calls := config.Llm_provider.Provider_config.model_id :: !calls;
+            response
+          in
+          let args = match artifact_args handle with
+            | `Assoc fields -> `Assoc (("runtime_id", selected) :: fields)
+            | _ -> failwith "artifact fixture must be an object"
+          in
+          let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~meta ~args () in
+          json_of_output raw, List.rev !calls
+        in
+        let json, calls = run (`String "p2.vision-b") (Ok (ok_response "selected reader")) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "runtime_id" json = "p2.vision-b");
+        assert (assoc_string "text" json = "selected reader");
+        let json, calls = run (`String "p2.vision-b")
+          (Error (Llm_provider.Http_client.HttpError
+            { code = 500; body = "selected unavailable"; retry_after_header = None })) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "error" json = "provider_error");
+        List.iter (fun (selected, code) ->
+          let json, calls = run selected (Ok (ok_response "must not run")) in
+          assert (calls = []);
+          assert (assoc_string "error" json = code))
+          [`String "missing.vision", "invalid_request";
+           `String "", "invalid_args"; `Int 1, "invalid_args"; `Null, "invalid_args"]))))
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -2054,6 +2090,7 @@ let () =
   test_uncapped_vision_fallback_reaches_provider ();
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
+  test_explicit_vision_runtime_selection ();
   test_retryable_provider_error_tries_next_runtime ();
   test_candidate_policy_error_tries_next_runtime ();
   test_policy_error_on_every_candidate_is_reported ();

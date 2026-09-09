@@ -1,3 +1,8 @@
+(test
+ (name test_completion_repair_delivery)
+ (modules test_completion_repair_delivery)
+ (libraries masc_test_deps))
+
 ; Run the actual generator comparison through targeted Test CI.
 (rule
  (alias runtest-tool-parity-goldens)
@@ -4326,6 +4331,18 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_response_latency_probe)))
+
+(rule
+ (alias runtest-test_tool_trace_spans)
+ (deps
+  test_tool_trace_spans.py
+  ../scripts/harness/perf/tool_trace_spans.py)
+ (action
+  (run python3 %{dep:test_tool_trace_spans.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tool_trace_spans)))
 
 (alias
  (name runtest)

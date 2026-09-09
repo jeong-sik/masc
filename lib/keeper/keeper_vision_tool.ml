@@ -61,8 +61,11 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
        %s\n\n\
-       Return only a JSON object with a non-empty string field named text. Do \
-       not include markdown fences or prose outside the JSON object."
+       Return only a JSON object with a non-empty string field named text. When \
+       the requested content is not visible, explicitly describe its absence \
+       in text; do not invent content to fill the field. Distinguish no visible \
+       content from content that is present but unreadable. Do not include \
+       markdown fences or prose outside the JSON object."
       req.Va.query
   in
   Agent_core.Types.make_message
@@ -632,6 +635,7 @@ let run_candidates_outcome
 
 let run_vision
     ?complete
+    ?runtime_id
     ~sw
     ~clock
     ~net
@@ -655,7 +659,19 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              run_candidates_outcome
+              let candidates = vision_runtime_candidates () in
+              let selected = match runtime_id with
+                | None -> Ok candidates
+                | Some requested ->
+                    let matching = List.filter
+                      (fun (id, _, _) -> String.equal id requested) candidates in
+                    if List.is_empty matching then
+                      Error "requested runtime is not a configured capable image candidate"
+                    else Ok matching
+              in
+              match selected with
+              | Error detail -> Vo_invalid_request detail
+              | Ok candidates -> run_candidates_outcome
                 ?complete
                 ~sw
                 ~clock
@@ -663,7 +679,7 @@ let run_vision
                 ~req
                 ~last_error:None
                 ~attempt_index:0
-                (vision_runtime_candidates ())))
+                candidates))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _exn ->
@@ -701,6 +717,12 @@ let execution_of_vision_outcome = function
     failed ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 ;;
 
+let runtime_id_of_args args =
+  match json_member_opt "runtime_id" args with
+  | None -> Ok None
+  | Some (`String id) when not (String.equal (String.trim id) "") -> Ok (Some id)
+  | Some _ -> Error "runtime_id must be a non-empty configured runtime identifier"
+
 let handle_with_outcome
     ?complete
     ?sw
@@ -709,15 +731,17 @@ let handle_with_outcome
     ~(meta : Keeper_meta_contract.keeper_meta)
     ~args
     () =
-  match string_member "artifact" args, string_member "query" args with
-  | None, _ | _, None ->
+  match string_member "artifact" args, string_member "query" args, runtime_id_of_args args with
+  | _, _, Error detail ->
+      failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
+  | None, _, _ | _, None, _ ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (err_json
          ~failure_class:Tool_result.Policy_rejection
          ~detail:"requires string fields: artifact, query"
          "invalid_args")
-  | Some handle_str, Some query ->
+  | Some handle_str, Some query, Ok runtime_id ->
     (match sw, net, clock with
      | None, _, _ | _, None, _ | _, _, None ->
        Keeper_tool_execution.failure
@@ -760,6 +784,7 @@ let handle_with_outcome
               | Ok media_type ->
                 run_vision
                   ?complete
+                  ?runtime_id
                   ~sw
                   ~clock
                   ~net

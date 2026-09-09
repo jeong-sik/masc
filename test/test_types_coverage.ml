@@ -609,7 +609,7 @@ let test_tempo_mode_of_yojson_wrong_type () =
    ============================================================ *)
 
 let test_backlog_to_yojson_empty () =
-  let b : Masc_domain.backlog = { tasks = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
+  let b : Masc_domain.backlog = { tasks = []; pending_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 1 } in
   let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->
@@ -632,7 +632,7 @@ let test_backlog_to_yojson_with_tasks () =
     contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
     skills = [];
   } in
-  let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
+  let b : Masc_domain.backlog = { tasks = [task]; pending_completion_rejections = []; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
   match json with
   | `Assoc fields ->

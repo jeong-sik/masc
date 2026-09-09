@@ -340,7 +340,7 @@ let add_routes router =
   |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
        with_public_read
          (fun _state req reqd ->
-           Http.Response.json_value ~compress:true ~request:req (frame_json ()) reqd)
+           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
          request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read

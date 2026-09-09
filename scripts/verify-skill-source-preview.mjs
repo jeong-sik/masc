@@ -62,7 +62,7 @@ try {
     }
     return route.continue()
   })
-  await page.goto(new URL('/dashboard/#status?section=skills', baseUrl).href)
+  await page.goto(new URL('/dashboard/#monitoring?section=skills', baseUrl).href)
   const first = page.getByRole('button', { name: /^Read instructions for / }).first()
   await first.waitFor()
   assert.equal(sourceReads.length, 0)
@@ -79,6 +79,8 @@ try {
   await page.screenshot({ path: resolve(output, 'desktop.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   await source.scrollIntoViewIfNeeded()
+  const mobileSourceBounds = await source.boundingBox()
+  assert.ok(mobileSourceBounds && mobileSourceBounds.x >= 0 && mobileSourceBounds.x + mobileSourceBounds.width <= 390, 'Source must fit mobile viewport')
   await page.screenshot({ path: resolve(output, 'mobile.png') })
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -96,7 +98,7 @@ try {
   assert.equal(await source.textContent(), sourceReads[1].payload.source_text)
   const receipt = { observed_at: new Date().toISOString(), manifest,
     backend: new URL(baseUrl).origin, blocked_mutations: mutations, blocked_websockets: blockedWebSockets,
-    deployment: false, mobile_overflow: mobileOverflow,
+    deployment: false, mobile_overflow: mobileOverflow, mobile_source_bounds: mobileSourceBounds,
     reads: sourceReads.map(({ request, payload }) => ({ reference: request.reference,
       access: payload.access, source_sha256: createHash('sha256').update(payload.source_text).digest('hex'),
       source_bytes: Buffer.byteLength(payload.source_text), exact_text_match: true })),

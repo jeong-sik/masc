@@ -32,7 +32,7 @@ export function SkillSourceInspector({ reference }: { reference: SkillReference 
   }, [identity, attempt])
   const current: SourceState = state.identity === identity ? state : { kind: 'loading', identity }
   return html`
-    <section class="min-w-0 rounded border border-[var(--color-border)] p-3" aria-label="Skill instructions">
+    <section class="min-w-0 rounded border border-[var(--color-border)] p-3" aria-label="Skill instructions" style=${{ maxWidth: 'calc(100vw - 4rem)' }}>
       <h3 class="font-semibold">Instructions · exact source</h3>
       <p class="ss-muted">Published SKILL.md including frontmatter. Reading this source does not edit or activate the Skill.</p>
       ${current.kind === 'loading' ? html`<p role="status">Loading exact source revision…</p>`

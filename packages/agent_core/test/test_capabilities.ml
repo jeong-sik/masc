@@ -2430,7 +2430,7 @@ let test_manifest_rejects_retired_reasoning_visibility_key () =
 let test_manifest_applies_accepted_reasoning_efforts () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","accepted_reasoning_efforts":["none","low","high"]}]}|}
+      {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
   match Capability_manifest.of_json json with
   | Ok [ entry ] ->

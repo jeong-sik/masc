@@ -128,7 +128,7 @@ page.document.querySelector=()=>null;
 page.location.assign=url=>assigned.push(url);
 page.followAnchor=new Anchor('_blank');
 page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
-vm.runInContext("window[Symbol.for('masc.browser.scene.v1')].nodes.set('follow-link',new WeakRef(followAnchor))",page);
+vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v2')].nodes.set('follow-link',new WeakRef(followAnchor));window[Symbol.for('masc.browser.scene.refs.v2')].links.set('follow-link',followAnchor.href)",page);
 const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
 assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
 page.followAnchor.target='_self';
@@ -138,6 +138,14 @@ assert.equal(dispatchedReceipt.data.tabId,7);
 assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
 assert.equal(dispatchedReceipt.data.action,'follow_link');
 console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');
+const beforeRecycledFollow=assigned.length;
+page.followAnchor.href='https://example.org/recycled-channel';
+const recycledFollow=await command(dispatchedFollow);
+assert.equal(recycledFollow.error,'scene_link_destination_changed');
+assert.equal(recycledFollow.effectPhase,'not_started');
+assert.equal(assigned.length,beforeRecycledFollow,'recycled anchors cannot navigate to an unobserved destination');
+page.followAnchor.href='https://example.org/destination';
+
 
 const stale=await command({...dispatchedFollow,expectedUrl:'https://example.org/stale'});
 assert.equal(stale.effectPhase,'not_started','stale URL rejection is explicitly pre-effect through native dispatch');

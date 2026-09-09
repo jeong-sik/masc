@@ -100,7 +100,7 @@ let script = {js|function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "follow_link") {
-    const element = browserScene({...args,mode:'resolve'});
+    const element = browserScene({...args,mode:'resolve_link'});
     if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
       throw new Error('follow_link_requires_anchor');
     const style = getComputedStyle(element);

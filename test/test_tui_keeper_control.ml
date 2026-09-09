@@ -694,6 +694,83 @@ let test_roster_decode_rejects_an_unknown_phase () =
         {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
         err
 
+(* The list route's own error row — a keeper whose metadata it could not
+   read — carries no health, phase, paused, or runtime_id. It cannot:
+   those readings come from the metadata that failed. One such row used
+   to refuse the whole roster (the TUI then drew its "not running"
+   fallback over every keeper); now the row decodes to the reading it
+   actually has and the rest of the roster stays visible. A field that IS
+   present but unknown still refuses, as the two tests above pin. The
+   shape mirrors [Keeper_tool_surface_ops.keeper_list_error_row_json]:
+   [status:"error"] first, then runtime_class/name/keepalive_running/
+   effective_meta_error, then whatever persisted metadata did read. *)
+let error_row name = Printf.sprintf
+    {|{"status":"error","runtime_class":"keeper","name":%S,
+       "keepalive_running":false,
+       "effective_meta_error":{"error":"effective_meta_read_failed",
+                               "agent_name":%S,"detail":"no effective meta"},
+       "meta":null,"created_at":null,"updated_at":null}|}
+    name name
+
+let test_roster_decodes_an_error_row_without_refusing_the_rest () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s,%s]}|}
+         (gate_row "healthy-one")
+         (error_row "broken-meta"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Error detail -> Alcotest.failf "roster must decode past an error row: %s" detail
+  | Ok (rows, _, _) ->
+      Alcotest.(check int) "both rows survive" 2 (List.length rows);
+      let broken =
+        List.find (fun r -> String.equal r.Decode.kr_name "broken-meta") rows
+      in
+      Alcotest.(check string)
+        "the unreadable keeper reads as degraded"
+        "degraded"
+        (Decode.keeper_health_to_string broken.Decode.kr_health);
+      Alcotest.(check string)
+        "its phase is the offline reading" "offline"
+        (Decode.keeper_phase_to_string broken.Decode.kr_phase);
+      Alcotest.(check string)
+        "its sandbox profile is empty, not invented" ""
+        broken.Decode.kr_sandbox_profile;
+      let good =
+        List.find (fun r -> String.equal r.Decode.kr_name "healthy-one") rows
+      in
+      Alcotest.(check string)
+        "the healthy row is untouched"
+        "healthy"
+        (Decode.keeper_health_to_string good.Decode.kr_health)
+
+(* Present-but-unknown health stays a refusal even though an absent one now
+   falls back: the fallback is for readings that do not exist, not for
+   vocabulary this build has not learned. *)
+let test_roster_decode_rejects_present_unknown_health_on_error_row () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s]}|} (error_row "broken-meta"))
+  in
+  let json_with_bad_health =
+    match json with
+    | `Assoc fields ->
+        let keepers =
+          List.find (fun (k, _) -> String.equal k "keepers") fields
+          |> snd
+        in
+        (match keepers with
+         | `List [ `Assoc row ] ->
+             `Assoc
+               (("keepers", `List [ `Assoc (("health", `String "quarantined") :: row) ])
+                :: List.filter (fun (k, _) -> not (String.equal k "keepers")) fields)
+         | _ -> json)
+    | _ -> json
+  in
+  match Decode.decode_keeper_runtime_list json_with_bad_health with
+  | Ok _ -> Alcotest.fail "a present unknown health must not decode"
+  | Error _ -> ()
+
 (* The roster header's tally and the status column are the same reading drawn
    twice. They disagreed once already, when the tally folded a status the
    column spelled out. These pin the tally to whichever function labels the
@@ -981,5 +1058,9 @@ let () =
             test_roster_decode_rejects_an_unknown_status
         ; Alcotest.test_case "unknown phase is rejected" `Quick
             test_roster_decode_rejects_an_unknown_phase
+        ; Alcotest.test_case "an error row decodes without refusing the rest" `Quick
+            test_roster_decodes_an_error_row_without_refusing_the_rest
+        ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick
+            test_roster_decode_rejects_present_unknown_health_on_error_row
         ] )
     ]

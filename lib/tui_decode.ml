@@ -5270,15 +5270,45 @@ let decode_planning_snapshot json =
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
-  let* raw_health = required_string_field json "health" in
-  let* kr_health =
-    match keeper_health_of_string raw_health with
-    | Some health -> Ok health
-    | None ->
-        Error
-          (Printf.sprintf "keeper %S has unknown health %S" kr_name raw_health)
+  (* An error row — the list route's own reading of a keeper whose metadata
+     it could not read — is marked [status:"error"] (see
+     {!Keeper_tool_surface_ops.keeper_list_error_row_json}). It does not
+     carry health, phase, or a meta block, and cannot: those readings come
+     from the metadata that failed to read. Refusing such a row here used
+     to refuse the whole roster (masc task-1485): one unreadable keeper
+     blanked every keeper and the TUI drew its "not running" fallback over
+     the fleet. For those rows the absent readings decode to what the row
+     actually has: health [KH_degraded] — "status file unreadable or
+     undecodable" — phase [Offline], empty profile and runtime id.
+
+     A healthy row is not extended the same tolerance: a field the server
+     always sends (sandbox_profile, phase, runtime_id, …) that goes missing
+     is producer drift, and the reading still fails loud rather than
+     guessing. A present-but-unknown value fails either way; the fallback
+     is for readings that do not exist, not for vocabulary this build has
+     not learned. *)
+  let error_row = match member "status" json with
+    | `String "error" -> true
+    | _ -> false
   in
-  let* kr_paused = required_bool_field json "paused" in
+  let* kr_health =
+    match member "health" json with
+    | `String raw_health -> (
+      match keeper_health_of_string raw_health with
+      | Some health -> Ok health
+      | None ->
+          Error
+            (Printf.sprintf "keeper %S has unknown health %S" kr_name
+               raw_health))
+    | `Null when error_row -> Ok KH_degraded
+    | absent -> field_type_error "health" "a string" absent
+  in
+  let* kr_paused =
+    match member "paused" json with
+    | `Bool value -> Ok value
+    | `Null when error_row -> Ok false
+    | bad -> field_type_error "paused" "a boolean" bad
+  in
   (* An absent action is absent, not a default one: the server publishes null
      when the diagnostic named none, and a keeper with nothing to do is a
      different reading from a keeper whose action this build cannot spell. *)
@@ -5293,28 +5323,56 @@ let decode_keeper_runtime json =
             (Printf.sprintf "keeper %S has unknown next action %S" kr_name raw))
     | bad -> field_type_error "next_action" "a string or null" bad
   in
-  let* kr_keepalive_running = required_bool_field json "keepalive_running" in
-  let* raw_activation_mode = required_string_field json "activation_mode" in
+  let* kr_keepalive_running =
+    match member "keepalive_running" json with
+    | `Bool value -> Ok value
+    | `Null when error_row -> Ok false
+    | bad -> field_type_error "keepalive_running" "a boolean" bad
+  in
+  let* raw_activation_mode =
+    match member "activation_mode" json with
+    | `String raw -> Ok raw
+    | `Null when error_row -> Ok "manual"
+    | bad -> field_type_error "activation_mode" "a string" bad
+  in
   let* kr_activation_mode = match raw_activation_mode with
     | "manual" -> Ok Activation_manual
     | "on_demand" -> Ok Activation_on_demand
     | "autonomous" -> Ok Activation_autonomous
     | value -> Error ("unknown keeper activation mode: " ^ value)
   in
-  let* kr_runtime_id = required_string_field json "runtime_id" in
+  let* kr_runtime_id =
+    match member "runtime_id" json with
+    | `String value -> Ok value
+    | `Null when error_row -> Ok ""
+    | bad -> field_type_error "runtime_id" "a string" bad
+  in
   (* Under [meta] because the row already carries the keeper's own
      declaration there; a second top-level copy would be a second place to
-     update. *)
-  let* row_meta = required_object_field json "meta" in
-  let* kr_sandbox_profile = required_string_field row_meta "sandbox_profile" in
-  let* raw_phase = required_string_field json "phase" in
+     update. An error row with no meta block has no declaration to read,
+     so the sandbox profile is empty rather than guessed. *)
+  let* kr_sandbox_profile =
+    match member "meta" json with
+    | `Null when error_row -> Ok ""
+    | _ ->
+        let* row_meta = required_object_field json "meta" in
+        match member "sandbox_profile" row_meta with
+        | `String value -> Ok value
+        | `Null when error_row -> Ok ""
+        | `Null -> missing_field "sandbox_profile"
+        | bad -> field_type_error "meta.sandbox_profile" "a string" bad
+  in
   let* kr_phase =
-    match keeper_phase_of_string raw_phase with
-    | Some phase -> Ok phase
-    | None ->
-        Error
-          (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
-             raw_phase)
+    match member "phase" json with
+    | `Null when error_row -> Ok Keeper_state_machine.Offline
+    | `String raw_phase -> (
+      match keeper_phase_of_string raw_phase with
+      | Some phase -> Ok phase
+      | None ->
+          Error
+            (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
+               raw_phase))
+    | bad -> field_type_error "phase" "a string" bad
   in
   Ok
     { kr_name

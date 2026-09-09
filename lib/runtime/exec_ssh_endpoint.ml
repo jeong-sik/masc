@@ -19,10 +19,12 @@ let known_capabilities = [ "kvm"; "firecracker" ]
    same relative form rather than resolving against [Config_dir_resolver]
    here. Consumers join them onto the workspace base (or
    [Config_dir_resolver.masc_root]). *)
-let default_identity_file ~name = Printf.sprintf ".masc/ssh/%s.key" name
+let default_identity_file ~name =
+  Filename.concat Common.masc_dirname (Printf.sprintf "ssh/%s.key" name)
+;;
 
 let default_known_hosts_file ~name =
-  Printf.sprintf ".masc/ssh/known_hosts.d/%s" name
+  Filename.concat Common.masc_dirname (Printf.sprintf "ssh/known_hosts.d/%s" name)
 ;;
 
 let default_port = 22

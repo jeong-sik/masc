@@ -16,7 +16,8 @@ open Server_auth
 module Http = Http_server_eio
 
 let lane_token_path () =
-  Env_config_core.resolve_against_base_path ".masc/browser-lane/token"
+  Env_config_core.resolve_against_base_path
+    (Filename.concat Common.masc_dirname "browser-lane/token")
 ;;
 
 let lane_token () =

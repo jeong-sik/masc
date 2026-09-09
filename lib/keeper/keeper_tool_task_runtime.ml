@@ -102,7 +102,7 @@ let validation_error_json message =
    scopes that arg to [masc_add_task]), so [Unknown_predecessor] /
    [Predecessor_not_terminal] cannot be produced through this tool's live
    args today. Exposed (like [validation_error_json] above) so the route
-   split can be tested directly against all six variants without depending
+   split can be tested directly against all variants without depending
    on that unreachable path. *)
 type task_create_failure_route =
   | Task_create_workflow_rejection
@@ -110,25 +110,14 @@ type task_create_failure_route =
 
 let task_create_failure_route : Workspace_task.add_task_error -> task_create_failure_route
   = function
+  | Workspace_task.Unknown_goal _
   | Workspace_task.Unknown_predecessor _
   | Workspace_task.Predecessor_not_terminal _ -> Task_create_workflow_rejection
+  | Workspace_task.Goal_source_unavailable _
   | Workspace_task.Backlog_read_failed _
   | Workspace_task.Goal_link_write_failed _
   | Workspace_task.Backlog_write_failed _
   | Workspace_task.Unexpected_error _ -> Task_create_runtime_failure
-;;
-
-let validate_goal_id config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some _ -> Ok goal_id
-  | None -> Error (Printf.sprintf "unknown goal_id: %s" goal_id)
-;;
-
-let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
-  match Safe_ops.json_string_opt "goal_id" args with
-  | Some s when String.trim s <> "" ->
-      validate_goal_id config (String.trim s) |> Result.map Option.some
-  | _ -> Ok None
 ;;
 
 let no_eligible_exclusion_summary =
@@ -680,12 +669,10 @@ let handle_keeper_task_tool_with_outcome
         (validation_error_json
            "description is required. Explain what needs to be done and why.")
     else (
-      match resolve_task_create_goal_id ~config ~meta args with
-      | Error message ->
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Policy_rejection
-          (validation_error_json message)
-      | Ok goal_id ->
+      let goal_id =
+        Safe_ops.json_string_opt "goal_id" args
+        |> Workspace_task_classify.trim_opt
+      in
           (* De-duplicated: this keeper-internal path now shares the canonical
              [Task.Args.parse_task_contract] used by the public
              masc_task_create facade. The previous local copy
@@ -701,7 +688,7 @@ let handle_keeper_task_tool_with_outcome
                (validation_error_json message)
            | Ok contract ->
              (match
-                Workspace_task.add_task_with_result
+                Masc_task_handlers.Task_goal_assignment.add_task_with_result
                   ?contract
                   ?goal_id
                   config

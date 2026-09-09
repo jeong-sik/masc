@@ -728,7 +728,8 @@ let add_delete_action_routes router =
                 respond_error ~status:`Conflict ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err)
               | Error
-                  (( Task.Goal_assignment.Backlog_read_failed _
+                  (( Task.Goal_assignment.Goal_source_unavailable _
+                   | Task.Goal_assignment.Backlog_read_failed _
                    | Task.Goal_assignment.Link_write_failed _ ) as err) ->
                 respond_error ~status:`Internal_server_error ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err))

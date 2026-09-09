@@ -376,6 +376,30 @@ let load_primary_state config =
     Undecodable "primary Goal store is missing while its recovery mirror exists"
   else Loaded (default_state ())
 
+type goal_reference_error =
+  | Goal_source_unavailable of string
+  | Goal_missing of string
+
+(* Goal membership and the dependent commit share the Goal lock. Callbacks
+   may acquire backlog then link locks, never re-enter the Goal store. *)
+let with_existing_goals config ~goal_ids f =
+  match goal_ids with
+  | [] -> Ok (f ())
+  | _ ->
+    (match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
+      match load_primary_state config with
+      | Undecodable detail ->
+        Error (Goal_source_unavailable detail)
+      | Loaded state ->
+        match List.find_opt
+          (fun id -> not (List.exists (fun (goal : goal) -> String.equal goal.id id) state.goals))
+          goal_ids with
+        | Some id -> Error (Goal_missing id)
+        | None -> Ok (f ())) with
+     | Ok result -> result
+     | Error error ->
+       Error (Goal_source_unavailable (Masc_domain.masc_error_to_string error)))
+
 let update_state config f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
@@ -452,9 +476,8 @@ let delete_goal_error_to_string = function
   | Persistence_failed msg -> "goal persistence failed: " ^ msg
 
 let delete_goal config ~goal_id =
-  let deleted =
-    Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      match load_primary_state config with
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+      let deleted = match load_primary_state config with
       | Undecodable detail ->
         Error (Persistence_failed (undecodable_store_error config detail))
       | Loaded state ->
@@ -473,15 +496,13 @@ let delete_goal config ~goal_id =
             }
         with
         | Ok () -> Ok ()
-        | Error msg -> Error (Persistence_failed msg)))
+        | Error msg -> Error (Persistence_failed msg))
   in
   match deleted with
   | Error _ as error -> error
   | Ok () ->
-    (* This is best-effort cascade cleanup across two file stores, not a
-       cross-file transaction. A structural fix would either co-locate
-       goal-task links with goals or add a higher-level transaction lock that
-       covers every goal/link mutation path. *)
+    (* Keep membership removal and link cleanup in the same Goal lock.
+       Persistence remains two stores; a cleanup failure is reported explicitly. *)
     (match Workspace_goal_index.prune_links_for_goal_result config ~goal_id with
      | Ok () -> Ok Deleted
      | Error detail ->
@@ -495,7 +516,7 @@ let delete_goal config ~goal_id =
            goal_id
            detail
        in
-       Ok (Deleted_with_orphaned_links warning))
+       Ok (Deleted_with_orphaned_links warning)))
 
 let sort_goals goals =
   (* Sort key is [(priority asc, updated_at desc)]. *)

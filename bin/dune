@@ -897,6 +897,12 @@
  (libraries masc_tui_types masc_tui_board_detail))
 
 (library
+ (name masc_tui_browser_lane_layout)
+ (wrapped false)
+ (modules masc_tui_browser_lane_layout)
+ (libraries masc))
+
+(library
  (name masc_tui_board_comment_thread)
  (wrapped false)
  (modules masc_tui_board_comment_thread)
@@ -1276,6 +1282,7 @@
   masc_tui_approval_authority
   masc_tui_board_detail
   masc_tui_board_read_layout
+  masc_tui_browser_lane_layout
   masc_tui_fetched
   masc_tui_magnitude
   masc_tui_board_comment_thread

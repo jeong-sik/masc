@@ -3657,6 +3657,11 @@
  (libraries alcotest masc_tui_board_read_layout masc_tui_types masc_tui_board_detail))
 
 (test
+ (name test_tui_browser_lane_layout)
+ (modules test_tui_browser_lane_layout)
+ (libraries alcotest masc masc_tui_browser_lane_layout))
+
+(test
  (name test_tui_board_read_scroll)
  (modules test_tui_board_read_scroll)
  (libraries alcotest masc_tui_board_detail masc_tui_render_schedule))

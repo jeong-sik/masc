@@ -48,13 +48,13 @@ type completion_action =
 
 type dashboard_purge_artifact =
   | Keeper_metrics_store_artifact
-  | Keeper_decision_log_artifact
-  | Keeper_feedback_log_artifact
+  | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_playground_bundles_artifact
+  | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
@@ -62,6 +62,7 @@ type dashboard_purge_artifact =
 type completion_receipt =
   | Completion_not_requested
   | Completion_pending of completion_action
+  | Completion_delivery_failed of { action : completion_action; detail : string }
   | Completion_delivered of completion_action
 
 type cleanup_intent =
@@ -226,7 +227,7 @@ let schema_version = 8
 
 let requires_admission_fence operation =
   match operation.phase with
-  | Finalized { completion = Completion_pending _; _ } -> true
+  | Finalized { completion = (Completion_pending _ | Completion_delivery_failed _); _ } -> true
   | Finalized
       { completion = (Completion_not_requested | Completion_delivered _); _ }
   | Superseded _
@@ -284,6 +285,7 @@ let completion_action_of_cleanup_reason = function
 let completion_receipt_kind = function
   | Completion_not_requested -> "not_requested"
   | Completion_pending _ -> "pending"
+  | Completion_delivery_failed _ -> "delivery_failed"
   | Completion_delivered _ -> "delivered"
 ;;
 
@@ -395,6 +397,7 @@ let rec validate operation =
          with
          | None, Completion_not_requested -> Ok ()
          | Some expected, Completion_pending actual
+         | Some expected, Completion_delivery_failed { action = actual; _ }
          | Some expected, Completion_delivered actual
            when completion_action_equal expected actual -> Ok ()
          | (None | Some _), completion ->
@@ -498,8 +501,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
     |> List.sort_uniq String.compare
   in
   [ Keeper_metrics_store_artifact
-  ; Keeper_decision_log_artifact
-  ; Keeper_feedback_log_artifact
+  ; Keeper_root_logs_artifact
   ; Keeper_runtime_directory_artifact
     (* Memory OS sidecars live next to the toml in the config keepers
        directory, outside the runtime directory removed above: without
@@ -513,6 +515,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        backend-scoped root for the exact name so a same-name successor cannot
        inherit files from an earlier Local, Docker, microVM, or SSH lane. *)
   ; Keeper_playground_bundles_artifact
+  ; Keeper_runtime_configuration_artifact
   ; Keeper_configuration_artifact
     (* The chat store is a top-level per-keeper file
        (.masc/keeper_chat/<name>.jsonl), so it sits outside the runtime

@@ -117,6 +117,7 @@ type node_result =
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
+  ; output_validation_error : Keeper_tool_plan.execution_error option
   ; tool_use_id : string
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
@@ -251,6 +252,7 @@ let execute_one
       ; input
       ; schedule = scheduled.schedule
       ; result = result.result
+      ; output_validation_error = None
       ; tool_use_id
       ; failure_effect_disposition = result.failure_effect_disposition
       ; deferred_kind = result.deferred_kind
@@ -258,6 +260,23 @@ let execute_one
       ; truncated_to = result.truncated_to
       }
     in
+    let output, cause, output_validation_error =
+      match result.result with
+      | Tool_result.Deferred _ | Tool_result.Failed _ ->
+        None, Some (Tool_did_not_complete node_result), None
+      | Tool_result.Completed _ ->
+        match scheduled.descriptor.Keeper_tool_descriptor.composable_output with
+        | Keeper_tool_descriptor.Opaque_output -> None, None, None
+        | Keeper_tool_descriptor.Json_output _ ->
+          match Keeper_tool_plan.validate_output plan ~run_id ~node_id
+                  (Tool_result.data result.result) with
+          | Ok output -> Some output, None, None
+          | Error error ->
+            None,
+            Some (Plan_execution_failed { node_id; schedule = scheduled.schedule; error }),
+            Some error
+    in
+    let node_result = { node_result with output_validation_error } in
     let observation_error =
       match observe_node_result with
       | None -> None
@@ -270,41 +289,12 @@ let execute_one
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Some (Printexc.to_string exn))
     in
-    (match observation_error with
-     | Some detail ->
-       { result = Some node_result
-       ; output = None
-       ; cause = Some (Node_observation_failed { node = node_result; detail })
-       }
-     | None ->
-       (match result.result with
-     | Tool_result.Deferred _ | Tool_result.Failed _ ->
-       { result = Some node_result
-       ; output = None
-       ; cause = Some (Tool_did_not_complete node_result)
-       }
-     | Tool_result.Completed _ ->
-       (match scheduled.descriptor.Keeper_tool_descriptor.composable_output with
-        | Keeper_tool_descriptor.Opaque_output ->
-          { result = Some node_result; output = None; cause = None }
-        | Keeper_tool_descriptor.Json_output _ ->
-          (match
-             Keeper_tool_plan.validate_output
-               plan
-               ~run_id
-               ~node_id
-               (Tool_result.data result.result)
-           with
-           | Ok output ->
-             { result = Some node_result; output = Some output; cause = None }
-           | Error error ->
-             { result = Some node_result
-             ; output = None
-             ; cause =
-                 Some
-                   (Plan_execution_failed
-                      { node_id; schedule = scheduled.schedule; error })
-             }))))
+    match observation_error with
+    | Some detail ->
+      { result = Some node_result; output = None
+      ; cause = Some (Node_observation_failed { node = node_result; detail }) }
+    | None -> { result = Some node_result; output; cause }
+
 ;;
 
 let execute_with_tool_use_id
@@ -317,8 +307,7 @@ let execute_with_tool_use_id
   =
   let node_effect_disposition (result : node_result) =
     match result.result with
-    | Tool_result.Deferred _ -> Tool_result.Proven_pre_effect
-    | Tool_result.Failed _ ->
+    | Tool_result.Deferred _ | Tool_result.Failed _ ->
       Option.value
         ~default:Tool_result.Effect_outcome_unknown
         result.failure_effect_disposition

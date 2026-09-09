@@ -77,7 +77,7 @@ let test_absent_and_paused_reads_paused () =
 let test_live_running_offers_pause () =
   let r = reading ~liveness:(Control.Present (runtime "analyst")) "analyst" in
   check_actions "pause first"
-    [ Control.Pause; Control.Wakeup; Control.Shutdown ]
+    [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
     (Control.available r);
   Alcotest.(check (option action_testable))
     "primary is pause" (Some Control.Pause) (Control.primary r);
@@ -90,7 +90,7 @@ let test_live_paused_offers_resume () =
       "analyst"
   in
   check_actions "resume first"
-    [ Control.Resume; Control.Wakeup; Control.Shutdown ]
+    [ Control.Resume; Control.Wakeup; Control.Shutdown; Control.Delete ]
     (Control.available r);
   Alcotest.(check (option action_testable))
     "primary is resume" (Some Control.Resume) (Control.primary r)
@@ -270,22 +270,21 @@ let test_delete_is_confirmed_and_irreversible () =
   Alcotest.(check bool) "and the arm has a list to name" true
     (List.length Control.purge_artifacts > 0)
 
-(* A live fiber is the case a single keypress must not end. The purge route
-   would accept it and stop the keeper as part of the operation, so refusing
-   here is what keeps shutdown and delete two deliberate presses. *)
-let test_delete_is_not_offered_to_a_live_fiber () =
+(* Delete remains a confirmed action and delegates live-lane shutdown to the
+   durable server operation. An unread roster still offers no actions. *)
+let test_delete_is_offered_with_shutdown_confirmation () =
   let live = reading ~liveness:(Control.Present (runtime "analyst")) "analyst" in
-  Alcotest.(check bool) "no delete while a fiber runs" false
+  Alcotest.(check bool) "confirmed delete available while a fiber runs" true
     (List.mem Control.Delete (Control.available live));
   let paused =
     reading ~paused:true ~liveness:(Control.Present (runtime "analyst")) "analyst"
   in
-  Alcotest.(check bool) "not even for a paused one" false
+  Alcotest.(check bool) "also for a paused lane" true
     (List.mem Control.Delete (Control.available paused));
   (* An unread roster cannot say the fiber is gone. *)
   Alcotest.(check bool) "and not without a roster" false
     (List.mem Control.Delete (Control.available (reading "analyst")));
-  (* Absent is the one reading that licenses it, and boot stays the toggle. *)
+  (* An absent lane still offers boot as the primary action. *)
   let absent = reading ~liveness:Control.Absent "analyst" in
   Alcotest.(check bool) "offered once the fiber is gone" true
     (List.mem Control.Delete (Control.available absent));
@@ -450,7 +449,7 @@ let test_partial_roster_still_confirms_what_it_holds () =
   Alcotest.(check string) "the observed keeper reports its health" "healthy"
     (Control.health_label present);
   check_actions "and it can be paused"
-    [ Control.Pause; Control.Wakeup; Control.Shutdown ]
+    [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
     (Control.available present)
 
 let test_full_roster_is_complete () =
@@ -481,7 +480,7 @@ let test_success_is_accepted () =
   with
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "not already live" false already_live
-  | Control.Paused_owner_conflict _ | Control.Rejected _ ->
+  | Control.Purge_accepted _ | Control.Paused_owner_conflict _ | Control.Rejected _ ->
       Alcotest.fail "200 must be accepted"
 
 let test_already_live_is_carried () =
@@ -491,7 +490,7 @@ let test_already_live_is_carried () =
   with
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "already live" true already_live
-  | Control.Paused_owner_conflict _ | Control.Rejected _ ->
+  | Control.Purge_accepted _ | Control.Paused_owner_conflict _ | Control.Rejected _ ->
       Alcotest.fail "200 must be accepted"
 
 let test_conflict_is_its_own_outcome () =
@@ -505,7 +504,7 @@ let test_conflict_is_its_own_outcome () =
         "detail is the server's" true
         (String.length detail > 0
         && not (String.equal detail "HTTP 409"))
-  | Control.Accepted _ -> Alcotest.fail "409 is not an acceptance"
+  | Control.Accepted _ | Control.Purge_accepted _ -> Alcotest.fail "409 is not an acceptance"
   | Control.Rejected _ -> Alcotest.fail "409 has its own outcome"
 
 (* A 400 whose prose mentions pausing must stay a rejection. Routing on the
@@ -521,7 +520,7 @@ let test_rejection_prose_does_not_become_a_conflict () =
       Alcotest.(check bool)
         "detail is the server's error" true
         (String.length detail > 0 && not (String.equal detail "HTTP 400"))
-  | Control.Accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
       Alcotest.fail "400 is a rejection"
 
 let test_non_json_error_keeps_its_text () =
@@ -532,14 +531,14 @@ let test_non_json_error_keeps_its_text () =
       Alcotest.(check int) "status" 502 status;
       Alcotest.(check string)
         "text survives" "upstream closed the connection" detail
-  | Control.Accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
       Alcotest.fail "502 is a rejection"
 
 let test_empty_error_body_names_the_status () =
   match Control.classify_response ~status:503 ~body:"" with
   | Control.Rejected { detail; _ } ->
       Alcotest.(check string) "status stands in" "HTTP 503" detail
-  | Control.Accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
       Alcotest.fail "503 is a rejection"
 
 (* {1 Roster decode} *)
@@ -808,6 +807,19 @@ let test_roster_decode_rejects_unknown_action () =
         true
         (String_util.contains_substring err "reboot_the_universe")
 
+let test_purge_response_binds_exact_operation () =
+  let body name operation_id = Yojson.Safe.to_string (`Assoc [
+    "ok", `Bool true; "accepted", `Bool true; "target_kind", `String "keeper";
+    "keeper_name", `String name; "operation_id", `String operation_id]) in
+  (match Control.classify_purge_response ~keeper_name:"alpha" ~status:202 ~body:(body "alpha" "operation-alpha") with
+   | Control.Purge_accepted {operation_id} -> Alcotest.(check string) "durable operation retained" "operation-alpha" operation_id
+   | _ -> Alcotest.fail "valid purge receipt rejected");
+  List.iter (fun raw ->
+    match Control.classify_purge_response ~keeper_name:"alpha" ~status:202 ~body:raw with
+    | Control.Rejected _ -> ()
+    | _ -> Alcotest.fail "unbound purge receipt accepted")
+    ["{}"; "{not-json"; body "another" "operation-alpha"; body "alpha" ""]
+
 let () =
   Alcotest.run "tui-keeper-control"
     [ ( "health_tally"
@@ -860,7 +872,7 @@ let () =
         ; Alcotest.test_case "delete is confirmed and irreversible" `Quick
             test_delete_is_confirmed_and_irreversible
         ; Alcotest.test_case "delete is not offered to a live fiber" `Quick
-            test_delete_is_not_offered_to_a_live_fiber
+            test_delete_is_offered_with_shutdown_confirmation
         ; Alcotest.test_case "boot recovers a paused owner" `Quick
             test_boot_recovers_a_paused_owner
         ; Alcotest.test_case "resume body carries the operation id" `Quick
@@ -887,7 +899,8 @@ let () =
             test_full_roster_is_complete
         ] )
     ; ( "responses"
-      , [ Alcotest.test_case "a success is accepted" `Quick
+      , [ Alcotest.test_case "purge binds exact operation" `Quick test_purge_response_binds_exact_operation
+        ; Alcotest.test_case "a success is accepted" `Quick
             test_success_is_accepted
         ; Alcotest.test_case "already-live is carried" `Quick
             test_already_live_is_carried

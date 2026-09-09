@@ -26,6 +26,13 @@ and corrupt_owner_fence =
 
 val submit_error_to_string : submit_error -> string
 
+(** Retry only post-finalization Dashboard artifact delivery for the exact
+    durable operation. Lane joins and unknown effects are not replayed. *)
+val retry_completion :
+  config:Workspace.config -> keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (Keeper_shutdown_types.t, [ `Not_ready | `Submit of submit_error ]) result
+
 (** Restore admission from owner-addressable durable inventory. A Keeper with
     any corrupt payload is fenced once. A current operation that still requires
     a fence owns admission long enough to recover; otherwise the deterministic

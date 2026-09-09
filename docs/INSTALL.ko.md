@@ -2,10 +2,9 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.34.0** 설치 계약입니다. 공개된 최신 버전은
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/latest)에서 확인합니다.
-아래 `v0.34.0` 다운로드는 2026-09-08에 게시된 태그를 가리킵니다. `main` 소스
-빌드가 0.34.0과 다른 점(기본 Keeper `imp`)은 본문에 따로 적었습니다.
+이 문서는 **0.35.0 설치 계약**입니다. 태그와 자산 제공 여부는
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
+아래 다운로드 명령은 `v0.35.0`과 같은 버전의 설치기를 선택합니다.
 
 ## 플랫폼과 준비물
 
@@ -57,7 +56,7 @@ Apple Silicon의 Intel Homebrew 등 다른 prefix로 연결된 환경은 다운�
 `dyld: Library not loaded` 같은 stderr 원문과 실패한 실행 파일 경로를 확인하세요.
 종료 신호만으로 누락 라이브러리라고 단정하지 않습니다.
 
-0.34.0 배포 파일의 Mach-O 최소 OS는 Apple Silicon **macOS 14.0**,
+지원하는 최소 OS는 Apple Silicon **macOS 14.0**,
 Intel **macOS 15.0**입니다. 해당 CPU의 기본 Homebrew prefix
 (Apple Silicon `/opt/homebrew`, Intel `/usr/local`)에 의존성을 준비합니다.
 
@@ -74,7 +73,7 @@ uname -m
 ## 설치
 
 ```bash
-TAG=v0.34.0
+TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh
@@ -141,10 +140,9 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.0 바이너리**는 autoboot이 꺼진 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.0 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
-설치기는 설정을 바이너리에서 가져옵니다. 이전 0.34.0 바이너리의 기본 명단은
-비어 있습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
@@ -155,10 +153,13 @@ Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 �
 설치돼 있지 않아도 선택지가 사라지지 않고, 로컬 서버는 다른 컴퓨터의 endpoint를
 가리킬 수도 있습니다.
 
-고른 연결만 추가합니다. 모델 ID와 context 크기는 실제 서버·CLI 설정에 맞게 적습니다.
-도구 호출과 streaming은 직접 확인한 것만 켭니다. 모델 이름만 보고 이미지·reasoning·
-도구 지원을 짐작하지 않습니다. HTTP 모델은 그 provider에만 적용되는 capability
-overlay를 같이 만듭니다. API 키는 값이 아니라 환경변수 이름을 적습니다.
+고른 연결만 추가합니다. Claude Code·Codex는 모델 ID를 입력하면 설치된 모델
+카탈로그에서 context 크기를 가져오고 도구 호출·streaming 질문은 생략합니다.
+카탈로그에 없는 모델만 context 크기를 직접 입력합니다. HTTP 연결은 서버의
+context 크기와 도구 호출·streaming 지원 여부를 직접 확인해 입력합니다.
+HTTP capability overlay는 해당 provider에만 적용됩니다. API 키는 값이 아니라
+환경변수 이름을 적습니다. 기본 Z.AI 연결은 MASC를 시작하는 shell의
+`ZAI_API_KEY`를 읽습니다.
 
 설정은 임시 workspace에서 같은 바이너리의 runtime 검사를 통과한 뒤에야 반영됩니다.
 검사가 실패하거나 원본이 그 사이에 바뀌면 기존 설정을 그대로 둡니다. 같은 setup의
@@ -171,80 +172,48 @@ timeout까지 적어야 합니다. `Configure later`로 모델 연결을 미룰 
 Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설정하려면 `--wizard`를
 쓰세요.
 
-## 처음 실행하고 할 수 있는 일
+## `imp`와 첫 대화 (0.35.0)
+
+이 경로는 `masc setup`이 포함된 **0.35.0 설치 계약**입니다. 다운로드 전에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
+
+1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
+   런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
+   레인에도 연결합니다. 두 번째 모델 구독은 필요하지 않습니다.
+2. Claude Code·Codex는 CLI를 설치하고 해당 CLI에서 로그인한 뒤 이 터미널에서
+   응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
+   터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
+   모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+3. macOS에서는 Docker Desktop, Linux에서는 Docker Engine을 설치하고 시작합니다.
+   현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
 
 ```bash
-masc --base-path "$HOME/masc-workspace"
+masc setup --base-path "$HOME/masc-workspace"
 ```
 
-터미널에서 TUI가 열리고 해당 포트에 서버가 없으면 시작합니다. HTTP 서버만
-실행하려면 다음 명령을 사용합니다.
+`setup`은 누락된 설정을 시드하고 Docker 확인, 기본 샌드박스 이미지 빌드,
+같은 작업 공간의 서버 시작·연결, `local-admin` 로그인, 기존 `imp` 시작을 거쳐
+TUI를 엽니다. Keeper 설정 파일은 보존합니다. 기본 `imp` 설정은
+`activation_mode = "manual"`, `sandbox_profile = "docker"`,
+`network_mode = "inherit"`입니다. 다른 작업 공간이 포트를 쓰고 있으면
+`--port 8936`처럼 빈 포트를 지정하세요. 종료할 때 setup이 직접 시작한 서버도
+종료합니다. 서버를 계속 실행하려면 `--no-tui`를 사용하고 별도로 접속하세요.
 
-```bash
-masc start --base-path "$HOME/masc-workspace"
-```
+TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세요.
 
-서버는 foreground로 실행됩니다. 별도 터미널에서 상태를 확인합니다.
+- “안녕. 대화가 연결됐는지 확인할 수 있게 답해줘.”
+- “Board에 첫 대화라는 글을 작성하고 글 id를 알려줘.”
+- “내 샌드박스 살펴보기라는 Task를 설명과 함께 만들고 id를 알려줘.”
+- “네 샌드박스 안에서 `pwd`와 `ls`를 실행하고 디렉터리 목록을 보여줘.”
+- “web_fetch로 https://example.com 을 읽고 페이지 제목을 알려줘.”
 
-```bash
-curl http://127.0.0.1:8935/health
-curl 'http://127.0.0.1:8935/health?full=1'
-```
+답변, 저장된 Board 글과 Task, 샌드박스·웹 도구의 성공 결과를 확인하세요.
+여기서는 대화와 기본 기능을 확인하며 Task 완료는 별도 절차입니다. Web fetch는
+검색 API 키가 필요 없고 web search는 별도 검색 프로바이더 설정이 필요합니다.
+도구 승인을 기다리면 채팅이나 **Approvals**에서 해당 요청을 확인하세요.
+승인 대기나 HTTP 서버 응답만으로 모델 응답·도구 실행 성공을 판단하지 마세요.
 
-`/health` 응답은 HTTP listener가 열렸다는 뜻입니다. 첫 Keeper를 만들기 전에는
-full health의 `startup.state_ready`가 `true`인지도 확인합니다. 부팅 초기에는
-listener가 먼저 응답하고 내부 상태 초기화는 진행 중일 수 있습니다.
-
-브라우저에서 `http://127.0.0.1:8935/dashboard/`를 엽니다. 대시보드는 설치된
-번들을 자동 선택하므로 소스 디렉터리에서 시작할 필요가 없습니다.
-[인증 안내](LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에 따라 쓰기 권한을 설정합니다.
-
-MCP 클라이언트는 `http://127.0.0.1:8935/mcp`에 bearer와 함께 연결합니다.
-설치 스크립트가 출력하는 `masc login ... --shell` 명령과
-[클라이언트 설정](../README.md#mcp-client-setup)을 사용하세요.
-외부 에이전트는 작업을 등록·claim하고 목표, 보드, 댓글, 실행 증거를 공유할 수 있습니다.
-이 경우 MASC 자체의 모델 연결 없이도 외부 에이전트가 자기 모델을 사용합니다.
-
-Keeper를 실행하려면 모델 출처와 도구 실행 환경을 모두 준비합니다.
-
-1. `runtime.toml`에서 모델을 선택합니다. API 방식은 서버를 시작하는 shell에
-   해당 credential 환경변수를 export합니다. CLI 방식은 그 CLI를 별도 설치하고 로그인합니다.
-2. Docker 방식은 Docker daemon을 시작하고 `masc sandbox-image`로 기본 실행 이미지를
-   준비합니다. microVM/remote SSH는 각 backend 설정이 필요합니다.
-3. TUI Keepers 화면 또는 `masc keeper-create --help`로 Keeper를 생성합니다.
-   미리 구성된 팀이 필요하면 설치 시 `--team classic --sandbox docker`를 사용합니다.
-   팀 파일은 다음 서버 시작 시 Keeper를 자동 부팅하므로 모델·sandbox를 먼저 준비합니다.
-
-서버가 실행 중이고 Docker 이미지와 모델을 준비했다면, 별도 터미널에서 첫 Keeper를
-명시적으로 만들 수 있습니다. `login`과 `keeper-create`는 같은 base path, agent,
-host/port를 사용합니다.
-
-```bash
-masc login --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
-  --agent local-admin --role admin --no-expiry --json
-masc keeper-create --base-path "$HOME/masc-workspace" --host 127.0.0.1 --port 8935 \
-  --agent local-admin --name scout --sandbox-profile docker --network-mode none \
-  --no-skills --no-autoboot --no-proactive \
-  --instructions '주어진 작업을 수행하고 실제 도구 결과를 근거로 보고한다.'
-```
-
-생성 요청은 Keeper를 즉시 부팅합니다. `--no-autoboot`는 이후 서버 재시작 때의
-자동 부팅을 끄며, `--no-proactive`는 자발적 활동을 끕니다. TUI나 대시보드에서
-`scout`에게 작업을 보내세요. 이 예제의 `none`은 guest 외부 네트워크를 막으므로
-웹·Git 원격 작업에는 `inherit` 등 작업에 맞는 네트워크 설정이 필요합니다.
-같은 이름으로 다시 실행하면 기존 Keeper를 재설정합니다.
-
-첫 도구 실행이 대기하면 채팅의 pending tool approval을 확인하고 승인에 응답하세요.
-Keeper 채팅의 도구 승인(Auto/Yolo 및 도구별 승인)은 workspace Gate의
-`auto_judge`/`manual`과 외부 서비스 승인 경로와 별개입니다. per-Keeper Gate를
-`always_allow`로 바꿔도 workspace의 `auto_judge`를 완화할 수 없습니다.
-승인 대기를 모델 연결이나 설치 실패로 오해하지 않도록 각 승인 상태를 확인하세요.
-
-Keeper는 설정된 모델로 턴을 수행하고, sandbox에서 도구를 실행하며, 작업·보드·채팅을
-통해 협업합니다. 일정 실행, 승인 판단, 외부 connector와 브라우저 조작은 해당
-runtime/credential/backend 설정이 있어야 합니다. 브라우저는 별도
-[native host 연결 안내](../connectors/browser/host/README.md)를 따릅니다.
-서버 설치 smoke는 모델 응답이나 장시간 Keeper 연속 실행을 증명하지 않습니다.
+MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 사용하고 [클라이언트 설정](../README.md#mcp-client-setup)을 따르세요.
 
 ## 이미지와 Linux/microVM의 경계
 
@@ -278,7 +247,7 @@ Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 �
 masc keeper-create --base-path "$HOME/masc-workspace" \
   --agent local-admin --name linux-worker \
   --sandbox-profile microvm --microvm-backend nerdctl_kata \
-  --network-mode none --no-autoboot --no-proactive \
+  --network-mode none --activation-mode manual \
   --instructions "지정된 작업을 수행하고 실행 결과와 증거를 보고한다."
 ```
 
@@ -365,7 +334,7 @@ Gecko scene 기능은 native host와 브라우저 확장 0.3.0 이상이 함께 
 | `frontend` | 프론트엔드 구현과 검증 |
 | `qa` | 요구사항에 대한 테스트·검증 |
 
-이 preset은 `autoboot_enabled=true`, `sandbox_profile="docker"`,
+이 preset은 `activation_mode="autonomous"`, `sandbox_profile="docker"`,
 `network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
 컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
 
@@ -417,7 +386,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.34.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.0` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

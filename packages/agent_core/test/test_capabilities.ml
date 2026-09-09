@@ -2926,6 +2926,65 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
+(* Every [[providers]] entry declares a [capabilities_base], and until
+   2026-09-09 that base was consulted before the model's own bare row. It
+   therefore always answered, and the bare row -- the only lookup that applies
+   prefix matching -- was unreachable for any label naming a provider entry.
+   44 of the catalog's 125 bare rows sat behind that: glm 21, gemini 11,
+   kimi 7, ollama 5. Only `gemini`, `glm`, `kimi` and `ollama` are both a
+   wire-kind label and a [[providers]] id, which is why glm (#34126) and
+   gemini (#34301) were the two that got noticed.
+
+   The discriminator is a field the row sets and the provider base does not:
+   [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
+   what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
+   thinking-control contract" -- so [Some _] here means the row was read. *)
+let test_a_bare_row_outranks_the_provider_base () =
+  let resolved label model_id =
+    match
+      Capabilities.for_provider_model_id
+        ~wire:None
+        ~allow_bare_fallback:true
+        ~provider_label:label
+        ~model_id
+    with
+    | Some (c : Capabilities.capabilities) -> c.accepted_reasoning_efforts
+    | None -> failf "%s/%s resolved to no capabilities at all" label model_id
+  in
+  List.iter
+    (fun (label, model_id) ->
+       match resolved label model_id with
+       | Some (_ :: _) -> ()
+       | Some [] ->
+         failf "%s/%s read a row that declares no accepted efforts" label model_id
+       | None ->
+         failf
+           "%s/%s fell through to the provider base; the bare row naming it was not read"
+           label
+           model_id)
+    [ "gemini", "gemini-3-flash-preview"; "glm", "glm-4.6v" ]
+;;
+
+(* The reorder is gated on [allow_bare_fallback]: a config that named a
+   [provider_id] must not pick up a bare row, because a scoped provider's base
+   can deliberately differ from the provider-independent value. *)
+let test_a_named_provider_still_refuses_the_bare_row () =
+  match
+    Capabilities.for_provider_model_id
+      ~wire:None
+      ~allow_bare_fallback:false
+      ~provider_label:"gemini"
+      ~model_id:"gemini-3-flash-preview"
+  with
+  | None -> failf "the provider base should still answer here"
+  | Some (c : Capabilities.capabilities) ->
+    check
+      bool
+      "a named provider reads the base, which declares no accepted efforts"
+      true
+      (Option.is_none c.accepted_reasoning_efforts)
+;;
+
 let test_prefix_ordering_invariant () =
   (* Each entry: (route, model_id, label, discriminating_predicate).
      The predicate is true only when the more-specific (longer-prefix)
@@ -3320,6 +3379,14 @@ let () =
             "shadow pairs all resolve to specific branch (M01)"
             `Quick
             test_prefix_ordering_invariant
+        ; test_case
+            "a bare row outranks the provider base"
+            `Quick
+            test_a_bare_row_outranks_the_provider_base
+        ; test_case
+            "a named provider still refuses the bare row"
+            `Quick
+            test_a_named_provider_still_refuses_the_bare_row
         ] )
     ]
 ;;

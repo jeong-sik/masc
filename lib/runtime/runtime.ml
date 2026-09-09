@@ -917,7 +917,7 @@ let verifier_exact_slot_ids_of_lane_decls
       decls
   with
   | None -> []
-  | Some lane -> lane.slot_ids
+  | Some lane -> lane.slot_ids @ lane.cli_slot_ids
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
@@ -1651,12 +1651,13 @@ let verifier_exact_lane_slot_ids () =
          registry
          ~lane_id:verifier_exact_lane_id
      with
-     | Ok { selected_slots } ->
+     | Ok { selected_slots; cli_slots } ->
        Ok
          (List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) ->
                slot.slot_id)
-            selected_slots)
+            selected_slots
+          @ cli_slots)
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
@@ -2592,31 +2593,34 @@ let normalized_assignment = function
     else Ok (Assignment_present runtime_id)
 ;;
 
-let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
+let commit_keeper_assignment_using ?egress_allow ~commit_text transaction ~runtime_id =
   let* requested = normalized_assignment runtime_id in
   match transaction with
   | Missing_runtime_config _ ->
-    (match requested with
-     | Assignment_missing -> Ok (Assignment_unchanged Runtime_config_missing)
-     | Assignment_present _ -> Error runtime_config_path_missing_message)
+    (match requested, egress_allow with
+     | Assignment_missing, None -> Ok (Assignment_unchanged Runtime_config_missing)
+     | Assignment_present _, _ | Assignment_missing, Some _ -> Error runtime_config_path_missing_message)
   | Present_runtime_config transaction ->
   let current_assignment =
     match transaction.revision with
     | Runtime_config_present { assignment; _ } -> assignment
     | Runtime_config_missing -> Assignment_missing
   in
-  if requested = current_assignment
+  let assigned_source =
+    if requested = current_assignment then transaction.source_text
+    else match requested with
+      | Assignment_missing -> remove_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name
+      | Assignment_present runtime_id -> update_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name ~runtime_id
+  in
+  let next = match egress_allow with
+    | None -> assigned_source
+    | Some allow -> update_egress_allow_text assigned_source ~keeper_name:transaction.keeper_name ~allow
+  in
+  if String.equal next transaction.source_text
   then Ok (Assignment_unchanged transaction.revision)
   else
-    let next =
-      match requested with
-      | Assignment_missing ->
-        remove_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name
-      | Assignment_present runtime_id ->
-        update_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name ~runtime_id
-    in
     let* receipt = commit_text ~path:transaction.path next in
     Ok
       (Assignment_committed
@@ -2629,60 +2633,29 @@ let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
          })
 ;;
 
-let commit_keeper_assignment transaction ~runtime_id =
-  commit_keeper_assignment_using
+let commit_keeper_assignment ?egress_allow transaction ~runtime_id =
+  commit_keeper_assignment_using ?egress_allow
     ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
     transaction ~runtime_id
 ;;
 
-(* The keeper's egress allowlist, written inside the same transaction as its
-   runtime assignment: one lock, one file, one set of source bytes. A second
-   transaction would let another admitted writer land between a keeper being
-   put in the policy lane and being told what it may reach, and the gap
-   between those two is a keeper that reaches nothing while its config says
-   otherwise.
-
-   Unlike an assignment, there is no "unchanged" fast path keyed off the
-   revision: the transaction's revision carries the assignment, not the
-   allowlist, so the comparison is on the text this write would produce. *)
-let commit_keeper_egress_allow_using ~commit_text transaction ~allow =
+let commit_keeper_removal transaction =
   match transaction with
-  | Missing_runtime_config _ ->
-    (match allow with
-     | None -> Ok (Assignment_unchanged Runtime_config_missing)
-     | Some _ -> Error runtime_config_path_missing_message)
+  | Missing_runtime_config _ -> Ok (Assignment_unchanged Runtime_config_missing)
   | Present_runtime_config transaction ->
     let next =
-      match allow with
-      | None ->
-        remove_egress_allow_text transaction.source_text
-          ~keeper_name:transaction.keeper_name
-      | Some allow ->
-        update_egress_allow_text transaction.source_text
-          ~keeper_name:transaction.keeper_name ~allow
+      remove_runtime_assignment_text transaction.source_text
+        ~keeper_name:transaction.keeper_name
+      |> fun source -> remove_egress_allow_text source ~keeper_name:transaction.keeper_name
     in
     if String.equal next transaction.source_text
     then Ok (Assignment_unchanged transaction.revision)
     else
-      let* receipt = commit_text ~path:transaction.path next in
-      Ok
-        (Assignment_committed
-           { receipt
-           ; revision =
-               Runtime_config_present
-                 { source_revision = receipt.observation.source_revision
-                 ; assignment =
-                     (match transaction.revision with
-                      | Runtime_config_present { assignment; _ } -> assignment
-                      | Runtime_config_missing -> Assignment_missing)
-                 }
-           })
-;;
-
-let commit_keeper_egress_allow transaction ~allow =
-  commit_keeper_egress_allow_using
-    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
-    transaction ~allow
+      let* receipt = commit_runtime_config_text ~path:transaction.path next in
+      Ok (Assignment_committed { receipt;
+        revision = Runtime_config_present {
+          source_revision = receipt.observation.source_revision;
+          assignment = Assignment_missing } })
 ;;
 
 let restore_keeper_assignment_transaction_using ~commit_text transaction =
@@ -2852,6 +2825,48 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
+;;
+
+let set_first_run_runtime ?runtime_config_path ~runtime_id () =
+  let runtime_id = String.trim runtime_id in
+  if String.equal runtime_id "" || contains_newline runtime_id
+  then Error "runtime_id must be non-empty and must not contain newlines"
+  else
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let* config =
+          Runtime_toml.parse_string content
+          |> Result.map_error runtime_parse_errors_to_string
+        in
+        let runtimes, _ = partition_bindings config config.bindings in
+        let* runtime =
+          match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+          | Some runtime -> Ok runtime
+          | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
+        in
+        let slots, cli_slots =
+          match runtime.execution with
+          | Runtime_execution.Agent_core _ -> [ runtime_id ], []
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
+        in
+        let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+        let next =
+          List.fold_left
+            (fun content lane_id ->
+              let path = "runtime.exact_output_lanes." ^ lane_id in
+              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
+              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
+            next
+            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+        in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =

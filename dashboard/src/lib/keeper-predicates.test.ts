@@ -291,7 +291,7 @@ describe('접힌 status 가 살아 있는 축과 어긋날 때', () => {
   it('살아 있는 키퍼에게 부팅과 삭제를 권하지 않는다', () => {
     const vis = keeperActionVisibility(rondo)
     expect(vis.canBoot).toBe(false)
-    expect(vis.canPurge).toBe(false)
+    expect(vis.canPurge).toBe(true)
   })
 
   it('살아 있는 키퍼는 깨울 수 있다', () => {

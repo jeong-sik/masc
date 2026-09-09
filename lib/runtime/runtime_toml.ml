@@ -2227,7 +2227,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], _) ->
+  | [], Ok ([], []) ->
     Error (error path "exact-output lane must have at least one slot")
   | [], Ok (slot_ids, cli_slot_ids) ->
     let rec validate_cli position seen = function

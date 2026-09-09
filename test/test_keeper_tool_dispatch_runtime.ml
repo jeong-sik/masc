@@ -5300,7 +5300,7 @@ value = { surface = "dashboard", content = "must not be reached" }
 let write_then_unchanged_board_composition ~revision =
   Printf.sprintf
     {|[[compositions]]
-name = "write-then-durable-wait"
+name = "write-then-conditional-read"
 execution = "inline"
 
 [[compositions.nodes]]
@@ -5308,10 +5308,10 @@ id = "write"
 tool = "keeper_memory_write"
 [compositions.nodes.input]
 kind = "literal"
-value = { title = "composition before wait", content = "must execute exactly once before yielding" }
+value = { title = "composition before read", content = "write completes before conditional read" }
 
 [[compositions.nodes]]
-id = "wait"
+id = "read"
 tool = "masc_board_list"
 after = ["write"]
 [compositions.nodes.input]
@@ -6664,8 +6664,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
               fail "official-client provider loop remained open after unknown effect"))
 ;;
 
-let test_terminal_composition_post_effect_defer_closes_without_resume () =
-  with_exec_fixture "composition-generic-defer-terminal-boundary"
+let test_write_then_unchanged_read_completes () =
+  with_exec_fixture "composition-conditional-read-completion"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -6700,7 +6700,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
        in
        let skill_catalog =
          skill_catalog_of_composition
-           ~name:"write-then-durable-wait"
+           ~name:"write-then-conditional-read"
            (write_then_unchanged_board_composition ~revision)
        in
        let bundle =
@@ -6719,10 +6719,10 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
               match
                 find_tool_by_name
                   bundle.tools
-                  "keeper_compose_write-then-durable-wait"
+                  "keeper_compose_write-then-conditional-read"
               with
               | Some tool -> tool
-              | None -> fail "ordinary generic-deferred composition was not materialized"
+              | None -> fail "conditional-read composition was not materialized"
             in
             (match Agent_core.Tool.completion composition_tool with
              | Agent_core.Tool_contract.Continue_after_success -> ()
@@ -6756,47 +6756,26 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
                    (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
                       String.equal
                         tool.name
-                        "keeper_compose_write-then-durable-wait")
+                        "keeper_compose_write-then-conditional-read")
               |> function
               | Some tool -> tool
-              | None -> fail "generic-deferred composition was not projected"
+              | None -> fail "conditional-read composition was not projected"
             in
-            let result = tool.call ~call_id:"generic-deferred-composition" (`Assoc []) in
-            check bool "generic-deferred composition is incomplete" false result.success;
-            (match bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
-               check string
-                 "prior write prevents false resumability"
-                 "proven_post_effect"
-                 (Tool_result.failure_effect_disposition_to_string
-                    failure.effect_disposition)
-             | _ -> fail "post-effect defer did not terminalize the composition");
-            let deferred_payload = parse_json result.content in
-            check string
-              "nested deferred node retains producer-owned kind"
-              "generic_deferred"
+            let result = tool.call ~call_id:"conditional-read-composition" (`Assoc []) in
+            check bool "conditional-read composition completes" true result.success;
+            let read_action =
+              Yojson.Safe.Util.(parse_json result.content |> member "actions" |> to_list)
+              |> List.find (fun action ->
+                   Yojson.Safe.Util.(action |> member "node_id" |> to_string) = "read")
+            in
+            check string "read reused the exact conditional revision" "unchanged"
               Yojson.Safe.Util.
-                (member "cause" deferred_payload
-                 |> member "node"
-                 |> member "deferred_kind"
-                 |> to_string);
-            match result.abort_turn with
-            | Some
-                (Masc.Keeper_official_client_host.Terminal_tool_boundary
-                  { tool_name
-                  ; outcome =
-                      Masc.Keeper_official_client_host.Terminal_failed
-                        { effect_disposition = Tool_result.Proven_post_effect; _ }
-                  }) ->
-              check string
-                "official-client post-effect defer terminal tool"
-                "keeper_compose_write-then-durable-wait"
-                tool_name
-            | Some
-                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
-            | None ->
-              fail "official-client provider loop remained retryable after post-effect defer"))
+                (read_action |> member "result" |> member "data" |> member "kind" |> to_string);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | _ -> fail "completed conditional read changed terminal effect state");
+            check bool "unchanged read does not abort the provider turn" true
+              (Option.is_none result.abort_turn)))
 ;;
 
 let test_async_composition_binds_params_into_durable_status () =
@@ -7655,8 +7634,8 @@ let () =
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
-      test_case "post-effect deferred composition closes without resume" `Quick
-        test_terminal_composition_post_effect_defer_closes_without_resume;
+      test_case "write then unchanged read completes" `Quick
+        test_write_then_unchanged_read_completes;
       test_case "async composition binds params into durable status" `Quick
         test_async_composition_binds_params_into_durable_status;
       test_case "async composition status preserves artifact manifest" `Quick

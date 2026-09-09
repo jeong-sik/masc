@@ -10,12 +10,13 @@
 
 (executable
  (name main_eio)
- (modules main_eio)
+ (modules main_eio masc_cli_setup)
  (public_name masc)
  (package masc)
  (libraries
   masc
   masc_front_door
+  masc_tui_server_lifecycle
   masc.keeper_sandbox_image
   masc.auth
   masc.http_client

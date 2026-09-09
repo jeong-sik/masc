@@ -931,6 +931,19 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
           ]
           lane.cli_slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
+  let cli_only = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = [\"codex.codex\"]\n" in
+  (match Runtime_toml.parse_string cli_only with
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "CLI-only has no HTTP slots" [] lane.slot_ids;
+        check (list string) "CLI-only runtime" [ "codex.codex" ] lane.cli_slot_ids
+      | _ -> fail "exactly one CLI-only lane must parse")
+   | Error _ -> fail "CLI-only lane must parse without an HTTP target");
+  (match Runtime_toml.parse_string
+     "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = []\ncli_slots = []\n" with
+   | Error _ -> ()
+   | Ok _ -> fail "a lane without HTTP or CLI slots must be rejected");
   let absent = "[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"slot-a\"]\n" in
   (match Runtime_toml.parse_string absent with
    | Error _ -> fail "a lane without cli_slots must parse"
@@ -1679,7 +1692,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let io : Exact_output.resolver_io =
     { getenv =
         (function
-          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "KIMI_API_KEY"
+          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY" | "KIMI_API_KEY"
           | "OLLAMA_CLOUD_API_KEY" ->
             Ok (Some "exact-output-seed-test")
           | _ -> Ok None)
@@ -1697,6 +1710,26 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
     | Ok snapshot -> snapshot
     | Error _ -> fail "deployment exact-output catalog should load"
   in
+  let single_key_io : Exact_output.resolver_io =
+    { getenv = (function
+        | "ZAI_API_KEY" -> Ok (Some "first-install-glm-key")
+        | _ -> Ok None) }
+  in
+  let single_key_snapshot =
+    match Exact_output.load_resolver_snapshot ~io:single_key_io
+      ~catalog:(Exact_output.Embedded_with_overlay
+        { source = overlay_path; contents = overlay_contents }) () with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "single-key GLM exact catalog must load"
+  in
+  List.iter (fun id ->
+    match Exact_output.admit_target_ref single_key_snapshot id with
+    | Error _ -> failf "GLM target %s must admit with the public key" id
+    | Ok admitted ->
+      (match Exact_output.resolve_target admitted with
+       | Ok _ -> ()
+       | Error _ -> failf "GLM target %s must require only ZAI_API_KEY" id))
+    [ "glm-coding.glm-5-3"; "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ];
   let output_requirement =
     Exact_output.make_output_requirement
       ~schema:

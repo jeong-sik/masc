@@ -40,6 +40,13 @@ val container_path_of_host :
   host_path:string ->
   (string, string) result
 
+type read_error =
+  | Missing_file of string
+  | Not_a_file of string
+  | Read_failed of string
+
+val read_error_to_string : read_error -> string
+
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
     [host_path] through the selected sandbox backend and returns the captured
     bytes (clamped to [max_bytes]). Docker mounts the playground read-only;
@@ -55,7 +62,7 @@ val read_file :
   max_bytes:int ->
   timeout_sec:float ->
   unit ->
-  (string, string) result
+  (string, read_error) result
 
 (** [run_command ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()] is the
     general-purpose primitive that [read_file] is built on. It runs the same

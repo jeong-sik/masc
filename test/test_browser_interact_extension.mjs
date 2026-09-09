@@ -102,11 +102,15 @@ class Anchor {
   click() {throw new Error('follow must not run window.open handlers');}
 }
 let followed, assigned = [];
+// Styles are per node so an ancestor can withdraw the anchor the way a page
+// does, which is what the scene's `rendered` walk already accounts for.
+const followStyles = new Map();
 const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL, window:{},
   browserScene: () => followed,
   location:{href:'https://example.org/source',assign:url=>assigned.push(url)},
   document:{title:'Still source',querySelector:()=>null},scrollX:0,scrollY:0,
-  getComputedStyle:()=>({display:'block',visibility:'visible'})});
+  getComputedStyle:node =>
+    followStyles.get(node) ?? {display:'block',visibility:'visible',opacity:'1'}});
 followPage.window.top=followPage.window;
 vm.runInContext(driverFunction,followPage);
 const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
@@ -121,6 +125,30 @@ const receipt=follow();
 assert.equal(receipt.destinationUrl,'https://example.org/destination');
 assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
 assert.deepEqual(assigned,['https://example.org/destination']);
+
+// A page can withdraw the observed link between the read and the follow. The
+// scene stops admitting it -- `rendered` walks ancestors for display and
+// opacity -- so the follow has to stop too, or it navigates to a link the
+// operator can no longer see.
+{
+  const wrapper = {};
+  followed = new Anchor();
+  followed.parentElement = wrapper;
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'0'});
+  const before = assigned.length;
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with opacity 0 withdraws the link');
+  assert.equal(assigned.length,before,'a withdrawn link never navigates');
+  followStyles.set(wrapper, {display:'none',visibility:'visible',opacity:'1'});
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with display none withdraws the link');
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'1'});
+  assert.equal(follow().destinationUrl,'https://example.org/destination',
+    'a rendered ancestor still follows');
+  followStyles.delete(wrapper);
+  followed.parentElement = undefined;
+}
+console.log('PASS: a link withdrawn by an ancestor is not followed');
 
 // Exercise the actual native message dispatch and injected scene resolver.
 page.HTMLAnchorElement=Anchor;page.URL=URL;

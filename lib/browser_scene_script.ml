@@ -4,8 +4,14 @@ let runtime = {js|function browserScene(args) {
     if (element.localName !== 'a') return null;
     const value = element.href;
     const raw = typeof value === 'string' ? value : value?.baseVal;
-    if (typeof raw !== 'string' || (!element.hasAttribute('href')
-        && !element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href'))) return null;
+    // XLink is the SVG spelling of href and only an SVG anchor is followed
+    // through it. An HTML anchor carrying only an xlink:href has an empty
+    // .href, and resolving "" against baseURI advertised the current page as
+    // the destination -- selecting that control reloaded the page instead of
+    // following the XLink value.
+    const xlink = typeof SVGAElement !== 'undefined' && element instanceof SVGAElement
+      && element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href');
+    if (typeof raw !== 'string' || !(element.hasAttribute('href') || xlink)) return null;
     try { return new URL(raw,element.baseURI || document.baseURI).href; }
     catch { return null; }
   };

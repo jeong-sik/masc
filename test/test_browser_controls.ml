@@ -267,7 +267,9 @@ let test_download_result_reaches_provider () =
       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
 
 let test_interact_production_failure_phase () =
-  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
     let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~args in
     let args = `Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org"] in

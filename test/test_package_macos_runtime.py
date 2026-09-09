@@ -87,5 +87,38 @@ class PinnedDownload(unittest.TestCase):
         self.exercise(b'reviewed Python', False)
 
 
+class BinaryPublication(unittest.TestCase):
+    def test_readonly_destination_is_replaced_with_staged_bytes_and_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, destination = root / 'staged', root / 'masc-macos-arm64'
+            source.write_bytes(b'verified staged executable')
+            source.chmod(0o555)
+            destination.write_bytes(b'old executable')
+            destination.chmod(0o555)
+            old_inode = destination.stat().st_ino
+            package.publish_binary(source, destination)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o555)
+            self.assertNotEqual(destination.stat().st_ino, old_inode)
+            self.assertEqual({p.name for p in root.iterdir()}, {'staged', 'masc-macos-arm64'})
+
+    def test_destination_symlink_target_is_never_modified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target, destination = root / 'staged', root / 'untouched', root / 'masc-macos-arm64'
+            source.write_bytes(b'verified staged executable')
+            source.chmod(0o755)
+            target.write_bytes(b'external old executable')
+            target.chmod(0o444)
+            destination.symlink_to(target)
+            package.publish_binary(source, destination)
+            self.assertFalse(destination.is_symlink())
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(target.read_bytes(), b'external old executable')
+            self.assertEqual(target.stat().st_mode & 0o777, 0o444)
+
+
 if __name__ == '__main__':
     unittest.main()

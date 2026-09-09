@@ -26,10 +26,6 @@ val envelope_allowance_bytes : int
     nor the query: the JSON envelope, the prompt wrapped around the query,
     the generation parameters. *)
 
-val shrink_margin : float
-(** Factor applied to the edge the byte ratio predicts, because encoders do
-    not scale bytes exactly with pixel count. *)
-
 val base64_length : int -> int
 (** Length of the standard base64 encoding of that many bytes. *)
 

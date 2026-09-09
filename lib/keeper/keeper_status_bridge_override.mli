@@ -21,13 +21,6 @@ val maybe_string_override
   -> override_field_detail list
   -> override_field_detail list
 
-val maybe_bool_override
-  : string
-  -> bool option
-  -> bool
-  -> override_field_detail list
-  -> override_field_detail list
-
 val nonempty_string_list_override
   : string
   -> string list

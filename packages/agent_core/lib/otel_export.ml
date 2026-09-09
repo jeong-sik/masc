@@ -91,6 +91,7 @@ let build_otlp_body ~service_name (spans : Otel_tracer.span list) : string =
   Yojson.Safe.to_string json
 ;;
 
+(* Build an OTLP JSON body from a list of metrics. *)
 let build_otlp_metrics_body ~service_name (metrics : Otel_tracer.metric_entry list)
   : string
   =

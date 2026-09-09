@@ -634,7 +634,7 @@ let test_prepared_admission_resolves_catalog_context_limit () =
   let result, _captured =
     with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
     @@ fun ~sw ~net ~base_url ->
-    let cfg = { (config base_url) with model_id = "claude-sonnet-4-5" } in
+    let cfg = { (config base_url) with model_id = "claude-sonnet-4-6" } in
     let expected =
       Option.bind (Provider_config.capabilities_for_config_model cfg) (fun capabilities ->
         capabilities.Capabilities.max_context_tokens)

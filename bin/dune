@@ -21,6 +21,7 @@
   masc.auth
   masc.http_client
   masc_cli_keeper_create
+  digestif
   masc_tui_editor
   masc.crypto_rng
   masc.dashboard

@@ -407,6 +407,14 @@ blocking_pr_lints() {
   # here together is about 60s. Worth it while the alternative is a retired
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
+  # `dune build @check` builds the dev profile, where an inline test counts as
+  # a caller. `--release` drops inline tests, so a value only a `let%test`
+  # reaches has no caller there and warning 32 turns the build red. Three
+  # values reached main that way (#34848, #34861) and were caught days later
+  # by the one workflow that builds --release, behind a `paths:` filter
+  # (#34878). This reads the same state statically, on every PR.
+  run_lint "Inline-test-only values" \
+    python3 scripts/ci/check-inline-test-only-values.py
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
   # Promoted out of the advisory lane. It already ran there with --strict, and
   # --strict is the mode that fails, so the only thing "advisory" bought was

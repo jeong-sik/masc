@@ -66,7 +66,6 @@ val should_emit_tool_choice : Provider_config.t -> bool
 
 val openai_json_schema_payload : Yojson.Safe.t -> Yojson.Safe.t
 val response_format_to_openai_json : Types.response_format -> Yojson.Safe.t option
-val response_format_of_config : Provider_config.t -> Yojson.Safe.t option
 
 (** [build_request_assoc] is {!build_request} before the final
     [Yojson.Safe.to_string]; sibling backends (e.g. {!Backend_glm}) mutate the

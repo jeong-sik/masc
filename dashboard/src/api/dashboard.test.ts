@@ -5400,6 +5400,27 @@ describe('official-client login probe API', () => {
     expect(result.execution.status).toBe('not_measured')
   })
 
+  it.each([
+    ['ready', true, 'api_key'],
+    ['configured', false, 'provider_managed'],
+  ])('accepts %s authentication without a subscription plan', async (status, authenticated, auth_method) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...readyPayload,
+      login: { ...readyPayload.login, status, authenticated, auth_method, subscription_type: null },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await probeOfficialClientLogin('codex.codex')
+    expect(result.login).toMatchObject({ status, authenticated, auth_method, subscription_type: null })
+    expect(result.execution.status).toBe('not_measured')
+  })
+
+  it('rejects authentication claims on a configured-only provider', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...readyPayload,
+      login: { ...readyPayload.login, status: 'configured', authenticated: true, auth_method: 'provider_managed', subscription_type: null },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    await expect(probeOfficialClientLogin('codex.codex')).rejects.toThrow('유효하지 않은 official-client probe payload')
+  })
+
   it('rejects a payload that claims execution was measured', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

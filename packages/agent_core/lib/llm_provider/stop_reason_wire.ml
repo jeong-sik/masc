@@ -95,6 +95,10 @@ let reconcile (sr : Types.stop_reason) ~has_tool_blocks : Types.stop_reason =
   | Types.Unknown _ -> sr
 ;;
 
+(* [true] only for the typed fail-closed value produced when a provider
+   reported a tool-use finish but the assembled response carried no tool
+   block. Consumers that need to distinguish this executable-shape invariant
+   from arbitrary unknown stop reasons should use this predicate. *)
 let is_unmatched_tool_calls = function
   | Types.UnmatchedToolCalls -> true
   | Types.Unknown _ -> false

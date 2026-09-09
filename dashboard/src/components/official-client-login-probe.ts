@@ -16,7 +16,7 @@ interface OfficialClientLoginProbeProps {
 
 function loginTone(status: DashboardOfficialClientLoginStatus | 'not_measured'):
   'ok' | 'warn' | 'bad' | 'neutral' {
-  if (status === 'ready') return 'warn'
+  if (status === 'ready' || status === 'configured') return 'warn'
   if (status === 'not_measured' || status === 'timeout') return 'warn'
   return 'bad'
 }
@@ -56,11 +56,11 @@ export function OfficialClientLoginProbe({
     <section
       class="mt-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/55 p-3"
       data-testid=${`official-client-login-probe-${runtimeId}`}
-      aria-label=${`${runtimeId} subscription login evidence`}
+      aria-label=${`${runtimeId} CLI authentication evidence`}
     >
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">공식 CLI 구독 상태</div>
+          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">공식 CLI 인증 상태</div>
           <div class="mt-0.5 text-2xs text-[var(--color-fg-muted)]">
             로그인만 검사하며 모델 턴은 생성하지 않습니다.
           </div>

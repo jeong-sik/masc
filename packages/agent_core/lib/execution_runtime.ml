@@ -108,10 +108,6 @@ let create_error_to_string = function
       domain_count
 ;;
 
-let pp_create_error formatter error =
-  Format.pp_print_string formatter (create_error_to_string error)
-;;
-
 let stats t = Atomic.get t.observations
 
 module Private = struct

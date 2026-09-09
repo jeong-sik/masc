@@ -114,7 +114,8 @@ let answer_json ~boundary ~question = function
 ;;
 
 let handle ~config ~meta ~start_time ~args =
-  let boundary = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta in
+  (* The resolver and language server operate on the shared host tree. *)
+  let boundary = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let requested =
     let* question = question_of args in
     let* raw_path = required_string args "path" in

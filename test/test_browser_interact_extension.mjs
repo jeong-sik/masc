@@ -65,6 +65,7 @@ console.log('PASS: shared script, explicit tab, unique selector, URL preconditio
 
 closed = false;
 Object.assign(page,{crypto:webcrypto,innerWidth:800,innerHeight:600,scrollX:0,scrollY:0});
+page.window.getComputedStyle = node => page.getComputedStyle(node);
 page.document.documentElement = {};
 page.document.elementFromPoint = (x,y) => {assert.equal(x,200);assert.equal(y,300);return button;};
 // Obtain the same lightweight viewport identity used by capture, inside this page.

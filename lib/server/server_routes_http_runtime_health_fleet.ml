@@ -203,30 +203,8 @@ let queue_assoc_bool name ~default fields =
   | _ -> default
 ;;
 
-let keeper_event_queue_health_dimensions = function
+let keeper_event_queue_health_dimensions ~source_unavailable = function
   | `Assoc fields ->
-    let source_status =
-      match List.assoc_opt "status" fields with
-      | Some (`String value) -> value
-      | _ -> "unknown"
-    in
-    let source_unavailable =
-      match Health_status.of_string source_status with
-      | Health_status.Unavailable
-      | Health_status.Unknown
-      | Health_status.Blocked
-      | Health_status.Error
-      | Health_status.Timeout ->
-        true
-      | Health_status.Ok
-      | Health_status.Idle
-      | Health_status.Warming
-      | Health_status.Snapshot_not_ready
-      | Health_status.Degraded
-      | Health_status.Stale
-      | Health_status.Warning ->
-        false
-    in
     let counts_complete = queue_assoc_bool "counts_complete" ~default:false fields in
     let read_error_count = queue_assoc_int "read_error_count" fields in
     let transition_outbox_count = queue_assoc_int "transition_outbox_count" fields in
@@ -293,20 +271,11 @@ let keeper_event_queue_health_dimensions = function
       then "warning", "blocked"
       else "ok", "idle"
     in
-    let source_action_required =
-      queue_assoc_bool "operator_action_required" ~default:false fields
-    in
     let work_action_required =
       actionable_backlog_count > 0
     in
-    let operator_action_required =
-      source_action_required || storage_degraded || work_action_required
-    in
-    let status =
-      Health_status.max_string
-        source_status
-        (Health_status.max_string storage_status work_status)
-    in
+    let operator_action_required = storage_degraded || work_action_required in
+    let status = Health_status.max_string storage_status work_status in
     (* A backlog reason carries how deep the backlog is. Without it every size
        reads the same on screen: thirty paused keepers holding 560 stimuli look
        exactly like one keeper holding one. The dashboard joins these strings as
@@ -338,8 +307,6 @@ let keeper_event_queue_health_dimensions = function
       fields
       |> without "schema"
       |> without "queue_residence"
-      |> without "status"
-      |> without "operator_action_required"
       |> without "status_reasons"
       |> without "storage_integrity"
       |> without "work_liveness"
@@ -391,10 +358,9 @@ let keeper_event_queue_health_json ~execution_snapshot () =
   match current_server_state_opt () with
   | None ->
     keeper_event_queue_health_dimensions
+      ~source_unavailable:true
       (`Assoc
       [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
-      ; "status", `String "unavailable"
-      ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
       ; "pending_count", `Int 0
@@ -461,7 +427,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ~now
       ~base_path
       ~owner_lifecycle
-    |> keeper_event_queue_health_dimensions
+    |> keeper_event_queue_health_dimensions ~source_unavailable:false
 
 let keeper_fleet_runtime_resolution_base_fields
     ?profile_snapshot

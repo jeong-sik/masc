@@ -3377,6 +3377,45 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.textContent).toContain('결과 누락 1')
   })
 
+  it.each([
+    { executionId: null, streamState: null, status: 'unlinked', summary: '조인 불가 1' },
+    { executionId: 'exec-canonical', streamState: null, status: 'missing', summary: '결과 누락 1' },
+    { executionId: null, streamState: 'streaming' as const, status: 'pending', summary: null },
+  ])('classifies provider delivery output as $status without inventing a result', ({ executionId, streamState, status, summary }) => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'codex-delivery-row', label: 'WebFetch', turnRef: 'trace-codex#4',
+            toolCallId: 'exec-provider-uuid', executionId, toolCallEnded: true,
+            text: '{"url":"https://example.com"}',
+          }),
+          entry({
+            id: 'codex-assistant', role: 'assistant', source: 'direct_assistant',
+            turnRef: 'trace-codex#4', text: 'HTTP 200', streamState,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:00.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`, container,
+    )
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    if (streamState === 'streaming') {
+      const toggle = bundle?.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+      expect(toggle).not.toBeNull()
+      fireEvent.click(toggle!)
+    }
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe(status)
+    expect(step?.querySelector('.chat-block-tstep-status.ok')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.bad')).toBeNull()
+    if (summary) expect(bundle?.textContent).toContain(summary)
+    if (status !== 'missing') expect(bundle?.textContent).not.toContain('결과 누락')
+    if (status !== 'unlinked') expect(bundle?.textContent).not.toContain('조인 불가')
+  })
+
   it('keeps a settled unjoined tool step pending until tool outputs hydrate', () => {
     render(
       html`<${ChatTranscript}

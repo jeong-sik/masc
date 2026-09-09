@@ -466,7 +466,9 @@ type owner_lifecycle =
     owner truth with durable demand but no live fiber. Disabled, paused/dead,
     and shutdown-fenced owners remain distinct closed variants. Queue
     persistence deliberately does not infer owner truth from event contents or
-    elapsed time. *)
+    elapsed time. The document reports counts and read errors only: it carries
+    no [status] and no [operator_action_required], because deciding which
+    backlog needs an operator belongs to the health surface that serves it. *)
 val fleet_summary_json :
   now:float ->
   base_path:string ->

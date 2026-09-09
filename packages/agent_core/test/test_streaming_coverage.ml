@@ -445,7 +445,7 @@ let test_finalize_tool_use_missing_name () =
     (MessageDelta { stop_reason = Some EndTurn; usage = None });
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
-    check_string "missing name reason" "malformed_tool_use:index:0:missing_name" reason;
+    check_string "missing name reason" "malformed_tool_use:index:0:missing_identity" reason;
     check_string "raw omitted" "" raw
   | Error err -> fail_unexpected_stream_error err
   | Ok response ->
@@ -467,7 +467,7 @@ let test_finalize_tool_use_missing_id_fails_closed () =
     (MessageDelta { stop_reason = Some StopToolUse; usage = None });
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
-    check_string "missing id reason" "malformed_tool_use:index:0:missing_id" reason;
+    check_string "missing id reason" "malformed_tool_use:index:0:missing_identity" reason;
     check_string "raw omitted" "" raw
   | Error err -> fail_unexpected_stream_error err
   | Ok _ -> Alcotest.fail "expected missing tool id to fail closed"
@@ -800,7 +800,7 @@ let test_acc_message_delta_cache_update_nonzero () =
   | None -> Alcotest.fail "expected usage"
 ;;
 
-(* ── accumulate multiple stop_reason overrides ──────────────────── *)
+(* Conflicting terminal reasons must not overwrite the first outcome. *)
 
 let test_acc_multiple_message_deltas () =
   let acc = Streaming.create_stream_acc () in
@@ -810,10 +810,12 @@ let test_acc_multiple_message_deltas () =
   Streaming.accumulate_event
     acc
     (MessageDelta { stop_reason = Some EndTurn; usage = None });
-  let resp = finalize_ok acc in
-  match resp.stop_reason with
-  | EndTurn -> ()
-  | _ -> Alcotest.fail "expected last stop_reason to win (EndTurn)"
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    check_string "conflicting terminal reasons are rejected" "stop_reason_conflict" reason;
+    check_string "no provider payload is exposed" "" raw
+  | Error error -> fail_unexpected_stream_error error
+  | Ok _ -> Alcotest.fail "conflicting terminal reasons must fail closed"
 ;;
 
 (* ── ContentBlockStart with tool_id=None, tool_name=Some ────────── *)
@@ -836,7 +838,7 @@ let test_acc_partial_tool_metadata () =
     (MessageDelta { stop_reason = Some StopToolUse; usage = None });
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
-    check_string "missing id reason" "malformed_tool_use:index:0:missing_id" reason;
+    check_string "missing id reason" "malformed_tool_use:index:0:missing_identity" reason;
     check_string "raw omitted" "" raw
   | Error err -> fail_unexpected_stream_error err
   | Ok _ -> Alcotest.fail "expected partial tool metadata to fail closed"

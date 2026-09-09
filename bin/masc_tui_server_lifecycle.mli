@@ -1,15 +1,9 @@
-(** Opt-in, on-demand start of a masc server from inside the TUI
-    (RFC tui-server-lifecycle).
+(** On-demand background server startup for the TUI.
 
-    The discovery, argv and health-wait logic is pure over its injected
-    effects, so it unit-tests without a TTY, a real server, or an Eio
-    context. [start]/[stop] are the thin effectful shell over
-    {!Process_eio_detached}: they spawn the sibling [masc] binary as a
-    detached child in its own process group and tree-kill only that child.
-
-    The TUI must never stop a server it merely connected to. Only an
-    {!owned_server} — a handle for a server this TUI started — is stoppable,
-    so "kill what I did not start" is unrepresentable rather than guarded. *)
+    [start] launches the sibling [masc start] in a detached process group.
+    The server keeps running after the TUI exits. The startup handle is used
+    to observe and reap the child, not to tie its lifetime to the UI.
+    [stop] is an explicit operation for the owner of that handle. *)
 
 (** {1 When a server is due}
 
@@ -73,13 +67,13 @@ val wait_healthy :
     [attempts <= 0] yields [Timed_out 0] without calling [sleep]. *)
 
 type owned_server
-(** A server this TUI started and therefore owns. *)
+(** A background server started by this process. *)
 
 val owned_pgid : owned_server -> int
 
 val is_running : owned_server -> bool
-(** True while at least one member of the owned server's process group is
-    still alive. Suitable as the [child_alive] argument to {!wait_healthy}. *)
+(** Check the server child with non-blocking waitpid and reap it on exit.
+    Once observed exited, the handle stays exited. *)
 
 val start :
   masc_bin:string ->

@@ -52,28 +52,50 @@ export function isToolBlobMarker(text: string): boolean {
 }
 
 /**
- * Reverse of OCaml's `%S` quoting. Handles the small subset that the
- * OCaml side actually emits after `Inference_utils.sanitize_text_utf8`
- * (no control chars, but `\\`, `\"`, `\n`, `\t`, `\r` may appear).
+ * Reverse of OCaml's `%S` quoting. `%S` escapes every byte outside printable
+ * ASCII as a three-digit decimal `\DDD`, so a UTF-8 preview (Korean text,
+ * the em-dash in `failure_class=<class> — <guidance>`) arrives one byte at a
+ * time. Collect bytes and decode once; anything else `%S` emits is one of
+ * `\\ \" \n \t \r \b`.
  */
 function unescapeOcamlString(raw: string): string {
-  let out = ''
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i]
-    if (c !== '\\') {
-      out += c
+  const encoder = new TextEncoder()
+  const bytes: number[] = []
+  const pushText = (text: string): void => {
+    for (const byte of encoder.encode(text)) bytes.push(byte)
+  }
+  let i = 0
+  while (i < raw.length) {
+    const slash = raw.indexOf('\\', i)
+    if (slash === -1) {
+      pushText(raw.slice(i))
+      break
+    }
+    if (slash > i) pushText(raw.slice(i, slash))
+    const next = raw[slash + 1]
+    if (next === undefined) break // dangling backslash: nothing to decode
+    const decimal = raw.slice(slash + 1, slash + 4)
+    if (/^[0-9]{3}$/.test(decimal)) {
+      bytes.push(Number(decimal) & 0xff)
+      i = slash + 4
       continue
     }
-    const next = raw[i + 1]
-    i++
+    const hex = raw.slice(slash + 2, slash + 4)
+    if (next === 'x' && /^[0-9a-fA-F]{2}$/.test(hex)) {
+      bytes.push(parseInt(hex, 16))
+      i = slash + 4
+      continue
+    }
+    i = slash + 2
     switch (next) {
-      case '\\': out += '\\'; break
-      case '"': out += '"'; break
-      case 'n': out += '\n'; break
-      case 't': out += '\t'; break
-      case 'r': out += '\r'; break
-      default: out += next ?? '' // unknown escape: pass through next char
+      case '\\': bytes.push(0x5c); break
+      case '"': bytes.push(0x22); break
+      case 'n': bytes.push(0x0a); break
+      case 't': bytes.push(0x09); break
+      case 'r': bytes.push(0x0d); break
+      case 'b': bytes.push(0x08); break
+      default: pushText(next) // unknown escape: keep the char
     }
   }
-  return out
+  return new TextDecoder().decode(Uint8Array.from(bytes))
 }

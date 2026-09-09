@@ -883,6 +883,7 @@ let test_composable_output_registry_is_closed () =
     ; "masc_board_stats"
     ; "masc_get_metrics"
     ; "masc_goal_list"
+    ; "masc_msx_screen"
     ; "masc_run_list"
     ]
     json_names

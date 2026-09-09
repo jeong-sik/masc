@@ -165,9 +165,14 @@ let port = null;
 let reconnectTimer = null;
 
 function connect() {
-  port = browser.runtime.connectNative(HOST_NAME);
-  port.onMessage.addListener(onHostMessage);
-  port.onDisconnect.addListener(() => {
+  if (port) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  const connection = browser.runtime.connectNative(HOST_NAME);
+  port = connection;
+  connection.onMessage.addListener(msg => onHostMessage(msg, connection));
+  connection.onDisconnect.addListener(() => {
+    if (port !== connection) return;
     port = null;
     // The host is launched by the browser per connection; a quiet retry keeps
     // the lane alive across host restarts without spamming launches.
@@ -197,6 +202,7 @@ async function pageRead(args) {
   const cap = args?.maxChars ?? READ_CAP;
   if (!Number.isInteger(cap) || cap < 1 || cap > 100000) throw new Error("bad_max_chars");
   const [page] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
     code: `(() => {
       const chars = Array.from(document.body?.innerText ?? '');
       return {url:location.href,title:document.title,
@@ -212,6 +218,7 @@ async function pageElements(args) {
     : (await browser.tabs.query({active:true,currentWindow:true}))[0]?.id;
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid_tab_id");
   const [page] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
     code: '(' + (function () {
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
 function selector(el) {
@@ -259,6 +266,7 @@ return {url:location.href,title:document.title,total:visible.length,truncated:vi
 async function pageScene(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
   const [scene] = await browser.tabs.executeScript(args.tabId, {
+    runAt: "document_end",
     code: '(' + browserScene.toString() + ')(' + JSON.stringify({mode:'read',maxChars:args.maxChars,view:args.view,scope:args.scope}) + ')',
   });
   if (!scene) throw new Error('scene_unavailable');
@@ -271,6 +279,7 @@ async function pageCapture(args) {
   const before = await browser.tabs.get(tabId);
   const observeViewport = async () => {
     const [value] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
       code:'(' + browserScene.toString() + ')({mode:"viewport"})'
     });
     if (!value) throw new Error('viewport_unavailable');
@@ -333,12 +342,38 @@ function interactInPage(args) {
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
         throw new Error('scroll_coordinates_must_be_integers');
-      // document.elementFromPoint retargets shadow descendants to their host.
-      // Find the innermost accessible hit before walking scroll ancestors.
-      while (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
-        const inner = element.shadowRoot.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-        if (!inner || inner === element) break;
-        element = inner;
+      // Hit testing stops at shadow hosts and frame elements. Resolve both
+      // before scrolling; never redirect an inaccessible frame hit to its page.
+      let hitWindow = window, hitX = point.x * innerWidth, hitY = point.y * innerHeight;
+      for (;;) {
+        if (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+          const inner = element.shadowRoot.elementFromPoint(hitX, hitY);
+          if (inner && inner !== element) { element = inner; continue; }
+        }
+        if (element.localName !== 'iframe' && element.localName !== 'frame') break;
+        let childDocument;
+        try { childDocument = element.contentDocument; }
+        catch { throw new Error('scroll_frame_inaccessible'); }
+        if (!childDocument || !childDocument.defaultView) throw new Error('scroll_frame_inaccessible');
+        // A bounding rectangle cannot invert rotation, skew or perspective.
+        // Reject transformed frames/ancestors before either scroll axis acts.
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          if (style.transform !== 'none' || style.perspective !== 'none'
+              || (style.rotate && style.rotate !== 'none')
+              || (style.scale && style.scale !== 'none')
+              || (style.translate && style.translate !== 'none')
+              || (style.zoom && style.zoom !== 'normal' && Number(style.zoom) !== 1))
+            throw new Error('scroll_frame_geometry_unsupported');
+        }
+        const rect = element.getBoundingClientRect(), style = hitWindow.getComputedStyle(element);
+        hitX -= rect.left + element.clientLeft + Number.parseFloat(style.paddingLeft);
+        hitY -= rect.top + element.clientTop + Number.parseFloat(style.paddingTop);
+        hitWindow = childDocument.defaultView;
+        if (hitX < 0 || hitY < 0 || hitX >= hitWindow.innerWidth || hitY >= hitWindow.innerHeight)
+          throw new Error('scroll_point_outside_frame_content');
+        element = childDocument.elementFromPoint(hitX, hitY);
+        if (!element) throw new Error('point_has_no_element');
       }
       // Follow actual scroll containers under the pointer. Slack's message
       // pane scrolls independently of document.body and its channel sidebar.
@@ -346,7 +381,7 @@ function interactInPage(args) {
         if (delta === 0) return;
         const vertical = axis === 'y';
         for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
-          const style = getComputedStyle(node);
+          const style = hitWindow.getComputedStyle(node);
           const overflow = vertical ? style.overflowY : style.overflowX;
           const position = vertical ? node.scrollTop : node.scrollLeft;
           const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
@@ -360,7 +395,7 @@ function interactInPage(args) {
             if (chain === 'contain' || chain === 'none') return;
           }
         }
-        window.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+        hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
       };
     effectStarted = true;
       scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
@@ -421,11 +456,13 @@ function interactInPage(args) {
   }
 }
 
+
 async function pageInteract(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
   if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
+    runAt: "document_end",
     code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
   });
   if (!result) throw new Error("page_unavailable");
@@ -437,7 +474,7 @@ async function pageInteract(args) {
   return {tabId: args.tabId, ...result};
 }
 
-async function onHostMessage(msg) {
+async function onHostMessage(msg, connection = port) {
   const reply = { id: msg?.id, ok: false };
   try {
     switch (msg?.verb) {
@@ -485,7 +522,7 @@ async function onHostMessage(msg) {
       reply.ok = false;
       reply.error = "browser_reply_exceeds_8_mib";
     }
-    port?.postMessage(reply);
+    connection?.postMessage(reply);
   } catch {
     // Port died mid-answer; the reconnect path owns the next attempt.
   }

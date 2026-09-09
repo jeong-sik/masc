@@ -296,7 +296,7 @@
  (name masc_tui_server_lifecycle)
  (wrapped false)
  (modules masc_tui_server_lifecycle)
- (libraries masc.masc_process))
+ (libraries masc.masc_process unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,
@@ -1411,6 +1411,13 @@
  (wrapped false)
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
+(library
+ (name masc_tui_interactive)
+;; An interactive surface contract plus the MSX backend: renderer-independent
+;; input focus and frame handoff for panes that own their own loop.
+ (modules masc_tui_interactive)
+ (libraries masc_tui_types))
+
 (library
  (name masc_tui_msx)
 ;; The MSX spectator screen, over the opam path-pinned ocaml-msx core.

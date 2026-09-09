@@ -88,7 +88,13 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
    ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs
    into it inside its own jail and answers ENOENT itself. *)
 let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
-  let raw_path = requested_tool_execute_cwd ~config ~meta ~write_enabled ~args in
+  let raw_path =
+    requested_tool_execute_cwd ~config ~meta ~write_enabled ~args
+    |> keeper_observation_host_path_of_visible_path ~config ~meta
+  in
+  (* Execute returns the container-visible cwd. A caller may use that exact
+     directory again; project it through the admitted Keeper's own mount
+     before applying the same confinement and root-identity checks. *)
   match resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path with
   | Error rejection -> Error (Cwd_rejected rejection)
   | Ok confined ->

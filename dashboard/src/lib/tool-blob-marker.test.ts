@@ -47,6 +47,21 @@ describe('parseToolBlobMarker', () => {
     expect(parsed!.preview).toBe('line1\nline2\twith\\backslash')
   })
 
+  it('decodes %S decimal byte escapes back into UTF-8 text', () => {
+    // OCaml: Printf.sprintf "%S" "failure_class=x \xe2\x80\x94 \xed\x95\x9c"
+    const m = parseToolBlobMarker(
+      `[masc:blob sha256=${sha} bytes=12 mime=text/plain preview="failure_class=x \\226\\128\\148 \\237\\149\\156"]`,
+    )
+    expect(m?.preview).toBe('failure_class=x \u2014 \ud55c')
+  })
+
+  it('decodes a Korean preview escaped byte by byte', () => {
+    const m = parseToolBlobMarker(
+      `[masc:blob sha256=${sha} bytes=9 mime=text/plain preview="\\236\\158\\132\\235\\141\\148"]`,
+    )
+    expect(m?.preview).toBe('\uc784\ub354')
+  })
+
   it('decodes embedded escaped quote', () => {
     const m = `[masc:blob sha256=${sha} bytes=10 mime=text/plain preview="he said \\"hi\\""]`
     const parsed = parseToolBlobMarker(m)

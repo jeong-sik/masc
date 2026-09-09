@@ -474,10 +474,40 @@ let fixture_sandbox_profile () =
    Every profile a fixture can name is a guest profile, so a suite whose case
    must actually run its command wires the same factory the production turn
    bundle wires. The factory creates its runtime lazily: a case that never
-   dispatches a guest command starts no container. Cleanup is idempotent and
-   registered with at_exit. *)
+   dispatches a guest command starts no container. What a case that did
+   dispatch owes at the end is {!teardown_fixture_sandbox}, called from the
+   fixture's own finally. *)
 let fixture_turn_sandbox_factory ~config ~meta =
-  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
-  at_exit (fun () -> Masc.Keeper_sandbox_factory.cleanup factory);
-  Some factory
+  Some (Masc.Keeper_sandbox_factory.create ~config ~meta ())
+;;
+
+(* How long a fixture waits for the daemon to remove one container. *)
+let fixture_sandbox_teardown_timeout_sec = 30.0
+
+(* The persistent container a fixture's keeper started, removed. The factory
+   never removes it: production removes it at keeper teardown, and
+   [Keeper_sandbox_factory.cleanup] only drops the handle. Not an [at_exit]:
+   that cleanup takes an Eio mutex and the docker call goes through
+   Process_eio, and at process exit neither effect has a handler --
+   test_keeper_tool_dispatch_runtime.exe ended in Effect.Unhandled that way
+   on CI (run 34296943348). Call this inside the fixture's Eio context, in the
+   finally that also unregisters the keeper. Only a run allowed the real
+   daemon can have started a container. A removal failure is reported on
+   stderr, not raised, so it cannot stand in for the case's own result. *)
+let teardown_fixture_sandbox
+    ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  if Env_config_core.real_docker_allowed_under_test ()
+  then
+    match
+      Masc.Keeper_sandbox_runtime.remove_persistent_containers
+        ~keeper_name:meta.name
+        ~base_path:config.base_path
+        ~timeout_sec:fixture_sandbox_teardown_timeout_sec
+        ()
+    with
+    | Ok () -> ()
+    | Error detail ->
+      Printf.eprintf "fixture sandbox teardown for %s: %s\n%!" meta.name detail
 ;;

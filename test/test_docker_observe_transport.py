@@ -35,7 +35,10 @@ def main():
         shim = root / "masc-exec-shim"
         # Use the release builder: its pinned compiler and non-PIE static
         # linking are part of the executable's Linux portability contract.
-        arch = {"x86_64": "amd64", "aarch64": "arm64"}[platform.machine()]
+        # platform.machine() is "arm64" on Apple Silicon and "aarch64" on
+        # Linux for the same architecture; the builder names it "arm64".
+        arch = {"x86_64": "amd64", "amd64": "amd64",
+                "aarch64": "arm64", "arm64": "arm64"}[platform.machine()]
         build_dir = Path("dist") / ("observe-shim-" + uuid.uuid4().hex)
         try:
             build = run([str(repo / "scripts/remote-ssh/build-shim.sh"),

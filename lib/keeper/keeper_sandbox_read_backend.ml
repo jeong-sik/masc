@@ -390,43 +390,52 @@ let run_command ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
   | Error _ as err -> err
   | Ok (_st, out) -> Ok out
 
+type read_error =
+  | Missing_file of string
+  | Not_a_file of string
+  | Read_failed of string
+
+let read_error_to_string = function
+  | Missing_file detail | Not_a_file detail | Read_failed detail -> detail
+
 let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
-    ~(max_bytes : int) ~(timeout_sec : float) () : (string, string) result =
+    ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
   match container_path_of_host ~config ~meta ~host_path with
-  | Error _ as e -> e
+  | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
+    let read () =
+      run_command ?turn_sandbox_factory ~config ~meta
+        ~command_argv:[ "cat"; backend_path ] ~max_bytes ~timeout_sec ()
+      |> Result.map_error (fun detail -> Read_failed detail)
+    in
     if
       Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
       = Keeper_types_profile_sandbox.Endpoint_owned
-    then
-      run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:[ "cat"; backend_path ]
-        ~max_bytes ~timeout_sec ()
+    then read ()
     else
-    (* Pre-flight: verify the host path exists before spawning a container.
-       This avoids wasteful docker runs that inevitably fail with
-       "No such file or directory", and lets us emit a precise error
-       that names the host path the keeper actually asked for. *)
-    let profile_label =
-      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
-    in
-    if not (Sys.file_exists host_path) then
-      Error
-        (Printf.sprintf
-           "%s_read_failed: path_not_found: %s (host path does not exist; verify the \
-            relative path under your playground before calling Read)"
-           profile_label
-           host_path)
-    else if Sys.is_directory host_path then
-      Error
-        (Printf.sprintf
-           "%s_read_failed: path_is_directory: %s (Read requires a file, \
-            not a directory; to list a directory use Execute with ls, e.g. \
-            argv=['ls','-la','%s'])"
-           profile_label
-           host_path
-           host_path)
-    else
-      run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:[ "cat"; backend_path ]
-        ~max_bytes ~timeout_sec ()
+      let profile_label =
+        Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+      in
+      (* Only shared trees can be classified from host filesystem evidence.
+         Transport and access failures must not become missing-file advice. *)
+      match Unix.stat host_path with
+      | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_directory: %s (Read requires a file; to \
+                 list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      | _ -> read ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Error
+          (Missing_file
+             (Printf.sprintf
+                "%s_read_failed: path_not_found: %s (host path does not exist; \
+                 verify the relative path under your playground before calling Read)"
+                profile_label host_path))
+      | exception Unix.Unix_error (error, operation, argument) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
+                operation argument (Unix.error_message error)))

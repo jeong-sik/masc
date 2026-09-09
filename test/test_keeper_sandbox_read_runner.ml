@@ -120,7 +120,8 @@ let test_mock_backend_forwards_read_contract () =
        ~host_path:"/host/file.txt"
        ~max_bytes:128
        ~timeout_sec:2.5
-       ());
+       ()
+     |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string);
   Alcotest.(check (list string))
     "events"
     [ "should_route_read"

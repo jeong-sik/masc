@@ -306,7 +306,8 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
            | Error reason ->
                Error
                  (Store.Evidence_read_error
-                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))
+                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker
+                       (Keeper_sandbox_read_backend.read_error_to_string reason)))
            | Ok content -> (
                (* The reader classifies its bytes with the store's own scan:
                    text answers as text, and non-text bytes become a binary

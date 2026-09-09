@@ -786,6 +786,49 @@ let test_model_observability_runtime_match_does_not_promote_model_hint () =
     (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
 ;;
 
+let test_pending_approval_overrides_previous_success_until_resolved () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let config = Masc.Workspace.default_config base_dir in
+    let meta = make_meta "runtime-trust-pending-approval" in
+    let store =
+      Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name
+    in
+    Dated_jsonl.append store
+      (`Assoc
+        [ "ended_at", `String "2026-06-01T00:00:00Z"
+        ; "operator_disposition", `String "pass"
+        ; "operator_disposition_reason", `String "healthy"
+        ; "terminal_reason_code", `String "success"
+        ]);
+    let snapshot entries =
+      K.For_testing.snapshot_json_inner_with_pending_reader
+        ~read_pending:(fun ~base_path:_ -> Ok entries) ~config ~meta
+    in
+    let open Yojson.Safe.Util in
+    let pending = snapshot
+      [ `Assoc
+          [ "keeper_name", `String meta.name
+          ; "requested_at", `Float 1.0
+          ; "id", `String "pending-approval"
+          ] ]
+    in
+    Alcotest.(check int) "pending request remains visible" 1
+      (pending |> member "pending_approval_count" |> to_int);
+    Alcotest.(check string) "previous success cannot hide pending approval" "Alert"
+      (pending |> member "disposition" |> to_string);
+    Alcotest.(check string) "current reason explains pending decision"
+      "pending_operator_decision"
+      (pending |> member "disposition_reason" |> to_string);
+    Alcotest.(check string) "current action resolves approval" "resolve_approval"
+      (pending |> member "next_human_action" |> to_string);
+    let resolved = snapshot [] in
+    Alcotest.(check string) "cleared queue restores receipt disposition" "Pass"
+      (resolved |> member "disposition" |> to_string))
+;;
+
 let test_approval_queue_failure_remains_typed_unavailable () =
   Eio_main.run
   @@ fun env ->
@@ -955,6 +998,10 @@ let () =
         ] )
     ; ( "approval_queue_projection"
       , [ Alcotest.test_case
+            "pending approval overrides success until resolved"
+            `Quick
+            test_pending_approval_overrides_previous_success_until_resolved
+        ; Alcotest.test_case
             "queue failure remains typed unavailable"
             `Quick
             test_approval_queue_failure_remains_typed_unavailable

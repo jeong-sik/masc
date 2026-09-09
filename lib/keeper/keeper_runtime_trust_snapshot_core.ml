@@ -66,7 +66,7 @@ let display_disposition_requires_attention = function
 
 let effective_disposition raw ~fallback_disposition ~fallback_reason =
   match raw.approval_queue, raw.receipt_operator_disposition with
-  | Approval_queue_available _, Some (operator_disposition, operator_reason) ->
+  | Approval_queue_available 0, Some (operator_disposition, operator_reason) ->
     let disposition, disposition_reason =
       Keeper_operator_disposition_display.of_wire
         ~operator_disposition
@@ -74,7 +74,7 @@ let effective_disposition raw ~fallback_disposition ~fallback_reason =
     in
     disposition, disposition_reason, operator_disposition, operator_reason
   | Approval_queue_unavailable, _
-  | Approval_queue_available _, None ->
+  | Approval_queue_available _, _ ->
     let operator_disposition, operator_disposition_reason =
       operator_disposition_of_display
         ~disposition:fallback_disposition

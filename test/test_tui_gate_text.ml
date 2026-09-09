@@ -34,7 +34,9 @@ let test_each_phase_reads_as_itself () =
   check string "indeterminate" "적용 여부 불명 · 대상을 직접 확인하세요 · Execute"
     (line Approval_replay_indeterminate (Some "Execute"));
   check string "continuation" "턴 이어서 진행 · Execute"
-    (line Approval_continuation_recorded (Some "Execute"))
+    (line Approval_continuation_recorded (Some "Execute"));
+  check string "continuation failed" "이어가던 턴 실패 · Execute"
+    (line Approval_continuation_failed (Some "Execute"))
 
 (* The part that differs is the part the pane keeps. Every phase used to end
    the row, so at a narrow width the eight above read as one. *)
@@ -51,10 +53,30 @@ let test_the_phase_survives_a_narrow_pane () =
       ; Approval_replay_failed
       ; Approval_replay_indeterminate
       ; Approval_continuation_recorded
+      ; Approval_continuation_failed
       ]
   in
-  check int "eight phases, eight first lines" (List.length heads)
+  check int "nine phases, nine first lines" (List.length heads)
     (List.length (List.sort_uniq String.compare heads))
+
+(* #32956: the turn that received the replay failed after the model answered.
+   Like the recorded continuation it is not a stage, so it rides the outcome
+   as a suffix and says its own thing. *)
+let test_a_failed_continuation_rides_as_its_own_suffix () =
+  check (option string) "after the outcome"
+    (Some "미뤘던 호출 적용됨 · 이어가던 턴 실패 · Execute")
+    (Gate.fold_line
+       ~phases:
+         [ Approval_requested
+         ; Approval_resolved_approved
+         ; Approval_replay_applied
+         ; Approval_continuation_failed
+         ]
+       ~tool:(Some "Execute") ~summary:None);
+  check (option string) "alone, it is the line"
+    (Some "이어가던 턴 실패 · Execute")
+    (Gate.fold_line ~phases:[ Approval_continuation_failed ] ~tool:(Some "Execute")
+       ~summary:None)
 
 let test_a_row_without_a_tool_still_reads () =
   check string "no tool name" "판정 중 · 이 호출은 미뤄짐 · 외부 효과"
@@ -84,5 +106,7 @@ let () =
             test_the_phase_survives_a_narrow_pane
         ; test_case "a summary speaks for the tool" `Quick
             test_a_summary_speaks_for_the_tool
+        ; test_case "a failed continuation rides as its own suffix" `Quick
+            test_a_failed_continuation_rides_as_its_own_suffix
         ] )
     ]

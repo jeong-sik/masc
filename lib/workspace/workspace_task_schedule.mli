@@ -9,8 +9,6 @@ val task_is_claim_pool_candidate : Masc_domain.task -> bool
 (* Verification-record state does not gate the claim pool. Persisted task
    status is the scheduling authority. *)
 
-val underscore_name : string -> string
-val hyphen_name : string -> string
 val agent_record_keeper_name : config -> agent_name:string -> string option
 val keeper_receipt_candidate_names : config -> agent_name:string -> string list
 val directory_exists : string -> bool

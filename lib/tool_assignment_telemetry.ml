@@ -132,6 +132,8 @@ type runtime_state = {
   epoch : int;
   revision : int;
   store : Dated_jsonl.t option;
+  store_base_path : string option;
+      (** The base path [store] was opened under; [None] until it exists. *)
   assignments : assignment_id Assignment_by_agent.t;
 }
 
@@ -141,6 +143,7 @@ let runtime_state =
       epoch = 0;
       revision = 0;
       store = None;
+      store_base_path = None;
       assignments = Assignment_by_agent.empty;
     }
 
@@ -190,9 +193,23 @@ let observe_decode_failures ~site acc =
 
 (* ── Store lifecycle ──────────────────────────────────── *)
 
+(* A store answers for one base path. A server never changes its base path,
+   but a test executable moves between workspaces and deletes the ones it
+   leaves; a store bound to the first workspace kept appending into a deleted
+   directory, silently while a cached handle survived and loudly once #34341
+   made a stale handle reopen. So the store is rebound when the base path in
+   force differs from the one it was opened for, and the agent index starts
+   over with it: an assignment recorded in another workspace is not this
+   workspace's latest. *)
+let store_bound_to ~base_path (state : runtime_state) =
+  match state.store, state.store_base_path with
+  | Some store, Some bound when String.equal bound base_path -> Some store
+  | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+
 let get_or_create_runtime () : active_runtime =
+  let base_path = Env_config.base_path () in
   let observed = Atomic.get runtime_state in
-  match observed.store with
+  match store_bound_to ~base_path observed with
   | Some store -> activate observed store
   | None ->
     (* Store creation touches the filesystem and callers include tests that run
@@ -200,10 +217,9 @@ let get_or_create_runtime () : active_runtime =
        the rare initialise/reset effect; normal reads use the atomic snapshot. *)
     Cross_context_mutex.with_lock store_lifecycle_lock (fun () ->
       let current = Atomic.get runtime_state in
-      match current.store with
+      match store_bound_to ~base_path current with
       | Some store -> activate current store
       | None ->
-        let base_path = Env_config.base_path () in
         (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
         let dir =
           Filename.concat
@@ -212,8 +228,16 @@ let get_or_create_runtime () : active_runtime =
         in
         Fs_compat.mkdir_p dir;
         let store = Dated_jsonl.create ~base_dir:dir () in
+        let rebound = Option.is_some current.store in
         let next =
-          { current with revision = current.revision + 1; store = Some store }
+          {
+            epoch = (if rebound then current.epoch + 1 else current.epoch);
+            revision = current.revision + 1;
+            store = Some store;
+            store_base_path = Some base_path;
+            assignments =
+              (if rebound then Assignment_by_agent.empty else current.assignments);
+          }
         in
         Atomic.set runtime_state next;
         activate next store)
@@ -391,5 +415,6 @@ let reset_for_testing () : unit =
         epoch = current.epoch + 1;
         revision = current.revision + 1;
         store = None;
+        store_base_path = None;
         assignments = Assignment_by_agent.empty;
       })

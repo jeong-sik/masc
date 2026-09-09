@@ -2067,7 +2067,13 @@ let test_wire_measured_zero_latency_is_distinct () =
     silently skip the new kind otherwise. *)
 let test_all_is_exhaustive () =
   let xs = Provider_config.all_provider_kinds in
-  Alcotest.(check int) "seven canonical variants" 7 (List.length xs);
+  (* One per constructor named in the match at the end of this case.
+     Provider_kind.all is written by hand, so a variant added to the type and
+     not to it would leave the list short and every iterative test below would
+     skip the new kind quietly -- this length is what says otherwise. The
+     match is what makes the pair maintainable: adding a variant stops the
+     build there, two lines from the number that has to move with it. *)
+  Alcotest.(check int) "one entry per canonical variant" 6 (List.length xs);
   Alcotest.(check bool)
     "no duplicate canonical strings"
     true

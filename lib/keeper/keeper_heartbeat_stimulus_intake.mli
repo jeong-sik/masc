@@ -130,7 +130,10 @@ val consume_single_heartbeat_stimulus
     replay is not starved behind the queue position; the untouched entry is
     later retired by [reconcile_spent_selection] once its grant is spent. An
     approved resolution with no durable record behind it is not projected;
-    its entry is retired when the queue reaches it. *)
+    its entry is retired when the queue reaches it. A resolution whose
+    continuation slot is settled (recorded, or failed after the provider
+    answered) is not projected either: the model has seen its outcome, and
+    re-delivering it is the loop of #32956. *)
 val ready_hitl_resolution_peek
   :  base_path:string
   -> keeper_name:string

@@ -270,11 +270,15 @@ val ensure_replay_chat_projection :
   outcome:resolution_replay_outcome ->
   (unit, string) result
 
-val continuation_chat_projection_present :
+val continuation_settled_chat_projection_present :
   base_path:string ->
   keeper_name:string ->
   approval_id:string ->
   bool
+(** Whether the approval's continuation slot holds a settlement of either
+    phase ([Approval_continuation_recorded] or
+    [Approval_continuation_failed]). The intake reads this before a queued
+    resolution is delivered again. *)
 
 type continuation_projection_result =
   | Continuation_projection_recorded
@@ -287,6 +291,20 @@ val ensure_settled_continuation_chat_projection :
   base_path:string ->
   keeper_name:string ->
   resolution:Keeper_event_queue.hitl_resolution ->
+  (continuation_projection_result, string) result
+
+(** Record the continuation as failed when the turn that received the
+    replay failed after the provider answered ([route] satisfies
+    {!Keeper_runtime_failure_route.response_observed}). The same readiness
+    rule applies, so a grant the turn never spent is not settled by its
+    failure. The row shares the continuation slot with the recorded
+    receipt: one settlement per approval, and the intake retires the queued
+    wake on either (#32956). *)
+val ensure_failed_continuation_chat_projection :
+  base_path:string ->
+  keeper_name:string ->
+  resolution:Keeper_event_queue.hitl_resolution ->
+  route:Keeper_runtime_failure_route.route ->
   (continuation_projection_result, string) result
 
 val generate_id : unit -> string

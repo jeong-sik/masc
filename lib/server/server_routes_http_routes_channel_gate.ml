@@ -246,9 +246,9 @@ let handle_gate_connector_names state request reqd =
   in
   let scope =
     match Option.map String.trim (query_param request "scope") with
-    | Some "channel" -> Ok (Connector_names.Channel, "channel")
-    | Some "person" -> Ok (Connector_names.Person, "person")
-    | Some "server" -> Ok (Connector_names.Server, "server")
+    | Some "channel" -> Ok (Keeper_connector_names.Channel, "channel")
+    | Some "person" -> Ok (Keeper_connector_names.Person, "person")
+    | Some "server" -> Ok (Keeper_connector_names.Server, "server")
     | Some unknown -> Error ("unknown scope: " ^ unknown)
     | None -> Error "scope is required"
   in
@@ -297,13 +297,13 @@ let handle_gate_connector_names state request reqd =
            else
              let entries =
                match exact_ids with
-               | [] -> Connector_names.entries ~base_dir ~connector ~scope
+               | [] -> Keeper_connector_names.entries ~base_dir ~connector ~scope
                | ids ->
                  List.filter_map
                    (fun id ->
                      Option.map
                        (fun name -> id, name)
-                       (Connector_names.recall ~base_dir ~connector ~scope ~id))
+                       (Keeper_connector_names.recall ~base_dir ~connector ~scope ~id))
                    ids
              in
              let entries =
@@ -334,7 +334,7 @@ let handle_gate_connector_names state request reqd =
                    , match workspace_id with
                      | Some value -> `String value
                      | None -> `Null )
-                 ; "path", `String (Connector_names.path ~base_dir ~connector ~scope)
+                 ; "path", `String (Keeper_connector_names.path ~base_dir ~connector ~scope)
                  ; "offset", `Int offset
                  ; "limit", `Int limit
                  ; "total", `Int total

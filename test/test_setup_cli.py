@@ -87,11 +87,47 @@ class Setup(unittest.TestCase):
                 token.parent.mkdir(parents=True, exist_ok=True)
                 token.write_text('revoked-operator-token')
             posted = []
+            model_requests = []
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     self.send({'paths': {'effective_base_path': str(base.parent if foreign else base)},
                                'startup': {'state_ready': True}})
                 def do_POST(self):
+                    if self.path == '/v1/chat/completions':
+                        request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                        model_requests.append(request)
+                        results = [message for message in request['messages'] if message['role'] == 'tool']
+                        if results:
+                            # Consume the actual native challenge tool result;
+                            # the fixture never receives the nonce beforehand.
+                            challenge = json.loads(results[-1]['content'])['challenge']
+                            message = {'role':'assistant','content':json.dumps({'challenge':challenge})}
+                            finish = 'stop'
+                        else:
+                            name = request['tools'][0]['function']['name']
+                            message = {'role':'assistant','content':None,'tool_calls':[{
+                                'id':'readiness-fixture-call','type':'function',
+                                'function':{'name':name,'arguments':'{}'}}]}
+                            finish = 'tool_calls'
+                        if request.get('stream'):
+                            delta = dict(message)
+                            if 'tool_calls' in delta:
+                                delta['tool_calls'] = [dict(call,index=index) for index,call in enumerate(delta['tool_calls'])]
+                            chunks = [dict(id='fixture',object='chat.completion.chunk',created=0,model=request['model'],
+                                           choices=[dict(index=0,delta=delta,finish_reason=None)]),
+                                      dict(id='fixture',object='chat.completion.chunk',created=0,model=request['model'],
+                                           choices=[dict(index=0,delta={},finish_reason=finish)])]
+                            data = (''.join('data: '+json.dumps(chunk)+'\n\n' for chunk in chunks)+'data: [DONE]\n\n').encode()
+                            self.send_response(200)
+                            self.send_header('Content-Type','text/event-stream')
+                            self.send_header('Content-Length',str(len(data)))
+                            self.end_headers()
+                            self.wfile.write(data)
+                        else:
+                            self.send(dict(id='fixture',object='chat.completion',created=0,model=request['model'],
+                                           choices=[dict(index=0,message=message,finish_reason=finish)],
+                                           usage=dict(prompt_tokens=1,completion_tokens=1,total_tokens=2)))
+                        return
                     token = base / '.masc/auth/local-admin.token'
                     expected = token.read_text().strip() if token.exists() else ''
                     if not expected or expected == 'revoked-operator-token' or self.headers.get('Authorization') != 'Bearer ' + expected:
@@ -104,12 +140,17 @@ class Setup(unittest.TestCase):
                 def send(self, body):
                     data = json.dumps(body).encode()
                     self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
                     self.send_header('Content-Length', str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
                 def log_message(self, *args):
                     pass
             with http.server.HTTPServer(('127.0.0.1', 0), Handler) as server:
+                for name in ('runtime.toml','agent-core-models-overlay.toml'):
+                    path = config / name
+                    path.write_text(path.read_text().replace('http://127.0.0.1:9/v1',
+                                                            'http://127.0.0.1:'+str(server.server_port)+'/v1'))
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
                 try:
@@ -126,7 +167,9 @@ class Setup(unittest.TestCase):
             else:
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(posted, [('/api/v1/keepers/imp/boot', {'name': 'imp'})])
-                self.assertIn('Model replies are verified by your first conversation', result.stdout)
+                self.assertIn('Model response and harmless tool roundtrip verified.', result.stdout)
+                self.assertEqual(len(model_requests),2)
+                self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))
                 self.assertNotIn((base / '.masc/auth/local-admin.token').read_text().strip(), result.stdout)
 
     def test_supported_linked_deployment_root(self):

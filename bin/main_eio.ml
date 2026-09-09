@@ -2562,7 +2562,12 @@ let setup_validate_runtime base_path =
         let result = verify_runtime_execution runtime runtime_verification_timeout_s in
         let code = Runtime_verification.exit_code result in
         if code = 0 then print_endline "Model response and harmless tool roundtrip verified."
-        else prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.";
+        else (
+          (match result.failure, runtime.provider.credentials with
+           | Some (Runtime_verification.Unavailable Missing_credential), Some (Runtime_schema.Env key) ->
+             Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
+           | _ -> ());
+          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
 let setup_cmd_exit base_path port no_tui =

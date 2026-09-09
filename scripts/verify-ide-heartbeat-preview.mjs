@@ -61,8 +61,7 @@ try {
   for (const keeper of rows) {
     const panel = page.locator(`[data-keeper="${keeper.name}"] [data-testid="ide-persistence-panel"]`)
     await panel.waitFor()
-    await page.waitForFunction(name => performance.getEntriesByType('resource')
-      .some(entry => entry.name.endsWith(`/api/v1/keepers/${name}/state-diagram`)), keeper.name)
+    await panel.getByTestId('ide-persistence-lifecycle').getByText(keeper.phase, { exact: true }).waitFor()
     const label = panel.getByLabel('최근 하트비트')
     if (keeper.last_heartbeat) {
       assert.equal(await label.getAttribute('title'), heartbeat)
@@ -81,14 +80,19 @@ try {
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
   await page.screenshot({ path: resolve(output, 'mobile.png'), fullPage: true })
   assert.equal(mobileOverflow, false, 'mobile document overflow')
+  for (const keeper of rows) assert.ok(requests.includes(`/api/v1/keepers/${keeper.name}/state-diagram`))
   assert.deepEqual(pageErrors, [])
   assert.deepEqual(blocked, [])
   const screenshots = {}
   for (const name of ['desktop.png', 'mobile.png']) screenshots[name] = createHash('sha256').update(await readFile(resolve(output, name))).digest('hex')
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ observed_at: new Date().toISOString(),
+    harness_sha256: createHash('sha256').update(await readFile(new URL(import.meta.url))).digest('hex'),
     manifest, checks, fixture_rows: rows, synthetic_clock: '2026-09-10T00:05:00Z', requests,
     page_errors: pageErrors, blocked_requests: blocked, mobile_overflow: mobileOverflow, screenshots,
     deployment: false, scope: 'CI-built actual IdePersistencePanel with synthetic Keeper and state-diagram HTTP responses; not storage durability or full IDE layout proof',
   }, null, 2) + '\n')
   console.log(JSON.stringify({ evidence: output, checks: checks.length, page_errors: pageErrors }))
+} catch (error) {
+  console.error(JSON.stringify({ requests, blocked, page_errors: pageErrors }))
+  throw error
 } finally { await browser.close() }

@@ -143,7 +143,9 @@ listed, but a runtime without a supported real verification adapter cannot pass
 the interactive readiness check.
 
 The wizard reads context windows from model metadata or the exact connection's
-existing declaration. For Ollama it reads the configured or running context and
+existing declaration. For a fresh Codex home, it reads the installed CLI's bundled
+model catalog without authentication or a model call. API catalog suggestions
+do not supply a Codex context limit; model availability is checked separately. For Ollama it reads the configured or running context and
 loads only selected models when needed; it does not allocate the architectural
 maximum. For a single-model llama.cpp server it can read the configured context
 from `/props`. An unknown limit offers model selection again or an advanced field

@@ -962,8 +962,9 @@ let claimable_queued_with_db db =
     | Some {resolution=None; _} -> Some execution.id
     | Some {resolution=Some _; _} -> None
     | None -> (match execution.phase with
-        | Semantic.Recovering {origin=Semantic.Interrupted_execution; _}
-          when execution.gate_obligations <> [] -> Some execution.id
+        | Semantic.Recovering {origin; _}
+          when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+               && execution.gate_obligations <> [] -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ | Semantic.Recovering _ -> None)) executions in
   with_statement db ~operation:"read claimable original operations"
@@ -1503,8 +1504,9 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
     let* operation = operation_or_unknown store.db operation_id in
     let* execution = direct_execution_with_db store.db operation in
     match operation.state, execution with
-    | Operation.Queued, Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Interrupted_execution; _}; gate_obligations; _}
-        when gate_obligations = obligations && operation.execution_digest = execution_digest -> Ok operation
+    | Operation.Queued, Some {Semantic.phase=Semantic.Recovering {origin; _}; gate_obligations; _}
+        when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+             && gate_obligations = obligations && operation.execution_digest = execution_digest -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _ ->
       Error (Integrity_error "Gate wait commit is not confirmed") in
   let result = with_transaction store (fun () ->

@@ -164,7 +164,6 @@ let summarize_run run_ref =
     ; enable_thinking = Option.bind start_record (fun record -> record.enable_thinking)
     ; preserve_thinking =
         Option.bind start_record (fun record -> record.preserve_thinking)
-    ; thinking_budget = Option.bind start_record (fun record -> record.thinking_budget)
     ; reasoning_effort = Option.bind start_record (fun record -> record.reasoning_effort)
     ; thinking_block_count
     ; text_block_count
@@ -291,11 +290,6 @@ let validate_run run_ref =
         (match summary.preserve_thinking with
          | Some true -> "true"
          | Some false -> "false"
-         | None -> "")
-    ; Printf.sprintf
-        "thinking_budget=%s"
-        (match summary.thinking_budget with
-         | Some value -> string_of_int value
          | None -> "")
     ; Printf.sprintf
         "reasoning_effort=%s"

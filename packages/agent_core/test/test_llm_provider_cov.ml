@@ -18,7 +18,6 @@ let make_config
       ?temperature
       ?system_prompt
       ?enable_thinking
-      ?thinking_budget
       ?reasoning_effort
       ?tool_choice
       ?(response_format = Types.Off)
@@ -35,7 +34,6 @@ let make_config
     ?temperature
     ?system_prompt
     ?enable_thinking
-    ?thinking_budget
     ?reasoning_effort
     ?tool_choice
     ~response_format
@@ -734,26 +732,6 @@ let test_build_request_with_thinking () =
   let tc = gc |> member "thinkingConfig" in
   Alcotest.(check string) "thinkingLevel" "low" (tc |> member "thinkingLevel" |> to_string);
   Alcotest.(check bool) "includeThoughts" true (tc |> member "includeThoughts" |> to_bool)
-;;
-
-(* Gemini serves [thinkingLevel]; a numeric budget has no wire to travel on. *)
-let test_build_request_rejects_a_thinking_budget () =
-  let config =
-    make_config
-      ~kind:Gemini
-      ~model_id:gemini_flash_model
-      ~enable_thinking:true
-      ~thinking_budget:5000
-      ()
-  in
-  match Backend_gemini.build_request ~config ~messages:[ user_msg "reason" ] () with
-  | _ -> Alcotest.fail "expected a thinkingBudget rejection"
-  | exception Invalid_argument message ->
-    Alcotest.(check string)
-      "rejection"
-      "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
-       thinkingLevel wire; pass reasoning_effort"
-      message
 ;;
 
 let test_constants_http_code_sets () =
@@ -1794,10 +1772,6 @@ let () =
             `Quick
             test_build_request_with_system_prompt
         ; Alcotest.test_case "with thinking" `Quick test_build_request_with_thinking
-        ; Alcotest.test_case
-            "thinking rejects unspecified budget"
-            `Quick
-            test_build_request_rejects_a_thinking_budget
         ; Alcotest.test_case "json mode" `Quick test_build_request_json_mode
         ; Alcotest.test_case "with tools" `Quick test_build_request_with_tools
         ; Alcotest.test_case "tool_choice auto" `Quick test_build_request_tool_choice_auto

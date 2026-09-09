@@ -725,7 +725,6 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
 function invocationLabel(entry: ToolCallEntry): string | null {
   const parts = [
     entry.thinking_enabled !== undefined ? `thinking ${entry.thinking_enabled ? 'on' : 'off'}` : null,
-    entry.thinking_budget !== undefined ? `budget ${entry.thinking_budget}` : null,
     entry.tool_choice !== undefined ? `tool_choice ${entry.tool_choice}` : null,
     entry.prompt_fingerprint !== undefined ? `prompt ${entry.prompt_fingerprint.slice(0, 12)}` : null,
   ].filter((part): part is string => part !== null)

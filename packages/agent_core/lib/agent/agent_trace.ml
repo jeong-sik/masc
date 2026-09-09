@@ -252,7 +252,6 @@ let with_raw_trace_run_classified_result
          ?tool_choice:agent.state.config.tool_choice
          ?enable_thinking:agent.state.config.enable_thinking
          ?preserve_thinking:agent.state.config.preserve_thinking
-         ?thinking_budget:agent.state.config.thinking_budget
          ?reasoning_effort:
            (Option.map
               Llm_provider.Reasoning_effort.to_string

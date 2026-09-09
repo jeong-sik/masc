@@ -34,7 +34,6 @@ type t =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : Types.response_format
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; cache_system_prompt : bool
   ; context : Context.t
@@ -62,7 +61,6 @@ type sampling_patch =
   ; min_p : float option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
@@ -98,11 +96,11 @@ type delta =
 (** {1 Serialization} *)
 
 (** Serialize an exact current checkpoint to JSON. Raises [Invalid_argument]
-    when a manually constructed value violates the v10 contract. *)
+    when a manually constructed value violates the v11 contract. *)
 val to_json : t -> Yojson.Safe.t
 
 (** Serialize an exact current checkpoint to JSON without raising when a
-    manually constructed value violates the v10 contract. *)
+    manually constructed value violates the v11 contract. *)
 val to_json_result : t -> (Yojson.Safe.t, Error.t) result
 
 (** [drop_unencodable_json cp] is the recovery copy for a checkpoint whose
@@ -113,7 +111,7 @@ val to_json_result : t -> (Yojson.Safe.t, Error.t) result
     rejects the original — see {!to_json_result}. *)
 val drop_unencodable_json : t -> t option
 
-(** Deserialize only the exact current v10 checkpoint schema. Every other
+(** Deserialize only the exact current v11 checkpoint schema. Every other
     version is rejected. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result
 
@@ -134,7 +132,7 @@ val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
 val compute_delta : t -> t -> delta
 
 (** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
-    must satisfy the exact current v10 contract. *)
+    must satisfy the exact current v11 contract. *)
 val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)

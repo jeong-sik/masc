@@ -27,7 +27,6 @@ type sampling =
   { temperature : float option
   ; top_p : float option
   ; max_tokens : int option
-  ; thinking_budget : int option
   ; enable_thinking : bool option
   }
 
@@ -250,7 +249,6 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "temperature" (fun v -> `Float v) r.sampling.temperature
     @ opt_field "top_p" (fun v -> `Float v) r.sampling.top_p
     @ opt_field "max_tokens" (fun v -> `Int v) r.sampling.max_tokens
-    @ opt_field "thinking_budget" (fun v -> `Int v) r.sampling.thinking_budget
     @ opt_field "enable_thinking" (fun v -> `Bool v) r.sampling.enable_thinking
     @ opt_field "input_tokens" (fun v -> `Int v) r.usage.input_tokens
     @ opt_field "cache_creation_input_tokens" (fun v -> `Int v)
@@ -515,7 +513,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "temperature"
             ; "top_p"
             ; "max_tokens"
-            ; "thinking_budget"
             ; "enable_thinking"
             ; "input_tokens"
             ; "cache_creation_input_tokens"
@@ -644,7 +641,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* temperature = opt_member "temperature" fields as_float in
       let* top_p = opt_member "top_p" fields as_float in
       let* max_tokens = opt_member "max_tokens" fields as_int in
-      let* thinking_budget = opt_member "thinking_budget" fields as_int in
       let* enable_thinking = opt_member "enable_thinking" fields as_bool in
       let* input_tokens = opt_member "input_tokens" fields as_int in
       let* cache_creation_input_tokens =
@@ -688,7 +684,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_wire_observation
         ; model_input_window
         ; raw_trace_run_ref
-        ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
+        ; sampling = { temperature; top_p; max_tokens; enable_thinking }
         ; usage =
             { input_tokens
             ; output_tokens

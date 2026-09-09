@@ -12,7 +12,6 @@ open Types
     on the next turn. *)
 type turn_params =
   { temperature : float option
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
@@ -23,7 +22,6 @@ type turn_params =
 
 let default_turn_params =
   { temperature = None
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None

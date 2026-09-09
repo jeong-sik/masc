@@ -665,7 +665,6 @@ let make_hooks
              ?turn_kind:tctx.turn_kind
              ?lane:tctx.lane ?tool_choice:tctx.tool_choice
              ?thinking_enabled:tctx.thinking_enabled
-             ?thinking_budget:tctx.thinking_budget
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id

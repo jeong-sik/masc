@@ -2079,30 +2079,6 @@ let test_responses_build_request_includes_previous_response_id () =
   check_int "manual input still present" 1 (member "input" body |> to_list |> List.length)
 ;;
 
-let test_responses_build_request_rejects_numeric_thinking_budget () =
-  let config =
-    Provider_config.make
-      ~kind:OpenAI_compat
-      ~model_id:"gpt-5.5"
-      ~base_url:"https://api.openai.com"
-      ~request_path:"/v1/responses"
-      ~enable_thinking:false
-      ~thinking_budget:4096
-      ~max_tokens:128
-      ()
-  in
-  match
-    Responses.build_request ~config ~messages:[ msg User [ Text "short answer" ] ] ()
-  with
-  | _ -> Alcotest.fail "expected numeric thinking-budget rejection"
-  | exception Invalid_argument message ->
-    check_string
-      "rejection"
-      "Backend_openai_responses.build_request: thinking_budget is unsupported; pass \
-       reasoning_effort"
-      message
-;;
-
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -2578,10 +2554,6 @@ let () =
             "build request previous_response_id"
             `Quick
             test_responses_build_request_includes_previous_response_id
-        ; Alcotest.test_case
-            "build request rejects numeric thinking budget"
-            `Quick
-            test_responses_build_request_rejects_numeric_thinking_budget
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

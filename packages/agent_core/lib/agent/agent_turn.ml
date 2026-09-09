@@ -104,7 +104,6 @@ let provider_config_with_agent_config
   ; system_prompt = config.system_prompt
   ; enable_thinking = config.enable_thinking
   ; preserve_thinking = config.preserve_thinking
-  ; thinking_budget = config.thinking_budget
   ; reasoning_effort = config.reasoning_effort
   ; tool_choice = config.tool_choice
   ; disable_parallel_tool_use = config.disable_parallel_tool_use

@@ -51,7 +51,6 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   ; disable_parallel_tool_use = true
   ; enable_thinking = None
   ; preserve_thinking = Some false
-  ; thinking_budget = None
   ; clear_thinking = Some true
   }
   |> Keeper_structured_output_schema.without_response_format

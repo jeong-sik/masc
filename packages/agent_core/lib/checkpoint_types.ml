@@ -1,6 +1,6 @@
 open Types
 
-let checkpoint_version = 10
+let checkpoint_version = 11
 
 type t =
   { version : int
@@ -22,7 +22,6 @@ type t =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : response_format
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; cache_system_prompt : bool
   ; context : Context.t
@@ -50,7 +49,6 @@ type sampling_patch =
   ; min_p : float option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 

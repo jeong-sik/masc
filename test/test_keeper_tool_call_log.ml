@@ -889,7 +889,6 @@ let test_turn_context_fields_stored () =
       ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false
-      ~thinking_budget:1024
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
@@ -913,7 +912,6 @@ let test_turn_context_fields_stored () =
       ?agent_name:tctx.agent_name
       ?lane:tctx.lane ?tool_choice:tctx.tool_choice
       ?thinking_enabled:tctx.thinking_enabled
-      ?thinking_budget:tctx.thinking_budget
       ?prompt_fingerprint:tctx.prompt_fingerprint
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
@@ -937,8 +935,6 @@ let test_turn_context_fields_stored () =
       (match Yojson.Safe.Util.member "thinking_enabled" entry with
        | `Bool false -> true
        | _ -> false);
-    Alcotest.(check int) "thinking_budget field" 1024
-      (Safe_ops.json_int ~default:0 "thinking_budget" entry);
     Alcotest.(check (option string)) "prompt_fingerprint field"
       (Some "prompt-fp-k")
       (Safe_ops.json_string_opt "prompt_fingerprint" entry);
@@ -1074,10 +1070,6 @@ let test_turn_context_fields_absent_without_context () =
       (Safe_ops.json_string_opt "tool_choice" entry);
     Alcotest.(check bool) "thinking_enabled absent" true
       (match Yojson.Safe.Util.member "thinking_enabled" entry with
-       | `Null -> true
-       | _ -> false);
-    Alcotest.(check bool) "thinking_budget absent" true
-      (match Yojson.Safe.Util.member "thinking_budget" entry with
        | `Null -> true
        | _ -> false);
     Alcotest.(check bool) "prompt_fingerprint absent" true
@@ -1467,7 +1459,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~success:true ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
-      ~thinking_enabled:false ~thinking_budget:1024
+      ~thinking_enabled:false
       ~runtime_profile:"primary" ();
     let failure_output = "error: {\"ok\":false,\"error\":\"boom\"}" in
     Keeper_tool_call_log.log_call
@@ -1477,7 +1469,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~success:false ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
-      ~thinking_enabled:true ~thinking_budget:4096
+      ~thinking_enabled:true
       ~runtime_profile:"local_qwen3_27b_only" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     Alcotest.(check (option string)) "sampling mode present"

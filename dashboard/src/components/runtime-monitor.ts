@@ -426,7 +426,6 @@ function runtimeParameterDetailRows(
     detailRow('request', 'thinking', onOffText(request?.enable_thinking)),
     detailRow('request', 'preserve thinking', onOffText(request?.preserve_thinking)),
     detailRow('request', 'clear thinking', onOffText(request?.clear_thinking)),
-    detailRow('request', 'thinking budget', numberText(request?.thinking_budget)),
     detailRow('request', 'reasoning effort', request?.resolved_reasoning_effort),
     detailRow('request', 'glm clear', boolText(request?.glm_clear_thinking)),
     detailRow('request', 'glm replay', boolText(request?.glm_replay_reasoning)),

@@ -93,7 +93,6 @@ type agent_config =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : response_format
-  ; thinking_budget : int option (* For Claude 3.7+ extended thinking *)
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; tool_choice : tool_choice option
   ; disable_parallel_tool_use : bool
@@ -131,7 +130,6 @@ let default_config ~model =
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Off
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; tool_choice = None
   ; disable_parallel_tool_use = false

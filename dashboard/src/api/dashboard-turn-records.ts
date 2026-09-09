@@ -104,7 +104,6 @@ export type TurnRecordEntry = {
   temperature?: number
   top_p?: number
   max_tokens?: number
-  thinking_budget?: number
   enable_thinking?: boolean
   input_tokens?: number
   output_tokens?: number
@@ -484,7 +483,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'temperature',
     'top_p',
     'max_tokens',
-    'thinking_budget',
     'enable_thinking',
     'input_tokens',
     'cache_creation_input_tokens',
@@ -544,8 +542,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const temperature = decodeOptionalField(raw, 'temperature', decodeFiniteNumber)
   const top_p = decodeOptionalField(raw, 'top_p', decodeFiniteNumber)
   const max_tokens = decodeOptionalField(raw, 'max_tokens', decodeNonNegativeSafeInteger)
-  const thinking_budget =
-    decodeOptionalField(raw, 'thinking_budget', decodeNonNegativeSafeInteger)
   const enable_thinking = decodeOptionalField(raw, 'enable_thinking', decodeBoolean)
   const input_tokens = decodeOptionalField(raw, 'input_tokens', decodeNonNegativeSafeInteger)
   const output_tokens = decodeOptionalField(raw, 'output_tokens', decodeNonNegativeSafeInteger)
@@ -588,7 +584,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || temperature === null
     || top_p === null
     || max_tokens === null
-    || thinking_budget === null
     || enable_thinking === null
     || input_tokens === null
     || output_tokens === null
@@ -617,7 +612,6 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     temperature,
     top_p,
     max_tokens,
-    thinking_budget,
     enable_thinking,
     input_tokens,
     output_tokens,

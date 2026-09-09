@@ -67,14 +67,10 @@ type request_control_artifact =
   }
 
 type request_control_rejection =
-  | Thinking_budget_unsupported
   | Reasoning_effort_unsupported
   | Reasoning_effort_value_unsupported of Reasoning_effort.t
 
 let request_control_rejection_to_message = function
-  | Thinking_budget_unsupported ->
-    "Reasoning_dialect.request_control_fields: thinking_budget is unsupported by the \
-     selected provider wire"
   | Reasoning_effort_unsupported ->
     "Reasoning_dialect.request_control_fields: reasoning_effort is unsupported by the \
      selected provider wire"
@@ -317,28 +313,12 @@ let normalize_effort_value dialect effort =
   | Preserve_effort, effort -> Some (Reasoning_effort.to_string effort)
 ;;
 
-let validate_request_control_inputs
-      request_wire
-      dialect
-      ~thinking_budget
-      ~reasoning_effort
-  =
-  let thinking_budget_result =
-    (* No OpenAI-compatible wire carries a numeric budget; Anthropic and
-       Gemini budgets travel on their own serializers. *)
-    match thinking_budget with
-    | None -> Ok ()
-    | Some _ -> Error Thinking_budget_unsupported
-  in
-  match thinking_budget_result with
-  | Error _ as error -> error
-  | Ok () ->
-    (match reasoning_effort, request_wire, dialect.toggle_wire with
-     | None, _, _
-     | Some _, (Chat_completions | Responses), Reasoning_effort
-     | Some _, Chat_completions, Thinking_object { includes_reasoning_effort = true } ->
-       Ok ()
-     | Some _, _, _ -> Error Reasoning_effort_unsupported)
+let validate_request_control_inputs request_wire dialect ~reasoning_effort =
+  match reasoning_effort, request_wire, dialect.toggle_wire with
+  | None, _, _
+  | Some _, (Chat_completions | Responses), Reasoning_effort
+  | Some _, Chat_completions, Thinking_object { includes_reasoning_effort = true } -> Ok ()
+  | Some _, _, _ -> Error Reasoning_effort_unsupported
 ;;
 
 let normalized_effort_for_request dialect = function
@@ -354,7 +334,6 @@ let request_control_fields
       dialect
       ~enable_thinking
       ~preserve_thinking
-      ~thinking_budget
       ~reasoning_effort
       ?clear_thinking_object
       ()
@@ -382,12 +361,7 @@ let request_control_fields
     | Gemini_thinking_config -> reasoning_effort
   in
   match
-    validate_request_control_inputs
-      request_wire
-      dialect
-      ~thinking_budget
-      ~reasoning_effort
-  with
+    validate_request_control_inputs request_wire dialect ~reasoning_effort with
   | Error _ as error -> error
   | Ok () ->
     (match normalized_effort_for_request dialect reasoning_effort with
@@ -858,7 +832,6 @@ let%test "request_control_fields emits qwen chat_template kwargs" =
     dialect
     ~enable_thinking:(Some false)
     ~preserve_thinking:(Some true)
-    ~thinking_budget:None
     ~reasoning_effort:None
     ()
   = Ok
@@ -877,7 +850,6 @@ let%test "request_control_fields renders an explicit disable as reasoning_effort
     dialect
     ~enable_thinking:(Some false)
     ~preserve_thinking:None
-    ~thinking_budget:None
     ~reasoning_effort:(Some Reasoning_effort.High)
     ()
   = Ok
@@ -893,7 +865,6 @@ let%test "request_control_fields renders an explicit disable on the responses wi
     dialect
     ~enable_thinking:(Some false)
     ~preserve_thinking:None
-    ~thinking_budget:None
     ~reasoning_effort:(Some Reasoning_effort.Medium)
     ()
   = Ok
@@ -910,7 +881,6 @@ let%test "request_control_fields keeps the caller's effort unless the toggle is 
       dialect
       ~enable_thinking
       ~preserve_thinking:None
-      ~thinking_budget:None
       ~reasoning_effort:(Some Reasoning_effort.High)
       ()
   in
@@ -939,7 +909,6 @@ let%test "request_control_fields emits thinking object with explicitly supported
     dialect
     ~enable_thinking:(Some true)
     ~preserve_thinking:None
-    ~thinking_budget:None
     ~reasoning_effort:(Some Reasoning_effort.High)
     ()
   = Ok
@@ -957,7 +926,6 @@ let%test "request_control_fields keeps zai glm no-toggle exception explicit" =
     default
     ~enable_thinking:(Some true)
     ~preserve_thinking:(Some true)
-    ~thinking_budget:None
     ~reasoning_effort:None
     ~clear_thinking_object:false
     ()
@@ -984,7 +952,6 @@ let%test "explicit enable receipt follows the selected OpenAI request wire" =
       dialect
       ~enable_thinking:(Some true)
       ~preserve_thinking:None
-      ~thinking_budget:None
       ~reasoning_effort
       ()
   in
@@ -1027,7 +994,6 @@ let%test "chat-template token receipt names its out-of-band wire encoding" =
     dialect
     ~enable_thinking:(Some true)
     ~preserve_thinking:None
-    ~thinking_budget:None
     ~reasoning_effort:None
     ()
   = Ok
@@ -1051,7 +1017,6 @@ let%test "unrelated output field cannot satisfy explicit enable receipt" =
     dialect
     ~enable_thinking:(Some true)
     ~preserve_thinking:None
-    ~thinking_budget:None
     ~reasoning_effort:None
     ()
   = Ok

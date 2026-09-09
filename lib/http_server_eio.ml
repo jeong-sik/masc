@@ -155,7 +155,7 @@ module Response = struct
           match Yojson.Safe.from_string body with
           | json when recognizes json -> `Gateway_timeout
           | _ -> ok_status ()
-          | exception _ -> ok_status ()
+          | exception Yojson.Json_error _ -> ok_status ()
 
   let rev_prepend_headers headers acc =
     List.fold_left (fun acc header -> header :: acc) acc headers

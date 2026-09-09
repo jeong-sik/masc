@@ -2290,6 +2290,18 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
           "recovery-backed observation degrades fleet health"
           "degraded"
           (fleet_safety |> member "status" |> to_string);
+        (* The dashboard reads this schema through an equality, not two
+           independent fields: store-normalizers.ts:594 asserts
+           [operator_action_required === (status !== 'ok')] and, when the two
+           disagree, throws the payload away for a synthesized row reading
+           status "blocked" with blocker "current_fact_invalid" -- a severity
+           the fleet never reported and a blocker name the server never sends,
+           with every real count replaced by null. This test held the status
+           half only, so the verdict could drift out from under it. *)
+        Alcotest.(check bool)
+          "and the verdict the dashboard compares it against agrees"
+          true
+          (fleet_safety |> member "operator_action_required" |> to_bool);
         Alcotest.(check int)
           "recovery-backed observation records one scan error"
           1
@@ -2568,7 +2580,24 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
             let open Yojson.Safe.Util in
             Alcotest.(check int) "in-flight Keeper remains executable" 1
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
-            Alcotest.(check bool) "in-flight Keeper needs no operator action" false
+            (* This workspace never writes a backlog, so the fleet cannot read
+               one and [status] is already "degraded" here -- it was before this
+               assertion changed, too. What moved is the verdict beside it. The
+               dashboard does not read the two as independent fields:
+               store-normalizers.ts:594 requires [operator_action_required ===
+               (status !== 'ok')] and throws the payload away when they
+               disagree, showing status "blocked" with blocker
+               "current_fact_invalid" instead. A bare [false] next to a
+               "degraded" status is that disagreement, so this test used to pin
+               the shape the dashboard rejects. Assert the relation rather than
+               a literal, so neither half can drift alone again. *)
+            let status = fleet_safety |> member "status" |> to_string in
+            Alcotest.(check string)
+              "a fleet that cannot read its backlog is degraded" "degraded"
+              status;
+            Alcotest.(check bool)
+              "and the verdict the dashboard compares it against agrees"
+              (status <> "ok")
               (fleet_safety |> member "operator_action_required" |> to_bool);
             Alcotest.(check (list string)) "in-flight Keeper is running" []
               (keepers_not_running fleet_safety)))))

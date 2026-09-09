@@ -78,10 +78,24 @@ try {
   await source.scrollIntoViewIfNeeded()
   await page.screenshot({ path: resolve(output, 'desktop.png') })
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await first.click()
+  await source.waitFor()
   await source.scrollIntoViewIfNeeded()
+  const sourceLayout = await source.evaluate(element => ({
+    scrollTop: element.scrollTop, scrollLeft: element.scrollLeft,
+    scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+    whiteSpace: getComputedStyle(element).whiteSpace, color: getComputedStyle(element).color,
+  }))
+  assert.equal(sourceLayout.whiteSpace, 'pre-wrap')
+  assert.ok(sourceLayout.scrollWidth <= sourceLayout.clientWidth, 'Source text must wrap inside the reader')
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const mobileSourceBounds = await source.boundingBox()
   assert.ok(mobileSourceBounds && mobileSourceBounds.x >= 0 && mobileSourceBounds.x + mobileSourceBounds.width <= 390, 'Source must fit mobile viewport')
+  await source.click()
+  await source.press('Home')
   await page.screenshot({ path: resolve(output, 'mobile.png') })
+  await source.screenshot({ path: resolve(output, 'mobile-source.png') })
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await first.click()
@@ -94,11 +108,11 @@ try {
   await page.screenshot({ path: resolve(output, 'unavailable.png') })
   await page.getByRole('button', { name: 'Retry source read', exact: true }).click()
   await source.waitFor()
-  assert.equal(sourceReads.length, 2)
-  assert.equal(await source.textContent(), sourceReads[1].payload.source_text)
+  assert.equal(sourceReads.length, 3)
+  assert.equal(await source.textContent(), sourceReads[2].payload.source_text)
   const receipt = { observed_at: new Date().toISOString(), manifest,
     backend: new URL(baseUrl).origin, blocked_mutations: mutations, blocked_websockets: blockedWebSockets,
-    deployment: false, mobile_overflow: mobileOverflow, mobile_source_bounds: mobileSourceBounds,
+    deployment: false, mobile_overflow: mobileOverflow, mobile_source_bounds: mobileSourceBounds, source_layout: sourceLayout,
     reads: sourceReads.map(({ request, payload }) => ({ reference: request.reference,
       access: payload.access, source_sha256: createHash('sha256').update(payload.source_text).digest('hex'),
       source_bytes: Buffer.byteLength(payload.source_text), exact_text_match: true })),

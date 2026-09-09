@@ -13,5 +13,6 @@ replace a newly selected revision. Existing editing remains a separate action.
 
 Validation: the two focused Vitest suites passed 32 tests, including direct
 catalog-row inspection, exact source text, revision changes, mismatch refusal
-and failure/retry. No local build was run. CI asset build and browser evidence
-are still required before claiming the deployed UI is changed.
+and failure/retry. No local build was run. CI-built browser evidence now verifies exact live-source reading, error/retry
+and focused mobile layout; see `docs/evidence/2026-09-10-skill-direct-inspection`.
+The deployed UI is not claimed changed.

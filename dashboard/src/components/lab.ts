@@ -4,6 +4,7 @@ import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
 import { LabPerf } from './lab-perf'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
+import { WorkspaceMemoryContextPanel } from './memory/workspace-memory-context'
 import { SectionNav } from './common/section-nav'
 import { SurfaceHeader } from './common/surface-header'
 
@@ -45,6 +46,7 @@ export function Lab() {
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`
+        <${WorkspaceMemoryContextPanel} />
         <${KeeperMemoryHealth} />
       ` : null}
     </div>

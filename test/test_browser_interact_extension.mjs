@@ -82,3 +82,12 @@ page.getComputedStyle = el => ({display:'block',visibility:'visible',overflowY:e
 const nested = await command({...observed,action:'scroll_at',x:0,y:-120});
 assert.equal(nested.ok,true);assert.equal(pane.scrollTop,-120);
 console.log('PASS: extension dispatches screenshot point click, rejects stale viewport and unsupported drag, scrolls reverse-flow pane');
+
+const innerHost = {shadowRoot: {elementFromPoint: () => button}};
+const outerHost = {shadowRoot: {elementFromPoint: () => innerHost}};
+page.document.elementFromPoint = () => outerHost;
+pane.scrollTop = 0;
+const shadowScroll = await command({...observed,action:'scroll_at',x:0,y:-120});
+assert.equal(shadowScroll.ok,true);
+assert.equal(pane.scrollTop,-120,'nested open shadow roots reach the internal scroll pane');
+console.log('PASS: nested open shadow roots target the internal scroll pane');

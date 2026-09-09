@@ -377,3 +377,15 @@ describe('Goal source unavailable across HTTP projections', () => {
     await expect(fetch()).rejects.toThrow('goals.json: criterion_revision is missing')
   })
 })
+
+
+describe('Goal–Task link source unavailable', () => {
+  it.each([
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s preserves the link source cause', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ok: false, error_code: 'goal_task_links_unavailable',
+      error: 'goal_task_links: primary registry is missing; recovery is non-authoritative' })
+    await expect(fetch()).rejects.toThrow('primary registry is missing')
+  })
+})

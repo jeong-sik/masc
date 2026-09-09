@@ -6,8 +6,5 @@ val prepare : directory:string -> (string, string) result
     auth.json if present; never copies or changes the original configuration.
     Keyring-only credentials are not extracted into files by verification. *)
 
-val disabled_server_names : home:string -> string list
-(** Read the disabled inherited server names from the private projection. *)
-
 val cli_overrides : home:string -> string list
 (** Explicit CLI overrides prevent system or ancestor layers re-enabling tools. *)

@@ -475,7 +475,7 @@ let test_disk_backup_failure_preserves_machine () =
 
 let test_key_vocabulary () =
   let named =
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f1"; "f5"; "a"; "M"; "7" ]
   in
   List.iter
     (fun n ->
@@ -484,13 +484,13 @@ let test_key_vocabulary () =
   List.iter
     (fun n ->
       check bool ("key " ^ n ^ " is refused") true (Result.is_error (Msx_lane.key_of_string n)))
-    [ ""; "f6"; "shift"; "banana"; "ab" ];
+    [ ""; "f6"; "banana"; "ab" ];
   List.iter
     (fun n ->
       match Msx_lane.key_of_string n with
       | Ok k -> check string ("round trip " ^ n) n (Msx_lane.key_to_string k)
       | Error m -> fail m)
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "f3"; "m" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f3"; "m" ]
 ;;
 
 let test_registration () =

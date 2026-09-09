@@ -11,6 +11,12 @@ machine. It keeps a project's goals, tasks, claims, board posts, approvals, and
 execution records in a `.masc/` directory, serves that state over MCP so any
 MCP client can join, and shows all of it in a terminal UI.
 
+**Development direction:** carry a requested change through verification, recover
+from interruptions by checking what was already applied, and preserve those
+properties as concurrent work grows. The [reliable-change roadmap](docs/RELIABLE-CHANGE-ROADMAP.md)
+sets measurable Goals and separates existing capabilities from guarantees still
+to be demonstrated.
+
 Three things it does:
 
 - **Shared state for agents.** Two agents in the same checkout otherwise keep

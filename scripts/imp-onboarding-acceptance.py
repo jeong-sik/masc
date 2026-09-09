@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -32,9 +33,103 @@ def events(path):
     return [json.loads(line[5:]) for line in path.read_text().splitlines() if line.startswith('data:')]
 
 
+def snapshot_evidence(base, output):
+    """Preserve raw records before validating them, including a failed run."""
+    keeper = base / '.masc/keepers/imp'
+    traces = []
+    parse_errors = []
+    for name in ('raw-traces', 'turn-records', 'execution-receipts'):
+        source = keeper / name
+        if not source.exists():
+            continue
+        shutil.copytree(source, output / name, dirs_exist_ok=True)
+        rows = []
+        for path in sorted(source.rglob('*.jsonl')):
+            for line_number, line in enumerate(path.read_text().splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as error:
+                    parse_errors.append(dict(file=str(path.relative_to(base)),
+                                             line=line_number, error=str(error)))
+        target = 'tool-traces.json' if name == 'raw-traces' else name + '.json'
+        (output / target).write_text(json.dumps(rows, indent=2, ensure_ascii=False))
+        if name == 'raw-traces':
+            traces = rows
+    for source, target in (('.masc/board_posts.jsonl', 'board-posts.jsonl'),
+                           ('.masc/tasks/backlog.json', 'backlog.json')):
+        path = base / source
+        if path.exists():
+            shutil.copyfile(path, output / target)
+    if parse_errors:
+        (output / 'trace-parse-errors.json').write_text(json.dumps(parse_errors, indent=2))
+    return traces
+
+
+def directory_execution(traces):
+    # Join the actual dispatched input to its completion, never infer a listing
+    # from a successful exit or an assistant's description. The final form is
+    # also present in the recorded macOS baseline.
+    def lists_working_directory(script):
+        if not isinstance(script, str):
+            return False
+        try:
+            lexer = shlex.shlex(script, posix=True, punctuation_chars=';&|')
+            lexer.whitespace_split = True
+            commands = [[]]
+            for token in lexer:
+                if token in (';', '&&'):
+                    commands.append([])
+                elif token in ('&', '|', '||'):
+                    return False
+                else:
+                    commands[-1].append(token)
+        except ValueError:
+            return False
+        has_pwd = any(command == ['pwd'] for command in commands)
+        has_listing = any(command and command[0] == 'ls'
+                          and all(argument.startswith('-') or argument == '.' for argument in command[1:])
+                          for command in commands)
+        return has_pwd and has_listing
+    def identity(event):
+        return tuple(event.get(key) for key in ('worker_run_id', 'session_id', 'tool_use_id'))
+    starts = {identity(event): event for event in traces
+              if event.get('record_type') == 'tool_execution_started'
+              and event.get('tool_name') == 'Execute'
+              and event.get('tool_use_id')}
+    for event in traces:
+        if (event.get('record_type') != 'tool_execution_finished'
+                or event.get('tool_name') != 'Execute' or event.get('tool_error') is not False):
+            continue
+        started = starts.get(identity(event))
+        if not started or not lists_working_directory(started.get('tool_input', {}).get('script')):
+            continue
+        try:
+            result = json.loads(event.get('tool_result', ''))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(result, dict):
+            continue
+        if not (result.get('ok') is True and result.get('via') == 'docker'
+                and result.get('sandbox_profile') == 'docker'
+                and result.get('status') == {'kind': 'exit', 'code': 0}
+                and result.get('cwd') == '/home/keeper/playground/imp'
+                and result.get('output_completeness') == 'complete'):
+            continue
+        lines = result.get('output', '').splitlines()
+        directories = {line.split()[-1] for line in lines
+                       if line.startswith('d') and len(line.split()) >= 9}
+        if '/home/keeper/playground/imp' in lines and {'.', '..'}.issubset(directories):
+            return dict(input=started, completion=event)
+    raise RuntimeError('no matched Execute input/output proves the current path and directory listing in the Docker sandbox')
+
+
 def measure(args):
     binary = str(Path(args.binary).resolve())
     output = Path(args.output).resolve()
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise RuntimeError('evidence output must be a new or empty directory: ' + str(output))
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='masc-imp-', dir=args.work_parent) as directory:
         base = Path(directory).resolve()
@@ -98,15 +193,27 @@ def measure(args):
                             url + '/api/v1/keepers/chat/stream'], env=env,
                             input=('header = "Content-Type: application/json"\nheader = "Authorization: Bearer ' + token + '"\n').encode(),
                             stdout=stream, stderr=subprocess.PIPE, timeout=240)
+                    snapshot_evidence(base, output)
                     result.check_returncode()
                     stream_events = events(path)
+                    if index == 0:
+                        assistant_messages = {(event.get('runId'), event.get('messageId'))
+                                              for event in stream_events
+                                              if event.get('type') == 'TEXT_MESSAGE_START'
+                                              and event.get('role') == 'assistant'}
+                        greeting = ''.join(event['delta'] for event in stream_events
+                                           if event.get('type') == 'TEXT_MESSAGE_CONTENT'
+                                           and (event.get('runId'), event.get('messageId')) in assistant_messages
+                                           and isinstance(event.get('delta'), str)).strip()
+                        if not greeting:
+                            raise RuntimeError('greeting completed without assistant text; see chat-0.sse')
+                        (output / 'greeting.txt').write_text(greeting)
                     if any(event.get('type') == 'RUN_ERROR' for event in stream_events):
                         raise RuntimeError(f'chat {index} returned RUN_ERROR; see {path}')
                     if not any(event.get('type') == 'RUN_FINISHED' for event in stream_events):
                         raise RuntimeError(f'chat {index} has no completed run')
                     print(f'chat {index} completed', flush=True)
-                traces = [json.loads(line) for path in (base / '.masc/keepers/imp/raw-traces').glob('*.jsonl')
-                          for line in path.read_text().splitlines()]
+                traces = snapshot_evidence(base, output)
                 completed = [event for event in traces if event.get('record_type') == 'tool_execution_finished'
                              and event.get('tool_error') is False]
                 (output / 'tool-traces.json').write_text(json.dumps(traces, indent=2, ensure_ascii=False))
@@ -117,11 +224,8 @@ def measure(args):
                     except json.JSONDecodeError:
                         continue
                     results.setdefault(event['tool_name'], []).append(value)
-                if not any(value.get('ok') is True and value.get('via') == 'docker'
-                           and value.get('status') == {'kind': 'exit', 'code': 0}
-                           and value.get('cwd') == '/home/keeper/playground/imp'
-                           for value in results.get('Execute', [])):
-                    raise RuntimeError('no successful directory execution in the actual Docker sandbox')
+                directory_proof = directory_execution(traces)
+                (output / 'directory-execution.json').write_text(json.dumps(directory_proof, indent=2))
                 if not any(value.get('status') == 'ok' and value.get('http_status') == 200
                            and value.get('final_url') == 'https://example.com/'
                            for value in results.get('WebFetch', [])):
@@ -139,29 +243,30 @@ def measure(args):
                 if not required.issubset({event.get('tool_name') for event in completed}):
                     raise RuntimeError('missing successful MASC tool results: ' + str(required - {e.get('tool_name') for e in completed}))
                 (output / 'tool-results.json').write_text(json.dumps(completed, indent=2, ensure_ascii=False))
-                for name in ('turn-records', 'execution-receipts'):
-                    rows = [json.loads(line) for path in (base / '.masc/keepers/imp' / name).rglob('*.jsonl')
-                            for line in path.read_text().splitlines()]
-                    (output / (name + '.json')).write_text(json.dumps(rows, indent=2, ensure_ascii=False))
                 (output / 'backlog.json').write_bytes((base / '.masc/tasks/backlog.json').read_bytes())
                 (output / 'health.json').write_text(json.dumps(health, indent=2))
+                if args.playwright_module:
+                    run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
+                        str(base / '.masc/auth/local-admin.token'), str(output),
+                        args.playwright_module, args.browser_executable)
                 (output / 'receipt.json').write_text(json.dumps(dict(
                     source=run(binary, 'build-commit').strip(), model=args.model,
                     platform=run('uname', '-sm').strip(), fixture_model=False,
                     approval_overrides=False, keeper='imp', completed_chats=len(prompts),
                     successful_tools=sorted(required)), indent=2))
-                if args.playwright_module:
-                    run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
-                        str(base / '.masc/auth/local-admin.token'), str(output),
-                        args.playwright_module, args.browser_executable)
                 print('Acceptance evidence:', output, flush=True)
             finally:
-                server.terminate()
+                # SSE streams already live in output. Copy raw records even if
+                # curl times out, a verdict fails, or browser verification fails.
                 try:
-                    server.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-                    server.wait()
+                    server.terminate()
+                    try:
+                        server.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        server.kill()
+                        server.wait()
+                finally:
+                    snapshot_evidence(base, output)
 
 
 if __name__ == '__main__':

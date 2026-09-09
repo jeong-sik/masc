@@ -350,16 +350,19 @@ let batch_disposition_of_cycle_outcome
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* No exact direct-reply/ignore settlement exists, so connector
-          attention stays pending instead of gaining an evidence-free
-          Ignored label (#32114 kept this narrow claim honest). The rest of
-          the admitted batch is still consumed: the completed turn projected
-          those rows and chose its actions with them in view. The
-          attention-only disposition preserves Connector attention while
-          advancing the rest. Refusing both replayed the same board rows into
-          every later turn — one post re-promoted 297 times and a 10-15s wake
-          churn (#32277). *)
-       Batch_ack_attention_only)
+       (* A completed turn projected every admitted row and chose its actions
+          with them in view; that is what the queue delivered and what the
+          ack records. Connector attention used to be held back here until an
+          exact reply/ignore receipt existed (#32114), which turned "the
+          keeper read this and did not answer" into a wake reason: the same
+          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
+          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
+          minutes on 2026-09-09, #34655), the same way refusing the board ack
+          replayed one post 297 times (#32277). Whether the keeper answered is
+          not the queue's question: the reaction ledger's turn_finished row
+          carries the turn's disposition, and the external-attention store
+          keeps the message itself. Neither needs the pending entry. *)
+       Batch_ack_completed)
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason =
@@ -389,7 +392,7 @@ let batch_disposition_of_cycle_outcome
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
        so an unconsumed grant is retained. Connector attention remains
-       pending until it has an exact reply/ignore settlement. *)
+       pending until the resumed turn completes. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _

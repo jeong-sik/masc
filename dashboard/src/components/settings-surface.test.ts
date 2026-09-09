@@ -1209,7 +1209,6 @@ describe('SettingsSurface', () => {
               max_context: 131072,
               thinking_support: true,
               preserve_thinking: true,
-              max_thinking_budget: 8192,
               streaming: true,
               temperature: 0.65,
               capabilities: {

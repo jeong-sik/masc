@@ -464,7 +464,6 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'streaming', onOffText(declaredModel?.streaming)),
     detailRow('declared model', 'thinking', onOffText(declaredModel?.thinking_support)),
     detailRow('declared model', 'preserve thinking', onOffText(declaredModel?.preserve_thinking)),
-    detailRow('declared model', 'thinking budget', numberText(declaredModel?.max_thinking_budget)),
     detailRow('declared model', 'temperature', numberText(declaredModel?.temperature)),
     detailRow('declared model', 'sampling', declaredSampling),
     detailRow('declared model', 'capability source', declaredCaps?.source),

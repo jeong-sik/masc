@@ -66,13 +66,6 @@ val text_extractor : (string -> 'a option) -> 'a extractor
 
 (** {1 Agent-level structured output} *)
 
-val run_structured
-  :  sw:Eio.Switch.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> Agent.t
-  -> string
-  -> extract:'a extractor
-  -> ('a, Error.t) result
 
 (** {1 Streaming extraction} *)
 

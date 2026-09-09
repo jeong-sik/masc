@@ -77,7 +77,6 @@ type tool_result_outcome =
   | Tool_failed of tool_failure_provenance
 [@@deriving show]
 
-val tool_failure_kind_is_recoverable : tool_failure_kind -> bool
 val tool_result_outcome_is_error : tool_result_outcome -> bool
 
 type tool_error =
@@ -124,8 +123,6 @@ type json_shape =
   | Json_object
 [@@deriving show, eq]
 
-val json_shape_of_json : Yojson.Safe.t -> json_shape
-val json_shape_to_string : json_shape -> string
 
 (** Exact object-shape check for a manual decoder. [Error] names the missing
     required fields, the fields outside [required @ optional], and the

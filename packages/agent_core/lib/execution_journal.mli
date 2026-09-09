@@ -13,7 +13,6 @@ type run
 
 val run_id : run -> Execution_event.Run_id.t
 val run_root : run -> Execution_event.Node_id.t
-val equal_run : run -> run -> bool
 
 (** A value together with the exact immutable event that materialized it. *)
 type 'a event_record = private
@@ -341,8 +340,6 @@ val read_page
 
 val snapshot : t -> snapshot
 val snapshot_cursor : snapshot -> cursor
-val snapshot_find_node : snapshot -> Execution_event.Node_id.t -> node_view option
-val snapshot_find_run : snapshot -> Execution_event.Run_id.t -> run_view option
 val find_node : t -> Execution_event.Node_id.t -> node_view option
 val find_run : t -> Execution_event.Run_id.t -> run_view option
 

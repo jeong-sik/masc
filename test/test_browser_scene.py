@@ -202,6 +202,22 @@ try:
  check('HTTP302 final observation differs from original href',redirect_receipt['destinationUrl'].endswith('/redirect') and redirected['url'].endswith('/canonical'))
  check('redirect recovery reads actual destination content',any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes']))
  (a.out/'redirect.json').write_text(json.dumps({'follow':redirect_receipt,'first_observed_url':first_redirect_observation['url'],'observed_url':redirected['url'],'title':redirected['title'],'application_verified':False},ensure_ascii=False,indent=2))
+ js("""document.body.innerHTML='<a id=policy href="#policy" rel=noreferrer>Policy link</a><svg width=300 height=80><a id=vector href="#vector" aria-label="Vector link"><text x=10 y=40>Vector</text></a></svg>';""")
+ policy_scene=observe();policy_node=control(policy_scene,'Policy link')
+ for attribute,value in [('rel','noreferrer'),('referrerpolicy','no-referrer')]:
+  js("const a=document.querySelector('#policy');a.removeAttribute('rel');a.removeAttribute('referrerpolicy');a.setAttribute(arguments[0],arguments[1]);",[attribute,value])
+  try:act(policy_scene,policy_node,action='follow_link');raise AssertionError('link policy ignored')
+  except RuntimeError as e:check('explicit '+attribute+' rejects before follow','follow_link_referrer_policy_unsupported' in str(e) and js('return location.href;')==policy_scene['url'])
+ vector_scene=observe();vector=control(vector_scene,'Vector link')
+ check('SVG anchor exposes normalized observed absolute href',isinstance(vector['href'],str) and vector['href'].endswith('#vector'))
+ js("document.querySelector('#vector').setAttribute('href','#recycled-vector');")
+ try:act(vector_scene,vector,action='follow_link');raise AssertionError('SVG animated href repointed')
+ except RuntimeError as e:check('SVG animated href mutation rejects against string pin','scene_link_destination_changed' in str(e))
+ for target in ['_top','_parent']:
+  js("document.querySelector('#vector').setAttribute('target',arguments[0]);",[target])
+  vector_scene=observe();vector=control(vector_scene,'Vector link')
+  receipt=act(vector_scene,vector,action='follow_link')
+  check('SVG '+target+' in top document follows same tab',js('return location.href;')==receipt['destinationUrl'])
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

@@ -1,6 +1,15 @@
 (* Same fixed function as the extension; parity is checked by the Node regression. *)
 let runtime = {js|function browserScene(args) {
-  const key = Symbol.for('masc.browser.scene.refs.v2');
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    if (typeof raw !== 'string' || (!element.hasAttribute('href')
+        && !element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href'))) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v3');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
   if (args.mode === 'resolve' || args.mode === 'resolve_link') {
@@ -11,7 +20,7 @@ let runtime = {js|function browserScene(args) {
       throw new Error('scene_node_detached');
     if (args.mode === 'resolve_link') {
       if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
-      if (element.href !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
     }
     return element;
   }
@@ -33,7 +42,7 @@ let runtime = {js|function browserScene(args) {
   }
   const nodeId = element => {
     let id = state.ids.get(element);
-    const href = element.localName === 'a' && element.hasAttribute('href') ? element.href : null;
+    const href = linkHref(element);
     // A recycled anchor gets a new observation reference. Retire its old
     // reference so connected virtualized anchors cannot accumulate revisions.
     if (!id || (href !== null && state.links.get(id) !== href)) {
@@ -136,14 +145,14 @@ let runtime = {js|function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=node.matches('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
     if (control && visible(node)) {
       const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
       describe('control',node,label,boxes(node.getClientRects(),node),{
-        ...(tag === 'a' && node.hasAttribute('href') ? {href:node.href} : {}),
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;
@@ -151,6 +160,8 @@ let runtime = {js|function browserScene(args) {
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
       describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
         boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
       continue;
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);

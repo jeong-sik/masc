@@ -11,6 +11,7 @@ open Alcotest
 module P = Masc.Keeper_loop_tool_projection
 module K = Masc.Keeper_chat_store
 module H = Masc.Keeper_hooks_agent_core
+module E = Masc.Keeper_chat_events
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -84,7 +85,8 @@ let approval_key id =
 let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-fixture" ~absolute_turn:7
 
 let persist ?(turn_failed = false) t ~base_dir ~approval_id =
-  P.persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_failed
+  (P.persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_failed)
+    .P.outcome
 ;;
 
 (* One sealed tool call with its canonical execution identity. *)
@@ -100,7 +102,12 @@ let test_continuation_rows_land_once () =
     let t = P.create () in
     feed_one_sealed_call t;
     let key = approval_key "approval-1" in
-    (match persist t ~base_dir ~approval_id:"approval-1" with
+    let persisted =
+      P.persist_continuation t ~base_dir ~keeper_name ~approval_id:"approval-1" ~turn_ref
+        ~turn_failed:false
+    in
+    check int "a clean stream quarantines nothing" 0 (List.length persisted.P.quarantined);
+    (match persisted.P.outcome with
      | P.Projected (K.Appended _) -> ()
      | P.Projected (K.Already_present _) -> fail "first append reported as already present"
      | P.Nothing_to_project -> fail "a sealed call projected nothing"
@@ -213,6 +220,78 @@ let test_a_new_attempt_clears_the_previous_rejection () =
      | rows -> fail (Printf.sprintf "expected the clean attempt's row only, got %d" (List.length rows))))
 ;;
 
+(* A delta that arrives after its block stopped is quarantined by the
+   collector. The chat lane's live bridge reports those as they happen; the
+   loop lane has no bridge, so the projection hands them back with the
+   outcome instead of leaving the turn short with nothing saying so. *)
+let test_a_quarantined_row_is_reported () =
+  with_base_dir "keeper-loop-projection-quarantine" (fun base_dir ->
+    let t = P.create () in
+    P.on_event t (start ~index:0 ~tool_id:"call-1" ~tool_name:"Edit");
+    P.on_event t (json_snapshot ~index:0 {|{"path":"lib/a.ml"}|});
+    P.on_event t (stop ~index:0);
+    P.on_event t (json_snapshot ~index:0 {|{"path":"late.ml"}|});
+    P.on_tool_stream_observation t (turn_collected [ 0 ]);
+    let persisted =
+      P.persist_continuation t ~base_dir ~keeper_name ~approval_id:"approval-6" ~turn_ref
+        ~turn_failed:false
+    in
+    (match persisted.P.quarantined with
+     | [] -> fail "the late delta was not reported"
+     | errors ->
+       check bool "the late delta is reported against its block" true
+         (List.exists
+            (fun (kind, (occurrence : E.tool_stream_occurrence), _) ->
+               kind = E.Tool_args_without_start && occurrence.block_index = 0)
+            errors));
+    (match persisted.P.outcome with
+     | P.Projected (K.Appended _) -> fail "a quarantined row was projected"
+     | P.Projected (K.Already_present _) | P.Nothing_to_project | P.Projection_dropped _ -> ());
+    check int "no row" 0 (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
+(* The store merges once-appends per slot ordinal. A second turn continuing
+   the same approval would read its first rows as present and append only
+   its surplus, interleaving two turns under one identity; the key is looked
+   up first and the later turn is reported as already present, rows intact. *)
+let test_a_second_turn_under_the_same_approval_is_not_interleaved () =
+  with_base_dir "keeper-loop-projection-second-turn" (fun base_dir ->
+    let first = P.create () in
+    feed_one_sealed_call first;
+    (match persist first ~base_dir ~approval_id:"approval-7" with
+     | P.Projected (K.Appended _) -> ()
+     | P.Projected (K.Already_present _) -> fail "first append reported as already present"
+     | P.Nothing_to_project -> fail "the first turn projected nothing"
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
+    let second = P.create () in
+    P.on_event second (start ~index:0 ~tool_id:"call-2" ~tool_name:"Read");
+    P.on_event second (json_snapshot ~index:0 {|{"path":"lib/b.ml"}|});
+    P.on_event second (stop ~index:0);
+    P.on_event second (start ~index:1 ~tool_id:"call-3" ~tool_name:"Write");
+    P.on_event second (json_snapshot ~index:1 {|{"path":"lib/c.ml"}|});
+    P.on_event second (stop ~index:1);
+    P.on_tool_stream_observation second (turn_collected [ 0; 1 ]);
+    let later_turn_ref = Ids.Turn_ref.make ~trace_id:"trace-fixture" ~absolute_turn:8 in
+    let persisted =
+      P.persist_continuation second ~base_dir ~keeper_name ~approval_id:"approval-7"
+        ~turn_ref:later_turn_ref ~turn_failed:false
+    in
+    check int "no quarantined row" 0 (List.length persisted.P.quarantined);
+    (match persisted.P.outcome with
+     | P.Projected (K.Already_present _) -> ()
+     | P.Projected (K.Appended _) ->
+       fail "a second turn appended rows under the first turn's identity"
+     | P.Nothing_to_project -> fail "the second turn reported no rows"
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
+    (match K.load ~base_dir ~keeper_name with
+     | [ row ] ->
+       check (option string) "only the first turn's call" (Some "Edit") row.tool_call_name;
+       check bool "and the first turn's ref" true
+         (Option.equal Ids.Turn_ref.equal (Some turn_ref) row.turn_ref)
+     | rows ->
+       fail (Printf.sprintf "expected the first turn's row only, got %d" (List.length rows))))
+;;
+
 let () =
   run
     "keeper_loop_tool_projection"
@@ -229,6 +308,10 @@ let () =
             test_invalid_approval_id_drops_the_projection
         ; test_case "a new attempt clears the previous rejection" `Quick
             test_a_new_attempt_clears_the_previous_rejection
+        ; test_case "a quarantined row is reported with the outcome" `Quick
+            test_a_quarantined_row_is_reported
+        ; test_case "a second turn under the same approval is not interleaved" `Quick
+            test_a_second_turn_under_the_same_approval_is_not_interleaved
         ] )
     ]
 ;;

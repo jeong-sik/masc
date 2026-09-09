@@ -57,6 +57,23 @@ type outcome =
   | Projection_dropped of drop_reason
       (** the rows of this turn are not in the store, and why *)
 
+type protocol_error =
+  Keeper_chat_events.stream_protocol_error_kind
+  * Keeper_chat_events.tool_stream_occurrence
+  * string
+(** A stream event the collector quarantined: its typed conflict, the
+    occurrence it hit, and the collector's own sentence. The quarantined row
+    is not among the persisted ones. *)
+
+type persisted =
+  { outcome : outcome
+  ; quarantined : protocol_error list
+        (** drained from the collector at persist time; the chat lane's live
+            bridge reports the same conflicts as they happen, the loop lane
+            has no bridge, so they are handed back here for the caller to
+            say. Empty on a clean stream. *)
+  }
+
 val persist_continuation :
   t ->
   base_dir:string ->
@@ -64,11 +81,17 @@ val persist_continuation :
   approval_id:string ->
   turn_ref:Ids.Turn_ref.t ->
   turn_failed:bool ->
-  outcome
+  persisted
 (** Append the turn's finalized tool rows once under the delivery identity
     of the approval whose replay this turn continues. With [turn_failed] the
     snapshot is the failure-safe one: an unsealed provider scope is
     invalidated and only sealed evidence is kept. A rejected mapping is
     {!Projection_dropped} whatever the rows, since a refused seal finalizes
     nothing; otherwise a turn with no finalized tool call is
-    {!Nothing_to_project} before the approval id is even read. *)
+    {!Nothing_to_project} before the approval id is even read.
+
+    One approval projects one turn. The store merges once-appends per slot
+    ordinal, so a second turn under the same approval would interleave its
+    rows with the first turn's under one identity; a key that already holds
+    a tool row is answered with [Projected (Already_present _)] before
+    anything is appended. *)

@@ -164,8 +164,13 @@ let run (ctx : ctx)
       commit-required rule), which is the chat lane's policy. *)
    let tool_projection =
      match hitl_resolution with
-     | Some _ -> Some (Keeper_loop_tool_projection.create ())
-     | None -> None
+     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ } ->
+       Some (Keeper_loop_tool_projection.create ())
+     (* A rejection carries no replay to continue: whatever tools this turn
+        runs are not that approval's, so they are not delivered under its
+        identity. *)
+     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ } | None ->
+       None
    in
    let deferred_runtime_lane_ref = ref None in
   let do_run
@@ -502,15 +507,32 @@ let run (ctx : ctx)
          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          ~absolute_turn:keeper_turn_id
      in
-     (match
-        Keeper_loop_tool_projection.persist_continuation
-          projection
-          ~base_dir:config.base_path
-          ~keeper_name:meta.name
-          ~approval_id
-          ~turn_ref
-          ~turn_failed:(Result.is_error result)
-      with
+     let persisted =
+       Keeper_loop_tool_projection.persist_continuation
+         projection
+         ~base_dir:config.base_path
+         ~keeper_name:meta.name
+         ~approval_id
+         ~turn_ref
+         ~turn_failed:(Result.is_error result)
+     in
+     (* A quarantined row is missing from the projection below; the chat
+        lane's live bridge would have reported the conflict as it happened,
+        and this lane has no bridge, so it is said here, one line per row. *)
+     List.iter
+       (fun (kind, (occurrence : Keeper_chat_events.tool_stream_occurrence), detail) ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "%s: continuation turn tool row quarantined under approval %s (%s at \
+             stream_scope=%d block_index=%d): %s"
+            meta.name
+            approval_id
+            (Keeper_chat_events.stream_protocol_error_kind_to_string kind)
+            occurrence.stream_scope
+            occurrence.block_index
+            detail)
+       persisted.Keeper_loop_tool_projection.quarantined;
+     (match persisted.Keeper_loop_tool_projection.outcome with
       | Keeper_loop_tool_projection.Nothing_to_project -> ()
       | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Appended _) ->
         Keeper_chat_broadcast.chat_appended

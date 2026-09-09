@@ -688,7 +688,7 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
     { docker with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
   in
   let assert_mismatch ~factory_meta ~caller_meta =
-    let cwd = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config caller_meta in
+    let cwd = Keeper_sandbox.host_root_abs_of_meta ~config caller_meta in
     let factory = Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
     Fun.protect
       ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
@@ -703,7 +703,7 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
         ()
     in
     Alcotest.(check (option string))
-      "typed contract mismatch"
+      ("typed contract mismatch: " ^ raw)
       (Some "sandbox_profile_contract_mismatch")
       (parse_string_field raw "code")
   in

@@ -2,20 +2,38 @@
 // Confirmation POST is fulfilled locally and never forwarded to the backend.
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
-import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { readFile, mkdir, writeFile, readdir } from 'node:fs/promises'
 import { resolve, relative, extname, sep } from 'node:path'
 import assert from 'node:assert/strict'
 const require = createRequire(new URL('../dashboard/package.json', import.meta.url))
 const { chromium } = require('playwright')
 const [preview, head, backend, destination] = process.argv.slice(2)
 assert.ok(preview && head && backend && destination, 'PREVIEW HEAD BACKEND OUTPUT required')
-const root = resolve(preview), output = resolve(destination)
-const manifest = JSON.parse(await readFile(resolve(root, 'preview-provenance.json'), 'utf8'))
-assert.equal(manifest.pr_head_commit, head)
-for (const [name, hash] of Object.entries(manifest.files)) {
-  const path = resolve(root, name)
-  assert.ok(!relative(root, path).startsWith(`..${sep}`) && path.startsWith(root + sep))
-  assert.equal(createHash('sha256').update(await readFile(path)).digest('hex'), hash)
+const artifactRoot = resolve(preview), output = resolve(destination)
+const buildReceipt = JSON.parse(await readFile(resolve(artifactRoot, 'dashboard-build-receipt.json'), 'utf8'))
+assert.equal(buildReceipt.source_commit, head)
+const archive = resolve(artifactRoot, buildReceipt.archive)
+assert.equal(relative(artifactRoot, archive), buildReceipt.archive)
+assert.equal(createHash('sha256').update(await readFile(archive)).digest('hex'), buildReceipt.archive_sha256)
+const unpack = output + '-bundle'
+execFileSync('python3', ['-c', `import pathlib,sys,tarfile
+out=pathlib.Path(sys.argv[2]);out.mkdir()
+with tarfile.open(sys.argv[1]) as archive:
+ for member in archive.getmembers():
+  if not member.name.startswith('dashboard/') and member.name != 'dashboard': raise ValueError('unexpected archive root')
+ archive.extractall(out, filter='data')
+`, archive, unpack])
+const root = resolve(unpack, 'dashboard')
+assert.equal(createHash('sha256').update(await readFile(resolve(root, 'index.html'))).digest('hex'), buildReceipt.index_sha256)
+const manifest = { files: {} }
+for (const item of await readdir(root, { recursive: true, withFileTypes: true })) {
+  if (item.isFile()) {
+    const file = resolve(item.parentPath, item.name)
+    const name = relative(root, file)
+    assert.ok(!name.startsWith(`..${sep}`))
+    manifest.files[name] = createHash('sha256').update(await readFile(file)).digest('hex')
+  }
 }
 await mkdir(output, { recursive: false })
 const criterion = { revision: 'fixture-revision-1', title: 'Browser synthetic Goal', metric: 'verified artifacts', target_value: '1' }
@@ -78,6 +96,7 @@ try {
   assert.ok((await panel.textContent()).includes(verdict.evidence))
   assert.equal(await panel.locator('script').count(), 0)
   await panel.screenshot({ path: resolve(output, 'evidence-before.png') })
+  await page.screenshot({ path: resolve(output, 'detail-desktop.png') })
   await panel.getByRole('button', { name: '이 증명으로 목표 완료 확인' }).click()
   await panel.getByText(/최종 확인 완료 · synthetic-operator/).waitFor()
   assert.equal(posts.length, 1); assert.ok(readCount >= 2)
@@ -88,11 +107,17 @@ try {
   await panel.getByText(/서버에 반영되었을 수 있습니다/).waitFor()
   assert.equal(await panel.getByText(/최종 확인 완료/).count(), 0)
   await panel.screenshot({ path: resolve(output, 'readback-failed.png') })
+  mode = 'success'; completed = false
+  await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
+  await panel.getByRole('button', { name: '이 증명으로 목표 완료 확인' }).waitFor()
+  const evidenceBounds = await panel.boundingBox()
+  assert.ok(evidenceBounds && evidenceBounds.x >= 0 && evidenceBounds.x + evidenceBounds.width <= 390)
+  await panel.screenshot({ path: resolve(output, 'evidence-mobile.png') })
   mode = 'denied'; completed = false
   await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
   await panel.getByText(/synthetic operator permission denied/).waitFor()
   await panel.screenshot({ path: resolve(output, 'permission-denied-mobile.png') })
   const bounds = await panel.boundingBox()
   assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 390)
-  await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ head, scope: 'CI-built UI, synthetic confirmation HTTP; no real Goal mutation or human-auth proof', posts, reads, blocked, mobileBounds: bounds }, null, 2) + '\n')
+  await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ head, buildReceipt, scope: 'CI-built UI, synthetic confirmation HTTP; no real Goal mutation or human-auth proof', posts, reads, blocked, mobileBounds: bounds, mobileEvidenceBounds: evidenceBounds }, null, 2) + '\n')
 } finally { await browser.close() }

@@ -49,8 +49,12 @@ const { chromium } = require(playwrightModule);
         typeof operation.outcome_ref !== 'string' || !operation.outcome_ref) {
       throw new Error('Browser operation did not succeed with a durable terminal outcome');
     }
-    const reply = page.locator('[data-chat-role="assistant"][data-chat-stream-state="complete"]')
-      .filter({ hasText: 'IMP_BROWSER_OK' }).last();
+    const replySelector = await page.evaluate(({ id, outcome }) => {
+      const complete = '[data-chat-role="assistant"][data-chat-stream-state="complete"]';
+      return complete + '[data-chat-stream-contract-request-id="' + CSS.escape(id) + '"],' +
+        complete + '[data-chat-turn-ref="' + CSS.escape(outcome) + '"]';
+    }, { id: requestId, outcome: operation.outcome_ref });
+    const reply = page.locator(replySelector).filter({ hasText: 'IMP_BROWSER_OK' }).last();
     await reply.waitFor({ timeout: 30000 });
     const gateObservation = await page.locator('.v2-statchip.attn').evaluateAll(nodes =>
       nodes.map(node => ({ label: node.textContent, detail: node.getAttribute('title') })));

@@ -24,3 +24,18 @@ dialect and requires no adapter change.
 A separate observed Kimi failure comes from omitted `thinking-support` becoming
 an explicit false policy in the runtime parser. That absence-versus-disable
 problem is not resolved by this DeepSeek dialect correction.
+
+## Isolated dispatch observation
+
+The operator applied the same one-field dialect correction to the isolated c083
+runtime. The subsequent operation `kmsg-d38dd9285c0abac2c47c6d0923330e1d`
+passed the earlier local encoding rejection and received DeepSeek's
+`Payment required: Insufficient Balance` error, followed by the Ollama fallback's
+quota error. This is evidence of reaching a different dispatch boundary, not a
+successful completion or delivered PDF. Production configuration was untouched.
+
+[`isolated-dispatch.txt`](../evidence/2026-09-10-deepseek-thinking-dialect/isolated-dispatch.txt)
+contains exact non-thinking lines 744–745, 891, 894–895, 897 and 907 from
+`/tmp/masc-memory-guide-home.server.log`; timestamps are Asia/Seoul (UTC+09:00).
+The first pair records the original rejection; the remaining lines record the
+post-correction attempt. Logger-truncated error text is preserved as observed.

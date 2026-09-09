@@ -989,6 +989,24 @@ enabled = false
     | `Missing | `Unavailable _ -> Alcotest.fail "reselected primary lane must resolve")
 ;;
 
+let test_first_run_imp_binding_is_explicit () =
+  with_runtime_file (fun path ->
+    write_file path (Runtime.update_runtime_assignment_text (read_file path)
+      ~keeper_name:"imp" ~runtime_id:"runpod_mtp.qwen");
+    let select ?(bind_imp = false) () =
+      match Runtime.set_first_run_runtime ~runtime_config_path:path
+        ~runtime_id:"openai.gpt" ~fallback_runtime_ids:[ "runpod_mtp.qwen" ] ~bind_imp () with
+      | Ok _ -> () | Error detail -> Alcotest.fail detail in
+    select ();
+    Alcotest.(check (option string)) "existing imp preserved without explicit selection"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "imp");
+    select ~bind_imp:true ();
+    Alcotest.(check (option string)) "explicit setup selects primary lane for imp"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "imp");
+    Alcotest.(check (option string)) "unrelated Keeper assignment preserved"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
 let test_runtime_route_writer_rejects_unknown_default_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
@@ -2317,6 +2335,8 @@ let () =
             test_first_run_runtime_binds_supporting_lanes
         ; Alcotest.test_case "first-run fallback ordering and atomic preservation" `Quick
             test_first_run_fallback_order_and_preservation
+        ; Alcotest.test_case "first-run imp binding requires explicit selection" `Quick
+            test_first_run_imp_binding_is_explicit
         ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
             test_first_run_cli_runtime_binds_supporting_lanes
         ; Alcotest.test_case

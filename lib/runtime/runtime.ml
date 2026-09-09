@@ -2848,7 +2848,7 @@ let lane_table_path lane_id =
     Printf.sprintf "runtime.lanes.\"%s\"" (Toml_line_editor.escape_string lane_id)
 ;;
 
-let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ~runtime_id () =
+let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
   let runtime_id = String.trim runtime_id in
   let candidate_ids = runtime_id :: List.map String.trim fallback_runtime_ids in
   if String.equal runtime_id "" || contains_newline runtime_id
@@ -2892,6 +2892,10 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ~run
         let next =
           Toml_line_editor.edit_table_multiline_array next
             ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids
+        in
+        let next =
+          if bind_imp then update_runtime_assignment_text next ~keeper_name:"imp" ~runtime_id
+          else next
         in
         let next =
           List.fold_left

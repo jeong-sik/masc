@@ -2382,6 +2382,41 @@ let sandbox_image_cmd =
     (Cmd.info "sandbox-image" ~doc ~man)
     Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
 
+(* Catalog model families are selectable suggestions, not account entitlement.
+   Do not expose broad fallback rows such as [gpt], [cc:] or [claude_code]
+   as if they were concrete CLI model IDs. *)
+type wizard_model_client = Wizard_claude_code | Wizard_codex
+
+let runtime_model_list_cmd =
+  let client =
+    Arg.(required & pos 0
+      (some (enum [ "claude-code", Wizard_claude_code; "codex", Wizard_codex ]))
+      None & info [] ~docv:"CLIENT")
+  in
+  let run client =
+    match Llm_provider.Model_catalog.load_default () with
+    | Error message -> prerr_endline message; 1
+    | Ok catalog ->
+      let prefix = match client with Wizard_claude_code -> "claude-" | Wizard_codex -> "gpt-5" in
+      let models =
+        Llm_provider.Model_catalog.model_entries catalog
+        |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+          match entry.provider_name, entry.max_context_tokens with
+          | None, Some context when context > 0 && String.starts_with ~prefix entry.id_prefix ->
+            Some (`Assoc [ "id", `String entry.id_prefix
+                         ; "label", `String entry.id_prefix
+                         ; "max_context", `Int context ])
+          | _ -> None)
+      in
+      print_endline (Yojson.Safe.to_string (`Assoc [
+        "source", `String "installed MASC model catalog";
+        "account_availability_verified", `Bool false;
+        "models", `List models ]));
+      0
+  in
+  Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
+    Term.(const run $ client)
+
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let run model =
@@ -2482,6 +2517,7 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
+    ; runtime_model_list_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

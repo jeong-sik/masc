@@ -12,9 +12,12 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import subprocess
 import tempfile
 from urllib.parse import urlsplit
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.error import HTTPError, URLError
 
 CHOICES = {
     'llama_cpp': ('openai-compatible-http', None),
@@ -211,14 +214,165 @@ def configure(binary, base_path, spec):
             'readiness': 'not_probed', 'model': spec['model'], 'choice': spec['choice']}
 
 
+def positive_integer(value):
+    return type(value) is int and value > 0
+
+
+def model_text(value):
+    return isinstance(value, str) and bool(value) and value == value.strip() and all(ord(c) >= 32 and ord(c) != 127 for c in value)
+
+
+def discover_models(choice, endpoint='', api_key_env='', timeout=10):
+    """Return observed IDs, not guessed names or inferred context capacities."""
+    if choice == 'codex':
+        path = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'models_cache.json'
+        try:
+            cache = json.loads(path.read_text())
+            rows = cache['models']
+            if not isinstance(rows, list):
+                raise ValueError('invalid model cache')
+        except (OSError, ValueError, KeyError, TypeError):
+            return [], 'No readable Codex model list. Sign in with Codex and open its /model picker to find an exact model ID.'
+        origin = 'Codex local model list (cached; availability is checked after selection)'
+        models = []
+        for row in rows:
+            if not isinstance(row, dict) or row.get('visibility') != 'list' or not model_text(row.get('slug')):
+                continue
+            models.append(dict(id=row['slug'], label=row.get('display_name'), context=row.get('context_window')))
+    elif choice in ('llama_cpp', 'vllm', 'openai_compatible'):
+        url = urlsplit(endpoint)
+        if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
+            raise SetupError('Use the server HTTP(S) API base URL without embedded credentials, query or fragment')
+        headers = {'Accept': 'application/json'}
+        if api_key_env:
+            if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', api_key_env):
+                raise SetupError('Enter the API key environment variable name, not the key itself')
+            credential = os.environ.get(api_key_env)
+            if credential:
+                headers['Authorization'] = 'Bearer ' + credential
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        try:
+            with build_opener(NoRedirect()).open(Request(endpoint.rstrip('/') + '/models', headers=headers), timeout=timeout) as response:
+                rows = json.load(response)['data']
+            if not isinstance(rows, list):
+                raise ValueError('invalid model list')
+        except (OSError, ValueError, KeyError, TypeError, URLError) as error:
+            detail = 'HTTP ' + str(error.code) if isinstance(error, HTTPError) else 'unavailable or invalid response'
+            return [], 'Server /models: ' + detail + '. Start the server/check authentication, or copy its exact served model ID.'
+        origin = 'Your server /models response'
+        models = [dict(id=row['id'], label=row.get('name'), context=row.get('max_model_len'))
+                  for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
+    else:
+        return [], ('Open Claude Code and use /model to find your model ID.' if choice == 'claude_code'
+                    else 'Copy the exact model ID shown by your runtime.')
+    seen, result = set(), []
+    for model in models:
+        if model['id'] in seen:
+            continue
+        seen.add(model['id'])
+        model['label'] = model['label'] if model_text(model['label']) else model['id']
+        model['context'] = model['context'] if positive_integer(model['context']) else None
+        result.append(model)
+    return result, origin
+
+
+def catalog_models(binary, choice):
+    client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(choice)
+    if client is None:
+        return []
+    result = subprocess.run([binary, 'runtime-model-list', client], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        return []
+    try:
+        rows = json.loads(result.stdout)['models']
+        if not isinstance(rows, list):
+            return []
+        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'])
+                for row in rows if isinstance(row, dict) and model_text(row.get('id'))
+                and positive_integer(row.get('max_context'))]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
+def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
+    def ask(label):
+        print('? ' + label + ': ', end='', file=sys.stderr, flush=True)
+        answer = sys.stdin.readline()
+        if not answer or answer.strip().lower() == 'q':
+            raise SetupError('model setup cancelled; run the installer again when you have the model settings')
+        return answer.strip()
+    models, origin = discover_models(choice, endpoint, api_key_env, timeout)
+    if not models and choice in ('codex', 'claude_code'):
+        models = catalog_models(binary, choice)
+        if models:
+            origin = 'Installed MASC model catalog (account availability is checked after selection)'
+    print('\n' + origin, file=sys.stderr)
+    for index, item in enumerate(models, 1):
+        print('  {}) {} — ID: {}'.format(index, item['label'] if model_text(item['label']) else item['id'], item['id']), file=sys.stderr)
+    print('Choose a listed number or paste an exact model ID. Enter q to cancel; do not guess a model name.', file=sys.stderr)
+    selected = None
+    while True:
+        answer = ask('Model number or exact ID' if models else 'Exact model ID from your runtime')
+        if answer.isascii() and answer.isdigit() and models:
+            index = int(answer)
+            if 1 <= index <= len(models):
+                selected = models[index - 1]
+                model = selected['id']
+                break
+            print('Choose one of the displayed numbers, or paste a model ID.', file=sys.stderr)
+        elif model_text(answer):
+            model = answer
+            selected = next((item for item in models if item['id'] == model), None)
+            break
+        else:
+            print('Enter a model ID or a listed number; blank input cannot choose a model.', file=sys.stderr)
+    context = selected['context'] if selected else None
+    context_source = origin if context else None
+    if context is None and choice in ('codex', 'claude_code'):
+        result = subprocess.run([binary, 'runtime-model-info', model], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            try:
+                info = json.loads(result.stdout)
+                if info.get('model') == model and positive_integer(info.get('max_context')):
+                    context, context_source = info['max_context'], 'installed MASC model catalog'
+            except (ValueError, AttributeError):
+                pass
+    if context is not None:
+        print('Context window: {:,} tokens — from {}. No number to enter.'.format(context, context_source), file=sys.stderr)
+    else:
+        print('Context window means the amount of text the model can keep in one request, measured in tokens.', file=sys.stderr)
+        print('Use the configured server limit (llama.cpp --ctx-size, vLLM --max-model-len), or the model limit documented by your CLI/provider.', file=sys.stderr)
+        print('Do not guess. For input format only: a documented 8,192-token limit is entered as 8192. Enter q if you do not know the limit.', file=sys.stderr)
+        while context is None:
+            answer = ask('Documented/configured context limit in tokens (digits only; q to cancel)')
+            if answer.isascii() and answer.isdigit() and int(answer) > 0:
+                context = int(answer)
+            else:
+                print('Enter the documented token count using digits greater than zero, without commas or units; or q to cancel.', file=sys.stderr)
+    return dict(model=model, max_context=context)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
     parser.add_argument('--base-path', required=True)
-    parser.add_argument('--spec', required=True)
+    parser.add_argument('--spec')
+    parser.add_argument('--select-model', choices=CHOICES)
+    parser.add_argument('--endpoint', default='')
+    parser.add_argument('--credential-env', dest='api_key_env', default='')
+    parser.add_argument('--discovery-timeout', type=float, default=10)
     args = parser.parse_args()
     try:
-        result = configure(args.binary, args.base_path, json.loads(Path(args.spec).read_text()))
+        if bool(args.spec) == bool(args.select_model):
+            raise SetupError('choose exactly one of --spec or --select-model')
+        if args.select_model:
+            if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
+                raise SetupError('discovery timeout must be positive')
+            result = select_model(args.binary, args.select_model, args.endpoint, args.api_key_env, args.discovery_timeout)
+        else:
+            result = configure(args.binary, args.base_path, json.loads(Path(args.spec).read_text()))
         print(json.dumps(result, ensure_ascii=False))
     except (SetupError, OSError, ValueError, subprocess.SubprocessError) as error:
         raise SystemExit('runtime setup failed: ' + str(error))

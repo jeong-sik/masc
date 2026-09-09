@@ -1,4 +1,6 @@
 """Selected-only rendering and transactional publication through the real helper."""
+import contextlib
+import io
 import importlib.util
 import json
 import os
@@ -27,6 +29,62 @@ def spec(choice='vllm'):
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
     return result
+
+
+class ModelSelection(unittest.TestCase):
+    def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
+                {'slug':'observed-id','display_name':'Visible model','visibility':'list','context_window':4567},
+                {'slug':'hidden','visibility':'hide','context_window':99},
+                {'slug':'bad\nname','visibility':'list'},
+                {'slug':'observed-id','visibility':'list'}]}))
+            with patch.dict(os.environ, {'CODEX_HOME':directory}):
+                models, origin = SETUP.discover_models('codex')
+                self.assertEqual(models,[dict(id='observed-id',label='Visible model',context=4567)])
+                self.assertIn('cached',origin)
+                failed_lookup=subprocess.CompletedProcess([],1,'','')
+                with patch('subprocess.run',return_value=failed_lookup), patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+                    selected=SETUP.select_model('/fixture/masc','codex')
+                self.assertEqual(selected,dict(model='observed-id',max_context=4567))
+                self.assertIn('No number to enter',terminal.getvalue())
+
+    def test_empty_codex_cache_uses_installed_list(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
+            def cli(argv, **kwargs):
+                data=({'models':[dict(id='catalog-id',label='Catalog model',max_context=9876)]}
+                      if argv[1]=='runtime-model-list' else dict(model='catalog-id',max_context=9876))
+                return subprocess.CompletedProcess(argv,0,json.dumps(data),'')
+            with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('99\n1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+                selected=SETUP.select_model('/fixture/masc','codex')
+            self.assertEqual(selected,dict(model='catalog-id',max_context=9876))
+            self.assertIn('account availability',terminal.getvalue())
+
+    def test_http_models_offer_actual_server_id_and_configured_limit(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                assert self.path == '/v1/models'
+                payload=json.dumps({'data':[{'id':'served-model','max_model_len':8192}]}).encode()
+                self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+            def log_message(self,*args): pass
+        with HTTPServer(('127.0.0.1',0),Handler) as server:
+            thread=threading.Thread(target=server.serve_forever);thread.start()
+            try:
+                with patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+                    selected=SETUP.select_model('/unused','vllm','http://127.0.0.1:'+str(server.server_port)+'/v1')
+                self.assertEqual(selected,dict(model='served-model',max_context=8192))
+            finally:
+                server.shutdown();thread.join()
+
+    def test_context_lookup_rejects_wrong_identity_and_bool(self):
+        replies=[dict(model='another',max_context=123),dict(model='manual',max_context=True)]
+        for reply in replies:
+            def cli(argv,**kwargs):
+                return subprocess.CompletedProcess(argv,0,json.dumps({'models':[]} if argv[1]=='runtime-model-list' else reply),'')
+            with self.subTest(reply=reply), patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('manual\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/fixture/masc','claude_code')
 
 
 class RuntimeSetup(unittest.TestCase):
@@ -126,6 +184,25 @@ runtime.write_text(runtime.read_text().replace('original.model', sys.argv[4]))
             with self.assertRaisesRegex(OSError, 'simulated disk error'):
                 SETUP.configure(self.binary, self.base, spec())
         self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
+
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class InstalledModelCatalog(unittest.TestCase):
+    def test_claude_list_includes_sonnet5_and_selects_without_context_question(self):
+        result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        models=catalog['models']
+        sonnet=next(row for row in models if row['id']=='claude-sonnet-5')
+        self.assertEqual(sonnet['max_context'],1000000)
+        self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
+        self.assertNotIn('claude_code',{row['id'] for row in models})
+        index=models.index(sonnet)+1
+        with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected=SETUP.select_model(BINARY,'claude_code')
+        self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
+        self.assertIn('No number to enter',terminal.getvalue())
+        self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

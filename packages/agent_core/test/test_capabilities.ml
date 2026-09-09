@@ -264,7 +264,7 @@ let test_gemini_catalog_drives_capabilities () =
     "gemini-3.1-pro-preview ctx"
     (Some 1_000_000)
     (ctx "gemini-3.1-pro-preview");
-  check (option int) "gemini-2.5-flash ctx" (Some 1_000_000) (ctx "gemini-2.5-flash")
+  check (option int) "gemini-3.7-flash ctx" (Some 1_048_576) (ctx "gemini-3.7-flash")
 ;;
 
 let test_lookup_kimi_k2_native_cloud_suffix () =

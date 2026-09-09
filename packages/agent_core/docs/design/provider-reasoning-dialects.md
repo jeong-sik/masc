@@ -28,7 +28,7 @@ accepting no request-time thinking parameter.
 | `Ollama_think` | `No_preserve_thinking_control` | Ollama native `/api/chat` top-level `think` bool/level, with thoughts in `message.thinking` | No mandatory replay; parse Ollama thinking side channel |
 | `Reasoning_effort` | `No_preserve_thinking_control` | OpenAI-compatible `reasoning_effort` field | No mandatory replay yet |
 | `Anthropic_thinking` | built-in | Claude Messages API `thinking` blocks. Older/current manual-thinking models use `thinking: {type:"enabled", budget_tokens:N}`; adaptive models use `thinking: {type:"adaptive"}` plus optional `output_config.effort`. | Preserve thinking blocks in history; Claude filters relevant blocks |
-| `Gemini_thinking_config` | built-in | Gemini native `generationConfig.thinkingConfig`. Gemini 3+ uses `thinkingLevel`; Gemini 2.5 uses `thinkingBudget`; thought parts/signatures carry visible summaries/tool continuity. | Preserve tool-call-linked thought signatures |
+| `Gemini_thinking_config` | built-in | Gemini native `generationConfig.thinkingConfig`. Gemini serves `thinkingLevel`; thought parts/signatures carry visible summaries/tool continuity. | Preserve tool-call-linked thought signatures |
 
 ## Evidence
 
@@ -56,7 +56,7 @@ accepting no request-time thinking parameter.
   items forward. Source:
   <https://platform.openai.com/docs/guides/reasoning>, checked 2026-06-14.
 - Gemini official docs: Gemini exposes `thinkingConfig`; Gemini 3+ should use
-  `thinkingLevel`, while Gemini 2.5 uses `thinkingBudget`; optional thought
+  `thinkingLevel`; optional thought
   summaries are marked on response parts. Source:
   <https://ai.google.dev/gemini-api/docs/thinking>, checked 2026-06-14.
 - Qwen official docs: OpenAI-compatible Qwen thinking uses

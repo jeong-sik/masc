@@ -1656,13 +1656,6 @@ supports_native_streaming = true
 
 # Gemini Models
 [[models]]
-id_prefix = "gemini-2.5"
-base = "gemini"
-max_context_tokens = 1000000
-supports_reasoning_budget = true
-accepted_reasoning_efforts = []
-
-[[models]]
 # gemini-3.8-flash-{high,...}, served through the Antigravity Google
 # subscription; masc runs the -high slot. Without this row it prefix-matches
 # the generic "gemini-3" row, which declares no thinking contract at all, so
@@ -2434,16 +2427,6 @@ task = "speech"
 
 [[models]]
 id_prefix = "gemini-3.1-flash-tts-preview"
-provider_name = "gemini-speech"
-task = "speech"
-
-[[models]]
-id_prefix = "gemini-2.5-flash-preview-tts"
-provider_name = "gemini-speech"
-task = "speech"
-
-[[models]]
-id_prefix = "gemini-2.5-pro-preview-tts"
 provider_name = "gemini-speech"
 task = "speech"
 

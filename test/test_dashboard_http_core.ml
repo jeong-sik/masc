@@ -2176,9 +2176,9 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
       ~title:"Linked task" ~priority:3 ~description:"evidence" with
     | Ok created -> created
     | Error error -> fail (Workspace.add_task_error_to_string error) in
-  let path = Workspace_goal_index.goal_task_links_path config in
-  let mirror = path ^ ".last-good" in
-  let original = Fs_compat.load_file path in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = links_path ^ ".last-good" in
+  let original = Fs_compat.load_file links_path in
   let open Yojson.Safe.Util in
   let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
   let detail () = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
@@ -2206,14 +2206,14 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
       (List.exists (fun (task : Masc_domain.task) -> task.id = created.task_id)
         (Workspace.get_tasks_safe config))
   in
-  Fs_compat.save_file path "{broken";
+  Fs_compat.save_file links_path "{broken";
   check_unavailable ();
-  check string "read does not repair primary" "{broken" (Fs_compat.load_file path);
+  check string "read does not repair primary" "{broken" (Fs_compat.load_file links_path);
   check string "read does not alter recovery" original (Fs_compat.load_file mirror);
-  Sys.remove path;
+  Sys.remove links_path;
   check_unavailable ();
-  check bool "read does not recreate primary" false (Sys.file_exists path);
-  Fs_compat.save_file path original;
+  check bool "read does not recreate primary" false (Sys.file_exists links_path);
+  Fs_compat.save_file links_path original;
   assert_link_visible ()
 
 let test_goal_proof_surfaces_share_persisted_criterion_truth () =

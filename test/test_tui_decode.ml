@@ -8671,7 +8671,7 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
           test_goal_store_unavailable_preserves_source_detail;
-        test_case "Goal link source unavailable retains detail" `Quick
+        Alcotest.test_case "Goal link source unavailable retains detail" `Quick
           test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;

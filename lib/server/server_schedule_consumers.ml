@@ -1281,6 +1281,7 @@ let cancel_keeper_schedules config ~keeper_name =
     | Ok (Schedule_payload_projection.Keeper_wake, payload) ->
       (match body_keeper_name payload with
        | Error _ -> false
+       | Ok target when String.equal target keeper_name -> true
        | Ok target ->
          (match resolve_keeper_wake_target config target with
           | Ok resolved -> String.equal resolved keeper_name
@@ -1304,8 +1305,8 @@ let cancel_keeper_schedules config ~keeper_name =
       state.schedules
   in
   let applied_at = Unix.gettimeofday () in
-  (match schedule_ids with
-   | [] -> ()
+  let withdrawal = match schedule_ids with
+   | [] -> Ok ()
    | _ ->
      (match
         Keeper_registry_event_queue.cancel_scheduled_wakes_result
@@ -1315,19 +1316,18 @@ let cancel_keeper_schedules config ~keeper_name =
           ~schedule_ids
           ~reason:"schedule cancelled; enqueued utterance withdrawn"
       with
-      | Ok 0 -> ()
+      | Ok 0 -> Ok ()
       | Ok n ->
         Log.Keeper.info
           "cancel_keeper_schedules: withdrew %d pending queue stimulus for \
            keeper=%s"
           n
-          keeper_name
+          keeper_name;
+        Ok ()
       | Error detail ->
-        Log.Keeper.warn
-          "cancel_keeper_schedules: queue withdraw failed keeper=%s: %s"
-          keeper_name
-          detail));
-  Schedule_store.cancel_matching config ~should_cancel
+        Error (Schedule_store.Persistence_failed
+          ("scheduled wake withdrawal failed: " ^ detail))) in
+  Result.bind withdrawal (fun () -> Schedule_store.cancel_matching config ~should_cancel)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch }

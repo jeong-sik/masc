@@ -1,47 +1,42 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  keeperPurgePending,
-  markKeeperPurgePending,
-  purgePendingAfterRefresh,
-} from './store'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import * as lifecycle from './api/keeper-lifecycle'
+import { keeperPurgePending, keeperDeletionInventory, keeperDeletionError,
+  markKeeperPurgePending, refreshKeeperDeletions } from './store'
 
-describe('keeper purge pending', () => {
+describe('durable Keeper deletion observation', () => {
   beforeEach(() => {
-    keeperPurgePending.value = new Set<string>()
+    vi.restoreAllMocks()
+    keeperPurgePending.value = new Set()
+    keeperDeletionInventory.value = null
+    keeperDeletionError.value = null
   })
 
-  it('marks a submitted purge so the row can show it is in flight', () => {
-    markKeeperPurgePending('canary-a')
-    expect([...keeperPurgePending.value]).toEqual(['canary-a'])
+  it('restores a deletion after reload without any Keeper roster row', async () => {
+    vi.spyOn(lifecycle, 'fetchKeeperDeletions').mockResolvedValue({ operations: [{
+      kind: 'runtime_shutdown', source: null, keeperName: 'removed-owner', operationId: 'durable-operation', completed: false,
+      canRetry: true, phase: 'finalized', description: 'artifact cleanup failed',
+    }], errors: [], configurationErrors: [] })
+    await refreshKeeperDeletions()
+    expect([...keeperPurgePending.value]).toEqual(['removed-owner'])
+    expect(keeperDeletionInventory.value?.operations[0]?.operationId).toBe('durable-operation')
   })
 
-  it('ignores a blank name and does not re-emit for a name already pending', () => {
-    markKeeperPurgePending('   ')
+  it('clears acceptance only when the durable inventory confirms completion', async () => {
+    markKeeperPurgePending('removed-owner')
+    vi.spyOn(lifecycle, 'fetchKeeperDeletions').mockResolvedValue({ operations: [{
+      kind: 'runtime_shutdown', source: null, keeperName: 'removed-owner', operationId: 'durable-operation', completed: true,
+      canRetry: false, phase: 'finalized', description: 'completed',
+    }], errors: [], configurationErrors: [] })
+    await refreshKeeperDeletions()
     expect(keeperPurgePending.value.size).toBe(0)
-
-    markKeeperPurgePending('canary-a')
-    const first = keeperPurgePending.value
-    markKeeperPurgePending('canary-a')
-    expect(keeperPurgePending.value).toBe(first)
+    expect(keeperDeletionInventory.value?.operations[0]?.completed).toBe(true)
   })
 
-  // The server deletes asynchronously, so the refresh that follows the submit
-  // still returns the keeper. Only its later disappearance means the purge
-  // finished — there is no completion event to listen for.
-  it('keeps a name while the refresh still returns that keeper', () => {
-    const pending = new Set(['canary-a'])
-    expect(purgePendingAfterRefresh(pending, [{ name: 'canary-a' }])).toBe(pending)
-  })
-
-  it('drops a name once the refresh stops returning that keeper', () => {
-    const next = purgePendingAfterRefresh(new Set(['canary-a', 'canary-b']), [
-      { name: 'canary-b' },
-    ])
-    expect([...next]).toEqual(['canary-b'])
-  })
-
-  it('returns the same set when nothing is pending so no render is triggered', () => {
-    const empty = new Set<string>()
-    expect(purgePendingAfterRefresh(empty, [{ name: 'canary-a' }])).toBe(empty)
+  it('keeps unresolved acceptance and exposes a failed observation', async () => {
+    markKeeperPurgePending('removed-owner')
+    vi.spyOn(lifecycle, 'fetchKeeperDeletions').mockRejectedValue(new Error('store unavailable'))
+    await refreshKeeperDeletions()
+    expect(keeperPurgePending.value.has('removed-owner')).toBe(true)
+    expect(keeperDeletionError.value).toBe('store unavailable')
   })
 })

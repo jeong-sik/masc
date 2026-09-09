@@ -1125,7 +1125,7 @@ let run_turn
     let final_agent_core_turn_ordinal_ref =
       s.Keeper_run_tools.final_agent_core_turn_ordinal_ref
     in
-    let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
+    let receipt_agent_core_turn_count_ref = s.Keeper_run_tools.receipt_agent_core_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
     let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
     let receipt_runtime_observation_ref =
@@ -1564,7 +1564,7 @@ let run_turn
                    Boundary_redaction.to_string
                      Boundary_redaction.runtime_model_label
                  in
-                 receipt_turn_count_ref := Some result.turns;
+                 receipt_agent_core_turn_count_ref := Some result.turns;
                  receipt_model_used_ref :=
                    Option.bind
                      result.runtime_observation
@@ -1782,7 +1782,7 @@ let run_turn
            ~fallback_reason:receipt_fallback_reason
            ~runtime_rotation_attempts
            ~turn_result
-           ~receipt_turn_count_ref
+           ~receipt_agent_core_turn_count_ref
            ~receipt_stop_reason_ref
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref

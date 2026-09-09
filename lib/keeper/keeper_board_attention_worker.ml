@@ -1616,7 +1616,7 @@ let execute_exact
       prepared
   =
   match Exact_flow.execute ~clock ~before_dispatch ~before_advance prepared with
-  | Error exhausted when cli_tail_may_answer exhausted ->
+  | Error exhausted when Exact_flow.has_http_flow prepared && cli_tail_may_answer exhausted ->
     (match Exact_flow.run_cli_tail ~base_path prepared with
      | Ok (slot_id, judgment) ->
        Log.Keeper.info

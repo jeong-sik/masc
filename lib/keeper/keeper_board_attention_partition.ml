@@ -1468,14 +1468,11 @@ let complete ~now ~worker_epoch ~base_path ~partition ~item =
         -> Ok (Completed { item; completed_at = now })
       | Some _, Bound _ ->
         Error "judgment provenance differs from the durable exact binding"
-      (* A CLI slot answered after the catalog was exhausted. There is no
-         attempt to match, so what is checked instead is that the exact flow
-         actually ran: [Bound] is the residue of its last attempt. [Unbound]
-         would mean the CLI tail answered without the catalog ever being
-         tried, and an [Advancing] flow is not exhausted yet. *)
-      | None, Bound _ -> Ok (Completed { item; completed_at = now })
-      | None, Unbound ->
-        Error "cli-slot completion requires an exhausted durable exact binding"
+      (* A CLI judgment owns no HTTP receipt. The durable candidate claim and
+         worker epoch authorize completion both for CLI-only lanes and for a
+         CLI tail after an HTTP attempt. Pending advancement still cannot be
+         bypassed. *)
+      | None, (Bound _ | Unbound) -> Ok (Completed { item; completed_at = now })
       | Some _, Unbound ->
         Error "partition completion requires a durable exact binding"
       | (Some _ | None), Advancing _ ->

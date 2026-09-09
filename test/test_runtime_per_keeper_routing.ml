@@ -768,6 +768,50 @@ let test_runtime_assignment_writer_clears_assignment () =
       (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
+let test_runtime_and_egress_change_share_the_published_revision () =
+  with_runtime_file (fun path ->
+    let written = match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+      ~keeper_name:"routingtest" (fun transaction ->
+        Runtime.commit_keeper_assignment ~egress_allow:["example.com"] transaction
+          ~runtime_id:(Some "runpod_mtp.qwen")) with
+      | Ok {value=Ok (Runtime.Assignment_committed write); _} -> write.revision
+      | Ok {value=Ok (Runtime.Assignment_unchanged _); _} -> fail "changed settings were reported unchanged"
+      | Ok {value=Error error; _} | Error error -> fail error in
+    check (option string) "egress write did not undo runtime assignment"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "combined write produced invalid runtime configuration" in
+    let allow = Option.map Egress_allowlist.allow_strings
+      (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest") in
+    check (option (list string)) "runtime and egress both survived" (Some ["example.com"]) allow;
+    let observed = match Runtime.observe_keeper_assignment ~runtime_config_path:path
+      ~keeper_name:"routingtest" () with
+      | Ok observation -> observation.value | Error error -> fail error in
+    check string "returned revision is the final file revision"
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson written))
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson observed)))
+;;
+
+let test_deleted_keeper_loses_assignment_and_egress_together () =
+  with_runtime_file (fun path ->
+    let source = Fs_compat.load_file path
+      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"routingtest" ~allow:["api.github.com"]
+      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"other" ~allow:["example.com"] in
+    write_file path source;
+    (match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+       ~keeper_name:"routingtest" Runtime.commit_keeper_removal with
+     | Ok { value = Ok _; _ } -> ()
+     | Ok { value = Error detail; _ } | Error detail -> fail detail);
+    check (option string) "deleted Keeper is no longer assigned in the running process"
+      None (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "cleanup wrote invalid runtime configuration" in
+    check bool "deleted Keeper egress override is absent" true
+      (Option.is_none (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest"));
+    check bool "other Keeper egress override survives" true
+      (Option.is_some (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"other")))
+;;
+
 let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
   with_runtime_file (fun path ->
     let expected =
@@ -880,6 +924,48 @@ let test_runtime_route_writer_updates_default () =
       "runtime cache default refreshed"
       "openai.gpt"
       (Runtime.get_default_runtime_id ()))
+;;
+
+let check_first_run_lanes path runtime_id ~cli =
+  match Runtime_toml.parse_string (read_file path) with
+  | Error _ -> Alcotest.fail "first-run configuration must parse"
+  | Ok config ->
+    Alcotest.(check (option string)) "selected default" (Some runtime_id) config.default_runtime_id;
+    List.iter (fun id ->
+      match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
+        config.exact_output_lane_decls with
+      | None -> Alcotest.failf "missing first-run lane %s" id
+      | Some lane ->
+        Alcotest.(check (list string)) (id ^ " HTTP slots")
+          (if cli then [] else [ runtime_id ]) lane.slot_ids;
+        Alcotest.(check (list string)) (id ^ " CLI slots")
+          (if cli then [ runtime_id ] else []) lane.cli_slot_ids)
+      [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+;;
+
+let test_first_run_runtime_binds_supporting_lanes () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    check_first_run_lanes path "openai.gpt" ~cli:false;
+    let before = read_file path in
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unknown setup runtime must fail");
+    Alcotest.(check string) "failed setup does not change any lane" before (read_file path))
+;;
+
+let test_first_run_cli_runtime_binds_supporting_lanes () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-cli-first-run" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path codex_runtime_config;
+      (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      check_first_run_lanes path "codex.codex" ~cli:true))
 ;;
 
 let test_runtime_route_writer_rejects_unknown_default_without_write () =
@@ -2205,6 +2291,10 @@ let () =
             "dashboard runtime assignment clear validates and refreshes cache"
             `Quick
             test_runtime_assignment_writer_clears_assignment
+        ; test_case "runtime and egress publish one final revision" `Quick
+            test_runtime_and_egress_change_share_the_published_revision
+        ; test_case "deleted Keeper loses assignment and egress together" `Quick
+            test_deleted_keeper_loses_assignment_and_egress_together
         ; Alcotest.test_case
             "concurrent assignment CAS admits exactly one writer"
             `Quick
@@ -2221,6 +2311,10 @@ let () =
             "dashboard runtime route writer updates default"
             `Quick
             test_runtime_route_writer_updates_default
+        ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
+            test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
+            test_first_run_cli_runtime_binds_supporting_lanes
         ; Alcotest.test_case
             "unknown default route is rejected before runtime.toml write"
             `Quick

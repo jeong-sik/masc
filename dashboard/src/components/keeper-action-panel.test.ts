@@ -230,7 +230,7 @@ describe('purge action', () => {
       keepalive_running: false,
     })
 
-    expect(keeperActionVisibility(running).canPurge).toBe(false)
+    expect(keeperActionVisibility(running).canPurge).toBe(true)
     expect(keeperActionVisibility(paused).canPurge).toBe(true)
     expect(keeperActionVisibility(offline).canPurge).toBe(true)
   })

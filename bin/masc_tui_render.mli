@@ -195,6 +195,7 @@ type context_pane_body =
     }
 val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
+val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
 val agenda_viewport : Masc_tui_types.state -> int * int
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list

@@ -218,6 +218,35 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        fail "tool failure became a plan error")
 ;;
 
+let test_output_validation_precedes_node_observation () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let called = ref [] in
+  let observed = ref None in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    called := node_name node :: !called;
+    Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data:`Null)
+  in
+  let observe_node_result result = observed := Some result; Ok () in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ())
+          ~dispatch ~observe_node_result () with
+  | Ok _ -> fail "invalid output must not complete the plan"
+  | Error failure ->
+    check (list string) "invalid producer stops dependent nodes" [ "producer" ] !called;
+    (match !observed with
+     | None -> fail "invalid-output node was not observed"
+     | Some node ->
+       check bool "observer sees output validation failure" true
+         (Option.is_some node.Executor.output_validation_error);
+       check bool "original producer completion is retained" true
+         (Tool_result.is_success node.result);
+       check bool "original invalid bytes are retained" true
+         (Yojson.Safe.equal `Null (Tool_result.data node.result)));
+    match failure.cause with
+    | Executor.Plan_execution_failed { error = Plan.Output_validation_failed _; _ } -> ()
+    | _ -> fail "output validation lost its typed plan failure"
+;;
+
 let test_observation_failure_settles_siblings_and_stops_downstream () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
@@ -297,6 +326,32 @@ let test_dispatch_exception_preserves_pre_minted_tool_identity () =
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
        fail "dispatch exception lost its settled tool result")
+;;
+
+let test_deferred_effect_evidence_is_not_invented () =
+  Eio_main.run @@ fun _env ->
+  List.iter (fun (evidence, expected) ->
+    let plan = fixture () in
+    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+      if String.equal (node_name node) "left" then
+        let result = Tool_result.make_deferred ~tool_name:"left" ~start_time:0.0 () in
+        let execution = Masc.Keeper_tool_execution.of_tool_result
+            ?failure_effect_disposition:evidence result in
+        Executor.dispatch_result
+          ~failure_effect_disposition:execution.failure_effect_disposition
+          ~deferred_kind:Masc.Keeper_tool_execution.Generic_deferred result
+      else
+        Executor.dispatch_result
+          (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
+    in
+    match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+    | Ok _ -> fail "deferred node must not complete the dependent plan"
+    | Error failure ->
+      check string "aggregate preserves supplied effect evidence" expected
+        (Tool_result.failure_effect_disposition_to_string failure.effect_disposition))
+    [ None, "effect_outcome_unknown"
+    ; Some Tool_result.Proven_pre_effect, "proven_pre_effect"
+    ; Some Tool_result.Proven_post_effect, "proven_post_effect" ]
 ;;
 
 let test_deferred_cause_does_not_mask_unknown_sibling () =
@@ -400,6 +455,10 @@ let () =
             `Quick
             test_failed_sibling_stops_downstream_after_batch_settlement
         ; test_case
+            "output validation precedes node observation"
+            `Quick
+            test_output_validation_precedes_node_observation
+        ; Alcotest.test_case
             "observation failure settles siblings and stops downstream"
             `Quick
             test_observation_failure_settles_siblings_and_stops_downstream
@@ -408,6 +467,10 @@ let () =
             `Quick
             test_dispatch_exception_preserves_pre_minted_tool_identity
         ; test_case
+            "deferred effect evidence is not invented"
+            `Quick
+            test_deferred_effect_evidence_is_not_invented
+        ; Alcotest.test_case
             "deferred cause does not mask unknown sibling"
             `Quick
             test_deferred_cause_does_not_mask_unknown_sibling

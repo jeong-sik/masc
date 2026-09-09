@@ -126,32 +126,25 @@ val keeper_assignment_revision :
 val keeper_assignment_transaction_path : keeper_assignment_transaction -> string option
 
 val commit_keeper_assignment :
+  ?egress_allow:string list ->
   keeper_assignment_transaction ->
   runtime_id:string option ->
   (keeper_assignment_write, string) result
-(** Commit the requested assignment from the exact source bytes captured by
-    the transaction. [None] clears it. An unchanged assignment returns
-    [Assignment_unchanged] without rewriting [runtime.toml]. *)
-
-val commit_keeper_egress_allow :
-  keeper_assignment_transaction ->
-  allow:string list option ->
-  (keeper_assignment_write, string) result
-(** Write this keeper's [\[egress.keepers.<name>\]] allowlist from the exact
-    source bytes the transaction captured (RFC-0415). [None] removes the
-    table, which leaves the keeper reaching nothing rather than everything.
-
-    Inside the same transaction as {!commit_keeper_assignment} on purpose:
-    one lock, one file. A second transaction would let another admitted
-    writer land between a keeper entering the policy lane and being told what
-    it may reach, and a keeper in that gap reaches nothing while its config
-    says otherwise. *)
+(** Compose the assignment and optional egress allowlist into one source
+    commit. [runtime_id=None] clears the assignment; omitted [egress_allow]
+    preserves the allowlist. The receipt describes the final source revision.
+    [Assignment_unchanged] means neither setting changed the source bytes. *)
 
 val restore_keeper_assignment_transaction :
   keeper_assignment_transaction -> (keeper_assignment_write, string) result
 (** Restore the exact [runtime.toml] source bytes captured when the
     transaction began. The caller must still be inside the transaction
     callback, so no other admitted runtime writer can interleave. *)
+
+val commit_keeper_removal :
+  keeper_assignment_transaction -> (keeper_assignment_write, string) result
+(** Remove this exact Keeper's runtime assignment and egress override in one
+    source commit, preserving other Keepers' settings. *)
 
 val observe_keeper_assignment :
   ?runtime_config_path:string ->
@@ -775,6 +768,17 @@ val set_runtime_default :
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
+
+val set_first_run_runtime :
+  ?runtime_config_path:string ->
+  runtime_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Atomically select the default runtime and bind the librarian, Board attention,
+    Host Gate judge, and verifier exact-output lanes to that same runtime.
+    HTTP runtimes use catalog slots; official clients use CLI slots. Intended
+    for an explicit first-install setup action, since existing lane choices
+    are replaced. Validation failures leave the configuration unchanged. *)
 
 val set_runtime_media_failover :
   ?runtime_config_path:string ->

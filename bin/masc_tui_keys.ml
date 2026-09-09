@@ -59,12 +59,9 @@ let keeper_actions =
   ; b Act "e" "settings"
   ; b Act "f" "files" ~help:"file changes this keeper wrote"
   ; b Act "a" "new" ~help:"new keeper"
-    (* Offered only for a keeper the roster shows no fiber for, and it takes two
-       presses. "d" on this surface already opens repository changes, so delete
-       takes "x". Listed here because the footer is the surface's inventory of
-       keys; whether the row applies comes from
-       [Masc_tui_keeper_control.available]. *)
-  ; b Act "x" "delete" ~help:"remove a stopped keeper and everything it wrote"
+  ; b Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
+  ; b Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
+
   ]
 
 let for_surface = function

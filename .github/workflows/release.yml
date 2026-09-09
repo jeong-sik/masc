@@ -140,8 +140,47 @@ jobs:
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
+      # Manual branch runs also serve isolated runtime/TUI experiments. Keep
+      # their compiled bytes even when a later unrelated release check fails.
+      # The release job downloads only masc-*; these are never release assets.
+      - name: Record runtime probe binaries
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PROBE_COMMIT: ${{ github.sha }}
+          PROBE_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          out = Path('runtime-probe')
+          out.mkdir()
+          files = {}
+          for name in ('main_eio', 'masc_tui', 'masc_browser_host'):
+              source = Path('_build/default/bin') / (name + '.exe')
+              target = out / (name + '.exe')
+              shutil.copy2(source, target)
+              files[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
+          (out / 'manifest.json').write_text(json.dumps({
+              'commit': os.environ['PROBE_COMMIT'], 'arch': os.environ['PROBE_ARCH'],
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'release_validated': False, 'sha256': files,
+          }, indent=2) + '\n')
+          PYCODE
+
+      - name: Upload runtime probe binaries
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: runtime-probe/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Runtime setup validates each supported connection
         run: python3 test/test_install_runtime_setup.py --binary _build/default/bin/main_eio.exe
+
+      - name: First conversation setup CLI
+        run: python3 test/test_setup_cli.py --binary _build/default/bin/main_eio.exe
 
       - name: Keeper creation CLI exits after HTTP response
         run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
@@ -227,14 +266,6 @@ jobs:
           _build/default/bin/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
           grep -q -- '--base-path' /tmp/masc-tui-help.txt
 
-      - name: Generate release evidence bundle
-        run: |
-          chmod +x scripts/release-evidence.sh
-          mkdir -p dist
-          scripts/release-evidence.sh \
-            _build/default/bin/main_eio.exe \
-            dist/release-evidence-${{ matrix.arch }}.md
-
       - name: Package binary
         run: |
           mkdir -p dist
@@ -282,6 +313,51 @@ jobs:
           echo "probe: $probe"
           echo "$probe" | jq -e '.name == "masc-exec-shim" and (.version | test("^[0-9]+\\.")) and (.capabilities | type == "array")' >/dev/null
           sha256sum "$shim"
+
+      # Preserve native files for isolated operator acceptance while the
+      # remaining evidence and installation gates run. These artifacts are
+      # deliberately outside the masc-* distribution download pattern.
+      - name: Record unverified native preflight provenance
+        env:
+          PREFLIGHT_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os
+          from pathlib import Path
+          files = sorted(Path('dist').glob('masc-*')) + [
+              Path('scripts/install.sh'), Path('scripts/install-runtime-setup.py'),
+              Path('config/runtime.toml'), Path('config/agent-core-models-overlay.toml')]
+          receipt = dict(source_commit=os.environ['GITHUB_SHA'],
+                         platform=os.environ['PREFLIGHT_ARCH'],
+                         run_id=os.environ['GITHUB_RUN_ID'],
+                         run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+                         release_verified=False, published=False,
+                         sha256={str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                                 for p in files if p.is_file()})
+          Path('native-preflight.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYCODE
+
+      - name: Upload unverified native preflight files
+        uses: actions/upload-artifact@v7
+        with:
+          name: preflight-native-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/masc-*
+            scripts/install.sh
+            scripts/install-runtime-setup.py
+            config/runtime.toml
+            config/agent-core-models-overlay.toml
+            native-preflight.json
+
+      - name: Generate release evidence bundle
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p dist
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            dist/release-evidence-${{ matrix.arch }}.md
 
       # Exercise scripts/install.sh end to end against the just-packaged
       # binaries: stage dist/ as a file:// release, install through the real

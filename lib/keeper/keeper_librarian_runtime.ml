@@ -137,6 +137,7 @@ type extraction_error =
   | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
+  | Cli_slots_exhausted
   | Domain_output_invalid of string
   | Memory_snapshot_write_failed of
       { detail : string
@@ -148,7 +149,7 @@ let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librari
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
-  | Exact_execution_failed _ -> Exact_execution_failure
+  | Exact_execution_failed _ | Cli_slots_exhausted -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
 ;;
@@ -200,6 +201,7 @@ let extraction_error_to_string = function
        | No_outward_effect -> "none"
        | Outward_effect_started -> "started")
       detail
+  | Cli_slots_exhausted -> "librarian official-client slots exhausted; per-slot failures are logged"
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
@@ -212,6 +214,7 @@ let selected_slot_of_extraction_error = function
   | Execution_clock_unavailable
   | Exact_setup_failed _
   | Exact_execution_failed _
+  | Cli_slots_exhausted
   | Domain_output_invalid _ ->
     None
 ;;
@@ -514,6 +517,13 @@ let execute_exact_output_classified
   =
   let open Result.Syntax in
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  match selected_slots with
+  | [] ->
+    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~selected_input ~messages with
+     | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id, None)
+     | None -> Error Cli_slots_exhausted)
+  | _ :: _ ->
   let* messages, fitted_message_count =
     fitted_messages ~selected_slots ~full_messages:messages ~render_at
   in

@@ -69,7 +69,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
   ; final_agent_core_turn_ordinal_ref : int option ref
-  ; receipt_turn_count_ref : int option ref
+  ; receipt_agent_core_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref

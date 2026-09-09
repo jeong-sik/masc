@@ -306,7 +306,8 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
            | Error reason ->
                Error
                  (Store.Evidence_read_error
-                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))
+                    (Printf.sprintf "sandbox_backend_read: %s: %s" worker
+                       (Keeper_sandbox_read_backend.read_error_to_string reason)))
            | Ok content -> (
                (* The reader classifies its bytes with the store's own scan:
                    text answers as text, and non-text bytes become a binary
@@ -643,7 +644,8 @@ let handle_keeper_task_tool_with_outcome
            Keeper_tool_execution.success_data data
          | Workspace_broadcast.Pending
          | Workspace_broadcast.Deferred _ ->
-           Keeper_tool_execution.deferred_data data
+           Keeper_tool_execution.deferred_data
+             ~effect_disposition:Tool_result.Proven_post_effect data
          | Workspace_broadcast.Rejected _ ->
            Keeper_tool_execution.failure_data
              ~class_:Tool_result.Workflow_rejection

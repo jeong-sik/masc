@@ -29,7 +29,7 @@ UNVERIFIED_CAPABILITIES = (
     'supports_parallel_tool_calls', 'supports_reasoning', 'supports_extended_thinking',
     'supports_reasoning_budget', 'supports_response_format_json', 'supports_structured_output',
     'supports_multimodal_inputs', 'supports_image_input', 'supports_audio_input',
-    'supports_video_input', 'supports_document_input', 'supports_system_prompt',
+    'supports_video_input', 'supports_document_input',
     'supports_caching', 'supports_prompt_caching', 'supports_top_k', 'supports_min_p',
     'supports_seed', 'supports_computer_use', 'supports_code_execution',
 )
@@ -124,6 +124,15 @@ def render(spec):
         caps.update({key: False for key in UNVERIFIED_CAPABILITIES})
         caps.update(thinking_control_format='none', reasoning_streaming_format='none')
         overlay = table(('models',), caps, array=True)
+        # Exact-output lanes resolve through this same provider/model pair.
+        # A runtime binding alone is not an Agent Core target declaration.
+        overlay += table(('providers',), {
+            'id': provider, 'kind': 'openai_compat', 'base_url': endpoint,
+            'request_path': '/chat/completions', 'api_key_env': spec.get('api_key_env', ''),
+            'capabilities_base': 'openai_chat'}, array=True)
+        overlay += table(('targets',), {
+            'id': provider + '.' + model_key, 'provider_ref': provider,
+            'model_id': model}, array=True)
     return provider + '.' + model_key, runtime.encode(), overlay.encode()
 
 
@@ -173,7 +182,7 @@ def configure(binary, base_path, spec):
                 (stage_config / path.name).write_bytes(content)
             env = dict(os.environ, MASC_BASE_PATH=stage, MASC_CONFIG_DIR=str(stage_config))
             result = subprocess.run([str(Path(binary).resolve()), 'runtime-default-set',
-                                     '--base-path', stage, runtime_id], env=env,
+                                     '--base-path', stage, runtime_id, '--setup-lanes'], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode:
                 diagnostic = result.stderr.decode(errors='replace').strip() or 'validator produced no stderr'

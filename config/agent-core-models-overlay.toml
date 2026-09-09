@@ -291,10 +291,6 @@ thinking_control_format = "none"
 # measured 2026-08-29 against this endpoint. The glm-coding row for the same
 # model carries reasoning_content because Z.AI's wire spells it that way.
 reasoning_streaming_format = "delta:reasoning"
-# Dual-channel like minimax-m3: part of the reasoning also arrives as
-# <think>...</think> inside content (the confirmed glm/ollama-cloud
-# non-streaming leak); the typed field above does not carry that part.
-content_inline_reasoning = "think_tags"
 # The replay contract belongs to the model, not the wire: GLM keeps intermediate
 # reasoning across the tool-call rounds of one user turn and drops it when a new
 # user turn starts (bigmodel request-flow diagram, cited by the glm-coding rows).
@@ -315,9 +311,6 @@ supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
-# Same dual-channel <think> contract as the glm-5.3 row above — the confirmed
-# non-streaming leak runtime.
-content_inline_reasoning = "think_tags"
 reasoning_replay = "latest_user_turn_tool_calls"
 # Vision is measured, not inherited: a 64x64 probe PNG (white 44x20 rectangle on
 # black) came back described correctly on this wire on 2026-08-29.

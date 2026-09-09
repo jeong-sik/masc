@@ -58,6 +58,20 @@ product grows (see [Dashboard](#dashboard)).
 
 ## Start here
 
+### First conversation: 0.35.0 candidate
+
+After selecting your model in the installer wizard, authenticate its CLI or export
+its API credential and start Docker. Then run:
+
+```bash
+masc setup --base-path "$HOME/masc-workspace"
+```
+
+Setup prepares the default image, starts the workspace server and `imp`, and opens
+the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
+and read https://example.com with web_fetch. Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0350-candidate).
+This command requires the candidate binary; 0.35.0 has not yet been published.
+
 ### Published binaries
 
 Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.34.0).
@@ -72,21 +86,13 @@ bash /tmp/masc-install.sh --version "$TAG"
 ```
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a one-time wizard (`--no-wizard` skips it). The wizard reports what the host has and writes exactly one thing,
-`[runtime].default` in `runtime.toml`. It never asks for an API key and never
-stores one; the server reads keys from the environment it is started in.
-
-The wizard reports two axes:
-
-- **Model source.** The wizard lists what `.masc/config/runtime.toml`
-  declares: the providers seeded there, plus any commented-out template you
-  uncomment. Each is shown with whether it answered, whether it still wants a
-  credential, or whether it is not there at all. That file holds the provider
-  list, the environment variable each one reads, and the templates — the
-  wizard adds none of its own. `--provider <id>` picks one without prompting.
-- **Execution sandbox.** Which of `docker`, `microvm`, and `remote_ssh` this
-  host can offer. The wizard reports and does not choose. The sandbox is set
-  per Keeper, or by a `--team <preset>` that carries its own choice.
+and runs a one-time wizard (`--no-wizard` skips it). The 0.35.0 candidate wizard
+selects an existing model or configures your Claude Code, Codex, or HTTP runtime.
+It writes the selected default and configures helper lanes during fresh setup.
+It asks for API credential variable names, never their secret values; the server
+reads those variables from its startup environment. `--provider <id>` selects
+an existing provider without prompting. For the default `imp`, `masc setup`
+prepares the Docker image after you install and start Docker.
 
 Release **0.34.0** includes Intel macOS, `masc-browser-host`, and the matched
 dashboard, and preserves configuration during `--force` reinstalls.
@@ -146,7 +152,8 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `autoboot_enabled = false` |
+| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.0 candidate) |
+| `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
 falls back to `MASC_BASE_PATH`, then the current directory. Runtime state
@@ -314,8 +321,8 @@ server boots it, wakes it on board mentions, timers, and unassigned tasks,
 runs each turn in a sandbox, and writes the turn's records under `.masc/`
 before the Keeper goes idle. A fresh root starts with one Keeper, `imp`: the
 installer, `masc init`, and the server all seed it from the binary's
-`keepers-default/`. It ships with `autoboot_enabled = false`, so nothing runs
-until a model and a sandbox exist and you start it or turn autoboot on. The
+`keepers-default/`. It ships with `activation_mode = "manual"`, so nothing runs
+until a model and a sandbox exist and you start it or set `activation_mode = "autonomous"`. The
 published v0.34.0 binary predates this seed and leaves `keepers/` empty.
 
 ```toml

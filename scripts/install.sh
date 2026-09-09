@@ -576,7 +576,9 @@ update_runtime_default() {
     return 1
   fi
 
-  if ! "$DEST" runtime-default-set --base-path "$base_path" "$runtime_id" >/dev/null; then
+  local lane_args=()
+  [ "$CONFIG_PREEXISTING" -eq 1 ] || lane_args=(--setup-lanes)
+  if ! "$DEST" runtime-default-set --base-path "$base_path" "$runtime_id" "${lane_args[@]}" >/dev/null; then
     warn "failed to update $runtime_file through masc runtime-default-set"
     return 1
   fi
@@ -1739,12 +1741,16 @@ Installed:
   provider credentials, Keeper creation and execution backend setup are separate
   browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
 
-Next (choose the TUI or server-only command):
+Next: start your first conversation with imp:
   ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
   ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
   ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
 
-  ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
+  ${c_dim}# install/start Docker Desktop (macOS) or Docker Engine (Linux), then:${c_off}
+  ${c_dim}# prepare the sandbox, start imp, and open the conversation workspace${c_off}
+  $start_env "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# optional: mint a worker bearer for a separate MCP client${c_off}
   eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
   ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}

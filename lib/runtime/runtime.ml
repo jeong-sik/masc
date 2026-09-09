@@ -917,7 +917,7 @@ let verifier_exact_slot_ids_of_lane_decls
       decls
   with
   | None -> []
-  | Some lane -> lane.slot_ids
+  | Some lane -> lane.slot_ids @ lane.cli_slot_ids
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
@@ -1651,12 +1651,13 @@ let verifier_exact_lane_slot_ids () =
          registry
          ~lane_id:verifier_exact_lane_id
      with
-     | Ok { selected_slots } ->
+     | Ok { selected_slots; cli_slots } ->
        Ok
          (List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) ->
                slot.slot_id)
-            selected_slots)
+            selected_slots
+          @ cli_slots)
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
@@ -2852,6 +2853,48 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
+;;
+
+let set_first_run_runtime ?runtime_config_path ~runtime_id () =
+  let runtime_id = String.trim runtime_id in
+  if String.equal runtime_id "" || contains_newline runtime_id
+  then Error "runtime_id must be non-empty and must not contain newlines"
+  else
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let* config =
+          Runtime_toml.parse_string content
+          |> Result.map_error runtime_parse_errors_to_string
+        in
+        let runtimes, _ = partition_bindings config config.bindings in
+        let* runtime =
+          match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+          | Some runtime -> Ok runtime
+          | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
+        in
+        let slots, cli_slots =
+          match runtime.execution with
+          | Runtime_execution.Agent_core _ -> [ runtime_id ], []
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
+        in
+        let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+        let next =
+          List.fold_left
+            (fun content lane_id ->
+              let path = "runtime.exact_output_lanes." ^ lane_id in
+              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
+              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
+            next
+            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+        in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =

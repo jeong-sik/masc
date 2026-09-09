@@ -882,6 +882,48 @@ let test_runtime_route_writer_updates_default () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
+let check_first_run_lanes path runtime_id ~cli =
+  match Runtime_toml.parse_string (read_file path) with
+  | Error _ -> Alcotest.fail "first-run configuration must parse"
+  | Ok config ->
+    Alcotest.(check (option string)) "selected default" (Some runtime_id) config.default_runtime_id;
+    List.iter (fun id ->
+      match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
+        config.exact_output_lane_decls with
+      | None -> Alcotest.failf "missing first-run lane %s" id
+      | Some lane ->
+        Alcotest.(check (list string)) (id ^ " HTTP slots")
+          (if cli then [] else [ runtime_id ]) lane.slot_ids;
+        Alcotest.(check (list string)) (id ^ " CLI slots")
+          (if cli then [ runtime_id ] else []) lane.cli_slot_ids)
+      [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+;;
+
+let test_first_run_runtime_binds_supporting_lanes () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    check_first_run_lanes path "openai.gpt" ~cli:false;
+    let before = read_file path in
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unknown setup runtime must fail");
+    Alcotest.(check string) "failed setup does not change any lane" before (read_file path))
+;;
+
+let test_first_run_cli_runtime_binds_supporting_lanes () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-cli-first-run" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path codex_runtime_config;
+      (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      check_first_run_lanes path "codex.codex" ~cli:true))
+;;
+
 let test_runtime_route_writer_rejects_unknown_default_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
@@ -2221,6 +2263,10 @@ let () =
             "dashboard runtime route writer updates default"
             `Quick
             test_runtime_route_writer_updates_default
+        ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
+            test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
+            test_first_run_cli_runtime_binds_supporting_lanes
         ; Alcotest.test_case
             "unknown default route is rejected before runtime.toml write"
             `Quick

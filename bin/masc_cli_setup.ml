@@ -91,8 +91,12 @@ let workspace_preflight ~base_path =
   let unreadable detail = Workspace_needs_attention
     [{path = requested_root; kind = Unreadable_state; detail}] in
   try
-    match Unix.lstat requested_root with
-    | _ ->
+    let present =
+      try let (_ : Unix.stats) = Unix.lstat requested_root in true
+      with Unix.Unix_error (Unix.ENOENT, _, _) -> false
+    in
+    if not present then Workspace_ready
+    else
       let root = Fs_compat.realpath requested_root in
       let before = Unix.stat root in
       if before.Unix.st_kind <> Unix.S_DIR then unreadable "MASC root is not a directory"
@@ -103,7 +107,6 @@ let workspace_preflight ~base_path =
            && String.equal root (Fs_compat.realpath requested_root)
         then result
         else unreadable "MASC root changed during preflight; no file was changed"
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Workspace_ready
   with
   | Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
   | Sys_error detail -> unreadable detail

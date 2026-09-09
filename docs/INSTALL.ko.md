@@ -76,10 +76,18 @@ uname -m
 TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
+
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
 `.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
@@ -93,6 +101,12 @@ export PATH="$HOME/.local/bin:$PATH"
 `--no-wizard`는 모델 선택을 건너뜁니다. `--provider <id>`는
 `runtime.toml`의 공급자 catalog에서 선택합니다. 마법사는 사용 가능한 모델 서버와
 CLI 인증 상태를 탐지하고 `[runtime].default`를 선택하며 API 키는 저장하지 않습니다.
+모델 설정은 CLI의 로컬 모델 목록이나 HTTP 서버의 `/models` 응답을 번호로 보여 줍니다.
+CLI 목록이 없으면 설치된 MASC 모델 catalog를 사용합니다. 번호를 선택하거나 정확한
+모델 ID를 입력하세요. 빈 입력으로 모델을 자동 선택하지 않으며, 목록에 있다는 사실이
+계정의 사용 권한을 보장하지는 않습니다. context window는 선택한 항목에서 자동으로
+채우고 출처를 표시합니다. Codex가 관측한 실제 context 한도가 있으면 catalog 값보다
+우선합니다. 한도를 알 수 없을 때만 문서나 서버 설정에 있는 토큰 수를 묻습니다.
 모델이 없어도 서버 설치와 상태 화면 사용은 가능합니다.
 
 ## 첫 설치 마법사

@@ -12,10 +12,18 @@ macOS·Linux용 바이너리를 설치합니다. OCaml·Node.js 빌드 도구는
 TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
+
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
 
 ## `imp`와 첫 대화 (0.35.0)
 

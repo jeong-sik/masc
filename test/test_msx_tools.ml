@@ -529,7 +529,48 @@ let test_registration () =
     ; (Tool_schemas_misc.Misc_msx_screen, "masc_msx_screen", true)
     ; (Tool_schemas_misc.Misc_msx_press, "masc_msx_press", false)
     ; (Tool_schemas_misc.Misc_msx_step, "masc_msx_step", false)
+    ; (Tool_schemas_misc.Misc_msx_peek, "masc_msx_peek", true)
+    ; (Tool_schemas_misc.Misc_msx_ram_diff, "masc_msx_ram_diff", true)
     ]
+;;
+
+(* RAM introspection: peek reads memory as hex and takes the snapshot,
+   ram_diff reports what changed since. The cases that are certain on a
+   ROM-less machine: refusal before any peek, a hex of the asked size, an
+   idle diff being empty (peek itself changes nothing), and a bad address
+   being refused. How much a reload changes is not certain here, so it is
+   not asserted. *)
+let test_peek_and_ram_diff () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes without ROMs" true (is_completed r);
+  let r = dispatch ~base_path "masc_msx_ram_diff" [] in
+  check bool "diff before any peek is refused" true (rejected r);
+  let r =
+    dispatch ~base_path "masc_msx_peek" [ ("address", `String "e000"); ("length", `Int 8) ]
+  in
+  check bool "peek completes" true (is_completed r);
+  check bool "eight bytes arrive as sixteen hex chars" true
+    (match member "hex" (Tool_result.data r) with
+     | Some (`String h) -> String.length h = 16
+     | _ -> false);
+  check int "the address is echoed" 0xe000
+    (match member "address" (Tool_result.data r) with
+     | Some (`Int a) -> a
+     | _ -> 0);
+  let r = dispatch ~base_path "masc_msx_ram_diff" [] in
+  check bool "a diff right after the peek sees no change" true
+    (match member "changed_bytes" (Tool_result.data r) with
+     | Some (`Int 0) -> true
+     | _ -> false);
+  let r =
+    dispatch ~base_path "masc_msx_peek" [ ("address", `String "zz"); ("length", `Int 4) ]
+  in
+  check bool "an unparsable address is refused" true (rejected r);
+  let r =
+    dispatch ~base_path "masc_msx_peek" [ ("address", `String "fff0"); ("length", `Int 32) ]
+  in
+  check bool "a peek past the address space is refused" true (rejected r)
 ;;
 
 (* RFC-0439 §5.3, through the tool path: with a BIOS and XSpelunker on this
@@ -667,6 +708,7 @@ let () =
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "bitmap mode classification" `Quick test_bitmap_mode_classification
         ; test_case "registration" `Quick test_registration
+        ; test_case "peek and ram_diff" `Quick test_peek_and_ram_diff
         ; test_case "xspelunker: two presses reach the level card" `Quick
             test_xspelunker_two_presses
         ; test_case "two keepers share one machine" `Quick

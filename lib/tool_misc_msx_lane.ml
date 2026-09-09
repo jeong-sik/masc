@@ -203,6 +203,53 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
   | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
 ;;
 
+(* RAM introspection handlers. Read-only, so no board relay and no agent
+   identity: anyone may look, nobody may write (RFC-0439's cheat line).
+   Addresses arrive as hex strings ("e000", "0xE000") because that is how
+   memory is talked about; decimal parses too. *)
+let parse_address s =
+  let s = String.lowercase_ascii (String.trim s) in
+  let s =
+    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
+  in
+  int_of_string_opt ("0x" ^ s)
+;;
+
+let handle_peek ~tool_name ~start_time args =
+  let address =
+    match parse_address (get_string args "address" "") with
+    | Some a -> a
+    | None -> -1
+  in
+  match Msx_lane.peek ~address ~length:(get_int args "length" 16) with
+  | Ok hex ->
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:(`Assoc [ ("address", `Int address); ("hex", `String hex) ]) ()
+  | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+;;
+
+let handle_ram_diff ~tool_name ~start_time () =
+  match Msx_lane.ram_diff () with
+  | Ok (d : Msx_lane.ram_diff) ->
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:(`Assoc
+        [ ( "changes"
+          , `List
+              (List.map
+                 (fun (c : Msx_lane.ram_change) ->
+                   `Assoc
+                     [ ("address", `Int c.address)
+                     ; ("length", `Int c.length)
+                     ; ("from", `String c.from_hex)
+                     ; ("to", `String c.to_hex)
+                     ])
+                 d.changes) )
+        ; ("truncated", `Bool d.truncated)
+        ; ("changed_bytes", `Int d.changed_bytes)
+        ]) ()
+  | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+;;
+
 let handle_screen ~tool_name ~start_time _args =
   of_lane ~tool_name ~start_time (Msx_lane.screen ())
 ;;

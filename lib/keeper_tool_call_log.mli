@@ -106,7 +106,7 @@ val set_turn_context :
 
 val get_turn_context :
   cell:turn_ctx_cell ->
-  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string option * string option
+  unit ->string option * string option * bool option * string option * string option * string option * int option * int option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id,
     sandbox_profile, network_mode)] for

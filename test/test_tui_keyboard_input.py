@@ -13968,7 +13968,9 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
             os.write(master, data)
             wait_for_output(process, master, output, b"a=T", start=start, timeout=3)
             image_end = end_of_needle(output, b"a=T", start)
-            footer = b"Esc: back"
+            # Include the wheel hint before checking pane/center fallback.
+            # Esc: back is only the beginning of the footer.
+            footer = b"j/k:center"
             wait_for_output(process, master, output, footer, start=image_end, timeout=3)
             return bytes(output[start:end_of_needle(output, footer, image_end)])
 
@@ -14065,21 +14067,20 @@ def run_browser_pointer_regression(executable: str) -> None:
             wait_for_output(process, master, output, b"Esc: back", start=start, timeout=3)
             return bytes(output[start:])
         image = image_input(b"\x0f")
-        assert b"f=100,a=T,r=24," in image, "unexpected screenshot placement geometry"
+        assert b"f=100,a=T,r=25," in image, "fullscreen screenshot must use all 30 physical terminal rows"
         # Caption clicks are consumed without dispatch; no double action on press.
         os.write(master, b"\x1b[<0;2;1M\x1b[<0;2;1m")
         wait_for_terminal_input_consumed(slave)
         assert not actions
         image_input(b"\x1b[<0;2;5M\x1b[<0;2;5m")
         assert len(actions)==1 and actions[0]["action"]=="click_at"
-        # 30x100 terminal reserves one navigation row. Three caption rows
-        # and two margin rows leave 24 image rows; 10x20 cells and a square
-        # PNG make 48 columns. Mouse reports the target cell centers.
-        assert actions[0]["point"] == {"x":0.03125,"y":0.0625}, actions[0]["point"]
+        # 30x100 terminal, 10x20 cells, square PNG: 25 rows x 50 columns,
+        # after the three caption rows. Mouse reports target cell centers.
+        assert actions[0]["point"] == {"x":0.03,"y":0.06}, actions[0]
         image_input(b"\x1b[<0;2;5M\x1b[<0;5;8m")
         assert len(actions)==2 and actions[1]["action"]=="drag"
-        assert actions[1]["from"] == {"x":0.03125,"y":0.0625}, actions[1]["from"]
-        assert actions[1]["to"] == {"x":0.09375,"y":0.1875}, actions[1]["to"]
+        assert actions[1]["from"] == {"x":0.03,"y":0.06}, actions[1]["from"]
+        assert actions[1]["to"] == {"x":0.09,"y":0.18}, actions[1]["to"]
         assert len(captures)==3
         send_and_wait(process, master, output, b"\x1b", b"pointer fixture")
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")

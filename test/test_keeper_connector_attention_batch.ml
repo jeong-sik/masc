@@ -920,6 +920,77 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
     check int "every transported selection was durably settled" 0 (List.length remaining))
 ;;
 
+(* A batch wake is one conversation's backlog, so it continues on that
+   conversation. Routing a batch as "not a continuation wake" made
+   [Continuation_route_addressed] unreachable for any batched conversation,
+   and under the rule #34662 removed such rows could never settle. *)
+let wake_channel ~channel_id ~message_id =
+  match
+    Keeper_continuation_channel.discord
+      ~guild_id:(Some "guild-batch")
+      ~channel_id
+      ~parent_channel_id:None
+      ~thread_id:None
+      ~reply_to_message_id:message_id
+      ~user_id:"user-batch"
+      ()
+  with
+  | Ok channel -> channel
+  | Error detail -> failf "channel fixture failed: %s" detail
+;;
+
+let wake_payload ~channel_id ~message_id : Q.stimulus_payload =
+  Q.Connector_attention
+    { event_id = Printf.sprintf "evt-%s-%s" channel_id message_id
+    ; channel = wake_channel ~channel_id ~message_id
+    }
+;;
+
+let test_batch_wake_continues_on_its_newest_member () =
+  let wake =
+    Keeper_registry.Woken
+      [ wake_payload ~channel_id:"C-batch" ~message_id:"m1"
+      ; wake_payload ~channel_id:"C-batch" ~message_id:"m2"
+      ]
+  in
+  match Keeper_unified_turn.continuation_channel_of_wake wake with
+  | None -> fail "a batched conversation wake must continue on its conversation"
+  | Some channel ->
+    check bool "the newest member's route" true
+      (Keeper_continuation_channel.same_route channel
+         (wake_channel ~channel_id:"C-batch" ~message_id:"m2"));
+    check bool "the conversation every member shares" true
+      (Keeper_continuation_channel.same_conversation channel
+         (wake_channel ~channel_id:"C-batch" ~message_id:"m1"))
+;;
+
+let test_single_payload_wake_keeps_its_channel () =
+  match
+    Keeper_unified_turn.continuation_channel_of_wake
+      (Keeper_registry.Woken [ wake_payload ~channel_id:"C-one" ~message_id:"m1" ])
+  with
+  | None -> fail "a single connector payload must continue on its channel"
+  | Some channel ->
+    check bool "same route as the payload" true
+      (Keeper_continuation_channel.same_route channel
+         (wake_channel ~channel_id:"C-one" ~message_id:"m1"))
+;;
+
+let test_batch_spanning_conversations_routes_nowhere () =
+  let none label wake =
+    match Keeper_unified_turn.continuation_channel_of_wake wake with
+    | None -> ()
+    | Some _ -> failf "%s must not route" label
+  in
+  none "two conversations"
+    (Keeper_registry.Woken
+       [ wake_payload ~channel_id:"C-a" ~message_id:"m1"
+       ; wake_payload ~channel_id:"C-b" ~message_id:"m1"
+       ]);
+  none "empty wake" (Keeper_registry.Woken []);
+  none "proactive tick" Keeper_registry.Proactive_tick
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -960,9 +1031,23 @@ let () =
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
         ; test_case
-            "unsettled route evidence stays pending, never Ignored"
+            "a completed turn without a reply receipt acks its connector attention"
             `Quick
             test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt
+        ] )
+    ; ( "continuation_channel_of_wake"
+      , [ test_case
+            "a batched conversation wake continues on its newest member"
+            `Quick
+            test_batch_wake_continues_on_its_newest_member
+        ; test_case
+            "a single payload wake keeps its channel"
+            `Quick
+            test_single_payload_wake_keeps_its_channel
+        ; test_case
+            "a batch spanning conversations routes nowhere"
+            `Quick
+            test_batch_spanning_conversations_routes_nowhere
         ] )
     ]
 ;;

@@ -194,6 +194,14 @@ val hitl_replay_yield_request
     grant durably unspent). *)
 
 
+val continuation_channel_of_wake :
+  Keeper_registry.wake_reason -> Keeper_continuation_channel.t option
+(** The channel a turn woken by [wake] continues on: a single payload's
+    routable channel, or for a batch (RFC-0377, one connector conversation's
+    backlog) the newest member's channel when every member is the same
+    conversation. [None] for an empty wake, a proactive tick, a chat request,
+    an unroutable payload, or a batch spanning conversations. *)
+
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane

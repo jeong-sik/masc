@@ -341,9 +341,8 @@ let batch_disposition_of_cycle_outcome
      | Keeper_unified_turn.Continuation_route_addressed ->
        Batch_ack_completed
      | Keeper_unified_turn.Continuation_memory_write_completed ->
-       (* The receipt proves a completed non-surface terminal effect.  The
-          external-attention ledger's Ignored reason is narrowly "turn
-          completed without direct reply"; it does not claim model intent. *)
+       (* The receipt proves a completed non-surface terminal effect; it does
+          not claim model intent. *)
        Batch_ack_completed
      | Keeper_unified_turn.Continuation_memory_retract_completed ->
        Batch_ack_completed
@@ -359,9 +358,11 @@ let batch_disposition_of_cycle_outcome
           day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
           minutes on 2026-09-09, #34655), the same way refusing the board ack
           replayed one post 297 times (#32277). Whether the keeper answered is
-          not the queue's question: the reaction ledger's turn_finished row
-          carries the turn's disposition, and the external-attention store
-          keeps the message itself. Neither needs the pending entry. *)
+          not the queue's question, and today no store answers it durably:
+          the ack receipt is [Turn_completed] for every route and the
+          reaction ledger's disposition token is "completed" for every route
+          (#34666). The message itself stays in the external-attention
+          store. *)
        Batch_ack_completed)
   | Some
       (Cycle.Checkpointed

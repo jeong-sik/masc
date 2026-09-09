@@ -326,6 +326,22 @@ let undecodable_store_error config detail =
     detail
     (goals_path config)
 
+(* The read side had no counterpart, so a caller was handed the decoder's own
+   sentence and nothing else: "goal_of_yojson: criterion_revision must be a
+   non-blank string" names no file and no next move, and an operator holding
+   97 unreadable goals had to find goals.json themselves (#34603). Same shape
+   as Goal_verification.undecodable_load_error, which did say both. *)
+let undecodable_load_error config detail =
+  Printf.sprintf
+    "goal_store: store did not decode (%s); repair or reset %s"
+    detail
+    (goals_path config)
+
+let decode_state_result config json =
+  match state_of_yojson json with
+  | Ok state -> Ok state
+  | Error detail -> Error (undecodable_load_error config detail)
+
 let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
@@ -415,13 +431,13 @@ let get_goal config ~goal_id =
 
 let get_goal_result config ~goal_id =
   let* json = Workspace_utils.read_json_result config (goals_path config) in
-  let* state = state_of_yojson json in
+  let* state = decode_state_result config json in
   Ok (find_goal state.goals goal_id)
 
 let transact_goal config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let* json = Workspace_utils.read_json_result config (goals_path config) in
-      let* state = state_of_yojson json in
+      let* state = decode_state_result config json in
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
       | Some current ->

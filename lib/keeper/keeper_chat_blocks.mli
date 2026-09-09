@@ -9,8 +9,9 @@
       codec: p, h4, ul, callout, table, code, mermaid, svg, voice, attach,
       image, link, and fusion. Thinking (RFC-0302) carries assistant
       reasoning content (empty string for a signature-only [RedactedThinking]) so
-      reload can restore the dashboard thinking UI; not produced by
-      [parse_text_to_blocks].
+      reload can restore the dashboard thinking UI; produced by
+      [parse_text_to_blocks] only from an official-client envelope's
+      thinking or redacted_thinking blocks — plain text never carries one.
     - Matched fenced code blocks become code blocks with escaped HTML and raw source.
     - Mermaid fenced code blocks become mermaid blocks with raw source.
     - Markdown images [![alt](url)] become image blocks.

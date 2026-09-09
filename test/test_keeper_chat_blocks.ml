@@ -695,6 +695,42 @@ let test_unknown_envelope_schema_folds_to_a_marker () =
    | _ ->
      Alcotest.(check int) "exactly one marker block" 1 (List.length blocks))
 
+(* An empty projection must not hand the raw JSON back to the plain-text
+   path: broadcast omits empty blocks and the dashboard's live stream would
+   re-parse the envelope locally. *)
+let test_empty_envelope_projection_still_marks () =
+  let raw =
+    {|{"schema":"masc.official-client-context-message.v2","message":{"role":"assistant","content_blocks":[]}}|}
+  in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Text t ] ->
+     Alcotest.(check string) "one marker, never the raw envelope"
+       "[빈 official-client 메시지]" t.html
+   | _ -> Alcotest.fail "expected exactly the empty-projection marker")
+
+let test_malformed_known_envelope_folds () =
+  let raw = {|{"schema":"masc.official-client-context-message.v2","message":"not-an-assoc"}|} in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Text t ] ->
+     Alcotest.(check string) "shape variants fold, not dump"
+       "[형식이 다른 official-client 메시지]" t.html
+   | _ -> Alcotest.fail "expected exactly the variant marker")
+
+let test_redacted_thinking_maps_to_the_redacted_block () =
+  let raw =
+    {|{"schema":"masc.official-client-context-message.v2","message":{"content_blocks":[
+    {"type":"redacted_thinking","data":"opaque"}
+  ]}}|}
+  in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Thinking th ] ->
+     Alcotest.(check bool) "redacted flag set" true th.redacted;
+     Alcotest.(check string) "no content exposed" "" th.content
+   | _ -> Alcotest.fail "expected one redacted thinking block")
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -706,6 +742,12 @@ let () =
             test_official_client_envelope_projects_blocks;
           Alcotest.test_case "unknown envelope schema folds to a marker" `Quick
             test_unknown_envelope_schema_folds_to_a_marker;
+          Alcotest.test_case "empty envelope projection still marks" `Quick
+            test_empty_envelope_projection_still_marks;
+          Alcotest.test_case "malformed known envelope folds" `Quick
+            test_malformed_known_envelope_folds;
+          Alcotest.test_case "redacted thinking maps to redacted block" `Quick
+            test_redacted_thinking_maps_to_the_redacted_block;
           Alcotest.test_case "markdown image and surrounding text" `Quick
             test_markdown_image_and_surrounding_text;
           Alcotest.test_case "bare image url on own line" `Quick

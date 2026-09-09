@@ -482,52 +482,64 @@ let official_client_message_blocks raw =
         | "masc.official-client-context-message.v2" -> (
           match List.assoc_opt "content_blocks" message with
           | Some (`List blocks) ->
-            Some
-              (List.filter_map
-                 (fun json ->
-                   match json with
-                   | `Assoc block -> (
-                     match List.assoc_opt "type" block with
-                     | Some (`String "text") -> (
-                       match List.assoc_opt "text" block with
-                       | Some (`String text) when text <> "" ->
-                         Some (Text { html = escape_html text })
-                       | _ -> None)
-                     | Some (`String "thinking") -> (
-                       match List.assoc_opt "thinking" block with
-                       | Some (`String content) when content <> "" ->
-                         Some (Thinking { content; redacted = false })
-                       | _ -> None)
-                     | Some (`String "tool_use") -> (
-                       match List.assoc_opt "name" block with
-                       | Some (`String name) ->
-                         Some
-                           (Text
-                              { html =
-                                  escape_html (Printf.sprintf "[%s 도구 호출]" name)
-                              })
-                       | _ -> None)
-                     | Some (`String "tool_result") ->
-                       Some (Text { html = escape_html "[도구 결과]" })
-                     | Some (`String kind) ->
-                       Some
-                         (Text
-                            { html =
-                                escape_html
-                                  (Printf.sprintf "[지원 밖 메시지 블록: %s]" kind)
-                            })
-                     | _ -> None)
-                   | _ -> None)
-                 blocks)
-          | _ -> None)
+            let projected =
+              List.filter_map
+                (fun json ->
+                  match json with
+                  | `Assoc block -> (
+                    match List.assoc_opt "type" block with
+                    | Some (`String "text") -> (
+                      match List.assoc_opt "text" block with
+                      | Some (`String text) when text <> "" ->
+                        Some (Text { html = escape_html text })
+                      | _ -> None)
+                    | Some (`String "thinking") -> (
+                      match List.assoc_opt "thinking" block with
+                      | Some (`String content) when content <> "" ->
+                        Some (Thinking { content; redacted = false })
+                      | _ -> None)
+                    | Some (`String "tool_use") -> (
+                      match List.assoc_opt "name" block with
+                      | Some (`String name) ->
+                        Some
+                          (Text
+                             { html =
+                                 escape_html (Printf.sprintf "[%s 도구 호출]" name)
+                             })
+                      | _ ->
+                        Some (Text { html = escape_html "[이름 없는 도구 호출]" }))
+                    | Some (`String "tool_result") ->
+                      Some (Text { html = escape_html "[도구 결과]" })
+                    | Some (`String "redacted_thinking") ->
+                      Some (Thinking { content = ""; redacted = true })
+                    | Some (`String kind) ->
+                      Some
+                        (Text
+                           { html =
+                               escape_html
+                                 (Printf.sprintf "[지원 밖 메시지 블록: %s]" kind)
+                           })
+                    | _ -> None)
+                  | _ -> None)
+                blocks
+            in
+            (* An empty projection must not hand the message back to the
+               plain-text path: broadcast omits empty blocks and the
+               dashboard would re-parse the raw envelope JSON. *)
+            (match projected with
+             | [] -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ]
+             | _ -> Some projected)
+          | _ -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ])
         | other ->
           Some
             [ Text
                 { html =
-                    escape_html
-                      (Printf.sprintf "[외부 런타임 메시지 형식: %s]" other)
-                } ]
-        )
+                    escape_html (Printf.sprintf "[외부 런타임 메시지 형식: %s]" other)
+                } ])
+      | Some (`String _), _ | None, _ ->
+        (* A known-schema envelope that does not match the codec's shape —
+           fold like an unknown schema rather than dumping it raw. *)
+        Some [ Text { html = escape_html "[형식이 다른 official-client 메시지]" } ]
       | _ -> None)
     | _ -> None
 ;;

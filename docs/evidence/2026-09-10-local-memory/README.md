@@ -33,3 +33,23 @@ requires the extracted value/unit separately. Source IDs, exact case coverage,
 finite numbers and response completion are scored together. Free-text
 explanation semantics still require manual review. The installed script
 captures model/server identity and refuses to overwrite existing output.
+
+## Unhinted result
+
+`qwen3-8b-unhinted/` completed normally (`done=true`) in 145.50 seconds:
+477 prompt tokens and 768 output tokens. Aggregate check failed. Artifact
+and unresolved-conflict cases passed; both measurement corrections returned
+the right value/unit (21 seconds and 37 milliseconds), but `source_ids`
+contained only the replacement record (`r2` / `h2`) and omitted the prior
+record (`r1` / `h1`). Manual reading confirmed the omitted prior IDs were
+mentioned in explanation text, so this is a structured provenance-retention
+failure, not a numerical-extraction failure.
+
+The result supports investigating an advisory extraction role with
+host-validated source coverage; it does not authorize automatic shared-memory
+commit or prove a production role. No runtime settings were changed.
+
+The corrected call began before the script's final timestamp/hash metadata
+addition. Its receipt therefore lacks those fields; request/response and
+Ollama version/model identity were preserved. Do not attribute the newer
+script bytes to that completed invocation without this distinction.

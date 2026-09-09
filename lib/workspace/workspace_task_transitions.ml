@@ -979,11 +979,7 @@ let commit_verdict_r
                  ~task_id
                  ~status:new_status
                  ~module_name:"commit_verdict_r");
-           (* Both approved completion and approved cancellation reconcile the
-              committed terminal state with its producer. *)
-           if Masc_domain.task_status_is_terminal new_status
-              && not (Masc_domain.task_status_is_terminal task.task_status)
-           then
+           let reconcile_terminal () =
               run_post_commit "terminal_reconciliation" (fun () ->
                 match
                   (Atomic.get Workspace_hooks.task_terminal_committed_fn)
@@ -999,7 +995,8 @@ let commit_verdict_r
                     task_id
                     producer
                     kind
-                    detail);
+                    detail)
+           in
            (* Completion hooks key off the RESULT, and the completer is the
               producer — never the authority, which is not an agent and owns no
               task. *)
@@ -1041,6 +1038,7 @@ let commit_verdict_r
                      | `Assoc fields ->
                        `Assoc (fields @ [ "authority", `String authority_actor ])
                      | other -> other));
+              reconcile_terminal ();
               run_post_commit "done_hooks" (fun () ->
                 Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
               (* Completion metrics must fire on this path too. They used to be
@@ -1061,11 +1059,11 @@ let commit_verdict_r
                   ~collaborators:[]
                   ~handoff_from:None
                   ~handoff_to:None)
+            | Masc_domain.Cancelled _ -> reconcile_terminal ()
             | Masc_domain.Todo
             | Masc_domain.Claimed _
             | Masc_domain.InProgress _
-            | Masc_domain.AwaitingVerification _
-            | Masc_domain.Cancelled _ -> ());
+            | Masc_domain.AwaitingVerification _ -> ());
            let event_kind =
              match verdict with
              | Masc_domain.Verdict_approved -> Event_kind.Task.Approved

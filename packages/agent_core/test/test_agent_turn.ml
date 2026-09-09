@@ -296,7 +296,7 @@ let test_accumulate_usage_with_response () =
     Llm_provider.Provider_config.make
       ~kind:Anthropic
       ~provider_id:"anthropic"
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ()
   in
@@ -304,7 +304,7 @@ let test_accumulate_usage_with_response () =
     Agent_turn.accumulate_usage
       ~current_usage:current
       ~provider_config:(Some provider_config)
-      ~response_model:(Some "claude-sonnet-4-6")
+      ~response_model:(Some "claude-sonnet-5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check int) "input tokens" 100 result.total_input_tokens;
@@ -366,7 +366,7 @@ let test_accumulate_usage_prefers_response_cost () =
     Llm_provider.Provider_config.make
       ~kind:Anthropic
       ~provider_id:"anthropic"
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ()
   in
@@ -374,7 +374,7 @@ let test_accumulate_usage_prefers_response_cost () =
     Agent_turn.accumulate_usage
       ~current_usage:current
       ~provider_config:(Some provider_config)
-      ~response_model:(Some "claude-sonnet-4-6")
+      ~response_model:(Some "claude-sonnet-5")
       ~response_usage:(Some response_usage)
   in
   Alcotest.(check (float 0.0001)) "uses response cost" 0.4321 result.estimated_cost_usd

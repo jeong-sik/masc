@@ -91,7 +91,8 @@ val build_request_artifact
     shared empty-completion overflow classifier rather than dropping the
     stop_reason (agent-core boundary). *)
 val parse_response_result
-  :  string
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> string
   -> (api_response, Backend_openai_parse.parse_error) result
 
 (** Raising variant of {!parse_response_result} for raise-style callers and the
@@ -100,7 +101,10 @@ val parse_response_result
     rather than surfacing its typed [stop_reason]). Production paths use
     {!parse_response_result} so an overflow empty turn's [stop_reason] reaches
     the overflow classifier (agent-core boundary). *)
-val parse_response : string -> api_response
+val parse_response
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> string
+  -> api_response
 
 (** Extract [reasoning_content] from Glm response body and prepend
     as a {!Types.Thinking} content block to the parsed response. *)

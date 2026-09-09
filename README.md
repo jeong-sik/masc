@@ -35,7 +35,7 @@ Three things it does:
 > **Status.** Pre-1.0, for local, trusted environments. Not a production
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
-> unsafe action. The installation contract targets 0.35.1; check
+> unsafe action. The installation contract targets 0.35.2; check
 > [GitHub Releases](https://github.com/jeong-sik/masc/releases) for available binaries.
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
@@ -50,7 +50,7 @@ and the capture metadata are in the same directory.
 |---|---|---|
 | **TUI** | Watch and steer Keepers, answer the Gate, read tool calls, browse code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claims a task, posts to the board, records evidence | Any MCP client at `http://127.0.0.1:8935/mcp` with a bearer |
-| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.35.1 installer includes a binary-matched bundle |
+| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.35.2 installer includes a binary-matched bundle |
 
 All three read and write the same `.masc/`. New operator work lands in the
 TUI. The dashboard is kept building and truthful, but it is not where the
@@ -58,15 +58,14 @@ product grows (see [Dashboard](#dashboard)).
 
 ## Start here
 
-### First conversation: 0.35.1
+### First conversation: 0.35.2
 
-After selecting your model in the installer wizard, authenticate its CLI or export
-its API credential and start Docker. Then run:
-
-Choose a numbered model or enter an exact model ID. The wizard shows the source
-of its context limit; Codex's observed client limit takes precedence over the
-catalog. If no limit is known, enter the documented value. Claude Code and Codex
-enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
+First sign in to your model CLI or export its API credential, and start Docker.
+In the installer, use **↑/↓, Space and Enter** to select one or more models, then
+choose imp's primary connection and fallback order. The wizard checks each model's
+response and tool use before saving. Context limits come from the connection's
+metadata; an unknown limit offers reselection or an advanced field. Z.AI uses
+`ZAI_API_KEY`. Then start imp:
 
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
@@ -74,18 +73,18 @@ masc setup --base-path "$HOME/masc-workspace"
 
 Setup prepares the default image, starts the workspace server and `imp`, and opens
 the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
-and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0351).
+and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0352).
 Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary availability.
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.1).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.2).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.35.1 (check tag availability on GitHub Releases).
+> Installation target: v0.35.2 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.1
+TAG=v0.35.2
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -96,15 +95,16 @@ Optional inspection: run `less /tmp/masc-install.sh` before installation. Press 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a one-time wizard (`--no-wizard` skips it). The 0.35.1 wizard
-selects an existing model or configures your Claude Code, Codex, or HTTP runtime.
-It writes the selected default and configures helper lanes during fresh setup.
+and runs a one-time wizard (`--no-wizard` skips it). The 0.35.2 wizard
+offers multiple model connections with arrow keys and checkboxes. It verifies each
+selected model with a real response and harmless tool call, then binds imp to the
+selected primary and fallback order while preserving other connections.
 It asks for API credential variable names, never their secret values; the server
 reads those variables from its startup environment. `--provider <id>` selects
 an existing provider without prompting. For the default `imp`, `masc setup`
 prepares the Docker image after you install and start Docker.
 
-Release **0.35.1** includes Intel macOS, `masc-browser-host`, and the matched
+Release **0.35.2** includes Intel macOS, `masc-browser-host`, and the matched
 dashboard, and preserves configuration during `--force` reinstalls.
 The macOS installer includes its Python and shared libraries, so MASC does not require Homebrew. Apple Silicon requires macOS 14 or later; Intel requires macOS 15 or later.
 
@@ -157,7 +157,7 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.1) |
+| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.2) |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
@@ -436,7 +436,7 @@ says which prompt file each reader gets.
 
 ## Dashboard
 
-The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.35.1 release
+The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.35.2 release
 installer installs the matching dashboard beneath the binary prefix and verifies
 its source commit and file checksums. No Node.js, source checkout or frontend build
 is needed to use it. An already running server keeps its original bundle until

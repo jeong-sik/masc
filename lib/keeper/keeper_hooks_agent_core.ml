@@ -186,6 +186,7 @@ let make_hooks
     ~(keeper_turn_id : int)
     ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
+    ?(current_runtime_attempt = fun () -> None)
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
@@ -419,6 +420,7 @@ let make_hooks
              ~agent_name:meta.name ~task_id:acc.task_id
              ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
              ~response_id:response.id
+             ?runtime_attempt:(current_runtime_attempt ())
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens
@@ -662,6 +664,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ~artifact_refs:(Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name

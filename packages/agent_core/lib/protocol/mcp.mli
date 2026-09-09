@@ -75,7 +75,6 @@ val is_alive : t -> bool
 
 val list_tools : t -> (mcp_tool list, Error.t) result
 val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
-val to_tools : t -> mcp_tool list -> (Tool.t list, Error.t) result
 
 (** {1 Resource and prompt operations} *)
 
@@ -141,12 +140,6 @@ val reconnect
   -> mgr:_ Eio.Process.mgr
   -> managed
   -> (managed, Error.t) result
-
-val connect_all_best_effort
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> server_spec list
-  -> managed list * (string * Error.t) list
 
 val close_managed : managed -> unit
 val close_all : managed list -> unit

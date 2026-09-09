@@ -25,11 +25,6 @@ val normalize_path_for_check : string -> string
 (** [normalize_path_for_check] with trailing slashes stripped. *)
 val normalize_path_for_check_stripped : string -> string
 
-(** Normalize a sandbox-root entry against [root], returning [None]
-    when blank or unresolvable. *)
-val normalize_sandbox_root_for_check :
-  root:string -> string -> string option
-
 (** [true] iff [path] resolves under [root_norm]. *)
 val is_within_root_norm : root_norm:string -> string -> bool
 
@@ -241,8 +236,3 @@ val resolve_keeper_read_path :
 
 (** Project the exact [Unix.process_status] to kind/code/signal JSON. *)
 val process_status_to_json : Unix.process_status -> Yojson.Safe.t
-
-(** Extract user-role text messages from [ctx_work], dropping
-    blanks. *)
-val extract_user_messages :
-  Keeper_types.working_context -> string list

@@ -10,19 +10,23 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample)
  (public_name masc)
  (package masc)
  (libraries
   masc
+  masc.masc_goal
+  masc.keeper_toml
   masc_front_door
   masc_tui_server_lifecycle
   masc.keeper_sandbox_image
   masc.auth
   masc.http_client
   masc_cli_keeper_create
+  digestif
   masc_tui_editor
   masc.crypto_rng
+  masc.masc_random_id
   masc.dashboard
   masc.operator
   masc.server

@@ -67,7 +67,8 @@ type named_run_result =
   }
 
 type runtime_attempt =
-  { runtime_id : string
+  { routing_run_id : string
+  ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   }
@@ -211,6 +212,8 @@ let runtime_failed_decision ~idx ~runtime_id error =
     [
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
+      ("attempt_total_usage", `Null);
+      ("attempt_usage_status", `String "unresolved");
       ( "error_kind"
       , `String Agent_core.Error.(category error |> category_label) );
     ]
@@ -959,6 +962,7 @@ let run_named
 	  let runtime_id = String.trim runtime_id in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
+  let routing_run_id = Random_id.hex ~bytes:16 in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let checkpoint_stage_observed = Atomic.make false in
@@ -967,9 +971,11 @@ let run_named
     | Some manifest_ctx, Some append ->
       let decision =
         match decision with
-        | None -> Some (`Assoc [])
-        | Some (`Assoc _) as d -> d
-        | Some other -> Some (`Assoc [ ("decision", other) ])
+        | None -> Some (`Assoc [ "routing_run_id", `String routing_run_id ])
+        | Some (`Assoc fields) ->
+          Some (`Assoc (("routing_run_id", `String routing_run_id) :: fields))
+        | Some other ->
+          Some (`Assoc [ ("routing_run_id", `String routing_run_id); ("decision", other) ])
       in
       seq_ref := !seq_ref + 1;
       let elapsed_ms =
@@ -1256,7 +1262,8 @@ let run_named
       Option.iter
         (fun observe ->
            observe
-             { runtime_id = attempt_runtime_id
+             { routing_run_id
+             ; runtime_id = attempt_runtime_id
              ; lane_attempt_index = idx
              ; checkpoint_owner =
                  Runtime_execution.checkpoint_owner runtime.Runtime.execution

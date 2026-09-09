@@ -76,21 +76,6 @@ val agent_current_task_match :
   task_id:string ->
   agent_task_match
 
-(** Scan every on-disk agent record and clear [current_task] when it equals
-    [task_id].  Use this when the backlog no longer references the task
-    (terminal status or deletion) and the exact previous assignee is not
-    known.  Logs one event per affected agent, named by [cause].
-
-    The read is best-effort and unlocked; {!clear_stale_agent_task}
-    re-checks the match under the per-agent file lock before writing. *)
-val clear_stale_agent_task_for_task :
-  Workspace_utils_backend_setup.config ->
-  cause:clear_cause ->
-  task_id:string ->
-  status:Masc_domain.task_status ->
-  module_name:string ->
-  unit
-
 (** Typed settlement sweep. Every record is read under its own lock and matching
     caches are cleared with commit and readback verification. Scan, decode, lock,
     write and readback failures remain errors for the caller to retry. *)

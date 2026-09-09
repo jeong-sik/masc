@@ -267,11 +267,11 @@ let mk_worker_run status : Sessions.worker_run =
   ; aliases = [ "t"; "test" ]
   ; primary_alias = Some "t"
   ; provider = Some "anthropic"
-  ; model = Some "sonnet-4-6"
+  ; model = Some "sonnet-5"
   ; requested_provider = Some "anthropic"
-  ; requested_model = Some "sonnet-4-6"
+  ; requested_model = Some "sonnet-5"
   ; resolved_provider = Some "anthropic"
-  ; resolved_model = Some "claude-sonnet-4-6-20250514"
+  ; resolved_model = Some "claude-sonnet-5-20260101"
   ; status
   ; trace_capability = Sessions.Raw
   ; validated = status = Sessions.Completed

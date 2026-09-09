@@ -121,6 +121,9 @@ module Make (Payload : Payload) : sig
   val replay_status : t -> replay_status
   (** Immutable diagnostics from this registry instance's startup read. *)
 
+  val validate_event_json : Yojson.Safe.t -> (unit, string) result
+  (** Pure event codec validation; does not replay or mutate a registry. *)
+
   val replay : string -> t
   (** Retains a lightweight in-memory projection while compaction streams the
       selected original register/complete rows. Dropped payload fields are

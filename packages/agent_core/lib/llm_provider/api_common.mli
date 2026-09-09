@@ -103,17 +103,6 @@ val admit_document_blocks
   -> Types.content_block list
   -> (unit, document_admission_error) result
 
-(** {!admit_document_blocks} over a whole history, reporting the first
-    inadmissible document. Retained for callers that want a hard admission
-    verdict; the request/serialize paths degrade instead (see
-    {!degrade_document_messages}). *)
-val admit_document_messages
-  :  wire_form:document_wire_form
-  -> model_id:string
-  -> supports_document_input:bool
-  -> Types.message list
-  -> (unit, document_admission_error) result
-
 (** The visible text block an unrepresentable document is replaced with. Names
     the media type so the omission is legible to the model and, through it, the
     user — the degrade is not silent. *)

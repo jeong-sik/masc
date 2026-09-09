@@ -85,12 +85,6 @@ val total_exported : t -> int
 (** Build an OTLP JSON body from a list of spans. *)
 val build_otlp_body : service_name:string -> Otel_tracer.span list -> string
 
-(** Build an OTLP JSON body from a list of metrics. *)
-val build_otlp_metrics_body
-  :  service_name:string
-  -> Otel_tracer.metric_entry list
-  -> string
-
 (** Split a span list into batches of at most [max_size]. *)
 val split_batches
   :  int

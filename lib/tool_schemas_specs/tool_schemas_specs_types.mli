@@ -33,7 +33,6 @@ type dashboard_scope =
     and the runtime parser, which sit on opposite sides of the generator's
     dependency cut (#27069). *)
 
-val dashboard_scope_to_string : dashboard_scope -> string
 val dashboard_scope_of_string_opt : string -> dashboard_scope option
 
 val dashboard_scope_strings : string list

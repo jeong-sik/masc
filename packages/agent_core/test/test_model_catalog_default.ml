@@ -26,8 +26,12 @@ let with_clean_model_catalog_override f =
 let subscription_model_rows =
   [ "claude-opus-5", "claude-opus-5"
   ; "claude-fable-5", "claude-fable-5"
+    (* Fable 5.1 needs a row of its own even though "claude-fable-5" prefixes
+       it: 5.1 reads cached tokens at 0.025x the base input price and 5 reads
+       them at 0.1x. Landing 5.1 on the shorter row would bill its cache reads
+       at four times the real rate, which no lookup failure would announce. *)
+  ; "claude-fable-5-1", "claude-fable-5-1"
   ; "claude-sonnet-5", "claude-sonnet-5"
-  ; "claude-haiku-4-5-20251001", "claude-haiku-4-5"
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
@@ -40,8 +44,6 @@ let subscription_model_rows =
   ; "gemini-3.6-flash-low", "gemini-3.6-flash"
   ; "gemini-3.5-flash-high", "gemini-3.5-flash"
   ; "gemini-3.1-pro-high", "gemini-3.1-pro"
-  ; "claude-sonnet-4-6", "claude-sonnet-4-6"
-  ; "claude-opus-4-6-thinking", "claude-opus-4-6"
   ; "gpt-oss-120b-medium", "gpt-oss-120b"
   ]
 ;;
@@ -106,6 +108,46 @@ let test_subscription_models_admit_their_reasoning_efforts () =
            (Some expected)
            entry.accepted_reasoning_efforts)
     subscription_model_efforts
+;;
+
+(* Cache pricing the fleet's Anthropic rows have to carry: [Pricing.estimate_cost]
+   returns [Incomplete] when a usage record reports cache tokens the row prices
+   with no multiplier, and [annotate_usage_cost] then leaves [cost_usd] at None.
+   A row that prices only input and output therefore records no cost at all for
+   a cached turn, which is every turn once a system prompt is cached.
+
+   The list covers the Anthropic models masc runs. The Mythos rows are left out
+   because they are not part of that set; they carry the same gap, and Mythos
+   5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
+   whichever change starts running them. *)
+let anthropic_cache_pricing_rows =
+  [ "claude-opus-5", 1.25, 0.1
+  ; "claude-sonnet-5", 1.25, 0.1
+  ; "claude-fable-5", 1.25, 0.1
+  ; "claude-fable-5-1", 1.25, 0.025
+  ]
+;;
+
+let test_anthropic_rows_price_cache_tokens () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"anthropic cache pricing"
+  in
+  List.iter
+    (fun (model_id, expected_write, expected_read) ->
+       match Model_catalog.lookup catalog model_id with
+       | None -> failf "%s resolves to no catalog row" model_id
+       | Some (entry : Model_catalog.model_entry) ->
+         check
+           (option (float 0.0001))
+           (Printf.sprintf "%s prices cache writes" model_id)
+           (Some expected_write)
+           entry.cache_write_multiplier;
+         check
+           (option (float 0.0001))
+           (Printf.sprintf "%s prices cache reads" model_id)
+           (Some expected_read)
+           entry.cache_read_multiplier)
+    anthropic_cache_pricing_rows
 ;;
 
 let test_load_default_catalog () =
@@ -472,6 +514,10 @@ let () =
     "model catalog default"
     [ ( "embedded catalog"
       , [ test_case "load_default" `Quick test_load_default_catalog
+        ; test_case
+            "anthropic rows price cache tokens"
+            `Quick
+            test_anthropic_rows_price_cache_tokens
         ; test_case
             "Ollama Cloud v1 vendor rows preserve probe truth"
             `Quick

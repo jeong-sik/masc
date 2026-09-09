@@ -36,9 +36,9 @@ let test_create_sets_model () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-haiku-4-5" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~net ~model:"claude-opus-5" |> Builder.build_safe |> Result.get_ok
   in
-  check_model "model" "claude-haiku-4-5" (Agent.state agent).config.model
+  check_model "model" "claude-opus-5" (Agent.state agent).config.model
 ;;
 
 (* --- 2. with_system_prompt --- *)
@@ -47,7 +47,7 @@ let test_with_system_prompt () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "You are helpful."
     |> Builder.build_safe
     |> Result.get_ok
@@ -64,7 +64,7 @@ let test_with_name () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_name "test-agent"
     |> Builder.build_safe
     |> Result.get_ok
@@ -78,7 +78,7 @@ let test_with_max_tokens () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_max_tokens 8192
     |> Builder.build_safe
     |> Result.get_ok
@@ -95,7 +95,7 @@ let test_with_temperature () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_temperature 0.7
     |> Builder.build_safe
     |> Result.get_ok
@@ -141,7 +141,7 @@ let test_with_tools_replaces () =
   let t1 = make_tool "a" in
   let t2 = make_tool "b" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.with_tools [ t2 ]
     |> Builder.build_safe
@@ -162,7 +162,7 @@ let test_with_tool_appends () =
   let t1 = make_tool "first" in
   let t2 = make_tool "second" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.with_tool t2
     |> Builder.build_safe
@@ -182,7 +182,7 @@ let test_with_hooks () =
   let hook _event = Hooks.Continue in
   let hooks = { Hooks.empty with before_turn = Some hook } in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_hooks hooks
     |> Builder.build_safe
     |> Result.get_ok
@@ -199,7 +199,7 @@ let test_with_tracer () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tracer Tracing.fmt
     |> Builder.build_safe
     |> Result.get_ok
@@ -231,7 +231,7 @@ let test_with_transport () =
     }
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_transport mock_transport
     |> Builder.build_safe
     |> Result.get_ok
@@ -248,7 +248,7 @@ let test_with_context () =
   let ctx = Context.create_sync () in
   Context.set ctx "key" (`String "value");
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_context ctx
     |> Builder.build_safe
     |> Result.get_ok
@@ -555,7 +555,7 @@ let test_with_mcp_clients () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_mcp_clients []
     |> Builder.build_safe
     |> Result.get_ok
@@ -576,7 +576,7 @@ let test_with_contract_composes_prompt () =
     |> Contract.add_instruction_layer ~label:"role" "Prefer concise, factual answers."
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_contract contract
     |> Builder.build_safe
@@ -626,7 +626,7 @@ let test_with_skill_appends_prompt () =
         (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_skill skill
     |> Builder.build_safe
@@ -658,7 +658,7 @@ let test_with_contract_injects_context_metadata () =
     Contract.empty |> Contract.with_runtime_awareness "Aware of explicit grants."
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_context ctx
     |> Builder.with_contract contract
     |> Builder.build_safe
@@ -684,7 +684,7 @@ let test_with_tool_choice () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool_choice Types.Any
     |> Builder.build_safe
     |> Result.get_ok
@@ -705,7 +705,7 @@ let test_with_reasoning_effort () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_reasoning_effort Llm_provider.Reasoning_effort.Max
     |> Builder.build_safe
     |> Result.get_ok
@@ -775,7 +775,7 @@ let test_chain_multiple () =
 let test_immutability_check () =
   with_net
   @@ fun net ->
-  let original = Builder.create ~net ~model:"claude-sonnet-4-6" in
+  let original = Builder.create ~net ~model:"claude-sonnet-5" in
   let _modified = original |> Builder.with_name "modified" in
   let agent_from_original = Builder.build_safe original |> Result.get_ok in
   Alcotest.(check string)
@@ -790,10 +790,10 @@ let test_defaults_match_agent_create () =
   with_net
   @@ fun net ->
   let builder_agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~net ~model:"claude-sonnet-5" |> Builder.build_safe |> Result.get_ok
   in
   let direct_agent =
-    Agent.create ~config:(Types.default_config ~model:"claude-sonnet-4-6") ~net ()
+    Agent.create ~config:(Types.default_config ~model:"claude-sonnet-5") ~net ()
   in
   let bc = (Agent.state builder_agent).config in
   let dc = (Agent.state direct_agent).config in
@@ -820,7 +820,7 @@ let test_build_with_tools_merges_mcp () =
   @@ fun net ->
   let t1 = make_tool "explicit" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.with_mcp_clients []
     |> Builder.build_safe

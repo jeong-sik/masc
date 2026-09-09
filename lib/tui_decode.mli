@@ -1053,7 +1053,12 @@ val decode_keeper_runtime_list :
     [(rows, configuration_errors, truncated, total)]. Explicit metadata errors
     are retained per keeper without discarding readable rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
-    drift surfaces as an error instead of a wrong status glyph. *)
+    drift surfaces as an error instead of a wrong status glyph.
+
+    A [status:"error"] row without structured metadata error is retained in
+    the error list with its message or an explicit unavailable explanation.
+    No lifecycle, activation, runtime or paused state is inferred from missing
+    metadata. Healthy rows keep their required-field contract. *)
 
 (** Lifecycle value shown by the Lanes surface. The composite endpoint is an
     operator projection whose vocabulary can grow before this binary does, so

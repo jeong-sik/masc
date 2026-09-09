@@ -328,7 +328,7 @@ let test_message_delta_with_cache_usage () =
 let test_message_start_missing_output_tokens () =
   (* Some API responses may omit output_tokens in message_start usage *)
   let data =
-    {|{"type":"message_start","message":{"id":"msg_partial","model":"claude-sonnet-4-6","usage":{"input_tokens":500}}}|}
+    {|{"type":"message_start","message":{"id":"msg_partial","model":"claude-sonnet-5","usage":{"input_tokens":500}}}|}
   in
   match Agent_core.Llm_provider.Streaming.parse_sse_event None data with
   | Some (MessageStart { id; usage; _ }) ->
@@ -343,7 +343,7 @@ let test_message_start_missing_output_tokens () =
 let test_parse_with_explicit_event_type () =
   (* event_type parameter overrides the 'type' field in JSON *)
   let data =
-    {|{"message":{"id":"msg_02","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":10}}}|}
+    {|{"message":{"id":"msg_02","model":"claude-opus-5-20260101","usage":{"input_tokens":10}}}|}
   in
   match Agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
   | Some (MessageStart { id; _ }) ->
@@ -435,7 +435,7 @@ let test_anthropic_interleaved_thinking_tool_text_finalizes () =
   let module Acc = Agent_core.Llm_provider.Complete_stream_acc in
   let raw_events =
     [ parse_anthropic_event_exn
-        {|{"type":"message_start","message":{"id":"msg_anth","model":"claude-sonnet-4-6","usage":{"input_tokens":11}}}|}
+        {|{"type":"message_start","message":{"id":"msg_anth","model":"claude-sonnet-5","usage":{"input_tokens":11}}}|}
     ; parse_anthropic_event_exn
         {|{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}|}
     ; parse_anthropic_event_exn

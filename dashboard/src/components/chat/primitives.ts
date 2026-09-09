@@ -1,3 +1,4 @@
+import { ChatEditEvidence } from './edit-evidence'
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
@@ -397,6 +398,7 @@ function timeLabel(timestamp?: string | null): string | null {
 }
 
 function deliveryLabel(entry: KeeperConversationEntry): string {
+  if (entry.streamState === 'cancelling') return '서버 취소 확인 중'
   switch (entry.delivery) {
     case 'queued':
       return 'queued'
@@ -426,6 +428,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
 
 function liveMessageLabel(entry: KeeperConversationEntry): string | null {
   if (entry.text.trim()) return null
+  if (entry.streamState === 'cancelling') return '응답 연결 중단 · 서버 취소 확인 중'
+  if (entry.delivery === 'cancelled') return '요청이 취소되었습니다.'
   if (entry.delivery === 'streaming') {
     if (entry.streamState === 'thinking') return '생각 중...'
     return entry.streamState === 'finalizing' ? '응답 마무리 중...' : '응답 작성 중...'
@@ -3339,6 +3343,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
           : null}
         <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
       </button>
+      <${ChatEditEvidence} output=${outputEntry} />
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
@@ -3551,6 +3556,7 @@ function ToolTraceStep({
           <span class="chat-block-tstep-dur">${durLabel}</span>
           ${hasBody ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
         </div>
+        <${ChatEditEvidence} output=${output} />
         ${open && hasBody
           ? html`
             <div class="chat-block-tool-body">

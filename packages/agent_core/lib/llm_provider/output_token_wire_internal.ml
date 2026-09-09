@@ -133,7 +133,7 @@ type receipt =
   { envelope : envelope
   ; resolution : resolution
   }
-[@@deriving show, eq]
+[@@deriving eq]
 
 type required_error = Required_output_token_ceiling_missing [@@deriving show, eq]
 

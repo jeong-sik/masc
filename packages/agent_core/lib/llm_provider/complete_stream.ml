@@ -105,6 +105,54 @@ let%test "OpenAI-compatible parser classifies a normal content chunk" =
   | Streaming.Openai_parse_failed _ -> false
 ;;
 
+let%test "OpenAI-compatible parser falls back to sibling reasoning fields" =
+  (* A catalog row declares where reasoning arrives; a server that spells it
+     under the other documented field must not have the delta silently
+     discarded. *)
+  let delta_reasoning field =
+    match
+      Streaming.parse_openai_sse_chunk
+        ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content")
+        (Printf.sprintf {|{"id":"c","model":"m","choices":[{"delta":{%s}}]}|} field)
+    with
+    | Streaming.Openai_chunk chunk -> chunk.delta_reasoning
+    | Streaming.Openai_done
+    | Streaming.Openai_empty
+    | Streaming.Openai_provider_error _
+    | Streaming.Openai_parse_failed _ -> None
+  in
+  delta_reasoning {|"reasoning":"pondering"|} = Some "pondering"
+  && delta_reasoning {|"reasoning_content":"declared","reasoning":"shadowed"|}
+     = Some "declared"
+;;
+
+(* Whether the inline-reasoning splitter runs on the content channel: the
+   resolved provider-qualified capability may declare think-tags, and a
+   template-parser dialect's reasoning channel IS the content channel. *)
+let inline_reasoning_enabled ~content_inline_reasoning ~streaming_reasoning =
+  match
+    ( (content_inline_reasoning : Capabilities.content_inline_reasoning)
+    , (streaming_reasoning : Reasoning_dialect.streaming_reasoning) )
+  with
+  | Capabilities.Think_tags, _ | _, Reasoning_dialect.Template_parser -> true
+  | Capabilities.No_content_inline_reasoning, _ -> false
+;;
+
+let%test "inline reasoning split activates for template-parser dialects and declared \
+          think-tags"
+  =
+  inline_reasoning_enabled
+    ~content_inline_reasoning:Capabilities.No_content_inline_reasoning
+    ~streaming_reasoning:Reasoning_dialect.Template_parser
+  && inline_reasoning_enabled
+       ~content_inline_reasoning:Capabilities.Think_tags
+       ~streaming_reasoning:Reasoning_dialect.Delta_reasoning_details
+  && not
+       (inline_reasoning_enabled
+          ~content_inline_reasoning:Capabilities.No_content_inline_reasoning
+          ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content"))
+;;
+
 (* Per-provider clean-stream regression guards for the phantom-completion check
    (finalize returns Error when no terminal [stop_reason] was seen -- see
    [Complete_stream_acc.finalize_stream_acc]). Each backend's REAL wire terminal,
@@ -194,7 +242,7 @@ let%test "Ollama done without reason finalizes typed incomplete" =
      accumulate_events acc (fst (Streaming.ollama_chunk_to_events st chunk))
    | Streaming.Ollama_provider_error _ | Streaming.Ollama_parse_failed _ -> ());
   match Complete_stream_acc.finalize_stream_acc acc with
-  | Error (Types.Stream_incomplete { reason = "stream_terminated_without_stop_reason" })
+  | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" })
     -> true
   | Error _ | Ok _ -> false
 ;;
@@ -564,9 +612,12 @@ let complete_stream_http
               in
               (* Whether this model also embeds reasoning in its content
                  channel. Separate from [streaming_reasoning], which says how
-                 reasoning arrives on its own channel: minimax-m3 uses both. *)
+                 reasoning arrives on its own channel: minimax-m3 uses both.
+                 Resolved through the provider-qualified lookup — a capability
+                 declared only on a provider row is invisible to a bare
+                 model-id lookup. *)
               let content_inline_reasoning =
-                match Capabilities.for_model_id model with
+                match Provider_config.capabilities_for_config_model config with
                 | Some caps -> caps.Capabilities.content_inline_reasoning
                 | None -> Capabilities.No_content_inline_reasoning
               in
@@ -578,9 +629,9 @@ let complete_stream_http
                 | Some s -> s
                 | None ->
                   let inline_reasoning =
-                    match content_inline_reasoning with
-                    | Capabilities.Think_tags -> true
-                    | Capabilities.No_content_inline_reasoning -> false
+                    inline_reasoning_enabled
+                      ~content_inline_reasoning
+                      ~streaming_reasoning
                   in
                   let s =
                     Streaming.create_openai_stream_state

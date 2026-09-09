@@ -209,6 +209,8 @@ and goal_of_yojson = function
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 
+let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
+
 type rollup = {
   active_count : int;
   verifying_count : int;
@@ -434,12 +436,6 @@ let update_state config f =
 
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
-
-let get_goal_result config ~goal_id =
-  let* json = Workspace_utils.read_json_result config (goals_path config) in
-  let* state = decode_state_result config json in
-  Ok (find_goal state.goals goal_id)
-
 let transact_goal config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let* json = Workspace_utils.read_json_result config (goals_path config) in

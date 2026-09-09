@@ -679,37 +679,6 @@ let sampling_params_ignored_when_thinking dialect =
     params
 ;;
 
-(* Sampling params a wire format ignores while thinking is enabled, keyed purely
-   by the format so both request builders can consult it without a full dialect.
-   Only DeepSeek-style [Thinking_object] suppresses sampling; the constant is the
-   single source of truth, also used by [of_capabilities] above. *)
-let sampling_params_ignored_for_format
-  : Capabilities.thinking_control_format -> Capabilities.sampling_parameter list
-  = function
-  | Capabilities.Thinking_object -> deepseek_ignored_sampling_params
-  | Capabilities.No_thinking_control
-  | Capabilities.Thinking_object_adaptive
-  | Capabilities.Thinking_object_only
-  | Capabilities.Chat_template_kwargs
-  | Capabilities.Chat_template_token _
-  | Capabilities.Ollama_think
-  | Capabilities.Reasoning_effort -> []
-;;
-
-let sampling_field_ignored_when_thinking
-      ~thinking_control_format
-      ~enable_thinking
-      ~parameter
-  =
-  let thinking_active =
-    match enable_thinking with
-    | Some false -> false
-    | Some true | None -> true
-  in
-  thinking_active
-  && List.mem parameter (sampling_params_ignored_for_format thinking_control_format)
-;;
-
 let should_replay_reasoning dialect ~assistant_had_tool_call =
   match dialect.replay_policy with
   | No_replay | Provider_opaque_state -> false

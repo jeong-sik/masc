@@ -133,10 +133,6 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
-val get_goal_result :
-  Workspace_utils.config -> goal_id:string -> (goal option, string) result
-(** Authoritative primary-only read; recovery does not mask missing or corrupt data. *)
-
 val transact_goal :
   Workspace_utils.config -> goal_id:string ->
   (goal -> (goal * 'a, string) result) -> (goal * 'a, string) result
@@ -235,3 +231,6 @@ type goal_reference_error =
 val with_existing_goals :
   Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
   ('a, goal_reference_error) result
+
+val validate_state_json : Yojson.Safe.t -> (unit, string) result
+(** Pure current-schema validation. Does not read, repair or write a store. *)

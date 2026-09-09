@@ -82,7 +82,7 @@ let test_gemma4_capability_is_visual_first () =
 let test_non_gemma_inherits_preserve () =
   (* Anthropic models stay Preserve_input_order — the default — since
      Anthropic does not call out a modality-order preference. *)
-  match Capabilities.for_model_id "claude-sonnet-4-6" with
+  match Capabilities.for_model_id "claude-sonnet-5" with
   | None -> () (* not in model catalog — fine, default applies *)
   | Some c ->
     (match c.modality_priority with

@@ -2580,14 +2580,14 @@ turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
 
-[models."claude-haiku-4-5"]
-api-name = "claude-haiku-4-5"
-max-context = 200000
+[models."claude-opus-5"]
+api-name = "claude-opus-5"
+max-context = 1000000
 tools-support = true
 streaming = true
 turn-timeout-s = 0
 
-[claude_code."claude-haiku-4-5"]
+[claude_code."claude-opus-5"]
 
 [providers.agy]
 protocol = "antigravity-cli"
@@ -2603,7 +2603,7 @@ max-context = 128000
 ;;
 
 let cli_primary = "claude_code.claude-sonnet-5"
-let cli_secondary = "claude_code.claude-haiku-4-5"
+let cli_secondary = "claude_code.claude-opus-5"
 
 let with_cli_runtimes f =
   let path = Filename.temp_file "hitl-cli-runtime" ".toml" in

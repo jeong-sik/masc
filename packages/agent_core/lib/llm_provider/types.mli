@@ -77,7 +77,6 @@ type tool_result_outcome =
   | Tool_failed of tool_failure_provenance
 [@@deriving show]
 
-val tool_failure_kind_is_recoverable : tool_failure_kind -> bool
 val tool_result_outcome_is_error : tool_result_outcome -> bool
 
 type tool_error =
@@ -124,8 +123,6 @@ type json_shape =
   | Json_object
 [@@deriving show, eq]
 
-val json_shape_of_json : Yojson.Safe.t -> json_shape
-val json_shape_to_string : json_shape -> string
 
 (** Exact object-shape check for a manual decoder. [Error] names the missing
     required fields, the fields outside [required @ optional], and the
@@ -539,10 +536,6 @@ type output_token_envelope =
 
 val output_token_envelope_to_yojson : output_token_envelope -> Yojson.Safe.t
 
-val output_token_envelope_of_yojson
-  :  Yojson.Safe.t
-  -> (output_token_envelope, string) result
-
 type output_token_policy =
   | Omitted
   | Explicit
@@ -565,10 +558,6 @@ type output_token_ceiling_source =
 [@@deriving show, eq]
 
 val output_token_ceiling_source_to_yojson : output_token_ceiling_source -> Yojson.Safe.t
-
-val output_token_ceiling_source_of_yojson
-  :  Yojson.Safe.t
-  -> (output_token_ceiling_source, string) result
 
 type output_token_ceiling = private
   { value : int
@@ -616,8 +605,6 @@ val output_token_receipt_of_yojson
   -> (output_token_receipt, string) result
 
 val equal_output_token_receipt : output_token_receipt -> output_token_receipt -> bool
-val pp_output_token_receipt : Format.formatter -> output_token_receipt -> unit
-val show_output_token_receipt : output_token_receipt -> string
 
 (** Default/zero inference telemetry value owned by the telemetry type module.
     Callers should record-update this value instead of duplicating every field. *)
@@ -915,7 +902,6 @@ val text_of_response : api_response -> string
     reasoning or execution payloads. *)
 val visible_text_of_content : content_block list -> string
 
-val visible_text_of_message : message -> string
 val visible_text_of_response : api_response -> string
 
 (** {1 Usage Helpers}

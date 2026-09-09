@@ -153,6 +153,29 @@ function browserScene(args) {
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
   }
+  // Landmarks and scrollable panes are independent observed properties.
+  // A site instruction chooses the relevant scope; a header must not hide
+  // an unrelated message pane from the observation.
+  if (view === 'regions' && root && !truncated) {
+    for (const element of [root,...root.querySelectorAll('*')]) {
+      if (truncated) break;
+      if (!visible(element)) continue;
+      const style = css(element);
+      const scrollsY = ['auto','scroll'].includes(style.overflowY)
+        && element.scrollHeight > element.clientHeight;
+      const scrollsX = ['auto','scroll'].includes(style.overflowX)
+        && element.scrollWidth > element.clientWidth;
+      if (!scrollsY && !scrollsX) continue;
+      const rects = boxes(element.getClientRects(),element);
+      if (!rects.length) continue;
+      const heading = element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
+      const name = element.getAttribute('aria-label') || heading?.textContent
+        || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
+      // The same element may already be a landmark: keep one reference.
+      const existing = nodes.find(node => node.nodeId === state.ids.get(element));
+      if (!existing) describe('region',element,name,rects,{role:'scroll-area'});
+    }
+  }
   const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];
   while (stack.length && !truncated) {
     const node=stack.pop();

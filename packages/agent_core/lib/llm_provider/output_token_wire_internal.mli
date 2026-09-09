@@ -24,11 +24,9 @@ type ceiling_source =
 [@@deriving show, eq]
 
 val envelope_to_yojson : envelope -> Yojson.Safe.t
-val envelope_of_yojson : Yojson.Safe.t -> (envelope, string) result
 val policy_to_yojson : policy -> Yojson.Safe.t
 val policy_of_yojson : Yojson.Safe.t -> (policy, string) result
 val ceiling_source_to_yojson : ceiling_source -> Yojson.Safe.t
-val ceiling_source_of_yojson : Yojson.Safe.t -> (ceiling_source, string) result
 
 type ceiling =
   { value : int
@@ -57,5 +55,3 @@ val receipt_ceiling_source : receipt -> ceiling_source option
 val receipt_to_yojson : receipt -> Yojson.Safe.t
 val receipt_of_yojson : Yojson.Safe.t -> (receipt, string) result
 val equal_receipt : receipt -> receipt -> bool
-val pp_receipt : Format.formatter -> receipt -> unit
-val show_receipt : receipt -> string

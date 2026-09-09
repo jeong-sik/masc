@@ -74,10 +74,6 @@ val persistent_container_kind : string
     adopted across turns and server restarts, removed only when the keeper
     is. *)
 
-val current_owner_pid : unit -> int
-(** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
-    select those containers again. Kept as one reader so a filter cannot be
-    built from a different pid than the label carries. *)
 (** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
 
 val strip_trailing_slashes : string -> string
@@ -124,17 +120,12 @@ val container_masc_runtime_base : container_root:'a -> string
 val container_masc_dir : container_root:'a -> string
 val container_masc_config_dir : container_root:'a -> string
 val host_masc_config_dir : base_path:string -> string
-val docker_masc_config_mount_spec :
-  base_path:string -> container_root:'a -> string
 val docker_masc_config_mount_args :
   base_path:string -> container_root:'a -> string list
-val docker_masc_runtime_env_pairs :
-  container_root:'a -> (string * string) list
 val docker_masc_runtime_env_args : container_root:'a -> string list
 val docker_user_env_args : unit -> string list
 val trim_env_opt : string -> string option
 val docker_config_host_root : base_path:string -> string
-val docker_config_container_root : container_root:'a -> string
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
 type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir

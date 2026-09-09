@@ -407,6 +407,20 @@ blocking_pr_lints() {
   # here together is about 60s. Worth it while the alternative is a retired
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
+  # The count this holds went 0 -> 149 in the ten days nobody ran it, then
+  # back to 34 across seven purge PRs. Wired here so the next 149 cannot
+  # accumulate unseen. Below the baseline passes and says by how much; the
+  # number moves down in the PR that earns it.
+  # Its own "CI Failure Visibility" section used to be the only thing it
+  # confirmed, and it confirmed the absence of a workflow step deleted on
+  # purpose in #32511. With that stale check gone the audit passes, so it can
+  # run as a gate instead of a report nobody read. It nests
+  # anti-fake-audit.sh, which is 113s of its ~120s; the lint job is ~2.5min
+  # against a ~6min build in the same PR, so it stays off the critical path.
+  run_lint "Hardcoding and truth audit" \
+    bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
+  run_lint "Dead export ratchet" \
+    python3 scripts/audit-dead-surface.py --exports --ratchet
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
   # Promoted out of the advisory lane. It already ran there with --strict, and
   # --strict is the mode that fails, so the only thing "advisory" bought was
@@ -446,7 +460,12 @@ blocking_pr_lints() {
 }
 
 advisory_lints() {
-  # The two that stay here, with the number that keeps them here. Both have an
+  # Text spans cannot establish OCaml binding reachability: ;; is optional,
+  # so a production caller may be inside a guessed inline-test span. Keep
+  # candidates visible without using them as a merge rejection authority.
+  run_lint "Inline-test-only candidates (advisory)" \
+    python3 scripts/ci/check-inline-test-only-values.py
+  # The two other checks that stay here, with the number that keeps them here. Both have an
   # enforcing mode and both are red in it, so "advisory" is not a policy choice
   # about their subject -- it is where they sit until the count comes down.
   #

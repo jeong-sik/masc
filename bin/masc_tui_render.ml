@@ -8636,8 +8636,8 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started -> "RUNNING · ARGUMENTS STREAMING"
-  | Keeper_chat_transcript.Awaiting_result -> "RUNNING · AWAITING RESULT"
+  | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
+  | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Failed -> "FAILED"
   | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"
@@ -10421,8 +10421,14 @@ let render_keeper_message (state : state) =
             adjacent in the braille rotation, so the jump did not read as
             turning either. [activity_frame] is the counter that ticker
             advances, and stepping from it means one repaint, one frame. *)
-         let running_mark =
-           Masc_tui_answering.running_glyph ~frame:state.activity_frame
+         let running_mark, progress_heading =
+           match Keeper_chat_transcript.phase live with
+           | Keeper_chat_transcript.Waiting -> "○", "WAITING TO START"
+           | Working ->
+               Masc_tui_answering.running_glyph ~frame:state.activity_frame,
+               "IN PROGRESS"
+           | Stream_ended -> "○", "FINALIZING"
+           | Stream_failed _ -> "!", "REQUEST ERROR"
          in
          (* The age belongs to the progress row, which already ends with it
             (masc #29229 pins that a turn which never started still reports
@@ -10480,7 +10486,7 @@ let render_keeper_message (state : state) =
              (match kind with
               | Keeper_chat_transcript.Progress ->
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
+                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                      ^ " · " ^ text ^ queue_hint)
               | Keeper_chat_transcript.Attention ->

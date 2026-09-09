@@ -1,4 +1,3 @@
-val schema_cache : (string, string) Hashtbl.t
 val reset_schema_cache : unit -> unit
 val python_argv_for : string -> string list
 val fetch_schema : ?base_path:string -> string -> (string, string) result

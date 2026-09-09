@@ -69,7 +69,6 @@ type options = Agent_types.options =
     (** Closed synchronous exact-tool approval callback. *)
   ; description : string option
   ; periodic_callbacks : periodic_callback list
-  ; slot_id : int option
   ; on_run_complete : (bool -> unit) option
   ; journal : Durable_event.journal option
   ; transport : Llm_provider.Llm_transport.t option

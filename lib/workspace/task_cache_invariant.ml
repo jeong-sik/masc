@@ -210,64 +210,6 @@ let clear_stale_agent_task config ~cause ~agent_name ~task_id ~status ~module_na
        ~status_label:(Masc_domain.task_status_to_string status)
        ~module_name)
 ;;
-
-(** Scan every on-disk agent record and clear [current_task] when it equals
-    [task_id].  Use this when the backlog no longer references the task
-    (terminal status or deletion) and the exact previous assignee is not
-    known.  Logs one event per affected agent, named by [cause].
-
-    The read is best-effort and unlocked; [clear_stale_agent_task] re-checks
-    the match under the per-agent file lock before writing, so the worst race
-    is a no-op or a duplicate log rather than a corrupt agent record. *)
-let clear_stale_agent_task_for_task
-      config
-      ~(cause : clear_cause)
-      ~(task_id : string)
-      ~(status : Masc_domain.task_status)
-      ~(module_name : string)
-    : unit =
-  let agents_path = agents_dir config in
-  if path_exists config agents_path
-  then
-    (try
-       let agent_files = Sys.readdir agents_path in
-       Array.iter
-         (fun name ->
-            if Filename.check_suffix name ".json"
-            then (
-              let agent_file = Filename.concat agents_path name in
-              match read_json_opt config agent_file with
-              | None -> ()
-              | Some json -> (
-                  match agent_of_yojson json with
-                  | Ok agent when agent.current_task = Some task_id ->
-                      clear_stale_agent_task config
-                        ~cause
-                        ~agent_name:agent.name
-                        ~task_id
-                        ~status
-                        ~module_name
-                  | Ok _ -> ()
-                  | Error msg ->
-                    Log.Misc.warn
-                      "task_cache_invariant: agent parse failed for %s (%s): %s"
-                      agent_file
-                      module_name
-                      msg)))
-         agent_files
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | Sys_error msg ->
-         Log.Misc.warn
-           "task_cache_invariant: agent directory scan failed (%s): %s"
-           module_name
-           msg
-     | exn ->
-         Log.Misc.warn
-           "task_cache_invariant: unexpected scan error (%s): %s"
-           module_name
-           (Printexc.to_string exn))
-
 let clear_stale_agent_task_for_task_result config ~cause ~task_id ~status ~module_name =
   let path = agents_dir config in
   let files = match config.backend, key_of_path config path with

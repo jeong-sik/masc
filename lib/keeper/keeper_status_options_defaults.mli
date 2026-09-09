@@ -14,7 +14,6 @@ type tail_order =
   | Newest_first
 
 val tail_order_to_string : tail_order -> string
-val all_tail_orders : tail_order list
 val valid_tail_order_strings : string list
 val tail_order_of_string : string -> tail_order option
 

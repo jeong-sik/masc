@@ -34,8 +34,6 @@ val control_schema : control_operation -> Masc_domain.tool_schema
 val control_schemas : Masc_domain.tool_schema list
 (** Canonical control schemas used by registration. *)
 
-val msx_schemas : Masc_domain.tool_schema list
-(** MSX lane tools (RFC-0439 §3.5): load, eject, screen, press, step. *)
 val web_search_schema : Masc_domain.tool_schema
 val web_fetch_schema : Masc_domain.tool_schema
 val web_schemas : Masc_domain.tool_schema list
@@ -111,6 +109,7 @@ type misc_operation =
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
+  | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
 [@@deriving enumerate]

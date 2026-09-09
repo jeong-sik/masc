@@ -26,6 +26,7 @@ let current_b = fact ~claim:"drop B"
 
 let input () : Librarian.input =
   { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-cli-lane" ~absolute_turn:7
+  ; goal_context = Masc.Keeper_librarian.No_task
   ; keeper_instructions = "You are the cli-lane keeper."
   ; current = Some { Librarian.facts = [ current_a; current_b ] }
   ; messages =

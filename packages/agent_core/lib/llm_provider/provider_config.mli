@@ -314,17 +314,12 @@ type reasoning_effort = Reasoning_effort.t =
   | XHigh
   | Max
 
-val all_reasoning_efforts : reasoning_effort list
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 
 (** Resolve the [thinking.clear_thinking] member: the explicit field, else the
     inverse of [preserve_thinking], else the wire default [true]. SSOT for both
     request builders. *)
-val clear_thinking_value
-  :  clear_thinking:bool option
-  -> preserve_thinking:bool option
-  -> bool
 
 (** [true] iff the request is under Preserved Thinking: thinking active AND
     [clear_thinking] false. Rows whose
@@ -425,13 +420,6 @@ type tool_choice_request_rejection =
 
 val tool_choice_request_rejection_to_message : tool_choice_request_rejection -> string
 val validate_tool_choice_request_typed : t -> (unit, tool_choice_request_rejection) result
-
-val validate_tool_choice_request_with_capabilities
-  :  provider_kind:provider_kind
-  -> model_id:string
-  -> tool_choice:Types.tool_choice option
-  -> Capabilities.capabilities
-  -> (unit, tool_choice_request_rejection) result
 
 val validate_tool_choice_request : t -> (unit, string) result
 

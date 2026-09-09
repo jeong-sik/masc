@@ -120,21 +120,6 @@ let completion_contract_result_to_string result =
   |> Completion_contract_label.to_string
 ;;
 
-let completion_contract_result_of_label = function
-  | Completion_contract_label.Unknown -> Completion_observation_unknown
-  | Completion_contract_label.Not_dispatched -> Completion_not_dispatched
-  | Completion_contract_label.No_visible_output -> Completion_no_visible_output
-  | Completion_contract_label.Response_observed -> Completion_response_observed
-  | Completion_contract_label.Tool_execution_observed ->
-    Completion_tool_execution_observed
-;;
-
-let completion_contract_result_of_string raw =
-  raw
-  |> Completion_contract_label.of_string
-  |> Option.map completion_contract_result_of_label
-;;
-
 type runtime_rotation_attempt =
   { from_runtime : string
   ; to_runtime : string

@@ -2,12 +2,15 @@
 
     This is an agent-runtime boundary, not an {!Llm_provider.Llm_transport}
     implementation. Codex owns the whole turn. MASC owns process lifetime,
-    subscription admission, and terminal projection. *)
+    typed CLI authentication admission, and terminal projection. *)
 
 type subscription =
-  { plan_type : string
-  ; email : string option
-  }
+  | Chatgpt of { plan_type : string; email : string option }
+  | Api_key
+  | Provider_managed
+  | Amazon_bedrock
+
+val authentication_to_string : subscription -> string
 
 type probe_result =
   { subscription : subscription
@@ -16,6 +19,9 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; isolated_home : string option
+    (** Verification-only private CODEX_HOME prepared with auth/provider configuration.
+        Normal turns leave this [None] to retain the user's configured home. *)
   ; model : string option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture

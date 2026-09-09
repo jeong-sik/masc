@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.35.2] - 2026-09-10
+
+### Installation and model connections
+
+- Select multiple runtime connections and models with arrow keys and checkboxes, then choose imp's primary model and fallback order. Preserve existing connections when adding or reselecting models.
+- Require a real response and harmless tool roundtrip before the interactive wizard publishes selected connections. Preserve existing settings when verification fails and offer retry, exclusion, or selection again.
+- Discover installed Ollama models and effective context windows; use exact existing connection metadata and single-model llama.cpp server context before asking for advanced manual input.
+- Support observed Claude Code API-key, token and gateway authentication, plus Codex API-key and provider-managed configurations. Keep authentication evidence separate from configuration presence.
+- Check existing Keeper and Goal state before setup writes. Offer an unused workspace when old state cannot be decoded, preserving the original files.
+- Isolate Codex's readiness probe from inherited tool servers using a private connection/auth configuration. This connectivity probe does not establish full imp sandbox acceptance by itself.
+
 ## [0.35.1] - 2026-09-09
 
 ### Installation

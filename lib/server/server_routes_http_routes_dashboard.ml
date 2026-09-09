@@ -2398,6 +2398,32 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              handle_dashboard_link_previews state req reqd body_str))
          request reqd)
+  |> Http.Router.get "/api/v1/dashboard/workspace-memory-proposals" (fun request reqd ->
+       with_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+             Server_workspace_memory_proposals.get ~base_path ~id:(Server_utils.query_param req "id")) in
+           Http.Response.json_value ~status ~request:req json reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/workspace-memory-proposals" (fun request reqd ->
+       with_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Request.read_body_async reqd (fun body ->
+             let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+               Server_workspace_memory_proposals.post ~base_path body) in
+             Http.Response.json_value ~status ~request:req json reqd))
+         request reqd)
+  |> Http.Router.get "/api/v1/dashboard/workspace-memory-context" (fun request reqd ->
+       with_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let json = Domain_pool_ref.submit_io_or_inline (fun () ->
+             Server_dashboard_http_keeper_memory_health.workspace_memory_context_http_json
+               ~base_path) in
+           Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in

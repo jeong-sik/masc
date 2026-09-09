@@ -1225,28 +1225,20 @@ let test_glm_capabilities () =
   Alcotest.(check (option int)) "40960 output cap" (Some 40_960) c.max_output_tokens
 ;;
 
-let test_for_model_id_claude_opus_4 () =
-  match Capabilities.for_model_id "claude-opus-4-20260101" with
+let test_for_model_id_claude_opus_5 () =
+  match Capabilities.for_model_id "claude-opus-5-20260101" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
     Alcotest.(check (option int)) "128K output" (Some 128_000) c.max_output_tokens
-  | None -> Alcotest.fail "expected Some for claude-opus-4"
+  | None -> Alcotest.fail "expected Some for claude-opus-5"
 ;;
 
-let test_for_model_id_claude_sonnet_4 () =
-  match Capabilities.for_model_id "claude-sonnet-4-latest" with
+let test_for_model_id_claude_sonnet_5 () =
+  match Capabilities.for_model_id "claude-sonnet-5-latest" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
-    Alcotest.(check (option int)) "64K output" (Some 64_000) c.max_output_tokens
-  | None -> Alcotest.fail "expected Some for claude-sonnet-4"
-;;
-
-let test_for_model_id_claude_haiku_4 () =
-  match Capabilities.for_model_id "claude-haiku-4-2026" with
-  | Some c ->
-    Alcotest.(check (option int)) "200K context" (Some 200_000) c.max_context_tokens;
-    Alcotest.(check (option int)) "8K output" (Some 8_192) c.max_output_tokens
-  | None -> Alcotest.fail "expected Some for claude-haiku-4"
+    Alcotest.(check (option int)) "128K output" (Some 128_000) c.max_output_tokens
+  | None -> Alcotest.fail "expected Some for claude-sonnet-5"
 ;;
 
 let test_for_model_id_gpt5 () =
@@ -1392,7 +1384,7 @@ let test_for_model_id_unknown () =
 ;;
 
 let test_for_model_id_case_insensitive () =
-  match Capabilities.for_model_id "Claude-Opus-4-Latest" with
+  match Capabilities.for_model_id "Claude-Opus-5-Latest" with
   | Some _ -> ()
   | None -> Alcotest.fail "expected case-insensitive match"
 ;;
@@ -1815,9 +1807,11 @@ let () =
         ; Alcotest.test_case "glm" `Quick test_glm_capabilities
         ] )
     ; ( "capabilities.for_model_id"
-      , [ Alcotest.test_case "claude-opus-4" `Quick test_for_model_id_claude_opus_4
-        ; Alcotest.test_case "claude-sonnet-4" `Quick test_for_model_id_claude_sonnet_4
-        ; Alcotest.test_case "claude-haiku-4" `Quick test_for_model_id_claude_haiku_4
+      , [ Alcotest.test_case "claude-opus-5" `Quick test_for_model_id_claude_opus_5
+        ; Alcotest.test_case
+            "claude-sonnet-5"
+            `Quick
+            test_for_model_id_claude_sonnet_5
         ; Alcotest.test_case "gpt-5" `Quick test_for_model_id_gpt5
         ; Alcotest.test_case "gpt-4.1" `Quick test_for_model_id_gpt41
         ; Alcotest.test_case "gpt" `Quick test_for_model_id_gpt4o

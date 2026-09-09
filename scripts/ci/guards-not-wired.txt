@@ -35,7 +35,6 @@
 # audit-*. They were not passing this check, they were not in it. Counts went
 # 76/23 to 103/45.
 #
-scripts/anti-fake-audit.sh  # report: the default scan scores each test file with bc
 #   arithmetic over pattern counts and fails under a threshold, so wiring it makes a
 #   PR's verdict a heuristic. --production-scan has a real rule and is red on main.
 scripts/ml_line_cap_audit.sh  # report, and both of its enforcing modes are
@@ -53,8 +52,6 @@ scripts/audit-code-smell.sh  # report; --strict enforces and is red on main at 2
 #   ignore() sites without a justification
 scripts/audit-cross-module-exhaustive-match.sh  # report: its only non-zero exit is
 #   a usage error or a missing rg
-scripts/audit-dead-surface.py  # tool: needs --modules/--exports/--stanzas
-scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
 scripts/audit-keeper-credential-drift.sh  # report, and reads the operator's live
 #   .masc/auth/agents: its only non-zero exit is that directory being absent
 scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc credential store

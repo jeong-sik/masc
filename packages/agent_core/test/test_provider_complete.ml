@@ -75,7 +75,7 @@ let test_anthropic_basic_body () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ~max_tokens:1024
       ()
@@ -84,7 +84,7 @@ let test_anthropic_basic_body () =
   let body = BA.build_request ~config ~messages:msgs () in
   let json = Yojson.Safe.from_string body in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "model" "claude-sonnet-4-6" (json |> member "model" |> to_string);
+  Alcotest.(check string) "model" "claude-sonnet-5" (json |> member "model" |> to_string);
   Alcotest.(check int) "max_tokens" 1024 (json |> member "max_tokens" |> to_int);
   Alcotest.(check bool) "stream false" false (json |> member "stream" |> to_bool);
   let msgs_json = json |> member "messages" |> to_list in
@@ -95,7 +95,7 @@ let test_anthropic_with_system () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:""
       ~system_prompt:"You are helpful."
       ()
@@ -113,7 +113,7 @@ let test_anthropic_with_thinking () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:""
       ~enable_thinking:true
       ~reasoning_effort:Llm_provider.Reasoning_effort.Medium
@@ -141,7 +141,7 @@ let test_anthropic_disabled_thinking_rejects_reasoning_effort () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:""
       ~enable_thinking:false
       ~reasoning_effort:Llm_provider.Reasoning_effort.Medium
@@ -152,7 +152,7 @@ let test_anthropic_disabled_thinking_rejects_reasoning_effort () =
   | exception Invalid_argument message ->
     Alcotest.(check string)
       "rejection"
-      "Backend_anthropic.build_request: model \"claude-sonnet-4-6\" cannot set \
+      "Backend_anthropic.build_request: model \"claude-sonnet-5\" cannot set \
        reasoning_effort \"medium\" when enable_thinking=false"
       message
 ;;
@@ -179,7 +179,7 @@ let test_anthropic_thinking_forced_tool_choice_rejected_before_request () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ~enable_thinking:true
       ~tool_choice:Any
@@ -188,7 +188,7 @@ let test_anthropic_thinking_forced_tool_choice_rejected_before_request () =
   Alcotest.check_raises
     "thinking + forced tool_choice fails before JSON body serialization"
     (Invalid_argument
-       "Backend_anthropic.build_request: anthropic model \"claude-sonnet-4-6\" does not \
+       "Backend_anthropic.build_request: anthropic model \"claude-sonnet-5\" does not \
         support required forced tool_choice when thinking is enabled; use auto/none or \
         disable thinking")
     (fun () ->
@@ -214,7 +214,7 @@ let test_anthropic_output_schema () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:""
       ~response_format:(JsonSchema schema)
       ()
@@ -241,7 +241,7 @@ let test_anthropic_json_schema_response_format () =
       ]
   in
   let config =
-    { (PC.make ~kind:Anthropic ~model_id:"claude-sonnet-4-6" ~base_url:"" ()) with
+    { (PC.make ~kind:Anthropic ~model_id:"claude-sonnet-5" ~base_url:"" ()) with
       response_format = JsonSchema schema
     }
   in
@@ -274,7 +274,7 @@ let test_anthropic_build_request_preserves_multiturn_thinking_tool_order () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ~max_tokens:1024
       ()
@@ -342,7 +342,7 @@ let test_anthropic_parse_response_initializes_telemetry () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_test",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "end_turn",
     "content": [
       {"type": "text", "text": "Hello there."}
@@ -374,7 +374,7 @@ let test_anthropic_parse_response_rejects_unknown_content_block () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_future",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "end_turn",
     "content": [
       {"type": "future_block", "payload": {"text": "do not drop me"}}
@@ -394,7 +394,7 @@ let test_anthropic_parse_response_rejects_unknown_media_source_kind () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_future_media",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "end_turn",
     "content": [
       {
@@ -1761,7 +1761,7 @@ let test_complete_stream_rejects_output_schema_for_glm () =
 let test_annotate_response_cost () =
   let response : api_response =
     { id = "resp-1"
-    ; model = "claude-sonnet-4-6"
+    ; model = "claude-sonnet-5"
     ; stop_reason = EndTurn
     ; content = [ Text "ok" ]
     ; usage =
@@ -1890,7 +1890,7 @@ let test_stream_acc_text () =
   let events =
     [ MessageStart
         { id = "msg_123"
-        ; model = "claude-sonnet-4-6"
+        ; model = "claude-sonnet-5"
         ; usage =
             Some
               { input_tokens = 10
@@ -1955,7 +1955,7 @@ let test_cache_system_prompt () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:""
       ~system_prompt:long_prompt
       ~cache_system_prompt:true

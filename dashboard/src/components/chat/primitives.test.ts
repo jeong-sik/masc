@@ -876,6 +876,42 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })
 
+  it('shows edit evidence for its execution without opening raw tool arguments', () => {
+    recordToolCallOutputs([toolCallOutput({
+      tool_use_id: 'edit-proof', tool: 'Edit',
+      input: { old_string: 'before edit', new_string: 'after edit' },
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1 }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    render(html`<${ChatTranscript}
+      entries=${[toolEntry({ id: 'tool-edit-proof', label: 'Edit' }),
+        toolEntry({ id: 'tool-other-execution', label: 'Edit' })]}
+      emptyText="empty" />`, container)
+    const first = container.querySelector('[data-chat-entry-id="tool-edit-proof"]')
+    const other = container.querySelector('[data-chat-entry-id="tool-other-execution"]')
+    expect(first?.querySelector('[data-chat-edit-evidence]')?.textContent).toContain('after edit')
+    expect(first?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(other?.querySelector('[data-chat-edit-evidence]')).toBeNull()
+  })
+
+  it('joins stored originals by execution even when provider call IDs repeat', () => {
+    const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
+    recordToolCallOutputs([toolCallOutput({
+      execution_id: 'execution-snapshot', tool_use_id: 'repeated-provider-id', tool: 'Edit', input: {},
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'original.md', occurrences: 1,
+        edit_snapshots: { status: 'stored', before: blob, after: blob } }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    render(html`<${ChatTranscript} entries=${[
+      toolEntry({ id: 'snapshot-row', executionId: 'execution-snapshot', toolCallId: 'repeated-provider-id', label: 'Edit' }),
+      toolEntry({ id: 'other-row', executionId: 'execution-other', toolCallId: 'repeated-provider-id', label: 'Edit' }),
+    ]} emptyText="empty" />`, container)
+    const first = container.querySelector('[data-chat-entry-id="snapshot-row"]')
+    const other = container.querySelector('[data-chat-entry-id="other-row"]')
+    expect(first?.querySelector('[data-edit-snapshot-view]')?.textContent).toContain('편집 전후 원본 보기')
+    expect(other?.querySelector('[data-edit-snapshot-view]')).toBeNull()
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),

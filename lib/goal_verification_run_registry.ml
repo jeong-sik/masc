@@ -224,6 +224,8 @@ let evaluated_verdict_of_yojson = Payload.evaluated_verdict_of_yojson
 
 module Store = Run_registry_core.Make (Payload)
 
+let validate_event_json = Store.validate_event_json
+
 type t = Store.t
 
 let create = Store.create

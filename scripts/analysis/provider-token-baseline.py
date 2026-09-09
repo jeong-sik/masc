@@ -25,14 +25,23 @@ def read_rows(path):
     rows = []
     for number, line in enumerate(raw.splitlines(), 1):
         try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError('expected JSON object')
+            rows.append(row)
+        except (ValueError, UnicodeDecodeError):
             malformed.append({'path': str(path.relative_to(args.masc_root)), 'line': number})
     return rows
 
 def stats(values):
-    known = [v for v in values if isinstance(v, (int, float))]
-    return {'observations': len(values), 'known': len(known), 'sum': sum(known),
+    # Token and byte counts are nonnegative integers; bool is not a count.
+    known = [v for v in values if type(v) is int and v >= 0]
+    missing = sum(v is None for v in values)
+    invalid = len(values) - len(known) - missing
+    return {'observations': len(values), 'known': len(known),
+            'missing': missing, 'invalid': invalid,
+            'known_sum': sum(known) if known else None,
+            'complete_sum': sum(known) if values and len(known) == len(values) else None,
             'median': statistics.median(known) if known else None,
             'max': max(known) if known else None}
 
@@ -44,7 +53,7 @@ for row in ledger:
     group = usage.setdefault(key, [])
     group.append(row)
 usage_rows = []
-for key, rows in sorted(usage.items()):
+for key, rows in sorted(usage.items(), key=lambda item: json.dumps(item[0])):
     usage_rows.append({'model': key[0], 'projection': key[1], 'trust': key[2],
                       'rows': len(rows),
                       'tokens': {f: stats([r.get(f) for r in rows]) for f in
@@ -78,16 +87,18 @@ for path in sorted((args.masc_root / 'keepers').glob('*/turn-records/' + month +
                 components[component['component']].append(component['bytes'])
 report = {'sample_finished_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
           'utc_date': args.date, 'source_files': sources, 'malformed_lines': malformed,
-          'ledger_interval': [min(r['timestamp'] for r in ledger), max(r['timestamp'] for r in ledger)],
+          'source_decode_complete': not malformed,
+          'ledger_interval': [min((r['timestamp'] for r in ledger), default=None), max((r['timestamp'] for r in ledger), default=None)],
           'usage_by_projection': usage_rows,
           'hook_requests': {'count': len(wire), 'adjacent_by_keeper': dict(pairs),
                             'tool_schema_bytes': stats([r.get('tool_schema_bytes') for r in wire]),
                             'extra_context_bytes': stats([r.get('extra_system_context_bytes') for r in wire])},
           'turn_records': {'count': turn_count,
-                           'shapes': [{'shape': k[0], 'usage_scope': k[1], 'rows': v} for k, v in sorted(shapes.items())],
+                           'shapes': [{'shape': k[0], 'usage_scope': k[1], 'rows': v} for k, v in sorted(shapes.items(), key=lambda item: json.dumps(item[0]))],
                            'prompt_blocks_bytes': {k: stats(v) for k, v in blocks.items()},
                            'wire_shape_components_bytes': {k: stats(v) for k, v in components.items()}},
-          'limits': ['UTC-day prefix snapshots are not an atomic snapshot of the whole runtime.',
+          'limits': ['known_sum excludes missing/invalid counts; complete_sum is null unless every decoded observation in that group is valid and at least one exists; consult source_decode_complete for excluded rows.',
+                     'UTC-day prefix snapshots are not an atomic snapshot of the whole runtime.',
                      'Hook captures are not final provider HTTP bytes; repeated hooks are not deduplicated requests.',
                      'Byte counts are not tokenizer counts. CLI durable_shape excludes client-owned history expansion.',
                      'Raw observations and resolved deltas overlap; never add these projections.',

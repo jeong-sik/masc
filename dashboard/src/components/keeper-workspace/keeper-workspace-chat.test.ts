@@ -198,8 +198,8 @@ describe('KeeperWorkspaceChat', () => {
     // The in-thread design cue (keepers.jsx chat-pendcue) rides the same queue.
     const pendcue = container.querySelector('[data-testid="keeper-chat-pendcue"]') as HTMLButtonElement
     expect(pendcue).not.toBeNull()
-    expect(pendcue.textContent).toContain('판정 중')
-    expect(pendcue.textContent).toContain('이 호출은 미뤄짐')
+    expect(pendcue.textContent).toContain('승인 대기')
+    expect(pendcue.textContent).toContain('승인 목록에서 확인하세요')
     expect(pendcue.textContent).toContain('fs_write')
     await act(async () => {
       queueLink.click()

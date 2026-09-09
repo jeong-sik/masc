@@ -343,12 +343,3 @@ let with_raw_trace_run_result ~of_core_error ~error_to_string agent user_prompt 
     user_prompt
     f
 ;;
-
-let with_raw_trace_run agent user_prompt f =
-  with_raw_trace_run_result
-    ~of_core_error:Fun.id
-    ~error_to_string:Error.to_string
-    agent
-    user_prompt
-    f
-;;

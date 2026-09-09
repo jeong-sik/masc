@@ -1,0 +1,83 @@
+{
+  "observed_at": "2026-09-09T18:17:58.058258+00:00",
+  "persisted_exact_match": true,
+  "sha256": "9360fb87bcc5fd03c881126156e734b4d0d3674e2734e1ebf3ccb7411a0a6ea8",
+  "turns": [
+    {
+      "keeper": "code-reviewer",
+      "response_keys": [
+        "keeper",
+        "count",
+        "skipped_rows",
+        "source",
+        "producer",
+        "durable_store",
+        "dashboard_surface",
+        "freshness_slo_s",
+        "live_turn_in_progress",
+        "live_turn_started_at_unix",
+        "live_turn_last_progress_at_unix",
+        "latest_ts_unix",
+        "latest_ts_iso",
+        "latest_age_s",
+        "health",
+        "stale_reason",
+        "memory_os",
+        "entries"
+      ],
+      "delta_matches": [],
+      "identity": [
+        {
+          "path": "/memory_os/update_source/trace_id",
+          "value": "trace-1788312311286-00006"
+        },
+        {
+          "path": "/entries/0/record/trace_id",
+          "value": "trace-1788312311286-00006"
+        },
+        {
+          "path": "/entries/1/record/trace_id",
+          "value": "trace-1788312311286-00006"
+        }
+      ]
+    },
+    {
+      "keeper": "msx-retro-mania",
+      "response_keys": [
+        "keeper",
+        "count",
+        "skipped_rows",
+        "source",
+        "producer",
+        "durable_store",
+        "dashboard_surface",
+        "freshness_slo_s",
+        "live_turn_in_progress",
+        "live_turn_started_at_unix",
+        "live_turn_last_progress_at_unix",
+        "latest_ts_unix",
+        "latest_ts_iso",
+        "latest_age_s",
+        "health",
+        "stale_reason",
+        "memory_os",
+        "entries"
+      ],
+      "delta_matches": [],
+      "identity": [
+        {
+          "path": "/memory_os/update_source/trace_id",
+          "value": "trace-1788882319100-00000"
+        },
+        {
+          "path": "/entries/0/record/trace_id",
+          "value": "trace-1788882319100-00000"
+        },
+        {
+          "path": "/entries/1/record/trace_id",
+          "value": "trace-1788882319100-00000"
+        }
+      ]
+    }
+  ]
+}

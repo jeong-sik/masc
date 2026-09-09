@@ -8,6 +8,8 @@ open Result_syntax
 
 (* ── Run discovery ──────────────────────────────────────────── *)
 
+(* Extract [run_ref] values from a list of parsed records.
+   Groups records by [worker_run_id] and computes [start_seq]/[end_seq]. *)
 let run_refs_of_records ~path records : Raw_trace.run_ref list =
   let table : (string, Raw_trace.run_ref) Hashtbl.t = Hashtbl.create 8 in
   List.iter

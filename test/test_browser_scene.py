@@ -132,6 +132,16 @@ try:
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ # Landmark-free chat layout: only actual visible overflow panes are scopes.
+ js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\">No overflow</div>';")
+ fallback=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('landmark-free outline returns only visible overflowing pane',len(fallback['nodes'])==1 and fallback['nodes'][0]['text']=='Messages')
+ fallback_scope={'documentId':fallback['documentId'],'nodeId':fallback['nodes'][0]['nodeId']}
+ selected=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':fallback_scope,'maxChars':5000}])
+ check('scroll-area reference resolves to channel body',any(n['text']=='Channel body' for n in selected['nodes']))
+ js("document.body.insertAdjacentHTML('afterbegin','<main>Semantic body</main>');")
+ preferred=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('landmarks do not suppress separate scroll scopes',len(preferred['nodes'])==2 and any(n['tag']=='main' for n in preferred['nodes']) and any(n['text']=='Messages' for n in preferred['nodes']))
  js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
  landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
  check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)

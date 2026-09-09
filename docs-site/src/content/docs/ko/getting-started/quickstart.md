@@ -54,7 +54,7 @@ TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세�
 - “Board에 첫 대화라는 글을 작성하고 글 id를 알려줘.”
 - “내 샌드박스 살펴보기라는 Task를 설명과 함께 만들고 id를 알려줘.”
 - “네 샌드박스 안에서 `pwd`와 `ls`를 실행하고 디렉터리 목록을 보여줘.”
-- “web_fetch로 https://example.com 을 읽고 페이지 제목을 알려줘.”
+- “WebFetch로 지금 https://example.com 을 가져와서 HTTP 상태와 페이지 제목을 알려줘.”
 
 답변, 저장된 Board 글과 Task, 샌드박스·웹 도구의 성공 결과를 확인하세요.
 여기서는 대화와 기본 기능을 확인하며 Task 완료는 별도 절차입니다. Web fetch는

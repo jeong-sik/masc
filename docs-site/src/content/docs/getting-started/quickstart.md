@@ -57,7 +57,7 @@ In the TUI, select **Keepers → imp** and send these requests one at a time:
 - “Create a Board post titled First conversation and show its id.”
 - “Create a Task titled Explore my sandbox, with a description, and show its id.”
 - “Run `pwd` and `ls` in your sandbox and show the directory listing.”
-- “Use web_fetch to read https://example.com and tell me its page title.”
+- “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.”
 
 Confirm the reply, persisted Board post and Task, and successful sandbox and
 web tool results. This checks conversation and basic capabilities; Task

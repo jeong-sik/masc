@@ -266,7 +266,36 @@ let test_download_result_reaches_provider () =
          | _ -> fail "expected exactly one downloadable file")
       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> fail "invalid durable download manifest")))
 
+let test_interact_production_failure_phase () =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let invoke args = Masc.Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~args in
+    let args = `Assoc ["lane",`String "automation";"tabId",`Int 1;
+      "action",`String "click";"selector",`String "a";"expectedUrl",`String "https://example.org"] in
+    let phase result = result.Masc.Keeper_tool_execution.failure_effect_disposition in
+    check bool "invalid input is recoverable in production wrapper" true
+      (phase (invoke (`Assoc [])) = Tool_result.Proven_pre_effect);
+    check bool "disconnected selected client rejects before execution" true
+      (phase (invoke (`Assoc ["lane",`String "live";"tabId",`Int 1;
+        "clientId",`String "00000000-0000-4000-8000-000000000001";
+        "action",`String "click";"selector",`String "a"])) = Tool_result.Proven_pre_effect);
+    let reply = ref (Lane.Rejected_before_effect "observed document changed") in
+    Lane.install_automation_executor (Some (fun _ -> !reply));
+    Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
+    check bool "typed backend pre-effect rejection is recoverable" true
+      (phase (invoke args) = Tool_result.Proven_pre_effect);
+    reply := Lane.Answered (`Assoc ["ok",`Bool false;"error",`String "observed node detached";
+      "effectPhase",`String "not_started"]);
+    check bool "structured native pre-effect receipt is recoverable" true
+      (phase (invoke args) = Tool_result.Proven_pre_effect);
+    reply := Lane.Refused "response lost after click";
+    check bool "post-dispatch uncertainty remains fenced" true
+      (phase (invoke args) = Tool_result.Effect_outcome_unknown);
+    reply := Lane.Answered (`Assoc ["ok",`Bool false;"error",`String "observed node detached"]);
+    check bool "error wording alone never establishes pre-effect" true
+      (phase (invoke args) = Tool_result.Effect_outcome_unknown)))
+
 let () = run "Firefox controls" ["behavior",[
+  test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;
   test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;
   test_case "navigation uses requested tab" `Quick test_targeted_goto;
   test_case "selectors must match exactly once" `Quick test_selector_contract;

@@ -135,15 +135,13 @@ let normalize raw = String.lowercase_ascii (String.trim raw)
     data, not a model-id classifier: an entry must declare which request
     shape it accepts before a thinking-enabled request is built. *)
 type anthropic_thinking_control =
-  | Manual_budget
   | Adaptive_default
   | Adaptive_preferred
   | Adaptive_only
   | Always_adaptive
 
 let anthropic_thinking_control_table =
-  [ "manual_budget", Manual_budget
-  ; "adaptive_default", Adaptive_default
+  [ "adaptive_default", Adaptive_default
   ; "adaptive_preferred", Adaptive_preferred
   ; "adaptive_only", Adaptive_only
   ; "always_adaptive", Always_adaptive

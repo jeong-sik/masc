@@ -281,6 +281,11 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
             observation.identity
+        | Runtime_codex_app_server.Elicitation_cancelled
+            { server_name; mode = _; reason = Runtime_codex_app_server.Host_input_unavailable } ->
+          Log.Keeper.info ~keeper_name
+            "Codex MCP request cancelled: host input unavailable (server=%s); the user did not decline it"
+            server_name
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text

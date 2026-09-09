@@ -109,14 +109,12 @@ type structured_output_support = Capability_vocab.structured_output_support =
 [@@deriving show, eq]
 
 type anthropic_thinking_control =
-  | Anthropic_manual_budget
   | Anthropic_adaptive_default
   | Anthropic_adaptive_preferred
   | Anthropic_adaptive_only
   | Anthropic_always_adaptive
 
 let anthropic_thinking_control_of_vocab_value = function
-  | Capability_vocab.Manual_budget -> Anthropic_manual_budget
   | Capability_vocab.Adaptive_default -> Anthropic_adaptive_default
   | Capability_vocab.Adaptive_preferred -> Anthropic_adaptive_preferred
   | Capability_vocab.Adaptive_only -> Anthropic_adaptive_only
@@ -1223,11 +1221,11 @@ let apply_declarative_capability_overrides overrides =
        | None -> base.reasoning_replay_override)
     }
   in
-  if
-    (not capabilities.supports_reasoning)
-    || capabilities.thinking_control_format = No_thinking_control
-  then { capabilities with accepted_reasoning_efforts = None }
-  else capabilities
+  (* Native adapters own their wire format, so [No_thinking_control] does not
+     erase an enabled model's effort vocabulary. An explicit lack of reasoning
+     support still invalidates it before native request validation. *)
+  if capabilities.supports_reasoning then capabilities
+  else { capabilities with accepted_reasoning_efforts = None }
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =

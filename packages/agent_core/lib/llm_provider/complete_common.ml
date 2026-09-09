@@ -475,8 +475,7 @@ let thinking_control_request_rejection
         (match anthropic_thinking_control with
          | Some Capabilities.Anthropic_always_adaptive -> true
          | Some
-             ( Capabilities.Anthropic_manual_budget
-             | Capabilities.Anthropic_adaptive_default
+             ( Capabilities.Anthropic_adaptive_default
              | Capabilities.Anthropic_adaptive_preferred
              | Capabilities.Anthropic_adaptive_only ) -> false
          | None ->

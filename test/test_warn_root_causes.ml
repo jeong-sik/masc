@@ -182,10 +182,19 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
       Fun.protect
         ~finally:bundle.cleanup
         (fun () ->
-          let expected_names =
+          let descriptor_names =
             Keeper_tool_descriptor.model_visible_descriptors ()
             |> List.concat_map Keeper_tool_descriptor.keeper_model_names
             |> List.sort_uniq String.compare
+          in
+          let controls =
+            [ Tool_schemas_composition_control.status_schema, Agent_core.Tool_contract.Concurrent
+            ; Tool_schemas_composition_control.cancel_schema, Agent_core.Tool_contract.Serial ]
+          in
+          let expected_names =
+            descriptor_names
+            @ List.map (fun ((schema : Masc_domain.tool_schema), _) -> schema.name) controls
+            |> List.sort String.compare
           in
           let actual_names =
             bundle.tools
@@ -199,6 +208,21 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
             actual_names;
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools);
+          List.iter
+            (fun ((schema : Masc_domain.tool_schema), execution) ->
+              let tool = match List.find_opt
+                (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name schema.name)
+                bundle.tools with
+                | Some tool -> tool
+                | None -> failf "missing composition control %s" schema.name
+              in
+              check bool (schema.name ^ " input schema") true
+                (tool.schema.input_schema = Some schema.input_schema);
+              check bool (schema.name ^ " execution contract") true
+                (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
+              check bool (schema.name ^ " continues after success") true
+                (Agent_core.Tool.completion tool = Agent_core.Tool_contract.Continue_after_success))
+            controls;
           List.iter
             (fun (tool : Agent_core.Tool.t) ->
                let name = tool.schema.name in
@@ -243,7 +267,9 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                     (Agent_core.Tool.completion tool
                      = Agent_core.Tool_contract.Terminal_after_success
                          Agent_core.Tool_contract.Effect_outcome_unknown)))
-            bundle.tools))
+            (List.filter
+               (fun (tool : Agent_core.Tool.t) -> List.mem tool.schema.name descriptor_names)
+               bundle.tools)))
 
 let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
   ignore (init_registry ());
@@ -621,18 +647,6 @@ let test_keeper_mainline_failures_log_at_error () =
        {|episode_create failed|})
 
 
-(* Replicates the wire-capture byte measure (keeper_wire_capture.ml): the
-   compact JSON of the exact unredacted tools array sent to the model. *)
-let bundle_schema_bytes (bundle : Keeper_tools_agent_core.tool_bundle) =
-  bundle.tools
-  |> List.map Agent_core.Tool.schema_to_json
-  |> fun raw -> Yojson.Safe.to_string (`List raw) |> String.length
-;;
-
-let bundle_tool_count (bundle : Keeper_tools_agent_core.tool_bundle) =
-  List.length bundle.tools
-;;
-
 let with_bundle ~name f =
   ignore (init_registry ());
   let dir =
@@ -662,26 +676,18 @@ let with_bundle ~name f =
       in
       Fun.protect ~finally:bundle.cleanup (fun () -> f bundle))
 
-(* A keeper's turn payload carries the full surface (
-   default [All], pinned byte-identically by test_keeper_tool_schema_bytes);
-   a declared keeper's payload narrows to its groups. This test proves the
-   narrowing is real in the actual turn bundle, not just discovery JSON. *)
-let test_declared_bundle_narrows_turn_payload () =
-  let undeclared_count, undeclared_bytes =
-    with_bundle ~name:"test-undeclared" (fun b ->
-      (bundle_tool_count b, bundle_schema_bytes b))
+(* Keeper identity does not declare a tool selection. Check the exact
+   materialized surface; typed capability selection is tested separately. *)
+let test_keeper_names_do_not_narrow_tool_surface () =
+  let names ~name =
+    with_bundle ~name (fun bundle ->
+      List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) bundle.tools
+      |> List.sort String.compare)
   in
-  let declared_count, declared_bytes =
-    with_bundle ~name:"test-declared" (fun b ->
-      (bundle_tool_count b, bundle_schema_bytes b))
-  in
-  check bool "undeclared keeper's payload is non-empty" true (undeclared_count > 0);
-  check bool "declared keeper's payload is smaller than undeclared"
-    true
-    (declared_count < undeclared_count);
-  check bool "declared keeper's schema bytes are smaller than undeclared"
-    true
-    (declared_bytes < undeclared_bytes)
+  let first = names ~name:"test-undeclared" in
+  let second = names ~name:"test-declared" in
+  check bool "full surface is nonempty" true (first <> []);
+  check (list string) "a name alone does not declare a tool selection" first second
 
 (* ── Runner ───────────────────────────────────────────────────── *)
 
@@ -705,7 +711,7 @@ let () =
           test_case "assignment telemetry is before-turn scoped" `Quick
             test_tool_assignment_telemetry_is_before_turn_scoped;
           test_case "turn payload carries the full surface" `Quick
-            test_declared_bundle_narrows_turn_payload;
+            test_keeper_names_do_not_narrow_tool_surface;
         ] );
       ( "atomic_agent_json",
         [

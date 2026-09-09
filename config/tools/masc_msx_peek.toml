@@ -1,11 +1,8 @@
 name = "masc_msx_peek"
 description = """
-Read the machine's memory at a logical address and refresh the snapshot \
-that masc_msx_ram_diff compares against. Read-only: writing memory is the \
-cheat this lane refuses. Address is a hex string like \"e000\" or \
-\"0xE000\" (decimal parses too); length is bytes, 1..256, default 16. The \
-result is hex pairs in byte order. Cheap enough to call before and after \
-one action to find what that action changed."""
+Read memory bytes and refresh the snapshot for masc_msx_ram_diff.
+
+Read-only. Address accepts hex (e000 or 0xE000) or decimal. Returns hex byte pairs."""
 additional_properties = false
 
 defer_loading = true

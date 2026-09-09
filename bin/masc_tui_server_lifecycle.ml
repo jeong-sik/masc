@@ -1,5 +1,4 @@
-(* Opt-in, on-demand masc server start from inside the TUI.
-   RFC tui-server-lifecycle. See the .mli for the contract. *)
+(* On-demand background server startup. The server outlives the TUI. *)
 
 (* What a completed refresh found at the port, in the vocabulary this
    decision is made in. The TUI reads it off the status the refresh left
@@ -48,6 +47,7 @@ let discover_server_binary ~tui_exe ~file_exists ~path_lookup ~base_path ~host
 let server_argv ~masc_bin ~base_path ~host ~port =
   [
     masc_bin;
+    "start";
     "--base-path";
     base_path;
     "--host";
@@ -74,15 +74,32 @@ let wait_healthy ~health_ok ~child_alive ~attempts ~sleep =
 
 type owned_server = {
   pgid : int;
+  exited : bool Atomic.t;
 }
 
 let owned_pgid t = t.pgid
-let is_running t = Process_eio_detached.is_pgid_alive ~pgid:t.pgid
+let is_running t =
+  if Atomic.get t.exited then false
+  else
+    let exited () =
+      Atomic.set t.exited true;
+      false
+    in
+    match Unix.waitpid [ Unix.WNOHANG ] t.pgid with
+    | 0, _ -> true
+    | _, _ -> exited ()
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) -> exited ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> true
 
 let start ~masc_bin ~base_path ~host ~port ~env =
   let argv = server_argv ~masc_bin ~base_path ~host ~port in
   match Process_eio_detached.spawn_detached_devnull ~argv ~env ~cwd:base_path with
-  | Ok handle -> Ok { pgid = handle.Process_eio_detached.devnull_pgid }
+  | Ok handle ->
+      Ok
+        {
+          pgid = handle.Process_eio_detached.devnull_pgid;
+          exited = Atomic.make false;
+        }
   | Error msg -> Error msg
 
 let stop t ~grace_sec =

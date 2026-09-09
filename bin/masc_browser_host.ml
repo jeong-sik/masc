@@ -89,7 +89,10 @@ let decode_reply json =
        | None -> Error "successful reply has no data")
   | Some (`Bool false) ->
       let* error = required_string fields "error" in
-      Ok (id, failure id error)
+      let phase = match List.assoc_opt "effectPhase" fields with
+        | Some (`String "not_started") -> ["effectPhase", `String "not_started"]
+        | _ -> [] in
+      Ok (id, `Assoc (["id", `String id; "ok", `Bool false; "error", `String error] @ phase))
   | _ -> Error "reply ok must be a boolean"
 
 let read_frame reader =

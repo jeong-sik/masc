@@ -24,7 +24,7 @@ type interaction = Click of string | Fill of { selector : string; text : string 
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
-  | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
+  | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
 type verb =
   | Tabs_list
@@ -75,6 +75,7 @@ let interaction_args ~tab_id ~expected_url action =
         "viewport", Pointer.viewport_to_json viewport]
     | Click selector -> ["action", `String "click"; "selector", `String selector]
     | Fill {selector; text} -> ["action", `String "fill"; "selector", `String selector; "text", `String text]
+    | Follow_link target -> ("action",`String "follow_link") :: node_fields target
     | Click_node target -> ("action",`String "click") :: node_fields target
     | Fill_node {target;text} -> ("action",`String "fill") :: ("text",`String text) :: node_fields target
     | Scroll {x; y} -> ["action", `String "scroll"; "x", `Int x; "y", `Int y] in

@@ -57,3 +57,8 @@ required = true
 name = "nodeId"
 type = "string"
 required = true
+
+[[params]]
+name = "expectedUrl"
+type = "string"
+description = "For scene/regions: reject an observation whose URL differs from this destination. A matching URL is not application-content readiness; verify the observed channel title and content."

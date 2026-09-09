@@ -74,13 +74,16 @@ let of_json json =
     | Some target when target.document_id <> document_id -> Error "scene scope document mismatch"
     | Some _ | None -> Ok () in
   Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated;view;scope}
-let read ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
+let read ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
   let started = Mtime_clock.elapsed_ns () in
   let* tab_id = match request.tab_id with Some id -> Ok id | None -> Error "scene requires tabId" in
   let* target = Browser_surface.resolved_target request in
   let* json = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
     ~timeout_sec:20. |> Browser_surface.decode_answer in
   let* scene = of_json json in
+  let* () = match expected_url with
+    | Some url when scene.url <> url -> Error "destination_url_not_observed; navigation may be in progress; retry only the read"
+    | Some _ | None -> Ok () in
   let* () = if scene.view = view && scene.scope = scope then Ok ()
     else Error "browser did not acknowledge the requested scene view/scope; update the connector" in
   let* actual = field "tabId" json in

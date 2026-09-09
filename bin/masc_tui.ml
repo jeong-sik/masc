@@ -4210,10 +4210,10 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scope:target ~host ~port ~view ~tab_id ()))
-        | Scene_click {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ())))
+              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -7296,10 +7296,13 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+  let wheel_hint = match !image_cell_pixels with
+    | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
+    | _ -> "wheel:center" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:("  Esc: back  r:refresh  wheel:pane  j/k:center  " ^ pointer_hint) bytes;
+    ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -14781,7 +14784,7 @@ and is loaded on demand through keeper_skill.
              | Some region -> (match Masc_tui_graphics.image_point region ~row ~column with
                  | Some (x,y_point) -> scroll_at {x;y=y_point} y
                  | None -> ())
-             | None -> () in
+             | None -> scroll_at {x=0.5;y=0.5} y in
            (match event with
             | Mouse_left_press (row,column) ->
                 browser_pointer_press := None;
@@ -16539,7 +16542,7 @@ and is loaded on demand through keeper_skill.
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                       | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
-                            node_id=node.node_id;expected_url=scene.content.url})
+                            node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }

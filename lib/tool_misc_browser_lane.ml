@@ -133,7 +133,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
 
 let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
-    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope"])) fields
+    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope";"expectedUrl"])) fields
     | _ -> false in
   if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
   else
@@ -146,7 +146,10 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     | Ok frame_path ->
     let mode = get_string args "mode" "text" in
     let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
-    if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+    let destination_guard_present = match args with `Assoc fields -> List.mem_assoc "expectedUrl" fields | _ -> false in
+    if destination_guard_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+      make_workflow_err ~tool_name ~start_time "expectedUrl supports top-document scene or regions only"
+    else if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
       make_workflow_err ~tool_name ~start_time "scope supports top-document scene or regions only"
     else if frame_path <> [] || mode = "frames" || mode = "dialog" then
       if lane <> "automation" then make_workflow_err ~tool_name ~start_time "frame and dialog reads require automation"
@@ -174,9 +177,16 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
               | `Assoc fields -> (match List.assoc_opt "scope" fields with
                   | None -> Ok None | Some json -> Result.map Option.some (Browser_scene.scope_of_json json))
               | _ -> Ok None in
-            let result = Result.bind scope (fun scope -> Browser_scene.read
+            let expected_url = match args with
+              | `Assoc fields -> (match List.assoc_opt "expectedUrl" fields with
+                  | None -> Ok None
+                  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+                  | Some _ -> Error "expectedUrl must be a nonempty string")
+              | _ -> Error "browser arguments must be an object" in
+            let result = Result.bind expected_url (fun expected_url -> Result.bind scope (fun scope -> Browser_scene.read
+              ?expected_url
               ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
-              ?scope {request with tab_id=Some tab_id} ~max_chars) in
+              ?scope {request with tab_id=Some tab_id} ~max_chars)) in
             match result with
             | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
             | Error detail -> make_workflow_err ~tool_name ~start_time detail)

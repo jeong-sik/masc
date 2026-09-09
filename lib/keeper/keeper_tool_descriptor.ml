@@ -641,7 +641,8 @@ let browser_read_output_schema = `Assoc ["type",`String "object";
 let browser_interact_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc ["tabId",`Assoc ["type",`String "integer"];
     "url",`Assoc ["type",`String "string"];"urlBefore",`Assoc ["type",`String "string"];
-    "action",`Assoc ["type",`String "string"]];
+    "action",`Assoc ["type",`String "string"];
+    "destinationUrl",`Assoc ["type",`String "string"]];
   "required",`List (List.map (fun key -> `String key) ["tabId";"url";"urlBefore";"action"]);
   "additionalProperties",`Bool true]
 

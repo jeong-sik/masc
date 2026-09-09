@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Use documentId and nodeId from BrowserRead mode=scene, or a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Use scroll_at with screenshot point and viewport to scroll the nested pane under that point (native wheel on automation, scrollable DOM ancestor on live). Returns the current URL and document scroll position; read/capture again to verify the resulting page. Screenshot click_at uses normalized viewport coordinates and requires the observed viewport and expectedUrl. Drag uses trusted pointer actions on the automation lane. No arbitrary JavaScript."""
+Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Use documentId and nodeId from BrowserRead mode=scene, or a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Use scroll_at with screenshot point and viewport to scroll the nested pane under that point (native wheel on automation, scrollable DOM ancestor on live). Returns the current URL and document scroll position; read/capture again to verify the resulting page. Screenshot click_at uses normalized viewport coordinates and requires the observed viewport and expectedUrl. Drag uses trusted pointer actions on the automation lane. follow_link navigates directly to an observed same-tab HTTP(S) anchor href, bypassing page click handlers. Rejects new-window targets and downloads before navigation; requires documentId/nodeId and expectedUrl. destinationUrl is the intended URL, not a loaded-page receipt. No arbitrary JavaScript."""
 additional_properties = false
 
 [[params]]
@@ -24,7 +24,7 @@ description = "Reject if the tab URL changed since this observation."
 name = "action"
 type = "string"
 required = true
-enum = ["click", "fill", "scroll", "click_at", "scroll_at", "drag"]
+enum = ["follow_link", "click", "fill", "scroll", "click_at", "scroll_at", "drag"]
 
 [[params]]
 name = "selector"
@@ -162,3 +162,5 @@ name = "scrollY"
 type = "number"
 required = true
 description = "Observed vertical scroll position in CSS pixels."
+
+# follow_link uses documentId/nodeId and expectedUrl already declared above.

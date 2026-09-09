@@ -10,10 +10,10 @@
 
 let module_path = "lib/keeper/keeper_hooks_agent_core.ml"
 
-(* The format string is wrapped across source lines, so the literal is
-   matched by substring rather than exactly. *)
+(* The line is assembled from [Log.Kv] fields, so the key is its own string
+   literal and is matched by substring. *)
 let test_the_failure_line_carries_the_arguments () =
-  let n = Ast_grep.count_string_literals ~module_path ~needle:"failed_params=" in
+  let n = Ast_grep.count_string_literals ~module_path ~needle:"failed_params" in
   if n < 1 then
     Alcotest.failf
       "the tool_call log line must carry the failed call's arguments; \

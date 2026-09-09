@@ -184,6 +184,28 @@ let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())
    named the file; [day_key] is the writer's own key (#27143). *)
 let format_utc_date_of (t : float) = Jsonl_writer.day_key ~ts:t
 
+(* A log line is read by people and by models, and both pay per token. A field
+   the producer did not measure carries no fact, so it is left out rather than
+   rendered as a placeholder: [cache_n=-] on every turn of a lane that never
+   reports a cache says nothing that its absence does not (2026-09-09). [false]
+   and [0] are values, not absences, and are rendered. Only the message text is
+   shaped here; the ring entry's typed fields are untouched. *)
+module Kv = struct
+  type field = string * string option
+
+  let str key value : field = key, Some value
+  let int key value : field = key, Some (string_of_int value)
+  let bool key value : field = key, Some (string_of_bool value)
+  let opt key value : field = key, value
+  let opt_map key render value : field = key, Option.map render value
+
+  let render (fields : field list) =
+    fields
+    |> List.filter_map (fun (key, value) ->
+         Option.map (fun value -> key ^ "=" ^ value) value)
+    |> String.concat " "
+end
+
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.
     Lock-free: single-writer (log functions), multi-reader (API).

@@ -5399,3 +5399,9 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-msx-background-poll)))
 (include stanzas/test_keeper_msx_observe.inc)
+
+; Log.Kv: a key=value line leaves out the fields whose value is None.
+(test
+ (name test_log_kv)
+ (modules test_log_kv)
+ (libraries alcotest masc_log))

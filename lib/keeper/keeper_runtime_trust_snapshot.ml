@@ -332,9 +332,13 @@ let trust_model_of_observations ~pending_approval_projection
     { approval_queue =
         approval_queue_state_of_projection pending_approval_projection
     ; runtime_blocker_class =
-        assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
-    ; runtime_blocker_summary =
-        assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
+        (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
+         |> Option.map (fun serialized ->
+              match
+                Keeper_meta_contract.blocker_class_of_serialized_string serialized
+              with
+              | Some blocker -> Ok blocker
+              | None -> Error serialized))
     ; receipt_operator_disposition =
         Option.bind latest_receipt receipt_operator_disposition
     ; attention_needs_attention =

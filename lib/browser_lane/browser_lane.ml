@@ -277,9 +277,9 @@ let disconnect_client ~client_id =
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
 let issue_live client ~verb ~timeout_sec =
-  if not (connected client) then Refused "client_not_connected"
+  if not (connected client) then Rejected_before_effect "client_not_connected"
   else if not (verb_allowed_on_live verb) then
-    Refused "session ownership and direct navigation belong to the automation lane"
+    Rejected_before_effect "session ownership and direct navigation belong to the automation lane"
   else
     Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
@@ -303,5 +303,5 @@ let issue_for ~target ~verb ~timeout_sec =
         (fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue ~lane_name ~verb ~timeout_sec =
   match resolve_target ~lane_name ~client_id:None with
-  | Error error -> Refused error
+  | Error error -> Rejected_before_effect error
   | Ok target -> issue_for ~target ~verb ~timeout_sec

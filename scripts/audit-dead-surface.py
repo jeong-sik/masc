@@ -259,6 +259,14 @@ def all_files(root: Path) -> list[Path]:
     still real -- `.git` and, after a build, `_build` (42,237 files here) were
     both walked and then discarded.
     """
+    # This file is excluded. Its own comments name the values it reports --
+    # a baseline note saying which exports are held back, a docstring citing
+    # the case that motivated a rule -- and the reference scan below is a
+    # token scan, so those names read as call sites and the values disappear
+    # from the report. That has now happened twice, each time making a rule
+    # look like it worked when it had not run. The audit calls no OCaml value,
+    # so nothing real is lost by not reading it.
+    self_path = Path(__file__).resolve()
     tracked = tracked_files(root)
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -269,6 +277,8 @@ def all_files(root: Path) -> list[Path]:
                 continue
             path = directory / name
             if tracked is not None and path not in tracked:
+                continue
+            if path.resolve() == self_path:
                 continue
             if path.is_file():
                 out.append(path)
@@ -747,7 +757,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # it waits for its own reviewed purge rather than a blind sweep here.
 # 1 -> 0, measured on 2026-08-30: the MCP 2026-07-28 conformance pass removed
 # the mime-derived resource icon palette, which held the last one.
-DEAD_EXPORT_BASELINE = 0
+# 0 -> 33, measured on 2026-09-10, and the first baseline this ratchet is wired
+# behind. Nothing ran it between 2026-08-30 and 2026-09-09, and 149 exports
+# accumulated in those ten days. #34854, #34861, #34862, #34863, #34864,
+# #34867 and #34868 took it back to 33. Raising the number is the honest
+# reading of a measurement nobody was taking; it is wired now, so the next
+# move is down.
+#
+# What the remaining 33 are, so the next person does not re-derive it:
+#   21  runtime (8), sessions_store (6), runtime_store (5),
+#       sessions_store_parsers (2) -- held by the v0.217.x frozen-surface
+#       decision in #34858, where producer and consumer are both gone.
+#    6  odoc-referenced: a sibling declaration's doc block names them with
+#       {!name}, so removing the val breaks the doc it is named from. One of
+#       the six is also one of the agent entry points below.
+#    3  agent's other run entry points; "no caller in this tree" is not the
+#       same verdict for a library's headline API.
+#    1  mcp_session.reconnect_all -- the capture half of the same pair is
+#       live, so this is a half-wired feature, not a leftover (#34871).
+#    2  exact_output_plan.fingerprint_to_string and
+#       stop_reason_wire.is_unmatched_tool_calls -- an inline test is their
+#       only caller. Dropping the val turns the release build red, so they
+#       need the test rewritten first (#34884).
+DEAD_EXPORT_BASELINE = 33
 
 
 def run_ratchet(count: int) -> int:

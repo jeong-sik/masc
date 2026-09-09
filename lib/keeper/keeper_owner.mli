@@ -359,3 +359,6 @@ val resume_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
 val direct_gate_waits : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result
 val discharge_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
   obligation:Keeper_semantic_execution.gate_obligation -> (unit, error) result
+
+val defer_direct_gate_reconciliation : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  obligations:Keeper_semantic_execution.gate_obligation list -> diagnostic:string -> (Chat_operation.t, error) result

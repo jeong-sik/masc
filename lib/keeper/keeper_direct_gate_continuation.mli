@@ -13,3 +13,9 @@ val suspend : config:Workspace.config -> keeper_name:string ->
 val reconcile : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> (unit, string) result
 val discharge : config:Workspace.config -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   user_message:string -> checkpoint:Agent_core.Checkpoint.t -> admission -> (unit, string) result
+
+(** A checkpoint-less Gate reconciliation is nonterminal but cannot supply a
+    resume reference. The original request and obligations remain durable. *)
+type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Checkpoint_reconciliation
+val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (pending option, string) result

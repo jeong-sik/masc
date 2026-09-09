@@ -83,7 +83,28 @@ let test_runtime_failure_retains_gate_obligations () = with_path (fun path -> wi
     ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation]);
   check bool "runtime fallback retains original request" true ((get store).input = Some input)))
 
+let test_unconfirmed_checkpoint_survives_restart () = with_path (fun path ->
+  with_store path (fun store ->
+    let operation = admit store in
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+    Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~obligations:[obligation]
+      ~diagnostic:"retained checkpoint could not be installed" |> ok |> ignore;
+    check bool "checkpoint-less request is nonclaimable" true (claim store = None));
+  with_store path (fun store ->
+    Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
+    check bool "full original input survives restart" true ((get store).input = Some input);
+    check bool "exact effect identity survives restart" true
+      ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation]);
+    rejected (Store.resolve_direct_gate store ~now:7. ~operation_id:original
+      ~resolution:{Semantic.obligation; decision=Semantic.Gate_approved});
+    check bool "approval alone cannot manufacture a checkpoint" true (claim store = None);
+    Store.submit store ~now:8. ~operation_id:other ~source ~input:(`String "independent work") |> ok |> ignore;
+    check bool "independent work remains claimable" true
+      (match claim store with Some operation -> Operation.Operation_id.equal other operation.operation_id | None -> false)))
+
 let () = run "direct Gate waiting" ["journal", [
+  test_case "unconfirmed checkpoint preserves input and effects across restart" `Quick test_unconfirmed_checkpoint_survives_restart;
   test_case "approval resumes same request after independent work and restart" `Quick (test_wait_restart_resolution Semantic.Gate_approved);
   test_case "denial remains explicit and cannot imply task success" `Quick (test_wait_restart_resolution (Semantic.Gate_denied "operator declined"));
   test_case "runtime fallback retains Gate effect references" `Quick test_runtime_failure_retains_gate_obligations]]

@@ -1730,17 +1730,12 @@ let process_single_turn ~user_row_origin ~submission
   let pending_direct_continuation () =
     match submission with
     | Owner_operation {operation_id; _} ->
-      let ( let* ) = Result.bind in
-      let* retry = Keeper_owner_registry.direct_runtime_retry ~base_path ~keeper_name:payload.name ~operation_id
-        |> Result.map_error Keeper_owner_registry.command_error_to_string in
-      match retry with
-      | Some retry -> Ok (Some retry.Keeper_semantic_execution.checkpoint)
-      | None -> Keeper_owner_registry.direct_gate_state ~base_path ~keeper_name:payload.name ~operation_id
-          |> Result.map_error Keeper_owner_registry.command_error_to_string
-          |> Result.map (Option.map (fun state -> state.Keeper_semantic_execution.waiting.checkpoint))
+      Keeper_direct_gate_continuation.pending ~base_path ~keeper_name:payload.name ~operation_id
   in
   (* Capture this attempt's incoming identity before dispatch consumes it. *)
-  let resumed_from = pending_direct_continuation () in
+  let resumed_from = pending_direct_continuation () |> Result.map (function
+      | Some (Keeper_direct_gate_continuation.Bound_checkpoint reference) -> Some reference
+      | Some Keeper_direct_gate_continuation.Checkpoint_reconciliation | None -> None) in
   let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
       ?stream_lifecycle () =
     let ( let* ) = Result.bind in
@@ -2636,17 +2631,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
       let pending_continuation () =
-        let ( let* ) = Result.bind in
-        let base_path = (Mcp_server.workspace_config state).base_path in
-        let* retry = Keeper_owner_registry.direct_runtime_retry ~base_path
+        Keeper_direct_gate_continuation.pending
+          ~base_path:(Mcp_server.workspace_config state).base_path
           ~keeper_name ~operation_id:operation.operation_id
-          |> Result.map_error Keeper_owner_registry.command_error_to_string in
-        match retry with
-        | Some _ -> Ok (Some ())
-        | None -> Keeper_owner_registry.direct_gate_state ~base_path
-            ~keeper_name ~operation_id:operation.operation_id
-            |> Result.map_error Keeper_owner_registry.command_error_to_string
-            |> Result.map (Option.map (fun _ -> ()))
       in
       (match operation.input with
        | None ->

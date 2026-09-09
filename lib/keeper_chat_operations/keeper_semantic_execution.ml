@@ -112,6 +112,7 @@ type action =
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Suspend_gate_reconciliation of gate_obligation list * string
   | Suspend_gate of gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -250,6 +251,14 @@ let apply ~now action current =
            | Recovering {origin = (Checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution | Gate_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
+      | Suspend_gate_reconciliation (obligations, diagnostic) ->
+          (match current.phase with
+           | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
+             if obligations <> [] && String.trim diagnostic <> ""
+                && List.for_all (fun prior -> List.mem prior obligations) current.gate_obligations
+             then unchanged (Recovering {origin=Interrupted_execution; diagnostic})
+             else reject ()
+           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_gate waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
@@ -305,6 +314,7 @@ let apply ~now action current =
                  | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> unchanged (Settled terminal)
                  | Settled _ -> reject ())) in
     let gate_obligations = match action with
+      | Suspend_gate_reconciliation (obligations, _) -> obligations
       | Suspend_gate waiting -> waiting.obligations
       | Discharge_gate obligation -> List.filter (fun current -> current <> obligation) current.gate_obligations
       | Settle _ -> []

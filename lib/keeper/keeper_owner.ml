@@ -155,6 +155,8 @@ type _ command =
   | Discharge_direct_gate : {operation_id:Operation_id.t; obligation:Keeper_semantic_execution.gate_obligation} -> (unit, error) result command
   | Direct_gate_state : Operation_id.t -> (Keeper_semantic_execution.gate_wait_state option, error) result command
   | Direct_gate_obligations : Operation_id.t -> (Keeper_semantic_execution.gate_obligation list, error) result command
+  | Defer_direct_gate_reconciliation : {operation_id:Operation_id.t; execution_digest:string;
+      obligations:Keeper_semantic_execution.gate_obligation list; diagnostic:string} -> (Chat_operation.t, error) result command
   | Defer_direct_gate : {operation_id:Operation_id.t; execution_digest:string;
       waiting:Keeper_semantic_execution.gate_wait} -> (Chat_operation.t, error) result command
   | Resolve_direct_gate : {operation_id:Operation_id.t; resolution:Keeper_semantic_execution.gate_resolution} ->
@@ -714,7 +716,11 @@ let start
                 | Ok None ->
                   (match Chat_operation_store.direct_gate_state t.operation_store ~operation_id with
                    | Ok (Some _) -> Ok ()
-                   | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                   | Ok None ->
+                     (match Chat_operation_store.direct_gate_obligations t.operation_store ~operation_id with
+                      | Ok (_ :: _) -> Ok ()
+                      | Ok [] -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                      | Error error -> Error error)
                    | Error error -> Error error)
                 | Error error -> Error error)
              | Chat_operation.Cancelled _ -> Ok ()
@@ -921,6 +927,11 @@ let start
         | Command (Direct_gate_obligations operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct Gate obligations" (fun () ->
             Chat_operation_store.direct_gate_obligations t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Defer_direct_gate_reconciliation {operation_id; execution_digest; obligations; diagnostic}, resolve) ->
+          let response = run_operation_command t ~label:"retain direct Gate reconciliation" (fun () ->
+            Chat_operation_store.defer_direct_gate_reconciliation t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~obligations ~diagnostic) |> Result.map fst in
           Eio.Promise.resolve resolve response; loop state shutdown_operation_id
         | Command (Defer_direct_gate {operation_id; execution_digest; waiting}, resolve) ->
           let response = run_operation_command t ~label:"suspend direct Gate operation" (fun () ->
@@ -1349,3 +1360,6 @@ let resume_direct_gate t ~operation_id ~waiting ~resolution = request t (Resume_
 
 let direct_gate_waits t = request t Direct_gate_waits
 let discharge_direct_gate t ~operation_id ~obligation = request t (Discharge_direct_gate {operation_id; obligation})
+
+let defer_direct_gate_reconciliation t ~operation_id ~execution_digest ~obligations ~diagnostic =
+  request t (Defer_direct_gate_reconciliation {operation_id; execution_digest; obligations; diagnostic})

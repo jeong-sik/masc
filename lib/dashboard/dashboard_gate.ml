@@ -6,7 +6,9 @@
 
 (* Which exact-output lane serves Gate Auto Judge, read from the published
    runtime registry. The first slot is the model that judges; later slots are
-   AGENT_CORE failover order. An unpublished or busy registry reports itself as a
+   AGENT_CORE failover order, followed by official-client fallback ids. These
+   are configured route identities, not an inference or authentication receipt.
+   An unpublished or busy registry reports itself as a
    closed unavailable variant instead of guessing (#26126). *)
 let judge_lane_json () =
   let lane_id = Hitl_summary_worker.lane_id in
@@ -24,7 +26,7 @@ let judge_lane_json () =
     (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
      | Error error ->
        unavailable (Runtime_exact_output_registry.lane_resolution_error_to_string error)
-     | Ok { selected_slots } ->
+     | Ok { selected_slots; cli_slots } ->
        `Assoc
          [ "status", `String "available"
          ; "lane_id", `String lane_id
@@ -33,7 +35,8 @@ let judge_lane_json () =
                (List.map
                   (fun (slot : Runtime_exact_output_registry.selected_slot) ->
                     `String slot.slot_id)
-                  selected_slots) )
+                  selected_slots
+                @ List.map (fun slot_id -> `String slot_id) cli_slots) )
          ])
 ;;
 

@@ -3791,11 +3791,8 @@ let%test "ollama_chunk_to_events: a cut thought is released as reasoning at done
 
 let%test "ollama_chunk_to_events: text resuming after a think block stays well-formed"
   =
-  (* text -> <think> -> text: the resumed text rides the already-open text
-     block (no second start for an index that already carries payload — the
-     accumulator rejects start-after-payload), and the thinking segment gets
-     its own block. Cross-index delta order is tolerated: the accumulator
-     keys blocks by index and the chat bridge projects per lane. *)
+  (* Each channel transition opens a fresh index, preserving the original
+     order in both the live deltas and the final indexed block sequence. *)
   let state = create_openai_stream_state ~inline_reasoning:true () in
   let feed content =
     let line =
@@ -3820,7 +3817,7 @@ let%test "ollama_chunk_to_events: text resuming after a think block stays well-f
   in
   List.filter_map test_thinking_text events = [ "more" ]
   && List.filter_map test_reply_text events = [ "answer "; " tail" ]
-  && starts = [ 0, "text"; 1, "thinking" ]
+  && starts = [ 0, "text"; 1, "thinking"; 2, "text" ]
 ;;
 
 (* parse_sse_event regression: the previous implementation returned [None]

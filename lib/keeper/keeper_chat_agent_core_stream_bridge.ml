@@ -141,9 +141,10 @@ let remove_block bridge_state index =
     blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index
   }
 
-let occupy_non_tool_index bridge_state index =
+let occupy_non_tool_index ?channel bridge_state index =
   match stream_block_for_index bridge_state index with
-  | None -> replace_block bridge_state index (Occupied_non_tool_block None)
+  | None | Some (Occupied_non_tool_block None) ->
+      replace_block bridge_state index (Occupied_non_tool_block channel)
   | Some _ -> bridge_state
 
 let tool_start_is_replay existing tool =
@@ -799,7 +800,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       with
       | Some rejected -> rejected
       | None ->
-        let bridge_state = occupy_non_tool_index bridge_state index in
+        let bridge_state = occupy_non_tool_index ~channel:Public_text bridge_state index in
         { bridge_state =
             { bridge_state with
               current_message_has_text =
@@ -814,7 +815,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events =
              [ Agent_core_thinking_delta { index; delta = redact_text text } ]
          })
@@ -829,7 +830,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         let bridge_state = occupy_non_tool_index bridge_state index in
+         let bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
          let text =
            Agent_core.Types.reasoning_details_text ~reasoning_content ~details
          in
@@ -846,7 +847,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        | None ->
          (* Canonical history owns the opaque carrier; there is no new visible
             text or signature to publish on the chat surface. *)
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events = []
          })
   | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
@@ -856,7 +857,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events =
              [ Agent_core_thinking_signature_delta
                  { index; signature_bytes = String.length signature }
@@ -1156,7 +1157,11 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          conflict ?quarantined_occurrence
            ?tool_call_id:failed_tool_call_id
            "non-tool content block header reused an invalid index"
-       | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
+       | Some (Occupied_non_tool_block None) ->
+         { bridge_state = replace_block bridge_state index
+             (Occupied_non_tool_block (declared_channel content_type))
+         ; chat_events = [ block_start ] }
+       | Some (Occupied_non_tool_block (Some _) | Active_media _ | Invalid_media_block) ->
          { bridge_state; chat_events = [ block_start ] }
        | None ->
          let occurrence =

@@ -748,6 +748,34 @@ let test_voice_effect_defers_without_gating_local_reads () =
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "voice-gate-effect" in
   Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  (* Voice refuses an unconfigured provider before asking for approval. Give
+     this effect-boundary test a real configuration; Manual Gate must prevent
+     its loopback endpoint from being dispatched. Keep the config root isolated
+     from the runner's environment and restore the resolver afterward. *)
+  let config_root = Filename.concat base_path "voice-config" in
+  Unix.mkdir config_root 0o755;
+  let runtime_path = Filename.concat config_root "runtime.toml" in
+  Out_channel.with_open_text runtime_path (fun channel ->
+    output_string channel
+      {|[voice.tts]
+default_model = "gate-test-tts"
+default_voice = "gate-test-voice"
+[[voice.tts.endpoints]]
+id = "gate-test-tts"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:1/v1"
+|});
+  let previous_config_root = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" config_root;
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" (Option.value ~default:"" previous_config_root);
+      Config_dir_resolver.reset ())
+  @@ fun () ->
+  (match Voice_config.load_detailed () with
+   | Ok _ -> ()
+   | Error error -> fail ("voice fixture failed: " ^ Voice_config.load_error_to_string error));
   let config = Workspace.default_config base_path in
   (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
    | Ok _ -> ()

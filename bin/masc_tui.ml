@@ -14603,7 +14603,9 @@ and is loaded on demand through keeper_skill.
         if state.msx_open then
           if state.msx_menu_open then
             Masc_tui_msx.render_menu ~write:write_to_terminal state
-          else state.msx_last_poll_ns <- 0L
+          else
+            Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+              ~connection:state.connection_status state.msx_frame
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in

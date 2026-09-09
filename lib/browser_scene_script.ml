@@ -154,6 +154,27 @@ let runtime = {js|function browserScene(args) {
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
   }
+  // Some applications expose no visible landmarks. Their independently
+  // scrollable panes still provide observed, resolvable collection scopes.
+  // Use these only when the semantic outline is empty, never all divs.
+  if (view === 'regions' && root && !nodes.length && !truncated) {
+    for (const element of [root,...root.querySelectorAll('*')]) {
+      if (truncated) break;
+      if (!visible(element)) continue;
+      const style = css(element);
+      const scrollsY = ['auto','scroll'].includes(style.overflowY)
+        && element.scrollHeight > element.clientHeight;
+      const scrollsX = ['auto','scroll'].includes(style.overflowX)
+        && element.scrollWidth > element.clientWidth;
+      if (!scrollsY && !scrollsX) continue;
+      const rects = boxes(element.getClientRects(),element);
+      if (!rects.length) continue;
+      const heading = element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
+      const name = element.getAttribute('aria-label') || heading?.textContent
+        || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
+      describe('region',element,name,rects,{role:'scroll-area'});
+    }
+  }
   const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];
   while (stack.length && !truncated) {
     const node=stack.pop();

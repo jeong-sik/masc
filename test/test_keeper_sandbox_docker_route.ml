@@ -678,55 +678,9 @@ let check_typed_validation_error needle raw =
   Alcotest.(check bool) "validation error surfaced" true
     (response_mentions raw "error" needle)
 
-let test_execute_typed_env_wrapper_target_allowed () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute
-      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
-      ()
-  in
-  Alcotest.(check (option bool)) "typed env wrapper succeeds" (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option bool)) "typed response" (Some true)
-    (parse_bool_field raw "typed");
-  Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
-
-
-let test_execute_typed_repeated_executable_arg_is_preserved () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute
-      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~args:
-        (tool_execute_typed_exec_args
-           ~cwd:playground
-           ~argv:[ "echo"; "hello" ]
-           "echo")
-      ()
-  in
-  Alcotest.(check (option bool)) "repeated argv[0] remains valid" (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option bool)) "typed response" (Some true)
-    (parse_bool_field raw "typed");
-  Alcotest.(check int) "echo exit status" 0 (parse_status_exit_code raw);
-  Alcotest.(check bool)
-    "output preserves caller-authored argv"
-    true
-    (response_mentions raw "output" "echo hello")
-
-
 let test_execute_rejects_factory_profile_drift_in_every_direction () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta:docker ~playground ->
+  @@ fun ~config ~meta:docker ~playground:_ ->
   let microvm =
     { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
   in
@@ -734,6 +688,7 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
     { docker with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
   in
   let assert_mismatch ~factory_meta ~caller_meta =
+    let cwd = Keeper_sandbox.host_root_abs_of_meta ~config caller_meta in
     let factory = Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
     Fun.protect
       ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
@@ -744,11 +699,11 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
         ~turn_sandbox_factory:(Some factory)
         ~config
         ~meta:caller_meta
-        ~args:(tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[])
+        ~args:(tool_execute_typed_exec_args ~cwd "pwd" ~argv:[])
         ()
     in
     Alcotest.(check (option string))
-      "typed contract mismatch"
+      ("typed contract mismatch: " ^ raw)
       (Some "sandbox_profile_contract_mismatch")
       (parse_string_field raw "code")
   in
@@ -861,6 +816,81 @@ done\n\
 cat >/dev/null\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
+
+let test_execute_typed_env_wrapper_target_allowed () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
+      ()
+  in
+  Alcotest.(check (option bool)) "typed env wrapper succeeds" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
+
+
+let test_execute_typed_repeated_executable_arg_is_preserved () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~argv:[ "echo"; "hello" ]
+           "echo")
+      ()
+  in
+  Alcotest.(check (option bool)) "repeated argv[0] remains valid" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "echo exit status" 0 (parse_status_exit_code raw);
+  Alcotest.(check bool)
+    "output preserves caller-authored argv"
+    true
+    (response_mentions raw "output" "echo hello")
+
+
+let test_execute_git_status_readonly () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status"; "--short" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "git status succeeds"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed")
 
 let fake_docker_missing_image_script =
   "#!/bin/sh\n\
@@ -1166,26 +1196,6 @@ let test_execute_git_c_bare_worktrees_is_owned_by_cli () =
     (parse_bool_field raw "ok");
   Alcotest.(check bool) "opaque argv reaches the sandbox" true
     (Sys.file_exists log_path)
-
-let test_execute_git_status_readonly () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute
-      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-      ~turn_sandbox_factory:None
-      ~config
-      ~meta
-      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status"; "--short" ])
-      ()
-  in
-  Alcotest.(check (option bool)) "git status succeeds"
-    (Some true)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option bool)) "typed response" (Some true)
-    (parse_bool_field raw "typed")
 
 let test_execute_git_push_routes_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->

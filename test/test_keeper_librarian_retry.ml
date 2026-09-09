@@ -33,6 +33,7 @@ let input () : Librarian.input =
       Ids.Turn_ref.make
         ~trace_id:"trace-selection"
         ~absolute_turn:7
+  ; goal_context = Masc.Keeper_librarian.No_task
   ; keeper_instructions = "You are the retry-test keeper."
   ; current =
       Some
@@ -956,6 +957,30 @@ let test_constraint_category_excludes_self_imposed_scope () =
          "임의 제한과 구분해 원래 범위대로 보존하세요.")
 ;;
 
+let test_repo_template_carries_goal_criteria () =
+  let criterion = Masc.Goal_store.Criterion
+    { revision = "criterion-audio-1"; title = "Publish a playable audio essay"
+    ; metric = Some "independently reviewed audio essays"; target_value = Some "1" } in
+  let render context =
+    match Runtime.messages_for_librarian { (input ()) with goal_context = context } with
+    | Error detail -> failf "Goal context render failed: %s" detail
+    | Ok messages -> user_text_of_messages messages in
+  let rendered = render (Librarian.Task_goals
+    { task_id = "task-audio"; criteria = Ok ["goal-audio", Masc.Goal_phase.Executing, criterion] }) in
+  List.iter (fun text -> check bool ("model receives " ^ text) true
+    (String_util.contains_substring rendered text))
+    [ "task-audio"; "goal-audio"; "criterion-audio-1"
+    ; "independently reviewed audio essays"; "\"target_value\":\"1\"" ];
+  let unavailable = render (Librarian.Task_goals
+    { task_id = "task-audio"; criteria = Error "Goal source unreadable" }) in
+  check bool "read failure is visible" true
+    (String_util.contains_substring unavailable "Goal source unreadable");
+  check bool "stale criterion is not carried across inputs" false
+    (String_util.contains_substring unavailable "criterion-audio-1");
+  check bool "no task remains explicit" true
+    (String_util.contains_substring (render Librarian.No_task) "no_task")
+;;
+
 let test_repo_template_renders_keeper_instructions () =
   (match Runtime.messages_for_librarian (input ()) with
    | Error detail -> failf "librarian render failed: %s" detail
@@ -1269,6 +1294,8 @@ let () =
             test_prompt_input_and_rendered_prompt_share_the_same_window
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
+        ; test_case "goal criteria reach the librarian model input" `Quick
+            test_repo_template_carries_goal_criteria
         ; test_case "repo template carries counterpart memory contract" `Quick
             test_repo_template_carries_counterpart_memory_contract
         ; test_case "constraint category excludes self-imposed scope" `Quick

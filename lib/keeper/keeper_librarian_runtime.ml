@@ -689,6 +689,7 @@ let exact_input_payload
   =
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
+    ; "goal_context", Keeper_librarian.goal_context_to_json inp.goal_context
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "prompt", prompt_material_payload prompt_material
     ; ( "rendered_prompt_variables"

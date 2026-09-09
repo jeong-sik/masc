@@ -75,6 +75,17 @@ let with_ws name fn =
       Eio.Switch.run @@ fun sw ->
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta () in
+      (* Effective producer metadata reads operational settings from the
+         Keeper manifest; the runtime snapshot only carries runtime state. *)
+      let keepers_dir =
+        Filename.concat (Workspace.masc_root_dir config) "config/keepers"
+      in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_text
+        (Filename.concat keepers_dir (meta.name ^ ".toml"))
+        (fun channel ->
+          Out_channel.output_string channel
+            "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"none\"\n");
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail ("keeper meta fixture write failed: " ^ detail));
@@ -381,7 +392,9 @@ let test_completion_with_evidence_refs_succeeds () =
     check string "completion outcome" "success"
       (outcome_label result.KTE.disposition);
     check_submitted_evidence config (single_submission ())
-      [ "note:completion-trust-harness" ];
+      [ "note:completion-trust-harness"
+      ; "note:Implemented the deliverable and recorded completion evidence."
+      ];
     match await_authority_verdict ~clock config "task-001" with
     | Some { task_status = Masc_domain.Done { assignee; _ }; _ } ->
       check string "done assignee" meta.name assignee;
@@ -456,7 +469,8 @@ let test_rejection_delivery_then_changed_submission_completes () =
         second
       | ids -> failf "expected two submissions, got %d" (List.length ids)
     in
-    check_submitted_evidence config second_id revised_refs;
+    check_submitted_evidence config second_id
+      (revised_refs @ [ "note:Corrected the rejected evidence" ]);
     (match await_authority_verdict ~clock config "task-001" with
      | Some { task_status = Masc_domain.Done { assignee; _ }; _ } ->
        check string "approved task owner" meta.name assignee

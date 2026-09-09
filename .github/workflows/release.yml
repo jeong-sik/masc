@@ -146,9 +146,9 @@ jobs:
       - name: Keeper creation CLI exits after HTTP response
         run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
 
-      - name: Regenerate and compare tool contract goldens
+      - name: Tool contract truth
         if: matrix.arch == 'linux-x64'
-        run: opam exec -- dune build --release tool_parity_golden_check.stamp
+        run: opam exec -- dune exec --release test/test_tool_contract_truth.exe
 
       - name: Sandbox image CLI runtime routing
         run: python3 test/test_sandbox_image_cli.py _build/default/bin/main_eio.exe

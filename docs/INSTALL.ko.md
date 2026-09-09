@@ -391,3 +391,26 @@ bash /tmp/masc-install.sh --uninstall --purge-data \
 ```
 
 다른 경로를 가리키는 `.masc` 또는 배포 디렉터리 symlink는 링크 자체만 삭제합니다.
+
+### 기존 workspace의 파일을 읽을 수 없는 경우
+
+`masc setup`은 workspace 초기화, Docker 준비, 로그인, 서버 실행 전에 기존
+Keeper 설정과 Goal 상태를 현재 스키마로 읽을 수 있는지 확인합니다. 읽을 수
+없는 파일은 실제 경로와 파서 오류를 표시하고 기존 파일을 수정하지 않은 채
+중단합니다. 구버전 파일을 보존했다는 사실이 새 버전과의 호환성을 뜻하지는
+않습니다.
+
+다음 중 하나를 선택하세요.
+
+- 별도로 시작하려면 사용하지 않는 디렉터리를 골라
+  앞에서 받은 검증된 installer로
+  `bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-new-workspace" --wizard`를
+  실행해 runtime을 선택합니다. 이어서
+  `masc setup --base-path "$HOME/masc-new-workspace"`를 실행합니다. 원래 workspace는 그대로 남습니다.
+- 원래 workspace를 검토하려면 setup을 중단하고 표시된 파일과
+  `CHANGELOG.md`의 `Fresh state required` 항목을 확인합니다. 기존 로그는
+  원래 workspace의 `.masc/logs`에 있습니다. 사용자가 의도적으로 파일을
+  수정한 뒤에만 같은 workspace에서 setup을 다시 실행하세요.
+
+Setup은 예전 Goal 파일을 삭제하거나 복구 사본을 덮어쓰지 않고, Keeper 설정을
+자동 변환하지도 않습니다. 중단한 workspace가 준비됐다고 표시하지 않습니다.

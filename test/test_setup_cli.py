@@ -20,6 +20,36 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_old_state_is_reported_before_any_setup_changes(self):
+        old_goal = {'id':'old-goal','title':'Old goal','phase':'executing','priority':3,
+                    'created_at':'2020-01-01T00:00:00Z','updated_at':'2020-01-01T00:00:00Z'}
+        states = [
+            ('config/keepers/imp.toml', '[keeper]\nautoboot_enabled = true\n'),
+            ('goals.json', json.dumps({'version':1,'updated_at':'2020-01-01T00:00:00Z','goals':[old_goal]})),
+            ('goal_verifications.json', json.dumps({'version':1,'updated_at':'2020-01-01T00:00:00Z',
+                'records':[{'goal_id':'old-goal','updated_at':'2020-01-01T00:00:00Z','completion':{'state':'proven'}}]})),
+            ('goal-verification-runs.jsonl', json.dumps({'event':'register','id':'old-run','started_at':1,
+                'registration':{'goal_id':'old-goal','review_kind':'proof','authority_actor':'old'}})+'\n'),
+            ('goals.json.last-good', json.dumps({'version':1,'updated_at':'2020-01-01T00:00:00Z','goals':[old_goal]})),
+        ]
+        for relative, content in states:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory(prefix='masc-setup-preflight-') as tmp:
+                base=Path(tmp);path=base/'.masc'/relative;path.parent.mkdir(parents=True);path.write_text(content)
+                def snapshot():
+                    return {str(p.relative_to(base)):(p.read_bytes(),p.stat().st_ino,p.stat().st_mode,p.stat().st_mtime_ns)
+                            for p in base.rglob('*') if p.is_file()}
+                before=snapshot()
+                result=subprocess.run([BINARY,'setup','--base-path',str(base),'--no-tui'],
+                    env={'PATH':'/usr/bin:/bin','HOME':tmp},capture_output=True,text=True,timeout=30)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn(str(path),result.stderr)
+                self.assertIn('choose_new_workspace',result.stderr)
+                self.assertIn('return_without_changes',result.stderr)
+                self.assertIn('No workspace files were changed',result.stderr)
+                self.assertEqual(snapshot(),before)
+                self.assertFalse((base/'.masc/auth').exists())
+                self.assertFalse((base/'.masc/config/runtime.toml').exists())
+
     def scenario(self, foreign=False, missing_key=False, stale_token=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)

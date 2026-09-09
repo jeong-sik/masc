@@ -458,3 +458,25 @@ bash /tmp/masc-install.sh --uninstall --purge-data \
 
 A `.masc` or distribution-directory symlink that points elsewhere has only
 the link itself deleted.
+
+### Existing workspace needs attention
+
+`masc setup` checks existing Keeper profiles and Goal state before initializing the
+workspace, preparing Docker, signing in, or starting a server. If a file cannot
+be read with the current schema, setup prints its actual path and decoder error
+and stops without rewriting the workspace. A preserved file from an older
+release is not proof that the new version can read it.
+
+Choose one of these paths:
+
+- Start separately: choose an unused directory and run
+  `bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-new-workspace" --wizard`
+  with the verified installer downloaded above. After selecting your runtime, run
+  `masc setup --base-path "$HOME/masc-new-workspace"`. Your original workspace remains available for review.
+- Return without changes: stop setup, keep the original files, and review the
+  reported paths with the `Fresh state required` entry in `CHANGELOG.md`.
+  Existing logs are under the original workspace's `.masc/logs` directory.
+  Rerun setup on that workspace only after you have intentionally repaired it.
+
+Setup does not delete old Goal files, restore recovery mirrors, or silently
+convert Keeper settings. It does not claim readiness for the stopped workspace.

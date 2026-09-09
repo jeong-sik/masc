@@ -209,6 +209,8 @@ and goal_of_yojson = function
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 
+let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
+
 type rollup = {
   active_count : int;
   verifying_count : int;

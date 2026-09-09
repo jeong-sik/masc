@@ -958,7 +958,7 @@ let test_constraint_category_excludes_self_imposed_scope () =
 ;;
 
 let test_repo_template_carries_goal_criteria () =
-  let criterion = Masc.Goal_store.Criterion
+  let criterion = Goal_store.Criterion
     { revision = "criterion-audio-1"; title = "Publish a playable audio essay"
     ; metric = Some "independently reviewed audio essays"; target_value = Some "1" } in
   let render context =
@@ -966,7 +966,7 @@ let test_repo_template_carries_goal_criteria () =
     | Error detail -> failf "Goal context render failed: %s" detail
     | Ok messages -> user_text_of_messages messages in
   let rendered = render (Librarian.Task_goals
-    { task_id = "task-audio"; criteria = Ok ["goal-audio", Masc.Goal_phase.Executing, criterion] }) in
+    { task_id = "task-audio"; criteria = Ok ["goal-audio", Goal_phase.Executing, criterion] }) in
   List.iter (fun text -> check bool ("model receives " ^ text) true
     (String_util.contains_substring rendered text))
     [ "task-audio"; "goal-audio"; "criterion-audio-1"

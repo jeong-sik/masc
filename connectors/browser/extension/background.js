@@ -1,5 +1,14 @@
 function browserScene(args) {
-  const key = Symbol.for('masc.browser.scene.refs.v2');
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    if (typeof raw !== 'string' || (!element.hasAttribute('href')
+        && !element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href'))) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v3');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
   if (args.mode === 'resolve' || args.mode === 'resolve_link') {
@@ -10,7 +19,7 @@ function browserScene(args) {
       throw new Error('scene_node_detached');
     if (args.mode === 'resolve_link') {
       if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
-      if (element.href !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
     }
     return element;
   }
@@ -32,7 +41,7 @@ function browserScene(args) {
   }
   const nodeId = element => {
     let id = state.ids.get(element);
-    const href = element.localName === 'a' && element.hasAttribute('href') ? element.href : null;
+    const href = linkHref(element);
     // A recycled anchor gets a new observation reference. Retire its old
     // reference so connected virtualized anchors cannot accumulate revisions.
     if (!id || (href !== null && state.links.get(id) !== href)) {
@@ -88,6 +97,22 @@ function browserScene(args) {
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
   };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -135,14 +160,14 @@ function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=node.matches('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || tag;
+      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
       describe('control',node,label,boxes(node.getClientRects(),node),{
-        ...(tag === 'a' && node.hasAttribute('href') ? {href:node.href} : {}),
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;
@@ -150,6 +175,8 @@ function browserScene(args) {
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
       describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
         boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
       continue;
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
@@ -319,15 +346,22 @@ function interactInPage(args) {
   const before = location.href;
   if (args.action === "follow_link") {
     const element = browserScene({...args,mode:'resolve_link'});
-    if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
+    if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
       throw new Error('follow_link_requires_anchor');
     const style = getComputedStyle(element);
     if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
       throw new Error('element_not_visible');
     const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
-    if (target !== '' && target.toLowerCase() !== '_self') throw new Error('follow_link_requires_same_tab');
+    const normalizedTarget = target.toLowerCase();
+    const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
+      || (window === window.top && (normalizedTarget === '_top' || normalizedTarget === '_parent'));
+    if (!sameTab) throw new Error('follow_link_requires_same_tab');
+    const rel = (element.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.includes('noreferrer') || element.hasAttribute('referrerpolicy'))
+      throw new Error('follow_link_referrer_policy_unsupported');
     if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
-    const destination = new URL(element.href, location.href);
+    const rawHref = typeof element.href === 'string' ? element.href : element.href.baseVal;
+    const destination = new URL(rawHref, element.baseURI || document.baseURI || location.href);
     if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
     const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
       navigationSource:{url:before,documentId:args.documentId},
@@ -473,8 +507,18 @@ function interactInPage(args) {
 
 
 async function pageInteract(args) {
-  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  // Only this read-only preflight can establish that injection never began.
+  // A later executeScript rejection can lose a result after a page effect.
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+    const tab = await browser.tabs.get(args.tabId);
+    if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
+  } catch (cause) {
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = false;
+    throw error;
+  }
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",

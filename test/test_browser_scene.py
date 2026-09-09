@@ -193,15 +193,44 @@ try:
  js("document.body.innerHTML='<a href=\"/redirect\">Canonical channel link</a>';")
  redirect_source=observe();redirect_link=control(redirect_source,'Canonical channel link')
  redirect_receipt=act(redirect_source,redirect_link,action='follow_link')
- first_redirect_observation=observe()
- # Reobserve URL and pixels after the initial scene; none of these receipts
- # alone declares that the requested application content has been verified.
- call('GET','/session/'+sid+'/url')
- call('GET','/session/'+sid+'/screenshot')
- redirected=observe()
+ # Test-only bounded observation: never replay the navigation or use a
+ # screenshot as a loading barrier. Keep the first pending result/error.
+ redirect_deadline=time.monotonic()+10
+ first_redirect_observation=None;redirect_attempts=0;redirect_errors=[]
+ while True:
+  redirect_attempts+=1
+  try:
+   redirected=observe()
+   if first_redirect_observation is None:first_redirect_observation=redirected
+   if (redirected['url']==f'http://127.0.0.1:{server.server_port}/canonical'
+       and redirected['documentId']!=redirect_source['documentId']
+       and any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes'])):break
+  except RuntimeError as error:
+   redirect_errors.append(str(error))
+  if time.monotonic()>=redirect_deadline:
+   raise AssertionError({'redirect_wait_exhausted':True,'attempts':redirect_attempts,'first_observation':first_redirect_observation,'errors':redirect_errors})
+  time.sleep(.05)
+ (a.out/'redirect-stable.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
  check('HTTP302 final observation differs from original href',redirect_receipt['destinationUrl'].endswith('/redirect') and redirected['url'].endswith('/canonical'))
  check('redirect recovery reads actual destination content',any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes']))
- (a.out/'redirect.json').write_text(json.dumps({'follow':redirect_receipt,'first_observed_url':first_redirect_observation['url'],'observed_url':redirected['url'],'title':redirected['title'],'application_verified':False},ensure_ascii=False,indent=2))
+ (a.out/'redirect.json').write_text(json.dumps({'follow':redirect_receipt,'first_observed_url':first_redirect_observation['url'],'observation_attempts':redirect_attempts,'observation_errors':redirect_errors,'new_document_observed':redirected['documentId']!=redirect_source['documentId'],'observed_url':redirected['url'],'title':redirected['title'],'application_verified':False},ensure_ascii=False,indent=2))
+ js("""document.body.innerHTML='<a id=policy href="#policy" rel=noreferrer>Policy link</a><svg width=300 height=80><a id=vector href="#vector"><text x=10 y=40>Vector link<tspan style="display:none">HIDDEN_LABEL</tspan><tspan style="visibility:hidden">INVISIBLE_LABEL</tspan></text></a></svg>';""")
+ policy_scene=observe();policy_node=control(policy_scene,'Policy link')
+ for attribute,value in [('rel','noreferrer'),('referrerpolicy','no-referrer')]:
+  js("const a=document.querySelector('#policy');a.removeAttribute('rel');a.removeAttribute('referrerpolicy');a.setAttribute(arguments[0],arguments[1]);",[attribute,value])
+  try:act(policy_scene,policy_node,action='follow_link');raise AssertionError('link policy ignored')
+  except RuntimeError as e:check('explicit '+attribute+' rejects before follow','follow_link_referrer_policy_unsupported' in str(e) and js('return location.href;')==policy_scene['url'])
+ vector_scene=observe();vector=control(vector_scene,'Vector link')
+ check('natural SVG link label includes visible text only',vector['text']=='Vector link')
+ check('SVG anchor exposes normalized observed absolute href',isinstance(vector['href'],str) and vector['href'].endswith('#vector'))
+ js("document.querySelector('#vector').setAttribute('href','#recycled-vector');")
+ try:act(vector_scene,vector,action='follow_link');raise AssertionError('SVG animated href repointed')
+ except RuntimeError as e:check('SVG animated href mutation rejects against string pin','scene_link_destination_changed' in str(e))
+ for target in ['_top','_parent']:
+  js("document.querySelector('#vector').setAttribute('target',arguments[0]);",[target])
+  vector_scene=observe();vector=control(vector_scene,'Vector link')
+  receipt=act(vector_scene,vector,action='follow_link')
+  check('SVG '+target+' in top document follows same tab',js('return location.href;')==receipt['destinationUrl'])
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

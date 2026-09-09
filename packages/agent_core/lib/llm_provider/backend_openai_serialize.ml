@@ -646,18 +646,6 @@ let project_history config messages =
       messages
 ;;
 
-let dialect_history_projection
-      ?assistant_tool_content_format
-      ~replay_capability
-      dialect
-      messages
-  =
-  match typed_history_projection ~replay_capability dialect messages with
-  | Error _ as error -> error
-  | Ok projection ->
-    Ok (render_history_projection ?assistant_tool_content_format dialect projection)
-;;
-
 let dialect_messages_of_history
       ?assistant_tool_content_format
       ~replay_capability

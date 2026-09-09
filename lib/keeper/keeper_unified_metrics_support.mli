@@ -24,12 +24,6 @@ val classify_usage_trust :
   usage:Agent_core.Types.api_usage ->
   usage_trust
 
-val estimate_usage_cost_usd :
-  Agent_core.Types.api_usage ->
-  float
-(** Return the provider-reported value verbatim. Missing cost uses the numeric
-    aggregate identity [0.0]; anomaly provenance is emitted separately. *)
-
 val usage_trust_to_string : usage_trust -> string
 val usage_trust_reasons : usage_trust -> string list
 val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list

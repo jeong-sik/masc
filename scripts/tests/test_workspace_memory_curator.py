@@ -5,6 +5,7 @@ import http.server
 import json
 from pathlib import Path
 import subprocess
+import socket
 import sys
 import tempfile
 import threading
@@ -14,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class CuratorScenario(unittest.TestCase):
-    def run_curator(self, proposal, context=None, response_fields=None, raw_response=None, http_status=200, live_status=None, live_body=None):
+    def run_curator(self, proposal, context=None, response_fields=None, raw_response=None, http_status=200, live_status=None, live_body=None, publish=False, publish_status=200, wrong_readback=False):
         observed = []
+        published = {}
         secret = 'test-only-private-bearer'
         source_bytes = (ROOT / 'docs/evidence/2026-09-10-workspace-memory-curator/input.json').read_bytes() if live_body is None else live_body
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -24,6 +26,11 @@ class CuratorScenario(unittest.TestCase):
 
             def do_GET(self):
                 observed.append((self.path, self.headers.get('Authorization')))
+                if self.path.startswith('/api/v1/dashboard/workspace-memory-proposals?id='):
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'id': 'a' * 64, 'proposal': {} if wrong_readback else published}).encode())
+                    return
                 if self.path == '/api/v1/dashboard/workspace-memory-context':
                     self.send_response(live_status)
                     if live_status == 302:
@@ -39,6 +46,16 @@ class CuratorScenario(unittest.TestCase):
             def do_POST(self):
                 observed.append((self.path, self.headers.get('Authorization')))
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path == '/api/v1/dashboard/workspace-memory-proposals':
+                    published.update(request)
+                    if publish_status is None:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        self.connection.close()
+                        return
+                    self.send_response(publish_status)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'id': 'a' * 64}).encode())
+                    return
                 assert request['model'] == 'local-test'
                 assert request['stream'] is True
                 assert request['format']['required'] == ['shared_claims', 'conflicts', 'excluded']
@@ -62,8 +79,12 @@ class CuratorScenario(unittest.TestCase):
                 source_args = ['--context', str(context_path)] if live_status is None else [
                     '--context-url', f'http://127.0.0.1:{server.server_port}/api/v1/dashboard/workspace-memory-context',
                     '--token-file', str(credential)]
+                publication_credential = Path(directory) / 'publication-token'
+                publication_credential.write_text('publication-only-private-bearer')
+                publish_args = ['--publish-url', f'http://127.0.0.1:{server.server_port}/api/v1/dashboard/workspace-memory-proposals',
+                    '--publish-token-file', str(publication_credential)] if publish else []
                 result = subprocess.run([sys.executable, str(ROOT / 'scripts/curate-workspace-memory.py'),
-                    *source_args,
+                    *source_args, *publish_args,
                     '--endpoint', f'http://127.0.0.1:{server.server_port}', '--model', 'local-test',
                     '--output', str(output)], capture_output=True, text=True)
                 receipt = json.loads((output / 'receipt.json').read_text())
@@ -76,6 +97,36 @@ class CuratorScenario(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+    def test_publication_reads_back_exact_proposal_and_scopes_credentials(self):
+        proposal = {'shared_claims': [], 'conflicts': [], 'excluded': [
+            {'source_id': f's{i}', 'reason': 'Review needed'} for i in range(1, 5)]}
+        result, receipt, artifact, _ = self.run_curator(proposal, live_status=200, publish=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(receipt['publication']['status'], 'readback_verified')
+        self.assertTrue(receipt['runtime_mutation'])
+        self.assertEqual(json.loads(self.captures['publish-readback.response.raw'])['proposal'], artifact)
+        for path, auth in self.observed:
+            if path.startswith('/api/v1/dashboard/workspace-memory-proposals'):
+                self.assertEqual(auth, 'Bearer publication-only-private-bearer')
+            elif path == '/api/v1/dashboard/workspace-memory-context':
+                self.assertEqual(auth, 'Bearer test-only-private-bearer')
+            else:
+                self.assertIsNone(auth)
+        self.assertTrue(all(b'publication-only-private-bearer' not in body for body in self.captures.values()))
+
+    def test_publication_failure_keeps_local_proposal_and_uncertain_remote_effect(self):
+        proposal = {'shared_claims': [], 'conflicts': [], 'excluded': [
+            {'source_id': f's{i}', 'reason': 'Review needed'} for i in range(1, 5)]}
+        for status, wrong in [(401, False), (200, True), (None, False)]:
+            with self.subTest(status=status, wrong_readback=wrong):
+                result, receipt, artifact, _ = self.run_curator(proposal, publish=True,
+                    publish_status=status, wrong_readback=wrong)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(artifact['proposal'], proposal)
+                self.assertEqual(receipt['status'], 'failed')
+                self.assertIsNone(receipt['runtime_mutation'])
+                self.assertNotEqual(receipt['publication']['status'], 'readback_verified')
 
     def test_authenticated_context_is_captured_and_credential_stays_at_source(self):
         proposal = {'shared_claims': [], 'conflicts': [], 'excluded': [

@@ -4,7 +4,8 @@
 # ///
 """Propose a shared memory artifact from a captured workspace context using local Ollama.
 
-Run with uv run. This writes a reviewable proposal, never Keeper memory or live
+Run with uv run. This produces a reviewable proposal and can optionally publish
+it to the MASC proposal store. It never promotes Keeper memory or changes live
 configuration. Every supplied claim must have an explicit disposition.
 """
 import argparse
@@ -118,6 +119,8 @@ def main():
     parser.add_argument('--endpoint', required=True)
     parser.add_argument('--model', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--publish-url', help='Local MASC workspace-memory-proposals endpoint')
+    parser.add_argument('--publish-token-file', type=Path)
     args = parser.parse_args()
     endpoint = urllib.parse.urlsplit(args.endpoint)
     if endpoint.hostname != 'localhost' and not ipaddress.ip_address(endpoint.hostname or '').is_loopback:
@@ -134,6 +137,16 @@ def main():
             raise ValueError('Provide the local MASC workspace-memory-context endpoint without URL credentials')
         if source_url.hostname != 'localhost' and not ipaddress.ip_address(source_url.hostname or '').is_loopback:
             raise ValueError('Workspace context source must be loopback')
+    if args.publish_token_file and not args.publish_url:
+        parser.error('--publish-token-file requires --publish-url')
+    if args.publish_url:
+        destination = urllib.parse.urlsplit(args.publish_url)
+        if (destination.scheme not in ('http', 'https') or destination.username or destination.password
+                or destination.query or destination.fragment
+                or destination.path != '/api/v1/dashboard/workspace-memory-proposals'):
+            raise ValueError('Provide the local MASC workspace-memory-proposals endpoint without URL credentials')
+        if destination.hostname != 'localhost' and not ipaddress.ip_address(destination.hostname or '').is_loopback:
+            raise ValueError('Proposal destination must be loopback')
     args.output.mkdir(parents=True, exist_ok=False)
     def save(name, value):
         target = args.output / name
@@ -257,10 +270,51 @@ def main():
             raise ValueError('Model response is not terminal')
         proposal = json.loads(response['message']['content'])
         validate_proposal(proposal, sources)
-        save('proposal.json', {'status': 'model_proposed', 'context_sha256': receipt['context_sha256'],
-            'sources': sources, 'gaps': gaps, 'snapshots': snapshots, 'proposal': proposal})
+        artifact = {'status': 'model_proposed', 'context_sha256': receipt['context_sha256'],
+            'sources': sources, 'gaps': gaps, 'snapshots': snapshots, 'proposal': proposal}
+        save('proposal.json', artifact)
         receipt.update(status='proposed', source_count=len(sources), model_digest=selected[0].get('digest'),
             prompt_eval_count=response.get('prompt_eval_count'), eval_count=response.get('eval_count'))
+        if args.publish_url:
+            token = args.publish_token_file.read_text().strip() if args.publish_token_file else None
+            if args.publish_token_file and (not token or any(character.isspace() for character in token)):
+                raise ValueError('Publication token file must contain one nonblank bearer credential')
+            headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+            if token:
+                headers['Authorization'] = 'Bearer ' + token
+            receipt['publication'] = {'status': 'attempted', 'url': args.publish_url}
+            # A transport failure after POST cannot prove that no write happened.
+            receipt['runtime_mutation'] = None
+            save('receipt.json', receipt)
+            def publication_request(url, name, payload=None):
+                request = urllib.request.Request(url, headers=headers,
+                    data=canonical(payload).encode() if payload is not None else None)
+                try:
+                    reply = opener.open(request)
+                except urllib.error.HTTPError as error:
+                    reply = error
+                with reply:
+                    raw = reply.read()
+                    if token and token.encode() in raw:
+                        save(name + '.http.json', {'status': reply.status, 'body': 'withheld_credential_echo'})
+                        raise ValueError('Publication response echoed credential bytes; body withheld')
+                    (args.output / (name + '.response.raw')).write_bytes(raw)
+                    save(name + '.http.json', {'status': reply.status, 'url': url})
+                    if not 200 <= reply.status < 300:
+                        raise ValueError(f'Publication {name} returned HTTP {reply.status}')
+                    return json.loads(raw)
+            published = publication_request(args.publish_url, 'publish', artifact)
+            proposal_id = published['id']
+            if (not isinstance(proposal_id, str) or len(proposal_id) != 64
+                    or any(c not in '0123456789abcdef' for c in proposal_id)):
+                raise ValueError('Publication returned an invalid proposal id')
+            receipt['publication'].update(status='acknowledged', id=proposal_id)
+            save('receipt.json', receipt)
+            readback = publication_request(args.publish_url + '?id=' + proposal_id, 'publish-readback')
+            if readback.get('id') != proposal_id or canonical(readback.get('proposal')) != canonical(artifact):
+                raise ValueError('Publication readback differs from the saved proposal')
+            receipt['publication']['status'] = 'readback_verified'
+            receipt['runtime_mutation'] = True
     except Exception as error:
         receipt.update(status='failed', error=str(error))
         raise

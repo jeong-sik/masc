@@ -979,6 +979,27 @@ let commit_verdict_r
                  ~task_id
                  ~status:new_status
                  ~module_name:"commit_verdict_r");
+           (* Both approved completion and approved cancellation reconcile the
+              committed terminal state with its producer. *)
+           if Masc_domain.task_status_is_terminal new_status
+              && not (Masc_domain.task_status_is_terminal task.task_status)
+           then
+              run_post_commit "terminal_reconciliation" (fun () ->
+                match
+                  (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+                    config
+                    ~agent_name:producer
+                    ~task_id
+                with
+                | Workspace_hooks.Task_terminal_delivered -> ()
+                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+                  Log.TaskState.error
+                    "task verdict terminal reconciliation degraded task_id=%s \
+                     producer=%s kind=%s detail=%s"
+                    task_id
+                    producer
+                    kind
+                    detail);
            (* Completion hooks key off the RESULT, and the completer is the
               producer — never the authority, which is not an agent and owns no
               task. *)
@@ -1020,22 +1041,6 @@ let commit_verdict_r
                      | `Assoc fields ->
                        `Assoc (fields @ [ "authority", `String authority_actor ])
                      | other -> other));
-              run_post_commit "terminal_reconciliation" (fun () ->
-                match
-                  (Atomic.get Workspace_hooks.task_terminal_committed_fn)
-                    config
-                    ~agent_name:assignee
-                    ~task_id
-                with
-                | Workspace_hooks.Task_terminal_delivered -> ()
-                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
-                  Log.TaskState.error
-                    "task verdict terminal reconciliation degraded task_id=%s \
-                     producer=%s kind=%s detail=%s"
-                    task_id
-                    assignee
-                    kind
-                    detail);
               run_post_commit "done_hooks" (fun () ->
                 Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
               (* Completion metrics must fire on this path too. They used to be

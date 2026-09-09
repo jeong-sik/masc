@@ -5432,10 +5432,13 @@
  (modules test_keeper_supervisor_hitl_announcements)
  (libraries alcotest masc))
 
-(executable
+(test
  (name test_docker_observe_transport)
  (modules test_docker_observe_transport)
- (libraries masc_test_deps exec_ssh_protocol eio eio_main))
+ (libraries masc_test_deps exec_ssh_protocol eio eio_main)
+ (deps test_docker_observe_transport.py)
+ (action
+  (run python3 %{dep:test_docker_observe_transport.py} %{test})))
 
 (rule
  (alias runtest-test_docker_observe_transport)

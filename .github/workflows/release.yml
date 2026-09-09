@@ -140,6 +140,42 @@ jobs:
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
 
+      # Manual branch runs also serve isolated runtime/TUI experiments. Keep
+      # their compiled bytes even when a later unrelated release check fails.
+      # The release job downloads only masc-*; these are never release assets.
+      - name: Record runtime probe binaries
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PROBE_COMMIT: ${{ github.sha }}
+          PROBE_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          out = Path('runtime-probe')
+          out.mkdir()
+          files = {}
+          for name in ('main_eio', 'masc_tui', 'masc_browser_host'):
+              source = Path('_build/default/bin') / (name + '.exe')
+              target = out / (name + '.exe')
+              shutil.copy2(source, target)
+              files[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
+          (out / 'manifest.json').write_text(json.dumps({
+              'commit': os.environ['PROBE_COMMIT'], 'arch': os.environ['PROBE_ARCH'],
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'release_validated': False, 'sha256': files,
+          }, indent=2) + '\n')
+          PYCODE
+
+      - name: Upload runtime probe binaries
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: runtime-probe/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Runtime setup validates each supported connection
         run: python3 test/test_install_runtime_setup.py --binary _build/default/bin/main_eio.exe
 

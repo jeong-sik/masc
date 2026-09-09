@@ -1412,7 +1412,7 @@ let run_turn
                       ~context_injector
                       ~context:shared_context
                       ~terminal_effect_state:s.terminal_effect_state
-                      ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+                      ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint

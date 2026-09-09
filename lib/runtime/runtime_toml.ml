@@ -1134,7 +1134,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       typed_find_or "a boolean" path tbl "tools-support" Otoml.get_boolean ~default:false
     in
     let thinking_support_result =
-      typed_find_or "a boolean" path tbl "thinking-support" Otoml.get_boolean ~default:false
+      typed_find "a boolean" path tbl "thinking-support" Otoml.get_boolean
     in
     let preserve_thinking_result =
       typed_find "a boolean" path tbl "preserve-thinking" Otoml.get_boolean

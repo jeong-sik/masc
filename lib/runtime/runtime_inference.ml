@@ -50,9 +50,9 @@ type seed = {
     This keeps Qwen3.6 thinking on even if the legacy global default remains
     false.
 
-    [None] argument means the runtime id is not in the loaded config (unknown
-    id, or before [Runtime.init_default]): no per-model signal, leave the
-    caller policy unchanged.
+    [None] means the model leaves the policy unset, or the runtime id is not
+    loaded. Preserve that absence so provider defaults remain authoritative
+    unless the caller explicitly configured a thinking request.
 
     Thinking is a toggle here, not a quantity: no configuration carries a
     token budget any more. *)

@@ -70,6 +70,6 @@ describe('real Goal confirmation component through API decoding', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
     api.post.mockRejectedValue(new Error('stop'))
     fireEvent.click(screen.getByText('이 증명으로 목표 완료 확인'))
-    expect(api.post.mock.calls[0][1].goal_id).toBe('goal-2')
+    expect(api.post.mock.calls[0]?.[1].goal_id).toBe('goal-2')
   })
 })

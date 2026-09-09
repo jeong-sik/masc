@@ -197,19 +197,11 @@ let advance config receipt state =
 
 let finish config receipt ~cleanup =
   let* () = require_configuration_only config receipt.keeper_name in
-  (* [Removed] is terminal, so replaying it answers from the receipt without
-     reading the source at all. Reading it first made the reply depend on what
-     is at that path now: normally nothing, which fell through to [Conflict]
-     and reported a finished removal as a failed retry, and a same-name
-     manifest created since would change the answer again. *)
-  let* () = match receipt.state with
-    | Removed -> Ok ()
-    | Prepared | Cleanup_required _ | Artifacts_removed ->
-      let* source = read_regular receipt.source_path in
-      (match source, receipt.state with
-       | None, Artifacts_removed -> Ok ()
-       | Some source, _ when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
-       | _ -> Error (Conflict "configuration source changed since deletion was requested")) in
+  let* source = read_regular receipt.source_path in
+  let* () = match source, receipt.state with
+    | None, Artifacts_removed -> Ok ()
+    | Some source, _ when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
+    | _ -> Error (Conflict "configuration source changed since deletion was requested") in
   let* receipt = match receipt.state with
     | Prepared | Cleanup_required _ ->
       (match protect (fun () -> cleanup receipt.keeper_name |> Result.map_error (fun detail -> Storage_error detail)) with
@@ -243,7 +235,17 @@ let submit ~config ~keeper_name ~actor ~cleanup =
       let source_path = manifest_path config keeper_name in
       let* source = read_regular source_path in
       match source with
-      | None -> Error (Invalid_request "Keeper configuration does not exist")
+      | None ->
+        (* No manifest and nothing pending: either this removal already
+           finished and the client is repeating a submission whose response it
+           lost, or there was never a configuration here. Answer the finished
+           one with its own receipt instead of "does not exist", which read as
+           a failure for work that succeeded. *)
+        (match List.filter (fun receipt -> receipt.state = Removed) inventory.receipts with
+         | [ receipt ] -> Ok receipt
+         | [] -> Error (Invalid_request "Keeper configuration does not exist")
+         | _ :: _ :: _ ->
+           Error (Conflict "multiple completed configuration removals require reconciliation"))
       | Some bytes ->
         let now = Masc_domain.now_iso () in
         let* receipt = save config {operation_id=Id.generate (); keeper_name; actor;

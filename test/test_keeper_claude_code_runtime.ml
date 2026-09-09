@@ -90,12 +90,18 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = fa
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
-  output_string output "if [ \"${1-}\" = auth ]; then\n";
+  (* The client puts its flags ahead of the subcommand, so the probe arrives
+     as `--setting-sources=<layers> auth status --json`. Matching the
+     subcommand pair anywhere in argv keeps this fixture answering the probe
+     when a flag is added or moved; pinning a position sends the probe into
+     the turn body instead, which answers it with turn output and reports
+     nothing. *)
+  output_string output "case \" $* \" in *\" auth status \"*)\n";
   output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
   if remove_after_auth
   then output_string output "  rm -- \"$0\"\n";
   output_string output "  exit 0\n";
-  output_string output "fi\n";
+  output_string output "  ;;\nesac\n";
   output_string output "session=''\n";
   output_string output "for arg in \"$@\"; do\n";
   output_string output "  case \"$arg\" in\n";
@@ -159,10 +165,10 @@ let with_fixture_sequence
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
-  output_string output "if [ \"${1-}\" = auth ]; then\n";
+  output_string output "case \" $* \" in *\" auth status \"*)\n";
   output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
   output_string output "  exit 0\n";
-  output_string output "fi\n";
+  output_string output "  ;;\nesac\n";
   output_string output "count=0\n";
   output_string output
     ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"

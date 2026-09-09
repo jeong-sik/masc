@@ -2,10 +2,11 @@ import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
 import { afterEach, expect, it, vi } from 'vitest'
 import { get } from '../../api/core'
+import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
 vi.mock('../../api/core', () => ({ get: vi.fn() }))
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
   models: [{ model_id: 'runtime_lane_example', success_count: 8, error_count: 2,
@@ -70,4 +71,66 @@ it('requests the chosen period and ignores superseded responses', async () => {
   await act(async () => { finishOld({ window_minutes: 60, models: [] }) })
   expect(view.getByText(/서버 집계 창:/).textContent).toContain('30분')
   expect(view.getByRole('table')).toBeTruthy()
+})
+
+
+const pending = { window_minutes: 60, bucket_minutes: 0, total_entries: 0,
+  total_error_entries: 0, cost_ledger_read: { state: 'pending' }, latency_buckets: [], models: [] }
+
+it('follows the real pending cache envelope through to available without operator refresh', async () => {
+  vi.useFakeTimers()
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  vi.mocked(get).mockResolvedValueOnce(pending).mockResolvedValueOnce(response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(view.getByRole('status').textContent).toContain('서버가 첫 집계를 준비')
+  expect(view.queryByText(/초기 캐시 응답/)).toBeNull()
+  expect(view.queryByText('비용 원장 읽기 상태 미보고')).toBeNull()
+  await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS) })
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(view.getByText('runtime_lane_example')).toBeTruthy()
+  expect(view.queryByRole('status')).toBeNull()
+})
+
+it('stops a pending refresh lifecycle when unmounted', async () => {
+  vi.useFakeTimers()
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  vi.mocked(get).mockResolvedValue(pending)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  const signal = vi.mocked(get).mock.calls[0]![1]!.signal!
+  view.unmount()
+  expect(signal.aborted).toBe(true)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS)
+    window.dispatchEvent(new Event('focus'))
+  })
+  expect(get).toHaveBeenCalledTimes(1)
+})
+
+it('aborts the old pending window and prevents a late follow-up from replacing the new window', async () => {
+  vi.useFakeTimers()
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  let finishOld!: (value: unknown) => void
+  vi.mocked(get).mockResolvedValueOnce(pending)
+    .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    .mockResolvedValueOnce({ ...response, window_minutes: 30 })
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_PANEL_REFRESH_MS) })
+  const signal = vi.mocked(get).mock.calls[1]![1]!.signal!
+  await act(async () => { fireEvent.change(view.getByLabelText('집계 요청 기간'), { target: { value: '30' } }) })
+  expect(signal.aborted).toBe(true)
+  await act(async () => { finishOld(pending) })
+  expect(view.getByText('runtime_lane_example')).toBeTruthy()
+  expect(view.getByText(/서버 집계 창:/).textContent).toContain('30분')
+  expect(get).toHaveBeenCalledTimes(3)
+})
+
+it('distinguishes an available empty aggregate from a pending initial cache', async () => {
+  vi.mocked(get).mockResolvedValue({ ...response, models: [] })
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('반환된 집계에 런타임 기록이 없습니다.')).toBeTruthy())
+  expect(view.queryByText(/서버가 첫 집계를 준비/)).toBeNull()
+  expect(view.queryByRole('table')).toBeNull()
 })

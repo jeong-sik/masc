@@ -1,10 +1,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchRuntimeModelMetrics, type DashboardRuntimeModelMetricsResponse } from '../../api/dashboard-runtime'
+import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string }
-  | { kind: 'ready'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
+  | { kind: 'ready' | 'pending'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
 
 function number(value: number | null | undefined, unit = ''): string {
   return value != null && Number.isFinite(value) && value >= 0
@@ -17,14 +18,26 @@ export function OverviewRuntimeStats() {
   const [state, setState] = useState<State>({ kind: 'loading' })
   useEffect(() => {
     const controller = new AbortController()
+    let inFlight = false
     setState({ kind: 'loading' })
-    void fetchRuntimeModelMetrics(windowMinutes, 0, { signal: controller.signal }).then(
-      value => { if (!controller.signal.aborted) setState({ kind: 'ready', value, receivedAt: new Date() }) },
-      error => { if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) }) },
-    )
-    return () => controller.abort()
+    const refresh = async () => {
+      if (controller.signal.aborted || inFlight) return
+      inFlight = true
+      try {
+        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: controller.signal })
+        if (!controller.signal.aborted) setState({
+          kind: value.cost_ledger_read?.state === 'pending' ? 'pending' : 'ready',
+          value, receivedAt: new Date(),
+        })
+      } catch (error) {
+        if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+      } finally { inFlight = false }
+    }
+    void refresh()
+    const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    return () => { stopRefresh(); controller.abort() }
   }, [windowMinutes, generation])
-  const data = state.kind === 'ready' ? state.value : null
+  const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
   const ledger = data?.cost_ledger_read
   return html`<section class="ov-card min-w-0" aria-label="런타임 사용 통계" data-overview-runtime-stats>
     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -41,12 +54,13 @@ export function OverviewRuntimeStats() {
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
     ${data ? html`
-      <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' ? state.receivedAt.toLocaleString() : ''}</p>
+      <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' || state.kind === 'pending' ? state.receivedAt.toLocaleString() : ''}</p>
       <p class="text-xs text-text-muted">집계 기준 시각과 결정 기록의 보존·읽기 누락은 API가 제공하지 않습니다. 선택한 기간 전체가 관측되었다는 의미는 아닙니다.</p>
-      ${ledger?.state === 'unavailable' ? html`<p role="alert">비용 원장을 읽지 못했습니다: ${ledger.detail ?? '상세 미보고'}. 아래 값은 읽을 수 있었던 결정 기록 기반입니다.</p>`
+      ${ledger?.state === 'pending' ? html`<p role="status">서버가 첫 집계를 준비하고 있습니다. 표시 중에는 자동으로 다시 읽습니다.</p>`
+        : ledger?.state === 'unavailable' ? html`<p role="alert">비용 원장을 읽지 못했습니다: ${ledger.detail ?? '상세 미보고'}. 아래 값은 읽을 수 있었던 결정 기록 기반입니다.</p>`
         : ledger?.state === 'available' ? html`<p class="text-xs">비용 원장 읽기 완료 · 형식 오류 ${number(ledger.malformed_rows)} · 스키마 위반 ${number(ledger.schema_violation_rows)} · 식별 충돌 ${number(ledger.identity_conflict_rows)}행</p>`
           : html`<p class="text-xs">비용 원장 읽기 상태 미보고</p>`}
-      ${data.models.length === 0 ? html`<p role="status">아직 관측할 런타임 집계가 반환되지 않았습니다. 초기 캐시 응답이거나 해당 기간의 기록이 없을 수 있습니다.</p>`
+      ${state.kind === 'pending' ? null : data.models.length === 0 ? html`<p role="status">${ledger ? '반환된 집계에 런타임 기록이 없습니다.' : '아직 관측할 런타임 집계가 반환되지 않았습니다. 초기 캐시 응답이거나 해당 기간의 기록이 없을 수 있습니다.'}</p>`
         : html`<div class="max-w-full overflow-x-auto" tabIndex=${0} role="region" aria-label="런타임별 토큰·지연·결과">
           <table class="w-full text-sm"><thead><tr class="border-b border-border">
             <th scope="col" class="p-2 text-left">런타임</th><th scope="col" class="p-2 text-left">기록 결과</th>

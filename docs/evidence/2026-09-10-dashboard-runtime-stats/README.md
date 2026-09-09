@@ -11,8 +11,10 @@ numeric zero remains zero.
 Source behavior inspected for this change:
 
 - `server_routes_http_routes_provider_runs.ml` serves a cached response and can
-  initially return an empty placeholder. An empty array therefore appears as
-  not yet observed, with no zero-usage claim.
+  initially return `cost_ledger_read.state=pending` with an empty placeholder.
+  Pending is preserved as a typed preparing state and followed through with
+  the shared visibility-aware panel refresh lifecycle. Completed empty aggregates
+  and absent read-status responses remain distinct, with no zero-usage claim.
 - `model_inference_metrics_reader.ml` merges Keeper decision records with dated
   cost-ledger entries. Cost-ledger failures can leave decision-only results;
   `cost_ledger_read` diagnostics are now preserved by the dashboard decoder.
@@ -25,11 +27,20 @@ Source behavior inspected for this change:
   window from the browser's response receipt time and does not manufacture an
   exact observation interval.
 
-Validation: eight new component/API scenarios and 103 existing Overview tests
-passed. The existing targeted `fetchRuntimeModelMetrics` API scenario also
+Validation: twelve focused component/API scenarios passed after the pending
+repair. Before that repair, the eight original scenarios and 103 existing
+Overview tests passed. The existing targeted `fetchRuntimeModelMetrics` API scenario also
 passed. Coverage includes real detail-route navigation, malformed inventories,
 ledger failure, missing versus zero, empty-cache state, retry and superseded
 period requests. Existing Overview teardown emitted abort/socket diagnostics;
 the test runner exited successfully. No local build was run. CI artifact/browser
 rendering and deployed behavior remain pending. TUI statistics are outside this
 Dashboard unit and remain pending.
+
+The refresh lifecycle uses the existing `setupVisibleAutoRefresh` helper and its
+shared `DEFAULT_PANEL_REFRESH_MS` cadence, plus focus/visibility notifications.
+It skips overlapping reads, disposes interval/listeners and aborts old requests
+when unmounted or when the period changes. There is no retry cap or elapsed-time
+failure. Added tests exercise the actual pending envelope followed by available
+metrics, available-but-empty results, unmount cleanup and an old pending request
+finishing after a period change.

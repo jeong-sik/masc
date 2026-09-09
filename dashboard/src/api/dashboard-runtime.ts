@@ -414,6 +414,7 @@ export interface LatencyBucket {
 }
 
 export type RuntimeCostLedgerRead =
+  | { state: 'pending' }
   | { state: 'available'; malformed_rows: number | null; schema_violation_rows: number | null; identity_conflict_rows: number | null }
   | { state: 'unavailable'; detail: string | null }
 
@@ -946,7 +947,9 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
   const models = raw.models.map(decodeRuntimeModelMetric)
   if (models.some(model => model === null)) return null
   const ledger = isRecord(raw.cost_ledger_read) ? raw.cost_ledger_read : null
-  const costLedgerRead: RuntimeCostLedgerRead | null = ledger?.state === 'available'
+  const costLedgerRead: RuntimeCostLedgerRead | null = ledger?.state === 'pending'
+    ? { state: 'pending' }
+    : ledger?.state === 'available'
     ? { state: 'available', malformed_rows: asNumber(ledger.malformed_rows) ?? null,
         schema_violation_rows: asNumber(ledger.schema_violation_rows) ?? null,
         identity_conflict_rows: asNumber(ledger.identity_conflict_rows) ?? null }

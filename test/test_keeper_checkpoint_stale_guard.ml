@@ -336,6 +336,80 @@ let test_externally_replaced_canonical_is_the_watermark () =
       fail "stale save ignored an externally replaced canonical checkpoint"
     | Error error -> fail ("external replacement classification failed: " ^ error))
 
+(* A version bump leaves the old canonical on disk: the load refuses it and the
+   keeper starts fresh, and nothing deletes the file. The save has to replace
+   it, or every turn after the bump fails the same way and the keeper cannot
+   checkpoint again until someone removes it by hand. A canonical from a
+   *later* version is the opposite case and still refuses. *)
+let with_canonical_at_version ~session_dir ~session_id ~version =
+  let canonical_path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id
+  in
+  let json =
+    make_checkpoint ~session_id ~turn_count:9 ~marker:"before-the-bump"
+    |> Agent_core.Checkpoint.to_json
+  in
+  let rewritten =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "version" then key, `Int version else key, value)
+           fields)
+    | other -> other
+  in
+  Fs_compat.save_file canonical_path (Yojson.Safe.to_string rewritten);
+  canonical_path
+
+let test_superseded_canonical_is_replaced () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-superseded" in
+    let canonical_path =
+      with_canonical_at_version ~session_dir ~session_id
+        ~version:(Agent_core.Checkpoint.checkpoint_version - 1)
+    in
+    (match
+       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+         (make_checkpoint ~session_id ~turn_count:1 ~marker:"after-the-bump")
+     with
+     | Ok (Keeper_checkpoint_store.Saved _) -> ()
+     | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+       fail "a superseded canonical was treated as a newer watermark"
+     | Error error ->
+       fail ("a superseded canonical blocked the save: " ^ error));
+    match
+      Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
+    with
+    | Ok reloaded ->
+      check int "the replacement carries the current version"
+        Agent_core.Checkpoint.checkpoint_version reloaded.version;
+      check int "the replacement is this turn's checkpoint" 1 reloaded.turn_count
+    | Error error ->
+      ignore canonical_path;
+      fail
+        ("the replacement did not load back: "
+         ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error))
+
+let test_newer_canonical_is_not_replaced () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "sess-newer" in
+    let canonical_path =
+      with_canonical_at_version ~session_dir ~session_id
+        ~version:(Agent_core.Checkpoint.checkpoint_version + 1)
+    in
+    let before = Fs_compat.load_file canonical_path in
+    (match
+       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
+         (make_checkpoint ~session_id ~turn_count:1 ~marker:"older-binary")
+     with
+     | Ok _ -> fail "an older binary overwrote a newer canonical"
+     | Error _ -> ());
+    check bool "the newer canonical is untouched" true
+      (String.equal before (Fs_compat.load_file canonical_path)))
+
 (* The AGENT_CORE per-turn pipeline builds checkpoints with an empty session_id (the
    AGENT_CORE agent carries no session field). The keeper sink stamps a validated,
    non-empty trace_id before persisting; the store fails loud on an empty
@@ -1377,6 +1451,10 @@ let () =
             test_disk_is_the_watermark_ssot;
           test_case "external canonical replacement is the watermark" `Quick
             test_externally_replaced_canonical_is_the_watermark;
+          test_case "a superseded canonical is replaced, not refused forever" `Quick
+            test_superseded_canonical_is_replaced;
+          test_case "a newer canonical is not overwritten" `Quick
+            test_newer_canonical_is_not_replaced;
           test_case "empty session_id is refused, not silently dropped" `Quick
             test_empty_session_id_rejected;
           test_case "session leaf escapes and symlink leaves are refused" `Quick

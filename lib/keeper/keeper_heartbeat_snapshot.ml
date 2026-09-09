@@ -38,6 +38,10 @@ let write_heartbeat_snapshot
     with
     | Ok count -> count
     | Error Keeper_checkpoint_store.Not_found -> None
+    (* A superseded canonical has no count this binary can read, and the cut
+       is deliberate, so it is the same answer as no checkpoint at all rather
+       than a warning the operator is asked to look at. *)
+    | Error (Keeper_checkpoint_store.Superseded_version _) -> None
     | Error
         Keeper_checkpoint_store.(
           Store_error detail | Parse_error detail | Io_error detail | Agent_core_error detail)

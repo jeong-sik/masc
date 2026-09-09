@@ -77,6 +77,13 @@ type checkpoint_load_error =
   | Not_found
   | Store_error of string
   | Parse_error of string
+  (** A canonical this binary recognises as an earlier [checkpoint_version].
+      Apart from [Parse_error] because the two need opposite answers: a
+      superseded canonical is replaceable, a corrupt one is not. A canonical
+      from a later version stays [Parse_error] -- that means an older binary is
+      reading a newer workspace, and replacing it would destroy history the
+      newer binary can still read. *)
+  | Superseded_version of { expected : int; got : int }
   | Io_error of string
   | Agent_core_error of string
 

@@ -30,6 +30,8 @@ module Store = Masc.Keeper_checkpoint_store
    carry [string] payloads which is fine for value-level comparison. *)
 let pp_err fmt = function
   | Store.Not_found -> Format.fprintf fmt "Not_found"
+  | Store.Superseded_version { expected; got } ->
+    Format.fprintf fmt "Superseded_version(expected=%d,got=%d)" expected got
   | Store.Store_error s -> Format.fprintf fmt "Store_error(%s)" s
   | Store.Parse_error s -> Format.fprintf fmt "Parse_error(%s)" s
   | Store.Io_error s -> Format.fprintf fmt "Io_error(%s)" s

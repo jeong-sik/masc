@@ -1,5 +1,6 @@
 type t =
   | Agent_core_parse
+  | Agent_core_superseded
   | Agent_core_store
   | Agent_core_io
   | Agent_core_failure
@@ -8,6 +9,7 @@ type t =
 
 let to_label = function
   | Agent_core_parse -> "agent_core_parse"
+  | Agent_core_superseded -> "agent_core_superseded"
   | Agent_core_store -> "agent_core_store"
   | Agent_core_io -> "agent_core_io"
   | Agent_core_failure -> "agent_core"

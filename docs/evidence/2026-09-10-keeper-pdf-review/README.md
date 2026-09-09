@@ -1,0 +1,5 @@
+# Actual Keeper PDF review
+
+The isolated 17b9 runtime replayed approved Execute `appr_01a0886b-9b50-7000-8a0a-f69b80bd473a`. The exact 969-byte output blob has SHA-256 `c5e6727a5656800f04ab7f0ec38de4dc94d1406ec3fcef44904d430dab68013e` and reports exit 0. Independently observed PDF: 212846 bytes, SHA-256 `7e8b2169baea222447458b2b045e59cdf38ae57546ee20c6e1959185aaa76b29`. Docker Poppler pdfinfo reported four A4 pages. These PNGs are independent pdftoppm renders of every page, inspected visually.
+
+Rejected against the declared three-page Goal: four pages; page 3 diagram Korean glyphs are missing; Markdown emphasis markers are printed literally; a page 2 box title is split from its page 3 body. Body Korean is now readable. The script's exit 0 and VERIFY output do not establish visual correctness. This is real Keeper-produced documentation describing synthetic memory examples, not real observations of those examples. A correction was submitted to the same Keeper. These are document renders, not Dashboard browser screenshots.

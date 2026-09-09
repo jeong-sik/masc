@@ -10,7 +10,13 @@ let to_json t = t.raw
 let claims t = t.claims
 let conflicts t = t.conflicts
 let exclusions t = t.exclusions
-let field k = function `Assoc xs -> List.assoc_opt k xs |> Option.value ~default:`Null | _ -> `Null
+let optional_field k = function
+  | `Assoc xs -> Ok (List.assoc_opt k xs)
+  | _ -> Error ("Expected object while reading " ^ k)
+let field k json =
+  let* value = optional_field k json in
+  match value with Some value -> Ok value | None -> Error ("Missing field: " ^ k)
+let read_field k decode json = let* value = field k json in decode value
 let text = function `String s when String.trim s <> "" -> Ok s | _ -> Error "Expected nonblank string"
 let array = function `List xs -> Ok xs | _ -> Error "Expected array"
 let rec traverse f = function
@@ -38,78 +44,89 @@ let id t = hash (Yojson.Safe.to_string t.raw)
 let decode raw =
   let* raw = canonical raw in
   let* () = exact ["status"; "context_sha256"; "sources"; "gaps"; "snapshots"; "proposal"] raw in
-  let* () = match field "status" raw with `String "model_proposed" -> Ok () | _ -> Error "Only model_proposed submissions are supported" in
-  let* context_hash = text (field "context_sha256" raw) in
+  let* status = field "status" raw in
+  let* () = match status with `String "model_proposed" -> Ok () | _ -> Error "Only model_proposed submissions are supported" in
+  let* context_hash = read_field "context_sha256" text raw in
   let* () = if valid_id context_hash then Ok () else Error "Invalid context SHA-256" in
-  let* sources = array (field "sources" raw) in
-  let* snapshots = array (field "snapshots" raw) in
-  let* gaps = array (field "gaps" raw) in
+  let* sources = read_field "sources" array raw in
+  let* snapshots = read_field "snapshots" array raw in
+  let* gaps = read_field "gaps" array raw in
   let* _ = traverse (fun j ->
-    let* _ = text (field "keeper_id" j) in
-    let* () = match field "store" j with `String ("ordinary" | "source_bound") -> Ok () | _ -> Error "Unknown gap store" in
-    let observation = field "observation" j in
-    match field "status" observation with
+    let* _ = read_field "keeper_id" text j in
+    let* store = field "store" j in
+    let* () = match store with `String ("ordinary" | "source_bound") -> Ok () | _ -> Error "Unknown gap store" in
+    let* observation = field "observation" j in
+    let* status = field "status" observation in
+    match status with
     | `String "missing" -> Ok ()
     | `String "unavailable" ->
-      (match field "detail" observation with
-       | `String _ -> Ok ()
-       | _ -> Error "Unavailable gap must include a detail string")
+      let* detail = field "detail" observation in
+      (match detail with `String _ -> Ok () | _ -> Error "Unavailable gap must include a detail string")
     | _ -> Error "Gap must record missing or unavailable storage") gaps in
-  let* snapshot_ids = traverse (fun j ->
-    let* sid = text (field "snapshot_id" j) in
-    let* _owner = text (field "keeper_id" j) in
-    let* () = match field "store" j with `String ("ordinary" | "source_bound") -> Ok () | _ -> Error "Unknown memory store" in
-    let* digest = text (field "snapshot_sha256" j) in
+  let* snapshot_entries = traverse (fun j ->
+    let* sid = read_field "snapshot_id" text j in
+    let* owner = read_field "keeper_id" text j in
+    let* store = field "store" j in
+    let* () = match store with `String ("ordinary" | "source_bound") -> Ok () | _ -> Error "Unknown memory store" in
+    let* digest = read_field "snapshot_sha256" text j in
     let* () = if valid_id digest then Ok () else Error "Invalid snapshot SHA-256" in
-    let* () = match field "metadata" j with `Assoc _ -> Ok () | _ -> Error "Snapshot metadata must be an object" in
-    Ok sid) snapshots in
-  let* () = if unique snapshot_ids then Ok () else Error "Duplicate snapshot identity" in
+    let* metadata = field "metadata" j in
+    let* () = match metadata with `Assoc _ -> Ok () | _ -> Error "Snapshot metadata must be an object" in
+    Ok (sid, (owner, store, digest, metadata))) snapshots in
+  let* () = if unique (List.map fst snapshot_entries) then Ok () else Error "Duplicate snapshot identity" in
   let* source_bindings = traverse (fun j ->
-    let* sid = text (field "source_id" j) in
-    let* snapshot = text (field "snapshot_id" j) in
-    let* snapshot_json = match List.find_opt (fun s -> field "snapshot_id" s = `String snapshot) snapshots with
-      | None -> Error "Unknown source snapshot" | Some s -> Ok s in
-    let* binding = match field "fact" j, field "evidence_path" j with
-      | (`Assoc _ as fact), `Null ->
-        let* _ = text (field "claim" fact) in
-        let* () = if field "keeper_id" j = field "keeper_id" snapshot_json
-          && field "store" j = field "store" snapshot_json
-          && field "snapshot_sha256" j = field "snapshot_sha256" snapshot_json
+    let* sid = read_field "source_id" text j in
+    let* snapshot = read_field "snapshot_id" text j in
+    let* owner, store, digest, metadata = match List.assoc_opt snapshot snapshot_entries with
+      | None -> Error "Unknown source snapshot" | Some entry -> Ok entry in
+    let* fact = optional_field "fact" j in
+    let* evidence_path = optional_field "evidence_path" j in
+    let* binding = match fact, evidence_path with
+      | Some (`Assoc _ as fact), None ->
+        let* _ = read_field "claim" text fact in
+        let* fact_owner = read_field "keeper_id" text j in
+        let* fact_store = field "store" j in
+        let* fact_digest = read_field "snapshot_sha256" text j in
+        let* () = if fact_owner = owner && fact_store = store && fact_digest = digest
           then Ok () else Error "Source attribution differs from snapshot" in
-        (match field "revision" j, field "fact_index" j with
+        let* revision = field "revision" j in
+        let* index = field "fact_index" j in
+        let* snapshot_revision = field "revision" metadata in
+        (match revision, index with
          | `Int revision, `Int index when revision > 0 && index >= 0
-             && field "revision" (field "metadata" snapshot_json) = `Int revision -> Ok (Fact (snapshot, index))
+             && snapshot_revision = `Int revision -> Ok (Fact (snapshot, index))
          | _ -> Error "Invalid source revision or fact index")
-      | `Null, `List [`String "change"] ->
-        (match field "change" (field "metadata" snapshot_json) with
+      | None, Some (`List [`String "change"]) ->
+        let* change = field "change" metadata in
+        (match change with
          | `Assoc _ -> Ok (Change snapshot) | _ -> Error "Missing change evidence")
-      | `Null, `List [`String "invalidations"; `Int index] ->
-        (match field "invalidations" (field "metadata" snapshot_json) with
-         | `List xs when index >= 0 && index < List.length xs -> Ok (Invalidation (snapshot, index))
-         | _ -> Error "Invalid invalidation evidence reference")
-      | _ -> Error "Source must contain a fact or known metadata evidence path" in
+      | None, Some (`List [`String "invalidations"; `Int index]) ->
+        let* invalidations = read_field "invalidations" array metadata in
+        if index >= 0 && index < List.length invalidations then Ok (Invalidation (snapshot, index))
+        else Error "Invalid invalidation evidence reference"
+      | _ -> Error "Source must contain a fact or known metadata evidence path; absent alternatives must be omitted" in
     Ok (sid, binding)) sources in
   let source_ids = List.map fst source_bindings in
   let bindings = List.map snd source_bindings in
   let* () = if List.length bindings = List.length (List.sort_uniq Stdlib.compare bindings)
     then Ok () else Error "Duplicate source evidence binding" in
   let* () = if unique source_ids then Ok () else Error "Duplicate source identity" in
-  let proposal = field "proposal" raw in
+  let* proposal = field "proposal" raw in
   let* () = exact ["shared_claims"; "conflicts"; "excluded"] proposal in
-  let* claim_rows = array (field "shared_claims" proposal) in
+  let* claim_rows = read_field "shared_claims" array proposal in
   let* claims = traverse (fun j ->
     let* () = exact ["claim"; "source_ids"] j in
-    let* claim = text (field "claim" j) in let* source_ids = refs (field "source_ids" j) in
+    let* claim = read_field "claim" text j in let* source_ids = read_field "source_ids" refs j in
     Ok ({ claim; source_ids } : claim)) claim_rows in
-  let* conflict_rows = array (field "conflicts" proposal) in
+  let* conflict_rows = read_field "conflicts" array proposal in
   let* conflicts = traverse (fun j ->
     let* () = exact ["description"; "source_ids"] j in
-    let* description = text (field "description" j) in let* source_ids = refs (field "source_ids" j) in
+    let* description = read_field "description" text j in let* source_ids = read_field "source_ids" refs j in
     Ok ({ description; source_ids } : conflict)) conflict_rows in
-  let* exclusion_rows = array (field "excluded" proposal) in
+  let* exclusion_rows = read_field "excluded" array proposal in
   let* exclusions = traverse (fun j ->
     let* () = exact ["source_id"; "reason"] j in
-    let* source_id = text (field "source_id" j) in let* reason = text (field "reason" j) in
+    let* source_id = read_field "source_id" text j in let* reason = read_field "reason" text j in
     Ok { source_id; reason }) exclusion_rows in
   let used = List.concat_map (fun (x:claim) -> x.source_ids) claims @ List.concat_map (fun (x:conflict) -> x.source_ids) conflicts in
   let excluded = List.map (fun x -> x.source_id) exclusions in

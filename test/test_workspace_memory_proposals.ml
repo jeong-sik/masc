@@ -50,6 +50,20 @@ let test_invalid () =
   ignore (Api.post ~base_path (Yojson.Safe.to_string (replace "proposal" bad input)) |> expect `Bad_request);
   let overlap = replace "excluded" (`List [obj ["source_id", str "writer"; "reason", str "unused"]]) proposal in
   ignore (Api.post ~base_path (Yojson.Safe.to_string (replace "proposal" overlap input)) |> expect `Bad_request);
+  let sources = field "sources" input |> Yojson.Safe.Util.to_list in
+  let original = List.hd sources in
+  let missing_fact = match original with
+    | `Assoc fields -> `Assoc (List.remove_assoc "fact" fields)
+    | _ -> Alcotest.fail "source fixture object" in
+  List.iter (fun invalid_source ->
+    let invalid = replace "sources" (`List (invalid_source :: List.tl sources)) input in
+    ignore (Api.post ~base_path (Yojson.Safe.to_string invalid) |> expect `Bad_request))
+    [missing_fact; replace "fact" `Null original;
+     replace "evidence_path" `Null original; `Null; `String "not an object"];
+  List.iter (fun invalid ->
+    ignore (Api.post ~base_path (Yojson.Safe.to_string invalid) |> expect `Bad_request))
+    [`Null; `List []; replace "proposal" `Null input;
+     replace "snapshots" (`List [obj ["snapshot_id", str "writer"]]) input];
   let listing = Api.get ~base_path ~id:None |> expect `OK in
   json_equal "invalid input never creates proposal" (`List []) (field "proposals" listing)
 let test_corruption () =

@@ -59,7 +59,6 @@ infer them from model names.
 | `assistant_tool_content_format` | exists in code | keep separate | Assistant tool-call content shape (`content:null` vs `content:""`) is a provider wire-contract axis, independent from reasoning replay. |
 | `supports_system_prompt` | missing | add | Most models support it, but some fine-tuned/distilled variants do not. Agent must fold system into first user message. |
 | `supports_reasoning` | exists | **split into 4** | See Thinking Taxonomy below. |
-| `supports_extended_thinking` | missing | add | budget_tokens control. Claude, Gemini, GPT-5.4. |
 | `supports_think_tool` | missing | add | Anthropic-only. Mid-reasoning pause between tool calls. |
 | `supports_adaptive_reasoning` | missing | add | Model auto-selects depth. Opus 4.6, Gemini 3 dynamic. |
 | `accepted_reasoning_efforts` | exists in code | keep separate | Optional model-specific subset of canonical effort values. Omit unless provider docs or live evidence confirm the accepted values. |
@@ -137,7 +136,6 @@ Proposal: keep `supports_reasoning` as the union (any of the above),
 add specific flags for SDK features that depend on the distinction.
 
 Minimum viable split:
-- `supports_extended_thinking` — enables `thinking_budget` in agent config
 - `accepted_reasoning_efforts` — constrains which canonical effort values may be serialized for a model
 - `thinking_control_format` — request-time enable/depth wire shape
 - `preserve_thinking_control_format` — historical reasoning replay/preserve wire shape
@@ -207,7 +205,6 @@ runtime distinction.
 - Wire Discovery.ctx_size into capabilities
 
 ### Phase 2: Thinking split + structured output
-- Split `supports_reasoning` → keep as union + add `supports_extended_thinking`
 - Keep `supports_structured_output` and `supports_response_format_json` as distinct contracts
 - Wire native schema request paths only where the official provider API exposes them
 - Keep JSON mode + caller-side validation for providers whose current official docs stop at `json_object`

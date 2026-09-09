@@ -411,7 +411,6 @@ let model_capabilities_override_of_model_spec
          ; supports_named_tool_choice = caps.supports_named_tool_choice
          ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
          ; supports_reasoning = spec.thinking_support
-         ; supports_extended_thinking = caps.supports_extended_thinking
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format
          ; reasoning_streaming_format =

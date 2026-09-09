@@ -129,7 +129,6 @@ type model_capabilities =
   ; supports_required_tool_choice : bool
   ; supports_named_tool_choice : bool
   ; supports_parallel_tool_calls : bool
-  ; supports_extended_thinking : bool
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
   ; reasoning_streaming_format : reasoning_streaming_format option
@@ -154,7 +153,6 @@ let model_capabilities_default =
   ; supports_required_tool_choice = false
   ; supports_named_tool_choice = false
   ; supports_parallel_tool_calls = false
-  ; supports_extended_thinking = false
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
   ; reasoning_streaming_format = None

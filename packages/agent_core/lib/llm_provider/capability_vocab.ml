@@ -475,7 +475,6 @@ let capability_fields =
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
-  ; "supports_extended_thinking"
   ; "accepted_reasoning_efforts"
   ; "thinking_control_format"
   ; "thinking_control_token"

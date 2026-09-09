@@ -271,7 +271,6 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
     flagText(caps.supports_required_tool_choice, 'required'),
     flagText(caps.supports_named_tool_choice, 'named'),
     flagText(caps.supports_parallel_tool_calls, 'parallel'),
-    flagText(caps.supports_extended_thinking, 'extended-thinking'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
     flagText(caps.supports_prompt_caching, 'prompt-cache'),
     flagText(caps.emits_usage_tokens, 'usage'),
@@ -308,7 +307,6 @@ function runtimeEffectiveReasoningText(provider: DashboardRuntimeProviderSnapsho
   if (!caps) return null
   return textList([
     flagText(caps.supports_reasoning, 'reasoning'),
-    flagText(caps.supports_extended_thinking, 'extended'),
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort ${caps.accepted_reasoning_efforts.join(',')}`
       : null,

@@ -77,7 +77,6 @@ let test_default_no_limits () =
 let test_default_new_fields_false () =
   let c = Capabilities.default_capabilities in
   check bool "no parallel tools" false c.supports_parallel_tool_calls;
-  check bool "no extended thinking" false c.supports_extended_thinking;
   check bool "no structured output" false c.supports_structured_output;
   check bool "no image input" false c.supports_image_input;
   check bool "no audio input" false c.supports_audio_input;
@@ -90,7 +89,6 @@ let test_anthropic_capabilities () =
   let c = Capabilities.anthropic_capabilities in
   check bool "has tools" true c.supports_tools;
   check bool "has parallel tools" true c.supports_parallel_tool_calls;
-  check bool "has extended thinking" true c.supports_extended_thinking;
   check bool "has image" true c.supports_image_input;
   check bool "has structured output" true c.supports_structured_output;
   check bool "no audio" false c.supports_audio_input;
@@ -133,7 +131,6 @@ let test_lookup_mimo_v25_pro () =
     check (option int) "context 1M" (Some 1_000_000) c.max_context_tokens;
     check (option int) "output 128K" (Some 128_000) c.max_output_tokens;
     check bool "has reasoning" true c.supports_reasoning;
-    check bool "has extended thinking" true c.supports_extended_thinking;
     check_thinking_control
       "uses thinking object only"
       Capabilities.Thinking_object_only
@@ -460,7 +457,6 @@ let test_lookup_provider_m () =
   | Some c ->
     check (option int) "context 262K" (Some 262_144) c.max_context_tokens;
     check bool "tools" true c.supports_tools;
-    check bool "thinking" true c.supports_extended_thinking;
     check
       bool
       "chat_template_kwargs thinking control"
@@ -535,7 +531,6 @@ let test_lookup_runpod_rtxa6000_gemma4_coder_catalog () =
     check bool (label ^ " tool_choice") true c.supports_tool_choice;
     check bool (label ^ " parallel tools") true c.supports_parallel_tool_calls;
     check bool (label ^ " reasoning") true c.supports_reasoning;
-    check bool (label ^ " extended thinking") true c.supports_extended_thinking;
     check
       bool
       (label ^ " chat_template_token thinking control")
@@ -574,7 +569,6 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
     check bool (label ^ " forced tool_choice disabled") false c.supports_tool_choice;
     check bool (label ^ " named tool_choice disabled") false c.supports_named_tool_choice;
     check bool (label ^ " reasoning") true c.supports_reasoning;
-    check bool (label ^ " extended thinking") true c.supports_extended_thinking;
     check
       bool
       (label ^ " chat_template_token thinking control")
@@ -659,7 +653,6 @@ let test_lookup_minimax_m3_official_chat_dialect () =
     check bool "rejects required forced tool_choice" false c.supports_required_tool_choice;
     check bool "rejects named forced tool_choice" false c.supports_named_tool_choice;
     check bool "reasoning" true c.supports_reasoning;
-    check bool "extended thinking" true c.supports_extended_thinking;
     check_thinking_control
       "uses MiniMax adaptive thinking object"
       Capabilities.Thinking_object_adaptive
@@ -723,7 +716,7 @@ let test_lookup_qwen3_thinking_control () =
      toggles reasoning on the wire via
      {"chat_template_kwargs":{"enable_thinking":b}}. Without an explicit
      thinking_control_format the Qwen_3 record defaulted to
-     No_thinking_control and [supports_extended_thinking=true] never reached
+     No_thinking_control never reached
      the wire.
 
      Route through [for_model_id_with_manifest] with a non-matching manifest
@@ -864,7 +857,6 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
          check (option int) (model_id ^ " context") (Some 262_144) c.max_context_tokens;
          check bool (model_id ^ " tools") true c.supports_tools;
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
-         check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -916,7 +908,6 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
        | Some c ->
          check bool (model_id ^ " tools") true c.supports_tools;
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
-         check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
          check bool (model_id ^ " native streaming") true c.supports_native_streaming;
          check
            bool
@@ -958,7 +949,6 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
   | None -> fail "ollama_cloud/qwen3.5:397b should resolve"
   | Some c ->
     check bool "qwen3.5:397b reasoning" true c.supports_reasoning;
-    check bool "qwen3.5:397b extended thinking" true c.supports_extended_thinking;
     check_thinking_control
       "qwen3.5:397b reasoning rides the /v1 effort control"
       Capabilities.Reasoning_effort
@@ -989,7 +979,6 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
        | None -> failf "ollama_cloud/%s should resolve" model_id
        | Some c ->
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
-         check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -1389,13 +1378,7 @@ let check_frontier_model
     check bool (label ^ " supports tools") true c.supports_tools;
     check bool (label ^ " supports reasoning") true c.supports_reasoning;
     (match thinking_contract with
-     | Reasoning_only -> ()
-     | Extended_thinking ->
-       check
-         bool
-         (label ^ " supports extended thinking")
-         true
-         c.supports_extended_thinking);
+     | Reasoning_only | Extended_thinking -> ());
     check bool (label ^ " supports native streaming") true c.supports_native_streaming;
     (match structured_contract with
      | Response_format_json_schema ->
@@ -1816,8 +1799,7 @@ let test_manifest_base_label_anthropic () =
   in
   match Capabilities.for_model_id_with_manifest m "my-claude-custom" with
   | Some c ->
-    check (option int) "custom ctx 512K" (Some 512000) c.max_context_tokens;
-    check bool "anthropic base: extended thinking" true c.supports_extended_thinking
+    check (option int) "custom ctx 512K" (Some 512000) c.max_context_tokens
   | None -> fail "expected Some"
 ;;
 
@@ -2704,7 +2686,6 @@ let test_manifest_and_catalog_common_override_parity () =
             "supports_parallel_tool_calls": true,
             "assistant_tool_content_format": "empty_string",
             "supports_reasoning": true,
-            "supports_extended_thinking": true,
             "accepted_reasoning_efforts": ["low", "medium"],
             "supports_response_format_json": true,
             "supports_structured_output": true,
@@ -2744,7 +2725,6 @@ supports_named_tool_choice = true
 supports_parallel_tool_calls = true
 assistant_tool_content_format = "empty_string"
 supports_reasoning = true
-supports_extended_thinking = true
 accepted_reasoning_efforts = ["low", "medium"]
 supports_response_format_json = true
 supports_structured_output = true
@@ -3004,7 +2984,7 @@ let test_prefix_ordering_invariant () =
       , "glm-5-code-x"
       , "glm-5-code must precede broad glm-5"
       , fun (c : Capabilities.capabilities) ->
-          c.max_context_tokens = Some 128_000 && c.supports_extended_thinking )
+          c.max_context_tokens = Some 128_000 )
     ; (* glm-4.6v must precede glm-4.6 (inside broad branch) *)
       ( Direct_model
       , "glm-4.6v-x"

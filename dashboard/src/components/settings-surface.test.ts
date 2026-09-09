@@ -1075,7 +1075,6 @@ describe('SettingsSurface', () => {
           supports_required_tool_choice: true,
           supports_named_tool_choice: true,
           supports_parallel_tool_calls: true,
-          supports_extended_thinking: true,
           supports_multimodal_inputs: true,
           supports_image_input: true,
           supports_audio_input: true,
@@ -1145,7 +1144,6 @@ describe('SettingsSurface', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_reasoning: true,
-            supports_extended_thinking: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
             thinking_control_format: 'reasoning-effort',
             preserve_thinking_control_format: 'always-preserved',
@@ -1206,7 +1204,6 @@ describe('SettingsSurface', () => {
                 supports_required_tool_choice: true,
                 supports_named_tool_choice: true,
                 supports_parallel_tool_calls: true,
-                supports_extended_thinking: true,
                 thinking_control_format: 'chat-template-kwargs',
                 supports_image_input: true,
                 supports_audio_input: false,
@@ -1284,7 +1281,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('audio:on')
       expect(cards[0]?.textContent).toContain('video:off')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
+        'controls:tool-choice,required,named,parallel,system-prompt,prompt-cache,usage',
       )
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:agent-core-provider-config')
@@ -1297,7 +1294,6 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('input:multimodal,image,audio')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
       expect(cards[0]?.textContent).toContain('tool-content:empty-string')
-      expect(cards[0]?.textContent).toContain('extended-thinking')
       expect(cards[0]?.textContent).toContain('effort:low,medium,high')
       expect(cards[0]?.textContent).toContain('wire:reasoning-effort')
       expect(cards[0]?.textContent).toContain('preserve:always-preserved')
@@ -1308,7 +1304,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
+        'controls:tool-choice,required,named,parallel,system-prompt,prompt-cache,usage',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

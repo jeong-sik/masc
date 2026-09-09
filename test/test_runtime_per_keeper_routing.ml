@@ -1568,7 +1568,6 @@ supports_named_tool_choice = true
 supports_parallel_tool_calls = true
 assistant_tool_content_format = "empty_string"
 supports_reasoning = true
-supports_extended_thinking = true
 accepted_reasoning_efforts = ["low", "medium", "high"]
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
@@ -1596,7 +1595,6 @@ max_context_tokens = 131072
 max_output_tokens = 4096
 supports_tools = true
 supports_reasoning = true
-supports_extended_thinking = true
 
 [[models]]
 id_prefix = "reasoning-big-out"
@@ -1606,7 +1604,6 @@ max_context_tokens = 1000000
 max_output_tokens = 200000
 supports_tools = true
 supports_reasoning = true
-supports_extended_thinking = true
 |}
 ;;
 

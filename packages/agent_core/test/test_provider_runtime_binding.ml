@@ -344,11 +344,7 @@ let test_local_openai_compat_capabilities_not_inflated_by_locality () =
       ()
   in
   let caps = Provider_runtime_binding.capabilities_for_provider_config cfg in
-  Alcotest.(check bool) "no reasoning from locality" false caps.supports_reasoning;
-  Alcotest.(check bool)
-    "no extended thinking from locality"
-    false
-    caps.supports_extended_thinking
+  Alcotest.(check bool) "no reasoning from locality" false caps.supports_reasoning
 ;;
 
 let test_capabilities_host_invariant_local_vs_remote () =
@@ -425,7 +421,6 @@ provider_name = "ollama_cloud"
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "reasoning_effort"
 reasoning_replay = "preserve_always"
 |}
@@ -490,7 +485,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_parallel_tool_calls = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 |}

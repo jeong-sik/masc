@@ -636,7 +636,6 @@ let parse_capabilities provider_json =
     member_bool "supports_parallel_tool_calls" cap_json
   in
   let* supports_reasoning = member_bool "supports_reasoning" cap_json in
-  let* supports_extended_thinking = member_bool "supports_extended_thinking" cap_json in
   let* supports_response_format_json =
     member_bool "supports_response_format_json" cap_json
   in
@@ -693,9 +692,6 @@ let parse_capabilities provider_json =
     |> fun caps ->
     override supports_reasoning caps (fun caps value ->
       { caps with Capabilities.supports_reasoning = value })
-    |> fun caps ->
-    override supports_extended_thinking caps (fun caps value ->
-      { caps with Capabilities.supports_extended_thinking = value })
     |> fun caps ->
     override supports_response_format_json caps (fun caps value ->
       { caps with Capabilities.supports_response_format_json = value })

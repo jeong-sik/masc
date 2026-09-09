@@ -231,8 +231,6 @@ let assert_ollama_cloud_seed_runtime runtimes case =
          caps.supports_image_input;
        check bool (case.runtime_id ^ " multimodal input") case.vision
          caps.supports_multimodal_inputs;
-       check bool (case.runtime_id ^ " extended thinking") case.thinking
-         caps.supports_extended_thinking;
        check bool (case.runtime_id ^ " thinking control") true
          (Runtime_schema.equal_thinking_control_format
             caps.thinking_control_format
@@ -285,8 +283,6 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
     =
     check bool (name ^ " tools") true caps.supports_tools;
     check bool (name ^ " tool choice") true caps.supports_tool_choice;
-    check bool (name ^ " extended thinking") true
-      caps.supports_extended_thinking;
     check bool (name ^ " chat-template thinking") true
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
@@ -408,8 +404,6 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
     check bool "RunPod RTX A6000 Gemma tools" true caps.supports_tools;
     check bool "RunPod RTX A6000 Gemma tool choice" true
       caps.supports_tool_choice;
-    check bool "RunPod RTX A6000 Gemma extended thinking" true
-      caps.supports_extended_thinking;
     check bool "RunPod RTX A6000 Gemma top_k" true caps.supports_top_k;
     check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
     check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
@@ -1252,9 +1246,7 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
   | None -> fail "kimi-for-coding missing from the deployment catalog"
   | Some caps ->
     check bool "declares reasoning" true
-      caps.Llm_provider.Capabilities.supports_reasoning;
-    check bool "declares extended thinking" true
-      caps.Llm_provider.Capabilities.supports_extended_thinking
+      caps.Llm_provider.Capabilities.supports_reasoning
 
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -1404,9 +1396,7 @@ List.iter
           check (option int) "GLM Coding Plan output cap" (Some 128000)
             caps.max_output_tokens;
           check bool "GLM Coding Plan forced tool_choice disabled" false
-            caps.supports_tool_choice;
-          check bool "GLM Coding Plan extended thinking" true
-            caps.supports_extended_thinking
+            caps.supports_tool_choice
         | None -> fail "expected GLM Coding Plan capabilities"));
     (match
        List.find_opt
@@ -2894,7 +2884,6 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
      max_context_tokens = 1024\n\
      supports_tools = true\n\
      supports_reasoning = true\n\
-     supports_extended_thinking = true\n\
      thinking_control_format = \"chat_template_kwargs\"\n\
      preserve_thinking_control_format = \"chat_template_kwargs_preserve_thinking\"\n"
   in

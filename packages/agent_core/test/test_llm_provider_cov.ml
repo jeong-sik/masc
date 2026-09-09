@@ -1173,7 +1173,6 @@ let test_anthropic_capabilities () =
   Alcotest.(check bool) "named tool_choice" true c.supports_named_tool_choice;
   Alcotest.(check bool) "parallel tools" true c.supports_parallel_tool_calls;
   Alcotest.(check bool) "reasoning" true c.supports_reasoning;
-  Alcotest.(check bool) "extended_thinking" true c.supports_extended_thinking;
   Alcotest.(check bool) "structured output" true c.supports_structured_output;
   Alcotest.(check bool) "multimodal" true c.supports_multimodal_inputs;
   Alcotest.(check bool) "streaming" true c.supports_native_streaming;
@@ -1193,7 +1192,6 @@ let test_openai_compat_chat_capabilities () =
 let test_openai_compat_chat_extended_capabilities () =
   let c = Capabilities.openai_compat_chat_extended_capabilities in
   Alcotest.(check bool) "reasoning" true c.supports_reasoning;
-  Alcotest.(check bool) "extended_thinking" true c.supports_extended_thinking;
   Alcotest.(check bool) "top_k" true c.supports_top_k;
   Alcotest.(check bool) "min_p" true c.supports_min_p
 ;;
@@ -1375,8 +1373,7 @@ let test_for_model_id_glm () =
      Alcotest.(check (option int)) "128K context" (Some 128_000) c.max_context_tokens;
      Alcotest.(check (option int)) "96K output" (Some 96_000) c.max_output_tokens;
      Alcotest.(check bool) "tools" true c.supports_tools;
-     Alcotest.(check bool) "reasoning" true c.supports_reasoning;
-     Alcotest.(check bool) "thinking" true c.supports_extended_thinking
+     Alcotest.(check bool) "reasoning" true c.supports_reasoning
    | None -> Alcotest.fail "expected Some for glm-4.5-flash");
   (* glm-5.1 should still get full capabilities *)
   match Capabilities.for_model_id "glm-5.1" with

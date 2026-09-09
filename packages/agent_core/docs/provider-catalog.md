@@ -185,7 +185,7 @@ The `capabilities` object accepts the same capability field names used by
 - `max_context_tokens`, `max_output_tokens`
 - `supports_tools`, `supports_tool_choice`, `supports_parallel_tool_calls`
 - `assistant_tool_content_format`
-- `supports_reasoning`, `supports_extended_thinking`
+- `supports_reasoning`
 - `accepted_reasoning_efforts`
 - `thinking_control_format`, `preserve_thinking_control_format`
 - `reasoning_output_format`, `reasoning_streaming_format`

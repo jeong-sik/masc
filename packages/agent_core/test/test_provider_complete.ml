@@ -1364,7 +1364,6 @@ let test_declared_enable_dialect_passes_sync_stream_and_wire () =
   let caps =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_reasoning = true
-    ; supports_extended_thinking = true
     ; thinking_control_format = Llm_provider.Capabilities.Chat_template_kwargs
     }
   in
@@ -1398,7 +1397,6 @@ let test_declared_responses_effort_passes_sync_stream_and_wire () =
   let caps =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_reasoning = true
-    ; supports_extended_thinking = true
     ; thinking_control_format = Llm_provider.Capabilities.Reasoning_effort
     ; accepted_reasoning_efforts = Some [ Llm_provider.Reasoning_effort.Medium ]
     }
@@ -1437,7 +1435,6 @@ let test_declared_chat_template_token_receipt_matches_wire () =
   let caps =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_reasoning = true
-    ; supports_extended_thinking = true
     ; thinking_control_format =
         Llm_provider.Capabilities.Chat_template_token "<DECLARED_THINK>"
     }

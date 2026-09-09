@@ -71,9 +71,9 @@ def directory_execution(traces):
     # Join the actual dispatched input to its completion, never infer a listing
     # from a successful exit or an assistant's description. The final form is
     # also present in the recorded macOS baseline.
-    def lists_working_directory(script):
+    def directory_commands(script):
         if not isinstance(script, str):
-            return False
+            return []
         try:
             lexer = shlex.shlex(script, posix=True, punctuation_chars=';&|\n')
             lexer.whitespace = ' \t\r'
@@ -83,28 +83,54 @@ def directory_execution(traces):
                 if token in (';', '&&', '\n'):
                     commands.append([])
                 elif token in ('&', '|', '||'):
-                    return False
+                    return []
                 else:
                     commands[-1].append(token)
         except ValueError:
-            return False
-        has_pwd = any(command == ['pwd'] for command in commands)
-        has_listing = any(command and command[0] == 'ls'
-                          and all(argument.startswith('-') or argument == '.' for argument in command[1:])
-                          for command in commands)
-        return has_pwd and has_listing
+            return []
+        return commands
+
+    def command_roles(commands):
+        def listing(command):
+            return (command and command[0] == 'ls'
+                    and all(arg.startswith('-') or arg == '.' for arg in command[1:]))
+        if not commands or any(command and command != ['pwd'] and not listing(command)
+                               for command in commands):
+            return False, False
+        return any(command == ['pwd'] for command in commands), any(listing(c) for c in commands)
+
     def identity(event):
         return tuple(event.get(key) for key in ('worker_run_id', 'session_id', 'tool_use_id'))
     starts = {identity(event): event for event in traces
               if event.get('record_type') == 'tool_execution_started'
               and event.get('tool_name') == 'Execute'
               and event.get('tool_use_id')}
+    observations = {}
     for event in traces:
         if (event.get('record_type') != 'tool_execution_finished'
                 or event.get('tool_name') != 'Execute' or event.get('tool_error') is not False):
             continue
         started = starts.get(identity(event))
-        if not started or not lists_working_directory(started.get('tool_input', {}).get('script')):
+        if not started or not all(identity(event)):
+            continue
+        tool_input = started.get('tool_input')
+        if not isinstance(tool_input, dict):
+            continue
+        script = tool_input.get('script')
+        if script is None:
+            # Execute can encode the same shell program as an exact argv
+            # wrapper. Never search arbitrary argv for text resembling ls.
+            argv = tool_input.get('argv')
+            if (isinstance(argv, list) and len(argv) == 3
+                    and argv[0] in ('sh', 'bash', '/bin/sh', '/bin/bash')
+                    and argv[1] in ('-c', '-lc')):
+                script = argv[2]
+        commands = directory_commands(script) if script is not None else [tool_input.get('argv')]
+        if any(not isinstance(c, list) or not all(isinstance(arg, str) for arg in c)
+               for c in commands):
+            continue
+        has_pwd, has_listing = command_roles(commands)
+        if not (has_pwd or has_listing):
             continue
         try:
             result = json.loads(event.get('tool_result', ''))
@@ -121,8 +147,15 @@ def directory_execution(traces):
         lines = result.get('output', '').splitlines()
         directories = {line.split()[-1] for line in lines
                        if line.startswith('d') and len(line.split()) >= 9}
-        if '/home/keeper/playground/imp' in lines and {'.', '..'}.issubset(directories):
-            return dict(input=started, completion=event)
+        proof = dict(input=started, completion=event)
+        scope = (event['worker_run_id'], event['session_id'], result['cwd'])
+        observed = observations.setdefault(scope, {})
+        if has_pwd and '/home/keeper/playground/imp' in lines:
+            observed['pwd'] = proof
+        if has_listing and {'.', '..'}.issubset(directories):
+            observed['listing'] = proof
+        if 'pwd' in observed and 'listing' in observed:
+            return proof if observed['pwd'] == observed['listing'] else observed
     raise RuntimeError('no matched Execute input/output proves the current path and directory listing in the Docker sandbox')
 
 
@@ -184,7 +217,7 @@ def measure(args):
                     'Hello imp. Please introduce yourself briefly.',
                     'Create a Board post titled Imp first conversation and a Task titled Imp onboarding check. Leave the task open.',
                     'Show the current path and a detailed directory listing, including hidden entries, inside your default sandbox.',
-                    'Fetch https://example.com and tell me what it says.',
+                    'Use WebFetch to retrieve https://example.com now and report the HTTP status and title.',
                 ]
                 for index, prompt in enumerate(prompts):
                     path = output / f'chat-{index}.sse'

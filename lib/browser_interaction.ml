@@ -100,7 +100,7 @@ let script = {js|function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "follow_link") {
-    const element = browserScene({...args,mode:'resolve'});
+    const element = browserScene({...args,mode:'resolve_link'});
     if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
       throw new Error('follow_link_requires_anchor');
     const style = getComputedStyle(element);
@@ -112,6 +112,7 @@ let script = {js|function interactInPage(args) {
     const destination = new URL(element.href, location.href);
     if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
     const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      navigationSource:{url:before,documentId:args.documentId},
       title:document.title,scrollX:scrollX,scrollY:scrollY};
     // Follow the observed href directly: page click handlers cannot redirect
     // this primitive into window.open or an unrelated application action.

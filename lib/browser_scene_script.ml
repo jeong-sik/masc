@@ -1,14 +1,18 @@
 (* Same fixed function as the extension; parity is checked by the Node regression. *)
 let runtime = {js|function browserScene(args) {
-  const key = Symbol.for('masc.browser.scene.v1');
+  const key = Symbol.for('masc.browser.scene.refs.v2');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
-  if (args.mode === 'resolve') {
+  if (args.mode === 'resolve' || args.mode === 'resolve_link') {
     if (!sameDocument || args.documentId !== state.id) throw new Error('scene_document_changed');
     const ref = state.nodes.get(args.nodeId);
     const element = ref && ref.deref();
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
+    if (args.mode === 'resolve_link') {
+      if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
+      if (element.href !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+    }
     return element;
   }
   if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
@@ -18,16 +22,25 @@ let runtime = {js|function browserScene(args) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2,'0')).join('');
     state = {document, root:document.documentElement, id, next:0,
-      ids:new WeakMap(), nodes:new Map()};
+      ids:new WeakMap(), nodes:new Map(), links:new Map()};
     window[key] = state;
   }
   if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
-  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) state.nodes.delete(id);
+  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
+    state.nodes.delete(id); state.links.delete(id);
+  }
   const nodeId = element => {
     let id = state.ids.get(element);
-    if (!id) { id = 'n' + (++state.next); state.ids.set(element,id); }
+    const href = element.localName === 'a' && element.hasAttribute('href') ? element.href : null;
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
+    if (!id || (href !== null && state.links.get(id) !== href)) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); }
+      id = 'n' + (++state.next); state.ids.set(element,id);
+      if (href !== null) state.links.set(id,href);
+    }
     state.nodes.set(id,new WeakRef(element));
     return id;
   };
@@ -130,6 +143,7 @@ let runtime = {js|function browserScene(args) {
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
       describe('control',node,label,boxes(node.getClientRects(),node),{
+        ...(tag === 'a' && node.hasAttribute('href') ? {href:node.href} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;

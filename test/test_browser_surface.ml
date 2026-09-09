@@ -140,13 +140,14 @@ let test_scoped_scene_acknowledgement () =
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let ignores_scope = ref false in
+      let observed_document = ref "fixture" in
       let observed_url = ref "https://example.org" in
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_scene {tab_id;view;scope;_} ->
           let scope_json = match scope with None -> `Null | Some target ->
             `Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id] in
           answer (`Assoc ["tabId",`Int tab_id;"schema",`String "masc.browser.scene.v1";
-            "documentId",`String "fixture";"url",`String !observed_url;"title",`String "Page";
+            "documentId",`String !observed_document;"url",`String !observed_url;"title",`String "Page";
             "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
             "nodes",`List [];"truncated",`Bool false;
             "view",`String (if !ignores_scope then "content" else match view with Regions -> "regions" | Content -> "content");
@@ -180,6 +181,26 @@ let test_scoped_scene_acknowledgement () =
       check string "unguarded observation exposes final redirect URL" "https://example.org/canonical" actual_url;
       check bool "verified observed URL can be pinned without another follow" true
         (match guarded_tool actual_url with Tool_result.Completed _ -> true | _ -> false);
+      let source : Masc.Browser_scene.navigation_source = {url= !observed_url;document_id= !observed_document} in
+      let same_url_read ?(pin=true) () = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"BrowserRead" ~start_time:0.
+        (`Assoc (["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
+          "navigationSource",`Assoc ["url",`String source.url;
+            "documentId",`String source.document_id]] @
+          (if pin then ["expectedUrl",`String !observed_url] else []))) in
+      check bool "same URL old document is not navigation progress" true
+        (match same_url_read () with Tool_result.Failed _ -> true | _ -> false);
+      check bool "redirect inspection retains old-document rejection without URL pin" true
+        (match same_url_read ~pin:false () with Tool_result.Failed _ -> true | _ -> false);
+      observed_url := "https://example.org/spa-next";
+      check bool "redirect destination can be inspected while preserving source guard" true
+        (match same_url_read ~pin:false () with Tool_result.Completed _ -> true | _ -> false);
+      check bool "SPA changed URL permits same document observation" true
+        (match same_url_read () with Tool_result.Completed _ -> true | _ -> false);
+      observed_url := source.url;
+      observed_document := "reloaded-document";
+      check bool "same URL newly loaded document is observable" true
+        (match same_url_read () with Tool_result.Completed _ -> true | _ -> false);
+      observed_document := "fixture";
       ignores_scope := true;
       check bool "connector ignoring scope must fail rather than return whole page" true (Result.is_error (read ()));
       check bool "connector ignoring region view must fail" true

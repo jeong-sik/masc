@@ -205,13 +205,6 @@ let find_catalog label =
     | None -> None)
 ;;
 
-let known_labels () =
-  all ()
-  |> List.concat_map (fun binding -> binding.id :: binding.aliases)
-  |> List.map normalize
-  |> List.sort_uniq String.compare
-;;
-
 let binding_for_provider_config (cfg : PConfig.t) = Option.bind cfg.provider_id find
 
 let canonical_explicit_provider_id (cfg : PConfig.t) =

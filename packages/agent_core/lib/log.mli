@@ -97,6 +97,5 @@ val error : t -> string -> field list -> unit
 
 (** {2 Built-in sinks} *)
 
-val json_sink : _ Eio.Flow.sink -> sink
 val stderr_sink : unit -> sink
 val collector_sink : unit -> sink * (unit -> record list)

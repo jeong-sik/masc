@@ -131,42 +131,6 @@ let write_file path content =
   | exn -> io_error_of_exn ~op:"write" ~path exn
 ;;
 
-let write_file_secret path content =
-  try
-    let* () = ensure_dir_recursive (Filename.dirname path) in
-    let tmp_path =
-      Filename.temp_file
-        ~temp_dir:(Filename.dirname path)
-        (Filename.basename path ^ ".")
-        ".tmp"
-    in
-    let clean_tmp () =
-      try Sys.remove tmp_path with
-      | Sys_error _ | Unix.Unix_error _ -> ()
-    in
-    try
-      let fd =
-        Unix.openfile tmp_path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
-      in
-      let oc = Unix.out_channel_of_descr fd in
-      Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () ->
-           output_string oc content;
-           Out_channel.flush oc;
-           fsync_fd_best_effort fd);
-      Sys.rename tmp_path path;
-      fsync_dir_best_effort (Filename.dirname path);
-      Ok ()
-    with
-    | exn ->
-      clean_tmp ();
-      raise exn
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> io_error_of_exn ~op:"write_secret" ~path exn
-;;
-
 let append_file path content =
   try
     let* () = ensure_dir_recursive (Filename.dirname path) in

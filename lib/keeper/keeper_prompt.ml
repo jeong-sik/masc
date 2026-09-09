@@ -18,11 +18,6 @@ open Keeper_types_profile
    shared prompt body on every build. Reintroducing name interpolation belongs
    in declared template variables, not a second substitution mechanism. *)
 
-let exact_direct_mention_present ~(targets : string list) (content : string) :
-    bool =
-  Mention.any_mentioned ~targets content
-
-
 (* [keeper] declares no template variables, so it is read directly. *)
 let system_prompt_body () : string =
   Prompt_registry.get_prompt Prompt_names.keeper

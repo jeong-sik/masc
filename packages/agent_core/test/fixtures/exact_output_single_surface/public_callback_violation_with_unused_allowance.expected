@@ -1,0 +1,2 @@
+fixtures/exact_output_single_surface/public_callback_violation_with_unused_allowance.mli.fixture: public value with_callback argument _ accepts callback-bearing or unresolved type arrow(_,constr(unit),constr(unit))
+unused callback allowance (1): public_callback_violation_with_unused_allowance.mli.fixture|absent|_|arrow(_,constr(unit),constr(unit))

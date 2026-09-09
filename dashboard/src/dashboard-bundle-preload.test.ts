@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -96,6 +97,16 @@ describe('dashboard production bundle preloads', () => {
     const builtAt = Date.parse(stamp)
     expect(builtAt).toBeGreaterThanOrEqual(startedAt)
     expect(builtAt).toBeLessThanOrEqual(finishedAt)
+
+    const identity = JSON.parse(readFileSync(join(outDir, '.build-identity.json'), 'utf8'))
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: resolve(__dirname, '../..'), encoding: 'utf8',
+    }).trim()
+    expect(identity).toEqual({
+      schema: 'masc.dashboard-build.v1',
+      source_commit: git('status', '--porcelain', '--untracked-files=normal') === ''
+        ? git('rev-parse', 'HEAD') : null,
+    })
 
     const html = readFileSync(join(outDir, 'index.html'), 'utf8')
     const manifest = JSON.parse(

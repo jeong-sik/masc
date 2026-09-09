@@ -6,40 +6,23 @@ import { bundleStaleBannerModel, worktreeServerBannerModel } from './bundle-stal
 // load-bearing — when it stays silent.
 
 describe('bundleStaleBannerModel', () => {
-  it('warns on stale with both generations named', () => {
+  it('names different sources without guessing which is older', () => {
     const model = bundleStaleBannerModel({
-      status: 'stale',
-      build_stamp_at: '2026-08-27T10:12:41Z',
-      binary_built_at: '2026-08-27T10:30:10Z',
-      next_action: 'cd dashboard && pnpm run build',
+      status: 'mismatched', dashboard_source_commit: 'aaaa', binary_source_commit: 'bbbb',
     })
-    expect(model).not.toBeNull()
-    expect(model!.message).toContain('낡았습니다')
-    expect(model!.message).toContain('10:12')
-    expect(model!.message).toContain('10:30')
-    expect(model!.nextAction).toBe('cd dashboard && pnpm run build')
+    expect(model?.message).toContain('aaaa')
+    expect(model?.message).toContain('bbbb')
+    expect(model?.message).not.toContain('낡')
+    expect(model?.nextAction).toContain('CI')
+    expect(model?.nextAction).not.toContain('pnpm')
   })
-
-  it('still warns on stale when the stamps are absent', () => {
-    const model = bundleStaleBannerModel({ status: 'stale' })
-    expect(model).not.toBeNull()
-    expect(model!.message).toContain('낡았습니다')
-    // No "(번들 < 서버)" fragment without both instants.
-    expect(model!.message).not.toContain('번들')
-    expect(model!.nextAction).toContain('pnpm run build')
+  it('keeps unknown provenance separate from missing assets', () => {
+    expect(bundleStaleBannerModel({ status: 'unknown' })?.message).toContain('빌드 소스')
+    expect(bundleStaleBannerModel({ status: 'missing' })?.message).toContain('아티팩트')
+    expect(bundleStaleBannerModel({ status: 'unavailable' })?.message).toContain('검증')
   })
-
-  it('warns on a missing build stamp as unverifiable, not as current', () => {
-    const model = bundleStaleBannerModel({ status: 'missing' })
-    expect(model).not.toBeNull()
-    expect(model!.message).toContain('확인할 수 없습니다')
-  })
-
-  it('stays silent on ok', () => {
-    expect(bundleStaleBannerModel({ status: 'ok' })).toBeNull()
-  })
-
-  it('stays silent when an older server gives no verdict', () => {
+  it('stays silent for matching source and no verdict', () => {
+    expect(bundleStaleBannerModel({ status: 'ok', source_provenance: 'declared_build_source' })).toBeNull()
     expect(bundleStaleBannerModel(undefined)).toBeNull()
     expect(bundleStaleBannerModel(null)).toBeNull()
   })

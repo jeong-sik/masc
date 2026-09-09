@@ -846,7 +846,9 @@ export interface DashboardSurfaceHealth {
   status?: string
   next_action?: string
   build_stamp_at?: string
-  binary_built_at?: string
+  dashboard_source_commit?: string
+  binary_source_commit?: string
+  source_provenance?: string
 }
 
 export interface DashboardFullHealthResponse {

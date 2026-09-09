@@ -335,10 +335,10 @@ let make_stage bin args =
   }
 ;;
 
-let test_subst_bearing_ir_is_too_complex_pr_a () =
-  (* PR-A: $( ) parses into Shell_ir.Subst, but execution is not open yet —
-     the gate answers a typed refusal until PR-B teaches dispatch to
-     evaluate the substitution.  Task B flips this test to Allow. *)
+let test_subst_bearing_ir_allows_and_lists_children () =
+  (* Task B of RFC shell-ir-typed-command-substitution: a Subst-bearing IR
+     is no longer a structural refusal — the gate traverses the child
+     stages, so they appear in the stage list the context carries. *)
   let stage =
     { (make_stage "echo" []) with
       Masc_exec.Shell_ir.args =
@@ -353,13 +353,13 @@ let test_subst_bearing_ir_is_too_complex_pr_a () =
       ~sandbox:Gate.host_sandbox
       ()
   with
-  | Gate.Too_complex { reason } ->
-    Alcotest.(check string)
-      "subst reason tag"
-      "cmd_subst"
-      (Gate.too_complex_reason_tag reason)
+  | Gate.Allow context ->
+    Alcotest.(check (list string))
+      "stage bins include the subst child"
+      [ "echo"; "date" ]
+      context.Gate.stage_bins
   | other ->
-    Alcotest.failf "expected Too_complex, got %s" (Gate.verdict_tag other)
+    Alcotest.failf "expected Allow, got %s" (Gate.verdict_tag other)
 ;;
 
 let test_lower_typed_three_stage_matches_raw () =
@@ -586,9 +586,9 @@ let () =
             `Quick
             test_too_complex_reason_tags_are_stable
         ; Alcotest.test_case
-            "subst-bearing IR is Too_complex cmd_subst (PR-A)"
+            "subst-bearing IR allows, children listed"
             `Quick
-            test_subst_bearing_ir_is_too_complex_pr_a
+            test_subst_bearing_ir_allows_and_lists_children
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case

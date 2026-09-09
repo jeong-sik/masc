@@ -570,6 +570,22 @@ let test_script_classification_unit () =
   observation "TZ zone abbreviation stays inert" "TZ=UTC git rev-parse HEAD"
 ;;
 
+let test_substitution_children_supply_the_reason () =
+  (* RFC shell-ir-typed-command-substitution: a substitution's child stages
+     classify first.  A child that needs observation supplies the reason;
+     children that all classify static still leave the parent's argv
+     unproven — the substituted text is not on the line. *)
+  check classification "subst child reason propagates"
+    (Readonly.Needs_observation (Git_command_requires_execution Status))
+    (Readonly.classify_script "echo $(git status)");
+  check classification "static children leave the request unproven"
+    (Readonly.Needs_observation Unproven_request)
+    (Readonly.classify_script "echo $(date)");
+  check classification "no substitution stays static"
+    Readonly.Static_observation
+    (Readonly.classify_script "echo hello")
+;;
+
 let test_observation_scripts_pass_the_table () =
   check bool
     "observation script under Docker reads without judgment"
@@ -1047,6 +1063,10 @@ let () =
         ] )
     ; ( "script classification"
       , [ test_case "classification unit" `Quick test_script_classification_unit
+        ; test_case
+            "substitution children supply the reason"
+            `Quick
+            test_substitution_children_supply_the_reason
         ; test_case
             "observation scripts pass the table"
             `Quick

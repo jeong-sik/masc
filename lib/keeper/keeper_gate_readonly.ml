@@ -342,8 +342,9 @@ let rec literal_of_arg = function
   | Ir.Lit (_, { Ir.glob = true; _ }) -> None
   | Ir.Lit (text, _) -> Some text
   | Ir.Var _ -> None
-  (* PR-A: a substitution is never a literal. Task B classifies its child
-     stages; until then the [None] here routes the stage to the judge. *)
+  (* A substitution is never a literal — the substituted text is not on the
+     line. [classify_simple] consults the child stages for the reason; this
+     [None] keeps the word itself unproven. *)
   | Ir.Subst _ -> None
   | Ir.Concat parts ->
     let rec join acc = function
@@ -434,28 +435,45 @@ let env_assignments_inert (env : (string * Ir.arg) list) : bool =
       | Ir.Lit (v, _) -> env_assignment_inert name v
       | Ir.Concat _ -> false
       | Ir.Var _ -> false
-      (* PR-A: an unevaluated substitution is not inert; Task B classifies
-         the child stages it carries. *)
+      (* An unevaluated substitution is not inert; [classify_simple]
+         classifies the child stages it carries. *)
       | Ir.Subst _ -> false)
     env
 ;;
 
-let classify_simple (simple : Ir.simple) =
-  if not (env_assignments_inert simple.Ir.env)
-     || not (List.for_all redirect_is_observation simple.Ir.redirects)
-  then Needs_observation Unproven_request
-  else
-    match literals_of_args simple.Ir.args with
-    | None -> Needs_observation Unproven_request
-    | Some args ->
-      let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
-      if String.equal bin shell_directory_step then Static_observation
-      else classify_argv (bin :: args)
-;;
-
 (* Every stage must have a static proof; the first missing proof supplies
-   the execution reason instead of collapsing it to a boolean. *)
-let rec classify_ir = function
+   the execution reason instead of collapsing it to a boolean. A
+   substitution's child stages are stages of the same script: they classify
+   first, and a child that needs observation supplies the reason. Children
+   that all classify static still leave the parent's argv unproven — the
+   substituted text is not on the line. *)
+let rec classify_simple (simple : Ir.simple) =
+  let children =
+    List.concat_map Ir.subst_children_of_arg
+      (simple.Ir.args @ List.map snd simple.Ir.env)
+  in
+  match
+    List.find_map
+      (function
+        | Needs_observation _ as classification -> Some classification
+        | Static_observation -> None)
+      (List.map classify_ir children)
+  with
+  | Some classification -> classification
+  | None when children <> [] -> Needs_observation Unproven_request
+  | None ->
+    if not (env_assignments_inert simple.Ir.env)
+       || not (List.for_all redirect_is_observation simple.Ir.redirects)
+    then Needs_observation Unproven_request
+    else
+      match literals_of_args simple.Ir.args with
+      | None -> Needs_observation Unproven_request
+      | Some args ->
+        let bin = Masc_exec.Exec_program.to_string simple.Ir.bin in
+        if String.equal bin shell_directory_step then Static_observation
+        else classify_argv (bin :: args)
+
+and classify_ir = function
   | Ir.Simple simple -> classify_simple simple
   | Ir.Pipeline [] -> Needs_observation Unproven_request
   | Ir.Pipeline stages -> classify_stages stages

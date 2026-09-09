@@ -206,11 +206,14 @@ let feature_names t =
 ;;
 
 let structural_feature_blockers t =
+  (* [command_substitution] is a feature, not a blocker: [$( )] is inside
+     the subset since RFC shell-ir-typed-command-substitution (backticks
+     stay refused at the lexer, so a backtick fixture is a parse_status
+     blocker, not this one). *)
   let f = t.features in
   [ "redirect", f.redirect
   ; "heredoc", f.heredoc
   ; "subshell", f.subshell
-  ; "command_substitution", f.command_substitution
   ; "env_assignment", f.env_assignment
   ; "process_substitution", f.process_substitution
   ]

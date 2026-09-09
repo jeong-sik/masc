@@ -84,7 +84,10 @@ let test_measured_dispositions () =
   let case script expected = Alcotest.(check string) script expected (tag_of script) in
   case "ls *.ml" "representable";
   case "echo hi > out.txt" "representable";
-  case "echo $(date)" "cmd_subst";
+  (* $( ) parses and executes now (RFC shell-ir-typed-command-substitution);
+     the cmd_subst tag survives for backticks only. *)
+  case "echo $(date)" "representable";
+  case "echo `date`" "cmd_subst";
   case "sleep 5 &" "background";
   (* A quoted tag means the body is literal, so the subset can hold it
      without an expansion pass (bash_lexer.mll:87-92) and the costume hides
@@ -104,9 +107,9 @@ let test_measured_dispositions () =
 (* The tag names what the lexer refused, not the first metacharacter someone
    found by scanning the source.
 
-   Every case here but the [$(date)] one was reported as [redirect] before --
-   that one had [$(] to find, which the scan checked before [>]. The advice
-   attached to [redirect] told the caller to move the script into the [stdin]
+   Every case here was reported as [redirect] before — the scan checked the
+   metacharacters in an order that found [>] first. The advice attached to
+   [redirect] told the caller to move the script into the [stdin]
    field, which is not an answer for [>] under any reading, and it pointed at
    redirects that were all fine. The expansion beside them was not, and that
    is now what the tag says. *)
@@ -115,7 +118,9 @@ let test_a_tag_names_the_refused_lexeme_not_a_neighbour () =
   case "echo $HOME > out.txt" "param_expansion";
   case "echo exit=$? >> out.txt" "param_expansion";
   case "echo \"$HOME\" > out.txt" "param_expansion";
-  case "echo $(date) > out.txt" "cmd_subst";
+  case "echo `date` > out.txt" "cmd_subst";
+  (* $( ) with a redirect parses and runs now -- nothing is refused. *)
+  case "echo $(date) > out.txt" "representable";
   (* The witness, as the keeper sent it. *)
   case
     "echo cmd=build > ev.txt && git rev-parse HEAD >> ev.txt 2>&1; dune build \

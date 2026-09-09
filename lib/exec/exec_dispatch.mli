@@ -10,8 +10,9 @@ type dispatch_result = {
 
 val resolve_arg : Shell_ir.arg -> string
 (** Resolve literal pieces without reading the server environment.
-    Raises [Invalid_argument] for unresolved variables. Public dispatch rejects
-    such IR before executing any command or opening a redirect. *)
+    Raises [Invalid_argument] for unresolved variables and unevaluated
+    substitutions. Public dispatch rejects or evaluates such IR before
+    executing any command or opening a redirect. *)
 
 
 val dispatch_simple :
@@ -27,7 +28,13 @@ val dispatch_simple :
     [?on_output_chunk] is invoked for every chunk read from
     stdout/stderr while the process is running on the host sandbox path,
     including host commands that receive typed stdin. Guest and SSH runner
-    targets receive the same callback contract. *)
+    targets receive the same callback contract.
+
+    A [Shell_ir.Subst] in the stage's args or env is evaluated first, by
+    dispatching the child IR under the stage's own sandbox target; the
+    child's stdout — trailing newlines stripped — becomes exactly one argv
+    element, with no word splitting or glob (RFC
+    shell-ir-typed-command-substitution §2.3). *)
 
 val dispatch :
   ?base_host_env:string array ->
@@ -55,4 +62,6 @@ val dispatch_pipeline :
     receive the same callback contract. Decomposed fallback pipeline paths
     stream each stage's stderr and the final stage's stdout through the same
     callback contract while preserving intermediate stdout as stdin for the
-    next stage. *)
+    next stage. A stage carrying a [Shell_ir.Subst] declines the native and
+    per-target runners and takes the decomposed chain, where
+    [dispatch_simple] evaluates the substitution before spawn. *)

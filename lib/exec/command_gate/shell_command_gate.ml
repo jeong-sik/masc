@@ -121,7 +121,15 @@ let rec check_syntax ~(syntax_policy : syntax_policy) (ir : SI.t) =
   | SI.Simple s ->
     if stage_has_redirect s && not syntax_policy.redirect_allowed
     then Error (Redirect 1)
-    else Ok ()
+    else
+      (* A substitution's children are command positions too: [$(a | b)]
+         holds a pipeline under the policy, even nested inside a word. *)
+      List.fold_left
+        (fun acc child ->
+          Result.bind acc (fun () -> check_syntax ~syntax_policy child))
+        (Ok ())
+        (List.concat_map SI.subst_children_of_arg
+           (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
     let stage_n = List.length stages in
     if not syntax_policy.allow_pipes
@@ -243,13 +251,6 @@ let log_verdict ~source = function
 let rec structural_refusal (ir : SI.t) =
   if SI.has_variable_expansion ir then
     Some (`Too_complex (Unsupported_construct `Param_expansion))
-  else if SI.has_command_substitution ir then
-    (* PR-A of RFC shell-ir-typed-command-substitution: the parser reads
-       [$( )] into [Subst], and execution is still closed — the refusal is
-       typed, not a crash.  Reusing the [cmd_subst] tag keeps the census
-       vocabulary stable while execution is closed; PR-B removes this and
-       traverses the children instead. *)
-    Some (`Too_complex (Unsupported_construct `Cmd_subst))
   else
   match ir with
   | SI.Simple _ -> None

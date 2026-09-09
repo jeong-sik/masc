@@ -25,8 +25,8 @@
     - [Cannot_parse] — the bash subset parser rejected or aborted on
       the input.
     - [Too_complex] — parsed grammar but contains a construct the
-      subset deliberately excludes (heredoc, cmd_subst, ...) or
-      yields a nested pipeline that Phase 1 declines to flatten.
+      subset deliberately excludes (heredoc, backtick substitution, ...)
+      or yields a nested pipeline that Phase 1 declines to flatten.
 
     Pipelines are first-class. [a | b | c] is preserved as a
     non-nested ordered stage list of length three. Nested pipelines

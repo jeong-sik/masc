@@ -7760,6 +7760,20 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
 
+let test_goal_timeline_missing_source_does_not_invent_gate_failure () =
+  let cases = [
+    "{}";
+    {|{"ok":false,"error":"other source failed"}|};
+    {|{"timeline":null}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"ready","operator_detail":"not an error"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unexpected","operator_detail":"unknown"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unavailable","operator_detail":" "}}|}
+  ] in
+  List.iter (fun source ->
+    match Tui_decode.decode_goal_detail_timeline (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail ("invalid source state became a Gate failure: " ^ source)) cases
+
 let test_goal_timeline_rejects_a_thin_event () =
   let json =
     Yojson.Safe.from_string
@@ -8362,6 +8376,8 @@ let () =
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "missing source never invents a Gate failure" `Quick
+          test_goal_timeline_missing_source_does_not_invent_gate_failure
       ; Alcotest.test_case "rejects a thin event" `Quick
           test_goal_timeline_rejects_a_thin_event
       ] );

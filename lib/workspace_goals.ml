@@ -823,14 +823,14 @@ let confirm_completion config ~goal_id ~operator_id ~request_id
       | _ -> Error "confirmation must name the current proven criterion, request and verifier run" in
     let* transition = Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Confirm_completion in
     let* record = Goal_verification.record_human_confirmation config ~goal_id verdict ~operator_id in
+    let* confirming_operator = match record.Goal_verification.completion with
+      | Goal_verification.Human_confirmed (_, confirmation) -> Ok confirmation.operator_id
+      | _ -> Error "confirmation store did not retain operator authority" in
     let updated = match transition with
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in
-    Ok (updated, (record, updated.phase <> goal.phase)))
-  |> Result.map (fun (goal, (record, changed)) ->
-    let confirming_operator = match record.Goal_verification.completion with
-      | Goal_verification.Human_confirmed (_, confirmation) -> confirmation.operator_id
-      | _ -> operator_id in
+    Ok (updated, (record, updated.phase <> goal.phase, confirming_operator)))
+  |> Result.map (fun (goal, (record, changed, confirming_operator)) ->
     if changed then emit_goal_event {config; agent_name = confirming_operator} ~goal_id
       ~event_type:"goal_phase" ~payload:(`Assoc ["phase", Goal_phase.to_yojson goal.phase;
         "authority_kind", `String "human_operator"; "actor", `String confirming_operator;

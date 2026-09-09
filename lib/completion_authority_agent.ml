@@ -901,9 +901,10 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          again only through a fresh submission, or through the sweep, which is
          armed at boot and after a failed backlog read rather than on a timer.
          So the Task sits in [AwaitingVerification] until a producer or operator
-         acts, and this is the one line that says so — at the level its
-         retryable sibling above already uses. *)
-      Log.Misc.info
+         acts. The Task's own status already says so; this line is per-task
+         bookkeeping of a sweep that touches every awaiting Task, and at Info
+         it was 46 lines per boot (#34641), so it is routine. *)
+      Log.Misc.routine
         "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
         task.id
         verification_id)

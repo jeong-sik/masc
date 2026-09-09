@@ -33,6 +33,21 @@ val pending_hitl_approval_keeper_names :
     [sweep_and_recover] to surface otherwise silent chat stalls without
     changing approval/resume behavior. *)
 
+(** A keeper whose pending HITL count differs from the one last announced
+    for it, with the new count; a keeper announced non-zero and now absent
+    from [counts] is reported with [0]. Pure; the sweep keeps the memory.
+    Pending counts are state, so a line per sweep while nothing changed was
+    noise (#34643). *)
+type hitl_announcement =
+  { keeper_name : string
+  ; pending_count : int
+  }
+
+val pending_hitl_announcements :
+  announced:(string * int) list ->
+  counts:(string * int) list ->
+  hitl_announcement list
+
 val sweep_and_recover :
      load_or_materialize_keeper_meta:
        ('a context -> string -> (keeper_meta option, string) result)

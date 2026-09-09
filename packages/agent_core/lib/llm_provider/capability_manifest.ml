@@ -34,7 +34,6 @@ type entry =
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
-  ; supports_extended_thinking : bool option
   ; accepted_reasoning_efforts : string list option
     (** Optional subset of canonical reasoning effort values this model accepts
         (none / minimal / low / medium / high / xhigh). *)
@@ -302,7 +301,6 @@ let known_entry_keys =
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
   ; "supports_reasoning"
-  ; "supports_extended_thinking"
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
@@ -476,7 +474,6 @@ let parse_entry json =
   let* supports_named_tool_choice = member_bool "supports_named_tool_choice" json in
   let* supports_parallel_tool_calls = member_bool "supports_parallel_tool_calls" json in
   let* supports_reasoning = member_bool "supports_reasoning" json in
-  let* supports_extended_thinking = member_bool "supports_extended_thinking" json in
   let* supports_response_format_json = member_bool "supports_response_format_json" json in
   let* supports_structured_output = member_bool "supports_structured_output" json in
   let* supports_multimodal_inputs = member_bool "supports_multimodal_inputs" json in
@@ -504,7 +501,6 @@ let parse_entry json =
     ; chat_output_budget_field
     ; tool_schema_conformance
     ; supports_reasoning
-    ; supports_extended_thinking
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output

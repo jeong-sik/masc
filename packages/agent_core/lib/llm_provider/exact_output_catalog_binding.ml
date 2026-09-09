@@ -241,8 +241,6 @@ let merge_exact_model_entry
   ; tool_schema_conformance =
       prefer_overlay overlay.tool_schema_conformance base.tool_schema_conformance
   ; supports_reasoning = prefer_overlay overlay.supports_reasoning base.supports_reasoning
-  ; supports_extended_thinking =
-      prefer_overlay overlay.supports_extended_thinking base.supports_extended_thinking
   ; accepted_reasoning_efforts =
       prefer_overlay overlay.accepted_reasoning_efforts base.accepted_reasoning_efforts
   ; supports_response_format_json =

@@ -1234,7 +1234,6 @@ let test_gemini_stream_finish () =
 let test_gemini_capabilities_named () =
   let caps = Capabilities.gemini_capabilities in
   check bool "tools" true caps.supports_tools;
-  check bool "thinking" true caps.supports_extended_thinking;
   check bool "audio" true caps.supports_audio_input;
   check bool "video" true caps.supports_video_input;
   match caps.max_context_tokens with

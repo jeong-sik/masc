@@ -25,7 +25,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
@@ -52,7 +51,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
@@ -77,7 +75,6 @@ max_context_tokens = 256000
 # and each request logged Thinking_returned_but_declared_unsupported (#28457).
 # Every other kimi row in the catalog declares reasoning; this one did not.
 supports_reasoning = true
-supports_extended_thinking = true
 # Kimi returns reasoning it was not asked for and offers no field to turn it
 # off, which is what "none" and an always-on stream mean here — the same shape
 # kimi-k2.7-code carries in the base catalog.
@@ -97,7 +94,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_parallel_tool_calls = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_streaming_format = "delta:reasoning_content"
@@ -113,7 +109,6 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|think|>"
 supports_multimodal_inputs = true
@@ -132,7 +127,6 @@ base = "ollama"
 max_context_tokens = 131072
 supports_tools = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|think|>"
 supports_multimodal_inputs = true
@@ -162,7 +156,6 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 reasoning_replay = "preserve_always"
 supports_multimodal_inputs = true
@@ -182,7 +175,6 @@ max_context_tokens = 512000
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 # Mirror repair: an overlay copy that replaces the embedded base row wholesale
@@ -206,7 +198,6 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 # Mirror repair (task-838): value from the embedded base deepseek-v4-pro row.
 reasoning_replay = "drop_without_tool_preserve_with_tool"
@@ -229,7 +220,6 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 reasoning_streaming_format = "delta:reasoning"
 reasoning_replay = "drop_without_tool_preserve_with_tool"
 supports_multimodal_inputs = false
@@ -265,7 +255,6 @@ supports_tool_choice = true
 # tool_choice returned a tool_call for the named function.
 supports_named_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 # Both the non-streaming response and the stream spell it reasoning_content,
 # which is what the ollama_cloud row below already predicted for this wire
 # while pointing at a glm-coding row that did not exist.
@@ -297,7 +286,6 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 # /v1 streams reasoning under delta.reasoning, not delta.reasoning_content —
 # measured 2026-08-29 against this endpoint. The glm-coding row for the same
@@ -321,7 +309,6 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 reasoning_replay = "latest_user_turn_tool_calls"
@@ -346,7 +333,6 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 reasoning_replay = "preserve_always"
@@ -368,7 +354,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
@@ -386,7 +371,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
@@ -405,7 +389,6 @@ supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
 supports_reasoning = true
-supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"

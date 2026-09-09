@@ -725,7 +725,6 @@ streaming = true
 [models.deepseek-v4-pro.capabilities]
 max-output-tokens = 384000
 supports-tool-choice = true
-supports-extended-thinking = true
 thinking-control-format = "reasoning-effort"
 supports-response-format-json = true
 supports-structured-output = true
@@ -783,7 +782,6 @@ streaming = true
 [models.glm-4-7-coding.capabilities]
 max-output-tokens = 128000
 supports-tool-choice = false
-supports-extended-thinking = true
 supports-response-format-json = true
 supports-structured-output = false
 
@@ -993,8 +991,7 @@ let test_runtime_toml_accepts_glm_coding_capability () =
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;
-       check bool "forced tool choice disabled" false caps.supports_tool_choice;
-       check bool "extended thinking" true caps.supports_extended_thinking
+       check bool "forced tool choice disabled" false caps.supports_tool_choice
      | None -> fail "expected model capabilities")
   | models -> failf "expected one model, got %d" (List.length models)
 

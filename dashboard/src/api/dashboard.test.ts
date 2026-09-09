@@ -4353,7 +4353,6 @@ describe('fetchRuntimeProviders', () => {
             supports_required_tool_choice: true,
             supports_named_tool_choice: true,
             supports_parallel_tool_calls: true,
-            supports_extended_thinking: true,
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_system_prompt: true,
@@ -4423,7 +4422,6 @@ describe('fetchRuntimeProviders', () => {
               supports_runtime_tool_events: false,
               assistant_tool_content_format: 'null',
               supports_reasoning: true,
-              supports_extended_thinking: true,
               accepted_reasoning_efforts: ['low', 'medium', 'high'],
               thinking_control_format: 'chat-template-kwargs',
               preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
@@ -4489,7 +4487,6 @@ describe('fetchRuntimeProviders', () => {
                   supports_required_tool_choice: true,
                   supports_named_tool_choice: true,
                   supports_parallel_tool_calls: true,
-                  supports_extended_thinking: true,
                   thinking_control_format: 'chat-template-kwargs',
                   supports_image_input: true,
                   supports_audio_input: false,
@@ -4604,7 +4601,6 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.supports_required_tool_choice).toBe(true)
     expect(result.providers[0]?.supports_named_tool_choice).toBe(true)
     expect(result.providers[0]?.supports_parallel_tool_calls).toBe(true)
-    expect(result.providers[0]?.supports_extended_thinking).toBe(true)
     expect(result.providers[0]?.supports_response_format_json).toBe(true)
     expect(result.providers[0]?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.effective_capabilities?.supports_native_streaming).toBe(true)

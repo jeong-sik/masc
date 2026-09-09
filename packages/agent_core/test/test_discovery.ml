@@ -478,11 +478,7 @@ let test_refresh_and_sync_mock_server_updates_indexes () =
          Alcotest.(check int) "slot total" 4 slots.total;
          Alcotest.(check int) "busy" 2 slots.busy;
          Alcotest.(check int) "idle" 2 slots.idle
-       | None -> Alcotest.fail "expected slots");
-      Alcotest.(check bool)
-        "openai-compatible discovery does not infer extended reasoning"
-        false
-        status.capabilities.supports_extended_thinking
+       | None -> Alcotest.fail "expected slots")
     | _ -> Alcotest.fail "expected one endpoint status")
 ;;
 

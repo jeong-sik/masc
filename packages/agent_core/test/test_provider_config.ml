@@ -719,7 +719,6 @@ base = "openai_chat"
 supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 |}
     (fun () ->
@@ -753,7 +752,6 @@ provider_name = "vllm-qwen3-mtp"
 supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 |}
     (fun () ->
@@ -794,7 +792,6 @@ provider_name = "vllm-qwen3-mtp"
 supports_tools = true
 supports_tool_choice = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 |}
     (fun () ->
@@ -844,7 +841,6 @@ id_prefix = "host-independent-model"
 base = "openai_chat"
 supports_tools = true
 supports_reasoning = true
-supports_extended_thinking = true
 thinking_control_format = "chat_template_kwargs"
 |}
     (fun () ->

@@ -33,7 +33,6 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     item.supports_required_tool_choice ? 'required' : null,
     item.supports_named_tool_choice ? 'named' : null,
     item.supports_parallel_tool_calls ? 'parallel' : null,
-    item.supports_extended_thinking ? 'extended-thinking' : null,
     item.supports_system_prompt ? 'system-prompt' : null,
     runtimeSnapshotPromptCache(item),
     item.emits_usage_tokens ? 'usage' : null,
@@ -195,7 +194,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     caps?.supports_required_tool_choice ? 'required' : null,
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
-    caps?.supports_extended_thinking ? 'extended-thinking' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_prompt_caching
       ? 'prompt-cache'
@@ -284,7 +282,6 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.modality_priority ? `modality:${caps.modality_priority}` : null,
     caps.assistant_tool_content_format ? `tool-content:${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
-    caps.supports_extended_thinking ? 'extended-thinking' : null,
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort:${caps.accepted_reasoning_efforts.join(',')}`
       : null,

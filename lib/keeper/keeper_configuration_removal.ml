@@ -235,7 +235,24 @@ let submit ~config ~keeper_name ~actor ~cleanup =
       let source_path = manifest_path config keeper_name in
       let* source = read_regular source_path in
       match source with
-      | None -> Error (Invalid_request "Keeper configuration does not exist")
+      | None ->
+        (* Two requests can both pass [Keeper_dashboard_purge.resolve], which
+           runs before this and outside the durable lock, while the manifest is
+           still there. They then serialize here. The one that arrives second
+           finds the manifest already gone and a receipt that says Removed: the
+           deletion it asked for did happen. Answering "does not exist" told the
+           dashboard 409 for a delete that succeeded
+           ([server_dashboard_http_delete_actions.ml] reports every submit error
+           as Conflict), so the completed receipt is the answer. Outside the
+           race a second delete never reaches here at all -- [resolve] returns
+           [Ok None] once the manifest is gone. *)
+        let removed =
+          List.filter (fun receipt -> receipt.state = Removed) inventory.receipts
+          |> List.sort (fun a b -> String.compare b.updated_at a.updated_at)
+        in
+        (match removed with
+         | receipt :: _ -> Ok receipt
+         | [] -> Error (Invalid_request "Keeper configuration does not exist"))
       | Some bytes ->
         let now = Masc_domain.now_iso () in
         let* receipt = save config {operation_id=Id.generate (); keeper_name; actor;

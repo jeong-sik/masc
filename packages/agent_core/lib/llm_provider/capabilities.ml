@@ -211,14 +211,11 @@ type capabilities =
   ; (* ── Protocol ──────────────────────────────────────── *)
     supports_native_streaming : bool
   ; supports_system_prompt : bool
-  ; supports_caching : bool
   ; supports_prompt_caching : bool
-  ; prompt_cache_alignment : int option
   ; (* ── Sampling parameters ───────────────────────────── *)
     supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool (** Deterministic seed for reproducible sampling. *)
-  ; supports_seed_with_images : bool
     (** Whether the provider respects [seed] deterministically when
       image inputs are present.  Local providers (Ollama, llama-server)
       achieve near-perfect determinism on identical hardware; cloud
@@ -228,9 +225,6 @@ type capabilities =
     (** Request sampling parameters that must not be serialized for this
         provider/model even when a caller supplied them. This is catalog data,
         not a model-id heuristic. *)
-  ; (* ── Advanced modalities ───────────────────────────── *)
-    supports_computer_use : bool
-  ; supports_code_execution : bool
   ; (* ── Usage reporting ─────────────────────────────────── *)
     emits_usage_tokens : bool
     (** True when the provider's standard response carries
@@ -276,17 +270,11 @@ let default_capabilities =
   ; task = None
   ; supports_native_streaming = false
   ; supports_system_prompt = true
-  ; (* most models support it *)
-    supports_caching = false
   ; supports_prompt_caching = false
-  ; prompt_cache_alignment = None
   ; supports_top_k = false
   ; supports_min_p = false
   ; supports_seed = false
-  ; supports_seed_with_images = false
   ; ignored_sampling_parameters = []
-  ; supports_computer_use = false
-  ; supports_code_execution = false
   ; emits_usage_tokens = true (* stricter default: most providers report usage *)
   ; supported_models = None
   }
@@ -393,10 +381,7 @@ let anthropic_capabilities =
        {!Api_common.content_block_to_json} emits exactly that shape. *)
     supports_document_input = true
   ; supports_native_streaming = true
-  ; supports_caching = true
   ; supports_prompt_caching = true
-  ; prompt_cache_alignment = Some 1024
-  ; supports_computer_use = true
   ; (* Anthropic Messages API documents [top_k] as a valid sampling
      parameter ("Only sample from the top K options for each
      subsequent token", docs.anthropic.com/en/api/messages body
@@ -469,10 +454,6 @@ let kimi_capabilities =
   ; supports_native_streaming = true
   ; supports_multimodal_inputs = true
   ; supports_image_input = true
-  ; supports_code_execution =
-      true
-      (* Preserved from the pre-rename kimi_capabilities; dropped by accident
-       in the capability rename. *)
   }
 ;;
 
@@ -497,9 +478,7 @@ let openai_compat_chat_capabilities =
   ; supports_multimodal_inputs = true
   ; supports_image_input = true
   ; supports_native_streaming = true
-  ; supports_caching = true
   ; supports_prompt_caching = false
-  ; prompt_cache_alignment = None
   }
 ;;
 
@@ -578,7 +557,6 @@ let ollama_capabilities =
   ; supports_required_tool_choice = false
   ; supports_named_tool_choice = false
   ; supports_seed = true
-  ; supports_seed_with_images = true
   ; thinking_control_format = Ollama_think
   }
 ;;
@@ -705,12 +683,7 @@ let gemini_capabilities =
        does not relabel it. *)
     supports_document_input = true
   ; supports_native_streaming = true
-  ; supports_caching = true
   ; supports_prompt_caching = false
-  ; prompt_cache_alignment = None
-  ; (* The Generate Content adapter does not serialize the [codeExecution]
-       tool or project executableCode/codeExecutionResult response Parts. *)
-    supports_code_execution = false
   ; (* Google Gemini's generateContent API documents [topK] as part of
      generationConfig (ai.google.dev/api/generate-content). The
      [backend_gemini.build_request] serializer already emits it at
@@ -946,14 +919,11 @@ type declarative_capability_overrides =
   ; task : Capability_vocab.task option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
-  ; supports_caching : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
   ; ignored_sampling_parameters : Capability_vocab.sampling_parameter list option
-  ; supports_computer_use : bool option
-  ; supports_code_execution : bool option
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (* Already joined with its token by the catalog/manifest parser; the token
        lives in the [Chat_template_token] constructor, not a sibling field. *)
@@ -993,14 +963,11 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
     task = None
   ; supports_native_streaming = entry.supports_native_streaming
   ; supports_system_prompt = entry.supports_system_prompt
-  ; supports_caching = entry.supports_caching
   ; supports_prompt_caching = entry.supports_prompt_caching
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
   ; supports_seed = entry.supports_seed
   ; ignored_sampling_parameters = entry.ignored_sampling_parameters
-  ; supports_computer_use = entry.supports_computer_use
-  ; supports_code_execution = entry.supports_code_execution
   ; thinking_control_format = entry.thinking_control_format
   ; preserve_thinking_control_format = entry.preserve_thinking_control_format
   ; content_inline_reasoning = entry.content_inline_reasoning
@@ -1143,7 +1110,6 @@ let apply_declarative_capability_overrides overrides =
       override_bool base.supports_native_streaming overrides.supports_native_streaming
   ; supports_system_prompt =
       override_bool base.supports_system_prompt overrides.supports_system_prompt
-  ; supports_caching = override_bool base.supports_caching overrides.supports_caching
   ; supports_prompt_caching =
       override_bool base.supports_prompt_caching overrides.supports_prompt_caching
   ; supports_top_k = override_bool base.supports_top_k overrides.supports_top_k
@@ -1153,10 +1119,6 @@ let apply_declarative_capability_overrides overrides =
       (match overrides.ignored_sampling_parameters with
        | Some parameters -> parameters
        | None -> base.ignored_sampling_parameters)
-  ; supports_computer_use =
-      override_bool base.supports_computer_use overrides.supports_computer_use
-  ; supports_code_execution =
-      override_bool base.supports_code_execution overrides.supports_code_execution
   ; thinking_control_format =
       (* Typed and token-joined at catalog/manifest parse time (unknown labels
          already failed closed there), so this is a plain override. *)
@@ -1314,14 +1276,11 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; task = entry.task
   ; supports_native_streaming = entry.supports_native_streaming
   ; supports_system_prompt = entry.supports_system_prompt
-  ; supports_caching = entry.supports_caching
   ; supports_prompt_caching = entry.supports_prompt_caching
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
   ; supports_seed = entry.supports_seed
   ; ignored_sampling_parameters = entry.ignored_sampling_parameters
-  ; supports_computer_use = entry.supports_computer_use
-  ; supports_code_execution = entry.supports_code_execution
   ; thinking_control_format = entry.thinking_control_format
   ; preserve_thinking_control_format = entry.preserve_thinking_control_format
   ; content_inline_reasoning = entry.content_inline_reasoning
@@ -1603,14 +1562,11 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; supported_models = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
-  ; supports_caching = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None
   ; supports_seed = None
   ; ignored_sampling_parameters = None
-  ; supports_computer_use = None
-  ; supports_code_execution = None
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None
@@ -1650,14 +1606,11 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; supports_document_input = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
-  ; supports_caching = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None
   ; supports_seed = None
   ; ignored_sampling_parameters = None
-  ; supports_computer_use = None
-  ; supports_code_execution = None
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None
@@ -2053,7 +2006,7 @@ let%test "emits_usage_tokens: ollama reports usage" =
 
 let%test "capabilities_for_provider_label: anthropic" =
   match capabilities_for_provider_label "anthropic" with
-  | Some c -> c.emits_usage_tokens && c.supports_caching
+  | Some c -> c.emits_usage_tokens
   | None -> false
 ;;
 
@@ -2359,7 +2312,6 @@ let%test "capabilities_for_provider_label: aliases resolve to identical capabili
     | Some ca, Some cb ->
       ca.supports_tools = cb.supports_tools
       && ca.supports_reasoning = cb.supports_reasoning
-      && ca.supports_caching = cb.supports_caching
       && ca.emits_usage_tokens = cb.emits_usage_tokens
       && ca.max_context_tokens = cb.max_context_tokens
       && ca.max_output_tokens = cb.max_output_tokens
@@ -2426,7 +2378,6 @@ let%test
            Some
              ( c.supports_tools
              , c.supports_reasoning
-             , c.supports_caching
              , c.emits_usage_tokens
              , c.max_context_tokens
              , c.max_output_tokens

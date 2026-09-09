@@ -73,7 +73,6 @@ let deepseek_v4_capabilities =
   ; thinking_control_format = Capabilities.Thinking_object
   ; supports_response_format_json = true
   ; supports_native_streaming = true
-  ; supports_caching = true
   ; supports_prompt_caching = false
   }
 ;;

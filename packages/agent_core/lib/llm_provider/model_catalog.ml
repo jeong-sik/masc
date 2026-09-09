@@ -36,14 +36,11 @@ type model_entry =
   ; supported_models : string list option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
-  ; supports_caching : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
   ; ignored_sampling_parameters : Capability_vocab.sampling_parameter list option
-  ; supports_computer_use : bool option
-  ; supports_code_execution : bool option
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (* Typed at the parse boundary (unlike the sibling string-valued format
        fields) because it carries the chat-template thinking token in its
@@ -345,14 +342,11 @@ let known_entry_keys =
   ; "supported_models"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
-  ; "supports_caching"
   ; "supports_prompt_caching"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
   ; "ignored_sampling_parameters"
-  ; "supports_computer_use"
-  ; "supports_code_execution"
   ; "thinking_control_format"
   ; "thinking_control_token"
   ; "anthropic_thinking_control"
@@ -500,7 +494,6 @@ let parse_entry entry_toml =
   let* supports_system_prompt =
     bool_field ~entry_id:id_prefix "supports_system_prompt" entry_toml
   in
-  let* supports_caching = bool_field ~entry_id:id_prefix "supports_caching" entry_toml in
   let* supports_prompt_caching =
     bool_field ~entry_id:id_prefix "supports_prompt_caching" entry_toml
   in
@@ -509,12 +502,6 @@ let parse_entry entry_toml =
   let* supports_seed = bool_field ~entry_id:id_prefix "supports_seed" entry_toml in
   let* ignored_sampling_parameters =
     sampling_parameters_opt ~entry_id:id_prefix "ignored_sampling_parameters" entry_toml
-  in
-  let* supports_computer_use =
-    bool_field ~entry_id:id_prefix "supports_computer_use" entry_toml
-  in
-  let* supports_code_execution =
-    bool_field ~entry_id:id_prefix "supports_code_execution" entry_toml
   in
   let* thinking_control_format_raw =
     find_string_field ~entry_id:id_prefix "thinking_control_format" entry_toml
@@ -614,14 +601,11 @@ let parse_entry entry_toml =
     ; supported_models
     ; supports_native_streaming
     ; supports_system_prompt
-    ; supports_caching
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p
     ; supports_seed
     ; ignored_sampling_parameters
-    ; supports_computer_use
-    ; supports_code_execution
     ; thinking_control_format
     ; anthropic_thinking_control
     ; preserve_thinking_control_format

@@ -33,8 +33,8 @@ UNVERIFIED_CAPABILITIES = (
     'supports_response_format_json', 'supports_structured_output',
     'supports_multimodal_inputs', 'supports_image_input', 'supports_audio_input',
     'supports_video_input', 'supports_document_input',
-    'supports_caching', 'supports_prompt_caching', 'supports_top_k', 'supports_min_p',
-    'supports_seed', 'supports_computer_use', 'supports_code_execution',
+    'supports_prompt_caching', 'supports_top_k', 'supports_min_p',
+    'supports_seed',
 )
 
 

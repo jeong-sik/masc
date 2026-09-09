@@ -9,7 +9,7 @@ function nonEmptyParts(parts: Array<string | null | undefined>): string[] {
 
 function runtimeSnapshotPromptCache(item: DashboardRuntimeProviderSnapshot): string | null {
   if (item.supports_prompt_caching !== true) return null
-  return `prompt-cache${typeof item.prompt_cache_alignment === 'number' ? `@${item.prompt_cache_alignment}` : ''}`
+  return 'prompt-cache'
 }
 
 export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapshot): string | null {
@@ -35,12 +35,8 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     item.supports_parallel_tool_calls ? 'parallel' : null,
     item.supports_extended_thinking ? 'extended-thinking' : null,
     item.supports_system_prompt ? 'system-prompt' : null,
-    item.supports_caching ? 'cache' : null,
     runtimeSnapshotPromptCache(item),
-    item.supports_seed_with_images ? 'seed+images' : null,
     item.emits_usage_tokens ? 'usage' : null,
-    item.supports_computer_use ? 'computer-use' : null,
-    item.supports_code_execution ? 'code-exec' : null,
   ])
   const parts = nonEmptyParts([
     item.source ? `source:${item.source}` : null,
@@ -201,14 +197,10 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
     caps?.supports_extended_thinking ? 'extended-thinking' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
-    caps?.supports_caching ? 'cache' : null,
     caps?.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
+      ? 'prompt-cache'
       : null,
-    caps?.supports_seed_with_images ? 'seed+images' : null,
     caps?.emits_usage_tokens ? 'usage' : null,
-    caps?.supports_computer_use ? 'computer-use' : null,
-    caps?.supports_code_execution ? 'code-exec' : null,
   ])
   let thinking: string | null = null
   if (typeof spec.model?.thinking_support === 'boolean') {
@@ -305,12 +297,8 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
     caps.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
+      ? 'prompt-cache'
       : null,
-    caps.supports_caching ? 'cache' : null,
-    caps.supports_seed_with_images ? 'seed+images' : null,
-    caps.supports_computer_use ? 'computer-use' : null,
-    caps.supports_code_execution ? 'code-exec' : null,
     caps.emits_usage_tokens ? 'usage' : null,
     caps.supported_models && caps.supported_models.length > 0 ? `models:${caps.supported_models.length}` : null,
   ])

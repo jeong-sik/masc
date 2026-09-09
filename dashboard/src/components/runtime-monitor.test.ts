@@ -75,16 +75,11 @@ describe('RuntimeMonitor', () => {
           supports_response_format_json: true,
           supports_structured_output: true,
           supports_system_prompt: true,
-          supports_caching: true,
           supports_prompt_caching: true,
-          prompt_cache_alignment: 1024,
           supports_top_k: true,
           supports_min_p: true,
           supports_seed: true,
-          supports_seed_with_images: true,
           emits_usage_tokens: true,
-          supports_computer_use: true,
-          supports_code_execution: true,
           model_count: 1,
           models: ['Qwen/Qwen3-32B'],
           parameter_policy: {
@@ -161,16 +156,11 @@ describe('RuntimeMonitor', () => {
             task: 'transcription',
             supports_native_streaming: true,
             supports_system_prompt: true,
-            supports_caching: true,
             supports_prompt_caching: true,
-            prompt_cache_alignment: 1024,
             supports_top_k: true,
             supports_min_p: true,
             supports_seed: true,
-            supports_seed_with_images: true,
             ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
-            supports_computer_use: true,
-            supports_code_execution: true,
             emits_usage_tokens: true,
             supported_models: ['Qwen/Qwen3-32B'],
           },
@@ -221,16 +211,11 @@ describe('RuntimeMonitor', () => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
                 supports_system_prompt: true,
-                supports_caching: true,
                 supports_prompt_caching: true,
-                prompt_cache_alignment: 1024,
                 supports_top_k: true,
                 supports_min_p: true,
                 supports_seed: true,
-                supports_seed_with_images: true,
                 emits_usage_tokens: true,
-                supports_computer_use: true,
-                supports_code_execution: true,
               },
             },
             binding: {
@@ -406,12 +391,12 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')
     expect(container.textContent).toContain('thinking-control:reasoning-effort')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
     )
     expect(container.textContent).toContain('note:verified by runtime discovery')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
     )
     expect(container.textContent).toContain('price-in:0.1')
     expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')
@@ -426,8 +411,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('wire:chat-template-kwargs · preserve:chat-template-kwargs-preserve-thinking')
     expect(container.textContent).toContain('preserve:chat-template-kwargs-preserve-thinking')
     expect(container.textContent).toContain('task:transcription · native-stream')
-    expect(container.textContent).toContain('seed+images')
-    expect(container.textContent).toContain('code-exec')
   })
 
   it('uses provider snapshot model count and auth kind when the live probe request fails', async () => {
@@ -479,7 +462,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('effective · task')
     expect(container.textContent).toContain('transcription')
     expect(container.textContent).toContain('effective · controls')
-    expect(container.textContent).toContain('native-stream,system-prompt,cache')
+    expect(container.textContent).toContain('native-stream,system-prompt')
     expect(container.textContent).toContain('effective · ignored sampling')
     expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
   })

@@ -45,7 +45,6 @@ type model_entry =
         unique strings. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
-  ; supports_caching : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -54,8 +53,6 @@ type model_entry =
     (** Request sampling parameters that this catalog row declares must not be
         serialized. Parsed fail-closed against
         {!Capability_vocab.sampling_parameter_values}. *)
-  ; supports_computer_use : bool option
-  ; supports_code_execution : bool option
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (** Joined from the TOML [thinking_control_format] and [thinking_control_token]
         keys at parse time: [chat_template_token] carries its token in the

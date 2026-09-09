@@ -1083,16 +1083,11 @@ describe('SettingsSurface', () => {
           supports_response_format_json: true,
           supports_structured_output: true,
           supports_system_prompt: true,
-          supports_caching: true,
           supports_prompt_caching: true,
-          prompt_cache_alignment: 1024,
           supports_top_k: true,
           supports_min_p: true,
           supports_seed: true,
-          supports_seed_with_images: true,
           emits_usage_tokens: true,
-          supports_computer_use: true,
-          supports_code_execution: true,
           note: 'verified by runtime discovery',
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
@@ -1162,15 +1157,11 @@ describe('SettingsSurface', () => {
             reasoning_replay_override: 'preserve-always',
             supports_native_streaming: true,
             supports_system_prompt: true,
-            supports_caching: true,
             supports_prompt_caching: true,
-            prompt_cache_alignment: 1024,
             supports_top_k: true,
             supports_min_p: true,
             supports_seed: true,
-            supports_seed_with_images: true,
             ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
-            supports_code_execution: true,
             emits_usage_tokens: true,
             supports_multimodal_inputs: true,
             supports_image_input: true,
@@ -1224,16 +1215,11 @@ describe('SettingsSurface', () => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
                 supports_system_prompt: true,
-                supports_caching: true,
                 supports_prompt_caching: true,
-                prompt_cache_alignment: 1024,
                 supports_top_k: true,
                 supports_min_p: true,
                 supports_seed: true,
-                supports_seed_with_images: true,
                 emits_usage_tokens: true,
-                supports_computer_use: false,
-                supports_code_execution: true,
               },
             },
             binding: {
@@ -1298,7 +1284,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('audio:on')
       expect(cards[0]?.textContent).toContain('video:off')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
       )
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
       expect(cards[0]?.textContent).toContain('source:agent-core-provider-config')
@@ -1322,7 +1308,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
       expect(cards[0]?.textContent).toContain(
-        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+        'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
       )
       expect(cards[0]?.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')

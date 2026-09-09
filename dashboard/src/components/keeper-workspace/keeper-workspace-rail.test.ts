@@ -359,15 +359,11 @@ describe('KeeperWorkspaceRail', () => {
             reasoning_replay_override: 'preserve-always',
             supports_native_streaming: true,
             supports_system_prompt: true,
-            supports_caching: true,
             supports_prompt_caching: true,
-            prompt_cache_alignment: 1024,
             supports_top_k: true,
             supports_min_p: true,
             supports_seed: true,
-            supports_seed_with_images: true,
             ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
-            supports_code_execution: true,
             emits_usage_tokens: true,
             modality_priority: 'visual-first',
             task: 'transcription',
@@ -420,16 +416,11 @@ describe('KeeperWorkspaceRail', () => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
                 supports_system_prompt: true,
-                supports_caching: true,
                 supports_prompt_caching: true,
-                prompt_cache_alignment: 1024,
                 supports_top_k: true,
                 supports_min_p: true,
                 supports_seed: true,
-                supports_seed_with_images: true,
                 emits_usage_tokens: true,
-                supports_computer_use: false,
-                supports_code_execution: true,
               },
             },
             binding: {
@@ -504,7 +495,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,prompt-cache,usage',
     )
     expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')

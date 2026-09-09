@@ -98,13 +98,10 @@ for the full JSON Schema (draft-07).
 | `supports_document_input` | bool | from base | Document inputs (e.g. PDF). Not implied by `supports_image_input`: a row that omits it has its documents rejected at serialization rather than relabelled as images. |
 | `supports_native_streaming` | bool | from base | SSE streaming. |
 | `supports_system_prompt` | bool | from base | System prompt field. |
-| `supports_caching` | bool | from base | Prompt caching. |
 | `supports_prompt_caching` | bool | from base | Explicit cache breakpoints. |
 | `supports_top_k` | bool | from base | top\_k sampling parameter. |
 | `supports_min_p` | bool | from base | min\_p sampling parameter. |
 | `supports_seed` | bool | from base | Deterministic seed. |
-| `supports_computer_use` | bool | from base | Computer-use tools. |
-| `supports_code_execution` | bool | from base | Server-side code sandbox. |
 | `thinking_control_format` | string | from base | Thinking enable/depth wire control. Accepted values: `none`, `thinking_object`, `thinking_object_adaptive`, `thinking_object_only`, `chat_template_kwargs`, `chat_template_token`, `ollama_think`, `reasoning_effort`. |
 | `thinking_control_token` | string | absent | Exact chat-template token used when `thinking_control_format = "chat_template_token"`; blank values and leading/trailing whitespace are rejected. |
 | `preserve_thinking_control_format` | string | from base | Historical reasoning replay/preserve wire control. Accepted values: `none`, `thinking_object_keep_all`, `chat_template_kwargs_preserve_thinking`, `always_preserved`, `thinking_object_clear_thinking`. |

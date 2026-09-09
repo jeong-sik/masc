@@ -85,7 +85,6 @@ type entry =
   ; supports_document_input : bool option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
-  ; supports_caching : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -93,8 +92,6 @@ type entry =
   ; ignored_sampling_parameters : Capability_vocab.sampling_parameter list option
     (** Request sampling parameters that this manifest row declares must not be
         serialized. *)
-  ; supports_computer_use : bool option
-  ; supports_code_execution : bool option
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (** Canonical thinking-wire format (none / thinking_object /
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /

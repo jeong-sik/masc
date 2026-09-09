@@ -426,16 +426,11 @@ let model_capabilities_override_of_model_spec
          ; supports_video_input = caps.supports_video_input
          ; supports_native_streaming = spec.streaming
          ; supports_system_prompt = caps.supports_system_prompt
-         ; supports_caching = caps.supports_caching
          ; supports_prompt_caching = caps.supports_prompt_caching
-         ; prompt_cache_alignment = caps.prompt_cache_alignment
          ; supports_top_k = caps.supports_top_k
          ; supports_min_p = caps.supports_min_p
          ; supports_seed = caps.supports_seed
-         ; supports_seed_with_images = caps.supports_seed_with_images
          ; emits_usage_tokens = caps.emits_usage_tokens
-         ; supports_computer_use = caps.supports_computer_use
-         ; supports_code_execution = caps.supports_code_execution
          })
       spec.capabilities
 ;;

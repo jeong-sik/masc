@@ -1237,8 +1237,6 @@ let test_gemini_capabilities_named () =
   check bool "thinking" true caps.supports_extended_thinking;
   check bool "audio" true caps.supports_audio_input;
   check bool "video" true caps.supports_video_input;
-  check bool "code_execution" false caps.supports_code_execution;
-  check bool "caching" true caps.supports_caching;
   match caps.max_context_tokens with
   | Some n -> check int "1M context" 1_000_000 n
   | None -> fail "expected max_context_tokens"

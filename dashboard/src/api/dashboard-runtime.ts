@@ -98,16 +98,11 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
   supports_system_prompt?: boolean
-  supports_caching?: boolean
   supports_prompt_caching?: boolean
-  prompt_cache_alignment?: number | null
   supports_top_k?: boolean
   supports_min_p?: boolean
   supports_seed?: boolean
-  supports_seed_with_images?: boolean
   emits_usage_tokens?: boolean
-  supports_computer_use?: boolean
-  supports_code_execution?: boolean
 }
 
 export interface DashboardRuntimeDeclaredModelSpec {
@@ -178,16 +173,11 @@ export interface DashboardRuntimeEffectiveCapabilities {
   task?: string | null
   supports_native_streaming?: boolean
   supports_system_prompt?: boolean
-  supports_caching?: boolean
   supports_prompt_caching?: boolean
-  prompt_cache_alignment?: number | null
   supports_top_k?: boolean
   supports_min_p?: boolean
   supports_seed?: boolean
-  supports_seed_with_images?: boolean
   ignored_sampling_parameters: string[]
-  supports_computer_use?: boolean
-  supports_code_execution?: boolean
   emits_usage_tokens?: boolean
   supported_models: string[] | null
 }
@@ -233,16 +223,11 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
   supports_system_prompt?: boolean
-  supports_caching?: boolean
   supports_prompt_caching?: boolean
-  prompt_cache_alignment?: number | null
   supports_top_k?: boolean
   supports_min_p?: boolean
   supports_seed?: boolean
-  supports_seed_with_images?: boolean
   emits_usage_tokens?: boolean
-  supports_computer_use?: boolean
-  supports_code_execution?: boolean
   effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
   parameter_policy?: DashboardRuntimeParameterPolicy | null
   request_config?: DashboardRuntimeRequestConfig | null
@@ -553,16 +538,11 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
-    supports_caching: asBoolean(raw.supports_caching),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
-    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),
     supports_seed: asBoolean(raw.supports_seed),
-    supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
     emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
-    supports_computer_use: asBoolean(raw.supports_computer_use),
-    supports_code_execution: asBoolean(raw.supports_code_execution),
   }
 }
 
@@ -657,16 +637,11 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     task: asNullableString(raw.task),
     supports_native_streaming: asBoolean(raw.supports_native_streaming),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
-    supports_caching: asBoolean(raw.supports_caching),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
-    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),
     supports_seed: asBoolean(raw.supports_seed),
-    supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
     ignored_sampling_parameters: asStringArray(raw.ignored_sampling_parameters),
-    supports_computer_use: asBoolean(raw.supports_computer_use),
-    supports_code_execution: asBoolean(raw.supports_code_execution),
     emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
     supported_models: decodeNullableStringArray(raw.supported_models),
   }
@@ -714,16 +689,11 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
-    supports_caching: asBoolean(raw.supports_caching),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
-    prompt_cache_alignment: asNumber(raw.prompt_cache_alignment) ?? null,
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),
     supports_seed: asBoolean(raw.supports_seed),
-    supports_seed_with_images: asBoolean(raw.supports_seed_with_images),
     emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
-    supports_computer_use: asBoolean(raw.supports_computer_use),
-    supports_code_execution: asBoolean(raw.supports_code_execution),
     effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
     parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
     request_config: decodeRuntimeRequestConfig(raw.request_config),

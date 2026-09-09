@@ -12,7 +12,6 @@ import { keepers } from '../../store'
 import {
   IdePersistencePanel,
   lifecycleStateFromKeeperPhase,
-  persistenceStateFromKeeperPhase,
 } from './ide-persistence-panel'
 
 vi.mock('../../api/keeper', async () => {
@@ -41,12 +40,7 @@ describe('ide persistence helpers', () => {
     expect(lifecycleStateFromKeeperPhase('Crashed')).toBe('terminated')
   })
 
-  it('maps keeper phases to persistence states', () => {
-    expect(persistenceStateFromKeeperPhase('Running')).toBe('saved')
-    expect(persistenceStateFromKeeperPhase('Restarting')).toBe('syncing')
-    expect(persistenceStateFromKeeperPhase('Offline')).toBe('offline')
-    expect(persistenceStateFromKeeperPhase('Running', true)).toBe('offline')
-  })
+
 })
 
 describe('IdePersistencePanel', () => {
@@ -73,6 +67,34 @@ describe('IdePersistencePanel', () => {
 
     expect(screen.getByText('PERSISTENCE MAP')).toBeTruthy()
     expect(screen.getByTestId('ide-persistence-lifecycle')).toBeTruthy()
+  })
+
+  it.each(['Running', 'Restarting', 'Failing'])('reports heartbeat rather than invented save state for %s', async phase => {
+    activeKeeperName.value = 'sangsu'
+    keepers.value = [{ name: 'sangsu', status: 'online', phase,
+      last_heartbeat: '2026-05-06T00:00:00Z' }]
+    fetchKeeperStateDiagramMock.mockResolvedValue({
+      keeper: 'sangsu', current_phase: phase, mermaid: 'graph TD',
+    } satisfies KeeperStateDiagramResponse)
+    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
+    expect(screen.getByLabelText('최근 하트비트').getAttribute('title')).toBe('2026-05-06T00:00:00Z')
+    expect(screen.queryByText('저장됨')).toBeNull()
+    expect(screen.queryByText('동기화 중')).toBeNull()
+    expect(screen.queryByText('충돌')).toBeNull()
+  })
+
+  it('does not substitute creation or update time for an absent heartbeat', async () => {
+    activeKeeperName.value = 'sangsu'
+    keepers.value = [{ name: 'sangsu', status: 'online', phase: 'Running',
+      created_at: '2026-05-06T00:00:00Z', updated_at: '2026-05-07T00:00:00Z' }]
+    fetchKeeperStateDiagramMock.mockResolvedValue({
+      keeper: 'sangsu', current_phase: 'Running', mermaid: 'graph TD',
+    } satisfies KeeperStateDiagramResponse)
+    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
+    expect(screen.getByLabelText('최근 하트비트').textContent).toContain('정보 없음')
+    expect(screen.getByLabelText('최근 하트비트').hasAttribute('title')).toBe(false)
   })
 
   it('falls back to the explicit keeper name when no active keeper is selected', async () => {

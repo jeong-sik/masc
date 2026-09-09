@@ -7,7 +7,6 @@
     Returned via [AdjustParams] from [BeforeTurnParams] hook. *)
 type turn_params =
   { temperature : float option
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option

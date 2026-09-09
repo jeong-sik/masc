@@ -63,7 +63,6 @@ let empty_runtime_checkpoint ~system_prompt ~messages
     enable_thinking = None;
     preserve_thinking = None;
     response_format = Agent_core.Types.Off;
-    thinking_budget = None;
     cache_system_prompt = false;
     context;
     mcp_sessions = [];

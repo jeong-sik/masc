@@ -31,7 +31,6 @@ let test_make_defaults () =
   check_bool "system_prompt None" true (cfg.system_prompt = None);
   check_bool "enable_thinking None" true (cfg.enable_thinking = None);
   check_bool "preserve_thinking None" true (cfg.preserve_thinking = None);
-  check_bool "thinking_budget None" true (cfg.thinking_budget = None);
   check_bool "reasoning_effort None" true (cfg.reasoning_effort = None);
   check_bool "clear_thinking None" true (cfg.clear_thinking = None);
   check_bool "tool_stream false" false cfg.tool_stream;
@@ -177,7 +176,6 @@ let test_make_with_all_options () =
       ~system_prompt:"system"
       ~enable_thinking:true
       ~preserve_thinking:true
-      ~thinking_budget:1000
       ~reasoning_effort:Reasoning_effort.Low
       ~clear_thinking:false
       ~tool_stream:true
@@ -196,7 +194,6 @@ let test_make_with_all_options () =
   check_bool "system_prompt" true (cfg.system_prompt = Some "system");
   check_bool "enable_thinking" true (cfg.enable_thinking = Some true);
   check_bool "preserve_thinking" true (cfg.preserve_thinking = Some true);
-  check_bool "thinking_budget" true (cfg.thinking_budget = Some 1000);
   check_bool "reasoning_effort" true (cfg.reasoning_effort = Some Reasoning_effort.Low);
   check_bool "clear_thinking" true (cfg.clear_thinking = Some false);
   check_bool "tool_stream" true cfg.tool_stream;
@@ -1186,18 +1183,7 @@ let test_reasoning_effort_typed_config_value () =
     "explicit effort preserved"
     (Some "high")
     (reasoning_effort_option_to_string explicit.reasoning_effort);
-  let budget_only =
-    Provider_config.make
-      ~kind:OpenAI_compat
-      ~model_id:"budget-only-model"
-      ~base_url:"https://example.test"
-      ~thinking_budget:8192
-      ()
-  in
-  Alcotest.(check (option string))
-    "numeric budget does not imply effort"
-    None
-    (reasoning_effort_option_to_string budget_only.reasoning_effort)
+  ()
 ;;
 
 let test_validate_reasoning_effort_subset_rejects_unsupported () =

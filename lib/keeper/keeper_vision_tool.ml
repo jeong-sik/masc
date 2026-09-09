@@ -51,7 +51,6 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   ; disable_parallel_tool_use = true
   ; enable_thinking = None
   ; preserve_thinking = Some false
-  ; thinking_budget = None
   ; clear_thinking = Some true
   }
   |> Keeper_structured_output_schema.without_response_format
@@ -78,7 +77,7 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
         ()
     ]
 
-let vision_runtime_candidates ()
+let vision_runtime_candidates ~now
   : (string * Runtime.t * Llm_provider.Provider_config.t) list =
   (* Delegate image-capability admission to the RFC-0265 SSOT
      [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
@@ -91,8 +90,14 @@ let vision_runtime_candidates ()
      ([Runtime_agent.media_candidates] with no lane: [runtime.media_failover]
      first, then the remaining declared runtimes). Only [Agent_core] runtimes
      qualify here because this tool calls the provider itself; an official
-     client carries inline images for the reroute but has no provider config. *)
+     client carries inline images for the reroute but has no provider config.
+     The set is held in quota-window order ([Runtime_quota_window.demote_order],
+     the order the keeper lane already uses): a candidate whose account answered
+     a hard quota rejection moves behind the live ones, so a read does not start
+     at the candidate that just said it cannot pay (RFC-0440 §3). *)
   Runtime_agent.media_candidates ~lane:[]
+  |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime.t) ->
+       Some (Runtime.quota_scope_of_runtime rt))
   |> List.filter_map (fun (rt : Runtime.t) ->
        match rt.Runtime.execution with
        | Runtime_execution.Codex_app_server _
@@ -104,11 +109,11 @@ let vision_runtime_candidates ()
          then Some (rt.Runtime.id, rt, provider_config)
          else None)
 
-let vision_runtime_ids () : string list =
-  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ())
+let vision_runtime_ids ~now : string list =
+  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
 
-let first_vision_runtime_id () : (string, string) result =
-  match vision_runtime_ids () with
+let first_vision_runtime_id ~now : (string, string) result =
+  match vision_runtime_ids ~now with
   | id :: _ -> Ok id
   | [] -> Error "no image-capable runtime configured"
 
@@ -472,6 +477,22 @@ let predicted_size_failure ~actual_bytes ~limit_bytes =
     }
 ;;
 
+(* A 402 states the binding's account cannot pay. The keeper walk records the
+   same fact for a typed [PaymentRequired]; the read walk meets it as HTTP and
+   records it here so the next read starts elsewhere (RFC-0440 §3). Any answer
+   that got through clears an observation on that account. *)
+let note_candidate_account ~(runtime : Runtime.t) = function
+  | Llm_provider.Http_client.HttpError { code = 402; _ } ->
+    Runtime_quota_window.note_observed_exhausted
+      ~scope:(Runtime.quota_scope_of_runtime runtime)
+  | Llm_provider.Http_client.HttpError _
+  | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.ProviderFailure _
+  | Llm_provider.Http_client.AcceptRejected _
+  | Llm_provider.Http_client.ProviderTerminal _ -> ()
+;;
+
 let run_candidates_outcome
     ?complete
     ~sw
@@ -569,6 +590,7 @@ let run_candidates_outcome
                 })
             else if candidate_policy_http_error err
             then (
+              note_candidate_account ~runtime:rt err;
               record_vision_candidate_attempt
                 ~runtime_id
                 ~result:"error"
@@ -596,6 +618,8 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
+            Runtime_quota_window.note_succeeded
+              ~scope:(Runtime.quota_scope_of_runtime rt);
             (match
                outcome_of_response ~runtime_id ~requested_model:config.model_id response
              with
@@ -647,7 +671,7 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              let candidates = vision_runtime_candidates () in
+              let candidates = vision_runtime_candidates ~now:(Eio.Time.now clock) in
               let selected = match runtime_id with
                 | None -> Ok candidates
                 | Some requested ->

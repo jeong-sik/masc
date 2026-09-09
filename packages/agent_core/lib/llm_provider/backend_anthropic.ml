@@ -130,10 +130,7 @@ let validate_thinking_controls mode (config : Provider_config.t) =
       (Printf.sprintf
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
-  | _, _, _ ->
-    (match config.thinking_budget with
-     | Some _ -> Error "thinking_budget is unsupported by adaptive thinking"
-     | None -> Provider_config.validate_reasoning_effort_request config)
+  | _, _, _ -> Provider_config.validate_reasoning_effort_request config
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =

@@ -163,7 +163,6 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
       | None | Some Types.None_ -> false
       | Some _ -> true)
   || Option.is_some config.preserve_thinking
-  || Option.is_some config.thinking_budget
   || Option.is_some config.reasoning_effort
   || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages

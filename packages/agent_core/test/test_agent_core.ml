@@ -217,17 +217,6 @@ let test_build_safe_valid () =
   Alcotest.(check bool) "build_safe ok" true (Result.is_ok result)
 ;;
 
-let test_build_safe_explicit_thinking_budget () =
-  Eio_main.run
-  @@ fun env ->
-  let result =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
-    |> Builder.with_thinking_budget 1000
-    |> Builder.build_safe
-  in
-  Alcotest.(check bool) "explicit thinking budget" true (Result.is_ok result)
-;;
-
 let () =
   run
     "Agent Core"
@@ -252,8 +241,6 @@ let () =
         ; test_case "version info" `Quick test_version_info
         ] )
     ; ( "builder"
-      , [ test_case "build_safe valid" `Quick test_build_safe_valid
-        ; test_case "build_safe thinking" `Quick test_build_safe_explicit_thinking_budget
-        ] )
+      , [ test_case "build_safe valid" `Quick test_build_safe_valid ] )
     ]
 ;;

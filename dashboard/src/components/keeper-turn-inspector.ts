@@ -528,13 +528,13 @@ function buildTurnDetail(
     durationSource: 'not_recorded',
     meta: 'keeper turn pre-dispatch',
   }]
-  if (record.enable_thinking === true || record.thinking_budget != null) {
+  if (record.enable_thinking === true) {
     phases.push({
       label: 'Thinking',
       kind: 'reason',
       durationMs: null,
       durationSource: 'not_recorded',
-      meta: record.thinking_budget != null ? `budget ${record.thinking_budget}` : 'enabled',
+      meta: 'enabled',
     })
   }
 
@@ -810,7 +810,6 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="ti-param">temperature<b>${record.temperature ?? '—'}</b></span>
         <span class="ti-param">top_p<b>${record.top_p ?? '—'}</b></span>
         <span class="ti-param">max_tokens<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
-        <span class="ti-param">thinking_budget<b>${record.thinking_budget ?? '—'}</b></span>
         <span class="ti-param">enable_thinking<b>${thinkingChipLabel(record)}</b></span>
       </div>
       <div class="ti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
@@ -1039,7 +1038,6 @@ function TurnRow({
     record.temperature != null ? `t=${record.temperature}` : null,
     record.top_p != null ? `p=${record.top_p}` : null,
     record.max_tokens != null ? `tok=${record.max_tokens}` : null,
-    record.thinking_budget != null ? `think=${record.thinking_budget}` : null,
     record.enable_thinking === false ? 'no-think' : null,
   ].filter(Boolean)
 

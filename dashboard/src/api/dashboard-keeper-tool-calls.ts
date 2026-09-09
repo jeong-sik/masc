@@ -138,7 +138,6 @@ export type ToolCallEntry = {
   route_evidence?: ToolCallRouteEvidence
   // Model invocation parameters for this call's turn.
   thinking_enabled?: boolean
-  thinking_budget?: number
   tool_choice?: string
   prompt_fingerprint?: string
   // Which file the tool's definition was read from, relative to the masc
@@ -301,7 +300,6 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     action_radius: decodeActionRadius(raw.action_radius),
     route_evidence: decodeRouteEvidence(raw.route_evidence),
     thinking_enabled: asBoolean(raw.thinking_enabled),
-    thinking_budget: asNumber(raw.thinking_budget),
     tool_choice: asString(raw.tool_choice),
     prompt_fingerprint: asString(raw.prompt_fingerprint),
     definition_source: asString(raw.definition_source),

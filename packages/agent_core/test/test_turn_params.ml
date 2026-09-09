@@ -7,7 +7,6 @@ open Agent_core
 let test_default_turn_params () =
   let p = Hooks.default_turn_params in
   Alcotest.(check (option (float 0.01))) "no temperature" None p.temperature;
-  Alcotest.(check (option int)) "no thinking_budget" None p.thinking_budget;
   Alcotest.(check (option bool)) "no enable_thinking" None p.enable_thinking;
   Alcotest.(check bool) "no extra context" true (p.extra_system_context = None);
   Alcotest.(check bool) "no system prompt override" true (p.system_prompt_override = None)
@@ -96,13 +95,12 @@ let test_before_turn_params_event () =
 
 let test_adjust_params_decision () =
   let params =
-    { Hooks.default_turn_params with temperature = Some 0.9; thinking_budget = Some 8000 }
+    { Hooks.default_turn_params with temperature = Some 0.9 }
   in
   let decision = Hooks.AdjustParams params in
   match decision with
   | Hooks.AdjustParams p ->
-    Alcotest.(check (option (float 0.01))) "temperature" (Some 0.9) p.temperature;
-    Alcotest.(check (option int)) "thinking_budget" (Some 8000) p.thinking_budget
+    Alcotest.(check (option (float 0.01))) "temperature" (Some 0.9) p.temperature
   | _ -> Alcotest.fail "wrong decision type"
 ;;
 

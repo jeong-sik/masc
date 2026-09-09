@@ -48,7 +48,6 @@ let request_fingerprint
                      ; system_prompt
                      ; enable_thinking
                      ; preserve_thinking
-                     ; thinking_budget
                      ; reasoning_effort
                      ; clear_thinking
                      ; tool_stream
@@ -113,7 +112,6 @@ let request_fingerprint
       ; "system_prompt", opt_json (fun s -> `String s) system_prompt
       ; "enable_thinking", opt_json (fun b -> `Bool b) enable_thinking
       ; "preserve_thinking", opt_json (fun b -> `Bool b) preserve_thinking
-      ; "thinking_budget", opt_json (fun n -> `Int n) thinking_budget
       ; ( "reasoning_effort"
         , opt_json (fun e -> `String (Reasoning_effort.to_string e)) reasoning_effort )
       ; "clear_thinking", opt_json (fun b -> `Bool b) clear_thinking

@@ -27,7 +27,6 @@ type t = Checkpoint_types.t =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : response_format
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; cache_system_prompt : bool
   ; context : Context.t
@@ -55,7 +54,6 @@ type sampling_patch = Checkpoint_types.sampling_patch =
   ; min_p : float option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 

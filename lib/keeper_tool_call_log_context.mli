@@ -20,7 +20,6 @@ type turn_context =
   ; lane : string option
   ; tool_choice : string option
   ; thinking_enabled : bool option
-  ; thinking_budget : int option
   ; prompt_fingerprint : string option
   ; trace_id : string option
   ; session_id : string option
@@ -47,7 +46,6 @@ val set_turn_context :
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
-  ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
@@ -73,7 +71,6 @@ val get_turn_context :
   string option
   * string option
   * bool option
-  * int option
   * string option
   * string option
   * string option

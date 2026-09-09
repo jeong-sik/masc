@@ -71,7 +71,6 @@ val get_turn_context :
   string option
   * string option
   * bool option
-  * int option
   * string option
   * string option
   * string option

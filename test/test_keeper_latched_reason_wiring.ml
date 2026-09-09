@@ -134,6 +134,73 @@ let test_status_bridge_surfaces_latched_reason () =
          None
          (bridge_latched_reason config unset_meta))
 
+(* ── Attention reads liveness, not only written records ─────── *)
+
+let bridge_attention config (meta : Keeper_meta_contract.keeper_meta) =
+  let fields = Keeper_status_bridge.attention_fields_json config meta in
+  let needs_attention =
+    match List.assoc_opt "needs_attention" fields with
+    | Some (`Bool value) -> value
+    | Some _ | None -> failf "attention_fields_json did not surface needs_attention"
+  in
+  let reason =
+    match List.assoc_opt "attention_reason" fields with
+    | Some (`String value) -> Some value
+    | Some `Null | None -> None
+    | Some _ -> failf "attention_reason surfaced as a non-string, non-null value"
+  in
+  needs_attention, reason
+;;
+
+(* Approval rows, blocker classes and operator pauses are all records someone
+   wrote. A Keeper whose keepalive fiber is gone writes none of them, so before
+   this the answer fell through to "no attention" -- sangsu sat that way for two
+   and a half hours after a provider payment failure while its queue grew. *)
+let test_a_stopped_keepalive_needs_attention () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let keeper_name = "keepalive-liveness-keeper" in
+       let meta = make_meta keeper_name in
+       Keeper_registry.For_testing.clear ();
+       ignore
+         (Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let needs_attention, reason = bridge_attention config meta in
+       check bool "a running Keeper with nothing recorded is quiet" false
+         needs_attention;
+       check (option string) "and names no reason" None reason;
+       Keeper_registry.For_testing.clear ();
+       let needs_attention, reason = bridge_attention config meta in
+       check bool "a Keeper whose keepalive is gone needs attention" true
+         needs_attention;
+       check (option string) "and says which fact answered"
+         (Some "keepalive_stopped") reason)
+;;
+
+(* A paused Keeper is answered by the branch above this one. Liveness must not
+   relabel a silence the operator chose. *)
+let test_a_paused_keeper_keeps_its_pause_reason () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let meta = { (make_meta "paused-liveness-keeper") with paused = true } in
+       Keeper_registry.For_testing.clear ();
+       let needs_attention, reason = bridge_attention config meta in
+       check bool "a paused Keeper still needs attention" true needs_attention;
+       check (option string) "and keeps the pause reason" (Some "paused") reason)
+;;
+
 (* ── Site 3: gRPC pause directive ───────────────────────────── *)
 
 let test_grpc_pause_directive_records_reason () =
@@ -272,6 +339,10 @@ let () =
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick
             test_status_bridge_surfaces_latched_reason
+        ; test_case "a stopped keepalive needs attention" `Quick
+            test_a_stopped_keepalive_needs_attention
+        ; test_case "a paused keeper keeps its pause reason" `Quick
+            test_a_paused_keeper_keeps_its_pause_reason
         ] )
     ; ( "pause sites record reason"
       , [ test_case "gRPC pause directive records grpc_directive reason" `Quick

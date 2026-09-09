@@ -25,7 +25,8 @@ class PortableBootstrap(unittest.TestCase):
             path.chmod(0o755)
         command('uname', 'case "$1" in -m) echo arm64 ;; *) echo Darwin ;; esac')
         command('sw_vers', 'echo "${TEST_MACOS_VERSION:-14.0}"')
-        for name in ('python3', 'brew', 'xcode-select'):
+        command('python3', 'exit 98')
+        for name in ('brew', 'xcode-select'):
             command(name, 'echo ' + name + ' >> ' + shlex.quote(str(self.calls)) + '; exit 98')
         self.env = dict(os.environ, PATH=str(self.bin) + ':/usr/bin:/bin:/usr/sbin:/sbin', MASC_WIZARD='0')
 
@@ -39,10 +40,50 @@ class PortableBootstrap(unittest.TestCase):
         self.assertFalse(self.calls.exists(), self.calls.read_text() if self.calls.exists() else '')
         return result
 
-    def test_help_and_dry_run_never_launch_python_brew_or_xcode(self):
-        for args in (['--help'], ['--dry-run']):
+    def test_help_and_dry_run_never_launch_brew_or_xcode(self):
+        for args in (['--help'], ['--dry-run', '--version', 'v9.9.9']):
             result = self.run_installer(args)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_dry_run_without_python_reports_force_and_provider_plan(self):
+        binary = self.fixture.prefix / 'masc'
+        binary.write_bytes(self.fixture.binary.read_bytes())
+        binary.chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--force', '--provider', 'codex'], MASC_WIZARD='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('refreshing because --force is set', result.stdout + result.stderr)
+        self.assertIn('requested provider: codex; catalog validation', result.stdout)
+        self.assertIn('[dry-run] would download to', result.stdout)
+
+    def test_dry_run_uses_available_non_system_python_for_full_planning(self):
+        import sys
+        marker = self.fixture.root / "python-used"
+        interpreter = self.bin / "python3"
+        interpreter.write_text("#!/bin/sh\necho used >> " + shlex.quote(str(marker)) +
+                               "\nexec " + shlex.quote(sys.executable) + ' "$@"\n')
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreater(len(marker.read_text().splitlines()), 1)
+        self.assertIn('[dry-run] would install verified binary/dashboard bundle', result.stdout)
+
+    def test_dry_run_upgrades_stable_release_without_usable_python(self):
+        binary = self.fixture.prefix / 'masc'
+        old_bytes = b'#!/bin/sh\necho 0.34.0\n'
+        binary.write_bytes(old_bytes)
+        binary.chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v0.35.1',
+                                     '--no-wizard', '--no-seed', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('from 0.34.0 to 0.35.1; preserving workspace config', result.stdout)
+        self.assertIn('[dry-run] would download to', result.stdout)
+        self.assertEqual(binary.read_bytes(), old_bytes)
+        self.assertFalse((self.fixture.root / 'workspace').exists())
+
+    def test_dry_run_preserves_version_conflict(self):
+        self.fixture.old()
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('pass --force', result.stderr)
 
     def test_old_macos_fails_before_download(self):
         result = self.run_installer(['--version', 'v9.9.9'], TEST_MACOS_VERSION='13.6')

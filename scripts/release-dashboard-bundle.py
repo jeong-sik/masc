@@ -49,6 +49,8 @@ def validate_runtime(receipt):
         hex_value(value, 64)
     runtime = receipt["runtime"]
     if runtime is None:
+        if receipt["binary_asset"].startswith("masc-macos-"):
+            fail("macOS receipt requires bundled runtime")
         return
     exact_fields(runtime, ["asset", "sha256", "files"])
     if str(relative(runtime["asset"])) != "masc-runtime-" + receipt["binary_asset"][5:] + ".tar.gz":
@@ -63,6 +65,8 @@ def validate_runtime(receipt):
         if name in names or not (name.startswith(("lib/", "python/", "licenses/")) or name == "runtime-provenance.json"):
             fail("invalid runtime receipt path")
         names.add(name)
+        if name == "python/bin/python3" and entry["mode"] != 0o755:
+            fail("runtime interpreter must be executable")
         hex_value(entry["sha256"], 64)
         if (type(entry["size"]) is not int or entry["size"] < 0 or
                 type(entry["mode"]) is not int or entry["mode"] not in (0o644, 0o755)):

@@ -3,22 +3,6 @@
 open Masc_domain
 open Workspace_utils
 
-let underscore_name name =
-  String.map
-    (function
-      | '-' -> '_'
-      | c -> c)
-    name
-;;
-
-let hyphen_name name =
-  String.map
-    (function
-      | '_' -> '-'
-      | c -> c)
-    name
-;;
-
 (* Receipt-directory candidate derivation. RFC-0393: the alias parse and
    the loose "-agent" suffix strip are gone — a keeper's receipts live
    under its keeper_name, and the only other source is the agent record's

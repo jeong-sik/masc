@@ -5271,15 +5271,18 @@ let decode_planning_snapshot json =
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
   (* An error row — the list route's own reading of a keeper whose metadata
-     it could not read — is marked [status:"error"] (see
-     {!Keeper_tool_surface_ops.keeper_list_error_row_json}). It does not
-     carry health, phase, or a meta block, and cannot: those readings come
-     from the metadata that failed to read. Refusing such a row here used
-     to refuse the whole roster (masc task-1485): one unreadable keeper
-     blanked every keeper and the TUI drew its "not running" fallback over
-     the fleet. For those rows the absent readings decode to what the row
-     actually has: health [KH_degraded] — "status file unreadable or
-     undecodable" — phase [Offline], empty profile and runtime id.
+     it could not read — is marked [status:"error"]. Rows that carry an
+     explicit [effective_meta_error] object are partitioned into the errors
+     list by [decode_keeper_runtime_list] before reaching here; the shape
+     that reaches this decoder is the error row with no error detail. It
+     does not carry health, phase, or a meta block, and cannot: those
+     readings come from the metadata that failed to read. Refusing such a
+     row here used to refuse the whole roster (masc task-1485): one
+     unreadable keeper blanked every keeper and the TUI drew its "not
+     running" fallback over the fleet. For those rows the absent readings
+     decode to what the row actually has: health [KH_degraded] — "status
+     file unreadable or undecodable" — phase [Offline], empty profile and
+     runtime id.
 
      A healthy row is not extended the same tolerance: a field the server
      always sends (sandbox_profile, phase, runtime_id, …) that goes missing

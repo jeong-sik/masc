@@ -694,21 +694,20 @@ let test_roster_decode_rejects_an_unknown_phase () =
         {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
         err
 
-(* The list route's own error row — a keeper whose metadata it could not
-   read — carries no health, phase, paused, or runtime_id. It cannot:
-   those readings come from the metadata that failed. One such row used
-   to refuse the whole roster (the TUI then drew its "not running"
-   fallback over every keeper); now the row decodes to the reading it
-   actually has and the rest of the roster stays visible. A field that IS
-   present but unknown still refuses, as the two tests above pin. The
-   shape mirrors [Keeper_tool_surface_ops.keeper_list_error_row_json]:
-   [status:"error"] first, then runtime_class/name/keepalive_running/
-   effective_meta_error, then whatever persisted metadata did read. *)
+(* A keeper row whose metadata reading produced no error detail: the row is
+   marked [status:"error"], carries no [effective_meta_error] object, and so
+   reaches [decode_keeper_runtime] — which required health/phase/paused/
+   runtime_id, all readings of the metadata that failed, and refused the
+   whole roster (the TUI then drew its "not running" fallback over every
+   keeper). Now the row decodes to the reading it actually has and the
+   rest of the roster stays visible. A field that IS present but unknown
+   still refuses, as the two tests above pin. Rows that DO carry an
+   [effective_meta_error] object are partitioned into the errors list by
+   [decode_keeper_runtime_list] before this decoder runs — the other tests
+   in this file pin that pairing. *)
 let error_row name = Printf.sprintf
     {|{"status":"error","runtime_class":"keeper","name":%S,
        "keepalive_running":false,
-       "effective_meta_error":{"error":"effective_meta_read_failed",
-                               "agent_name":%S,"detail":"no effective meta"},
        "meta":null,"created_at":null,"updated_at":null}|}
     name name
 

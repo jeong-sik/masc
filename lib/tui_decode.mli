@@ -1056,9 +1056,11 @@ val decode_keeper_runtime_list :
     drift surfaces as an error instead of a wrong status glyph.
 
     The one tolerated absence is the route's own error row —
-    [status:"error"], a keeper whose metadata the route could not read.
-    That row leaves out [health], [phase], [meta.sandbox_profile],
-    [runtime_id], [paused], [activation_mode], and [keepalive_running]
+    [status:"error"], a keeper whose metadata reading produced no error
+    detail. Rows that carry an explicit [effective_meta_error] object are
+    partitioned into the errors list before this decoder runs, so this is
+    the shape that reaches it: no [health], [phase], [meta.sandbox_profile],
+    [runtime_id], [paused], [activation_mode], or [keepalive_running],
     because those readings do not exist to send. It decodes to what it has
     (health [KH_degraded], phase [Offline], empty profile) instead of
     refusing the whole roster; before task-1485 one such row blanked every

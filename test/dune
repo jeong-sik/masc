@@ -331,6 +331,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_sync
@@ -680,6 +681,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_sync

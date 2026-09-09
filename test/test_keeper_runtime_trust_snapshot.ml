@@ -815,6 +815,8 @@ let test_pending_approval_overrides_previous_success_until_resolved () =
           ; "id", `String "pending-approval"
           ] ]
     in
+    Alcotest.(check string) "prior success receipt is actually loaded" "pass"
+      (pending |> member "latest_receipt" |> member "operator_disposition" |> to_string);
     Alcotest.(check int) "pending request remains visible" 1
       (pending |> member "pending_approval_count" |> to_int);
     Alcotest.(check string) "previous success cannot hide pending approval" "Alert"

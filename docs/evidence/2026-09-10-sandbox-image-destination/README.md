@@ -29,3 +29,5 @@ python3 scripts/verify-sandbox-image-archive.py \
 
 Four behavior tests cover differing valid engine IDs, changed blob bytes,
 linked size mismatch, and changed destination metadata despite a matching ID.
+
+The configuration fingerprint covers all configuration fields, including nonempty User, Entrypoint and WorkingDir. Only explicitly enumerated false/empty legacy serialization defaults, empty User/WorkingDir, and null Entrypoint/Volumes/OnBuild are normalized to omission; unexpected fields or changed execution settings fail verification.

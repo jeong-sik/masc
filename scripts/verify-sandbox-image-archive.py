@@ -10,8 +10,22 @@ def digest_stream(stream):
     return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def configuration_fingerprint(config, keys):
-    raw = json.dumps({key: config[key] for key in keys}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+def semantic_configuration(config):
+    # Classic Docker emits these serialization-only defaults; containerd omits them.
+    legacy_defaults = {"AttachStdin": False, "AttachStdout": False, "AttachStderr": False,
+                       "OpenStdin": False, "StdinOnce": False, "Tty": False,
+                       "Domainname": "", "Hostname": "", "Image": "",
+                       # Absent and empty both select default user/workdir.
+                       "User": "", "WorkingDir": "",
+                       # Null means no entrypoint, volumes or build triggers.
+                       "Entrypoint": None, "Volumes": None, "OnBuild": None}
+    return {key: value for key, value in config.items()
+            if not (key in legacy_defaults and type(value) is type(legacy_defaults[key])
+                    and value == legacy_defaults[key])}
+
+
+def configuration_fingerprint(config):
+    raw = json.dumps(semantic_configuration(config), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -80,13 +94,13 @@ def verify_archive(path):
             if blob_path(digest) != member.name:
                 raise ValueError("Archive blob content digest mismatch")
             verified.append({"digest": digest, "bytes": member.size})
-        configuration_keys = [key for key in ("Env", "Cmd", "Labels", "ArgsEscaped") if key in config["config"]]
+        configuration_keys = sorted(semantic_configuration(config["config"]))
         return {"config_digest": config_descriptor["digest"],
                 "manifest_digest": descriptor["digest"],
                 "manifest_media_type": descriptor["mediaType"], "manifest_bytes": descriptor["size"],
                 "layer_descriptors": layers, "rootfs_diff_ids": config["rootfs"]["diff_ids"],
                 "configuration_keys": configuration_keys,
-                "configuration_sha256": configuration_fingerprint(config["config"], configuration_keys),
+                "configuration_sha256": configuration_fingerprint(config["config"]),
                 "architecture": config["architecture"], "os": config["os"],
                 "source_commit": config["config"]["Labels"]["org.opencontainers.image.revision"],
                 "image_tags": docker[0]["RepoTags"], "verified_blobs": verified}
@@ -107,7 +121,7 @@ def verify_inspect(inspect, archive, expected_tag):
             raise ValueError("Engine descriptor differs from the verified archive manifest")
     if (image["RootFS"]["Type"] != "layers" or image["RootFS"]["Layers"] != archive["rootfs_diff_ids"]):
         raise ValueError("Engine root filesystem differs from verified archive")
-    if configuration_fingerprint(image["Config"], archive["configuration_keys"]) != archive["configuration_sha256"]:
+    if configuration_fingerprint(image["Config"]) != archive["configuration_sha256"]:
         raise ValueError("Engine image configuration differs from archive")
     if image["Architecture"] != archive["architecture"] or image["Os"] != archive["os"]:
         raise ValueError("Engine image platform differs from archive")

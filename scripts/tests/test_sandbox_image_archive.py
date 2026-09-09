@@ -68,6 +68,16 @@ class ArchiveTest(unittest.TestCase):
                 with self.subTest(field=key), self.assertRaises(ValueError):
                     verifier.verify_inspect([{**image, key: replacement}], result, 'fixture:v1')
 
+    def test_execution_configuration_is_not_ignored(self):
+        baseline = {"User": "65532", "Entrypoint": ["/bin/sh"], "WorkingDir": "/work"}
+        fingerprint = verifier.configuration_fingerprint(baseline)
+        self.assertEqual(fingerprint, verifier.configuration_fingerprint({**baseline, "AttachStdin": False}))
+        for key, value in [("User", "0"), ("Entrypoint", ["/other"]),
+                           ("WorkingDir", "/other"), ("Healthcheck", {"Test": ["CMD", "false"]})]:
+            with self.subTest(key=key):
+                self.assertNotEqual(fingerprint, verifier.configuration_fingerprint({**baseline, key: value}))
+        self.assertNotEqual(fingerprint, verifier.configuration_fingerprint({**baseline, "Tty": True}))
+
     def test_modified_layer_bytes_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'image.tar.gz'

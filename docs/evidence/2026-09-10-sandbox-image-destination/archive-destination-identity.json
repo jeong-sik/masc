@@ -26,10 +26,10 @@
     "sha256:748c8d6307995b998a0b96a26695fa69cea6beea7fb25b43ddc43937211892c4"
   ],
   "configuration_keys": [
-    "Env",
+    "ArgsEscaped",
     "Cmd",
-    "Labels",
-    "ArgsEscaped"
+    "Env",
+    "Labels"
   ],
   "configuration_sha256": "sha256:323d939080ca47f9e4029e4d13e60063595b74f16b0a18f2f9a3c194af51d604",
   "architecture": "arm64",
@@ -99,6 +99,5 @@
       "bytes": 7723,
       "sha256": "2b8e7385231b65bb93760247dfd595fc986817bac805565cbe681610ac521966"
     }
-  },
-  "observation": "Independent local archive and destination inspection verification; no image rebuild or mutation."
+  }
 }

@@ -215,11 +215,6 @@ type capabilities =
     supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool (** Deterministic seed for reproducible sampling. *)
-    (** Whether the provider respects [seed] deterministically when
-      image inputs are present.  Local providers (Ollama, llama-server)
-      achieve near-perfect determinism on identical hardware; cloud
-      providers (Openai, Gemini) do not guarantee deterministic output
-      when images are in the prompt. *)
   ; ignored_sampling_parameters : sampling_parameter list
     (** Request sampling parameters that must not be serialized for this
         provider/model even when a caller supplied them. This is catalog data,

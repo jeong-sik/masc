@@ -166,10 +166,6 @@ type capabilities =
   ; supports_seed : bool
     (** Deterministic seed for reproducible sampling.
       @since 0.185.0 *)
-    (** Whether seed determinism is maintained when image inputs are present.
-      Local providers (Ollama) achieve near-perfect reproducibility; cloud
-      providers (Openai, Gemini) do not guarantee it.
-      @since 0.185.0 *)
   ; ignored_sampling_parameters : sampling_parameter list
     (** Request sampling parameters that must not be serialized for this
         provider/model even when a caller supplied them. *)

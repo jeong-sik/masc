@@ -1,10 +1,13 @@
 """Adversarial upstream archive tests for the regular-only macOS payload."""
 import importlib.util
 import io
+import hashlib
+import json
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/package-macos-runtime.py'
 spec = importlib.util.spec_from_file_location('runtime_package', SCRIPT)
@@ -50,6 +53,38 @@ class PythonArchive(unittest.TestCase):
     def test_duplicate_members_are_rejected(self):
         with self.assertRaises(ValueError):
             self.exercise([('python/bin/python3', b'one', None), ('python/bin/python3', b'two', None)])
+
+
+class PinnedDownload(unittest.TestCase):
+    def exercise(self, payload, reaches_extraction):
+        expected = b'reviewed Python archive'
+        url = 'https://github.com/astral-sh/python-build-standalone/releases/download/pinned/python.tar.gz'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / 'lock.json'
+            lock.write_text(json.dumps({'platforms': {'macos-arm64': {
+                'browser_download_url': url, 'size': len(expected),
+                'digest': 'sha256:' + hashlib.sha256(expected).hexdigest()}}}))
+            with patch.object(package, 'fetch', return_value=payload) as fetch, patch.object(
+                    package, 'unpack_python', side_effect=RuntimeError('verified bytes reached extraction')) as unpack:
+                if reaches_extraction:
+                    with self.assertRaisesRegex(RuntimeError, 'verified bytes reached extraction'):
+                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock)
+                    unpack.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(ValueError, 'checksum differs from pin'):
+                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock)
+                    unpack.assert_not_called()
+                fetch.assert_called_once_with(url)
+
+    def test_verified_payload_uses_only_pinned_download(self):
+        self.exercise(b'reviewed Python archive', True)
+
+    def test_equal_size_tampering_is_rejected_before_extraction(self):
+        self.exercise(b'altered! Python archive', False)
+
+    def test_truncated_payload_is_rejected_before_extraction(self):
+        self.exercise(b'reviewed Python', False)
 
 
 if __name__ == '__main__':

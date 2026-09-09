@@ -403,7 +403,7 @@ let complete_http
                 in
                 (* Mask api_key to a short fingerprint so log lines distinguish
                same-provider calls that use different keys (e.g.
-               ZAI_API_KEY vs ZAI_API_KEY_SB for glm vs glm-coding).
+               ZAI_API_KEY vs ZAI_CODING_API_KEY for glm vs glm-coding).
                Empty key renders as "-"; short keys render as "<len:N>"
                since they cannot be safely sampled. *)
                 let api_key_tag =

@@ -369,6 +369,11 @@ let%test "extract_error_message: ZAI Glm quota shape with string code" =
   = "Insufficient balance or no resource package. Please recharge."
 ;;
 
+let%test "extract_error_message: a blank message falls back to the body" =
+  extract_error_message {|{"error":""}|} = {|{"error":""}|}
+  && extract_error_message {|{"error":{"message":"  "}}|} = {|{"error":{"message":"  "}}|}
+;;
+
 let%test "extract_error_message: malformed body falls back to prefix" =
   let result = extract_error_message "not json at all" in
   result = "not json at all"

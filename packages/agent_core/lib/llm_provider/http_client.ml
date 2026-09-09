@@ -653,7 +653,10 @@ let request_body_shape_profile (body : string) : Yojson.Safe.t =
    under each rate limit, a 429 saying "weekly usage limit" in its own body
    (2026-09-09), which repeated what the body already said. The gate is the
    body, not the status: a 429 with an empty body still profiles, a 400 with a
-   structured message does not. *)
+   structured message does not. A 4xx whose body cannot be read at all (over
+   [Api_common.max_response_body], or the transport dropped mid-body) leaves
+   no profile: that failure is reported on its own path, and without the body
+   there is nothing to gate on. *)
 let response_body_is_opaque response_body =
   Option.is_none (Api_common.error_message_of_body response_body)
 ;;
@@ -745,6 +748,11 @@ let%test_module "profile_opaque_client_error" =
 
     let%test "JSON without an error key is opaque" =
       profiles_emitted ~code:400 ~response_body:{|{"detail":null}|} = 1
+    ;;
+
+    let%test "a blank error message names no cause and is profiled" =
+      profiles_emitted ~code:400 ~response_body:{|{"error":""}|} = 1
+      && profiles_emitted ~code:400 ~response_body:{|{"error":{"message":" "}}|} = 1
     ;;
 
     let%test "a 5xx is never profiled" = profiles_emitted ~code:502 ~response_body:"" = 0

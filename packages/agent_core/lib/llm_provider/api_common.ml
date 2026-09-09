@@ -58,18 +58,20 @@ let json_of_string_or_raw s =
 (* Provider error bodies come in two JSON shapes: a flat [{"error": "..."}]
    (Ollama, llama.cpp) and a nested [{"error": {"message": "..."}}] (OpenAI,
    Anthropic, ZAI). [None] is a body that names no cause: not JSON, JSON
-   without an [error] key, or an [error] whose message is not a string. The
-   match is exhaustive over [Yojson.Safe.t] so a new constructor is a compile
-   error here rather than a body silently read as "no message". *)
+   without an [error] key, or an [error] whose message is not a string or is
+   blank: [{"error":""}] names nothing. The match is exhaustive over
+   [Yojson.Safe.t] so a new constructor is a compile error here rather than a
+   body silently read as "no message". *)
 let error_message_of_body (body : string) : string option =
+  let named message = if string_is_blank message then None else Some message in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error _ -> None
   | `Assoc fields ->
     (match List.assoc_opt "error" fields with
-     | Some (`String message) -> Some message
+     | Some (`String message) -> named message
      | Some (`Assoc error_fields) ->
        (match List.assoc_opt "message" error_fields with
-        | Some (`String message) -> Some message
+        | Some (`String message) -> named message
         | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
         | None -> None)
      | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None -> None)

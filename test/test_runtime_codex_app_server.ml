@@ -2006,8 +2006,9 @@ let test_child_environment_is_allowlisted () =
                  | Ok _ -> ())))
 ;;
 
-let test_declared_provider_environment () =
-  let home = Filename.temp_file "codex-auth-home-" "" in
+let check_declared_provider_environment ~relative =
+  let home = Filename.temp_file ?temp_dir:(if relative then Some "." else None) "codex-auth-home-" "" in
+  let expected_home = if relative then Filename.concat (Sys.getcwd ()) home else home in
   Sys.remove home; Unix.mkdir home 0o700;
   let config_path = Filename.concat home "config.toml" in
   let bindings = [ "CODEX_HOME", home; "MASC_FIXTURE_PROVIDER_KEY", "fixture-key";
@@ -2028,6 +2029,7 @@ let test_declared_provider_environment () =
         Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
           let output = open_out wrapper in
           output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote expected_home ^ " ] || exit 70\n");
           output_string output "[ \"$MASC_FIXTURE_PROVIDER_KEY\" = fixture-key ] || exit 71\n";
           output_string output "[ \"$MASC_FIXTURE_PROVIDER_HEADER\" = fixture-header ] || exit 72\n";
           output_string output "[ \"${MASC_CODEX_SECRET_CANARY+x}\" != x ] || exit 73\n";
@@ -2042,6 +2044,11 @@ let test_declared_provider_environment () =
     | Error (Runtime_codex_app_server.Invalid_config _) -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "malformed credential declaration admitted")
+;;
+
+let test_declared_provider_environment () =
+  check_declared_provider_environment ~relative:false;
+  check_declared_provider_environment ~relative:true
 ;;
 
 let write_fixture_file path content =

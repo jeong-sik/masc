@@ -1337,6 +1337,7 @@ export type DashboardOfficialClientRecoveryDecision =
 
 export type DashboardOfficialClientLoginStatus =
   | 'ready'
+  | 'configured'
   | 'invalid_config'
   | 'cli_unavailable'
   | 'login_required'
@@ -1410,6 +1411,7 @@ function decodeOfficialClientNullableString(raw: unknown): string | null | undef
 
 const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatus>([
   'ready',
+  'configured',
   'invalid_config',
   'cli_unavailable',
   'login_required',
@@ -1711,15 +1713,17 @@ function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClien
   ) return null
   if (!status || !OFFICIAL_CLIENT_LOGIN_STATUSES.has(status as DashboardOfficialClientLoginStatus)) return null
   if ((status === 'ready') !== authenticated) return null
-  const ready = status === 'ready'
-  const loginKeys = ready
+  const hasAuthenticationMetadata = status === 'ready' || status === 'configured'
+  const loginKeys = hasAuthenticationMetadata
     ? ['status', 'authenticated', 'evidence_source', 'identity_verified', 'auth_method', 'subscription_type', 'api_provider']
     : ['status', 'authenticated', 'evidence_source', 'identity_verified', 'detail']
   if (!hasExactKeys(raw.login, loginKeys)) return null
-  const detail = ready ? null : asString(raw.login.detail) ?? null
-  if (!ready && !detail) return null
-  if (status === 'ready') {
-    if (!asString(raw.login.auth_method) || !asString(raw.login.subscription_type)) return null
+  const detail = hasAuthenticationMetadata ? null : asString(raw.login.detail) ?? null
+  if (!hasAuthenticationMetadata && !detail) return null
+  if (hasAuthenticationMetadata) {
+    if (!asString(raw.login.auth_method)) return null
+    if (raw.login.subscription_type !== null && !asString(raw.login.subscription_type)) return null
+    if (status === 'configured' && raw.login.auth_method !== 'provider_managed') return null
     if (raw.login.api_provider !== null && !asString(raw.login.api_provider)) return null
   }
   if (

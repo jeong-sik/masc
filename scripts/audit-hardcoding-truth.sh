@@ -139,27 +139,19 @@ else
   echo "PASS: anti-fake detector completed without fake-test findings."
 fi
 
-section "CI Failure Visibility"
-ci_meta_block="$(
-  awk '
-    /^[[:space:]]{6}- name: Meta bug-class gates/ { in_block = 1 }
-    in_block && /^[[:space:]]{2}[A-Za-z0-9_-]+:/ { exit }
-    in_block { print }
-  ' .github/workflows/ci.yml
-)"
-if [ -z "$ci_meta_block" ]; then
-  mark_confirmed "meta bug-class gates are missing from CI"
-elif printf '%s\n' "$ci_meta_block" | rg -q 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true'; then
-  mark_confirmed "meta bug-class gates are still advisory in CI"
-  printf '%s\n' "$ci_meta_block" \
-    | rg -n 'continue-on-error:[[:space:]]*true|\|\|[[:space:]]*true' || true
-elif printf '%s\n' "$ci_meta_block" | rg -q 'audit-hardcoding-truth\.sh' \
-  && ! printf '%s\n' "$ci_meta_block" | rg -q 'audit-hardcoding-truth\.sh[[:space:]]+--fail-on-confirmed'; then
-  mark_confirmed "hardcoding audit runs in non-strict mode inside meta gates"
-  printf '%s\n' "$ci_meta_block" | rg -n 'audit-hardcoding-truth\.sh' || true
-else
-  echo "PASS: meta bug-class gates run as blocking CI checks."
-fi
+# The section that stood here read .github/workflows/ci.yml for a step named
+# "Meta bug-class gates" and confirmed a finding when it was absent. #32511
+# deleted that step on purpose and spread its 24 guards across the lint suite,
+# the build job and dune rules; 14 are wired there today, 6 no longer exist
+# with the concepts they checked, and 3 are reached from a test or a dune
+# rule. So the check reported the absence of a step name, which had not been
+# the way guards run for a week, and that single stale finding was the only
+# thing keeping this audit's exit code non-zero.
+#
+# Whether guards actually run is what check-guards-are-wired.py answers, and
+# it answers it by reachability rather than by step name. It runs in the same
+# lint suite as this audit, so repeating it here would only add a second
+# reader of the same fact.
 
 section "Broad Active-Source Smell Sample"
 rg -n \

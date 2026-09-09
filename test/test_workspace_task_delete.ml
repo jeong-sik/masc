@@ -336,11 +336,36 @@ let test_contradictory_receipt_preserves_source () =
     Alcotest.(check string) "invalid primary is not repaired by observation" raw (Fs_compat.load_file path))
 ;;
 
+let test_old_deletion_cannot_remove_reused_task_identity () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "original" in
+    let original = List.hd (Workspace.read_backlog config).tasks in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_deleted -> () | _ -> Alcotest.fail "delete failed");
+    let receipt = match Workspace.deletion_receipts_r config with
+      | Ok {receipts=[receipt]; _} -> receipt | _ -> Alcotest.fail "missing identity" in
+    let backlog = Workspace.read_backlog config in
+    Workspace.write_backlog config {backlog with tasks=[{original with title="new identity owner"}]};
+    link config "new-goal" target;
+    let primary = Fs_compat.load_file (Workspace.backlog_path config) in
+    let links = Fs_compat.load_file (Workspace_goal_index.goal_task_links_path config) in
+    (match Workspace.retry_task_deletion_r config ~deletion_id:receipt.deletion_id with
+     | Error (Workspace.Task_identity_reused id) -> Alcotest.(check string) "collision identity" target id
+     | _ -> Alcotest.fail "old deletion acted on a new Task");
+    (match Workspace.retry_task_deletion_r config ~deletion_id:"unknown-deletion" with
+     | Error (Workspace.Unknown_deletion _) -> ()
+     | _ -> Alcotest.fail "unknown deletion accepted");
+    Alcotest.(check string) "new Task primary preserved" primary (Fs_compat.load_file (Workspace.backlog_path config));
+    Alcotest.(check string) "new Task links preserved" links (Fs_compat.load_file (Workspace_goal_index.goal_task_links_path config)))
+;;
+
 let () =
   Alcotest.run
     "Workspace task delete"
     [ ( "delete"
-      , [ Alcotest.test_case "deletion receipt survives a fresh store read" `Quick test_deletion_receipt_survives_reload
+      , [ Alcotest.test_case "old deletion identity cannot remove a new Task" `Quick test_old_deletion_cannot_remove_reused_task_identity
+        ; Alcotest.test_case "deletion receipt survives a fresh store read" `Quick test_deletion_receipt_survives_reload
         ; Alcotest.test_case "contradictory receipt is rejected without rewriting" `Quick test_contradictory_receipt_preserves_source
         ; Alcotest.test_case "deletion retires only its pending repair obligations" `Quick test_delete_retires_only_its_pending_rejections
         ; Alcotest.test_case "repair retirement follows deletion commit" `Quick test_delete_failure_keeps_rejection_until_primary_commit

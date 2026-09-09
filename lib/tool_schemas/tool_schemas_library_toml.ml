@@ -13,8 +13,9 @@
 
     The source vocabulary is a literal in [Tool_schemas_library] rather than a
     variant, so nothing derives it from an owner and the whole list moved.
-    [test_library_tool_toml_parity] pins all four against what the list
-    published before the move. *)
+    [test_library_tool_toml_parity] keeps the publication order and which
+    tools declare a keeper_projection; the descriptions and schemas it also
+    pinned were copies of these values. *)
 
 let loaded_of_name name : Tool_definition_toml.loaded =
   let rel = "tools/" ^ name ^ ".toml" in

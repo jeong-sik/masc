@@ -68,3 +68,21 @@ rules, checks keyboard focus and mobile overflow, and writes desktop/mobile
 screenshots plus a receipt. This is frontend verification over a live backend,
 not a production deployment claim. The script has not yet run against a built
 artifact at this commit; syntax validation alone does not prove acceptance.
+
+## Executed browser result — 2026-09-09T16:35:44Z
+
+CI run `34377445630`, PR head `2d9869c370f0f09253271286fe098a116adfa2f3`,
+checkout `0cd1fa7c8aff2cfb4d17b75d38f395d9f1aa1592` produced the verified assets.
+The browser compared 246 prompt entries, selected `stage:base-system`,
+confirmed its single `keeper` member, keyboard focus and no document-level
+horizontal overflow at 390×844. Desktop viewport was 1440×1000.
+
+See `built/receipt.json`, `built/desktop.png`, and `built/mobile.png`.
+Screenshots were opened and visually inspected. The build-identity warning
+and disconnected WebSocket indicator are expected in this mixed frontend/
+backend probe: it is not deployment evidence. Three POST requests and three
+WebSocket connections were intercepted and blocked. No update was sent.
+
+This proves the CI-built preset inspection scenario against the observed
+live source snapshot. It does not close TUI parity, effective prompt
+application to Keeper model requests, or the full 18-item product objective.

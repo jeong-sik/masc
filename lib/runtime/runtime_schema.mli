@@ -112,7 +112,6 @@ type model_capabilities =
   ; supports_named_tool_choice : bool
   ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
-      (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)

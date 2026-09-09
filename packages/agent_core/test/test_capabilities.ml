@@ -2906,27 +2906,17 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
-(* Until 2026-09-09 the provider-wide base was consulted before the model's
-   own bare row, so the bare row -- the only lookup that applies prefix
-   matching -- was unreachable wherever the base answered.
+(* A model's own bare row outranks the provider-wide base, and the bare row is
+   the only lookup that applies prefix matching, so a base that answered first
+   would make it unreachable.
 
-   Which labels those are is narrower than it looks. [provider_base_label]
-   goes through [Model_catalog.provider_entry_for_label], which returns [None]
-   for every wire-kind label ([anthropic], [kimi], [openai_compat], [ollama],
-   [gemini], [glm]). So for a label naming a wire kind the base never answered,
-   before this change or after; the reorder is observable only for a label
-   that names a [[providers]] entry and nothing else -- [glm-coding],
-   [ollama_cloud], [openrouter] and the rest.
-
-   The discriminator is a field the row sets and the provider base does not:
-   [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
-   what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
-   thinking-control contract" -- so [Some _] here means the row was read.
-
-   Only gemini bare rows declare that field; no glm bare row does, and
-   [glm-4.6v] additionally carries a [provider_name = "glm"] row, which an
-   exact provider-scoped lookup reads before any fallback. So glm cannot be
-   expressed with this discriminator and is not listed here. *)
+   The two tests below need a label the base actually answers for.
+   [provider_base_label] goes through [Model_catalog.provider_entry_for_label],
+   which returns [None] for every wire-kind label ([anthropic], [kimi],
+   [openai_compat], [ollama], [gemini], [glm]), so the ordering is observable
+   only for a label that names a [[providers]] entry. That is what
+   [with_precedence_catalog] declares. The discriminator is a field the row
+   sets and the base leaves [None]: [accepted_reasoning_efforts]. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows

@@ -220,12 +220,9 @@ let resolve_keeper_read_path
   | Ok path -> Ok path
 ;;
 
-(* cwd is a caller-declared execution location, not keeper-visible path
-   vocabulary: reinterpreting it (container-root rewrite, playground join
-   for relative input) via [project_keeper_logical_path] hides exactly
-   the ambiguous input the [path_outside_sandbox] Gate exists to reject.
-   File-path arguments keep the projection — a bare relative path inside
-   the sandbox is keeper vocabulary; a cwd must arrive at the Gate raw. *)
+(* These low-level cwd resolvers take concrete host coordinates. Public
+   Execute projects its admitted Keeper's container-visible cwd before this
+   boundary; both spellings are confined to the same owned root here. *)
 let resolve_keeper_read_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)

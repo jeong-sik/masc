@@ -2544,7 +2544,15 @@ let runtime_model_info_cmd =
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
-  match Runtime.load_list ~config_path with
+  let loaded =
+    try
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root:(Filename.dirname config_path) () in
+      Runtime.load_list ~config_path
+    with Env_config_core.Config_error message -> Error message
+  in
+  match loaded with
   | Error message -> prerr_endline message; 1
   | Ok (runtimes, default, assignments, _, lanes) ->
     let selected =

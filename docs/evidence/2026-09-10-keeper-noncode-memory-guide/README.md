@@ -51,3 +51,18 @@ difference in those three source files. This binds the source diagnosis to the
 reported binary source identity but does not identify every internal event of
 this failed operation. The measured receipt remains the evidence that only one
 attempt ran and no fallback was applied. A separate repair is in progress.
+
+## Work before failure
+
+The complete paginated journal has 6,139 events, including three tool calls and
+three result-ready references before the terminal rate-limit event. Tools were
+Board search, Execute and keeper_skill. The Execute request inspected available
+Python/PDF/image packages, renderers and Korean fonts, plus temporary-directory
+writability. The skill request selected diagram-in-chat. This shows attempted
+non-code preparation before failure; result-ready references are not independent
+proof of command success or completed artifacts. The selected non-thinking events
+and full private-capture hash are in `pre-failure-tool-events.json`.
+
+Resume must account for the already-started tools and checkpoint rather than
+treating the operation as a request that never began. Raw model stream content
+remains outside Git. No repeated request was sent during this observation.

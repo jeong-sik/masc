@@ -107,15 +107,22 @@ let script = {js|function interactInPage(args) {
   const before = location.href;
   if (args.action === "follow_link") {
     const element = browserScene({...args,mode:'resolve_link'});
-    if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
+    if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
       throw new Error('follow_link_requires_anchor');
     const style = getComputedStyle(element);
     if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
       throw new Error('element_not_visible');
     const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
-    if (target !== '' && target.toLowerCase() !== '_self') throw new Error('follow_link_requires_same_tab');
+    const normalizedTarget = target.toLowerCase();
+    const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
+      || (window === window.top && (normalizedTarget === '_top' || normalizedTarget === '_parent'));
+    if (!sameTab) throw new Error('follow_link_requires_same_tab');
+    const rel = (element.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.includes('noreferrer') || element.hasAttribute('referrerpolicy'))
+      throw new Error('follow_link_referrer_policy_unsupported');
     if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
-    const destination = new URL(element.href, location.href);
+    const rawHref = typeof element.href === 'string' ? element.href : element.href.baseVal;
+    const destination = new URL(rawHref, element.baseURI || document.baseURI || location.href);
     if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
     const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
       navigationSource:{url:before,documentId:args.documentId},

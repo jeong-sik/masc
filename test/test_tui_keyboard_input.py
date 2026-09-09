@@ -2877,6 +2877,18 @@ def assert_row_budgeted_surfaces(
 EVENT_RANGE_RE = re.compile(rb"TUI Session Events (\d+)-(\d+)/(\d+)")
 
 
+def manual_refresh_run(drawn: bytes, where: str) -> int:
+    """How many manual refreshes the newest event row stands for.
+
+    The panel folds a run of identical events into one row and writes the
+    length as a ×N tail; a run of one carries no tail at all.
+    """
+    match = re.search(rb"Manual refresh (?:\xc3\x97(\d+))?", screen_text(drawn))
+    if match is None:
+        raise AssertionError(f"{where} drew no manual refresh row: {drawn!r}")
+    return int(match.group(1)) if match.group(1) else 1
+
+
 def event_total(frame: bytes, where: str) -> int:
     """How many events the pane says it holds, read from the screen.
 
@@ -2985,6 +2997,21 @@ def assert_overview_event_rows(
                 master_fd,
                 output,
                 b"j",
+                event_range(first, first + window - 1, total),
+            )
+
+    def scroll_to_newest(total: int, window: int = 2) -> None:
+        """Press k until the window rests against the newest event.
+
+        That is where the collapsed run of manual refreshes is drawn; the
+        oldest window this scenario pins does not carry it.
+        """
+        for first in range(total - window, 0, -1):
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"k",
                 event_range(first, first + window - 1, total),
             )
 
@@ -3143,17 +3170,21 @@ def assert_overview_event_rows(
         final_cursor=b"\x1b[?25l",
     )
     scroll_to_oldest(total, start_offset=max(0, total - OVERVIEW_PANEL_ROW_CAP))
-    # The r adds the manual-refresh event, and the observer may add a feed
-    # event of its own on the same refresh. How many arrive is the runtime's
-    # business; what is asserted is that the pin held. So the total is read
-    # back off the redrawn frame rather than predicted.
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"r",
-        re.compile(rb"TUI Session Events \d+-\d+/\d+"),
+    # A manual refresh while the newest row is already a manual refresh does
+    # not add a row. The panel collapses a run of identical events into one
+    # with a ×N tail, keyed on event type and content alone
+    # (Masc_tui_types.overview_event_collapse_key), so the count beside the
+    # title stays where it is and the run grows instead. Asserting the count
+    # went up waited on a row the panel had folded away.
+    scroll_to_newest(total)
+    before_run = manual_refresh_run(
+        bytes(output), "Overview before the refresh"
     )
+    scroll_to_oldest(total)
+    # Written rather than waited on: the fold leaves every row of the oldest
+    # window exactly as it was, and a differential redraw sends nothing for a
+    # row that did not change.
+    os.write(master_fd, b"r")
     drain_until_quiet(process, master_fd, output)
     anchored = resize_and_wait(
         process,
@@ -3166,17 +3197,25 @@ def assert_overview_event_rows(
         final_cursor=b"\x1b[?25l",
     )
     after_r_total = event_total(anchored, "99-column Overview")
-    if after_r_total <= total:
+    if after_r_total != total:
         raise AssertionError(
-            f"the refresh did not add an event ({total} -> {after_r_total}): {anchored!r}"
+            f"the folded refresh changed the row count ({total} -> "
+            f"{after_r_total}): {anchored!r}"
         )
     if oldest_window(2, after_r_total) not in anchored:
-        raise AssertionError(f"event prepend broke the oldest pin: {anchored!r}")
-    # The oldest event on screen is the whole claim: the pin followed the
-    # prepend. Which younger event shares the two-row window depends on how
-    # many feed events the runtime logged, which is not this test's claim.
+        raise AssertionError(f"the added event broke the oldest pin: {anchored!r}")
+    # The oldest event on screen is the whole claim: the pin held while the
+    # event arrived. Which younger event shares the two-row window depends on
+    # how many feed events the runtime logged, which is not this test's claim.
     if b"TUI started" not in anchored:
-        raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
+        raise AssertionError(f"the added event changed the manual anchor: {anchored!r}")
+    scroll_to_newest(total)
+    after_run = manual_refresh_run(bytes(output), "Overview after the refresh")
+    if after_run <= before_run:
+        raise AssertionError(
+            f"the refresh did not reach the event log ({before_run} -> {after_run})"
+        )
+    scroll_to_oldest(total)
 
     send_and_wait(
         process,

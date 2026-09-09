@@ -108,9 +108,23 @@ let test_real_curator () =
   let saved = Api.post ~base_path (Yojson.Safe.to_string input) |> expect `OK in
   let fetched = Api.get ~base_path ~id:(Some (get_id saved)) |> expect `OK in
   json_equal "recorded model output survives server round-trip" (canonical input) (field "proposal" fetched)
+let test_unavailable_gap () =
+  let base_path = Filename.temp_dir "workspace-proposals-gap" "" in
+  let input = fixture () in
+  let gap observation = obj ["keeper_id", str "writer"; "store", str "source_bound";
+    "observation", observation] in
+  let without_detail = replace "gaps"
+    (`List [gap (obj ["status", str "unavailable"])]) input in
+  ignore (Api.post ~base_path (Yojson.Safe.to_string without_detail) |> expect `Bad_request);
+  let with_detail = replace "gaps" (`List [gap (obj ["status", str "unavailable";
+    "detail", str "Cannot read current snapshot: permission denied"])]) input in
+  let saved = Api.post ~base_path (Yojson.Safe.to_string with_detail) |> expect `OK in
+  let fetched = Api.get ~base_path ~id:(Some (get_id saved)) |> expect `OK in
+  json_equal "unavailable diagnostic survives round-trip" (canonical with_detail) (field "proposal" fetched)
 let () = Alcotest.run "workspace memory proposals" ["behavior", [
   Alcotest.test_case "submit, restart read, attribution and idempotence" `Quick test_persist;
   Alcotest.test_case "malformed references refused before persistence" `Quick test_invalid;
   Alcotest.test_case "missing and corruption remain distinct" `Quick test_corruption;
   Alcotest.test_case "unique evidence bindings and zero-fact retractions" `Quick test_evidence_bindings;
-  Alcotest.test_case "real saved local curator proposal" `Quick test_real_curator]]
+  Alcotest.test_case "real saved local curator proposal" `Quick test_real_curator;
+  Alcotest.test_case "unavailable gap requires preserved detail" `Quick test_unavailable_gap]]

@@ -47,8 +47,13 @@ let decode raw =
   let* _ = traverse (fun j ->
     let* _ = text (field "keeper_id" j) in
     let* () = match field "store" j with `String ("ordinary" | "source_bound") -> Ok () | _ -> Error "Unknown gap store" in
-    match field "status" (field "observation" j) with
-    | `String ("missing" | "unavailable") -> Ok ()
+    let observation = field "observation" j in
+    match field "status" observation with
+    | `String "missing" -> Ok ()
+    | `String "unavailable" ->
+      (match field "detail" observation with
+       | `String _ -> Ok ()
+       | _ -> Error "Unavailable gap must include a detail string")
     | _ -> Error "Gap must record missing or unavailable storage") gaps in
   let* snapshot_ids = traverse (fun j ->
     let* sid = text (field "snapshot_id" j) in

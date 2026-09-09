@@ -193,46 +193,6 @@ output_per_million = 15.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
-# Restored with #34849's finding: these rows were removed as collateral of the
-# manual_budget purge (#34792), which took their context limits, output limits
-# and prices with them. The models still exist and a runtime naming one is
-# disabled at boot without a row. The obsolete anthropic_thinking_control key
-# is gone rather than replaced: no adaptive policy has been checked for these
-# entries, and the backend refuses an explicit enable_thinking on a row that
-# declares none instead of guessing one.
-[[models]]
-id_prefix = "opus-4-5"
-base = "anthropic"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "sonnet-4"
-base = "anthropic"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-
-# Fallbacks for Cli Tool / CC
-[[models]]
-id_prefix = "claude-3-7-sonnet"
-base = "anthropic"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
 [[models]]
 id_prefix = "claude_code"
 base = "anthropic"
@@ -2924,39 +2884,6 @@ input_per_million = 3.0
 output_per_million = 15.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-opus-4-5"
-base = "anthropic"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-opus-4"
-base = "anthropic"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-sonnet-4"
-base = "anthropic"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-
 
 [[models]]
 id_prefix = "gpt-5.3-codex-spark"

@@ -2861,22 +2861,23 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (
-        BOARD_CELL_BODY.encode(),
-        b"comment-1",
-        b"comment-2",
-        b"comment-3",
-        b"j/k:scroll",
-    ):
+    # One comment row at this height. The surface spends the rest on its box,
+    # on the key footer, and on the "post rows" line it writes because the
+    # thread does not fit -- so the budget the thread is left with is the
+    # smallest one this pane hands out.
+    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"j/k:scroll"):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
         raise AssertionError(f"Board comment leaked Markdown source markers: {board!r}")
-    if b"comment-4" in board or b"comment-5" in board:
-        raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+    for hidden in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+        if hidden in board:
+            raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
 
-    send_and_wait(process, master_fd, output, b"j", b"comment-4")
-    send_and_wait(process, master_fd, output, b"j", b"comment-5")
+    # With one comment row, each press moves the thread by one, and the whole
+    # thread is still reachable.
+    for comment in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+        send_and_wait(process, master_fd, output, b"j", comment)
     os.write(master_fd, b"q")
 
 

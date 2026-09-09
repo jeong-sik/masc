@@ -68,6 +68,71 @@ let link config goal_id task_id =
   | Ok () -> () | Error message -> Alcotest.fail message
 ;;
 
+let pending_rejection task_id verification_id : Masc_domain.pending_completion_rejection =
+  { task_id; verification_id; producer = "keeper:delete-producer"
+  ; reason = "repair the rejected work"
+  ; authority = Masc_domain.Human_operator { operator_id = "delete-operator" }
+  ; committed_at = "2026-09-09T00:00:00Z"
+  }
+;;
+
+let test_delete_retires_only_its_pending_rejections () =
+  List.iter (fun already_absent -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    let other = make_task config "other" in
+    let own = pending_rejection target "verify-target" in
+    let retained = pending_rejection other "verify-other" in
+    let backlog = Workspace.read_backlog config in
+    let tasks = if already_absent then
+        List.filter (fun (task : Masc_domain.task) -> task.id <> target) backlog.tasks
+      else backlog.tasks in
+    Workspace.write_backlog config
+      {backlog with tasks; pending_completion_rejections = [own; retained]};
+    let revision = (Workspace.read_backlog config).version in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_deleted when not already_absent -> ()
+     | Ok Workspace.Task_already_absent when already_absent -> ()
+     | _ -> Alcotest.fail "deletion must retire pending repair request");
+    (* This is the authoritative input consumed by restart reconciliation. *)
+    Alcotest.(check bool) "recovery sees only the other Task obligation" true
+      (Workspace_task_rejection_outbox.pending config = Ok [retained]);
+    let after = Workspace.read_backlog config in
+    Alcotest.(check int) "one atomic mutation" (revision + 1) after.version;
+    Alcotest.(check (list string)) "other Task retained" [other]
+      (List.map (fun (task : Masc_domain.task) -> task.id) after.tasks);
+    ignore (Workspace.delete_task_r config ~task_id:target);
+    Alcotest.(check int) "settled retry has no new revision" after.version
+      (Workspace.read_backlog config).version)) [false; true]
+;;
+
+let test_delete_failure_keeps_rejection_until_primary_commit () =
+  List.iter (fun fail_before_commit -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    let pending = pending_rejection target "verify-target" in
+    let backlog = Workspace.read_backlog config in
+    Workspace.write_backlog config
+      {backlog with pending_completion_rejections = [pending]
+      ; version = if fail_before_commit then max_int - 1 else backlog.version};
+    if not fail_before_commit then
+      write_string (Workspace_goal_index.goal_task_links_path config) "{broken";
+    let result = Workspace.delete_task_r config ~task_id:target in
+    if fail_before_commit then (
+      (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected precommit failure");
+      Alcotest.(check bool) "uncommitted deletion preserves repair obligation" true
+        (Workspace_task_rejection_outbox.pending config = Ok [pending]);
+      Alcotest.(check int) "uncommitted deletion preserves Task" 1
+        (List.length (Workspace.read_backlog config).tasks))
+    else (
+      (match result with Ok (Workspace.Task_delete_cleanup_failed (_ :: _)) -> ()
+       | _ -> Alcotest.fail "expected committed deletion with link cleanup failure");
+      Alcotest.(check bool) "committed deletion retires repair despite link failure" true
+        (Workspace_task_rejection_outbox.pending config = Ok []);
+      Alcotest.(check int) "Task was deleted" 0
+        (List.length (Workspace.read_backlog config).tasks)))) [false; true]
+;;
+
 let test_deletion_prunes_only_its_references () =
   with_temp_config (fun config ->
     ignore (Workspace.init config ~agent_name:(Some "tester"));
@@ -219,7 +284,9 @@ let () =
   Alcotest.run
     "Workspace task delete"
     [ ( "delete"
-      , [ Alcotest.test_case "Memory cache mirror retry preserves primary" `Quick test_memory_cache_mirror_failure_retries_without_rewriting_primary
+      , [ Alcotest.test_case "deletion retires only its pending repair obligations" `Quick test_delete_retires_only_its_pending_rejections
+        ; Alcotest.test_case "repair retirement follows deletion commit" `Quick test_delete_failure_keeps_rejection_until_primary_commit
+        ; Alcotest.test_case "Memory cache mirror retry preserves primary" `Quick test_memory_cache_mirror_failure_retries_without_rewriting_primary
         ; Alcotest.test_case "cache read and write failures remain retryable" `Quick test_cache_failure_is_partial_and_retryable
         ; Alcotest.test_case "retry repairs both stores' failed recovery writes" `Quick test_retry_repairs_failed_recovery_copy
         ; Alcotest.test_case "only deleted Task references removed" `Quick test_deletion_prunes_only_its_references

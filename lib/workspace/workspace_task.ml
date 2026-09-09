@@ -22,16 +22,25 @@ let delete_task_r config ~task_id : task_delete_outcome Masc_domain.masc_result 
     let* backlog = read_backlog_r config |> Result.map_error (fun message ->
       Masc_domain.System (Masc_domain.System_error.IoError message)) in
     let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
+    let pending_completion_rejections, removed_rejections =
+      List.partition
+        (fun (pending : pending_completion_rejection) ->
+          not (String.equal pending.task_id task_id))
+        backlog.pending_completion_rejections
+    in
     let settle f = match Eio_guard.execution_context () with
       | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
       | Eio_guard.Non_eio -> f () in
     settle (fun () ->
-      let* commit_errors = match task with
-        | None -> Ok (match repair_backlog_copies_result config backlog with
+      let* commit_errors = match task, removed_rejections with
+        | None, [] -> Ok (match repair_backlog_copies_result config backlog with
             | Ok () -> [] | Error message -> [message])
-        | Some _ ->
+        | Some _, _ | None, _ :: _ ->
           let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
-          (match write_backlog_result config {backlog with tasks} with
+          (* Removing a Task also retires its undelivered repair requests in
+             the same authoritative commit. Recovery must not wake a producer
+             to repair a Task that no longer exists. *)
+          (match write_backlog_result config {backlog with tasks; pending_completion_rejections} with
            | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
            | Ok receipt -> Ok (List.filter_map Fun.id
                [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error])) in

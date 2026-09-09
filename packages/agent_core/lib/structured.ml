@@ -127,8 +127,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
 
 (* ── Extractors ────────────────────────────────────────────────── *)
 
-(** An extractor converts an api_response into a typed value.
-    Use with {!run_structured} for Agent.t-level structured output. *)
+(** An extractor converts an api_response into a typed value. *)
 type 'a extractor = api_response -> ('a, string) result
 
 let schema_extractor (schema : 'a schema) : 'a extractor =
@@ -174,15 +173,6 @@ let text_extractor (parse : string -> 'a option) : 'a extractor =
     | text :: _ -> Ok text
   in
   parse text |> Option.to_result ~none:"text extractor returned None"
-;;
-
-(** Run an agent with a prompt and extract a structured value from the response.
-    Uses the full Agent pipeline (hooks, tools, tracing) unlike {!extract}
-    which calls the API directly. *)
-let run_structured ~sw ?clock agent prompt ~(extract : 'a extractor) =
-  let* response = Agent.run ~sw ?clock agent prompt in
-  extract response
-  |> Result.map_error (fun detail -> Error.Serialization (JsonParseError { detail }))
 ;;
 
 (** Extract structured output with SSE streaming.

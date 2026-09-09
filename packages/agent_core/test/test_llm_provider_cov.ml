@@ -19,6 +19,7 @@ let make_config
       ?system_prompt
       ?enable_thinking
       ?thinking_budget
+      ?reasoning_effort
       ?tool_choice
       ?(response_format = Types.Off)
       ()
@@ -35,6 +36,7 @@ let make_config
     ?system_prompt
     ?enable_thinking
     ?thinking_budget
+    ?reasoning_effort
     ?tool_choice
     ~response_format
     ()

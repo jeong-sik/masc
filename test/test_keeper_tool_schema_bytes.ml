@@ -109,7 +109,15 @@ open Alcotest
    #34506 is the same shape and takes about 195 of that: five MSX tools
    whose first line was over the budget, the largest at 745 bytes. It fits
    under this figure, so the headroom it leaves is nearer 306. *)
-let ceiling_bytes = 98_164
+(* 2026-09-10: the workspace memory reader adds 776 serialized bytes and one
+   always-available tool. It lets Keepers discover and read attributed curator
+   proposals, disagreements and source gaps without treating them as verified
+   memory. Targeted CI 34401018154 at b33c497efb measured 98,808 bytes / 112
+   tools after the Browser description reduction landed. The preceding
+   surface is therefore 98,032 bytes / 111 tools. Add only the reader's 776
+   bytes to the previous 98,164 ceiling, retaining exactly 132 bytes of slack.
+   This is schema measurement, not a runtime token or behavior gate. *)
+let ceiling_bytes = 98_940
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -121,6 +129,10 @@ let schema_json (schema : Masc_domain.tool_schema) =
 
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
+  List.iter (fun (schema : Masc_domain.tool_schema) ->
+    if String.equal schema.name "keeper_workspace_memory_read" then
+      Printf.printf "workspace memory reader schema: %d bytes\n%!"
+        (String.length (Yojson.Safe.to_string (schema_json schema)))) schemas;
   let bytes =
     List.fold_left
       (fun acc schema -> acc + String.length (Yojson.Safe.to_string (schema_json schema)))
@@ -179,6 +191,7 @@ let all_surface_golden_names =
   ; "keeper_lane_status"
   ; "keeper_library_read"
   ; "keeper_library_search"
+  ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"

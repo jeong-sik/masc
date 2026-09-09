@@ -2586,6 +2586,11 @@ let setup_cmd_exit base_path port no_tui =
         ~agent:default_login_agent ~token:None ~keeper_name:"imp"
         ~declaration:(`Assoc ["name", `String "imp"]))
 
+let setup_preflight_cmd =
+  let info = Cmd.info "setup-preflight"
+    ~doc:"Read existing Keeper and Goal state without initialization or writes." in
+  Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
+
 let setup_cmd =
   let no_tui = Arg.(value & flag & info ["no-tui"]
     ~doc:"Prepare imp and leave the server running without opening the terminal UI.") in
@@ -2633,6 +2638,7 @@ let cmd =
     ; keeper_github_cmd
     ; sandbox_image_cmd
     ; setup_cmd
+    ; setup_preflight_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

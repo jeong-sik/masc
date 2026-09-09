@@ -314,10 +314,18 @@ let scope runtime_id =
 let claude_script ~marker ~body =
   Printf.sprintf {|#!/bin/sh
 set -eu
-if [ "${1-}" = auth ]; then
-  printf '%%s\n' '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}'
-  exit 0
-fi
+# The client puts its flags ahead of the subcommand, so the probe arrives as
+# `--setting-sources= auth status --json`. Matching the subcommand pair
+# anywhere in argv keeps this answering the probe when a flag is added or
+# moved; pinning a position sends the probe into the turn body below, which
+# answers it with turn output and records a marker line for a call that never
+# asked for one.
+case " $@ " in
+  *" auth status "*)
+    printf '%%s\n' '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}'
+    exit 0
+    ;;
+esac
 session=''
 model=''
 previous=''

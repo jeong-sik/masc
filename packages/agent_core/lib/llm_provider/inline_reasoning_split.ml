@@ -12,11 +12,6 @@ type state =
   ; mutable pending : string
   }
 
-type piece =
-  { reasoning : string
-  ; text : string
-  }
-
 let create () = { mode = Outside; pending = "" }
 let inside state = state.mode = Inside
 
@@ -93,24 +88,13 @@ let flush_segments state =
   if rest = "" then [] else [segment state.mode rest]
 ;;
 
-let piece_of_segments segments =
-  let reasoning = Buffer.create 64 and text = Buffer.create 64 in
-  List.iter (function
-    | Text bytes -> Buffer.add_string text bytes
-    | Reasoning bytes -> Buffer.add_string reasoning bytes) segments;
-  { reasoning = Buffer.contents reasoning; text = Buffer.contents text }
-;;
-
-let feed state chunk = piece_of_segments (feed_segments state chunk)
-let flush state = piece_of_segments (flush_segments state)
-
 (* Compare the typed byte stream, not delta boundaries chosen by transport. *)
-let test_typed_bytes segments =
+let[@warning "-32"] test_typed_bytes segments =
   List.concat_map (function
     | Text bytes -> List.init (String.length bytes) (fun i -> Outside, bytes.[i])
     | Reasoning bytes -> List.init (String.length bytes) (fun i -> Inside, bytes.[i])) segments
 
-let test_partition input cuts =
+let[@warning "-32"] test_partition input cuts =
   let state = create () in
   let rec feed_from offset = function
     | [] -> feed_segments state (drop input offset)

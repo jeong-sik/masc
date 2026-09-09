@@ -7,7 +7,7 @@
     blocks carrying this model's replies, 46 opened with reasoning, and
     stripping it left a real answer of 338 characters at the median.
 
-    This is declared per model through [reasoning_streaming_format], never
+    This is declared per model through [content_inline_reasoning], never
     applied to text on suspicion. A model that does not declare it keeps every
     byte of its content channel. *)
 
@@ -27,18 +27,3 @@ val feed_segments : state -> string -> segment list
 
 val flush_segments : state -> segment list
 (** Release pending bytes in their current channel, exactly once. *)
-
-type piece =
-  { reasoning : string
-  ; text : string
-  }
-
-val feed : state -> string -> piece
-(** Split one content delta. Either field may be empty. Bytes that could still
-    begin or complete a tag are held until a later call resolves them, so a tag
-    split across two deltas is never emitted as reply text. *)
-
-val flush : state -> piece
-(** End of stream. Held bytes are released: reply text outside a tag, and
-    reasoning inside one, because an unterminated tag is a cut stream rather
-    than a reason to drop what it carried. *)

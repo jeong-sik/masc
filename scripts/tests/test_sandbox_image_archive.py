@@ -64,6 +64,8 @@ class ArchiveTest(unittest.TestCase):
                      'Config': {'Labels': {'org.opencontainers.image.revision': 'source'}}}
             for key, replacement in [('RootFS', {'Type': 'layers', 'Layers': []}),
                                      ('Config', {'Labels': {'org.opencontainers.image.revision': 'other'}}),
+                                     ('Config', {**image['Config'], 'User': '0'}),
+                                     ('Config', {**image['Config'], 'Entrypoint': ['/unexpected']}),
                                      ('Descriptor', {'digest': config, 'mediaType': result['manifest_media_type'], 'size': result['manifest_bytes']})]:
                 with self.subTest(field=key), self.assertRaises(ValueError):
                     verifier.verify_inspect([{**image, key: replacement}], result, 'fixture:v1')

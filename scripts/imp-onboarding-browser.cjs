@@ -61,10 +61,19 @@ const { chromium } = require(playwrightModule);
     fs.writeFileSync(path.join(outputDir, 'browser-gate-observation.json'),
       JSON.stringify(gateObservation, null, 2).split(token).join('[REDACTED]'));
     await reply.scrollIntoViewIfNeeded();
+    const textHandle = await page.waitForFunction(selector => {
+      const matches = [...document.querySelectorAll(selector)];
+      for (const node of matches.reverse()) {
+        if (node.getClientRects().length && node.innerText?.includes('IMP_BROWSER_OK')) return node.innerText;
+      }
+      return false;
+    }, replySelector, { timeout: 30000 });
+    const assistantReply = await textHandle.jsonValue();
+    await textHandle.dispose();
     await page.screenshot({ path: path.join(outputDir, 'imp-browser-chat.png'), fullPage: false });
     fs.writeFileSync(path.join(outputDir, 'browser-receipt.json'), JSON.stringify({
       url: page.url(), keeper: 'imp', interaction: 'typed and sent a real chat message',
-      assistantReply: await reply.innerText(), requestId, terminalState: operation.state,
+      assistantReply, requestId, terminalState: operation.state,
       completedAt: operation.completed_at, outcomeRef: operation.outcome_ref,
       terminalEvidenceSource: 'durable_chat_operation', streamState: 'complete', fixtureModel: false,
     }, null, 2));

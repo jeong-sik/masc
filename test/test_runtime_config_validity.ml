@@ -199,7 +199,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
-    check bool (case.runtime_id ^ " thinking") case.thinking
+    check (option bool) (case.runtime_id ^ " thinking") (Some case.thinking)
       runtime.model.thinking_support;
     check bool (case.runtime_id ^ " known to provider-qualified AGENT_CORE catalog") true
       (Option.is_some
@@ -628,7 +628,7 @@ let test_repo_deepseek_thinking_request () =
       String.equal runtime.id "deepseek.deepseek-v4-pro") runtimes with
     | Some runtime -> runtime
     | None -> fail "direct DeepSeek seed runtime is missing" in
-  check bool "thinking remains enabled by model policy" true runtime.model.thinking_support;
+  check (option bool) "thinking remains enabled by model policy" (Some true) runtime.model.thinking_support;
   let provider_config = agent_core_provider_config runtime in
   List.iter (fun (enabled, effort, expected) ->
     let config = { provider_config with
@@ -645,6 +645,47 @@ let test_repo_deepseek_thinking_request () =
     [true, None, "enabled";
      true, Some Llm_provider.Reasoning_effort.High, "enabled";
      false, None, "disabled"]
+;;
+
+let test_unset_thinking_does_not_disable_reasoning_model () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let env_name = "MASC_KEEPER_ENABLE_THINKING" in
+  let old_env = Sys.getenv_opt env_name in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    Unix.putenv env_name (Option.value old_env ~default:"")) @@ fun () ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> () | Error detail -> fail detail);
+  let runtime = match Runtime.get_runtime_by_id "kimi_coding.kimi-for-coding" with
+    | Some runtime -> runtime | None -> fail "Kimi seed runtime is missing" in
+  check (option bool) "omitted model policy remains absent" None runtime.model.thinking_support;
+  let provider_config = agent_core_provider_config runtime in
+  List.iter (fun (raw, expected) ->
+    Unix.putenv env_name raw;
+    let fallback = Keeper_config.keeper_enable_thinking () in
+    check (option bool) "fleet policy preserves explicitness" expected fallback;
+    let policy = Keeper_turn_driver.For_testing.attempt_inference_policy
+      ~runtime_id:runtime.id ~fallback_enable_thinking:fallback () in
+    check (option bool) "request policy preserves explicitness" expected policy.attempt_enable_thinking;
+    let config = { provider_config with
+      Llm_provider.Provider_config.enable_thinking = policy.attempt_enable_thinking } in
+    let caps = match Llm_provider.Provider_config.capabilities_for_config_model config with
+      | Some caps -> caps | None -> fail "Kimi provider capability is missing" in
+    let rejection = Llm_provider.Complete_common.thinking_control_request_rejection ~caps config in
+    match expected with
+    | None ->
+      check bool "unspecified request is not rejected" true (Option.is_none rejection);
+      let request = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[] () in
+      let open Yojson.Safe.Util in
+      check bool "no invented thinking toggle" true ((request |> member "thinking") = `Null);
+      check bool "no invented effort" true ((request |> member "reasoning_effort") = `Null)
+    | Some false ->
+      check bool "explicit unsupported disable is still rejected" true
+        (rejection = Some Llm_provider.Complete_common.Disable_not_encodable)
+    | Some true -> ())
+    ["", None; "false", Some false; "true", Some true]
 ;;
 
 let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
@@ -1409,7 +1450,7 @@ List.iter
        check string "GLM Coding Plan model api name" "glm-4.7"
          runtime.model.api_name;
        check (option int) "GLM Coding Plan context" (Some 200000) runtime.model.max_context;
-       check bool "GLM Coding Plan thinking enabled" true
+       check (option bool) "GLM Coding Plan thinking enabled" (Some true)
          runtime.model.thinking_support;
       check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
         runtime.model.preserve_thinking;
@@ -4978,6 +5019,8 @@ let () =
             `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
           test_case "repo DeepSeek seed encodes thinking without an effort override"
             `Quick test_repo_deepseek_thinking_request;
+          test_case "unset thinking preserves provider defaults and explicit disable"
+            `Quick test_unset_thinking_does_not_disable_reasoning_model;
           test_case
             "repo runtime.toml all seeded bindings are keeper-dispatchable"
             `Quick test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable;

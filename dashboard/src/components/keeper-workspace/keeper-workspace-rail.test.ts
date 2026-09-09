@@ -271,6 +271,18 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('카탈로그 미등재')
   })
 
+  it('shows unset thinking policy without claiming an explicit disable', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({ providers: [{
+      provider: 'kimi_coding.kimi-for-coding', runtime_id: 'kimi_coding.kimi-for-coding',
+      model_api_name: 'kimi-for-coding', tools_support: true, streaming: true,
+    }] } as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+    const { container } = render(html`<${KeeperWorkspaceRail}
+      keeper=${mkKeeper({ runtime_canonical: 'kimi_coding.kimi-for-coding' })} />`)
+    openRuntimeDetail(container)
+    await waitFor(() => expect(container.querySelector('.rtc-flags')?.textContent).toContain('— thinking'))
+    expect(container.querySelector('.rtc-flags')?.textContent).not.toContain('✕ thinking')
+  })
+
   it('renders multimodal and effort adjustability from the runtime catalog capabilities', async () => {
     vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
       providers: [

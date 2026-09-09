@@ -61,8 +61,11 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
        %s\n\n\
-       Return only a JSON object with a non-empty string field named text. Do \
-       not include markdown fences or prose outside the JSON object."
+       Return only a JSON object with a non-empty string field named text. When \
+       the requested content is not visible, explicitly describe its absence \
+       in text; do not invent content to fill the field. Distinguish no visible \
+       content from content that is present but unreadable. Do not include \
+       markdown fences or prose outside the JSON object."
       req.Va.query
   in
   Agent_core.Types.make_message
@@ -145,10 +148,6 @@ let record_vision_candidate_attempt ~runtime_id ~result ~reason =
     ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
     ()
 ;;
-
-let ok_json text =
-  record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
 
 (* Default to Runtime_failure: an unclassified error is treated as an internal
    keeper-health fault, not a caller validation or workflow business rule. *)
@@ -289,8 +288,15 @@ let media_type_for_request ~bytes args =
   | Some (`String raw) -> validate_media_type raw
   | Some _ -> Error "media_type must be a string"
 
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -301,6 +307,17 @@ type vision_outcome =
       }
   | Vo_empty
   | Vo_truncated
+
+let ok_json (reading : vision_reading) =
+  record_vision_analyze_result ~result:"ok" ~reason:"ok";
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool true
+       ; "text", `String reading.text
+       ; "runtime_id", `String reading.runtime_id
+       ; "requested_model", `String reading.requested_model
+       ; "response_model", `String reading.response_model
+       ])
 
 let vision_text_of_json = function
   | `Assoc fields ->
@@ -319,7 +336,8 @@ let vision_text_of_response (response : Agent_core.Types.api_response) =
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let outcome_of_response (response : Agent_core.Types.api_response) =
+let outcome_of_response
+    ~runtime_id ~requested_model (response : Agent_core.Types.api_response) =
   (* A length stop is authoritative even when the prefix happens to form
      valid, nonempty JSON. Accepting that prefix would publish a partial
      extraction as success and prevent the next candidate from finishing it. *)
@@ -329,7 +347,8 @@ let outcome_of_response (response : Agent_core.Types.api_response) =
   | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
     (match Va.classify ~truncated:false ~content:text with
-     | Ok t -> Vo_ok t
+     | Ok text ->
+       Vo_ok { text; runtime_id; requested_model; response_model = response.model }
      | Error Va.Empty_extraction -> Vo_empty
      | Error Va.Truncated_extraction -> Vo_truncated)
 
@@ -589,7 +608,9 @@ let run_candidates_outcome
                 ; detail = Provider_http_error.to_message err
                 })
        | Ok response ->
-            (match outcome_of_response response with
+            (match
+               outcome_of_response ~runtime_id ~requested_model:config.model_id response
+             with
              | Vo_truncated ->
                record_vision_candidate_attempt
                  ~runtime_id
@@ -614,6 +635,7 @@ let run_candidates_outcome
 
 let run_vision
     ?complete
+    ?runtime_id
     ~sw
     ~clock
     ~net
@@ -637,7 +659,19 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              run_candidates_outcome
+              let candidates = vision_runtime_candidates () in
+              let selected = match runtime_id with
+                | None -> Ok candidates
+                | Some requested ->
+                    let matching = List.filter
+                      (fun (id, _, _) -> String.equal id requested) candidates in
+                    if List.is_empty matching then
+                      Error "requested runtime is not a configured capable image candidate"
+                    else Ok matching
+              in
+              match selected with
+              | Error detail -> Vo_invalid_request detail
+              | Ok candidates -> run_candidates_outcome
                 ?complete
                 ~sw
                 ~clock
@@ -645,7 +679,7 @@ let run_vision
                 ~req
                 ~last_error:None
                 ~attempt_index:0
-                (vision_runtime_candidates ())))
+                candidates))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _exn ->
@@ -683,6 +717,12 @@ let execution_of_vision_outcome = function
     failed ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 ;;
 
+let runtime_id_of_args args =
+  match json_member_opt "runtime_id" args with
+  | None -> Ok None
+  | Some (`String id) when not (String.equal (String.trim id) "") -> Ok (Some id)
+  | Some _ -> Error "runtime_id must be a non-empty configured runtime identifier"
+
 let handle_with_outcome
     ?complete
     ?sw
@@ -691,15 +731,17 @@ let handle_with_outcome
     ~(meta : Keeper_meta_contract.keeper_meta)
     ~args
     () =
-  match string_member "artifact" args, string_member "query" args with
-  | None, _ | _, None ->
+  match string_member "artifact" args, string_member "query" args, runtime_id_of_args args with
+  | _, _, Error detail ->
+      failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
+  | None, _, _ | _, None, _ ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (err_json
          ~failure_class:Tool_result.Policy_rejection
          ~detail:"requires string fields: artifact, query"
          "invalid_args")
-  | Some handle_str, Some query ->
+  | Some handle_str, Some query, Ok runtime_id ->
     (match sw, net, clock with
      | None, _, _ | _, None, _ | _, _, None ->
        Keeper_tool_execution.failure
@@ -710,13 +752,17 @@ let handle_with_outcome
      | Some sw, Some net, Some clock ->
        let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
-        | Error msg ->
-          Keeper_tool_execution.failure
-            ~class_:Tool_result.Runtime_failure
-            (err_json
-               ~failure_class:Tool_result.Runtime_failure
-               ~detail:msg
-               "artifact_load_failed")
+        | Error error ->
+          let failure_class, code, recovery = match error with
+            | Store.Malformed_handle _ -> Tool_result.Policy_rejection,
+                "invalid_artifact", "Copy the exact artifact returned by the image-producing tool."
+            | Store.Missing_artifact _ -> Tool_result.Workflow_rejection,
+                "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
+            | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
+                "artifact_load_failed", "The stored image could not be read with verified integrity." in
+          Keeper_tool_execution.failure ~class_:failure_class
+            (err_json ~failure_class
+               ~detail:(Store.load_error_to_string error ^ " " ^ recovery) code)
         | Ok bytes ->
           (match validate_image_size bytes with
              | Error msg ->
@@ -738,6 +784,7 @@ let handle_with_outcome
               | Ok media_type ->
                 run_vision
                   ?complete
+                  ?runtime_id
                   ~sw
                   ~clock
                   ~net

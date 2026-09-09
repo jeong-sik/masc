@@ -148,8 +148,8 @@ if sorted(path.name for path in roster.iterdir()) != ["imp.toml"]:
     raise SystemExit("install-smoke: expected exactly the first Keeper manifest imp.toml")
 with (roster / "imp.toml").open("rb") as source:
     manifest = tomllib.load(source)
-if manifest.get("keeper", {}).get("autoboot_enabled") is not False:
-    raise SystemExit("install-smoke: first Keeper must wait for manual start (autoboot_enabled = false)")
+if manifest.get("keeper", {}).get("activation_mode") != "manual":
+    raise SystemExit("install-smoke: first Keeper must wait for manual start (activation_mode must be manual)")
 PY_ROSTER
 for f in SKILL.md references/connection.md references/advanced.md references/verification.md; do
   [ -f "$base/.masc/skills/browser-lanes/$f" ] || {
@@ -164,6 +164,10 @@ for file in SKILL.md references/advanced.md references/connection.md references/
   }
 done
 echo "install-smoke: installer seeded the complete browser-lanes Skill package"
+
+[ -f "$base/.masc/skills/evidence-review/SKILL.md" ] || {
+  echo "install-smoke: evidence-review Skill missing" >&2; exit 1;
+}
 
 # Reinstall the actual compiled artifact through the upgrade branch. This
 # proves init --skills-only against real embedded assets, not a fixture CLI.

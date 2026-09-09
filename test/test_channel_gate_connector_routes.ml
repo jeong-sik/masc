@@ -459,6 +459,22 @@ let test_keeper_status_http_200_valid_keeper () =
     (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error err -> Alcotest.failf "replace_snapshot failed: %s" err);
+    (* A keeper is two files. The snapshot above holds runtime state; config
+       owns the sandbox_profile, and since #32078 a keeper without one has no
+       effective meta. keeper_exists then answers Error and this route
+       answers Service_unavailable -- which is the 503 this case read where
+       it expected 200. *)
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path
+    in
+    Fs_compat.mkdir_p keepers_dir;
+    Out_channel.with_open_bin
+      (Filename.concat keepers_dir "valid_keeper.toml")
+      (fun oc ->
+        output_string
+          oc
+          "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"gate route fixture\"\n");
     Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       Eio.Switch.run (fun sw ->

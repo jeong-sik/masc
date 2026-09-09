@@ -24,7 +24,7 @@ Keeper 런타임 설정은 지금 env 이름을 전달 경로로 쓴다. `runtim
 
 계기는 2026-09-02 헌법 정합 작업이다. "TOML 이 있는 env 는 env 쪽을 지운다" 로 적었던
 항목 세 개(`MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC` ↔ `turn.provider_call_deadline_sec`,
-`MASC_KEEPER_BOOTSTRAP_ENABLED` ↔ `bootstrap.enabled`,
+`MASC_KEEPER_AUTONOMOUS_ENABLED` ↔ `bootstrap.enabled`,
 `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` ↔ `heartbeat.interval_sec`)를 코드에서 보니 env
 이름이 중복이 아니라 TOML 값의 전달 경로였다. 지우려면 전달 경로부터 바꿔야 한다.
 
@@ -53,7 +53,7 @@ Keeper 런타임 설정은 지금 env 이름을 전달 경로로 쓴다. `runtim
 - 테스트: boot 저장소가 프로세스 전역이라 `Config_boot_overrides.reset_for_tests` 를
   테스트 파일 8개가 부른다.
 - 라이브: `~/.zshenv` 가 `MASC_KEEPER_*` 4개를 export 하고 그중
-  `MASC_KEEPER_BOOTSTRAP_ENABLED=true` 가 autoboot 를 켠다. `~/me/.masc/config/runtime.toml`
+  `MASC_KEEPER_AUTONOMOUS_ENABLED=true` 가 autoboot 를 켠다. `~/me/.masc/config/runtime.toml`
   의 `[turn]` 에는 `stream_idle_timeout_sec`, `provider_call_deadline_sec` 두 키만 있다.
 - 래칫: `scripts/env-read-baseline.json` 이 코드의 env 읽기 수를 위로 못 늘게 막는다.
 

@@ -32,3 +32,8 @@ enum = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 description = """
 Optional image MIME type override (e.g. image/png, image/jpeg). Sniffed from \
 the bytes when omitted."""
+
+[[params]]
+name = "runtime_id"
+type = "string"
+description = "Optional exact configured vision runtime identifier. When supplied, only that capable runtime is called; errors do not fall back to a different reader. Omit for automatic selection and failover. Useful for comparing readings of the same artifact."

@@ -8,6 +8,7 @@ module For_testing : sig
 end
 
 val supervise_keepalive :
+  ?intent:Keeper_activation_readiness.activation_intent ->
   publish_lifecycle:
     (event:Keeper_lifecycle_events.lifecycle_event ->
      string ->

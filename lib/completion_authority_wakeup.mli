@@ -29,3 +29,14 @@ val wake_rejected_producer :
   reason:string ->
   authority:Masc_domain.completion_authority ->
   delivery
+
+
+type recovery_report = { delivered : int; retained : int }
+
+val reconcile_pending :
+  config:Workspace_utils_backend_setup.config -> (recovery_report, string) result
+(** Deliver verdict-committed repair obligations from the authoritative backlog.
+    A durable Keeper queue write precedes exact-key source acknowledgment.
+    Identity/queue/ack failures retain the obligation for the next recovery.
+    Delivery is at least once across the queue-write/source-ack crash window;
+    the verification-keyed stimulus is information, not permission to mutate. *)

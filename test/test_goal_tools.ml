@@ -67,6 +67,26 @@ let expect_error (result : Tool_result.result option) =
   | None -> fail "tool not handled"
 ;;
 
+let test_goal_list_preserves_source_failure () =
+  with_workspace @@ fun config ->
+  let list () = Tool_workspace.dispatch (workspace_ctx config)
+    ~name:"masc_goal_list" ~args:(`Assoc []) in
+  let _goal, _ = match Goal_store.upsert_goal config ~title:"Visible source"
+      ~metric:"goals" ~target_value:"1" () with
+    | Ok value -> value | Error detail -> fail detail
+  in
+  let path = Goal_store.goals_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  Fs_compat.save_file path "unreadable primary";
+  let error = expect_error (list ()) in
+  check string "source error is not an empty successful list" "internal_error"
+    (get_string_field error "error_code");
+  check string "listing preserves the primary bytes" "unreadable primary"
+    (Fs_compat.load_file path);
+  check string "listing preserves recovery bytes" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
 let test_goal_upsert_and_list () =
   with_workspace
   @@ fun config ->
@@ -329,12 +349,20 @@ let request_complete config goal_id =
 (* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
    reached only through the verifier's proof. *)
 let prove_complete config goal_id =
+  let request_id, criterion =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
+      pending.request_id, pending.criterion
+    | _ -> fail "proof requires a durable pending request"
+  in
   Some
     (Workspace_goals.commit_verifier_decision
        ~tool_name:"goal_verifier_commit"
        ~start_time:0.
        config
        ~goal_id
+       ~request_id
+       ~criterion
        ~verification_run_id:"goal-verifier-test-run"
        ~decision:Workspace_goals.Proof_proven
        ~evidence:"observed by the test verifier")
@@ -406,6 +434,7 @@ let () =
     "goal_tools"
     [ ( "tool_workspace"
       , [ test_case "upsert and list" `Quick test_goal_upsert_and_list
+        ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
         ; test_case "list includes rollup" `Quick test_goal_list_includes_rollup
         ; test_case

@@ -1,10 +1,10 @@
 (** Which tool calls an operator is asked about before they run.
 
-    Read from what the tool already declares: its group, and whether this
-    particular input only reads. Nothing here matches on tool names — the
-    groups are a closed type, so a group added later has to be classified here
-    or the build stops. That is the point: a new family of tools must not
-    inherit "runs without asking" by saying nothing. *)
+    Descriptor-backed Execute calls delegate permission to their existing
+    durable execution Gate, which owns resolved cwd, sandbox profile and
+    grants. Interactive and autonomous Execute calls therefore use the same
+    authority. This is not a claim that every Execute input only reads.
+    Other calls retain their descriptor and input-based interactive policy. *)
 
 (** Why a call was or was not put to an operator. Carried rather than reduced
     to a bool so a decision can be explained where it is shown or logged. *)

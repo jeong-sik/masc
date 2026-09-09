@@ -340,7 +340,7 @@ dissenter 에서 "이 장부에 칸이 없다"    → 설계된 장부 밖 관�
 **재는 쪽이 안 된다.** `keeper_load_gate.sh:12-15`:
 
 > It **boots the server directly** (NOT via harness_start_server, which hardcodes
-> MASC_KEEPER_BOOTSTRAP_ENABLED off) with autoboot enabled
+> MASC_KEEPER_AUTONOMOUS_ENABLED off) with autoboot enabled
 
 `paused_work_disposition_soak.sh` 는 격리 base path 와 MCP 토큰과 동기 restart hook 을
 요구한다(README:31-44). 이는 서버 부팅과 재시작 제어 권한이 필요한 운영자·CI 하네스다.

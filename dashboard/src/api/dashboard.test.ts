@@ -3339,7 +3339,7 @@ describe('fetchKeeperConfig', () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       config_revision: configRevision,
-      autoboot_enabled: 'false',
+      activation_mode: 'manual',
       max_context_override: 64_000,
       sandbox_profile: 'docker',
       network_mode: 'none',
@@ -3363,9 +3363,6 @@ describe('fetchKeeperConfig', () => {
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
         runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
-      },
-      proactive: {
-        enabled: 'true',
       },
       skills: {
         names: ['ocaml-coding', 'proof-harness'],
@@ -3434,7 +3431,7 @@ describe('fetchKeeperConfig', () => {
     const result = await fetchKeeperConfig('keeper-sangsu')
 
     expect(result.sandbox_roots).toEqual(['/tmp/workspace'])
-    expect(result.autoboot_enabled).toBe(false)
+    expect(result.activation_mode).toBe('manual')
     expect(result.max_context_override).toBe(64000)
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
@@ -3546,7 +3543,8 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
-          config_revision: configRevision,
+          activation_mode: 'autonomous',
+      config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
           prompt: {
@@ -3576,6 +3574,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -3618,6 +3617,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3655,6 +3655,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -3690,6 +3691,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
@@ -3734,6 +3736,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+          activation_mode: 'autonomous',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },

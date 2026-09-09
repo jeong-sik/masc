@@ -7,6 +7,8 @@ HTTP failures; successful percentiles alone never count as goal completion.
 
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime, timezone
 import gzip
 import http.client
@@ -22,15 +24,56 @@ def percentile(values, fraction):
     return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)]
 
 
+def pointer_parts(pointer):
+    if pointer == "":
+        return []
+    if not pointer.startswith("/"):
+        raise ValueError("JSON pointer must be empty or start with /")
+    parts = pointer[1:].split("/")
+    for part in parts:
+        for index, char in enumerate(part):
+            if char == "~" and (index + 1 == len(part) or part[index + 1] not in "01"):
+                raise ValueError("invalid JSON pointer escape")
+    return [part.replace("~1", "/").replace("~0", "~") for part in parts]
+
+
+def pointer_value(document, pointer):
+    for part in pointer_parts(pointer):
+        if isinstance(document, dict):
+            document = document[part]
+        elif isinstance(document, list) and part.isascii() and part.isdigit() and (part == "0" or not part.startswith("0")):
+            document = document[int(part)]
+        else:
+            raise KeyError(pointer)
+    return document
+
+
+def json_equal(left, right):
+    # JSON booleans are not numbers, unlike Python's True == 1.
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(json_equal(left[k], right[k]) for k in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(json_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--path', action='append', help='Override sampled GET paths; repeat for multiple surfaces')
+    parser.add_argument('--require-json', action='append', default=[], metavar='POINTER=JSON',
+                        help='Required JSON value on sampled GET responses only; repeat for multiple conditions')
     parser.add_argument('--samples', type=int, default=30)
     parser.add_argument('--timeout', type=float, default=10)
     parser.add_argument('--target-ms', type=float, default=0.1)
     parser.add_argument('--interval', type=float, default=0,
                         help='seconds between sample rounds; recorded in evidence')
+    parser.add_argument('--accept-encoding', choices=('identity', 'gzip'), default='gzip')
+    parser.add_argument('--concurrent', action='store_true',
+                        help='start sampled GETs and MCP ping together on separate persistent connections')
     parser.add_argument('--token-env', default='MCP_TOKEN')
     args = parser.parse_args()
     url = urlsplit(args.base_url)
@@ -40,33 +83,34 @@ def main():
         parser.error('base-url must be an origin without path, query or fragment')
     if args.samples < 1 or args.timeout <= 0 or args.target_ms <= 0 or args.interval < 0:
         parser.error('samples, timeout and target-ms must be positive')
+    paths = args.path or ['/health', '/api/v1/dashboard/shell?light=true',
+                          '/api/v1/dashboard/execution', '/api/v1/dashboard/tools',
+                          '/api/v1/dashboard/telemetry/summary']
+    if any(not path.startswith('/') or path.startswith('//') for path in paths):
+        parser.error('sample paths must start with / and remain on the supplied origin')
+    requirements = []
+    try:
+        for condition in args.require_json:
+            pointer, separator, expected = condition.partition('=')
+            if not separator:
+                raise ValueError('require-json must use POINTER=JSON')
+            pointer_parts(pointer)
+            requirements.append((pointer, json.loads(expected)))
+    except ValueError as error:
+        parser.error(str(error))
     connection_type = (http.client.HTTPSConnection if url.scheme == 'https'
                        else http.client.HTTPConnection)
     connection = connection_type(url.hostname, url.port, timeout=args.timeout)
     token = os.environ.get(args.token_env)
-    headers = {'Accept-Encoding': 'gzip'}
+    headers = {'Accept-Encoding': args.accept_encoding}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     rows = []
+    observation_start = time.perf_counter_ns()
 
-    def request(label, path, *, method='GET', payload=None, extra=None):
-        started = time.perf_counter_ns()
-        row = {'label': label, 'path': path, 'method': method}
+    def decode_response(row, wire, response, *, payload=None, check_json=False):
+        decode_started = time.perf_counter_ns()
         try:
-            body = None if payload is None else json.dumps(payload)
-            request_headers = headers | (extra or {})
-            if body is not None:
-                request_headers['Content-Type'] = 'application/json'
-            connection.request(method, path, body, request_headers)
-            response = connection.getresponse()
-            headers_at = time.perf_counter_ns()
-            wire = response.read()
-            finished = time.perf_counter_ns()
-            row.update(status=response.status, wire_bytes=len(wire),
-                       headers_ms=(headers_at - started) / 1e6,
-                       total_ms=(finished - started) / 1e6,
-                       content_encoding=response.getheader('Content-Encoding'),
-                       server_timing=response.getheader('Server-Timing'))
             decoded = gzip.decompress(wire) if row['content_encoding'] == 'gzip' else wire
             if 'text/event-stream' in (response.getheader('Content-Type') or ''):
                 events = []
@@ -80,6 +124,9 @@ def main():
                                and event.get('id') == payload.get('id')), None)
             else:
                 parsed = json.loads(decoded) if decoded else None
+            decoded_at = time.perf_counter_ns()
+            row.update(decode_ms=(decoded_at - decode_started) / 1e6,
+                       client_total_ms=row['total_ms'] + (decoded_at - decode_started) / 1e6)
             row['valid'] = (200 <= response.status < 300
                             and isinstance(parsed, dict) and 'error' not in parsed)
             if isinstance(parsed, dict):
@@ -96,11 +143,52 @@ def main():
             if payload is not None and 'id' in payload:
                 row['valid'] = (row['valid'] and parsed.get('id') == payload['id']
                                 and 'result' in parsed)
+            if check_json:
+                row['semantic_errors'] = []
+                for pointer, expected in requirements:
+                    try:
+                        actual = pointer_value(parsed, pointer)
+                    except (KeyError, IndexError):
+                        row['semantic_errors'].append({'pointer': pointer, 'reason': 'missing JSON pointer'})
+                    else:
+                        if not json_equal(actual, expected):
+                            row['semantic_errors'].append({'pointer': pointer, 'reason': 'expected value mismatch'})
+                if row['semantic_errors']:
+                    row['valid'] = False
             return row, parsed, response
+        except (OSError, ValueError, EOFError) as error:
+            row.update(valid=False, error=type(error).__name__)
+            return row, None, response
+
+    def request(label, path, *, method='GET', payload=None, extra=None, check_json=False, client=None, wire_only=False):
+        client = connection if client is None else client
+        started = time.perf_counter_ns()
+        row = {'label': label, 'path': path, 'method': method,
+               'start_offset_ms': (started - observation_start) / 1e6}
+        try:
+            body = None if payload is None else json.dumps(payload)
+            request_headers = headers | (extra or {})
+            if body is not None:
+                request_headers['Content-Type'] = 'application/json'
+            client.request(method, path, body, request_headers)
+            response = client.getresponse()
+            headers_at = time.perf_counter_ns()
+            wire = response.read()
+            finished = time.perf_counter_ns()
+            row.update(status=response.status, wire_bytes=len(wire),
+                       wire_end_offset_ms=(finished - observation_start) / 1e6,
+                       headers_ms=(headers_at - started) / 1e6,
+                       total_ms=(finished - started) / 1e6,
+                       body_read_ms=(finished - headers_at) / 1e6,
+                       content_encoding=response.getheader('Content-Encoding'),
+                       server_timing=response.getheader('Server-Timing'))
+            if wire_only:
+                return row, wire, response
+            return decode_response(row, wire, response, payload=payload, check_json=check_json)
         except (OSError, http.client.HTTPException, ValueError) as error:
             row.update(valid=False, error=type(error).__name__,
                        total_ms=(time.perf_counter_ns() - started) / 1e6)
-            connection.close()
+            client.close()
             return row, None, None
 
     initial, health_before, _ = request('health_identity', '/health?full=1')
@@ -119,26 +207,42 @@ def main():
         mcp_headers['Mcp-Session-Id'] = session
         request('mcp_initialized', '/mcp', method='POST', payload={
             'jsonrpc': '2.0', 'method': 'notifications/initialized'}, extra=mcp_headers)
-    paths = ['/health', '/api/v1/dashboard/shell?light=true',
-             '/api/v1/dashboard/execution', '/api/v1/dashboard/tools',
-             '/api/v1/dashboard/telemetry/summary']
+    sample_clients = ([connection_type(url.hostname, url.port, timeout=args.timeout)
+                       for _ in range(len(paths) + bool(session))] if args.concurrent else [])
     try:
         for ordinal in range(args.samples):
             if ordinal and args.interval:
                 time.sleep(args.interval)
-            for path in paths:
-                row, _, _ = request(path, path)
-                rows.append(row | {'ordinal': ordinal})
+            jobs = [(path, path, {'check_json': True}) for path in paths]
             if session:
-                row, _, _ = request('mcp_ping', '/mcp', method='POST', payload={
+                jobs.append(('mcp_ping', '/mcp', {'method': 'POST', 'payload': {
                     'jsonrpc': '2.0', 'id': ordinal + 2, 'method': 'ping'},
-                    extra=mcp_headers)
-                rows.append(row | {'ordinal': ordinal})
+                    'extra': mcp_headers}))
+            if args.concurrent:
+                barrier = Barrier(len(jobs))
+                def sample(index, job):
+                    barrier.wait()
+                    label, path, options = job
+                    return request(label, path, client=sample_clients[index], wire_only=True, **options)
+                with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+                    futures = [executor.submit(sample, index, job) for index, job in enumerate(jobs)]
+                    responses = [future.result() for future in futures]
+                # Keep large JSON parsing off network worker threads: otherwise
+                # CPython's GIL can delay sibling wire timestamps.
+                responses = [decode_response(row, wire, response,
+                    payload=job[2].get('payload'), check_json=job[2].get('check_json', False))
+                    if response is not None else (row, None, None)
+                    for (row, wire, response), job in zip(responses, jobs)]
+            else:
+                responses = [request(label, path, **options) for label, path, options in jobs]
+            rows.extend(row | {'ordinal': ordinal} for row, _, _ in responses)
         final, health_after, _ = request('health_identity', '/health?full=1')
     finally:
         if session:
             request('mcp_cleanup', '/mcp', method='DELETE', extra=mcp_headers)
         connection.close()
+        for client in sample_clients:
+            client.close()
     summary = {}
     for label in dict.fromkeys(row['label'] for row in rows):
         group = [row for row in rows if row['label'] == label]
@@ -165,7 +269,13 @@ def main():
         'observed_at': datetime.now(timezone.utc).isoformat(),
         'base_url': args.base_url, 'target_ms': args.target_ms,
         'authenticated': bool(token), 'interval_s': args.interval,
-        'scope': 'sequential HTTP roundtrip including transfer; no injected load',
+        'accept_encoding': args.accept_encoding,
+        'concurrent': args.concurrent,
+        'scope': ('concurrent request rounds on separate connections; not objective readiness'
+                  if args.concurrent else 'sequential HTTP roundtrip including transfer; no injected load; not objective readiness'),
+        'timing_scope': 'total_ms ends at wire body receipt; decode_ms measures decompression and JSON/SSE parsing; client_total_ms sums these durations. Concurrent rounds defer decoding until all wire reads finish; the first round includes connection setup.',
+        'sample_paths': paths,
+        'required_json': [{'pointer': pointer, 'expected': expected} for pointer, expected in requirements],
         'identity_before': identity(health_before),
         'identity_after': identity(health_after),
         'same_runtime': (initial['valid'] and final['valid']

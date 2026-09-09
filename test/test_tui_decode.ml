@@ -658,6 +658,13 @@ let test_planning_goal_carries_the_judge_verdict () =
     (match proof (decoded_proof ~verification:(verification_json "proof_pending") ()) with
      | Tui_decode.Proof_pending -> true
      | _ -> false);
+  Alcotest.check Alcotest.bool "old approval is historical after a criterion edit" true
+    (match proof (decoded_proof ~verification:(`Assoc [ "completion",
+        `Assoc [ "state", `String "stale_criterion";
+          "historical_completion", `Assoc [ "state", `String "proof_proven";
+            "verdict", proven_verdict "old target reached" ] ] ]) ()) with
+     | Tui_decode.Proof_stale (Some "old target reached") -> true
+     | _ -> false);
   Alcotest.check Alcotest.bool "an idle ledger is idle" true
     (match proof (decoded_proof ~verification:(verification_json "idle") ()) with
      | Tui_decode.Proof_idle -> true
@@ -766,6 +773,18 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ] )
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
+
+let test_goal_store_unavailable_preserves_source_detail () =
+  let detail = "goals.json: criterion_revision is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
+                      "error", `String detail ] in
+  (match Tui_decode.decode_planning_snapshot json with
+   | Error message -> Alcotest.(check string) "planning source failure" detail message
+   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure" detail message
+  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
 
 let test_decode_planning_snapshot_current_contract () =
   match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
@@ -6588,6 +6607,14 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
           = Tui_decode.Lane_run_decision_rejected)
      | _ -> Alcotest.fail "expected one verifier run")
 
+let lane_payload_availability ~running ~output =
+  let available = `Assoc [ "state", `String "available" ] in
+  `Assoc
+    [ "input", available
+    ; "output", (if running then `Null else if output then available else
+        Exact_lane_run_registry.availability_to_yojson
+          (Exact_lane_run_registry.Unavailable Exact_lane_run_registry.Missing_completion)) ]
+
 let lane_run_detail_json ?(output = true) run_id =
   `Assoc
     [ ( "run"
@@ -6597,6 +6624,7 @@ let lane_run_detail_json ?(output = true) run_id =
            ; "actor", `String "omicron"
            ; "started_at", `Float 100.
            ; "status", `String (if output then "succeeded" else "running")
+           ; "payload_availability", lane_payload_availability ~running:(not output) ~output
            ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
            ; ( "input"
              , `Assoc
@@ -6663,6 +6691,7 @@ let hitl_lane_run_detail_json ?(status = "succeeded") ?(output = true) judgment 
     ; "actor", `String "auto_judge"
     ; "started_at", `Float 100.
     ; "status", `String status
+    ; "payload_availability", lane_payload_availability ~running:(String.equal status "running") ~output
     ; "elapsed_s", `Float 2.
     ; "selected_slot", `String "judge-primary"
     ; "skill_evidence", `Assoc [ "state", `String "no_keeper_skills" ]
@@ -6718,7 +6747,7 @@ let test_decode_hitl_detail_keeps_advisory_across_persistence_status () =
            "%s must keep the advisory judgment independently"
            status))
 
-let test_decode_hitl_persistence_status_without_output_is_not_reached () =
+let test_decode_hitl_persistence_status_with_unavailable_output () =
   [ "completion_persistence_failed"; "completion_durability_unknown" ]
   |> List.iter (fun status ->
     match
@@ -6727,11 +6756,11 @@ let test_decode_hitl_persistence_status_without_output_is_not_reached () =
     with
     | Error detail -> Alcotest.fail detail
     | Ok detail ->
-      Alcotest.(check bool) "no output was retained" true
+      Alcotest.(check bool) "unavailable output is not fabricated" true
         (Option.is_none detail.Tui_decode.lrd_output);
-      Alcotest.(check bool) "no output means no advisory was reached" true
+      Alcotest.(check bool) "missing evidence does not mean judgment was never reached" true
         (detail.Tui_decode.lrd_gate_judgment
-         = Tui_decode.Lane_run_gate_judgment_not_reached))
+         = Tui_decode.Lane_run_gate_judgment_unavailable))
 
 let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
   let json =
@@ -6742,6 +6771,7 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
             ; "run_kind", `String "task_verification"
             ; "lane", `String Runtime.verifier_exact_lane_id
             ; "subject_id", `String "task-9"
+            ; "payload_availability", lane_payload_availability ~running:false ~output:true
             ; "actor", `String Runtime.verifier_exact_lane_id
             ; "started_at", `Float 100.
             ; "status", `String "approved"
@@ -6789,6 +6819,64 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
        Alcotest.(check (float 0.0)) "typed tool duration" 12.
          tool.lrt_duration_ms
      | _ -> Alcotest.fail "verifier tool evidence must decode to one tool")
+
+let test_lane_detail_distinguishes_null_missing_and_unavailable () =
+  let make ~availability ~output =
+    match lane_run_detail_json "recorded-null" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc [ "run", `Assoc
+        (("payload_availability", availability) :: output
+          @ (fields |> List.remove_assoc "payload_availability" |> List.remove_assoc "output")) ]
+    | _ -> assert false
+  in
+  let available = lane_payload_availability ~running:false ~output:true in
+  let decoded =
+    Tui_decode.decode_lane_run_detail (make ~availability:available ~output:[ "output", `Null ])
+    |> Result.get_ok
+  in
+  Alcotest.(check bool) "recorded JSON null is present output" true
+    (decoded.lrd_output = Some `Null);
+  Alcotest.(check bool) "available output requires its field" true
+    (Result.is_error (Tui_decode.decode_lane_run_detail (make ~availability:available ~output:[])));
+  let unavailable = Exact_lane_run_registry.Unavailable Exact_lane_run_registry.Missing_completion in
+  let availability = `Assoc
+    [ "input", Exact_lane_run_registry.availability_to_yojson Exact_lane_run_registry.Available
+    ; "output", Exact_lane_run_registry.availability_to_yojson unavailable ] in
+  let decoded = Tui_decode.decode_lane_run_detail (make ~availability ~output:[]) |> Result.get_ok in
+  Alcotest.(check bool) "terminal status survives unreadable payload" true
+    (decoded.lrd_status = Tui_decode.Lane_run_succeeded);
+  Alcotest.(check bool) "unavailable preserves typed reason" true
+    (decoded.lrd_output_availability = Some unavailable);
+  Alcotest.(check bool) "unavailable is not JSON null" true (decoded.lrd_output = None)
+
+let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement () =
+  let make status verdict =
+    match hitl_lane_run_detail_json "approve" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
+      `Assoc [ "run", `Assoc
+        ([ "run_kind", `String "goal_verification";
+           "lane", `String Runtime.verifier_exact_lane_id;
+           "status", `String status;
+           "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
+         @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  List.iter (fun (status, decision, expected) ->
+    let json = make status [ "evaluated_verdict", `Assoc
+      [ "decision", `String decision; "reason", `String "measured original criterion" ] ] in
+    let detail = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "actual evaluator decision is preserved" true (detail.lrd_decision = expected);
+    Alcotest.(check string) "run settlement remains separate" status
+      (Tui_decode.lane_run_status_label detail.lrd_status))
+    [ "committed", "rejected", Tui_decode.Lane_run_decision_rejected;
+      "superseded", "approved", Tui_decode.Lane_run_decision_approved ];
+  List.iter (fun verdict ->
+    Alcotest.(check bool) "committed run cannot omit or invent judgement" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make "committed" verdict))))
+    [ []; [ "evaluated_verdict", `Null ];
+      [ "evaluated_verdict", `Assoc [ "decision", `String "maybe"; "reason", `String "unknown" ] ] ]
+;;
 
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =
@@ -7672,6 +7760,20 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
 
+let test_goal_timeline_missing_source_does_not_invent_gate_failure () =
+  let cases = [
+    "{}";
+    {|{"ok":false,"error":"other source failed"}|};
+    {|{"timeline":null}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"ready","operator_detail":"not an error"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unexpected","operator_detail":"unknown"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unavailable","operator_detail":" "}}|}
+  ] in
+  List.iter (fun source ->
+    match Tui_decode.decode_goal_detail_timeline (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail ("invalid source state became a Gate failure: " ^ source)) cases
+
 let test_goal_timeline_rejects_a_thin_event () =
   let json =
     Yojson.Safe.from_string
@@ -8274,6 +8376,8 @@ let () =
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "missing source never invents a Gate failure" `Quick
+          test_goal_timeline_missing_source_does_not_invent_gate_failure
       ; Alcotest.test_case "rejects a thin event" `Quick
           test_goal_timeline_rejects_a_thin_event
       ] );
@@ -8467,12 +8571,16 @@ let () =
           test_decode_hitl_detail_rejects_unknown_advisory;
         Alcotest.test_case "HITL persistence status keeps advisory" `Quick
           test_decode_hitl_detail_keeps_advisory_across_persistence_status;
-        Alcotest.test_case "HITL persistence status without output is not reached"
-          `Quick test_decode_hitl_persistence_status_without_output_is_not_reached;
+        Alcotest.test_case "HITL persistence status preserves unavailable judgment evidence"
+          `Quick test_decode_hitl_persistence_status_with_unavailable_output;
         Alcotest.test_case "verifier detail keeps kind, subject, and tools" `Quick
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick
           test_decode_lane_run_detail_requires_the_payload;
+        Alcotest.test_case "Goal evaluated decision is independent of run settlement" `Quick
+          test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
+        Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
+          test_lane_detail_distinguishes_null_missing_and_unavailable;
       ] );
     ( "decode_fusion",
       [
@@ -8568,6 +8676,8 @@ let () =
       [
         Alcotest.test_case "current contract" `Quick
           test_decode_planning_snapshot_current_contract;
+        Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
+          test_goal_store_unavailable_preserves_source_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
         Alcotest.test_case "goal carries the judge verdict" `Quick

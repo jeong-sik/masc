@@ -44,7 +44,9 @@ module Task_id : sig
   type t
 
   val validate : string -> (t, string) result
-  (** Validates [a-zA-Z0-9_:-]+, length 1–128. Quoted or otherwise
+  (** Validates [a-zA-Z0-9._-]+ with an optional single [:] namespace, length
+      1–64. Dots are admitted because names carry them (edgar.a.poe); a
+      leading dot is not. Path separators are rejected. Quoted or otherwise
       malformed values are rejected unchanged. *)
 
   val to_string : t -> string

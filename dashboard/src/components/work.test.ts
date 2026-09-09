@@ -68,7 +68,7 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { executionTaskTotal, goals, keepers, tasks } from '../store'
-import { goalTreeData } from '../goal-tree-state'
+import { goalTreeData, goalTreeError } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
@@ -145,6 +145,7 @@ describe('Work', () => {
     selectedTask.value = null
     showGoalCreate.value = false
     goalTreeData.value = null
+    goalTreeError.value = null
   })
 
   beforeEach(() => {
@@ -155,6 +156,7 @@ describe('Work', () => {
     // one test would silently drive every KPI assertion after it.
     executionTaskTotal.value = null
     goalTreeData.value = null
+    goalTreeError.value = null
     showGoalCreate.value = false
   })
 
@@ -218,6 +220,35 @@ describe('Work', () => {
         params: { section: 'work' },
         postId: null,
       }
+    })
+
+    it('shows Goal source failure instead of zero goals and normal circulation', () => {
+      goals.value = []
+      goalTreeData.value = null
+      goalTreeError.value = 'goals.json: criterion_revision is missing'
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('criterion_revision is missing')
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.queryByTestId('wka-flagged-calm')).toBeNull()
+      expect(screen.queryByText('주의 목표 없음 · 정상 순환')).toBeNull()
+      goalTreeError.value = null
+    })
+
+    it.each([
+      ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 미제출'],
+      ['stale', { state: 'stale', historical: { state: 'proven',
+        criterion: { revision: 'old', title: 'Old goal', metric: null, target_value: null },
+        requestId: 'old-request', runId: 'old-run', evidence: 'old evidence',
+        recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 기준 변경 · 재검증 필요'],
+      ['unreadable', { state: 'unreadable', detail: 'primary ledger failed' }, '검증 · 확인 불가'],
+    ] as const)('shows %s proof independently of a completed Goal phase', (_state, verification, label) => {
+      goals.value = [{ id: 'proof-goal', title: 'Measured goal', priority: 1,
+        phase: 'completed', created_at: '2026-09-08', updated_at: '2026-09-09', verification }]
+      render(html`<${Work} />`)
+      const card = screen.getByTestId('goal-card')
+      expect(within(card).getByText(label)).toBeTruthy()
+      expect(card.querySelector('.wk-goal-phase')?.textContent).toBe('completed')
+      expect(card.querySelector('[data-goal-proof]')?.getAttribute('data-goal-proof')).toBe(_state)
     })
 
     it('renders the reference 5 KPI counts from goals and tasks', () => {
@@ -633,7 +664,7 @@ describe('Work', () => {
         resetGoalCreateFormLocal()
       })
 
-      it('calls masc_goal_upsert with title and priority when form is submitted', async () => {
+      it('calls masc_goal_upsert with the entered success criterion and priority', async () => {
         callMcpToolMock.mockResolvedValue('ok')
 
         goals.value = []
@@ -648,6 +679,8 @@ describe('Work', () => {
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')
         fireEvent.input(titleInput, { target: { value: 'SLO 400ms 회복' } })
+        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'scheduler p99 over 24 hours' } })
+        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '400 ms or less' } })
 
         // Submit
         fireEvent.click(screen.getByTestId('goal-create-submit'))
@@ -657,6 +690,8 @@ describe('Work', () => {
 
         expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
           title: 'SLO 400ms 회복',
+          metric: 'scheduler p99 over 24 hours',
+          target_value: '400 ms or less',
           priority: expect.any(Number),
         }))
         // masc_goal_upsert rejects lifecycle fields; the form must not send them.

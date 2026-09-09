@@ -2318,6 +2318,8 @@ function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecyc
         return { badge: '적용 불명', title: '작업 적용 여부를 확정할 수 없습니다', detail: '효과가 이미 발생했을 수 있어 자동 재실행하지 않습니다.', tone: 'var(--color-status-warning)' }
       case 'continuation_recorded':
         return { badge: '이어감', title: '승인 후 후속 작업을 이어갔습니다', detail: 'replay 결과를 받은 Keeper 턴이 완료되거나 안전하게 checkpoint되었습니다.', tone: 'var(--color-status-success)' }
+      case 'continuation_failed':
+        return { badge: '이어가기 실패', title: '승인 결과를 받은 턴이 실패했습니다', detail: '모델이 replay 결과를 받은 뒤 턴이 실패했습니다. 이 승인은 다시 전달하지 않습니다.', tone: 'var(--color-status-error)' }
     }
   })()
   return html`

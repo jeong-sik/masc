@@ -76,14 +76,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
+type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
-  kr_autoboot_enabled : bool;
-  kr_proactive_enabled : bool;
+  kr_activation_mode : keeper_activation_mode;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   (* Declared, not observed. It answers "which sandbox is this keeper set
@@ -424,6 +425,7 @@ type goal_proof =
   | Proof_pending
   | Proof_proven of string option
   | Proof_refuted of string option
+  | Proof_stale of string option
   | Proof_unreadable of string option
 
 type planning_goal = {
@@ -1661,6 +1663,8 @@ let decode_goal_proof json =
      | None ->
        let completion = member "completion" json in
        (match string_at completion "state" with
+        | Some "stale_criterion" ->
+          Proof_stale (verdict_text (member "historical_completion" completion))
         | Some "proof_proven" -> Proof_proven (verdict_text completion)
         | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
         | Some "proof_pending" -> Proof_pending
@@ -5242,7 +5246,14 @@ let decode_system_log_snapshot json =
   let* sys_latest_seq = required_int_field json "latest_seq" in
   Ok { sys_entries; sys_total; sys_latest_seq }
 
+let goal_store_unavailable_detail json =
+  match member "ok" json, member "error_code" json, member "error" json with
+  | `Bool false, `String "goal_store_unavailable", `String detail -> Some detail
+  | _ -> None
+
 let decode_planning_snapshot json =
+  let* () = match goal_store_unavailable_detail json with
+    | Some detail -> Error detail | None -> Ok () in
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
   let* rollup_json = required_object_field json "rollup" in
@@ -5278,8 +5289,13 @@ let decode_keeper_runtime json =
     | bad -> field_type_error "next_action" "a string or null" bad
   in
   let* kr_keepalive_running = required_bool_field json "keepalive_running" in
-  let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
-  let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
+  let* raw_activation_mode = required_string_field json "activation_mode" in
+  let* kr_activation_mode = match raw_activation_mode with
+    | "manual" -> Ok Activation_manual
+    | "on_demand" -> Ok Activation_on_demand
+    | "autonomous" -> Ok Activation_autonomous
+    | value -> Error ("unknown keeper activation mode: " ^ value)
+  in
   let* kr_runtime_id = required_string_field json "runtime_id" in
   (* Under [meta] because the row already carries the keeper's own
      declaration there; a second top-level copy would be a second place to
@@ -5301,8 +5317,7 @@ let decode_keeper_runtime json =
     ; kr_paused
     ; kr_next_action
     ; kr_keepalive_running
-    ; kr_autoboot_enabled
-    ; kr_proactive_enabled
+    ; kr_activation_mode
     ; kr_runtime_id
     ; kr_phase
     ; kr_sandbox_profile
@@ -7642,6 +7657,7 @@ type lane_run_status =
   | Lane_run_approved
   | Lane_run_reviewed
   | Lane_run_committed
+  | Lane_run_superseded
   | Lane_run_rejected
   | Lane_run_deferred
   | Lane_run_review_cancelled
@@ -7662,6 +7678,7 @@ let lane_run_status_of_string = function
   | "approved" -> Lane_run_approved
   | "reviewed" -> Lane_run_reviewed
   | "committed" -> Lane_run_committed
+  | "superseded" -> Lane_run_superseded
   | "rejected" -> Lane_run_rejected
   | "deferred" -> Lane_run_deferred
   | "review_cancelled" -> Lane_run_review_cancelled
@@ -7682,6 +7699,7 @@ let lane_run_status_label = function
   | Lane_run_approved -> "approved"
   | Lane_run_reviewed -> "reviewed"
   | Lane_run_committed -> "committed"
+  | Lane_run_superseded -> "superseded"
   | Lane_run_rejected -> "rejected"
   | Lane_run_deferred -> "deferred"
   | Lane_run_review_cancelled -> "review_cancelled"
@@ -7715,6 +7733,7 @@ type lane_run_decision =
   | Lane_run_decision_rejected
   | Lane_run_decision_reviewed
   | Lane_run_decision_committed
+  | Lane_run_decision_superseded
   | Lane_run_decision_pending
   | Lane_run_decision_not_reached
   | Lane_run_not_a_decision
@@ -7729,6 +7748,7 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_rejected -> Lane_run_decision_rejected
      | Lane_run_reviewed -> Lane_run_decision_reviewed
      | Lane_run_committed -> Lane_run_decision_committed
+     | Lane_run_superseded -> Lane_run_decision_superseded
      | Lane_run_running -> Lane_run_decision_pending
      | Lane_run_deferred
      | Lane_run_review_cancelled
@@ -7786,6 +7806,7 @@ type lane_run_gate_judgment =
   | Lane_run_not_gate_judgment
   | Lane_run_gate_judgment_pending
   | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_judgment_unavailable
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
@@ -7857,6 +7878,7 @@ let decode_lane_run_gate_judgment ~lane ~status ~output =
       | Lane_run_approved
       | Lane_run_reviewed
       | Lane_run_committed
+      | Lane_run_superseded
       | Lane_run_rejected
       | Lane_run_deferred
       | Lane_run_review_cancelled
@@ -7903,10 +7925,13 @@ type lane_run_detail =
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_input_availability : Exact_lane_run_registry.payload_availability
+  ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
+  ; lrd_decision : lane_run_decision
   }
 
 let decode_lane_run_summary json =
@@ -7965,19 +7990,63 @@ let decode_lane_run_detail json =
   let* summary = decode_lane_run_summary run in
   let* input = required_object_field run "input" in
   let* lrd_input_payload = required_member input "payload" in
-  let lrd_output =
-    match member "output" run with
-    | `Null -> None
-    | value -> Some value
+  let* availability = required_object_field run "payload_availability" in
+  let* input_availability = required_member availability "input" in
+  let* lrd_input_availability =
+    Exact_lane_run_registry.availability_of_yojson input_availability
+  in
+  let* output_availability = required_member availability "output" in
+  let* lrd_output_availability =
+    match output_availability with
+    | `Null -> Ok None
+    | value ->
+      let* value = Exact_lane_run_registry.availability_of_yojson value in
+      Ok (Some value)
+  in
+  let* () =
+    match summary.lrs_status, lrd_output_availability with
+    | Lane_run_running, None -> Ok ()
+    | Lane_run_running, Some _ -> Error "running lane run cannot report output availability"
+    | _, None -> Error "terminal lane run must report output availability"
+    | _, Some _ -> Ok ()
+  in
+  let* lrd_output =
+    match lrd_output_availability with
+    | Some Exact_lane_run_registry.Available ->
+      let* output = required_member run "output" in
+      Ok (Some output)
+    | None | Some (Exact_lane_run_registry.Not_loaded
+                  | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_tool_evidence =
     decode_lane_run_tool_evidence ~run_kind:summary.lrs_run_kind
       ~output:lrd_output
   in
+  let* lrd_decision =
+    match summary.lrs_run_kind, summary.lrs_status, lrd_output with
+    | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
+    | Lane_run_goal_verification, _, None -> Ok Lane_run_decision_unknown
+    | Lane_run_goal_verification, status, Some output ->
+      let* raw = required_member output "evaluated_verdict" in
+      let* verdict = Goal_verification_run_registry.evaluated_verdict_of_yojson raw in
+      (match verdict, status with
+       | Some (Goal_verification_run_registry.Approved _), _ -> Ok Lane_run_decision_approved
+       | Some (Goal_verification_run_registry.Rejected _), _ -> Ok Lane_run_decision_rejected
+       | None, (Lane_run_reviewed | Lane_run_committed) -> Error "judged Goal run has no evaluated verdict"
+       | None, _ -> Ok Lane_run_decision_not_reached)
+    | _, _, _ -> Ok (lane_run_decision ~run_kind:summary.lrs_run_kind ~status:summary.lrs_status)
+  in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
-    decode_lane_run_gate_judgment ~lane:summary.lrs_lane
-      ~status:summary.lrs_status ~output:lrd_output
+    match lrd_output_availability with
+    | Some (Exact_lane_run_registry.Not_loaded
+           | Exact_lane_run_registry.Unavailable _)
+      when String.equal summary.lrs_lane
+        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge) ->
+      Ok Lane_run_gate_judgment_unavailable
+    | _ ->
+      decode_lane_run_gate_judgment ~lane:summary.lrs_lane
+        ~status:summary.lrs_status ~output:lrd_output
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
@@ -7990,10 +8059,13 @@ let decode_lane_run_detail json =
     ; lrd_elapsed_s = summary.lrs_elapsed_s
     ; lrd_selected_slot = summary.lrs_selected_slot
     ; lrd_input_payload
+    ; lrd_input_availability
+    ; lrd_output_availability
     ; lrd_output
     ; lrd_tool_evidence
     ; lrd_skill_evidence
     ; lrd_gate_judgment
+    ; lrd_decision
     }
 ;;
 
@@ -8927,15 +8999,17 @@ let decode_goal_timeline_event json =
   Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
-  match member "timeline" json with
-  | `Null ->
-      let detail =
-        match member "operator_detail" (member "approval_queue_state" json) with
-        | `String detail -> detail
-        | _ -> "approval queue store is unreadable"
-      in
-      Ok (Goal_timeline_unavailable detail)
-  | `List items ->
+  match goal_store_unavailable_detail json with
+  | Some detail -> Ok (Goal_timeline_unavailable detail)
+  | None ->
+  match Json_util.assoc_member_opt "timeline" json with
+  | Some `Null ->
+      let state = member "approval_queue_state" json in
+      (match member "state" state, member "operator_detail" state with
+       | `String "unavailable", `String detail when String.trim detail <> "" ->
+           Ok (Goal_timeline_unavailable detail)
+       | _ -> Error "goal detail has a null timeline without an unavailable source state")
+  | Some (`List items) ->
       let rec loop acc = function
         | [] -> Ok (Goal_timeline_ready (List.rev acc))
         | item :: rest ->
@@ -8943,7 +9017,8 @@ let decode_goal_detail_timeline json =
             loop (event :: acc) rest
       in
       loop [] items
-  | _ -> Error "goal detail timeline is neither a list nor null"
+  | None -> Error "goal detail response has no timeline"
+  | Some _ -> Error "goal detail timeline is neither a list nor null"
 
 (* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
    raw event-stream lines, not a uniform projection, so every field except

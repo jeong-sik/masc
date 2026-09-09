@@ -1,3 +1,4 @@
+import { requireKeeperActivationMode, type KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Keeper config (structured read-only view + mutations).
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
@@ -324,7 +325,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
-  const proactive = isRecord(data.proactive) ? data.proactive : {}
   const skills = isRecord(data.skills) ? data.skills : null
   if (!skills || !Object.hasOwn(skills, 'names')) {
     throw new Error('Invalid keeper config response: skills.names is required')
@@ -343,7 +343,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     config_write: decodeConfigWrite(data.config_write),
     config_transaction_warnings:
       decodeConfigWarnings(data.config_transaction_warnings),
-    autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
+    activation_mode: requireKeeperActivationMode(data.activation_mode),
     max_context_override: maxContextOverride,
     sandbox_profile: asNullableString(data.sandbox_profile) ?? UNKNOWN_SANDBOX_PROFILE,
     network_mode: asNullableString(data.network_mode) ?? UNKNOWN_NETWORK_MODE,
@@ -373,9 +373,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         ?? asNullableString(execution.selected_runtime_id)
         ?? '',
       runtime_options: normalizeStringList(execution.runtime_options),
-    },
-    proactive: {
-      enabled: asLooseBoolean(proactive.enabled),
     },
     skills: {
       names: decodeSkillNames(skills.names),
@@ -446,7 +443,7 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
   mention_targets?: string[]
-  autoboot_enabled?: boolean
+  activation_mode?: KeeperActivationMode
   max_context_override?: number | null
   // Sandbox
   sandbox_profile?: SandboxProfile
@@ -456,8 +453,6 @@ export type KeeperConfigUpdatePayload = {
   remote_endpoint?: string | null
   // Prompt fields
   instructions?: string
-  // Proactive
-  proactive_enabled?: boolean
   // Voice
   voice_always_allow?: boolean
   skills?: { names?: string[] }

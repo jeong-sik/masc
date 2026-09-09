@@ -24,6 +24,7 @@ import { Btn } from './btn'
 import { ErrorState } from './common/feedback-state'
 import type { StatusBadgeTone } from './common/status-badge'
 import { JsonViewerCard } from './common/json-viewer'
+import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-runs'
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
 import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
@@ -352,6 +353,28 @@ function LibrarianJournal({
   `
 }
 
+function ExactPayload({ side, availability, value }: {
+  side: 'input' | 'output'
+  availability: ExactLanePayloadAvailability | null
+  value: unknown
+}) {
+  const title = side === 'input' ? '실제 입력 · typed' : '실제 출력 · typed'
+  return html`
+    <div data-exact-payload=${side} data-payload-state=${availability?.state ?? 'pending'}>
+      ${availability?.state === 'available'
+        ? html`<${JsonViewerCard} title=${title} data=${value} expandAll=${true} />`
+        : html`<div class="ia-evi">
+            <div class="ia-k">${title}</div>
+            ${availability === null
+              ? html`<p class="ia-note">실행 중 · 아직 출력이 기록되지 않았습니다</p>`
+              : availability.state === 'not_loaded'
+                ? html`<p class="ia-note">원문을 불러오지 않았습니다</p>`
+                : html`<p class="ia-err">원문 사용 불가: ${availability.error.message} <code>${availability.error.code}</code></p>`}
+          </div>`}
+    </div>
+  `
+}
+
 // The listing carries no payloads, so opening a row is what fetches them. The
 // alternative — shipping every run's input and output with the list — is what
 // made this panel download 246 MB before it could draw a single line.
@@ -388,11 +411,12 @@ function ExactRunDetail({ runId }: { runId: string }) {
       </div>
     `
   }
-    const output = run.output ?? { code: run.code, detail: run.detail }
-    const memoryEvidence = run.lane === 'librarian_exact'
+    const inputAvailable = run.payloadAvailability.input.state === 'available'
+    const outputAvailable = run.payloadAvailability.output?.state === 'available'
+    const memoryEvidence = run.lane === 'librarian_exact' && outputAvailable
       ? librarianMemoryEvidence(run.output)
       : null
-    const inputEvidence = run.lane === 'librarian_exact'
+    const inputEvidence = run.lane === 'librarian_exact' && inputAvailable
       ? librarianInputEvidence(run.input.payload)
       : null
     return html`
@@ -408,8 +432,8 @@ function ExactRunDetail({ runId }: { runId: string }) {
           </p>
         </div>
         <div class="ia-tool-io">
-          <${JsonViewerCard} title="실제 입력 · typed" data=${run.input.payload} expandAll=${true} />
-          <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
+          <${ExactPayload} side="input" availability=${run.payloadAvailability.input} value=${run.input.payload} />
+          <${ExactPayload} side="output" availability=${run.payloadAvailability.output} value=${run.output} />
         </div>
         ${inputEvidence === null ? null : html`
           <div class="ia-evi" data-librarian-input-evidence>
@@ -454,7 +478,7 @@ function ExactRunDetail({ runId }: { runId: string }) {
                 revision=${librarianRevision(run.output)}
               />
             </div>`
-          : run.lane === 'librarian_exact'
+          : run.lane === 'librarian_exact' && run.subjectId === null
             ? html`<p class="ia-note">이 exact-run registry 세대는 subject_id를 기록하지 않아 Memory journal을 trace로 결합하지 않습니다.</p>`
             : null}
       </div>

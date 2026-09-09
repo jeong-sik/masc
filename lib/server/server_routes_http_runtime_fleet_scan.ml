@@ -31,15 +31,25 @@ let profile_defaults ?profile_snapshot config name =
   | None -> Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
       ~base_path:config.Workspace.base_path name
 
+let effective_activation_mode ?profile_snapshot config name meta =
+  match profile_defaults ?profile_snapshot config name with
+  | Error _ -> meta.Keeper_meta_contract.activation_mode
+  (* DET-OK: falls back to the keeper's own stored meta, not a random or clock-derived value. *)
+  | Ok defaults -> Option.value defaults.activation_mode ~default:meta.Keeper_meta_contract.activation_mode
+
 let effective_autoboot_enabled ?profile_snapshot config name meta =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> false
-  | Ok defaults -> Option.value defaults.autoboot_enabled ~default:meta.Keeper_meta_contract.autoboot_enabled
+  (* DET-OK: falls back to the keeper's own stored meta, not a random or clock-derived value. *)
+  | Ok defaults -> Keeper_activation_mode.restore_owner
+      (Option.value defaults.activation_mode ~default:meta.Keeper_meta_contract.activation_mode)
 
 let declarative_autoboot_enabled ?profile_snapshot config name =
   match profile_defaults ?profile_snapshot config name with
   | Error _ -> false
-  | Ok defaults -> Option.value defaults.autoboot_enabled ~default:true
+  (* DET-OK: falls back to the fixed Autonomous default, not random or clock-derived. *)
+  | Ok defaults -> Keeper_activation_mode.restore_owner
+      (Option.value defaults.activation_mode ~default:Keeper_activation_mode.Autonomous)
 
 let read_effective_meta ?profile_snapshot config name =
   match profile_snapshot with
@@ -69,12 +79,12 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
 let pause_kind = Keeper_activation_readiness.pause_kind
 let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire
 
-let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
+let paused_keeper_detail_json ~now ~name ~activation_mode
     (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
   `Assoc [
     ("name", `String name);
-    ("autoboot_enabled", `Bool autoboot_enabled);
+    ("activation_mode", Keeper_activation_mode.to_yojson activation_mode);
     ("pause_kind", `String (pause_kind_to_wire (pause_kind meta)));
     ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
     ("missing_pause_root_cause", `Bool (Option.is_none meta.latched_reason));
@@ -120,7 +130,7 @@ let durable_paused_keeper_scan config =
                  paused_keeper_detail_json
                    ~now
                    ~name:meta.name
-                   ~autoboot_enabled
+                   ~activation_mode:(effective_activation_mode config name meta)
                    meta
                  :: acc.details;
              }
@@ -278,7 +288,7 @@ let keeper_fleet_meta_scan ?profile_snapshot ?(include_paused_details = true) co
                           paused_keeper_detail_json
                             ~now
                             ~name:meta.name
-                            ~autoboot_enabled
+                            ~activation_mode:(effective_activation_mode ?profile_snapshot config name meta)
                             meta
                           :: acc.paused_scan.details
                         else acc.paused_scan.details);
@@ -1064,7 +1074,7 @@ let keeper_fleet_safety_health_json
   let keeper_bootstrap_enabled =
     match keeper_bootstrap_enabled_override with
     | Some value -> value
-    | None -> Env_config.KeeperBootstrap.enabled
+    | None -> Env_config.KeeperBootstrap.enabled ()
   in
   let runtime_base_path =
     match base_path with

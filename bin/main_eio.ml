@@ -1784,39 +1784,11 @@ let keeper_create_max_context_override =
     & opt (some int) None
     & info [ "max-context-override" ] ~docv:"N" ~doc)
 
-(* Tri-state, not [Arg.flag]. A [bool] cannot say "leave the key out", and the
-   key's absence is load-bearing: the config writer persists whatever the meta
-   holds, so a two-valued flag would write an autoboot decision the operator
-   never made. [vflag] also lets cmdliner refuse both spellings at once. *)
-let keeper_create_autoboot =
-  Arg.(
-    value
-    & vflag
-        None
-        [ ( Some true
-          , info [ "autoboot" ] ~doc:"Start this keeper on every server boot." )
-        ; ( Some false
-          , info
-              [ "no-autoboot" ]
-              ~doc:
-                "Persist this keeper but do not start it on future server \
-                 boots. It still starts once now." )
-        ])
-
-let keeper_create_proactive =
-  Arg.(
-    value
-    & vflag
-        None
-        [ ( Some true
-          , info
-              [ "proactive" ]
-              ~doc:"Let scheduled cycles produce proactive responses." )
-        ; ( Some false
-          , info
-              [ "no-proactive" ]
-              ~doc:"Answer only when addressed." )
-        ])
+let keeper_create_activation_mode =
+  Arg.(value & opt (some (enum ["manual", "manual"; "on_demand", "on_demand";
+                               "autonomous", "autonomous"])) None
+       & info ["activation-mode"] ~docv:"MODE"
+           ~doc:"Activation: manual, on_demand, or autonomous.")
 
 (* This command's own [--host] and [--port], not the server's. The shared
    terms are [masc serve]'s bind address, and they render in this command's
@@ -1873,8 +1845,7 @@ let keeper_create_flags_term =
         skill_names
         no_skills
         max_context_override
-        autoboot
-        proactive
+        activation_mode
     : (Masc_cli_keeper_create.flags, string) result
     =
     let selected_skills =
@@ -1890,7 +1861,6 @@ let keeper_create_flags_term =
     match selected_skills with
     | Error message -> Error message
     | Ok skills ->
-      let booleans : Masc_cli_keeper_create.booleans = { autoboot; proactive } in
       let flags : Masc_cli_keeper_create.flags =
         { name
         ; instructions
@@ -1901,7 +1871,7 @@ let keeper_create_flags_term =
         ; mention_targets
         ; skills
         ; max_context_override
-        ; booleans
+        ; activation_mode
         }
       in
       Ok flags
@@ -1918,8 +1888,7 @@ let keeper_create_flags_term =
     $ keeper_create_skill
     $ keeper_create_no_skills
     $ keeper_create_max_context_override
-    $ keeper_create_autoboot
-    $ keeper_create_proactive)
+    $ keeper_create_activation_mode)
 
 (* [--edit] takes the whole declaration from the editor, so a flag passed
    alongside it would be read by nobody. Naming the conflict costs one
@@ -1935,8 +1904,7 @@ let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
   && List.is_empty flags.mention_targets
   && Option.is_none flags.skills
   && Option.is_none flags.max_context_override
-  && Option.is_none flags.booleans.autoboot
-  && Option.is_none flags.booleans.proactive
+  && Option.is_none flags.activation_mode
 
 let keeper_create_edit_conflict_message =
   "masc keeper-create: --edit takes the declaration from the editor, so it \

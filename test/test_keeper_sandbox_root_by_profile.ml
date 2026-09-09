@@ -5,10 +5,15 @@
     [path_outside_sandbox] and a workspace-relative path is simply not found,
     while a file placed in the root and named bare is read.
 
-    The root is not one place. A local keeper's is
-    [.masc/playground/<name>/]; a Docker keeper's has a [docker] directory in
-    the middle. Anything writing a file for a keeper to read has to ask rather
-    than assume, and this is what it gets back. *)
+    The root is not one place: a Docker keeper's has a [docker] directory in
+    the middle of it. Anything writing a file for a keeper to read has to ask
+    rather than assume, and this is what it gets back.
+
+    It used to say a local keeper's root is [.masc/playground/<name>/] and
+    that a keeper declaring nothing takes it. #32078 removed that arm -- a
+    keeper runs under docker, microvm or ssh, or not at all -- so declaring
+    "local" now raises and declaring nothing has no root to take. Those two
+    cases are gone; the refusal is asserted in their place. *)
 
 open Alcotest
 
@@ -38,34 +43,24 @@ let root base name =
   Keeper_sandbox_config.host_root_abs_of_agent ~base_path:base ~agent_name:name
 ;;
 
-(* The two profiles differ by a directory, and that directory is the whole
+(* The profile puts a directory in the middle, and that directory is the whole
    difference between a file the keeper reads and one it never sees. *)
 let test_the_profile_decides_the_root () =
-  with_workspace [ ("plain", "local"); ("boxed", "docker") ] (fun base ->
-      check string "a local keeper's own directory"
-        (Filename.concat base ".masc/playground/plain/")
-        (root base "plain");
+  with_workspace [ ("boxed", "docker") ] (fun base ->
       check string "a Docker keeper's, one level in"
         (Filename.concat base ".masc/playground/docker/boxed/")
         (root base "boxed"))
 ;;
 
-(* A keeper with no TOML is local, because that is what the resolver defaults
-   to -- asserted rather than assumed, since a wrong default writes files into
-   a directory nothing reads. *)
-let test_no_declaration_is_local () =
+(* A keeper that declares no profile has no root. Asserted rather than left
+   out, because the thing that used to happen here -- falling through to a
+   default -- is what wrote files into a directory nothing reads. *)
+let test_no_declaration_has_no_root () =
   with_workspace [] (fun base ->
-      check string "the default root"
-        (Filename.concat base ".masc/playground/undeclared/")
-        (root base "undeclared"))
-;;
-
-(* Tool callers name keepers canonically. Both spellings have to land in one
-   directory or a file written under one name is invisible under the other. *)
-let test_the_canonical_agent_name_resolves_the_same () =
-  with_workspace [ ("boxed", "docker") ] (fun base ->
-      check string "wrapper stripped" (root base "boxed")
-        (root base "keeper-boxed-agent"))
+      match root base "undeclared" with
+      | answer ->
+        failf "a keeper declaring no profile answered with a root: %S" answer
+      | exception Keeper_sandbox_config.Invalid_keeper_sandbox_config _ -> ())
 ;;
 
 let () =
@@ -74,9 +69,8 @@ let () =
     [ ( "root"
       , [ test_case "the profile decides the root" `Quick
             test_the_profile_decides_the_root
-        ; test_case "no declaration is local" `Quick test_no_declaration_is_local
-        ; test_case "the canonical agent name resolves the same" `Quick
-            test_the_canonical_agent_name_resolves_the_same
+        ; test_case "no declaration has no root" `Quick
+            test_no_declaration_has_no_root
         ] )
     ]
 ;;

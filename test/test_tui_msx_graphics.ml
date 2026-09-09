@@ -13,24 +13,25 @@ module Msx = Masc_tui_msx
 module Types = Masc_tui_types
 module Graphics = Masc_tui_graphics
 
-let frame () =
-  let w = 256 and h = 192 in
+let frame ?(w = 256) ?(h = 192) ?(mode = "screen2") () =
   { Types.msx_number = 1
   ; msx_width = w
   ; msx_height = h
   ; msx_rgb = String.make (w * h * 3) '\128'
-  ; msx_mode = "screen2"
+  ; msx_mode = mode
   ; msx_cartridge = Some "test.rom"
   ; msx_disk = None
+  ; msx_players = []
   }
 ;;
 
-let drawn () =
+let drawn ?(f = frame ()) ?notice () =
   let buf = Buffer.create 65536 in
   Msx.render
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
-    (Some (frame ()));
+    ?notice
+    (Some f);
   Buffer.contents buf
 ;;
 
@@ -112,6 +113,53 @@ let test_every_other_terminal_still_gets_the_mosaic () =
     ]
 ;;
 
+(* SCREEN6/7 frames arrive 512 wide on the wire (ocaml-msx #15 keeps the
+   native pixels instead of squeezing them into 256). The spectator must
+   carry the frame's own width through both drawing paths rather than
+   assume 256 -- a squeezed assumption is exactly how a map's fine text
+   doubles over and reads as broken. *)
+let test_a_512_wide_frame_keeps_its_width () =
+  let wide = frame ~w:512 ~mode:"GRAPHIC6" () in
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    let out = drawn ~f:wide () in
+    check bool "the raw pixels went out at the frame's width" true
+      (mentions ~needle:"s=512" out);
+    check bool "and height" true (mentions ~needle:"v=192" out);
+    check bool "and no mosaic was drawn" false (mentions ~needle:"\027[38;2;" out))
+;;
+
+let test_the_mosaic_takes_a_512_wide_frame () =
+  let wide = frame ~w:512 ~mode:"GRAPHIC6" () in
+  with_protocol Graphics.Unsupported_protocol (fun () ->
+    let out = drawn ~f:wide () in
+    check bool "the mosaic drew from the wide frame" true
+      (mentions ~needle:"\027[38;2;" out);
+    check bool "no pixel protocol leaked" false (mentions ~needle:"f=24" out))
+;;
+
+let test_checkpoint_bindings_and_result_are_visible () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    let out = drawn () in
+    check bool "footer names quick save" true (mentions ~needle:"F6: save quick" out);
+    check bool "footer names quick restore" true (mentions ~needle:"F7: restore quick" out);
+    List.iter (fun notice ->
+      let out = drawn ~notice () in
+      check bool "checkpoint outcome remains visible beside the frame" true
+        (mentions ~needle:notice out);
+      (* In Kitty the explicit placement cursor used to jump back onto the
+         notice row; merely finding the notice bytes missed the overlap. *)
+      check bool "image begins below the notice" true
+        (mentions ~needle:"\027[3;1H" out);
+      check bool "image does not cover the notice row" false
+        (mentions ~needle:"\027[2;1H" out);
+      let rows, _ = Masc_tui_ansi.get_terminal_size () in
+      check bool "footer remains on the final terminal row" true
+        (mentions ~needle:(Printf.sprintf "\027[%d;1H" rows) out);
+      check bool "notice keeps save control visible" true (mentions ~needle:"F6: save quick" out);
+      check bool "notice keeps restore control visible" true (mentions ~needle:"F7: restore quick" out))
+      [ "Saved quick checkpoint"; "Restored quick checkpoint"; "Restore failed: no checkpoint" ])
+;;
+
 (* Restore the cell size for the same reason [with_protocol] restores the
    protocol: it is module state and a case must not leak it. *)
 let with_cell_pixels px f =
@@ -187,13 +235,90 @@ let test_no_cell_size_leaves_the_rows_alone () =
         (rows_of (drawn ()))))
 ;;
 
+let draw_frame f =
+  let buf = Buffer.create 1024 in
+  Msx.render ~write:(Buffer.add_string buf) ~connection:Types.Connected (Some f);
+  Buffer.contents buf
+
+let test_retained_pixels () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    let f = frame () in
+    let first = draw_frame f in
+    let next = draw_frame { f with msx_number = 2 } in
+    check bool "initial pixels" true (mentions ~needle:"f=24" first);
+    check bool "counter updates" true (mentions ~needle:"frame 2" next);
+    check bool "no erase display" false (mentions ~needle:"\027[2J" next);
+    check bool "no duplicate pixels" false (mentions ~needle:"f=24" next);
+    check bool "counter update is small" true (String.length next < 512);
+    Printf.printf "MSX retained wire: first=%d counter_only=%d bytes\n%!"
+      (String.length first) (String.length next);
+    let changed = draw_frame { f with msx_rgb = String.make (String.length f.msx_rgb) '\127' } in
+    check bool "changed pixels transmitted" true (mentions ~needle:"f=24" changed);
+    check bool "stable image and placement" true (mentions ~needle:"i=32,p=1,C=1" changed);
+    check bool "changed pixels do not clear" false (mentions ~needle:"\027[2J" changed))
+
+let test_failed_write_and_layout () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    ignore (drawn ());
+    let failed =
+      try
+        Msx.render ~write:(fun _ -> raise Exit) ~connection:Types.Connected (Some (frame ()));
+        false
+      with Exit -> true
+    in
+    check bool "write failure propagated" true failed;
+    let retry = drawn () in
+    check bool "retry sends pixels" true (mentions ~needle:"f=24" retry);
+    check bool "retry clears uncertain placement" true (mentions ~needle:"d=I,i=32" retry);
+    Msx.adjust_size (-1.0);
+    Fun.protect ~finally:(fun () -> Msx.adjust_size 1.0) (fun () ->
+      let resized = drawn () in
+      check bool "size change retires old placement" true (mentions ~needle:"d=I,i=32" resized);
+      check bool "size change transmits" true (mentions ~needle:"f=24" resized));
+    let empty = drawn_empty ~connection:Types.Connected in
+    check bool "empty frame removes old image" true (mentions ~needle:"d=I,i=32" empty))
+
+let test_surface_lifecycle () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    ignore (drawn ());
+    let buf = Buffer.create 1024 in
+    Msx.render_menu ~write:(Buffer.add_string buf) state;
+    check bool "menu removes image" true (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
+    check bool "return from menu sends pixels" true (mentions ~needle:"f=24" (drawn ()));
+    Buffer.clear buf;
+    ignore (Msx.consume ~write:(Buffer.add_string buf) state "esc");
+    check bool "exit removes image" true (mentions ~needle:"d=I,i=32" (Buffer.contents buf));
+    check bool "reopen sends pixels" true (mentions ~needle:"f=24" (drawn ())))
+
+let test_synchronized_batch () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    Msx.set_synchronized_output true;
+    Fun.protect ~finally:(fun () -> Msx.set_synchronized_output false) (fun () ->
+      let out = drawn () in
+      check bool "batch begins synchronized" true (String.starts_with ~prefix:"\027[?2026h" out);
+      check bool "batch ends synchronized" true (String.ends_with ~suffix:"\027[?2026l" out));
+    check bool "existing opt out respected" false (mentions ~needle:"?2026" (drawn ())))
+
 let () =
   run "masc_tui_msx graphics"
-    [ ( "path"
+    [ ( "retained"
+      , [ test_case "unchanged and changed pixels" `Quick test_retained_pixels
+        ; test_case "failure and layout invalidate" `Quick test_failed_write_and_layout
+        ; test_case "surface lifecycle" `Quick test_surface_lifecycle
+        ; test_case "synchronized batch" `Quick test_synchronized_batch
+        ] )
+    ; ( "path"
       , [ test_case "a graphics terminal gets the pixels" `Quick
             test_a_graphics_terminal_gets_the_pixels
         ; test_case "every other terminal still gets the mosaic" `Quick
             test_every_other_terminal_still_gets_the_mosaic
+        ; test_case "a 512-wide frame keeps its width" `Quick
+            test_a_512_wide_frame_keeps_its_width
+        ; test_case "the mosaic takes a 512-wide frame" `Quick
+            test_the_mosaic_takes_a_512_wide_frame
+        ; test_case "checkpoint bindings and outcome" `Quick
+            test_checkpoint_bindings_and_result_are_visible
         ] )
     ; ( "fit"
       , [ test_case "the image is kept inside the screen" `Quick

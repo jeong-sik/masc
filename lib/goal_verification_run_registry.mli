@@ -5,9 +5,14 @@
 
 type review_kind = Proof
 
+type evaluated_verdict = Approved of { reason : string } | Rejected of { reason : string }
+
+val evaluated_verdict_of_yojson : Yojson.Safe.t -> (evaluated_verdict option, string) result
+
 type outcome =
   | Reviewed
   | Committed
+  | Superseded of { detail : string }
   | Deferred of { detail : string }
   | Raised of { detail : string }
   | Review_cancelled of { detail : string }
@@ -18,6 +23,7 @@ type run_status =
   | Running
   | Completed of
       { outcome : outcome
+      ; evaluated_verdict : evaluated_verdict option
       ; evaluator_runtime : string option
       ; elapsed_s : float
       ; tools : Verification_run_registry.tool_observation list
@@ -26,6 +32,8 @@ type run_status =
 type run =
   { run_id : string
   ; goal_id : string
+  ; request_id : string
+  ; criterion : Goal_store.criterion
   ; review_kind : review_kind
   ; authority_actor : string
   ; started_at : float
@@ -42,6 +50,8 @@ val register_running :
   t ->
   run_id:string ->
   goal_id:string ->
+  request_id:string ->
+  criterion:Goal_store.criterion ->
   review_kind:review_kind ->
   authority_actor:string ->
   started_at:float ->
@@ -51,6 +61,7 @@ val mark_completed :
   t ->
   run_id:string ->
   outcome:outcome ->
+  evaluated_verdict:evaluated_verdict option ->
   tools:Verification_run_registry.tool_observation list ->
   ?evaluator_runtime:string ->
   elapsed_s:float ->

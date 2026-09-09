@@ -79,6 +79,7 @@ type goal_proof =
           recorded without text, which is a different fact from an empty
           measurement and is drawn as such. *)
   | Proof_refuted of string option  (** Refused; [Some] is why. *)
+  | Proof_stale of string option
   | Proof_unreadable of string option
       (** The ledger did not decode, or named a state this build does not know.
           Distinct from {!Proof_idle}: an unreadable store is not the same fact
@@ -1022,14 +1023,15 @@ val keeper_health_reading : keeper_health -> keeper_health_reading
     same mark as a working one. *)
 
 
+type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
+
 type keeper_runtime = {
   kr_name : string;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
-  kr_autoboot_enabled : bool;
-  kr_proactive_enabled : bool;
+  kr_activation_mode : keeper_activation_mode;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
   kr_sandbox_profile : string;
@@ -1982,6 +1984,7 @@ type lane_run_status =
   | Lane_run_approved
   | Lane_run_reviewed
   | Lane_run_committed
+  | Lane_run_superseded
   | Lane_run_rejected
   | Lane_run_deferred
   | Lane_run_review_cancelled
@@ -2007,6 +2010,7 @@ type lane_run_decision =
   | Lane_run_decision_rejected
   | Lane_run_decision_reviewed
   | Lane_run_decision_committed
+  | Lane_run_decision_superseded
   | Lane_run_decision_pending
   | Lane_run_decision_not_reached
   | Lane_run_not_a_decision
@@ -2047,6 +2051,7 @@ type lane_run_gate_judgment =
   | Lane_run_not_gate_judgment
   | Lane_run_gate_judgment_pending
   | Lane_run_gate_judgment_not_reached
+  | Lane_run_gate_judgment_unavailable
   | Lane_run_gate_advisory of
       Keeper_approval_queue_rules_types.advisory_judgment
 
@@ -2079,10 +2084,13 @@ type lane_run_detail =
   ; lrd_elapsed_s : float option
   ; lrd_selected_slot : string option
   ; lrd_input_payload : Yojson.Safe.t
+  ; lrd_input_availability : Exact_lane_run_registry.payload_availability
+  ; lrd_output_availability : Exact_lane_run_registry.payload_availability option
   ; lrd_output : Yojson.Safe.t option
   ; lrd_tool_evidence : lane_run_tool_evidence
   ; lrd_skill_evidence : lane_run_skill_evidence
   ; lrd_gate_judgment : lane_run_gate_judgment
+  ; lrd_decision : lane_run_decision
   }
 
 val decode_lane_run_page :

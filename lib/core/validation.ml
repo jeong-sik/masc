@@ -96,8 +96,14 @@ end = struct
       Error (Printf.sprintf "identifier too long: %d chars (max 64)" (String.length s))
     else if String.contains s '/' || String.contains s '\\' then
       Error "identifier cannot contain path separators"
-    else if String.contains s '.' && String.starts_with s ~prefix:".." then
-      Error "identifier cannot contain path traversal"
+    else if String.starts_with s ~prefix:"." then
+      (* Dots inside a name are admitted because names carry them --
+         edgar.a.poe -- but a leading one is never part of a name and is what
+         the path-shaped values start with: "." is the directory an id used
+         as one would sit in, ".." the one above, and ".git" a hidden entry
+         that would collide with a real one. The check this replaces read
+         [starts_with ".."], which caught "..foo" and let "." through. *)
+      Error "identifier cannot start with a dot"
     else if not (Re.execp valid_pattern s) then
       Error "identifier contains characters outside [A-Za-z0-9_:-]"
     else

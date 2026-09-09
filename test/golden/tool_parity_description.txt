@@ -8,9 +8,9 @@ keeper_broadcast	Send a message visible to all agents in the MASC workspace.
 
 Use for status updates, announcements, or warnings.
 keeper_capability_search	Search the complete Tool and Skill capability inventory frozen for this Keeper turn. SQLite FTS5 ranks lexical candidates with BM25. Results retain exact typed capability identity and availability but never invoke a candidate.
-keeper_code_query	Query the language server for definition, hover type/docs, or references of a symbol at a specific file and line.
+keeper_code_query	Ask the language server about a symbol: definition, type/docs, or references.
 
-Locate the symbol and line with Grep first. Answers reflect the compiler index.
+Give it the file and the line the symbol appears on. Locate them with Grep first. Answers reflect the compiler index.
 keeper_composition_cancel	Request cancellation of one async Keeper composition.
 
 Addressed by its exact durable request id.
@@ -18,7 +18,9 @@ keeper_composition_status	Read the status and structured result of one async Kee
 
 Both are exact and durable, addressed by the request's own id.
 keeper_context_status	Check your own persisted checkpoint and session state. Returns: name (your keeper name), checkpoint_bytes, message_count, generation, memory fact counts, sandbox health, and your workspace root plus backend/profile metadata. Context-window occupancy is not currently observed and is not returned. sandbox paths are tool-ready and can be passed directly as path or cwd to keeper tools without prefix. Use when checking checkpoint/session continuity or resolving a path without string-interpolating your own keeper name.
-keeper_ide_annotate	Leave a memo above a line of a file, as a comment in the file's own syntax. The memo reads masc(<your name>): <text>, or masc(<your name>) <kind>: <text> with kind decision, question or bookmark; the TUI lists these and marks their lines, and they travel with the file into diffs and reviews. This edits the file: the comment is inserted above line, indented like it, through the same write path as Edit. file_path, line and text are required. The file's extension picks the comment syntax; a file no language here owns, or one with no comment syntax (JSON), is refused.
+keeper_ide_annotate	Leave a memo above a line of a file, as a comment in the file's own syntax.
+
+The memo reads masc(<your name>): <text>, or masc(<your name>) <kind>: <text> with kind decision, question or bookmark; the TUI lists these and marks their lines, and they travel with the file into diffs and reviews. This edits the file: the comment is inserted above line, indented like it, through the same write path as Edit. file_path, line and text are required. The file's extension picks the comment syntax; a file no language here owns, or one with no comment syntax (JSON), is refused.
 keeper_lane_status	Read how your execution lane stands, from what the server already knows: the lane (microvm_remote, remote_ssh, or docker), its endpoint, what the endpoint's shim answered to the last probe (protocol major, capabilities), how the last Execute that reached the wire ended (payload_finished with its status, or lane_failed with a class and the detail you saw), and, when the lane itself failed, the operator action that fixes it. Nothing here changes state, and a server restart empties it. Call it once when Execute fails with a lane error, before retrying or posting: it says whether the failure is your payload's or the lane's.
 keeper_library_read	Read a full document from the knowledge library by exact topic name.
 
@@ -26,7 +28,9 @@ Use after keeper_library_search identifies a relevant document, or with a known 
 keeper_library_search	Search the knowledge library by keyword.
 
 Returns matching document titles, relevance scores (0-1), and text snippets. Use to discover relevant docs before reading full content with keeper_library_read.
-keeper_memory_retract	Retract one exact ordinary-current Memory OS fact. Use the memory_id returned by memory write or search and state the concrete reason. The same atomic commit removes every derived fact that no longer has a complete support path and records both the direct reason and the support invalidations for inspection. This is a terminal-contract tool: when it succeeds, the turn ends. The runtime rejects any batch that places it alongside another tool call — call it alone in its own turn, never batched with reads, writes, or shell execution.
+keeper_memory_retract	Retract one exact ordinary-current Memory OS fact.
+
+Use the memory_id returned by memory write or search and state the concrete reason. The same atomic commit removes every derived fact that no longer has a complete support path and records both the direct reason and the support invalidations for inspection. This is a terminal-contract tool: when it succeeds, the turn ends. The runtime rejects any batch that places it alongside another tool call — call it alone in its own turn, never batched with reads, writes, or shell execution.
 keeper_memory_search	Search your durable Memory OS facts or conversation history. Memory OS fact results preserve snapshot order and include exact memory_id, category, and observed or derived basis. Use returned memory_id values as premise_ids when writing a derived conclusion only when store='current_memory_snapshot'; source-bound results name their different store explicitly. Default searches the durable fact store. Use source='history' for raw user messages, source='all' for both.
 keeper_memory_write	Record a durable claim that later turns read back. Your context resets between turns, so a conclusion you leave only in this turn's reasoning is gone. Task sequencing and operating constraints belong to their typed domain stores, not memory prose. The runtime records explicit typed provenance and returns validation or persistence failures directly. When source_path is set, the claim is recalled only while the exact source bytes still match. To record a conclusion rather than an observation, provide both rule_id and premise_ids; the conclusion remains current only while one complete support set remains current. When the claim was read from a Board post, pass board_post_id (and board_comment_id for a comment) so the record names its source; a Board reference cannot be combined with source_path or with a derivation. This is a terminal-contract tool: when it succeeds, the turn ends. The runtime rejects any batch that places it alongside another tool call — call it alone in its own turn, never batched with reads, writes, or shell execution.
 keeper_person_note_set	Remember, or clear, a note about a person met on a connected surface.
@@ -77,17 +81,19 @@ keeper_voice_sessions	List active voice sessions from the voice bridge.
 keeper_voice_speak	Speak a short utterance via the voice bridge.
 
 Blocks until local playback finishes: status='spoken' with played_seconds means the user has already heard it — do NOT repeat or rephrase the same content. Duplicate identical messages within 30s return status='dedup_skipped' without playing. TTS or playback failures are returned as errors (ok=false), not silent successes. Concurrent calls are serialized by a global lock.
-keeper_webmcp_call	Execute a WebMCP tool registered on document.modelContext in a target browser page.
+keeper_webmcp_call	Call a WebMCP tool in a target browser page.
 
-Discover available tools with keeper_webmcp_list first. Requires Chrome started with --enable-features=WebMCP and --remote-debugging-port.
+The tool must be registered on document.modelContext. Discover available tools with keeper_webmcp_list first. Requires Chrome started with --enable-features=WebMCP and --remote-debugging-port.
 keeper_webmcp_list	List WebMCP tools registered on document.modelContext in an open browser page.
 
 Requires Chrome started with --enable-features=WebMCP and --remote-debugging-port.
 masc_add_task	Add a new task to the backlog for agents to claim. Task contracts provide completion/evidence context to the judge; they do not select a completion lane. Write one when you know what done looks like: none is derived from the title, so a task without a contract reaches the judge with no criteria and is judged against a standard the worker never saw. Every task must be submitted for an out-of-band system LLM completion-authority verdict. submit_for_verification creates an asynchronous review state that no agent or Keeper can claim. The application-owned system LLM agent reads the immutable submitted-evidence snapshot and commits the typed verdict; an authenticated human operator is the separate HITL path. To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. Priority 1=urgent, 5=low (default 3). Returns task-XXX ID for tracking. Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})
 masc_agent_card	Return the MASC server agent card and optional live agent summary.
-masc_agent_fitness	Get fitness scores for agents based on completion rate, reliability, and speed metrics.
+masc_agent_fitness	Fitness scores for agents: completion rate, reliability, speed.
 masc_agent_timeline	Unified timeline of an agent's activity in the currently selected workspace across tasks, messages, and joins.
-masc_ask	Ask the operator questions with named choices; answers arrive in a separate wake. Use when blocked on an external choice.
+masc_ask	Ask the operator a question with named choices.
+
+Answers arrive in a separate wake. Use when blocked on an external choice.
 masc_ask_status	Read the questions you asked and their responses or status.
 
 Answers arrive as separate wakes and are recorded in the durable log. Read this when returning to work that was waiting on an operator choice. Each row indicates whether a question is open, answered, or withdrawn, including choice ids.
@@ -168,7 +174,9 @@ masc_fusion_status	Read the status of out-of-band fusion deliberations started b
 
 With no argument, lists tracked runs (in-progress and recently completed); with a run_id, returns that single run. Each run reports keeper, preset, started_at (unix seconds), and status (running | completed | failed); failed runs also carry error and failure_code. Prefer waiting for the completion wake over polling this tool — the result reaches you without it. Read-only — does not start a deliberation. In-memory and server-lifetime: runs do not survive a restart.
 masc_gc	Run explicit age-based garbage collection. Agent lifecycle is not modified.
-masc_get_metrics	Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history.
+masc_get_metrics	Raw performance metrics for one agent.
+
+Task completion, timing, error rates, and collaboration history.
 masc_goal_list	List shared planning goals, optionally filtered by explicit lifecycle phase.
 masc_goal_transition	Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 
@@ -205,11 +213,30 @@ Each row carries title, source, author, created date, and tags. Use when browsin
 masc_library_read	Read a specific library document by topic name or partial match. Use when you need the full content of a known knowledge document. After masc_library_list or masc_library_search to find the topic name.
 masc_library_search	Search the agent knowledge library by content keywords or tags. Use when looking for documents on a specific topic without knowing the exact title. Pair with masc_library_read to fetch matching documents in full.
 masc_messages	Get recent broadcast messages from all agents. Use to: catch up after joining, check if someone @mentioned you, see project activity. Returns chronological list with sender, timestamp, content. Default: last 20 messages. Use limit param for more/less. Tip: Search for '@your-name' in results to find mentions.
-masc_msx_eject	Power off the workspace MSX machine. The input ledger file stays on disk; the next masc_msx_load starts a new one.
-masc_msx_load	Power on the workspace MSX machine (MSX2, C-BIOS) and load one image: a cartridge into the slot, or a .dsk floppy into drive A:. Replaces any machine already loaded and starts a new input ledger. Without cart it boots the BIOS alone and lists carts_available, the images in the workspace inventory (.masc/msx/carts/); pass one of those names as cart. Runs the boot ahead 45 frames so the first screen is the BIOS logo; a cartridge game reaches its own title after roughly 300 more frames (masc_msx_step). Returns the same observation as masc_msx_screen.
-masc_msx_press	Hold one or more keys on the shared MSX machine for hold_frames, then run the rest of frames released, and return the observation (see masc_msx_screen). Keys: up down left right space esc return trigger_a trigger_b f1-f5 or one character. Games read input edges, so a short hold (5 frames) is a press. Every edge is recorded in the ledger with your name and the frame number. Frames are 1/60 s; at most 300 per call.
-masc_msx_screen	Read the workspace MSX machine without moving time: frame count, display mode, program counter, halted flag, the name table as text (meaningful when the game uses a font), the 24x32 tile grid as hex pairs (GRAPHIC1/2/3 and MULTICOLOR; '..' is tile 0), and the sprite table. Tile numbers mean what the game says they mean; learn them by playing.
-masc_msx_step	Advance the shared MSX machine by frames with no key held and return the observation (see masc_msx_screen). Use it to let a title, a fade or a level intro play out. Frames are 1/60 s; at most 300 per call.
+masc_msx_change_disk	Swap the floppy in a running disk game.
+
+Replace the floppy in the running disk game without rebooting or advancing time. Saves the outgoing machine to before-disk-change first, retaining disk writes. After replacement, press Return if the game requests it. Requires a .dsk image from the inventory or an existing path.
+masc_msx_eject	Power off the workspace MSX machine.
+
+The input ledger file stays on disk; the next masc_msx_load starts a new one.
+masc_msx_load	Power on the workspace MSX machine and load one image.
+
+MSX2, C-BIOS. A cartridge into the slot, or a .dsk floppy into drive A:. Replaces any machine already loaded and starts a new input ledger. Without cart it boots the BIOS alone and lists carts_available, the images in the workspace inventory (.masc/msx/carts/); pass one of those names as cart. Runs the boot ahead 45 frames so the first screen is the BIOS logo; a cartridge game reaches its own title after roughly 300 more frames (masc_msx_step). Returns the same observation as masc_msx_screen.
+masc_msx_press	Press keys on the shared MSX machine.
+
+Press keys on the shared MSX machine and return the observation (see masc_msx_screen). By default keys are held together as a chord for hold_frames, then frames runs out released -- use this for a modifier or a diagonal + fire, e.g. ["right", "space"]. Set sequence=true to tap the keys one after another instead (each down hold_frames, up, then the rest of frames idle) -- use this to walk a menu in one call, e.g. ["down", "down", "return"]; the call then advances frames per key. Keys: up down left right space esc return backspace trigger_a trigger_b f1-f5 or one character. Games read input edges, so a short hold (5 frames) is a press. Every edge is recorded in the ledger with your name and the frame number. Frames are 1/60 s; at most 300 per key.
+masc_msx_restore	Resume a saved MSX machine.
+
+Restore a named MSX checkpoint, replacing the current machine only after validation. Resumes the saved frame, mounted media and input ledger without rebooting.
+masc_msx_save	Checkpoint the MSX machine under a name.
+
+Save the complete workspace MSX machine to a named checkpoint without advancing it. Includes CPU, RAM, VRAM, cartridge SRAM, disk bytes and open file positions; survives server restart. Replaces the named slot.
+masc_msx_screen	Read the MSX frame without advancing time.
+
+Read the current MSX frame without advancing time: mode, PC, screen_text, screen_view, tiles and sprites. screen_view is a 64x24 ASCII picture of the screen, readable in any mode, so a keeper with no vision runtime can recognise the layout (a title, a menu, a map). screen_text only reads text-mode text and is noise in bitmap modes; tile numbers are game-specific. Keeper calls also return a PNG artifact and dimensions; a keeper with a vision runtime can use keeper_analyze_image on it.
+masc_msx_step	Advance the shared MSX machine by frames with no key held.
+
+Returns the observation (see masc_msx_screen). Use it to let a title, a fade or a level intro play out. Frames are 1/60 s; at most 300 per call.
 masc_operator_action	Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions.
 masc_operator_board_attention_quarantine_requeue	Acknowledge and requeue exactly one Board-attention quarantine. The observed keeper, partition, candidate, and opaque quarantine id must all match; this tool never auto-retries.
 masc_operator_confirm	Confirm and execute a previously previewed operator action. Use this only after masc_operator_action returns confirm_required=true.
@@ -260,7 +287,7 @@ masc_web_fetch	Fetch one web page for deeper reading. Use exact tool name WebFet
 masc_web_search	Search the public web. Use exact tool name WebSearch. Example input: {"query":"OCaml 5.2 release date","limit":5,"includeContent":true}. Returns result.results with title, url, snippet. With includeContent:true the response gains a human-readable content_text rendering of every fetched page. When the configured provider is brave_llm_context the response instead carries grounded=true, context_text (pre-extracted chunks) and sources metadata, with no results rows — includeContent is then a no-op since the content already rides inline. Do not use snake_case names like web_search.
 report_review_verdict	Report your review verdict. You MUST call this tool with your assessment. verdict must be exactly APPROVE or REJECT.
 tool_edit_file	Write, append, or patch a file. path and mode are required; an absent mode is rejected instead of defaulting to overwrite. For mode='overwrite' or 'append', content is required and non-empty. For mode='patch', old_string and new_string are required; old_string must match exactly once unless replace_all=true. Good overwrite: path='lib/foo.ml', mode='overwrite', content='let x = 1'. Good patch: path='lib/foo.ml', mode='patch', old_string='old', new_string='new'. Bad: path='', content=''. Bad: mode='create' (use overwrite). Creates parent dirs.
-tool_execute	Run one command inside the Keeper sandbox. Give exactly one of argv or script: argv is one non-empty argv process vector run without a shell, tokens verbatim, and script is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle.
+tool_execute	Run one command inside the Keeper sandbox. Give exactly one of argv or script: argv is one non-empty argv process vector run without a shell, tokens verbatim, and script is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. In auto mode an enforced Observe run returns its actual exit status and output, including failed writes; this never authorizes execution outside Observe. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request.
 tool_read_file	Read a file as text (truncated at max_bytes). path is REQUIRED. Paths resolve relative to your workspace root, or to the typed `cwd` when you pass one — never a host path like '.masc/playground/your-name/...'. Good: path='lib/foo.ml'. Bad: path=''. For multi-file search, use Grep.
 tool_search_files	Search file contents with ripgrep. Provide a regex `pattern` (and optionally path/glob/type). Paths resolve against your workspace root — pass a path relative to it, never a host path like '.masc/playground/your-name/...'. To list a directory, read a file, run find, or view git status/log/diff, use the Execute tool.
 tool_write_file	Write or append a file. path and mode are required; an absent mode is rejected instead of defaulting to overwrite. content is required and non-empty. Good overwrite: path='lib/foo.ml', mode='overwrite', content='let x = 1'. Bad: path='', content=''. Creates parent dirs.

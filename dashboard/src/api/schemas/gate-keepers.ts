@@ -1,3 +1,4 @@
+import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
 const KeeperMetaWireSchema = Schema.Struct({
@@ -20,8 +21,7 @@ const GateKeeperWireSchema = Schema.Struct({
   paused: Schema.Boolean,
   next_action: Schema.NullOr(Schema.String),
   keepalive_running: Schema.Boolean,
-  autoboot_enabled: Schema.Boolean,
-  proactive_enabled: Schema.Boolean,
+  activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),
   runtime_id: Schema.NonEmptyString,
   created_at: Schema.NonEmptyString,
   updated_at: Schema.NonEmptyString,
@@ -50,8 +50,7 @@ const GateKeeperIssueWithMetaWireSchema = Schema.extend(
     meta: KeeperMetaWireSchema,
     created_at: Schema.NonEmptyString,
     updated_at: Schema.NonEmptyString,
-    autoboot_enabled: Schema.Boolean,
-    proactive_enabled: Schema.Boolean,
+    activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),
   }),
 )
 

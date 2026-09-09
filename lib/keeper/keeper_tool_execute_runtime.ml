@@ -141,7 +141,8 @@ let secret_files_for_source ~source ~observed ~prepare =
   | Keeper_gate.Exact_always_rule _
   | Keeper_gate.Keeper_always_allow
   | Keeper_gate.Workspace_always_allow
-  | Keeper_gate.Readonly_sandbox -> prepare ()
+  | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Local_output -> prepare ()
 ;;
 
 module For_testing = struct
@@ -522,6 +523,7 @@ let handle_tool_execute_typed
            the real call and reported its exit as an observation. *)
         let observation =
           Keeper_tool_execute_observe.create
+            ~execution_evidence:(fun () -> List.rev (Atomic.get shim_receipts))
             ~route:dispatch_bundle.observe_route
             ~dispatch:(fun sandbox ->
               Keeper_tooling.Execute_shell_ir.dispatch
@@ -533,6 +535,7 @@ let handle_tool_execute_typed
         in
         let gate_decision =
           Keeper_gate.decide
+            ~intent:input.intent
             ?cycle_grant:gate_grant
             ~observe:(Keeper_tool_execute_observe.observe observation)
             (* NDT-OK: this typed, caller-owned policy input is consumed only
@@ -577,7 +580,7 @@ let handle_tool_execute_typed
          | Keeper_gate.Allow authorization ->
           Log.Keeper.info
             ~keeper_name:meta.name
-            "external effect authorized operation=tool_execute source=%s"
+            "Execute result authorization operation=tool_execute source=%s"
             (Keeper_gate.authorization_source_to_string authorization.source);
           let authorized result =
             Keeper_tool_execution.with_gate_authorization authorization result

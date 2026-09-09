@@ -60,6 +60,20 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
+(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
+   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
+   cached prefix and [output_tokens] already includes reasoning, the same
+   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
+   defaults to 0 on the wire. *)
+type token_usage =
+  { input_tokens : int
+  ; cached_input_tokens : int
+  ; cache_write_input_tokens : int
+  ; output_tokens : int
+  ; reasoning_output_tokens : int
+  ; total_tokens : int
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -69,6 +83,10 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
+  ; usage : token_usage option
+    (* [None] when no thread/tokenUsage/updated for this turn arrived before
+       turn/completed; the host then reports the usage scope as unavailable
+       rather than a count of zero. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -313,6 +331,14 @@ let required_int stage name fields =
   | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
 ;;
 
+(* A token count: an integer that is not negative. *)
+let required_count stage name fields =
+  let* value = required_int stage name fields in
+  if value < 0
+  then protocol_error stage (Printf.sprintf "field %S must not be negative" name)
+  else Ok value
+;;
+
 type wire_message =
   | Response of
       { id : int
@@ -408,9 +434,10 @@ let reject_server_request io id =
    first token of every turn. The schemas still cross this wire once at
    thread/start; what changes is the context they are spent from. Measured
    2026-08-30 against the live surface: 83 tools, 81,270 bytes of spec. The
-   saving itself is not observable here — turn/completed carries no token
-   usage — so what is verified is that the model still resolves and calls a
-   deferred tool, not how much it costs. *)
+   saving itself is not measured here: thread/tokenUsage/updated reports the
+   turn's counts into [turn_result.usage], but nothing compares a deferred
+   turn against an undeferred one, so what is verified is that the model
+   still resolves and calls a deferred tool, not how much it costs. *)
 let tool_namespace = "masc"
 
 let dynamic_tool_spec (tool : dynamic_tool) =
@@ -761,8 +788,49 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
+(* thread/tokenUsage/updated carries the thread's running totals and the
+   [last] breakdown of the turn it names. Identity decides whether the frame
+   is about the turn this call awaits: one for another thread or turn is an
+   observation about work nobody here is waiting on, so it changes nothing
+   rather than ending the turn (#27967 is what a needless identity failure
+   costs). A frame that is ours but malformed is a protocol error: these
+   counts reach the usage ledger, and a half-read breakdown would be a number
+   nobody sent. *)
+let token_usage_notification ~thread_id ~turn_id params =
+  let stage = "thread/tokenUsage/updated" in
+  let* fields = assoc_at stage params in
+  let* notification_thread_id = required_string stage "threadId" fields in
+  let* notification_turn_id = required_string stage "turnId" fields in
+  if notification_thread_id <> thread_id || notification_turn_id <> turn_id
+  then Ok None
+  else
+    let* usage_json = required_member stage "tokenUsage" fields in
+    let* usage_fields = assoc_at stage usage_json in
+    let* last_json = required_member stage "last" usage_fields in
+    let* last = assoc_at stage last_json in
+    let* input_tokens = required_count stage "inputTokens" last in
+    let* cached_input_tokens = required_count stage "cachedInputTokens" last in
+    let* output_tokens = required_count stage "outputTokens" last in
+    let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" last in
+    let* total_tokens = required_count stage "totalTokens" last in
+    let* cache_write_input_tokens =
+      match List.assoc_opt "cacheWriteInputTokens" last with
+      | None -> Ok 0
+      | Some _ -> required_count stage "cacheWriteInputTokens" last
+    in
+    Ok
+      (Some
+         { input_tokens
+         ; cached_input_tokens
+         ; cache_write_input_tokens
+         ; output_tokens
+         ; reasoning_output_tokens
+         ; total_tokens
+         })
+;;
+
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback ~on_stream_event =
+    ~seen_fallback ~seen_usage ~on_stream_event =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -787,6 +855,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~seen_usage
       ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -818,6 +887,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~seen_usage
       ~on_stream_event
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
@@ -829,7 +899,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       observation;
     await_turn_terminal
       io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
-      ~on_stream_event
+      ~seen_usage ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -853,6 +923,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~seen_usage
       ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
@@ -875,6 +946,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~seen_usage
         ~on_stream_event
     else
       let* error_json = required_member stage "error" fields in
@@ -886,13 +958,33 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
            ~message
            error_fields)
   | Notification { method_ = "turn/completed"; params } ->
-    terminal_result
+    let* text =
+      terminal_result
+        ~thread_id
+        ~turn_id
+        ~seen_final
+        ~seen_fallback
+        ~tool_effect_attempted:(!tool_call_count > 0)
+        params
+    in
+    Ok (text, seen_usage)
+  | Notification { method_ = "thread/tokenUsage/updated"; params } ->
+    let* usage = token_usage_notification ~thread_id ~turn_id params in
+    let seen_usage =
+      match usage with
+      | Some _ -> usage
+      | None -> seen_usage
+    in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
       ~thread_id
       ~turn_id
       ~seen_final
       ~seen_fallback
-      ~tool_effect_attempted:(!tool_call_count > 0)
-      params
+      ~seen_usage
+      ~on_stream_event
   (* App-server progress and account notifications are observational. Protocol
      evolution must not turn them into a computation failure; each valid wire
      message resets the stream-idle liveness boundary. *)
@@ -905,6 +997,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~seen_usage
       ~on_stream_event
 ;;
 
@@ -1119,7 +1212,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text =
+  let* text, usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
@@ -1128,6 +1221,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~turn_id
       ~seen_final:None
       ~seen_fallback:None
+      ~seen_usage:None
       ~on_stream_event
   in
   emit_stream_event on_stream_event (Turn_finished { text });
@@ -1140,6 +1234,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; subscription
     ; user_agent
     ; resumed
+    ; usage
     }
 ;;
 

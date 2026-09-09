@@ -50,6 +50,8 @@ depends: [
   "x509" {>= "1.0"}
   "integers" {>= "0.7"}
   "zstd" {>= "0.4"}
+  "decompress" {>= "1.5.3"}
+  "checkseum" {>= "0.5.2"}
   "httpun" {>= "0.2"}
   "httpun-eio" {>= "0.2"}
   "httpun-ws" {= "0.2.0"}

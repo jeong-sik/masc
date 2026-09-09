@@ -543,6 +543,15 @@ def tab_until(
     output: bytearray,
     needle: Needle,
 ) -> bytes:
+    """Press Tab until the screen shows [needle], or give up after a lap.
+
+    Name the surface the walk is going to, not one on the way. The ring is
+    not fixed: Masc_tui_types.is_surface_active leaves Approvals out of it
+    while nothing is pending, so a walk that stopped there first burned
+    every press on a screen that did not exist. Six scenarios used it as a
+    waypoint to Board, and a seventh fabricated a pending tool approval in
+    its fixtures to keep the waypoint alive.
+    """
     for _ in range(TAB_CYCLE_BOUND):
         read_available(master_fd, output)
         start = len(output)
@@ -1143,8 +1152,7 @@ def keeper_runtime_http_fixtures(
                     "paused": False,
                     "phase": "running",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": True,
+                    "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                 },
                 {
@@ -1156,8 +1164,7 @@ def keeper_runtime_http_fixtures(
                     "paused": True,
                     "phase": "paused",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": False,
+                    "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                 },
             ],
@@ -1411,29 +1418,6 @@ def board_json_http_fixtures() -> HttpFixtures:
         200,
         {"post": posts[1], "comments": []},
     )
-    # The scenario tabs to "MASC Approvals" before Board, but
-    # Masc_tui_types.is_surface_active keeps Approvals off the visible
-    # surface ring while approval_items is empty, so tab_until would burn
-    # every key without the screen ever existing. Seed one pending keeper
-    # tool approval (shape mirrors compact_input_gate_http_fixtures) to put
-    # the surface back on the ring.
-    fixtures["/api/v1/keepers/tool-approvals"] = (
-        200,
-        {
-            "pending": [
-                {
-                    "keeper": "alpha",
-                    "tool_call_id": "tool-board-json-probe",
-                    "tool": "Execute",
-                    "args": "{}",
-                    "question": "Run the board-json probe?",
-                    "because": None,
-                    "asked_at": 1787766400.0,
-                    "timeout_sec": 300.0,
-                }
-            ]
-        },
-    )
     return fixtures
 
 
@@ -1631,7 +1615,13 @@ def run_terminal_scenario(
                     [
                         "/bin/sh",
                         "-c",
-                        "trap '' INT; kill -STOP $$; \"$@\"; tui_status=$?; "
+                        # TERM beside INT: the SIGTERM scenario signals the
+                        # process group, because this shell is the pid the
+                        # harness holds and the TUI is its child. The TUI
+                        # installs its own handlers for both, so ignoring
+                        # them here only keeps the shell alive to stop
+                        # itself after the TUI exits.
+                        "trap '' INT TERM; kill -STOP $$; \"$@\"; tui_status=$?; "
                         'kill -STOP $$; exit "$tui_status"',
                         "masc-tui-test-launcher",
                         executable,
@@ -1827,6 +1817,16 @@ def navigate_with_arrows_and_quit(
     )
 
 
+# The width at which the Keepers table still draws its LIFECYCLE / RUNTIME
+# column. Two thresholds bound it, and 140 sat between them: the column needs
+# 118 inner cells (Render_schedule.keeper_runtime_minimum_inner_width), and
+# from Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
+# columns off the top, which leaves too few again until 180. Measured on the
+# built TUI: 118 drops the column, 122 through 131 draw it, 132 through 176 do
+# not, 180 does.
+KEEPER_RUNTIME_COLUMN_COLUMNS = 126
+
+
 def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -1839,7 +1839,7 @@ def keeper_runtime_phase_and_identity_interaction(
         master_fd,
         output,
         rows=30,
-        columns=140,
+        columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
         needle=b"MASC Overview",
     )
     send_and_wait(
@@ -1880,7 +1880,7 @@ def keeper_long_runtime_identity_interaction(
         master_fd,
         output,
         rows=30,
-        columns=140,
+        columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
         needle=b"MASC Overview",
     )
     # Both keepers run the same provider subscription, so their ids differ
@@ -2635,7 +2635,11 @@ def keeper_message_unreliable_roster_interaction(
         )
         if any(path == chat_path for path, _body in requests):
             raise AssertionError("unreliable Keeper roster allowed a message POST")
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        # One Escape, and it lands on the Keepers list rather than on a
+        # keeper's detail: a detail is drawn from the roster, and the roster
+        # read is the thing this walk broke. Walking to alpha's detail first
+        # spent all four presses looking for a title the pane was never going
+        # to draw and left the TUI out on Overview.
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 
@@ -2656,6 +2660,22 @@ def interrupt_with_ctrl_c(
         b"\x03",
         b"Ctrl-C: press again to quit",
     )
+
+
+def terminate_with_sigterm(
+    process: subprocess.Popen[bytes],
+    _master_fd: int,
+    _slave_fd: int,
+    _output: bytearray,
+    _base_path: str,
+) -> None:
+    # What `kill` and a service manager send. The handler only records the
+    # signal; the loop has to read the record on its next pass and leave the
+    # way q does, so the terminal restore and Goodbye the harness checks after
+    # this come from that one exit path. A loop that never read it would sit
+    # here until the harness's post-exit wait gives up. The launcher shell in
+    # the same group ignores TERM (see run_terminal_scenario).
+    os.killpg(process.pid, signal.SIGTERM)
 
 
 def quit_from_compact_message(
@@ -2805,7 +2825,6 @@ def assert_row_budgeted_surfaces(
         final_cursor=b"\x1b[?25l",
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
 
@@ -3599,7 +3618,10 @@ def open_loaded_planning(
         timeout=3.0,
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
+    # No Approvals waypoint here. Masc_tui_types.is_surface_active keeps that
+    # surface off the ring while there is nothing pending, and these fixtures
+    # seed nothing, so the walk burned every key on a screen that does not
+    # exist. The walk to Board passes wherever Approvals would have been.
     tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (0)"))
     tab_until(process, master_fd, output, b"plan-alpha-29424")
 
@@ -3708,10 +3730,17 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
-    send_and_wait(process, master_fd, output, b"f", b"show:active")
-    empty = send_and_wait(
-        process, master_fd, output, b"f", b"no goals in this filter"
-    )
+    # One press, not two. The pane opens on Planning_filter_active, so the
+    # first press lands on completed, which these fixtures leave empty --
+    # the note this step is about is already on that screen. The old pair
+    # was written for a default of Planning_filter_all: it waited for
+    # "show:active", the filter the pane had just left, and then for a note
+    # that a second press had already carried past.
+    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
+        raise AssertionError(
+            f"the empty filter drew no note: {empty!r}"
+        )
     if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
         raise AssertionError(f"Planning empty note overflowed: {empty!r}")
     os.write(master_fd, b"q")
@@ -3849,7 +3878,6 @@ def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (4)"))
         resize_and_wait(
             process,
@@ -3911,7 +3939,6 @@ def board_json_interaction() -> Interaction:
     ) -> None:
         wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (2)"))
         resize_and_wait(
             process,
@@ -3986,7 +4013,6 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         )
 
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (3)"))
         resize_and_wait(
             process,
@@ -4099,7 +4125,6 @@ def open_loaded_board(
         timeout=3.0,
     )
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Approvals")
     tab_until(
         process,
         master_fd,
@@ -4213,7 +4238,6 @@ def board_detail_authority_interaction(
             tab_until(process, master_fd, output, b"MASC Activity")
             tab_until(process, master_fd, output, b"late-list-applied")
             tab_until(process, master_fd, output, b"MASC Keepers")
-            tab_until(process, master_fd, output, b"MASC Approvals")
             board = tab_until(
                 process,
                 master_fd,
@@ -4358,7 +4382,16 @@ def screen_rows(drawn: bytes) -> dict[int, bytes]:
     something writes it again. Replaying every absolute row address in
     arrival order and keeping the last write to each row reconstructs what
     is on screen. The pane never scrolls the terminal -- it addresses rows
-    absolutely -- so nothing moves a row's text to another row behind this."""
+    absolutely -- so nothing moves a row's text to another row behind this.
+
+    A clear ends that inheritance. Everything painted before the last
+    FULL_REDRAW is gone from the terminal, and a row the redraw has not
+    reached yet is blank rather than holding what it said before -- a
+    resize redraws the top of a surface first and the rest a frame later.
+    Replaying across a clear reported text the reader could no longer see."""
+    cleared = drawn.rfind(FULL_REDRAW)
+    if cleared >= 0:
+        drawn = drawn[cleared:]
     rows: dict[int, bytes] = {}
     addresses = list(CURSOR_ROW_RE.finditer(drawn))
     for index, address in enumerate(addresses):
@@ -5384,10 +5417,14 @@ def chat_steer_interaction(
         send_and_wait(
             process, master_fd, output, steer, composer_showing(steer)
         )
-        steered = send_and_wait(
-            process, master_fd, output, b"\r", b"STEER 1"
-        )
-        plain = CSI_RE.sub(b"", frame_containing(steered, b"STEER 1"))
+        send_and_wait(process, master_fd, output, b"\r", b"STEER 1")
+        # Read the screen, not the frame the steer arrived in. Queueing the
+        # steer renumbers the ordinary entry's header row -- NEXT 1 becomes
+        # NEXT 2 -- but leaves its body row alone, and a frame carries only
+        # the rows that changed. So the frame holds three of these four
+        # strings and the fourth has been sitting on screen since it was
+        # queued.
+        plain = screen_text(bytes(output))
         expected_rows = (
             b"STEER 1",
             b"corrected-course",
@@ -5650,12 +5687,23 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             input_text=expected_text,
             cursor_column=13,
         )
+        # The narrowest terminal the chat pane draws in. #33096 gated the pane
+        # on Masc_tui_message_layout.chat_min_terminal_cols; below it the pane
+        # draws "Keeper chat needs a larger terminal" and has no composer at
+        # all, so this step waited on a composer that was never going to
+        # arrive and stalled the whole lane (#34125).
+        #
+        # 41, not the 38 that commit's subject named: the constant is derived
+        # (4 + 2 + turn_rail_cells + chat_role_label_column + 20) and the
+        # derivation has grown by three since. Pinned at the floor rather than
+        # comfortably above it -- at 60 this would still pass while the floor
+        # moved underneath, which is how it got to 41 unnoticed.
         narrow_frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=30,
-            columns=16,
+            columns=41,
             needle=composer_showing(b"A"),
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -5663,7 +5711,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         assert_message_input_frame(
             narrow_frame,
             row=28,
-            columns=16,
+            columns=41,
             input_text=expected_text,
             cursor_column=13,
         )
@@ -6151,14 +6199,35 @@ def autonomous_turn_history_interaction() -> Interaction:
             start=pane_start,
             timeout=5.0,
         )
+        # Two calls, each with its own detail rows, do not fit the runner's
+        # default 30 rows: the block reaches the first call's identity line
+        # and the second is below the fold, so this read used to miss it and
+        # report a name that was on screen a few rows further down.
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=60,
+            columns=100,
+            needle=b"masc_task_history",
+            controls=(FULL_REDRAW,),
+        )
         pane = bytes(output[pane_start:])
         plain_pane = CSI_RE.sub(b"", pane)
         for needle, what in (
-            (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
+            # Not "content withheld" any more. That wording read as someone
+            # holding the text back and sent readers looking for a way to see
+            # it; there is none, and the count is the whole fact. The renderer
+            # says so in its own words at masc_tui_keeper_chat_history.ml.
+            ("2 reasoning steps \u00b7 text not recorded".encode(),
+             "the unrecorded reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
             ("\u00b7 THINKING".encode(), "the thinking lane"),
-            ("TOOLS\u2502".encode(), "the nested tool block"),
+            # The label is padded to its column now, so "TOOLS" no longer sits
+            # against the rule. The block marker in front of it is what tells
+            # this row from the word appearing anywhere else.
+            ("\u25a0 TOOLS".encode(), "the tool block header"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(
@@ -6251,7 +6320,13 @@ def memory_journal_timeline_interaction(
         )
         # This scenario verifies the complete timestamp axis. Chat itself now
         # rests in the clock-free reading layout, so opt into full metadata.
-        send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
+        #
+        # One press, not two. The header names only the two densities away
+        # from the resting one: Origin_bare draws "metadata:off", Origin_row
+        # draws "metadata:full", and Origin_inline -- the default this pane
+        # opens in -- draws nothing, because a label saying you are where you
+        # started is not news. So "metadata:inline" is not a string this
+        # header can produce, and waiting for it starved.
         send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
         # At rest the journal draws only its one-line summary: the header
         # with source, revision, and counts. The change fence under it is a
@@ -6647,7 +6722,9 @@ def context_inspector_fixtures() -> HttpFixtures:
             "runtime_profile": "anthropic.claude-opus-5",
             "captured_at": 1787600000.0,
             "wire": {
-                "phase": "Pre_dispatch_serialization",
+                # A nullary variant is a one-element list in
+                # ppx_deriving_yojson's encoding, not a bare string.
+                "phase": ["Pre_dispatch_serialization"],
                 "capture_id": "capture-context",
                 "provider": "anthropic",
                 "model": "claude-opus-5",
@@ -6693,7 +6770,7 @@ def context_inspector_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview"
+            process, master_fd, output, rows=50, columns=140, needle=b"MASC Overview"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -6720,7 +6797,11 @@ def context_inspector_interaction() -> Interaction:
             b"Tool schemas",
             b"User messages",
             b"Tool results",
-            b"Conversation history  7 / 9 atoms",
+            # The section is headed in plain words now, and the count reads
+            # "of" rather than a fraction. Both are pinned: the heading says
+            # which section this is, the count says what it carried.
+            b"how far back this turn looked",
+            b"7 of 9 atoms",
         ):
             if needle not in composition_plain:
                 raise AssertionError(
@@ -6788,7 +6869,13 @@ def context_inspector_interaction() -> Interaction:
             columns=109,
             needle=b"SELECTED BLOCK",
         )
-        narrow_map_plain = CSI_RE.sub(b"", narrow_map)
+        # The whole screen, not the frame the resize returned: a frame holds
+        # only the rows it wrote, and the resize repaints the map over more
+        # than one. The clear it starts with makes the wait matter -- until
+        # the later frames land, the evidence rows are blank rather than
+        # still holding what they said at the old width.
+        drain_until_quiet(process, master_fd, output)
+        narrow_map_plain = screen_text(bytes(output))
         for forbidden in (b"reached the provider", b"provider accepted", b"ON WIRE"):
             if forbidden in narrow_map_plain:
                 raise AssertionError(
@@ -6847,9 +6934,15 @@ def context_inspector_interaction() -> Interaction:
             b"\x1b",
             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
         )
-        help_frame = send_and_wait(process, master_fd, output, b"?", b"Slash commands")
-        if b"/context" not in CSI_RE.sub(b"", help_frame):
-            raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
+        # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
+        # section title it no longer carries.
+        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        # The /context disclosure this step used to assert is not here any
+        # more: the cheat sheet lists keys, and the slash commands announce
+        # themselves in the composer's hint line as the word is typed
+        # (Masc_tui_command.hint_spans, drawn at masc_tui_render.ml). That
+        # surface has no coverage yet and wants its own scenario rather than
+        # a tail on this one.
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
@@ -6973,8 +7066,11 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
+            # The skill row names an outcome now, not a chain of receipts.
+            # "DELIVERED · USED" was the evidence path; the label says what
+            # came of it, and the mark above already carries the state.
             re.compile(
-                rb"DELIVERED[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?USED"
+                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
@@ -7798,6 +7894,42 @@ def live_markdown_interaction(
     os.write(master_fd, b"q")
 
 
+# The three metadata densities differ in where the origin sits, not in what it
+# says, so the reading that tells them apart is which screen row each piece
+# landed on. A frame is no help: it addresses rows absolutely and writes no
+# newlines, so two rows read as one string and "name then body" matches the
+# stacked layout as readily as the inline one.
+def origin_screen_shape(
+    output: bytearray, badge: bytes, body: bytes
+) -> tuple[bytes, int]:
+    """The screen row carrying [badge], and how far below it [body] sits."""
+    rows = screen_rows(bytes(output))
+    badge_row = screen_row_of(rows, badge)
+    body_row = screen_row_of(rows, body)
+    if badge_row < 0 or body_row < 0:
+        raise AssertionError(
+            f"chat screen lost {badge!r} or {body!r}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    return rows[badge_row], body_row - badge_row
+
+
+# The speaker's colour belongs to the badge. A body drawn in it turns the whole
+# message into the speaker's colour and the pane loses the one contrast it has.
+# Written as the escape rather than as the three colours a speaker happens to
+# use today, so a wash in a fourth is caught the day someone writes it.
+BODY_WASH = rb"\x1b\[(?:3[0-7]|4[0-7]|9[0-7]|10[0-7])m *"
+
+
+def assert_bodies_unwashed(frame: bytes, description: str) -> None:
+    for body in (b"operator-body-neutral", b"keeper-body-neutral"):
+        washed = re.search(BODY_WASH + re.escape(body), frame)
+        if washed is not None:
+            raise AssertionError(
+                f"{description} washed {body!r} in the speaker's colour: {frame!r}"
+            )
+
+
 def message_origin_badge_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -7810,9 +7942,9 @@ def message_origin_badge_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-    send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
-    pane_start = len(output)
-    send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane draws before its history arrives, and every step below reads a
+    # row the history draws, so the walk starts once the later speaker is on
+    # screen.
     wait_for_output(
         process,
         master_fd,
@@ -7821,70 +7953,104 @@ def message_origin_badge_interaction(
         start=pane_start,
         timeout=5.0,
     )
-    keeper_end = end_of_needle(output, b"keeper-body-neutral", pane_start)
-    wait_for_output(
+    # The fixture names a speaker, so the operator's line arrives here as
+    # someone else's and takes the inbound mark rather than the one a line
+    # typed at this pane would take.
+    operator_badge = "◀ vincent".encode()
+    keeper_badge = "● alpha".encode()
+    operator_body = b"operator-body-neutral"
+    keeper_body = b"keeper-body-neutral"
+
+    # Ctrl-F walks bare -> inline -> row -> bare and the pane opens on inline,
+    # which is the one stop with no header word: the summary names the two
+    # projections away from the resting layout ("metadata:off" and
+    # "metadata:full") and stays silent about the layout itself. So the first
+    # press lands on the full row, and the press that comes back to inline is
+    # waited on by the short clock instead -- the one thing neither other stop
+    # draws.
+    full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
+    ):
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 1:
+            raise AssertionError(
+                f"the full origin row did not put the {description} body on the "
+                f"row below its origin (gap {gap}): {screen_text(bytes(output))!r}"
+            )
+        if re.search(rb"\[\d\d:\d\d:\d\d\]", row) is None:
+            raise AssertionError(
+                f"the full {description} origin row carried no timestamp: {row!r}"
+            )
+    for name in (b"vincent", b"alpha"):
+        if b"\x1b[7m" + name not in full_row:
+            raise AssertionError(
+                f"chat origin did not keep its reverse-video badge for {name!r}: "
+                f"{full_row!r}"
+            )
+    assert_bodies_unwashed(full_row, "the full origin row")
+
+    bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
+    ):
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 0:
+            raise AssertionError(
+                f"the clock-free layout did not keep the {description} body beside "
+                f"its origin (gap {gap}): {screen_text(bytes(output))!r}"
+            )
+        if body not in row:
+            raise AssertionError(
+                f"the clock-free {description} row lost its body: {row!r}"
+            )
+        if re.search(rb"\d\d:\d\d", row) is not None:
+            raise AssertionError(
+                f"the clock-free {description} row still drew a clock: {row!r}"
+            )
+    assert_bodies_unwashed(bare, "the clock-free layout")
+
+    inline = send_and_wait(
         process,
         master_fd,
         output,
-        FRAME_END,
-        start=keeper_end,
-        timeout=3.0,
+        b"\x06",
+        re.compile(rb"\d\d:\d\d " + re.escape("◀".encode())),
     )
-    update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
-    frame = bytes(output[pane_start:update_end])
-    plain_frame = CSI_RE.sub(b"", frame)
-    for pattern, description in (
-        (
-            b"\xe2\x96\xb6\\s+vincent[^\\n]*\\n\\s+operator-body-neutral",
-            "operator origin row and separated body",
-        ),
-        (
-            b"\xe2\x97\x8f\\s+alpha[^\\n]*\\n\\s+keeper-body-neutral",
-            "Keeper origin row and separated body",
-        ),
+    for badge, body, description in (
+        (operator_badge, operator_body, "operator"),
+        (keeper_badge, keeper_body, "Keeper"),
     ):
-        if re.search(pattern, plain_frame) is None:
-            raise AssertionError(f"chat frame omitted {description}: {frame!r}")
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in frame:
+        row, gap = origin_screen_shape(output, badge, body)
+        if gap != 0:
             raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{frame!r}"
+                f"the inline layout did not keep the {description} body beside its "
+                f"origin (gap {gap}): {screen_text(bytes(output))!r}"
             )
-    for forbidden, description in (
-        (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
-        (b"\x1b[34m  keeper-body-neutral", "Keeper body blue wash"),
-        (b"\x1b[32m  keeper-body-neutral", "Keeper body green wash"),
-    ):
-        if forbidden in frame:
-            raise AssertionError(f"chat frame retained {description}: {frame!r}")
-
-    bare = send_and_wait(process, master_fd, output, b"\x06", b"operator-body-neutral")
-    bare_plain = CSI_RE.sub(b"", bare)
-    if b"operator-body-neutral" not in bare_plain or b"keeper-body-neutral" not in bare_plain:
-        raise AssertionError(f"clock-free inline layout lost a speaker body: {bare!r}")
-    if re.search(rb"\d\d:\d\d\s+\xe2\x96\xb6", bare_plain) is not None:
-        raise AssertionError(f"clock-free metadata layout still rendered a clock: {bare!r}")
-
-    inline = send_and_wait(process, master_fd, output, b"\x06", b"metadata:inline")
-    inline_plain = CSI_RE.sub(b"", inline)
-    for pattern in (
-        b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
-        b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
-    ):
-        if re.search(pattern, inline_plain) is None:
+        if body not in row:
             raise AssertionError(
-                f"Ctrl-F header said inline but its physical rows did not: {inline!r}"
+                f"the inline {description} row lost its body: {row!r}"
             )
+    # Only the first row of a minute draws the clock, so the operator's row
+    # carries it and the Keeper's row a second later does not.
+    operator_row, _ = origin_screen_shape(output, operator_badge, operator_body)
+    if re.search(rb"\d\d:\d\d " + re.escape("◀".encode()), operator_row) is None:
+        raise AssertionError(
+            f"the inline layout drew no clock beside the operator origin: "
+            f"{operator_row!r}"
+        )
+    assert_bodies_unwashed(inline, "the inline layout")
 
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    if b"\x1b[36m  > \x1b[0mdraft-neutral" not in draft_frame:
+    if b"\x1b[96m  > \x1b[0mdraft-neutral" not in draft_frame:
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
+    escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")
 
 
@@ -7895,10 +8061,17 @@ def viewport_gap_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    # The too-small guard is strict on terminal rows (the composer reads
-    # terminal_rows > minimum_fixed_chrome_rows, and the guard still draws
-    # "resize to at least 14 rows" when opened at exactly 14), so the
-    # narrow-gap walk opens at the smallest size that renders: 15 rows.
+    # This fixture has no agenda strip. Fourteen physical rows leave only
+    # thirteen below navigation; the hint must name the usable physical size.
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"resize to at least 15 rows",
+    )
+    # Following the displayed size must restore the surface, not the warning.
     resize_and_wait(
         process,
         master_fd,
@@ -7986,6 +8159,32 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
     return fixtures, alpha_history
 
 
+# The width at which the roster shares the screen with the chat and nothing
+# else does. Two thresholds bound it, and 140 sat between them: the roster
+# needs the surface at Masc_tui_roster_pane.threshold_cols (110), and from
+# Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
+# columns off the top, which leaves the surface 76 and takes the roster away
+# again. Measured on the built TUI: 120 and 131 draw the roster, 132 does not,
+# 166 draws both panes.
+# The status row names the keeper, then its automation and gate, then the
+# runtime. Joining the health word to the runtime pinned that order, and the
+# two fields that arrived between them broke both readings at once. The pair
+# these scenarios care about is "this keeper's own health and its own
+# runtime", which is a question about one row.
+def assert_runtime_row(
+    frame: bytes, *, health: bytes, runtime: bytes, description: str
+) -> None:
+    rows = screen_rows(frame)
+    row = screen_row_of(rows, runtime)
+    if row < 0 or health not in rows[row]:
+        raise AssertionError(
+            f"{description} did not carry {health!r} beside {runtime!r}: {frame!r}"
+        )
+
+
+ROSTER_BESIDE_CHAT_COLUMNS = 120
+
+
 def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -7999,7 +8198,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"MASC Overview",
         )
         send_and_wait(
@@ -8054,15 +8253,20 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=31,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         beta_plain = CSI_RE.sub(b"", beta_frame)
+        assert_runtime_row(
+            beta_frame,
+            health=b"idle",
+            runtime=b"paused anthropic.claude-sonnet-4",
+            description="switched beta chat",
+        )
         for expected in (
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-            b"idle \xc2\xb7 paused anthropic.claude-sonnet-4",
             b"beta-current-history-marker",
         ):
             if expected not in beta_plain:
@@ -8094,14 +8298,19 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
+        assert_runtime_row(
+            alpha_frame,
+            health=b"healthy",
+            runtime=b"running anthropic.claude-opus-5",
+            description="restored alpha chat",
+        )
         for expected in (
-            b"healthy \xc2\xb7 running anthropic.claude-opus-5",
             b"alpha-current-history-marker",
             b"> alpha-draft",
         ):
@@ -8124,7 +8333,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=31,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -8154,7 +8363,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=ROSTER_BESIDE_CHAT_COLUMNS,
             needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
@@ -9011,6 +9220,31 @@ def verifier_lane_runs_response() -> HttpResponse:
     )
 
 
+def standalone_lane_runtime_config_response() -> HttpResponse:
+    return (
+        200,
+        {
+            **runtime_config_read_metadata(),
+            "path": "/workspace/config/runtime.toml",
+            "source_text": "\n".join(
+                [
+                    "[runtime.exact_output_lanes.board_attention_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.hitl_auto_judge]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.librarian_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.verifier_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                ]
+            ),
+        },
+    )
+
+
 def verifier_lane_run_detail_response() -> HttpResponse:
     return (
         200,
@@ -9026,6 +9260,10 @@ def verifier_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 3.0,
                 "selected_slot": "verifier-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {
@@ -9099,6 +9337,10 @@ def hitl_lane_run_detail_response() -> HttpResponse:
                 "elapsed_s": 2.0,
                 "selected_slot": "judge-primary",
                 "skill_evidence": {"state": "no_keeper_skills"},
+                "payload_availability": {
+                    "input": {"state": "available"},
+                    "output": {"state": "available"},
+                },
                 "input": {
                     "kind": "exact",
                     "payload": {"tool_name": "network_read"},
@@ -9875,16 +10117,22 @@ def keeper_lanes_ia_interaction(
                 )
 
         palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
-        lanes = resize_and_wait(
+        resize_and_wait(
             process,
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"Standalone LLM lanes",
             controls=(FULL_REDRAW,),
         )
-        lanes_plain = CSI_RE.sub(b"", lanes).decode("utf-8")
+        # The resize clears the screen and repaints the lane list -- ten rows
+        # -- and the selected lane's detail arrives in a later frame. So the
+        # frame that carries the list carries none of the detail below it,
+        # and the reading waits for the frames to stop before asking the
+        # screen.
+        drain_until_quiet(process, master_fd, output)
+        lanes_plain = screen_text(bytes(output)).decode("utf-8")
         if "MASC Lanes · Standalone" not in lanes_plain:
             raise AssertionError(
                 f"Lanes did not name the standalone scope: {lanes_plain!r}"
@@ -9963,7 +10211,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
             controls=(FULL_REDRAW,),
         )
@@ -9994,8 +10242,10 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
-            columns=140,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
+            columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
         )
@@ -10008,7 +10258,9 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
             columns=100,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
@@ -10046,8 +10298,10 @@ def keeper_lanes_ia_interaction(
             process,
             master_fd,
             output,
-            rows=14,
-            columns=140,
+            # 14 surface rows plus navigation; this fixture's agenda is silent
+            # and the composer yields its row at this minimum size.
+            rows=15,
+            columns=220,
             needle=b"Left / Esc",
             controls=(FULL_REDRAW,),
         )
@@ -10065,7 +10319,7 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             rows=30,
-            columns=140,
+            columns=220,
             needle=b"GATE RESOLUTION  NOT PROVEN BY THIS RUN",
             controls=(FULL_REDRAW,),
         )
@@ -10260,7 +10514,7 @@ def changes_keeper_and_arrow_detail_interaction(
         raise AssertionError(
             f"the diff drew no footer: {second_diff_plain[-800:]!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports
     # what it could use and the loop stores that. Without the report the
@@ -10294,7 +10548,7 @@ def changes_keeper_and_arrow_detail_interaction(
     send_and_wait(
         process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
     )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(
         process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
     )
@@ -10310,7 +10564,7 @@ def changes_keeper_and_arrow_detail_interaction(
     detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"-1 +1")
     if b"MASC Change" not in CSI_RE.sub(b"", detail):
         raise AssertionError(f"Right did not open the selected diff: {detail!r}")
-    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
         raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
     # v opens the row's file on the Code surface, read through the keeper's
@@ -10381,7 +10635,7 @@ def enter_outside_changes_interaction(
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
-    if "Turn" not in back_plain:
+    if "TURN" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
             f"Acting armed a view it does not own: {back_plain!r}"
@@ -10683,7 +10937,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Esc:code" not in history_plain:
+    if "Left / Esc:back" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
@@ -10718,12 +10972,15 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
-    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
+    if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
+            or "▸ y" not in choices_plain
+            or re.search(r"│\s+x\s+│", choices_plain) is None):
         raise AssertionError(
             f"the candidate list missed the second name: {choices!r}"
         )
-    # Enter alone runs the highlighted candidate (def y): the answer names
+    # Enter alone runs the highlighted candidate (y): the answer names
     # the location and the cursor jumps to it.
     picked = send_and_wait(
         process, master_fd, output, b"\r", b"y: lib/a.ml:1"
@@ -10813,7 +11070,18 @@ def config_navigation_interaction() -> Interaction:
         )
         # Source-only input must not open an editor or a hidden-source search.
         # If / stole focus, v would become search text instead of returning.
-        send_and_wait(process, master_fd, output, b"e/", b"runtime.toml status")
+        # Nothing should happen, which is the whole point -- so there is no
+        # new frame to wait for. A frame carries the rows that changed, and
+        # inert keys change none; waiting for the title to arrive again
+        # starves on a screen that is already correct. Read the screen.
+        os.write(master_fd, b"e/")
+        time.sleep(0.4)
+        read_available(master_fd, output)
+        if b"runtime.toml status" not in screen_text(bytes(output)):
+            raise AssertionError(
+                "e or / moved the Config status screen: "
+                f"{screen_text(bytes(output))!r}"
+            )
         reloaded_source = send_and_wait(process, master_fd, output, b"v", b"first-value = ")
         if b"first-value = 9" not in CSI_RE.sub(b"", reloaded_source):
             raise AssertionError("Config reload changed revision without its new source")
@@ -11382,6 +11650,13 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             ],
         },
     )
+    fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+        200,
+        {"status": "found", "schedule_id": "schedule-proof-701",
+         "wakes": [{"status": "succeeded", "started_at_iso": "2026-08-25T09:30:00Z",
+                    "finished_at_iso": "2026-08-25T09:30:01Z", "error": None}],
+         "wake_retention_per_schedule": 32},
+    )
     return fixtures
 
 
@@ -11439,26 +11714,46 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
         )
         evidence = send_and_wait(
-            process, master_fd, output, b"\x1b[6~", b"matched_pending"
+            process, master_fd, output, b"\x1b[6~", b"WAKES (1 retained"
         )
         evidence_plain = CSI_RE.sub(b"", evidence)
         for needle in (
-            b"LAST WAKE",
+            b"WAKES (1 retained, ceiling 32 per schedule)",
             b"DELIVERY EVIDENCE",
             b"pending=2",
             b"matched_consumed_ack",
+        ):
+            if needle not in evidence_plain:
+                raise AssertionError(
+                    f"Schedule wake/delivery page omitted {needle!r}: {evidence_plain!r}"
+                )
+        # Delivery identity and the work-result boundary follow the queue
+        # summary. Read their page rather than treating one viewport as all
+        # retained evidence; the operator can reach both with PgDn.
+        result_page = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"Keeper Calls or Activity"
+        )
+        result_plain = CSI_RE.sub(b"", result_page)
+        for needle in (
+            b"Keeper evidence",
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
             b"2026-08-25T09:30:20",
-            b"no schedule-to-tool/result join",
-            b"Keeper Calls or Acting",
+            b"Turn finished",
+            b"WORK RESULT",
+            b"bounded by its start and finish rows",
+            b"Keeper Calls or Activity",
         ):
-            if needle not in evidence_plain:
+            if needle not in result_plain:
                 raise AssertionError(
-                    f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
+                    f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
+        returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
+        returned_plain = CSI_RE.sub(b"", returned)
+        for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
+            if needle not in returned_plain:
+                raise AssertionError(f"Left did not restore the selected Schedule row: {returned_plain!r}")
         # The harness is 100 columns wide. Padding the id to a reserved width
         # used to push the instruction tail past the box border, so require
         # the words an operator needs to press the key a second time.
@@ -11727,14 +12022,19 @@ def fusion_list_detail_interaction(
     ) -> None:
         # The surface title, not the task id: this scenario seeds the goal the
         # verdict judges, and that goal lists the same task on Planning, so
-        # tabbing on the id stops one surface early.
-        # The surface title, not the task id: this scenario seeds the goal the
-        # verdict judges, and that goal lists the same task on Planning, so
         # tabbing on the id stops one surface early. Reading the whole stream
-        # for the headers then let a Harness frame drawn while tabbing past
-        # answer for the one on screen, which is how the assertions below
-        # passed against a list nobody was looking at.
-        tab_until(process, master_fd, output, b"MASC Harness")
+        # for the headers then let a frame drawn while tabbing past answer for
+        # the one on screen, which is how the assertions below passed against
+        # a list nobody was looking at.
+        #
+        # The verdicts are a Planning tab, not a top-level surface. They were
+        # one, called Harness, and Masc_tui_types.surface_ring no longer
+        # carries that name -- so tabbing for it spent every press without the
+        # screen ever existing. Planning opens on Goals and [v] walks its three
+        # stops.
+        tab_until(process, master_fd, output, b"MASC Planning")
+        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review")
+        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Verdicts")
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
@@ -11746,11 +12046,14 @@ def fusion_list_detail_interaction(
                 output,
                 rows=30,
                 columns=120,
-                needle=b"Evaluator",
+                needle=b"EVALUATOR",
                 controls=(FULL_REDRAW,),
             ),
         )
-        for needle in (b"Gate", b"Verdict", b"Evaluator"):
+        # The column row is upper case. Spelled in title case, "Verdict" was
+        # still found -- in the tab label "Task Verdicts" one row above -- so
+        # only two of these three ever said anything about the list.
+        for needle in (b"GATE", b"VERDICT", b"EVALUATOR"):
             if needle not in harness_plain:
                 raise AssertionError(
                     f"Harness list omitted {needle!r}: {harness_plain!r}"
@@ -11768,7 +12071,7 @@ def fusion_list_detail_interaction(
             b"masc://overview/tasks/task-linked-501",
         )
         verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"HARNESS VERDICT"
+            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
         )
         verdict_plain = CSI_RE.sub(b"", verdict)
         # The verdict names a task; the task names its goals; a goal declares
@@ -11800,7 +12103,12 @@ def fusion_list_detail_interaction(
             raise AssertionError(
                 f"the verdict says nothing about what it aims at: {verdict_plain!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
+        # Back on the list, whose tab label carries the count. The word came
+        # off when the count was split into page and ledger: it reads "(1)"
+        # here and "(8 of 4197)" against a server with a backlog.
+        send_and_wait(
+            process, master_fd, output, b"\x1b[D", b"\xe2\x96\xb8Task Verdicts (1)"
+        )
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -11861,11 +12169,16 @@ def fusion_list_detail_interaction(
             b"K:calling Keeper  B:Board evidence  Enter:open  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
-        footer_frame = resize_and_wait(
+        resize_and_wait(
             process, master_fd, output, rows=30, columns=200,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
         )
-        if footer not in CSI_RE.sub(b"", footer_frame):
+        # The footer is one row and the resize repaints the list before it, so
+        # the frame that carries the title does not carry the hints. Wait for
+        # the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        footer_frame = bytes(output)
+        if footer not in screen_text(footer_frame):
             raise AssertionError(
                 f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
             )
@@ -11920,10 +12233,14 @@ def fusion_list_detail_interaction(
             output,
             b"masc://fusion/fusion-target-501",
         )
-        panel = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\x1b[6~", b"panel-failure-second-501"
         )
-        panel_plain = CSI_RE.sub(b"", panel)
+        # The page lands over several frames -- the responses, then the judge
+        # section under them -- so the frame the first row arrives in does not
+        # hold the rest. Wait for the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        panel_plain = screen_text(bytes(output))
         for needle in (
             b"panel-answer-first-501",
             b"panel-failure-second-501",
@@ -11934,16 +12251,23 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )
-        if (
-            b"3  JUDGE" not in panel_plain
-            or b"judge-proof-501" not in panel_plain
-            or b"Judge topology: judge-of-judges" not in panel_plain
-            or b"First 1 [synthesized] ollama_cloud.minimax-m3" not in panel_plain
-            or b"First 2 [failed] ollama_cloud.deepseek-v4-pro" not in panel_plain
+        for needle in (
+            b"3  JUDGE",
+            b"judge-proof-501",
+            # The topology was a sentence ("Judge topology: judge-of-judges")
+            # and is now the row that draws it: the lens counts, then the
+            # shape they add up to.
+            "first ×2".encode(),
+            "meta ×1".encode(),
+            b"judge-of-judges",
+            b"First 1 [synthesized] ollama_cloud.minimax-m3",
+            b"First 2 [failed] ollama_cloud.deepseek-v4-pro",
         ):
-            raise AssertionError(
-                f"Fusion detail lost its judge section or lenses: {panel_plain!r}"
-            )
+            if needle not in panel_plain:
+                raise AssertionError(
+                    f"Fusion detail lost its judge section or lenses "
+                    f"({needle!r}): {panel_plain!r}"
+                )
         # The lens cards grew the detail past one page: the flow now ends on
         # the page after the panel one.
         tail = send_and_wait(
@@ -12659,6 +12983,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
     lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
     lanes_fixtures[
         "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
@@ -13228,6 +13553,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="Ctrl-C",
         interact=interrupt_with_ctrl_c,
         confirm_exit=b"\x03",
+    )
+    # No confirming key: the signal is the whole exit.
+    run_terminal_scenario(
+        executable,
+        description="SIGTERM",
+        interact=terminate_with_sigterm,
+        confirm_exit=b"",
     )
 
 
@@ -14349,28 +14681,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[
         "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
     ] = hitl_lane_run_detail_response()
-    fixtures[RUNTIME_CONFIG_RAW_PATH] = (
-        200,
-        {
-            **runtime_config_read_metadata(),
-            "path": "/workspace/config/runtime.toml",
-            "source_text": "\n".join(
-                [
-                    "[runtime.exact_output_lanes.board_attention_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.hitl_auto_judge]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.librarian_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                    "",
-                    "[runtime.exact_output_lanes.verifier_exact]",
-                    'slots = ["glm-coding.glm-5-turbo"]',
-                ]
-            ),
-        },
-    )
+    fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",
@@ -14644,6 +14955,75 @@ def msx_size_interaction(
 
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     os.write(master_fd, b"q")
+
+
+def run_msx_retained_regression(executable: str) -> None:
+    """Exercise retained Kitty pixels through the real TUI and private HTTP."""
+    number = [1]
+    changed = threading.Event()
+    original = msx_loaded_frame_fixture()[1]
+
+    def tick():
+        number[0] += 1
+        body = dict(original, number=number[0])
+        if changed.is_set():
+            body["rgb_base64"] = base64.b64encode(
+                bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
+            ).decode("ascii")
+        return 200, body
+
+    def interact(process, master, _slave, output, _base):
+        def footer_after(marker, start):
+            wait_for_output(process, master, output, marker, start=start, timeout=5.0)
+            marker_end = output.index(marker, start) + len(marker)
+            footer = b"F8: disk"
+            wait_for_output(process, master, output, footer,
+                            start=marker_end, timeout=5.0)
+            return output.index(footer, marker_end) + len(footer)
+
+        def key(value, needle):
+            start = len(output)
+            os.write(master, value)
+            wait_for_output(process, master, output, needle, start=start, timeout=5.0)
+            return bytes(output[start:])
+
+        key(b":go msx\r", b"watch split.rom")
+        first = key(b"\r", b"F6: save quick")
+        assert b"f=24" in first, "Kitty path was not negotiated"
+        start = len(output)
+        target = number[0] + 3
+        end = footer_after(f"frame {target} ".encode(), start)
+        steady = bytes(output[start:end])
+        assert b"f=24" not in steady, "unchanged pixels were retransmitted"
+        assert b"\x1b[2J" not in steady, "unchanged pixels erased the display"
+        assert b"a=d" not in steady, "unchanged pixels deleted the image"
+        start = len(output)
+        changed.set()
+        end = footer_after(b"i=32,p=1,C=1", start)
+        replacement = bytes(output[start:end])
+        assert b"f=24" in replacement, "changed pixels were not transmitted"
+        assert b"\x1b[2J" not in replacement, "replacement erased the display"
+        start = len(output)
+        os.write(master, b"-")
+        end = footer_after(b"+/-: 87%", start)
+        resized = bytes(output[start:end])
+        assert b"d=I,i=32" in resized, "resize retained the old placement"
+        assert b"f=24" in resized, "resize did not place pixels again"
+        exited = key(b"\x1b", b"MASC Overview")
+        assert b"d=I,i=32" in exited, "exit left the image behind"
+        key(b":go msx\r", b"watch split.rom")
+        reopened = key(b"\r", b"F6: save quick")
+        assert b"f=24" in reopened, "reopening reused a deleted image"
+        print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
+              f"replacement={len(replacement)} bytes", flush=True)
+        key(b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+
+    run_terminal_scenario(
+        executable, description="MSX retains Kitty pixels between live polls",
+        interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
+        http_fixtures={"/api/v1/msx/frame": (200, original), "/api/v1/msx/tick": tick},
+    )
 
 
 def run_msx_size_regression(executable: str) -> None:
@@ -14970,6 +15350,10 @@ def main() -> None:
         run_msx_spectator_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX spectator regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained":
+        run_msx_retained_regression(os.path.abspath(sys.argv[1]))
+        raise SystemExit(0)
+
     if len(sys.argv) == 3 and sys.argv[2] == "msx-size":
         run_msx_size_regression(os.path.abspath(sys.argv[1]))
         print("tui MSX size regression: PASS")

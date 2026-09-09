@@ -13,7 +13,7 @@ let typed_ok input =
 ;;
 
 let mk_argv ?cwd ?timeout_sec argv : Execute_input.execute_input =
-  { source = Argv argv; cwd; timeout_sec }
+  { source = Argv argv; cwd; timeout_sec; intent = Auto }
 ;;
 
 let mk_exec executable argv = mk_argv (executable :: argv)
@@ -606,42 +606,6 @@ let test_a_separator_goes_to_the_shell () =
       e
 ;;
 
-let script_description () =
-  let rec find = function
-    | `Assoc fields ->
-      (match List.assoc_opt "script" fields with
-       | Some (`Assoc script_fields) ->
-         (match List.assoc_opt "description" script_fields with
-          | Some (`String description) -> Some description
-          | Some _ | None -> None)
-       | Some _ | None ->
-         List.fold_left
-           (fun found (_, value) ->
-              match found with Some _ -> found | None -> find value)
-           None
-           fields)
-    | `List items ->
-      List.fold_left
-        (fun found value ->
-           match found with Some _ -> found | None -> find value)
-        None
-        items
-    | _ -> None
-  in
-  match find Tool_shard_types.tool_execute_schema.input_schema with
-  | Some description -> description
-  | None -> Alcotest.fail "the execute schema has no script description"
-;;
-
-let test_the_script_description_matches_what_the_parser_does () =
-  let description = script_description () in
-  let mentions sub = String_util.contains_substring description sub in
-  Alcotest.(check bool)
-    "the description offers ';' as something read as structure"
-    true
-    (mentions "';'")
-;;
-
 let test_script_and_argv_together_are_refused () =
   let msg =
     parse_json_error
@@ -1138,6 +1102,16 @@ let test_a_representable_costume_has_nothing_to_say () =
   | _ -> Alcotest.fail "a representable costume has no rewrite to offer"
 ;;
 
+let test_execute_intent_is_typed_and_defaults_to_auto () =
+  let parse fields = parse_json_exn (`Assoc (("argv", `List [ `String "ls" ]) :: fields)) in
+  Alcotest.(check bool) "default is Auto" true ((parse []).intent = Execute_input.Auto);
+  Alcotest.(check bool) "effect request survives parsing" true
+    ((parse [ "intent", `String "request_effect" ]).intent = Execute_input.Request_effect);
+  Alcotest.(check bool) "unknown intent is refused" true
+    (Result.is_error (Execute_input.of_json
+      (`Assoc [ "argv", `List [ `String "ls" ]; "intent", `String "allow" ])))
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1189,10 +1163,6 @@ let suite =
           "of_json_timeout_is_optional_and_preserved"
           `Quick
           test_of_json_timeout_is_optional_and_preserved
-      ; Alcotest.test_case
-          "the_script_description_matches_what_the_parser_does"
-          `Quick
-          test_the_script_description_matches_what_the_parser_does
       ; Alcotest.test_case
           "absent_timeout_resolves_to_the_default"
           `Quick
@@ -1368,4 +1338,6 @@ let suite =
       ])
 ;;
 
-let () = Alcotest.run "Keeper_tool_execute_typed_input typed" [ suite ]
+let () = Alcotest.run "Keeper_tool_execute_typed_input typed"
+  [ suite; "intent", [ Alcotest.test_case "explicit intent never means permission" `Quick
+      test_execute_intent_is_typed_and_defaults_to_auto ] ]

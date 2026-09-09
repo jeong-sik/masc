@@ -1,6 +1,15 @@
-(* The async request-control tools' schema and prose come from
-   config/tools/keeper_composition_{status,cancel}.toml, and the loaded schema
-   is byte-identical to the request-id schema they used to build inline. *)
+(* The async request-control tools are declared in
+   config/tools/keeper_composition_{status,cancel}.toml. Two things here have
+   a second producer to disagree with, and only those are checked: the loaded
+   input schema against the request-id shape these tools used to build inline,
+   and the tool names against Keeper_tool_composition_catalog.
+
+   The descriptions are not among them. They have one producer -- the TOML --
+   and the schema is read straight out of it, so a pinned copy of the prose
+   could only report that somebody edited the prose. It did exactly that:
+   #32741 split both sentences so the first fits the one line a deferred
+   tool's listing shows, which was the point of that PR, and the pin sat red
+   until this file was next read. *)
 
 (* Byte-identity holds because the two TOMLs omit a description on the
    request_id param; adding one would put a "description" in the property
@@ -29,15 +38,6 @@ let test_schemas_match_the_inline_form () =
     Tool_schemas_composition_control.cancel_schema.input_schema
 ;;
 
-let test_descriptions_are_the_authored_sentences () =
-  Alcotest.(check string) "status description"
-    "Read the exact durable status and structured result of one async Keeper composition request."
-    Tool_schemas_composition_control.status_schema.description;
-  Alcotest.(check string) "cancel description"
-    "Request cancellation of one async Keeper composition by its exact durable request id."
-    Tool_schemas_composition_control.cancel_schema.description
-;;
-
 let test_names_match_the_catalog () =
   Alcotest.(check string) "status name"
     Masc.Keeper_tool_composition_catalog.status_tool_name
@@ -53,8 +53,6 @@ let () =
     [ ( "toml"
       , [ Alcotest.test_case "schemas match the inline form" `Quick
             test_schemas_match_the_inline_form
-        ; Alcotest.test_case "descriptions are the authored sentences" `Quick
-            test_descriptions_are_the_authored_sentences
         ; Alcotest.test_case "names match the catalog" `Quick
             test_names_match_the_catalog
         ] )

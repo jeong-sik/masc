@@ -11,6 +11,11 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 상태를 MCP로 열어 어떤 MCP 클라이언트든 들어오게 하고, 전부를 터미널 UI로 보여
 줍니다.
 
+**개발 방향:** 맡긴 변경을 끝까지 확인하고, 끊기면 이미 적용된 결과를 확인해
+남은 작업을 이어갑니다. 이 보장을 유지하며 동시 작업 규모를 늘리는 것이 목표입니다.
+[완료·복구·규모 확장 로드맵](docs/RELIABLE-CHANGE-ROADMAP.md)에 측정 가능한 Goal과
+현재 구현된 부분, 앞으로 증명할 보장을 구분했습니다.
+
 하는 일은 셋입니다.
 
 - **에이전트가 같이 쓰는 상태.** 같은 체크아웃에서 에이전트 둘을 돌리면 각자
@@ -72,11 +77,16 @@ Claude Code, Codex, Antigravity 연결을 설정합니다. 새 연결은 입력�
 
 마법사가 보고하는 축은 둘입니다.
 
-- **모델 출처.** 설정된 API 공급자는
-  환경 변수 이름으로, 로컬 서버(Ollama, llama-server, MLX)는 헬스체크 경로를
-  찔러 `reachable`/`authentication required`/`unreachable`으로, 구독형 CLI(Claude Code, Codex,
-  Antigravity)는 `PATH`에 있으면 `installed`, 자체 로그인 확인을 통과하면
-  `signed in`으로 보여 줍니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
+- **모델 출처.** 시드된 `runtime.toml`에는 프로바이더 다섯이 들어 있습니다.
+  Ollama Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, 로컬 Ollama.
+  클라우드 프로바이더는 환경 변수 이름으로, 로컬 서버는 헬스체크 경로를 찔러
+  `reachable`/`authentication required`/`unreachable`로 보여 줍니다.
+  llama-server, vLLM, MLX 와 구독형 CLI(Claude Code, Codex, Antigravity)는 같은
+  파일에 주석 처리된 템플릿으로 있습니다. 주석을 풀면 마법사 목록에 오르고 CLI 는
+  `PATH`에 있으면 `installed`, 자체 로그인 확인을 통과하면 `signed in`으로
+  보입니다. 모델 바인딩이 둘 이상인 템플릿(Claude Code)은 그중 하나에
+  `wizard-default = true`를 달아야 하고, 없으면 마법사가 건너뜁니다. Anthropic 과
+  OpenAI 는 아직 시드 블록이 없습니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
 - **실행 샌드박스.** `docker`, `microvm`, `remote_ssh` 중 이 컴퓨터가 줄 수
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.
@@ -87,7 +97,7 @@ Claude Code, Codex, Antigravity 연결을 설정합니다. 새 연결은 입력�
 자동 설치합니다. Homebrew가 없으면 대화형 터미널에서 공식 설치 절차를
 시작하며, 비대화형 설치는 Homebrew를 미리 준비해야 합니다. Apple Silicon은
 macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
-첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.md)에 정리했습니다.
+첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.ko.md)에 정리했습니다.
 
 ### 소스에서
 
@@ -135,7 +145,7 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | `masc` | 터미널에서는 TUI를 엽니다. 포트에 아무도 없으면 서버부터 띄웁니다. 터미널이 아닌 곳(파이프, 유닛 파일, 컨테이너, CI)에서는 서버가 뜹니다 |
 | `masc start --base-path <dir>` | 터미널이든 아니든 서버를 띄웁니다 |
 | `masc-tui --base-path <dir>` | TUI를 이름으로 엽니다 |
-| `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. `keepers/`는 비워 둡니다 |
+| `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. Keeper `imp` 하나가 `autoboot_enabled = false`로 들어갑니다 |
 
 `--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 없으면
 `MASC_BASE_PATH`, 그다음 현재 디렉터리를 씁니다. 실행 상태는
@@ -292,14 +302,16 @@ Goal은 주인이 따로 없는, 같이 갖는 목표입니다. `masc_goal_upser
 
 Keeper는 `<base-path>/.masc/config/keepers/` 아래 TOML 파일 하나입니다.
 서버가 띄우고, 보드 멘션·타이머·미배정 작업에 깨우고, 턴마다 샌드박스에서
-돌리고, Keeper가 쉬기 전에 그 턴의 기록을 `.masc/` 아래에 씁니다. 선언하기
-전에는 아무것도 없습니다. 설치 스크립트도 `masc init`도 서버도 `keepers/`를
-비워 둡니다.
+돌리고, Keeper가 쉬기 전에 그 턴의 기록을 `.masc/` 아래에 씁니다. 새 루트에는
+Keeper `imp` 하나가 들어 있습니다. 설치 스크립트도 `masc init`도 서버도
+바이너리의 `keepers-default/`에서 그 하나를 시드합니다. `autoboot_enabled =
+false`로 들어오므로 모델과 샌드박스를 갖추고 직접 시작하거나 autoboot 을 켜기
+전에는 아무것도 돌지 않습니다. 공개된 v0.34.0 바이너리는 이 시드보다 앞서
+만들어져 `keepers/`를 비워 둡니다.
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"
@@ -367,7 +379,7 @@ Discord, iMessage, Slack은 서버 안에서 돌고, 토큰이 서버 환경에 
 |---|---|---|
 | `apple_container` | `container` | 돕니다. macOS의 기본값이고, `network_mode = "policy"`를 실을 수 있는 유일한 백엔드 |
 | `microsandbox` | `msb` | 배선은 됐고 부팅은 안 됩니다. 게스트를 구분하지 못해 Keeper가 `microvm_container_listing_failed`에서 멈춥니다 |
-| `nerdctl_kata` | `nerdctl` | 시험 안 했습니다. CLI가 없으면 이름을 대고 거부합니다 |
+| `nerdctl_kata` | `nerdctl` | Linux x64 에서 `Kata volume smoke` 워크플로로 한 번 확인했습니다(run 34194081312, 2026-09-08). Keeper 가 Kata 게스트 안에서 실행되고 작업 볼륨이 게스트 재생성 뒤에도 남습니다. 릴리즈 게이트에는 없고 macOS 에서는 재지 않았습니다. CLI가 없으면 이름을 대고 거부합니다 |
 
 CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에서 거부합니다. macOS가
 아닌 호스트에서는 백엔드를 직접 적어야 합니다.
@@ -404,7 +416,7 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 커밋과 파일 체크섬을 검증합니다. 사용하려고 Node.js나 소스를 설치하거나
 프론트엔드를 빌드할 필요가 없습니다. 이미 실행 중인 서버는 재시작할 때 새
 번들을 사용합니다. [배포 구조](docs/design/installed-dashboard-distribution.md)와
-[설치 가이드](docs/INSTALL.md)를 참고하세요. 이전 태그는 해당 태그의 설치
+[설치 가이드](docs/INSTALL.ko.md)를 참고하세요. 이전 태그는 해당 태그의 설치
 스크립트를 사용합니다.
 
 대시보드는 TUI가 읽는 상태를 그대로 읽고, TUI에 없는 화면 둘(실험적인 IDE

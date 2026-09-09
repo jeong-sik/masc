@@ -23,7 +23,7 @@ function run(overrides: Partial<FusionRunRecord> & { runId: string; keeper: stri
     runId,
     keeper,
     preset: 'trio',
-    topology: null,
+    topology: 'simple',
     startedAt: 1_788_503_280,
     status: 'completed',
     ...rest,

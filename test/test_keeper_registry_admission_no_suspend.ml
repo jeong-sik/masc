@@ -43,7 +43,7 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "autoboot_enabled", `Bool false
+        ; "activation_mode", `String "manual"
         ])
   with
   | Ok m -> m

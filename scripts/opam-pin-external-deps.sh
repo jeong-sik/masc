@@ -93,9 +93,10 @@ readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
-# bdd56b0 = ocaml-msx #15: VRAM read prefetch (Sangokushi II code restore),
-# native SCREEN5-8 frames, physical bank interleaving and bitmap commands.
-readonly OCAML_MSX_SHA="bdd56b068faa644404697c39a2bc89d86f6fa5b0"
+# 4e2799a = ocaml-msx #21: slot-aware disk BIOS dispatch and random reads;
+# retains DOS save-file writes, disk swapping and machine snapshots.
+# 27706b9 adds Backspace matrix input and replay support (ocaml-msx #25).
+readonly OCAML_MSX_SHA="27706b93cd182670b48d0988f65c2d793ee07098"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

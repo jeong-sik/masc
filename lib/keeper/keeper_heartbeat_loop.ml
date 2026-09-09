@@ -405,6 +405,46 @@ let batch_disposition_records_continuation = function
   | Batch_no_action -> false
 ;;
 
+type continuation_settlement =
+  | Continuation_settled_recorded
+  | Continuation_settled_failed of
+      { route : Keeper_runtime_failure_route.route }
+  | Continuation_unsettled
+
+(* How a turn's outcome settles the HITL continuation it was handed. A
+   completed or checkpointed turn records it, through the batch disposition
+   above. A failed turn settles it only when the provider answered the
+   request that carried the replay evidence: the model saw the evidence and
+   what failed came after it (#32956: with no receipt from a failed turn the
+   same approval was re-delivered for 24 turns, each ending at MaxTokens). A
+   failure before any answer leaves the continuation unsettled so the
+   evidence reaches a fresh turn. The queue disposition of a failed turn is
+   unchanged: [Batch_no_action]. *)
+let continuation_settlement_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : continuation_settlement
+  =
+  match cycle_outcome with
+  | Some (Cycle.Failed { failure; meta = _ }) ->
+    if
+      Keeper_runtime_failure_route.response_observed
+        failure.Keeper_unified_turn.route
+    then Continuation_settled_failed { route = failure.Keeper_unified_turn.route }
+    else Continuation_unsettled
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    if
+      batch_disposition_records_continuation
+        (batch_disposition_of_cycle_outcome cycle_outcome)
+    then Continuation_settled_recorded
+    else Continuation_unsettled
+;;
+
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -879,11 +919,11 @@ let run_keepalive_unified_turn
       let disposition =
         batch_disposition_of_cycle_outcome !cycle_outcome_ref
       in
-      let disposition_records_continuation =
-        batch_disposition_records_continuation disposition
-      in
-      (match disposition_records_continuation, !hitl_resolution_for_cycle with
-       | true, Some resolution ->
+      (match
+         ( continuation_settlement_of_cycle_outcome !cycle_outcome_ref
+         , !hitl_resolution_for_cycle )
+       with
+       | Continuation_settled_recorded, Some resolution ->
          (match
             Keeper_approval_queue.ensure_settled_continuation_chat_projection
               ~base_path:ctx.config.base_path
@@ -897,7 +937,33 @@ let run_keepalive_unified_turn
             hitl_continuation_projection_ok := false;
             record_event_queue_failure
               ("approval continuation projection failed: " ^ detail))
-       | false, _ | true, None -> ());
+       | Continuation_settled_failed { route }, Some resolution ->
+         (* The failed turn keeps [Batch_no_action] below: only the
+            continuation slot is settled, and the intake retires the queued
+            wake when it reaches it. A grant this turn never spent stays
+            unsettled ([Continuation_projection_not_ready]): the model was not
+            shown its outcome, so the wake is kept. *)
+         (match
+            Keeper_approval_queue.ensure_failed_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+              ~route
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
+          | Error detail ->
+            (* [record_event_queue_failure] keeps no message after a failed
+               turn, so the detail is logged here. *)
+            Log.Keeper.warn
+              ~keeper_name:meta_after_triage.name
+              "approval continuation failure projection failed: %s"
+              detail;
+            record_event_queue_failure
+              ("approval continuation failure projection failed: " ^ detail))
+       | Continuation_unsettled, _
+       | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
+         ());
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
        | Some

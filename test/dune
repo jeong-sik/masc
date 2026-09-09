@@ -1,3 +1,8 @@
+(test
+ (name test_completion_repair_delivery)
+ (modules test_completion_repair_delivery)
+ (libraries masc_test_deps))
+
 ; Run the actual generator comparison through targeted Test CI.
 (rule
  (alias runtest-tool-parity-goldens)
@@ -7,6 +12,12 @@
 ; Test Environment Configuration
 
 (test
+ (name test_msx_vision)
+ (modules test_msx_vision)
+ (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps
+   masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))
@@ -14,7 +25,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.runtime masc.server masc.tool_types yojson))
+ (libraries alcotest masc masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -998,11 +1009,11 @@
  (modules test_keeper_create_admission_transaction)
  (libraries masc_test_deps))
 
-; Extracted from the big (tests ...) group above: most fixtures declare
-; sandbox_profile = "local" (or carry no profile source, which resolves to the
-; persisted-meta placeholder Local) because the sandbox is incidental to the
-; overlay/status semantics under test — and config load now rejects Local
-; fail-closed without the hatch.
+; Extracted from the big (tests ...) group above: the sandbox is incidental to
+; the overlay and status semantics under test, so the fixtures declare a
+; loadable profile only because config load requires one. Two cases are about
+; the persisted-meta placeholder itself and read it from
+; Masc_test_deps.fixture_sandbox_profile rather than naming a value.
 (test
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)
@@ -3664,7 +3675,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table))
+ (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -3701,6 +3712,15 @@
  (name runtest)
  (deps (alias runtest-test_tui_metrics_source_status)))
 
+(rule
+ (alias runtest-test_tui_snapshot_response_order)
+ (deps test_tui_snapshot_response_order.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_snapshot_response_order.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_snapshot_response_order)))
+
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
@@ -3724,6 +3744,13 @@
  (name test_tui_esc_interrupt)
  (modules test_tui_esc_interrupt)
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_exit_signals)
+ (modules test_tui_exit_signals)
+ ; unix so one case delivers a real SIGTERM to the test process and reads it
+ ; back the way the loop does.
+ (libraries alcotest masc_tui_exit_signals unix))
 
 (test
  (name test_tui_retained_view)
@@ -3927,6 +3954,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-msx-spectator)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-msx-retained)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} msx-retained)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-msx-retained)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-size)
@@ -4294,6 +4331,18 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_response_latency_probe)))
+
+(rule
+ (alias runtest-test_tool_trace_spans)
+ (deps
+  test_tool_trace_spans.py
+  ../scripts/harness/perf/tool_trace_spans.py)
+ (action
+  (run python3 %{dep:test_tool_trace_spans.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tool_trace_spans)))
 
 (alias
  (name runtest)
@@ -4665,7 +4714,7 @@
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
-(include stanzas/test_connector_names.inc)
+(include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -4687,6 +4736,11 @@
 (test
  (name test_code_address)
  (modules test_code_address)
+ (libraries alcotest masc_agent_observation))
+
+(test
+ (name test_remote_url_syntax)
+ (modules test_remote_url_syntax)
  (libraries alcotest masc_agent_observation))
 
 (test
@@ -5000,7 +5054,7 @@
 (test
  (name test_keeper_tool_execute_observe)
  (modules test_keeper_tool_execute_observe)
- (libraries masc_test_deps))
+ (libraries masc_test_deps exec_ssh_protocol))
 
 (test
  (name test_keeper_execute_shim_evidence)
@@ -5246,4 +5300,78 @@
  (name runtest)
  (deps (alias runtest-test_tui_lane_pagination)))
 
+(include stanzas/test_tempo_coverage.inc)
 (include stanzas/test_keeper_periodic_wake.inc)
+
+(test
+ (name test_standalone_skill_tools)
+ (modules test_standalone_skill_tools)
+ (libraries masc_test_deps masc.skill_reference masc.skill_snapshot
+  masc.skill_snapshot_service))
+(rule
+ (alias runtest-test_tui_tools_poll_continuity)
+ (deps test_tui_tools_poll_continuity.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_tools_poll_continuity.py}
+   %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_tools_poll_continuity)))
+
+(rule
+ (alias runtest-test_tui_lane_payload_availability)
+ (deps test_tui_lane_payload_availability.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_lane_payload_availability.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_lane_payload_availability)))
+
+(rule
+ (alias runtest-test_tui_lane_detail_owner)
+ (deps test_tui_lane_detail_owner.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_lane_detail_owner.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_lane_detail_owner)))
+
+(rule
+ (alias runtest-test_tui_goal_source_availability)
+ (deps test_tui_goal_source_availability.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_goal_source_availability.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_goal_source_availability)))
+
+(rule
+ (alias runtest-test_tui_goal_proof_identity)
+ (deps test_tui_goal_proof_identity.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_goal_proof_identity.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_goal_proof_identity)))
+
+(test
+ (name test_dashboard_task_detail)
+ (modules test_dashboard_task_detail)
+ (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))
+
+(test
+ (name test_dashboard_task_search_text)
+ (modules test_dashboard_task_search_text)
+ (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))
+
+(test
+ (name test_dashboard_task_preview)
+ (modules test_dashboard_task_preview)
+ (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
+
+(include stanzas/test_h2_json_worker.inc)

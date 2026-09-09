@@ -295,8 +295,16 @@ let repeated_tool_call_input ~threshold tool_calls =
     else None
 ;;
 
-let direct_repetition_boundary ~execution ~tool_calls =
-  match Keeper_repetition_scope.Execution.failure execution with
+(* The official-client host calls this after every settled dynamic tool call,
+   on Direct and Autonomous turns alike, and skips its own exact-adjacent
+   counter while it is installed. The observations come from the turn
+   accumulator: the post_tool_use hook fills it on every lane, and setup
+   seeds it from the transcript when no execution scope was admitted -- the
+   same reading [native_tool_boundary] makes for AGENT_CORE. An admitted
+   scope contributes only its latched observation failure; it is not what
+   makes the boundary exist (#34083). *)
+let official_client_tool_boundary ~repetition_execution ~tool_calls =
+  match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   | None ->
@@ -666,7 +674,7 @@ let native_tool_boundary
 module For_testing = struct
   let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
-  let direct_repetition_boundary = direct_repetition_boundary
+  let official_client_tool_boundary = official_client_tool_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
@@ -1270,11 +1278,9 @@ let run_turn
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        let turn_result =
-         let on_official_client_tool_boundary =
-           Option.map (fun execution () ->
-             direct_repetition_boundary ~execution
-               ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc))
-             repetition_execution
+         let on_official_client_tool_boundary () =
+           official_client_tool_boundary ~repetition_execution
+             ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
          in
          let cooperative_yield_probe =
            Some
@@ -1394,7 +1400,7 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
-                      ?on_official_client_tool_boundary
+                      ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus
                       ?trace_link

@@ -1457,7 +1457,7 @@ let add_routes ~sw ~clock router =
               reqd)
          request
          reqd)
-  (* Paged, and without detail payloads. [lane=] filters BEFORE pagination so
+  (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response
      246 MB for 5,908 runs; [exact-lane-runs/<run_id>] carries the exact prompt
@@ -1487,12 +1487,20 @@ let add_routes ~sw ~clock router =
              (Server_utils.query_param req "lane" |> Option.map String.trim)
              (fun value -> if String.equal value "" then None else Some value)
          in
-         match before with
-         | Error message -> respond_dashboard_error ~request:req reqd message
-         | Ok before ->
+         let run_kind =
+           match Server_utils.query_param req "run_kind" with
+           | None -> Ok None
+           | Some value ->
+             Server_standalone_lane_projection.run_kind_of_string value
+             |> Result.map Option.some
+         in
+         match before, run_kind with
+         | Error message, _ | _, Error message ->
+           respond_dashboard_error ~request:req reqd message
+         | Ok before, Ok run_kind ->
            (match
               Server_standalone_lane_projection.recent_run_page_json
-                ~limit ~before ~lane
+                ~limit ~before ~lane ~run_kind
             with
             | Error message ->
               respond_dashboard_error ~request:req reqd message
@@ -2617,7 +2625,7 @@ let add_routes ~sw ~clock router =
           just the auth + transport wrapper. *)
        with_public_read (fun state req reqd ->
          let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2654,6 +2662,25 @@ let add_routes ~sw ~clock router =
                    ~config:(Mcp_server.workspace_config state) ~goal_id))
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/search-text" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Server_dashboard_task_search_text.read ~config)
+           |> Server_dashboard_task_search_text.response in
+         Http.Response.json_value ~status:(status :> Httpun.Status.t)
+           ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/detail" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let task_id = Server_utils.query_param req "task_id" in
+         let config = Mcp_server.workspace_config state in
+         let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Server_dashboard_task_detail.read ~config ~task_id)
+           |> Server_dashboard_task_detail.response in
+         Http.Response.json_value ~status:(status :> Httpun.Status.t)
+           ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->

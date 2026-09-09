@@ -1,4 +1,5 @@
-import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
+import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
+import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type {
   BoardMonitoring,
   KeeperApprovalQueueState,
@@ -141,7 +142,7 @@ export interface DashboardFleetSafetyHealth {
 
 export interface DashboardPausedKeeperDetail {
   name: string
-  autoboot_enabled: boolean | null
+  activation_mode: KeeperActivationMode | null
   pause_kind: string | null
   paused_elapsed_sec: number | null
   missing_pause_root_cause: boolean | null
@@ -657,6 +658,7 @@ export interface GoalTreeNode extends
   GoalTreeTimestamps {
   id: string
   title: string
+  verification?: GoalProof
   children: GoalTreeNode[]
   child_count: number
 }

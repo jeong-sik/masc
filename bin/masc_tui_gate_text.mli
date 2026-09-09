@@ -18,8 +18,9 @@ val fold_line :
 (** One line for a run of steps belonging to the same approval. The run
     collapses to the furthest stage it reached -- replay outcome, else Gate
     resolution, else still waiting -- and within a stage the latest step wins,
-    so a replay correction supersedes the row it corrects.
-    [Approval_continuation_recorded] rides as a suffix because it says
+    so a replay correction supersedes the row it corrects. A continuation
+    phase ([Approval_continuation_recorded] or
+    [Approval_continuation_failed]) rides as a suffix because it says
     something no outcome says. [None] for an empty run. *)
 
 type folded_argument =

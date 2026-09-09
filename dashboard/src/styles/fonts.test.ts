@@ -26,28 +26,32 @@ describe('keeper-v2 brand assets', () => {
     expect(css).not.toMatch(/url\((?!'\/dashboard)/)
   })
 
-  // A face declares a weight and points at a file. The browser trusts the
-  // declaration: asked for 600 it answers "there is a 600 face" and draws
-  // whatever outlines that file holds. So two weights pointing at the same
-  // bytes is a face that lies, and the CSS text cannot show it -- the two
-  // urls differ, only the files behind them do not.
-  //
-  // Four such runs are here today: EBGaramond 400=600 in both subsets, and
-  // JetBrainsMono 400=500=700 in both. Eight files, four distinct blobs,
-  // five declared weights. They are listed rather than failed because the
-  // repository holds no true 600 or 700 to swap in, and dropping the faces
-  // moves the text onto synthetic bold -- a look, not a bug fix. #33209
-  // carries the serif and now the mono.
+  // The EB Garamond and JetBrains Mono upright files are variable fonts (an
+  // fvar table with a 400-800 weight axis, one file per subset), so the face
+  // is declared once with a weight range and the browser draws 600 from the
+  // same bytes it draws 400 from. #33209 read the identical 400/600 and
+  // 400/500/700 files as faces that lie. They did not lie: a single-weight
+  // descriptor over a variable file still renders that weight from the axis.
+  // The old declarations were duplicates, one file shipped three times
+  // under three faces, and this file no longer does that.
+  it('declares each upright variable face once, with its weight range', () => {
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
+      .map(m => m[1])
+      .filter((body): body is string => body !== undefined)
+    const upright = faces.filter(
+      face => /font-style:\s*normal/.test(face) && /font-family:\s*'(EB Garamond|JetBrains Mono)'/.test(face),
+    )
+    expect(upright).toHaveLength(4)
+    for (const face of upright) {
+      expect(face).toMatch(/font-weight:\s*[1-9]00\s+[1-9]00;/)
+    }
+  })
+
+  // Two faces of different weights pointing at the same bytes would be a face
+  // that lies: the browser trusts the declaration and draws whatever the file
+  // holds. With the ranged declarations above no such pair may remain.
   it('gives each declared weight its own outlines', () => {
-    const known = new Set([
-      'EBGaramond-400-latin.woff2=EBGaramond-600-latin.woff2', // #33209
-      'EBGaramond-400-latinext.woff2=EBGaramond-600-latinext.woff2', // #33209
-      // #33209 counted the serif. The mono is worse: three weights, one file,
-      // in both subsets. Every weight of the code font draws the same
-      // outlines, so bold code is regular code.
-      'JetBrainsMono-400-latin.woff2=JetBrainsMono-500-latin.woff2=JetBrainsMono-700-latin.woff2',
-      'JetBrainsMono-400-latinext.woff2=JetBrainsMono-500-latinext.woff2=JetBrainsMono-700-latinext.woff2',
-    ])
+    const known = new Set<string>()
     const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
       .map(m => m[1])
       .filter((body): body is string => body !== undefined)

@@ -71,9 +71,36 @@ let make_meta name =
   | Error error -> fail ("meta_of_json failed: " ^ error)
 ;;
 
+(* A keeper is two files. The snapshot holds runtime state; the TOML holds
+   what config owns, and since #32078 that includes a sandbox_profile no
+   keeper has an effective meta without. A keeper seeded as a snapshot alone
+   reads back as Error, and the list publishes keeper_list_error_row_json --
+   a row with no phase and no health, which is what the axis cases below saw.
+
+   The directory comes from the resolver rather than being spelled here,
+   because where a keeper's TOML lives is its answer. *)
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir)
+  then (
+    mkdir_p (Filename.dirname dir);
+    if not (Sys.file_exists dir) then Sys.mkdir dir 0o755)
+;;
+
+let write_keeper_toml ~base_path name =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  mkdir_p keepers_dir;
+  Out_channel.with_open_bin
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    (fun oc ->
+      output_string
+        oc
+        "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"keeper list fixture\"\n")
+;;
+
 let seed_keepers config names =
   List.iter
     (fun name ->
+      write_keeper_toml ~base_path:config.Workspace.base_path name;
       match Keeper_meta_store.replace_snapshot config (make_meta name) with
       | Ok () -> ()
       | Error error -> failf "replace_snapshot %s failed: %s" name error)

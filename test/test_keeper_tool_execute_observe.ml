@@ -12,6 +12,32 @@ let boxed () =
   Target.Boxed { target = Masc_exec.Sandbox_target.host (); run = observe_run }
 ;;
 
+let trailer_of_status status : Exec_ssh_protocol.trailer =
+  let exit, signal = match status with
+    | Unix.WEXITED code -> Some code, None
+    | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> None, Some signal in
+  { v = Exec_ssh_protocol.newest; exit; signal; timed_out = false; shim_error = None }
+;;
+
+(* These Gate/dispatch tests use a controlled receipt fixture. The actual
+   Linux boundary is exercised by test_exec_shim_observe. *)
+let create_stage ~route ~dispatch =
+  let evidence = ref [] in
+  Stage.create ~route ~execution_evidence:(fun () -> !evidence)
+    ~dispatch:(fun target ->
+      let result = dispatch target in
+      (match route (), result with
+       | Target.Boxed { run; _ }, Ok result ->
+           let mode = match run with
+             | Keeper_types_profile_sandbox.Observe -> Exec_ssh_protocol.Observe
+             | Keeper_types_profile_sandbox.Guest_local -> Exec_ssh_protocol.Guest_local in
+           evidence := [ Masc.Keeper_sandbox_remote.Execution_observed
+             ({ mode; boundary = Exec_ssh_protocol.Sandbox_applied },
+              trailer_of_status result.Masc_exec.Exec_dispatch.status) ]
+       | _ -> ());
+      result)
+;;
+
 let process_result status =
   { Masc_exec.Exec_dispatch.status; stdout = "out"; stderr = "err"; output_files = None }
 ;;
@@ -37,14 +63,14 @@ let observation = testable (fun fmt o -> Format.pp_print_string fmt (observation
 (* Exit 0 is clean, and the result is kept for the caller: the gate that
    allows on it must not run the call again. *)
 let test_a_clean_run_is_kept_for_the_caller () =
-  let stage = Stage.create ~route:boxed ~dispatch:(fun _ -> result (Unix.WEXITED 0)) in
+  let stage = create_stage ~route:boxed ~dispatch:(fun _ -> result (Unix.WEXITED 0)) in
   check observation "clean, and it says which box"
     (Gate.Observed_result { run = observe_run; result = process_result (Unix.WEXITED 0) })
     (Stage.observe stage ());
   (* The box the route named is the box the gate is told about: a guest_local
      route answers guest_local, so the audit row can say so. *)
   let local =
-    Stage.create
+    create_stage
       ~route:(fun () ->
         Target.Boxed
           { target = Masc_exec.Sandbox_target.host ()
@@ -64,29 +90,32 @@ let test_a_clean_run_is_kept_for_the_caller () =
   | _ -> fail "a clean run left nothing for the caller"
 ;;
 
-(* Other Observe statuses are refused with the stderr the box wrote,
-   and nothing is kept: there is no result to return without the judge. *)
-let test_a_non_zero_run_is_refused_with_its_stderr () =
-  let stage = Stage.create ~route:boxed ~dispatch:(fun _ -> result (Unix.WEXITED 2)) in
-  check observation "refused"
-    (Gate.Observed_refused { status = Unix.WEXITED 2; stderr = "err" })
-    (Stage.observe stage ());
-  (* The refusal is readable afterwards, so the deferred receipt can tell the
-     keeper what the box refused. *)
-  check (option observation) "the outcome is remembered"
-    (Some (Gate.Observed_refused { status = Unix.WEXITED 2; stderr = "err" }))
-    (Stage.outcome stage);
-  let signalled = Stage.create ~route:boxed ~dispatch:(fun _ -> result (Unix.WSIGNALED 15)) in
-  check observation "a signal is refused too"
-    (Gate.Observed_refused { status = Unix.WSIGNALED 15; stderr = "err" })
-    (Stage.observe signalled ())
+let test_a_non_zero_run_is_returned_with_its_stderr () =
+  List.iter (fun status ->
+    let stage = create_stage ~route:boxed ~dispatch:(fun _ -> result status) in
+    let expected = Gate.Observed_result { run = observe_run; result = process_result status } in
+    check observation "actual status and outputs survive" expected (Stage.observe stage ());
+    check (option observation) "settled output remains available" (Some expected) (Stage.outcome stage))
+    [ Unix.WEXITED 1; Unix.WEXITED 2; Unix.WEXITED 127; Unix.WSIGNALED 15 ]
+;;
+
+let test_missing_or_refused_box_receipt_is_not_payload_evidence () =
+  List.iter (fun evidence ->
+    let stage = Stage.create ~route:boxed ~execution_evidence:(fun () -> evidence)
+      ~dispatch:(fun _ -> result (Unix.WEXITED 0)) in
+    match Stage.observe stage () with
+    | Gate.Observation_unavailable _ | Gate.Observed_refused _ -> ()
+    | _ -> fail "an unacknowledged box was accepted as a restricted payload result")
+    [ []; [ Masc.Keeper_sandbox_remote.Execution_observed
+        ({ mode = Exec_ssh_protocol.Observe; boundary = Exec_ssh_protocol.Setup_failed },
+         trailer_of_status (Unix.WEXITED 127)) ] ]
 ;;
 
 (* No box means no dispatch: the reason travels, the fake dispatch is never
    reached. *)
 let test_no_box_is_unavailable_without_dispatching () =
   let stage =
-    Stage.create
+    create_stage
       ~route:(fun () -> Target.No_box "docker_observe_unsupported: no shim")
       ~dispatch:(fun _ -> fail "dispatched with no box")
   in
@@ -99,13 +128,13 @@ let test_no_box_is_unavailable_without_dispatching () =
    under the gate's own closed tag, never read as clean or refused. *)
 let test_a_refused_dispatch_is_unavailable_under_its_tag () =
   let stage =
-    Stage.create
+    create_stage
       ~route:boxed
       ~dispatch:(fun _ -> Error (Keeper_tooling.Execute_shell_ir.Gate_reject "x"))
   in
   check observation "gate_reject" (Gate.Observation_unavailable "gate_reject") (Stage.observe stage ());
   let path =
-    Stage.create
+    create_stage
       ~route:boxed
       ~dispatch:(fun _ -> Error (Keeper_tooling.Execute_shell_ir.Path_reject "y"))
   in
@@ -158,7 +187,8 @@ let execute_through_gate
       ?(observed_secret_files = fun () -> [])
       ?(prepare_secret_files = fun () -> Ok [])
       ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh)
-      ?base_host_env
+      ?(intent = Masc.Keeper_tool_execute_typed_input.Auto)
+      ?base_host_env ?cycle_grant
       ~run ~argv base_path =
   let dispatch_count = ref 0 in
   let dispatch target =
@@ -181,11 +211,12 @@ let execute_through_gate
       ~workdir:base_path ~sandbox:target ?base_host_env ir
   in
   let target = Masc_exec.Sandbox_target.host () in
-  let stage = Stage.create ~route:(fun () -> Target.Boxed { target; run }) ~dispatch in
+  let stage = create_stage ~route:(fun () -> Target.Boxed { target; run }) ~dispatch in
   let request : Gate.request =
     { keeper_name = "settlement"
     ; operation = "tool_execute"
-    ; input = `Assoc [ "input", `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] ]
+    ; input = `Assoc [ "input", `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv)
+          ; "intent", `String (match intent with Masc.Keeper_tool_execute_typed_input.Auto -> "auto" | Request_effect -> "request_effect") ] ]
     ; call_summary = None
     ; base_path
     ; causal_context = None
@@ -194,7 +225,7 @@ let execute_through_gate
     ; sandbox_profile = Some sandbox_profile
     }
   in
-  let decision = Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
+  let decision = Gate.decide ~intent ?cycle_grant ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
   let chunks = ref [] in
   let result =
     match decision with
@@ -269,23 +300,97 @@ let test_successful_boxed_results_are_not_reexecuted () =
     [ Keeper_types_profile_sandbox.Observe; Keeper_types_profile_sandbox.Guest_local ]
 ;;
 
-let test_observe_failure_still_reaches_the_judge () =
+let test_explicit_effect_request_enters_gate_without_observe_or_write () =
+  with_execution_workspace @@ fun base_path ->
+  let decision, result, count, pending, chunks = execute_through_gate
+    ~intent:Masc.Keeper_tool_execute_typed_input.Request_effect
+    ~run:Keeper_types_profile_sandbox.Observe
+    ~argv:[ "sh"; "-c"; "printf changed > requested-effect.txt" ] base_path in
+  check int "no Observe or effect before permission" 0 count;
+  check bool "effect file absent" false (Sys.file_exists (Filename.concat base_path "requested-effect.txt"));
+  check int "durable permission request" 1 pending;
+  check bool "no fabricated result" true (result = None && chunks = []);
+  match decision with Gate.Deferred _ -> () | _ -> fail "effect intent authorized itself"
+;;
+
+let test_approved_effect_replay_consumes_one_exact_grant () =
+  with_execution_workspace @@ fun base_path ->
+  let module AQ = Masc.Keeper_approval_queue in
+  (* Approval delivery requires an existing Keeper recipient. *)
+  let recipient = `Assoc
+    [ "name", `String "settlement"; "trace_id", `String "trace-settlement" ] in
+  (match Masc_test_deps.meta_of_json_fixture recipient with
+   | Error detail -> fail detail
+   | Ok meta ->
+       match Masc.Keeper_meta_store.replace_snapshot
+           (Masc.Workspace.default_config base_path) meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+  let intent = Masc.Keeper_tool_execute_typed_input.Request_effect in
+  let argv = [ "sh"; "-c"; "printf x >> approved-effect.txt" ] in
+  let first, _, _, _, _ = execute_through_gate ~intent ~run:observe_run ~argv base_path in
+  let approval_id = match first with Gate.Deferred { approval_id; _ } -> approval_id
+    | _ -> fail "effect request should await authorization" in
+  (match AQ.resolve_with_policy ~base_path ~id:approval_id
+      ~decision:Keeper_approval_queue_rules_types.Decision.Approve () with
+   | Ok _ -> () | Error error -> fail (AQ.resolve_error_to_string error));
+  let queue = match Masc.Keeper_registry_event_queue.snapshot_result ~base_path "settlement" with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let grant = Keeper_event_queue.to_list queue |> List.find_map
+    (fun (stimulus : Keeper_event_queue.stimulus) -> match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution when resolution.approval_id = approval_id ->
+          Gate.cycle_grant_of_resolution resolution
+      | _ -> None)
+    |> function
+    | Some grant -> grant
+    | None -> fail "approved request did not deliver its exact replay grant to the Keeper" in
+  let decision, result, count, _, _ = execute_through_gate ~intent ~cycle_grant:grant
+    ~run:observe_run ~argv base_path in
+  check int "approved effect dispatches once" 1 count;
+  check bool "approved effect returns output" true (Option.is_some result);
+  (match decision with Gate.Allow { source = Gate.One_shot_resolution id; _ } ->
+      check string "same approval owns the effect" approval_id id
+    | _ -> fail "explicit effect bypassed one-shot authority");
+  let _, repeated, repeat_count, _, _ = execute_through_gate ~intent ~cycle_grant:grant
+    ~run:observe_run ~argv base_path in
+  check int "consumed approval cannot replay effect" 0 repeat_count;
+  check bool "second delivery awaits its own permission" true (Option.is_none repeated);
+  let path = Filename.concat base_path "approved-effect.txt" in
+  check string "side effect happened exactly once" "x" (Fs_compat.load_file path)
+;;
+
+let test_git_diff_nonzero_is_a_result_without_judge () =
+  with_execution_workspace @@ fun base_path ->
+  let write name text = let oc = open_out (Filename.concat base_path name) in output_string oc text; close_out oc in
+  write "before.txt" "before\n";
+  write "after.txt" "after\n";
+  List.iter (fun (right, expected) ->
+    let _, result, count, pending, _ = execute_through_gate ~run:Keeper_types_profile_sandbox.Observe
+      ~argv:[ "git"; "diff"; "--no-index"; "--no-ext-diff"; "--no-textconv";
+              "--exit-code"; "before.txt"; right ] base_path in
+    check int "one restricted dispatch" 1 count;
+    check int "diff does not wait for a Judge" 0 pending;
+    match result with
+    | Some result -> check bool "diff keeps actual exit" true (result.status = Unix.WEXITED expected)
+    | None -> fail "diff output was hidden behind a permission request")
+    [ "before.txt", 0; "after.txt", 1 ]
+;;
+
+let test_observe_failure_returns_without_effect_authorization () =
   with_execution_workspace @@ fun base_path ->
   let decision, result, count, pending, chunks =
     execute_through_gate ~run:Keeper_types_profile_sandbox.Observe
-      ~argv:[ "sh"; "-c"; "printf 'write refused\\n' >&2; exit 23" ] base_path
+      ~argv:[ "sh"; "-c"; "printf 'restricted failure\\n' >&2; exit 23" ] base_path
   in
   check int "one observation dispatch" 1 count;
-  check int "the Judge still has the request" 1 pending;
-  check bool "no final result before judgment" true (Option.is_none result);
-  check bool "refused observation is not streamed as a final result" true (chunks = []);
+  check int "payload failure is not a permission request" 0 pending;
+  (match result with
+   | Some result -> check bool "nonzero remains nonzero" true (result.status = Unix.WEXITED 23)
+   | None -> fail "completed payload was deferred");
+  check bool "stderr reaches the Keeper" true (chunks <> []);
   match decision with
-  | Gate.Deferred { approval_id; _ } ->
-    (match Masc.Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
-     | Ok (Some { observation = Some refusal; _ }) ->
-       check string "Judge reads the refusal" "write refused\n" refusal.observed_stderr
-     | _ -> fail "the pending approval lost the Observe refusal")
-  | Gate.Allow _ | Gate.Unavailable _ -> fail "Observe failure did not reach the Judge"
+  | Gate.Allow { source = Gate.Observed_in_box { run = Keeper_types_profile_sandbox.Observe; _ }; _ } -> ()
+  | _ -> fail "restricted execution acquired effect authority"
 ;;
 
 let test_observed_capture_is_returned_without_second_child () =
@@ -306,7 +411,7 @@ let test_observed_capture_is_returned_without_second_child () =
     Ok { Masc_exec.Exec_dispatch.status; stdout; stderr; output_files = Some files }
   in
   let target = Masc_exec.Sandbox_target.host () in
-  let stage = Stage.create ~route:(fun () -> Target.Boxed { target; run = observe_run }) ~dispatch in
+  let stage = create_stage ~route:(fun () -> Target.Boxed { target; run = observe_run }) ~dispatch in
   let request : Gate.request =
     { keeper_name = "settlement"
     ; operation = "tool_execute"
@@ -521,8 +626,10 @@ let () =
     "keeper_tool_execute_observe"
     [ ( "stage"
       , [ test_case "a clean run is kept for the caller" `Quick test_a_clean_run_is_kept_for_the_caller
-        ; test_case "a non-zero run is refused with its stderr" `Quick
-            test_a_non_zero_run_is_refused_with_its_stderr
+        ; test_case "a non-zero run returns its status and stderr" `Quick
+            test_a_non_zero_run_is_returned_with_its_stderr
+        ; test_case "missing/refused receipts cannot prove a box" `Quick
+            test_missing_or_refused_box_receipt_is_not_payload_evidence
         ; test_case "no box is unavailable without dispatching" `Quick
             test_no_box_is_unavailable_without_dispatching
         ; test_case "a refused dispatch is unavailable under its tag" `Quick
@@ -535,8 +642,14 @@ let () =
             test_successful_boxed_results_are_not_reexecuted
         ; test_case "observed output files survive authorization without a second child" `Quick
             test_observed_capture_is_returned_without_second_child
-        ; test_case "Observe failure still reaches the Judge" `Quick
-            test_observe_failure_still_reaches_the_judge
+        ; test_case "effect request waits for permission before any execution" `Quick
+            test_explicit_effect_request_enters_gate_without_observe_or_write
+        ; test_case "approved effect replay consumes one exact grant" `Quick
+            test_approved_effect_replay_consumes_one_exact_grant
+        ; test_case "git diff keeps changed and unchanged exit statuses" `Quick
+            test_git_diff_nonzero_is_a_result_without_judge
+        ; test_case "Observe payload failure returns without effect authorization" `Quick
+            test_observe_failure_returns_without_effect_authorization
         ; test_case "manual approval does not prepare identity" `Quick
             test_manual_approval_does_not_prepare_identity
         ] )

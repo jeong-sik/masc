@@ -11,10 +11,11 @@ The bundle includes:
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
   - dashboard read-path captures for briefing + project snapshot
-  - Keeper V01-V15 compile/regression conformance logs + correlated bundle
+  - verified Keeper V01-V15 compile/regression conformance receipt
   - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
-Raw files are written next to OUTPUT_MARKDOWN.
+Only the Markdown report is written next to release artifacts.
+Raw captures and lifecycle logs stay in private temporary storage and are removed on exit.
 EOF
 }
 
@@ -81,7 +82,6 @@ install_version_stdout="$scratch_dir/install-version.stdout"
 install_version_stderr="$scratch_dir/install-version.stderr"
 lifecycle_dir="$scratch_dir/keeper-full-lifecycle"
 lifecycle_bundle_json="$lifecycle_dir/bundle.json"
-lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 
 stop_server() {
   if [[ -n "${SERVER_PID:-}" ]]; then
@@ -302,7 +302,7 @@ installed_version="$(capture_installed_version)"
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_KEEPER_BOOTSTRAP_ENABLED=false \
+  MASC_KEEPER_AUTONOMOUS_ENABLED=false \
   "$installed_bin" --base-path "$base_path" --port "$PORT") >"$server_log" 2>&1 &
 SERVER_PID=$!
 
@@ -388,8 +388,7 @@ python3 - \
   "$project_snapshot_json" \
   "$initialize_json" \
   "$server_log" \
-  "$lifecycle_bundle_json" \
-  "$lifecycle_bundle_md" <<'PY'
+  "$lifecycle_bundle_json" <<'PY'
 import json
 import pathlib
 import sys
@@ -411,7 +410,6 @@ from datetime import datetime, timezone
     initialize_json,
     server_log,
     lifecycle_bundle_json,
-    lifecycle_bundle_md,
 ) = sys.argv[1:]
 
 def load(path):
@@ -491,10 +489,10 @@ md = f"""# Release Evidence Bundle
 
 ## Capture Retention
 
-Raw probe responses and logs are kept in temporary storage; cleanup is attempted
-when this command exits.
-The verified lifecycle matrix is embedded above; no temporary capture files are
-published with this report.
+Raw HTTP captures, authentication material, server logs, and lifecycle bundle
+files stay in private temporary storage and are removed when this command
+exits. They are not release attachments. The verified lifecycle matrix above
+is embedded in this report and is the only capture it retains.
 
 ## Re-run
 

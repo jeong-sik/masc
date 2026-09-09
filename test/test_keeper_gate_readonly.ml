@@ -70,13 +70,13 @@ let test_observation_table_is_fully_read () =
   passes "git remote -v" [ "git"; "remote"; "-v" ];
   passes "git ls-tree recursive" [ "git"; "ls-tree"; "-r"; "origin/main"; "--name-only" ];
   passes "git ls-tree through -C" [ "git"; "-C"; "masc"; "ls-tree"; "HEAD" ];
-  passes "rg plain" [ "rg"; "-n"; "pattern"; "." ];
-  passes "rg --pretty stays allowed" [ "rg"; "--pretty"; "x" ];
+  requires_observation "rg plain" [ "rg"; "-n"; "pattern"; "." ];
+  requires_observation "rg --pretty executes under observation" [ "rg"; "--pretty"; "x" ];
   passes "grep" [ "grep"; "-r"; "x"; "." ];
   passes "find read" [ "find"; "."; "-name"; "*.ml" ];
   requires_observation "sed needs execution evidence (script can write/exec)"
     [ "sed"; "-n"; "1,5p"; "f" ];
-  passes "sort read" [ "sort"; "-u"; "f" ];
+  requires_observation "sort read" [ "sort"; "-u"; "f" ];
   passes "uniq one operand" [ "uniq"; "f" ];
   passes "date read" [ "date"; "-u" ];
   passes "hostname flag" [ "hostname"; "-f" ];
@@ -776,6 +776,43 @@ let test_git_observation_returns_without_judge_queueing () =
     git_execution_cases
 ;;
 
+let test_rg_and_sort_use_execution_evidence_without_option_guessing () =
+  with_auto_judge @@ fun base_path ->
+  let cases =
+    [ [ "rg"; "needle"; "." ]
+    ; [ "rg"; "--pre"; "helper"; "needle" ]
+    ; [ "rg"; "--pre=helper"; "needle" ]
+    ; [ "rg"; "--"; "--pre=literal-pattern"; "source" ]
+    ; [ "rg"; "-e"; "--pre=literal-pattern"; "source" ]
+    ; [ "rg"; "--future-option"; "source" ]
+    ; [ "sort"; "source" ]
+    ; [ "sort"; "-o"; "output"; "source" ]
+    ; [ "sort"; "-ooutput"; "source" ]
+    ; [ "sort"; "--output=output"; "source" ]
+    ; [ "sort"; "--"; "-ooperand" ]
+    ; [ "sort"; "--future-option"; "source" ] ]
+  in
+  List.iter (fun argv ->
+    requires_observation "no static option-derived authority" argv;
+    List.iter (fun exit ->
+      let observations = ref 0 in
+      let expected = { Masc_exec.Exec_dispatch.status = Unix.WEXITED exit;
+        stdout = "captured output"; stderr = "captured stderr"; output_files = None } in
+      let decision = Keeper_gate.decide ~keeper_always_allow:false
+        ~observe:(fun () -> incr observations;
+          Keeper_gate.Observed_result { run = Keeper_types_profile_sandbox.Observe; result = expected })
+        (gate_request ~sandbox_profile:microvm base_path argv) in
+      (match decision with
+       | Keeper_gate.Allow { source = Keeper_gate.Observed_in_box { result; _ }; _ } ->
+           check bool "the exact restricted result is retained" true (result = expected)
+       | _ -> fail "rg/sort bypassed observation or unnecessarily queued a Judge");
+      check int "one execution observation" 1 !observations;
+      check int "no Judge request for a completed restricted result" 0 (pending_count base_path))
+      [ 0; 1 ]) cases;
+  passes "ls remains statically observational" [ "ls"; "-la" ];
+  passes "grep remains statically observational" [ "grep"; "needle"; "source" ]
+;;
+
 let test_git_without_a_box_uses_the_configured_judge () =
   with_auto_judge @@ fun base_path ->
   let asked = ref 0 in
@@ -947,6 +984,34 @@ let test_auto_judge_still_defers_writes_to_the_judge () =
   | Keeper_gate.Unavailable _ -> fail "write command made the queue unavailable"
 ;;
 
+let test_interactive_execute_keeps_durable_mode_authority () =
+  with_auto_judge @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let invoke argv =
+    let input = `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] in
+    (match Keeper_tool_approval_policy.verdict_for
+       ~composition_plan_index:None ~tool_name:"Execute" ~input with
+     | Keeper_tool_approval_policy.Run _ -> ()
+     | Keeper_tool_approval_policy.Ask _ -> fail "duplicate interactive authority held Execute");
+    Keeper_gate.decide ~keeper_always_allow:false
+      (gate_request ~sandbox_profile:docker base_path argv)
+  in
+  (match invoke [ "ls" ] with
+   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
+   | _ -> fail "observational Execute did not reach its execution Gate");
+  (match invoke [ "rm"; "fixture-only" ] with
+   | Keeper_gate.Deferred { reason = Judge_requested | Auto_judge_unavailable _; _ } -> ()
+   | _ -> fail "effectful Execute lost its Judge decision");
+  select_workspace config Keeper_gate_mode.Manual;
+  (match invoke [ "ls" ] with
+   | Keeper_gate.Deferred { reason = Human_requested; _ } -> ()
+   | _ -> fail "Manual execution mode lost its human decision");
+  select_workspace config Keeper_gate_mode.Always_allow;
+  (match invoke [ "rm"; "explicit-permission-fixture" ] with
+   | Keeper_gate.Allow { source = Workspace_always_allow; _ } -> ()
+   | _ -> fail "explicit execution permission was not the owning authority")
+;;
+
 let test_manual_mode_still_asks_the_human () =
   with_auto_judge @@ fun base_path ->
   let config = Workspace.default_config base_path in
@@ -1008,6 +1073,10 @@ let () =
             `Quick
             test_git_observation_returns_without_judge_queueing
         ; test_case
+            "rg and sort use execution evidence without option guessing"
+            `Quick
+            test_rg_and_sort_use_execution_evidence_without_option_guessing
+        ; test_case
             "Git without a box uses the configured Judge"
             `Quick
             test_git_without_a_box_uses_the_configured_judge
@@ -1039,6 +1108,8 @@ let () =
             "auto_judge still defers writes to the judge"
             `Quick
             test_auto_judge_still_defers_writes_to_the_judge
+        ; test_case "interactive Execute preserves durable mode authority" `Quick
+            test_interactive_execute_keeps_durable_mode_authority
         ; test_case "manual mode still asks the human" `Quick test_manual_mode_still_asks_the_human
         ] )
     ]

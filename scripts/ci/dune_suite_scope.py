@@ -9,8 +9,12 @@ run by hand fails for reasons that have nothing to do with the change under
 test -- test_server_runtime_bootstrap fails with the literal words "run the
 test via Dune" -- and a report that cries wolf is worse than no report.
 
-So this reads the stanza that declares the suite and answers "run" only when
-nothing in it needs dune. Everything else is named and skipped out loud.
+Deps and a setenv action are not reasons to skip, because scripts/ci/
+stanza_env.py already reads both and test.yml's targeted path already runs
+suites that way: it builds what --deps names and runs the executable under
+the environment the stanza sets. The caller asks that reader, and skips on
+what it refuses. What is left here is the shapes that mean there is no
+executable to run at all.
 
 Usage: dune_suite_scope.py <dir> <name>
 Prints "run" or "skip <reason>" and always exits 0; a scope it cannot
@@ -96,13 +100,8 @@ def scope(directory, name):
     if len(stanzas) > 1:
         return "skip declared by more than one stanza"
     form = stanzas[0]
-    for field, reason in (
-        ("action", "its stanza has a custom action dune has to apply"),
-        ("deps", "its stanza has deps only the runtest action materialises"),
-        ("enabled_if", "its stanza is conditionally disabled"),
-    ):
-        if re.search(r"\(\s*" + field + r"\b", form):
-            return f"skip {reason}"
+    if re.search(r"\(\s*enabled_if\b", form):
+        return "skip its stanza is conditionally disabled"
     return "run"
 
 

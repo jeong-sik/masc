@@ -27,11 +27,13 @@ let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
 (* name, description, input_schema (keys sorted) *)
 let expected =
   [ ( {|masc_agent_fitness|}
-    , {|Get fitness scores for agents based on completion rate, reliability, and speed metrics.|}
+    , {|Fitness scores for agents: completion rate, reliability, speed.|}
     , {|{"additionalProperties":false,"properties":{"agent_name":{"description":"Optional: Get fitness for specific agent. If omitted, returns all agents.","type":"string"},"days":{"default":7,"description":"Number of days to analyze (default: 7)","type":"integer"}},"type":"object"}|}
     )
   ; ( {|masc_get_metrics|}
-    , {|Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history.|}
+    , {|Raw performance metrics for one agent.
+
+Task completion, timing, error rates, and collaboration history.|}
     , {|{"additionalProperties":false,"properties":{"agent_name":{"description":"Agent name to get metrics for","type":"string"},"days":{"default":7,"description":"Number of days of history (default: 7)","maximum":90,"minimum":1,"type":"integer"}},"required":["agent_name"],"type":"object"}|}
     )
   ; ( {|masc_agent_card|}

@@ -53,7 +53,7 @@ let base_observation : WO.world_observation =
     pending_messages = [];
     pending_board_events = [];
     idle_seconds = 0;
-    active_goals = [];
+    active_goals = Ok [];
     unclaimed_task_count = 0;
     claimable_tasks = [];
     held_task_skills = [];
@@ -168,6 +168,17 @@ let contains ~needle haystack =
   in
   loop 0
 
+let count_occurrences ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  if n = 0 then 0
+  else
+    let rec loop i acc =
+      if i + n > h then acc
+      else if String.sub haystack i n = needle then loop (i + n) (acc + 1)
+      else loop (i + 1) acc
+    in
+    loop 0 0
+
 let dashboard_presence : Gate_surface.surface_presence =
   { surface = Gate_surface.Dashboard; alive = true }
 
@@ -270,11 +281,28 @@ let test_a_briefing_over_its_budget_withholds_the_oldest_turns () =
   let budget = 12_000 in
   let trimmed = user_message_within ~budget observation in
   check bool "the briefing is inside its budget" true (String.length trimmed <= budget);
-  check bool "the oldest turn is the one given up" false
-    (contains ~needle:{|{"turn":1,|} trimmed);
-  check bool "the newest turn survives" true (contains ~needle:{|{"turn":5,|} trimmed);
+  (* The needle has to name a row. The refusal digest replays the same
+     argument object and is rendered outside the row budget on purpose, so a
+     needle on the arguments alone is found whether the row was withheld or
+     not -- it reads the digest and calls the row present. Only the row
+     carries [turn N] in brackets. *)
+  check bool "the oldest turn's row is the one given up" false
+    (contains ~needle:"- [turn 1] " trimmed);
+  check bool "the newest turn's row survives" true
+    (contains ~needle:"- [turn 5] " trimmed);
+  (* The count is the producer's own, so read it back rather than pinning a
+     number: the section is one trimmable layer among several and how many
+     rows it has to give up to reach the budget is not this test's claim. *)
+  let rows_shown = count_occurrences ~needle:"- [turn " trimmed in
   check bool "the heading counts the turns it actually shows" true
-    (contains ~needle:"### Your Recent Actions (2 turns)" trimmed)
+    (contains
+       ~needle:(Printf.sprintf "### Your Recent Actions (%d turns)" rows_shown)
+       trimmed);
+  (* What made the old needle ambiguous is itself the guarantee: a withheld
+     turn's refusal is still named, because the digest is what changes the
+     next turn's behavior. *)
+  check bool "a withheld turn's refusal is still named in the digest" true
+    (contains ~needle:{|{"turn":1,|} trimmed)
 ;;
 
 (* The property that makes the budget safe to leave on: a briefing that

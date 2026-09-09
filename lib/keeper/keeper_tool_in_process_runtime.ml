@@ -1389,10 +1389,10 @@ let replay_connector_post_with_outcome
                       [#일반] on the message that arrived and an id on our own
                       reply to it -- the same room, named twice over. *)
                  ; channel_name =
-                     Connector_names.recall
+                     Keeper_connector_names.recall
                        ~base_dir:config.Workspace.base_path
                        ~connector:Channel_gate_discord_state.channel
-                       ~scope:Connector_names.Channel ~id:channel_id
+                       ~scope:Keeper_connector_names.Channel ~id:channel_id
                  ; parent_channel_id = None
                  ; thread_id = None
                  })
@@ -1453,10 +1453,10 @@ let replay_connector_post_with_outcome
                     { team_id = None
                     ; channel_id
                     ; channel_name =
-                        Connector_names.recall
+                        Keeper_connector_names.recall
                           ~base_dir:config.Workspace.base_path
                           ~connector:Channel_gate_slack_state.channel
-                          ~scope:Connector_names.Channel ~id:channel_id
+                          ~scope:Keeper_connector_names.Channel ~id:channel_id
                     ; thread_ts
                     })
                ()
@@ -1596,10 +1596,10 @@ let handle_surface_post_with_outcome
              else bound_discord_channels
            in
            let names =
-             Connector_names.entries
+             Keeper_connector_names.entries
                ~base_dir:config.Workspace.base_path
                ~connector:surface
-               ~scope:Connector_names.Channel
+               ~scope:Keeper_connector_names.Channel
            in
            (match
               Keeper_surface_post.resolve_bound_channel_reference
@@ -1821,7 +1821,11 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
     ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
     }
   in
-  Tool_misc.dispatch ctx ~name ~args
+  (match Tool_schemas_misc.misc_operation_of_tool_name name with
+   | Some Tool_schemas_misc.Misc_msx_screen ->
+     Some (Keeper_msx_screen.handle ~keeper_name:meta.name
+       ~tool_name:name ~start_time:(Time_compat.now ()) args)
+   | _ -> Tool_misc.dispatch ctx ~name ~args)
   |> dispatch_option_to_execution ~name
 ;;
 

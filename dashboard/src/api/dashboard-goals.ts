@@ -1,3 +1,4 @@
+import { decodeGoalProof } from './goal-proof'
 // MASC Dashboard — Goals projections (goal tree + detail).
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
@@ -21,6 +22,12 @@ import type {
   GoalTreeTask,
   KeeperApprovalQueueState,
 } from '../types'
+
+export function goalStoreUnavailableDetail(raw: unknown): string | null {
+  if (!isRecord(raw) || raw.ok !== false || raw.error_code !== 'goal_store_unavailable') return null
+  return typeof raw.error === 'string' && raw.error.length > 0
+    ? raw.error : 'Goal store unavailable'
+}
 
 export class DashboardGoalsApprovalQueueUnavailableError extends Error {
   readonly approval_queue_state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>
@@ -211,6 +218,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     phase,
     phase_color: asString(raw.phase_color, ''),
     goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, phase),
+    verification: decodeGoalProof(raw.verification),
     priority: asInt(raw.priority) ?? 0,
     metric,
     target_value: targetValue,
@@ -344,6 +352,8 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
 
 export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
   const raw = await get<unknown>('/api/v1/dashboard/goals')
+  const unavailable = goalStoreUnavailableDetail(raw)
+  if (unavailable !== null) throw new Error(unavailable)
   const decoded = decodeDashboardGoalsTreeResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goals payload')
   return decoded
@@ -351,6 +361,8 @@ export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeRespo
 
 export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
   const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
+  const unavailable = goalStoreUnavailableDetail(raw)
+  if (unavailable !== null) throw new Error(unavailable)
   const decoded = decodeDashboardGoalDetailResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goal detail payload')
   return decoded

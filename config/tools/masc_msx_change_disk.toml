@@ -1,0 +1,13 @@
+name = "masc_msx_change_disk"
+description = """
+Swap the floppy in a running disk game.
+
+Replace the floppy in the running disk game without rebooting or advancing time. Saves the outgoing machine to before-disk-change first, retaining disk writes. After replacement, press Return if the game requests it. Requires a .dsk image from the inventory or an existing path."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "disk"
+type = "string"
+required = true
+description = "Replacement .dsk image name or path."

@@ -104,6 +104,63 @@ let test_render_columns_line_up () =
       rows
   | [] -> Alcotest.fail "render produced nothing"
 
+(* Model and provider names come from runtime.toml, so a name outside ASCII
+   is a configuration away. Widths used to be byte counts: a three-byte
+   Korean scalar counted three against a column that shows it in two cells,
+   so the padding came out short and every column after it moved on that row
+   alone. *)
+let test_a_wide_name_is_padded_by_cells_not_bytes () =
+  (* Two rows whose names differ only in how many bytes a cell costs, and
+     whose last column holds the same value. Padded by cells they are the
+     same width; padded by bytes the wide one comes out short. *)
+  let lines =
+    [ "[models.abcd]"
+    ; "temperature = 0.7"
+    ; ""
+    ; "[local.abcd]"
+    ; "max-tokens = 100"
+    ; ""
+    ; "[models.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "temperature = 0.7"
+    ; ""
+    ; "[local.\"\xed\x95\x9c\xea\xb8\x80\"]"
+    ; "max-tokens = 100"
+    ]
+  in
+  match T.render ~width:80 (T.parse lines) with
+  | _ :: [ ascii; wide ] ->
+      let width text = Masc_tui_message_layout.display_width text in
+      check int "both rows are the same width in cells" (width ascii) (width wide)
+  | _ -> Alcotest.fail "expected a header and two rows"
+
+(* The clip is on the model column, and it used to cut at a byte: a name
+   whose limit falls inside a scalar came back with that scalar in pieces.
+   Cutting at a cell keeps every scalar whole, and the row still fills the
+   column it was given. *)
+let test_a_clipped_wide_name_keeps_its_scalars_whole () =
+  let long = String.concat "" (List.init 30 (fun _ -> "\xed\x95\x9c")) in
+  let lines =
+    [ "[models.\"" ^ long ^ "\"]"
+    ; "temperature = 0.7"
+    ; ""
+    ; "[local.\"" ^ long ^ "\"]"
+    ; "max-tokens = 100"
+    ]
+  in
+  match T.render ~width:40 (T.parse lines) with
+  | _ :: [ row ] ->
+      (* Every scalar decodes: a byte cut leaves a replacement here. *)
+      let rec whole i =
+        if i >= String.length row then true
+        else
+          let decoded = String.get_utf_8_uchar row i in
+          Uchar.utf_decode_is_valid decoded
+          && whole (i + Uchar.utf_decode_length decoded)
+      in
+      check bool "no scalar was cut in half" true (whole 0);
+      check bool "the clip marker is there" true (String.contains row '~')
+  | _ -> Alcotest.fail "expected a header and one row"
+
 let test_empty_input () =
   check
     string
@@ -170,6 +227,10 @@ let () =
         ] )
     ; ( "render"
       , [ Alcotest.test_case "columns line up" `Quick test_render_columns_line_up
+        ; Alcotest.test_case "a wide name is padded by cells not bytes" `Quick
+            test_a_wide_name_is_padded_by_cells_not_bytes
+        ; Alcotest.test_case "a clipped wide name keeps its scalars whole" `Quick
+            test_a_clipped_wide_name_keeps_its_scalars_whole
         ; Alcotest.test_case "empty input" `Quick test_empty_input
         ; Alcotest.test_case
             "detail names owners and API override"

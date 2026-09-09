@@ -7,6 +7,7 @@ vi.mock('./core', () => ({
 }))
 
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-goals'
+import { fetchDashboardPlanning } from './dashboard-mission'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -318,5 +319,61 @@ describe('fetchDashboardGoalsTree decoding', () => {
       snapshot_status: 'unavailable',
       snapshot_error: 'snapshot read failed',
     })
+  })
+})
+
+const proofCriterion = { revision: 'criterion-v2', title: 'Measured goal', metric: 'passed cases', target_value: '10' }
+const proofVerdict = {
+  outcome: 'proven', reason: null, request_id: 'request-v2', criterion: proofCriterion,
+  verification_run_id: 'verifier-v2', authority: { kind: 'system_llm_agent', actor: 'verifier_exact' },
+  evidence: '10 cases passed', recorded_at: '2026-09-09T00:00:00Z',
+}
+const currentProof = { state: 'proof_proven', verdict: proofVerdict }
+
+function verificationRecord(completion: unknown) {
+  return { goal_id: 'proof-goal', updated_at: '2026-09-09T00:00:00Z', completion }
+}
+
+describe('Goal proof projection through tree and detail APIs', () => {
+  it.each([
+    ['idle', verificationRecord({ state: 'idle' }), 'current', 'idle'],
+    ['pending', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,
+      request_id: 'request-v2', requested_at: '2026-09-09T00:00:00Z' }), 'current', 'pending'],
+    ['proven', verificationRecord(currentProof), 'current', 'proven'],
+    ['refuted', verificationRecord({ state: 'proof_refuted', verdict: {
+      ...proofVerdict, outcome: 'refuted', reason: 'Only 9 cases passed',
+    } }), 'current', 'refuted'],
+    ['stale', verificationRecord({ state: 'stale_criterion', historical_completion: currentProof }), 'stale', null],
+    ['unreadable', { state: 'ledger_error', detail: 'primary ledger read failed' }, 'unreadable', null],
+    ['malformed proven', verificationRecord({ state: 'proof_proven', verdict: {
+      ...proofVerdict, outcome: 'refuted', reason: 'inconsistent state',
+    } }), 'unreadable', null],
+    ['missing request identity', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,
+      requested_at: '2026-09-09T00:00:00Z' }), 'unreadable', null],
+  ])('%s remains separate from lifecycle phase', async (_label, verification, state, completionState) => {
+    const node = validNode('proof-goal', 'Measured goal', { phase: 'completed', verification })
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [node], summary: emptySummary() })
+    const tree = await fetchDashboardGoalsTree()
+    expect(tree.tree[0]?.phase).toBe('completed')
+    const proof = tree.tree[0]?.verification
+    expect(proof?.state).toBe(state)
+    if (proof?.state === 'current') expect(proof.completion.state).toBe(completionState)
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, goal: node, linked_tasks: [],
+      linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    const detail = await fetchDashboardGoalDetail('proof-goal')
+    expect(detail.goal.verification).toEqual(proof)
+  })
+})
+
+
+describe('Goal source unavailable across HTTP projections', () => {
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s retains the backend source error', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ok: false, error_code: 'goal_store_unavailable',
+      error: 'goals.json: criterion_revision is missing' })
+    await expect(fetch()).rejects.toThrow('goals.json: criterion_revision is missing')
   })
 })

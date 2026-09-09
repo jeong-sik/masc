@@ -144,6 +144,19 @@ let test_two_approvals_stay_two_rows () =
 let test_rows_that_are_not_gate_rows_are_untouched () =
   check (list string) "nothing else folds" [ "가"; "나" ] (fold [ said "가"; said "나" ])
 
+(* #32956: the turn that received the replay failed after the model answered.
+   The run is not folded: the failed step stays its own row so it is seen. *)
+let test_a_failed_continuation_keeps_the_run_open () =
+  let entries =
+    [ step Approval_requested
+    ; step Approval_resolved_approved
+    ; step Approval_replay_applied
+    ; step Approval_continuation_failed
+    ]
+  in
+  check (list string) "a failed continuation is not folded away"
+    (describe (rows entries)) (fold entries)
+
 (* The continuation says the turn resumed, which no outcome says. A run that
    holds only that fact -- the outcome rows are outside the loaded window --
    draws it as its whole line rather than folding to nothing. *)
@@ -229,6 +242,8 @@ let () =
             test_rows_that_are_not_gate_rows_are_untouched
         ; test_case "a run of only continuations still draws" `Quick
             test_a_run_of_only_continuations_still_draws
+        ; test_case "a failed continuation keeps the run open" `Quick
+            test_a_failed_continuation_keeps_the_run_open
         ] )
     ; ( "argument fold"
       , [ test_case "a line within the cap comes back whole" `Quick

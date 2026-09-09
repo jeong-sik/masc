@@ -81,7 +81,7 @@ let write_meta config ~keeper_name ~trace_id ~paused =
       (`Assoc
          [ "name", `String keeper_name
          ; "trace_id", `String trace_id
-         ; "autoboot_enabled", `Bool false
+         ; "activation_mode", `String "manual"
          ])
     |> require_ok "parse Keeper metadata fixture"
   in

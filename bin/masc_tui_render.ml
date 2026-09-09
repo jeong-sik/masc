@@ -106,9 +106,11 @@ let chat_row_action_at ~row =
 let acting_pane_drawn_cols () = !acting_pane_reserved_cols
 let acting_pane_scroll_limit () = !acting_pane_scroll_max
 
+let navigation_rows = 1
+
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - 1), max 1 (cols - !acting_pane_reserved_cols))
+  (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
 
 let frame_lines buf =
   let str = Buffer.contents buf in
@@ -4368,6 +4370,7 @@ let planning_proof_mark = function
   | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
   | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
   | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_stale _ -> (Theme.warn ()) ^ "~" ^ Ansi.reset
   | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
 ;;
 
@@ -4381,6 +4384,8 @@ let planning_proof_detail (goal : planning_goal) =
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
   | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
+  | Tui_decode.Proof_stale _ ->
+      Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
@@ -5802,22 +5807,11 @@ let keeper_message_identity ~max_cells state keeper_name =
              ^ fit_runtime_id (max_cells - prefix_width) runtime_id
              ^ Ansi.reset)
 
-(* Two dispositions an operator needs before stopping anything: whether the
-   keeper comes back by itself, and whether it takes turns without being
-   asked. Both are on the roster row. *)
+(* One activation mode and the sandbox declaration from the roster row. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
   match runtime with
-  | None -> Ansi.dim ^ "- - -" ^ Ansi.reset
+  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
   | Some row ->
-      let flag enabled letter =
-        if enabled then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ letter ^ Ansi.reset
-        else Ansi.dim ^ "-" ^ Ansi.reset
-      in
-      (* The sandbox is a name rather than a yes/no, so it gets a letter of its
-         own instead of the on/off colour the other two use: "D" reads as the
-         profile it stands for, and anything this roster has not been taught
-         shows its own first letter rather than being folded into "L". A word
-         the reader does not recognise is better than a wrong one. *)
       let sandbox =
         match row.kr_sandbox_profile with
         | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
@@ -5827,9 +5821,10 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      flag row.kr_autoboot_enabled "A"
-      ^ " "
-      ^ flag row.kr_proactive_enabled "P"
+      (match row.kr_activation_mode with
+       | Activation_manual -> "M"
+       | Activation_on_demand -> "D"
+       | Activation_autonomous -> "A")
       ^ " "
       ^ sandbox
 
@@ -5843,7 +5838,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; " "
     ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
     ; (if columns.kcol_show_flags then
-         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P S"
+         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "Mode S"
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "LAST"
     ; (if columns.kcol_show_runtime then
@@ -6254,7 +6249,7 @@ let render_keeper_list (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     "  Health = heartbeat/readiness   Lifecycle = keeper process   Last = time since last turn";
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  A = autoboot   P = autonomous turns   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
+    "  Mode: M manual / D on demand / A autonomous   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
@@ -6677,6 +6672,7 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_committed -> Theme.ok ()
   | Tui_decode.Lane_run_cancelled
   | Tui_decode.Lane_run_rejected
+  | Tui_decode.Lane_run_superseded
   | Tui_decode.Lane_run_deferred
   | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
   | Tui_decode.Lane_run_failed
@@ -6865,14 +6861,12 @@ let lane_run_payload_lines ~width json =
   else rendered
 
 let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
-  match
-    Tui_decode.lane_run_decision ~run_kind:detail.lrd_run_kind
-      ~status:detail.lrd_status
-  with
+  match detail.lrd_decision with
   | Tui_decode.Lane_run_decision_approved -> Theme.ok (), "APPROVED"
   | Tui_decode.Lane_run_decision_rejected -> Theme.warn (), "REJECTED"
   | Tui_decode.Lane_run_decision_reviewed -> Theme.ok (), "REVIEWED"
   | Tui_decode.Lane_run_decision_committed -> Theme.ok (), "COMMITTED"
+  | Tui_decode.Lane_run_decision_superseded -> Theme.info (), "SUPERSEDED"
   | Tui_decode.Lane_run_decision_pending -> Theme.info (), "NO DECISION YET"
   | Tui_decode.Lane_run_decision_not_reached -> Theme.warn (), "NO DECISION"
   | Tui_decode.Lane_run_not_a_decision -> Theme.info (), "NOT A VERDICT"
@@ -6980,6 +6974,8 @@ let lane_run_gate_judgment_summary = function
       , Printf.sprintf
           "%sJUDGMENT%s  %spending%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
           Ansi.bold Ansi.reset (Theme.info ()) Ansi.reset )
+  | Tui_decode.Lane_run_gate_judgment_unavailable ->
+    Some (Theme.warn (), "JUDGMENT  원문 사용 불가 · 판정 여부를 확인할 수 없습니다")
   | Tui_decode.Lane_run_gate_judgment_not_reached ->
     Some
       ( Ansi.reset
@@ -7069,17 +7065,33 @@ let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
     "INPUT · VERIFICATION REQUEST", "OUTPUT · VERDICT + TOOL EVIDENCE"
   | Tui_decode.Lane_run_kind_other _, _ -> "INPUT", "OUTPUT"
 
+let lane_run_payload_availability_lines ~width availability payload =
+  match availability with
+  | Masc.Exact_lane_run_registry.Available ->
+    (match payload with
+     | Some value -> lane_run_payload_lines ~width value
+     | None -> [ Theme.warn (), "원문 상태 불일치: 사용 가능한 원문 필드가 없습니다" ])
+  | Masc.Exact_lane_run_registry.Not_loaded ->
+    [ Theme.muted (), "원문을 불러오지 않았습니다" ]
+  | Masc.Exact_lane_run_registry.Unavailable error ->
+    let text = "원문 사용 불가: " ^ Masc.Exact_lane_run_registry.payload_read_error_to_string error in
+    Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
+    |> List.map (fun line -> Theme.warn (), line)
+
+let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
+  lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
+
 let lane_run_output_lines ~width (detail : Tui_decode.lane_run_detail) =
-  match detail.lrd_output with
-  | None ->
-    [ Theme.muted (), "(run has not completed; no output recorded)" ]
-  | Some output -> lane_run_payload_lines ~width output
+  match detail.lrd_output_availability, detail.lrd_output with
+  | None, _ -> [ Theme.muted (), "실행 중 · 아직 출력이 기록되지 않았습니다" ]
+  | Some availability, output ->
+    lane_run_payload_availability_lines ~width availability output
 
 let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
   let input_title, output_title = lane_run_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
-  @ indent (lane_run_payload_lines ~width detail.lrd_input_payload)
+  @ indent (lane_run_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
   @ indent (lane_run_output_lines ~width detail)
 
@@ -7158,7 +7170,7 @@ let render_lane_run_detail (state : state) ~run_id =
         let left_width = max 1 ((inner - divider_width) / 2) in
         let right_width = max 1 (inner - left_width - divider_width) in
         let input_lines =
-          lane_run_payload_lines ~width:left_width detail.lrd_input_payload
+          lane_run_input_lines ~width:left_width detail
         in
         let output_lines = lane_run_output_lines ~width:right_width detail in
         let payload_rows =
@@ -19182,12 +19194,24 @@ let render_agenda (state : state) =
   finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
 ;;
 
-let render_terminal_too_small ~rows ~cols =
+let render_terminal_too_small state ~rows ~cols =
+  (* The hint names physical terminal rows, whereas the guard receives the
+     body after navigation, agenda, and composer allocation. At the minimum
+     body size the composer can be absent; evaluate its policy at the proposed
+     surface size rather than copying the current tiny viewport's overhead. *)
+  let surface_rows =
+    Render_schedule.Viewport.minimum_fixed_chrome_rows
+    + Masc_tui_types.agenda_chrome_rows state
+  in
+  let minimum_terminal_rows =
+    navigation_rows + surface_rows
+    + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
+  in
   let buf = Buffer.create 64 in
   Buffer.add_string buf
     (fit_width
        (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
-          Render_schedule.Viewport.minimum_fixed_chrome_rows)
+          minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
   finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
@@ -19209,7 +19233,7 @@ let render (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then
-    let frame, clamped = render_terminal_too_small ~rows ~cols in
+    let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None)
   else if state.palette_open then
     let frame, clamped = render_palette state in

@@ -507,14 +507,32 @@ let resolution_has_durable_record
         | None -> true))
 ;;
 
+(* A resolution whose continuation slot is settled has nothing left for a
+   turn to do: the turn that received its replay completed, checkpointed, or
+   failed after the provider answered. Projecting it again hands the model
+   evidence it already consumed, which is the loop #32956 measured (one
+   approval on 24 turns). [reconcile_spent_selection] retires the queue entry
+   when the queue reaches it. *)
+let continuation_settled
+      ~base_path
+      ~keeper_name
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  Keeper_approval_queue.continuation_settled_chat_projection_present
+    ~base_path
+    ~keeper_name
+    ~approval_id:resolution.approval_id
+;;
+
 (* #28809: a ready [Hitl_resolved] may sit behind the stimulus that woke this
    turn — typically a redelivered workspace message whose own earlier turn
    deferred on that very approval. The resolution is durable truth in the
    approval journal, not queue-ordered content, so a turn may project it as
    cycle context without admitting it (the queue entry is untouched here).
-   After the projected replay
-   spends the grant, [reconcile_spent_selection] retires the still-queued
-   entry without costing a turn. *)
+   After the projected replay spends the grant and the receiving turn settles
+   the continuation, [reconcile_spent_selection] retires the still-queued
+   entry without costing a turn; until then the resolution is projected
+   again, because the model has not seen its outcome yet. *)
 let ready_hitl_resolution_peek ~base_path ~keeper_name =
   match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
   | Error _ -> None
@@ -526,6 +544,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
            if
              stimulus_ready_for_intake ~base_path stimulus
              && resolution_has_durable_record ~base_path resolution
+             && not (continuation_settled ~base_path ~keeper_name resolution)
            then Some resolution
            else None
          | Keeper_event_queue.Board_signal _
@@ -572,9 +591,11 @@ let reconcile_spent_selection
        [Keeper_gate_replay] keeps the raw result in-process and needs this wake
        to repair publication without running the effect again.
 
-       Retire only [consumed + durable outcome + continuation receipt]. The
-       final receipt is written after the replay-owning model turn completed or
-       durably checkpointed; without it, a crash between effect journaling and
+       Retire only [consumed + durable outcome + continuation settlement]. The
+       settlement is written after the replay-owning model turn completed,
+       durably checkpointed, or failed after the provider answered (#32956:
+       a failed continuation used to leave no receipt, so the same approval
+       rode 24 turns); without it, a crash between effect journaling and
        model continuation must replay the evidence into a fresh turn instead of
        silently draining the wake. A read error, an unconsumed grant, or a
        consumed grant without its outcome stays actionable. *)
@@ -610,7 +631,7 @@ let reconcile_spent_selection
            | Ok () ->
              if
                not
-                 (Keeper_approval_queue.continuation_chat_projection_present
+                 (Keeper_approval_queue.continuation_settled_chat_projection_present
                     ~base_path:config.Workspace_utils.base_path
                     ~keeper_name
                     ~approval_id)
@@ -707,7 +728,7 @@ let reconcile_spent_selection
      | Ok () ->
        if
          not
-           (Keeper_approval_queue.continuation_chat_projection_present
+           (Keeper_approval_queue.continuation_settled_chat_projection_present
               ~base_path:config.Workspace_utils.base_path
               ~keeper_name
               ~approval_id)

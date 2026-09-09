@@ -83,7 +83,33 @@ open Alcotest
    or 1,388 with its public name, plus one list separator. BrowserGoto
    guidance grows by 33 bytes. Preserve the existing headroom after merge. *)
 (* Explicit native client selection adds 1004 measured browser schema bytes. *)
-let ceiling_bytes = 93_217
+(* Named MSX checkpoints add 884 schema bytes (literal TOML/golden JSON);
+   preserve existing headroom. CI verifies the production renderer. *)
+(* CI 34231934273 at 4f109263 measured 95,902 bytes across 108 tools,
+   1,801 above the inherited ceiling after adding checkpoints. Account for
+   that already-shipped surface explicitly, without adding headroom.
+   Disk replacement adds 501 literal schema bytes; CI checks the renderer. *)
+(* 2026-09-08: #34409 gave twelve deferred tools a first line that fits the
+   line the model chooses them from. Before it, keeper_ide_annotate offered
+   570 bytes into an 80-byte budget and masc_msx_load 553, so what the model
+   saw of them was a sentence cut mid-word. Each gained a summary sentence
+   and a blank line, and nothing was removed, so the surface grew.
+
+   Argued here rather than in that PR because nothing said so at the time:
+   this suite runs in the nightly lane and not on a pull request, so #34409
+   merged green and the ceiling failed that night. Nightly 34258890189
+   measured 97,067 bytes across 109 tools.
+
+   The figure below is not that one. This pull request's own check measured
+   97,663 across the same 109 tools -- the surface grew another 596 bytes in
+   the merges between the nightly and it -- which is why the reading has to
+   come from the run that is about to land rather than from last night.
+   Set to keep the 501 bytes of headroom the line above accounts for.
+
+   #34506 is the same shape and takes about 195 of that: five MSX tools
+   whose first line was over the budget, the largest at 745 bytes. It fits
+   under this figure, so the headroom it leaves is nearer 306. *)
+let ceiling_bytes = 98_164
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -226,9 +252,12 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_msx_change_disk"
   ; "masc_msx_eject"
   ; "masc_msx_load"
   ; "masc_msx_press"
+  ; "masc_msx_restore"
+  ; "masc_msx_save"
   ; "masc_msx_screen"
   ; "masc_msx_step"
   ; "masc_plan_clear_task"

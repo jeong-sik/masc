@@ -34,3 +34,7 @@ val tick_response :
     an unavailable pool refuses the tick without running it inline. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
+
+val checkpoint_response :
+  base_path:string -> restore:bool -> body:string ->
+  [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t

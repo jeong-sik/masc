@@ -576,12 +576,7 @@ let dashboard_config_string_fields =
     "instructions";
     "sandbox_profile";
     "network_mode";
-  ]
-
-let dashboard_config_bool_fields =
-  [
-    "autoboot_enabled";
-    "proactive_enabled";
+    "activation_mode";
   ]
 
 let dashboard_config_string_list_fields =
@@ -614,7 +609,6 @@ let dashboard_config_patch_allowed_fields =
   ]
   @
   dashboard_config_string_fields
-  @ dashboard_config_bool_fields
   @ dashboard_config_string_list_fields
 
 let dedupe_keep_order_strings values =
@@ -777,10 +771,6 @@ let validate_dashboard_config_field key value =
     match value with
     | `String _ -> Ok ()
     | other -> dashboard_field_type_error key "a string" other
-  else if List.mem key dashboard_config_bool_fields then
-    match value with
-    | `Bool _ -> Ok ()
-    | other -> dashboard_field_type_error key "a boolean" other
   else if List.mem key dashboard_config_string_list_fields then
     validate_dashboard_string_list_field key value
   else Ok ()

@@ -84,6 +84,13 @@ type authorization_source =
       (** The request is a closed-set observation-only argv inside a
           per-keeper disposable guest — docker container or microvm
           ({!Keeper_gate_readonly}); allowed without judgment. *)
+  | Local_output
+      (** The operation's effect lands only on the operator's own outputs:
+          a speak ({!voice_speak_gate_operation}) plays on the operator's
+          speakers and is appended to the keeper's own chat. [Auto_judge]
+          allows it without a judge; Manual still parks it for the operator,
+          and the per-keeper and [voice.gate] exemptions still skip the Gate
+          entirely. *)
   | Observed_in_box of boxed_execution
       (** The request ran once inside the executor's box. Under
           [Observe] the guest kernel refused every file write outside a
@@ -182,17 +189,15 @@ val cycle_grant_of_resolution :
     decides when to ask, and what each answer means. *)
 type observation =
   | Observed_result of boxed_execution
-      (** [Observe] exit 0, or any [Guest_local] process result. The result
-          travels with the decision so returning it never needs a second
-          dispatch, including when guest-local writes preceded a failure. *)
+      (** Any payload result with an acknowledged enforced box. The result
+          travels with the decision without a second dispatch. Nonzero status
+          is not an effect-permission request or proof of sandbox denial. *)
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
       }
-      (** An [Observe] run ended otherwise: a refused write or socket, a
-          program that exited non-zero, a signal. Not an effect either, but
-          not an answer — the request keeps the judge, and this is what the
-          judge will be shown (RFC-0422 step 3b). *)
+      (** The shim's typed receipt reports setup failure or refusal. A
+          nonzero payload exit alone cannot construct this outcome. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so
@@ -223,9 +228,12 @@ val observed_refusal :
     grant, both Always Allow switches, the exact rules and the observation
     tables have all declined — and only there, so an always-allowed keeper
     never pays a box run and a Manual workspace still sees every request.
+    [intent=Request_effect] bypasses static/Observe shortcuts in Auto Judge
+    mode, but never bypasses permission or grants permission itself.
     [Observed_result] is returned through source {!Observed_in_box}; the other two
     answers defer to the judge as the request would have without the box. *)
 val decide :
+  ?intent:Keeper_tool_execute_typed_input.intent ->
   ?cycle_grant:cycle_grant ->
   ?observe:(unit -> observation) ->
   keeper_always_allow:bool ->

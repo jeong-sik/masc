@@ -819,11 +819,11 @@ let test_oneclick_empty_key_disables_implicit_classic_autoboot () =
   assert_contains
     "classic empty-key guard preserves explicit bootstrap override"
     entrypoint
-    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}" ]|};
+    {|[ "$TEAM" = "classic" ] && [ -z "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}" ]|};
   assert_contains
     "classic empty-key guard disables implicit autoboot"
     entrypoint
-    "export MASC_KEEPER_BOOTSTRAP_ENABLED=false"
+    "export MASC_KEEPER_AUTONOMOUS_ENABLED=false"
 ;;
 
 let test_oneclick_image_stamps_copied_dashboard_bundle () =
@@ -1200,16 +1200,16 @@ let test_nontty_wizard_connectivity_check_is_wired () =
     "MASC_INSTALL_NO_PING"
 ;;
 
-(* A fresh install with no --team has zero Keepers, and the post-install "Next"
-   block used to stop at "start server + open TUI" without saying how to get one.
-   Guard that it now points at both the TUI Keepers view and the scripted
-   keeper-create path. *)
+(* A fresh install seeds one Keeper, imp, with autoboot off, and the
+   post-install "Next" block used to stop at "start server + open TUI" without
+   saying that. Guard that it names the seeded Keeper, points at the TUI
+   Keepers view to start it, and keeps the scripted keeper-create path. *)
 let test_next_steps_guide_first_keeper () =
   let script = install_script () in
   assert_contains
-    "the post-install guidance points at creating a first keeper in the TUI"
+    "the post-install guidance names the seeded Keeper and where to start it"
     script
-    "create your first from the Keepers view";
+    "seeds one Keeper, imp, with autoboot off: start it from the Keepers view";
   assert_contains
     "the post-install guidance surfaces the scripted keeper-create path"
     script

@@ -1785,7 +1785,7 @@ type async_msg =
       string * int * (float * string) option *
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
-      string * (Masc.Tui_decode.lane_run_detail, string) result
+      string * int * (Masc.Tui_decode.lane_run_detail, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -1856,7 +1856,7 @@ type async_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
-      (Tui_decode.keeper_tool_approval list, string) result
+      Snapshot_read.request * (Tui_decode.keeper_tool_approval list, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -1875,7 +1875,7 @@ type async_msg =
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
-  | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
+  | Gate_snapshot_loaded of Snapshot_read.request * (Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
           survive nobody watching, and both lane modes. *)
   | Gate_approval_resolved of
@@ -1926,7 +1926,7 @@ type async_msg =
     }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
-  | Schedules_loaded of (schedule_snapshot, string) result
+  | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
      not say whose it was would be filed under whoever is open when it lands. *)
@@ -2205,6 +2205,13 @@ let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
    budget rather than one per failed poll. [s] stays the manual path. *)
 let tui_auto_start_attempted = ref false
 
+(* Whether the credential decision taken at boot is still owed a second look.
+   Set only when that decision came back [Unavailable]: minting needs a
+   workspace that already exists, and on a first install this process runs
+   before any server has made one. Cleared once a retry against a reachable
+   server settles it. *)
+let tui_credential_retry_pending = ref false
+
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
    [Sys.file_exists] is the same presence test the installer's layout gives
    us; the executable bit is not re-checked here because a non-executable
@@ -2448,7 +2455,12 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
-let launch_keeper_tool_approvals_load state ~mailbox =
+let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.keeper_tool_approvals_read in
+  state.keeper_tool_approvals_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2457,7 +2469,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_tool_approvals_loaded result)
+    enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2466,7 +2478,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+        (Keeper_tool_approvals_loaded (request, Error "Eio switch is unavailable"))
 
 (* What voice actually resolved to, plus the microphone the recorder would
    open.
@@ -2542,7 +2554,12 @@ let launch_keeper_turns_load state ~mailbox =
       enqueue_async mailbox
         (Keeper_turns_loaded (Error "Eio switch is unavailable"))
 
-let launch_gate_snapshot_load state ~mailbox =
+let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.gate_snapshot_read in
+  state.gate_snapshot_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2551,7 +2568,7 @@ let launch_gate_snapshot_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Gate_snapshot_loaded result)
+    enqueue_async mailbox (Gate_snapshot_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2560,7 +2577,7 @@ let launch_gate_snapshot_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
+        (Gate_snapshot_loaded (request, Error "Eio switch is unavailable"))
 
 (* [reason] mirrors [Masc_tui_http.post_dashboard_gate_resolve]: required
    labeled option, because a trailing [?reason] here is unerasable
@@ -2764,59 +2781,72 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
         (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error "Eio switch is unavailable"))
 
-(* Fetch the page before [before]. One at a time: msg_older_loading gates the
-   caller, so scrolling fast cannot open a request per keypress and land the
-   pages out of order. *)
-(* Load the verification queue. Its own fiber, like every other surface fetch:
-   the pane stays responsive and a slow server costs the list rather than the
-   keypress that asked for it. *)
-let launch_tools_load state ~mailbox =
-  state.tools_request_generation <- state.tools_request_generation + 1;
-  let generation = state.tools_request_generation in
-  let host = server_peer_host in
-  let port = state.port in
+(* Automatic polling shares a pending reading for the same Keeper. Explicit
+   refresh and selection changes supersede it, retaining the generation guard. *)
+let launch_tools_load ?(force = true) state ~mailbox =
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
   in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-    let async_observation =
-      try Masc_tui_http.fetch_async_request_observation ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+  let already_reading =
+    match state.tools_read_inflight with
+    | Some request -> Option.equal String.equal request.tri_keeper keeper
+    | None -> false
   in
-  (* The skills catalog (usage + flows) is a separate read and must not
-     delay the tool list: a slow catalog costs its own section, not the
-     screen. *)
-  let run_catalog () =
-    let result =
-      try Masc_tui_loader.load_skills_catalog ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if force || not already_reading then begin
+    state.tools_request_generation <- state.tools_request_generation + 1;
+    let generation = state.tools_request_generation in
+    state.tools_read_inflight <- Some
+      { tri_generation = generation
+      ; tri_keeper = keeper
+      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read; Tools_async_read ]
+      };
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+      let async_observation =
+        try Masc_tui_http.fetch_async_request_observation ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
     in
-    enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-  in
-  (match Eio_context.get_switch_opt () with
-   | Some sw ->
-       Eio.Fiber.fork_daemon ~sw (fun () ->
-           run_catalog ();
-           `Stop_daemon)
-   | None ->
-       enqueue_async mailbox
-         (Skills_catalog_loaded (generation, Error "Eio switch is unavailable")));
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (Tools_loaded (generation, keeper, Error "Eio switch is unavailable"))
+    (* The skills catalog (usage + flows) is a separate read and must not
+       delay the tool list: a slow catalog costs its own section, not the
+       screen. *)
+    let run_catalog () =
+      let result =
+        try Masc_tui_loader.load_skills_catalog ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
+         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None ->
+         let error = Error "Eio switch is unavailable" in
+         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
+         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
+         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+  end
+
+let settle_tools_read state ~generation part =
+  match state.tools_read_inflight with
+  | Some request when request.tri_generation = generation ->
+      let pending = List.filter (fun pending -> pending <> part) request.tri_pending in
+      state.tools_read_inflight <-
+        (match pending with
+         | [] -> None
+         | _ -> Some { request with tri_pending = pending })
+  | Some _ | None -> ()
 
 let tools_skill_profiles state =
   match state.tools_inventory with
@@ -2913,7 +2943,12 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
              (Keeper_schedules_loaded
                 (keeper_name, Error "Eio switch is unavailable")))
 
-let launch_schedules_load state ~mailbox =
+let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  let read, request = Snapshot_read.start ~intent state.schedules_read in
+  state.schedules_read <- read;
+  match request with
+  | None -> ()
+  | Some request ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2922,7 +2957,7 @@ let launch_schedules_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Schedules_loaded result)
+    enqueue_async mailbox (Schedules_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2930,7 +2965,7 @@ let launch_schedules_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None ->
-      enqueue_async mailbox (Schedules_loaded (Error "Eio switch is unavailable"))
+      enqueue_async mailbox (Schedules_loaded (request, Error "Eio switch is unavailable"))
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -4943,6 +4978,8 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
         (Lane_runs_loaded (lane_id, generation, before, Error "Eio switch is unavailable"))
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
+  state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
+  let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4951,7 +4988,7 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lane_run_detail_loaded (run_id, result))
+    enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4960,7 +4997,7 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Lane_run_detail_loaded (run_id, Error "Eio switch is unavailable"))
+        (Lane_run_detail_loaded (run_id, generation, Error "Eio switch is unavailable"))
 
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
@@ -5205,9 +5242,9 @@ let goto_surface state ~mailbox (destination : surface) =
    | Clients -> launch_clients_load state ~mailbox
    | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
    | Approvals ->
-       launch_keeper_tool_approvals_load state ~mailbox;
-       launch_gate_snapshot_load state ~mailbox
-   | Schedules -> launch_schedules_load state ~mailbox
+       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
+   | Schedules -> launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
    | Planning -> launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
@@ -5263,8 +5300,8 @@ let goto_surface state ~mailbox (destination : surface) =
    | Code -> launch_code_entries_load state ~mailbox
    | Metrics ->
        launch_memory_health_load state ~mailbox;
-       launch_keeper_tool_approvals_load state ~mailbox;
-       launch_gate_snapshot_load state ~mailbox;
+       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
        launch_keeper_tool_modes_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
@@ -6559,6 +6596,15 @@ let write_to_terminal payload =
    palette's "go MSX" both land here, so the two doors stay one door -- which
    is why the menu goes in the function rather than at the key. *)
 let open_msx_screen (state : Masc_tui_types.state) =
+  (* The spectator takes ownership from any image preview. A pending async
+     preview must not keep its old surface alive underneath the game. *)
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_msx.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
   state.msx_frame <-
     Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
   state.msx_carts <-
@@ -6728,6 +6774,8 @@ let clamp_planning_cursor state =
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
 let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+  if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
+  else begin
   state.browser_viewport <- None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
@@ -6772,6 +6820,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
                  (Message_layout.fit_width line (max 1 (columns - 1))))
              header_lines)
       in
+      Masc_tui_msx.invalidate ();
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
         ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
@@ -6779,6 +6828,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
       state.image_open <- true
+  end
 
 let ensure_img_cache_dir () =
   let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
@@ -7111,6 +7161,7 @@ let close_image state =
   | false -> ()
   | true ->
       state.image_open <- false;
+      Masc_tui_msx.invalidate ();
       write_to_terminal Masc_tui_graphics.delete_all
 
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
@@ -10234,6 +10285,73 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
            Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
   end
 
+(* The status a completed refresh leaves behind, in the vocabulary the
+   server-start rule decides over. Exhaustive on purpose: a new connection
+   state has to say here whether it counts as a reading of the port, and the
+   compiler asks rather than a wildcard answering for it. *)
+let contact_of_connection_status :
+    Masc_tui_types.connection_status -> Masc_tui_server_lifecycle.contact =
+  function
+  | Masc_tui_types.Disconnected -> Masc_tui_server_lifecycle.Nothing_answered
+  | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+      Masc_tui_server_lifecycle.Server_reached
+  | Masc_tui_types.Connecting | Masc_tui_types.Booting
+  | Masc_tui_types.Reconnecting ->
+      Masc_tui_server_lifecycle.Undecided
+
+(* A mint and a failure are not the same news. Both were reported as errors,
+   which reads a working first start as a broken one -- and on a first
+   install, where the client mints for itself, that is the ordinary path. *)
+let credential_notice_level = function
+  | Masc_tui_credential.Unavailable _ -> "error"
+  | Masc_tui_credential.Held | Masc_tui_credential.Minted
+  | Masc_tui_credential.Not_required -> "system"
+
+(* What a refresh completing owes the operator, decided from the status it
+   concluded rather than from which message carried it.
+
+   Both reactions used to hang off [Http_refresh_failed], which carries an
+   exception a surface load threw. Nothing listening on the port is not that:
+   each surface returns its own connection error, the refresh completes, and
+   [apply_http_surfaces] concludes [Disconnected] from the results. So the
+   one case a first install produces reached neither the server start the
+   installer promises nor a second look at a credential that could not be
+   minted yet. *)
+let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
+    ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  let contact = contact_of_connection_status state.connection_status in
+  if
+    Masc_tui_server_lifecycle.start_due ~contact
+      ~already_attempted:!tui_auto_start_attempted
+  then begin
+    tui_auto_start_attempted := true;
+    start_masc_server_here ~base_path ~host ~port
+      ~note:(fun msg -> add_event state "system" msg)
+      ~on_ready:(fun () ->
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox)
+  end;
+  (* A server answering here is the workspace appearing. The decision is the
+     same guarded one taken at boot -- it still refuses a base path that holds
+     no workspace, so a server reached on some other path changes nothing --
+     taken again at the moment its precondition can hold. It stays pending
+     while it keeps failing, because the server that would settle it may be
+     the one this session is still starting. *)
+  if
+    !tui_credential_retry_pending
+    && contact = Masc_tui_server_lifecycle.Server_reached
+  then begin
+    let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
+    if not (Masc_tui_credential.outcome_needs_retry outcome) then begin
+      tui_credential_retry_pending := false;
+      Option.iter
+        (add_event state (credential_notice_level outcome))
+        (Masc_tui_credential.outcome_notice outcome)
+    end
+  end
+
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
@@ -10343,6 +10461,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
+      react_to_server_contact state ~base_path ~host:server_peer_host
+        ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox;
       (* The held-call listing rides the same cadence as the surface that
          draws it. Fetched only while the surface is up: the waits are
          short-lived and every other surface would fetch rows it never
@@ -10569,24 +10690,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
-      (* Nothing is answering the port. The TUI is the front door and the
-         server is how it opens, so start one rather than leave the operator
-         looking at a disconnected workspace and a key to press. This is the
-         only place the TUI concludes Disconnected, and
-         [tui_auto_start_attempted] makes it one spawn for the whole session:
-         a refresh also fails for reasons a new server would not fix, and a
-         second masc on this port would only fail to bind. *)
-      if not !tui_auto_start_attempted then begin
-        tui_auto_start_attempted := true;
-        start_masc_server_here ~base_path ~host:server_peer_host
-          ~port:state.port
-          ~note:(fun msg -> add_event state "system" msg)
-          ~on_ready:(fun () ->
-            start_http_refresh state ~host:server_peer_host ~port:state.port
-              ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
-              ~scoped_refresh_inflight:http_scoped_refresh_inflight
-              ~scoped_refresh_followup ~mailbox)
-      end;
+      react_to_server_contact state ~base_path ~host:server_peer_host
+        ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -11309,7 +11415,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            add_event state "error" (keeper_name ^ ": github login: " ^ detail));
       launch_github_identity_view state ~mailbox keeper_name)
   | System_logs_loaded result -> apply_system_logs_load state result
-  | Schedules_loaded result -> (
+  | Schedules_loaded (request, result) -> (
+      match Snapshot_read.settle state.schedules_read request with
+      | None -> ()
+      | Some read ->
+      state.schedules_read <- read;
       match result with
       | Ok snapshot ->
           state.schedules <- Some snapshot;
@@ -11376,7 +11486,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "system" ("Schedule: " ^ message);
           (* The row shown still carries the old status until this lands; a
              cancelled row that reads "scheduled" invites a second cancel. *)
-          launch_schedules_load state ~mailbox
+          launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some err)
@@ -11527,6 +11637,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               call_label
         | Error detail -> "could not answer the held call: " ^ detail
       in
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       append_chat_history state request
         (match result with
          | Ok { Masc_tui_http.settled = true; _ }
@@ -11534,8 +11645,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Message_status
          | _ -> Message_error)
         text
-  | Keeper_tool_approvals_loaded result ->
-      (match result with
+  | Keeper_tool_approvals_loaded (request, result) ->
+      (match Snapshot_read.settle state.keeper_tool_approvals_read request with
+       | None -> ()
+       | Some read ->
+       state.keeper_tool_approvals_read <- read;
+       match result with
        | Ok held ->
            state.keeper_tool_approvals <- held;
            state.keeper_tool_approvals_error <- None;
@@ -11545,7 +11660,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; result } ->
-      if generation = state.image_request_generation
+      if not state.msx_open && generation = state.image_request_generation
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in
         let refuse reason =
@@ -11556,6 +11671,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok data -> draw_image state ~refuse ~title:name data
       end
   | Image_render_ready { title; caption; result } ->
+      if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
        | Ok data ->
@@ -11571,6 +11687,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     e opener title)
            | Error _ ->
                notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
+      end
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -11592,8 +11709,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               about the turns themselves, and blanking every badge on one
               lost poll would flicker. The error shows on the keeper list. *)
            state.keeper_turns_error <- Some detail)
-  | Gate_snapshot_loaded result ->
-      (match result with
+  | Gate_snapshot_loaded (request, result) ->
+      (match Snapshot_read.settle state.gate_snapshot_read request with
+       | None -> ()
+       | Some read ->
+       state.gate_snapshot_read <- read;
+       match result with
        | Ok snapshot ->
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
            state.gate_modes <- snapshot.Tui_decode.gs_modes;
@@ -11631,7 +11752,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let count = List.length (approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
@@ -11645,7 +11766,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            add_event state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
@@ -11655,7 +11776,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Ok () ->
            add_event state "system"
              (Printf.sprintf "%s Gate set to %s" (gate_lane_label lane) mode);
-           launch_gate_snapshot_load state ~mailbox
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
@@ -11753,7 +11874,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                "too late for %s's call %s; it was no longer waiting"
                keeper_name
                (Keeper_chat.compact_request_id tool_call_id)
-         | Error detail -> "could not answer the held call: " ^ detail)
+         | Error detail -> "could not answer the held call: " ^ detail);
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_chat_interrupt_done (request, result) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
@@ -11965,6 +12087,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail)))
   | Tools_loaded (generation, keeper_name, result) ->
+      settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
          && Option.equal String.equal keeper_name selected_name then (
@@ -11975,6 +12098,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
   | Skills_catalog_loaded (generation, result) ->
+      settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->
@@ -11982,6 +12106,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.skills_catalog_error <- None
       | Error detail -> state.skills_catalog_error <- Some detail)
   | Tools_async_observation_loaded (generation, result) ->
+      settle_tools_read state ~generation Tools_async_read;
       if generation = state.tools_request_generation then (
       match result with
       | Ok observation ->
@@ -12377,13 +12502,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
        | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ -> ())
-  | Lane_run_detail_loaded (run_id, result) ->
+  | Lane_run_detail_loaded (run_id, generation, result) ->
       (match state.lanes_mode with
-       | Lanes_run_detail (_, open_run) when String.equal open_run run_id ->
+       | Lanes_run_detail (_, open_run)
+         when generation = state.lane_run_detail_generation
+              && String.equal open_run run_id ->
            (match result with
-            | Ok detail ->
+            | Ok detail when String.equal detail.Tui_decode.lrd_run_id run_id ->
                 state.lane_run_detail <- Some detail;
                 state.lane_run_detail_error <- None
+            | Ok _ ->
+                state.lane_run_detail_error <-
+                  Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
        | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Harness_loaded result -> (
@@ -12520,6 +12650,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
    rather than skipped as unchanged. Both doors below end here so the two
    cannot come to disagree about what a resize costs. *)
 let discard_frame_for_new_size frame_presenter render_schedule =
+  Masc_tui_msx.invalidate ();
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
 
@@ -12716,9 +12847,11 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
      it and leave the terminal in raw mode. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
-  (* SIGINT is the only one of these a person sends by hand mid-sentence, so
-     it asks the loop rather than ending the process. The rest still mean the
-     session is over. *)
+  (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
+     session is over. Neither ends the process from the handler: the loop
+     leaves through [Break], so the switch release that stops a server this
+     TUI started runs whichever signal ended the session. See
+     [Masc_tui_exit_signals]. *)
   Sys.set_signal Sys.sigint (Sys.Signal_handle request_interrupt);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
   Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
@@ -12832,6 +12965,8 @@ let main
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
+  Masc_tui_msx.set_synchronized_output
+    (Terminal_profile.synchronized_output terminal_profile);
   let frame_presenter =
     Frame_presenter.create
       ~synchronized_output:
@@ -12890,7 +13025,18 @@ let main
   in
 
   let request_full_repaint _ = Atomic.set resize_requested true in
-  let terminate _ = exit 0 in
+  (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
+     second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
+     terminal restore and nothing else: the switch release in
+     [run_with_eio_context] never ran, so a server this TUI had started
+     stayed up -- and whether it did depended on which key ended the session.
+     Every end now goes the way q goes: the handler records, the loop reads
+     the record once per pass and raises [Break], the switch releases, and
+     the process returns from [main]. A handler cannot raise [Break] itself:
+     it runs at the next poll point, inside whatever the loop was doing, an
+     Eio wait included. *)
+  let exit_signals = Masc_tui_exit_signals.create () in
+  let terminate _ = Masc_tui_exit_signals.request_terminate exit_signals in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
      Ctrl-X on the same hand, and the footer never listed it, so the first
@@ -12900,9 +13046,9 @@ let main
      it, and suspend is wired to a handler that gives the terminal back. So
      the signal stays a signal and the loop decides what it means — the first
      one says what a second one will do, and any other key withdraws it. *)
-  let interrupt_requested = Atomic.make false in
-  let interrupt_armed = Atomic.make false in
-  let request_interrupt _ = Atomic.set interrupt_requested true in
+  let request_interrupt _ =
+    Masc_tui_exit_signals.request_interrupt exit_signals
+  in
   let rec suspend _ =
     restore_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
@@ -13159,11 +13305,16 @@ let main
      holds one the operator sees the cause ahead of the symptom: a tokenless
      process cannot dispatch, and cannot reconcile a dispatch an authenticated
      predecessor left behind. *)
-  (match
-     Masc_tui_credential.outcome_notice
-       (Masc_tui_http.install_operator_token ~base_path ~host ~port)
-   with
-   | Some notice -> add_event state "error" notice
+  (let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
+   (* On a first install nothing has served this base path yet, so the mint
+      gate refuses and this is not the answer to keep: the server that makes
+      the workspace is the one this TUI is about to start. Latching the retry
+      here is what stops a fresh install from sending the operator to
+      [masc login]. *)
+   tui_credential_retry_pending :=
+     Masc_tui_credential.outcome_needs_retry outcome;
+   match Masc_tui_credential.outcome_notice outcome with
+   | Some notice -> add_event state (credential_notice_level outcome) notice
    | None -> ());
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
@@ -14296,7 +14447,7 @@ and is loaded on demand through keeper_skill.
                   report_action state "system" (action ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
-                  launch_schedules_load state ~mailbox:async_messages))
+                  launch_schedules_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages))
           | _ ->
             report_action state "error"
               (action ^ ": the editor form must be a JSON object")))
@@ -14330,17 +14481,18 @@ and is loaded on demand through keeper_skill.
          one only says so. The notice is an event rather than a footer line
          because it has to survive the frame the operator is looking at, and
          because the answer to "why did nothing happen" belongs in the log
-         they can scroll back to. *)
-      if Atomic.exchange interrupt_requested false then begin
-        state.quit_armed <- false;
-        if Atomic.get interrupt_armed then exit 0
-        else begin
-          Atomic.set interrupt_armed true;
-          add_event state "system"
-            "Ctrl-C: press again to quit, or any other key to stay";
-          Render_schedule.request render_schedule Render_schedule.Background
-        end
-      end;
+         they can scroll back to. A terminate signal ends the session
+         outright. Both leave through [Break], the exit q takes, so the
+         switch release that stops a server this TUI started runs for every
+         way out. *)
+      (match Masc_tui_exit_signals.poll exit_signals with
+       | Masc_tui_exit_signals.Quit -> raise Break
+       | Masc_tui_exit_signals.Interrupt_armed ->
+           state.quit_armed <- false;
+           add_event state "system"
+             "Ctrl-C: press again to quit, or any other key to stay";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Masc_tui_exit_signals.Continue -> ());
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -14367,6 +14519,17 @@ and is loaded on demand through keeper_skill.
       (* The load menu owns the terminal while it is up: skip the frame poll so
          it does not repaint the picker with a game screen. The spectator poll
          resumes the moment a game is chosen and the menu closes. *)
+      (* Console writes damage whichever surface owns the terminal, including
+         the spectator whose output bypasses the ordinary frame presenter. *)
+      if Terminal_write_repair.consume_damage () then begin
+        Masc_tui_msx.invalidate ();
+        Frame_presenter.invalidate frame_presenter;
+        Render_schedule.request render_schedule Render_schedule.Force;
+        if state.msx_open then
+          if state.msx_menu_open then
+            Masc_tui_msx.render_menu ~write:write_to_terminal state
+          else state.msx_last_poll_ns <- 0L
+      end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if
@@ -14380,7 +14543,7 @@ and is loaded on demand through keeper_skill.
              keeper is pressing. A plain read would freeze between presses. *)
           state.msx_frame <-
             Masc_tui_http.tick_msx ~host:server_peer_host ~port:state.port;
-          Masc_tui_msx.render ~write:write_to_terminal
+          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
         end
       end;
@@ -14403,7 +14566,7 @@ and is loaded on demand through keeper_skill.
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
       if Option.is_some input then begin
-        Atomic.set interrupt_armed false;
+        Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
       end;
@@ -14472,7 +14635,7 @@ and is loaded on demand through keeper_skill.
                    poll at once so the next tick refreshes it (parity with the
                    Watch arm). *)
                 state.msx_last_poll_ns <- 0L;
-                Masc_tui_msx.render ~write:write_to_terminal
+                Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
               end
               else begin
@@ -14483,25 +14646,43 @@ and is loaded on demand through keeper_skill.
               state.msx_menu_open <- false;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
-              Masc_tui_msx.render ~write:write_to_terminal
+              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
-          | Load cart -> (
+          | (Load cart | Swap_disk cart) as choice -> (
+              state.msx_notice <- None;
               match
-                Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port
-                  ~cart
+                (match choice with
+                 | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
+                     ~host:server_peer_host ~port:state.port ~disk:cart
+                 | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
               with
               | Ok () ->
+                  (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
                   state.msx_frame <-
                     Masc_tui_http.fetch_msx_frame ~host:server_peer_host
                       ~port:state.port;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal
+                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:("load failed: " ^ message) state))
+                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+      | Some "f8" ->
+          state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+          Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
+      | Some (("f6" | "f7") as name) ->
+          let restore = name = "f7" in
+          let result = Masc_tui_http.post_msx_checkpoint
+              ~host:server_peer_host ~port:state.port ~restore ~slot:"quick" in
+          state.msx_notice <- Some (match result with
+            | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
+            | Error message -> "Checkpoint failed: " ^ message);
+          state.msx_frame <- Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+          state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+            ~connection:state.connection_status state.msx_frame
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -14513,7 +14694,7 @@ and is loaded on demand through keeper_skill.
              terminal draws the cached frame and never reach the machine. *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
-          Masc_tui_msx.render ~write:write_to_terminal
+          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame)
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
@@ -14530,7 +14711,7 @@ and is loaded on demand through keeper_skill.
               state.msx_frame <-
                 Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              Masc_tui_msx.render ~write:write_to_terminal
+              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
@@ -17524,6 +17705,18 @@ and is loaded on demand through keeper_skill.
            load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
+           (* Each source owns its read even while the whole-surface refresh
+              is busy. Cadence reads share these requests rather than
+              superseding them before their responses can arrive. *)
+           (match state.connection_status with
+            | Booting -> ()
+            | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+              launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages;
+              launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages;
+              launch_schedules_load ~intent:Snapshot_read.Refresh
+                state ~mailbox:async_messages);
            start_http_refresh state ~host ~port ~intent:Revalidate
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -20295,9 +20488,9 @@ and is loaded on demand through keeper_skill.
              launch_runtime_surface_load state ~mailbox:async_messages
                ~force:false
          | Tools ->
-             (* The inventory is near-static, but a tool whose projection
-                changes is exactly what this surface is read for. *)
-             launch_tools_load state ~mailbox:async_messages
+             (* A slow current read must finish before the next automatic
+                poll; explicit refresh still replaces it. *)
+             launch_tools_load ~force:false state ~mailbox:async_messages
          | Config ->
              (* The file moves under hot-reload edits from other agents. *)
              launch_runtime_config_load state ~mailbox:async_messages

@@ -37,6 +37,21 @@ val instruction_skill :
   unit ->
   instruction_skill
 
+val instruction_skills_of_catalog : Keeper_skill_catalog.t -> instruction_skill list
+(** Readable instruction entries with the frozen exact references and resource roots. *)
+
+val make_instruction_skill_tool :
+  config:Workspace.config ->
+  ?record_activation:
+    (invocation:Agent_core.Tool_contract.Invocation.t ->
+     content:Keeper_skill_activation_recorder.instruction_content ->
+     Skill_reference.t ->
+     (Keeper_skill_activation_ledger.record_outcome, Keeper_skill_activation_recorder.error) result) ->
+  ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  instruction_skills:instruction_skill list -> unit -> Agent_core.Tool.t
+(** Read a frozen Skill body or bundled resource without a Keeper turn or
+    composition execution. Native Agent-Core invocation identity is preserved. *)
+
 val schema_tool_rows :
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
@@ -174,6 +189,7 @@ module For_testing : sig
        ( Keeper_skill_activation_ledger.record_outcome
        , Keeper_skill_activation_recorder.error )
          result) ->
+    ?on_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
     instruction_skills:instruction_skill list ->
     unit ->
     Agent_core.Tool.t

@@ -1257,16 +1257,10 @@ let test_tui_current_projection_wiring () =
     ; "decode_planning_backlog"
     ; "decode_planning_snapshot"
     ];
-  (* [proactive_enabled] left the keeper detail row in #29311, and that row is
-     now built from [Keeper_meta_contract] rather than raw keys, so it cannot
-     come back through it. The one literal left is [decode_keeper_runtime],
-     which reads GET /api/v1/gate/keepers -- a live route, not the durable
-     metadata the retirement was about. Counted, so a second reader still
-     fails. *)
-  check int "proactive_enabled is read only by decode_keeper_runtime" 1
+  check int "activation_mode is decoded by the runtime row" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
-       ~needle:"proactive_enabled");
+       ~needle:"activation_mode");
   check int "verify appears only inside verifying_count" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
@@ -1328,7 +1322,35 @@ let test_overview_state_domains_are_closed_sum () =
        ~needle:"unknown attention severity")
 ;;
 
-
+let test_planning_cursor_uses_visible_goal_order () =
+  check int "visible planning helper lives in shared types" 1
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_types.ml"
+       ~name:"planning_visible_goals");
+  check int "visible planning helper avoids duplicate-prone insertion helper" 0
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_types.ml"
+       ~name:"insert_sorted");
+  check bool "visible planning helper uses stable depth sort" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_types.ml"
+       ~callee:"List.stable_sort"
+     >= 1);
+  check int "render no longer owns a private tree sorter" 0
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_render.ml"
+       ~name:"sort_goals_for_tree");
+  check bool "render uses shared visible-goal order" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"planning_visible_goals"
+     >= 1);
+  check bool "key handling uses shared visible-goal order" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"planning_visible_goals"
+     >= 2)
+;;
 
 (* The screen dials one address and it is not a setting.
 
@@ -1458,7 +1480,41 @@ let test_the_scroll_counts_back_from_a_pinned_row () =
        ~callees:[] ~identifiers:[ "rows_since_pin" ])
 ;;
 
+let test_planning_refresh_reconciles_navigation_identity () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "planning apply owns one identity reconciliation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_planning_load"
+       ~callee:"Planning_selection.reconcile");
+  check int "planning reconciliation has one application owner" 1
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Planning_selection.reconcile");
+  check int "planning apply is independent of the visible surface" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_planning_load" ~callees:[]
+       ~fields:[ "view" ]);
+  check int "scoped HTTP application owns one planning apply" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_http_scoped_surfaces"
+       ~callee:"apply_planning_load");
+  (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
+     lookups from the key loop: the loop re-derived the Planning selection from
+     whichever snapshot it happened to hold, and a reorder between refreshes
+     moved the cursor onto a different goal. Reconciliation belongs to
+     [Planning_selection.reconcile], pinned above.
 
+     That absence was guarded by counting [List.find_opt] in [main], which is a
+     2,700-line key dispatcher: #30603 added a repository lookup for the PR-URL
+     jump and turned this red on a call with nothing to do with Planning. What
+     the loop must not do is reach into the snapshot's goal list itself; the two
+     reads it legitimately makes both go through [planning_visible_goals], so
+     that projection is the permitted path and anything else is the bug coming
+     back. *)
+  check int "refresh loop reads planning goals only through the visible projection" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
+;;
 
 let test_overview_events_use_scroll_projection () =
   check int "overview renders one bounded event window" 1
@@ -1649,18 +1705,38 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"
        ~callee:"discard_frame_for_new_size");
-  (* Resize must still request a fresh frame. Other events can also damage
-     the terminal, including asynchronous image dismissal. Their contract is
-     repainting the screen, not a global limit on invalidation call sites:
-     test_tui_frame_presenter exercises full redraw after invalidation, and
-     run_browser_viewport_regression in test_tui_keyboard_input.py checks
-     that asynchronous dismissal restores the visible text rows. *)
-  check bool "main reaches the resize repaint boundary" true
+  (* Resize, async image dismissal, and terminal damage are distinct reasons
+     to distrust the cached text frame. Each owns one explicit invalidation;
+     ordinary refreshes must not gain another full-screen repaint site. *)
+  check bool "main reaches the resize invalidation boundary" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"invalidate_frame_for_resize"
      + Ast_grep.count_calls_in_value_binding ~module_path:main_path
          ~binding_name:"main" ~callee:"discard_frame_for_new_size"
      >= 1);
+  let invalidation_sites =
+    [ "discard_frame_for_new_size"; "drain_async_messages"; "main" ]
+  in
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " owns one presentation invalidation") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+           ~binding_name ~callee:"Frame_presenter.invalidate"))
+    invalidation_sites;
+  check int "no invalidation outside the explicit recovery boundaries"
+    (List.fold_left
+       (fun count binding_name ->
+         count + Ast_grep.count_calls_in_value_binding ~module_path:main_path
+           ~binding_name ~callee:"Frame_presenter.invalidate")
+       0 invalidation_sites)
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Frame_presenter.invalidate");
+  check int "async image dismissal requests a forced restoration" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"drain_async_messages"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
   let terminal_repair_path = "bin/masc_tui_terminal_write_repair.ml" in
   check int "console repair boundary delegates to the repair state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -1894,7 +1970,43 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          ; "Frame_presenter.setup"
          ; "request_full_repaint"
          ]);
-  check int "the local input loop propagates one Break" 1
+  (* Signal-driven quit and the armed q shortcut are separate exits. Pin
+     the condition of each rather than letting an arbitrary second raise
+     satisfy the count; both must still unwind through the root switch. *)
+  let raises_break (expression : Parsetree.expression) =
+    match expression.pexp_desc with
+    | Pexp_apply (callee, [Asttypes.Nolabel, argument]) ->
+        Ast_grep.expression_is_identifier "raise" callee
+        && Ast_grep.expression_is_constructor "Break" argument
+    | _ -> false
+  in
+  let count_exit matches =
+    Ast_grep.count_expressions_outside_calls_in_value_binding
+      ~module_path:main_path ~binding_name:"run_loop" ~callees:[] ~matches
+  in
+  let signal_exit = count_exit (fun expression ->
+    match expression.Parsetree.pexp_desc with
+    | Pexp_match ({pexp_desc = Pexp_apply (callee, _); _}, cases)
+      when Ast_grep.expression_is_identifier "Masc_tui_exit_signals.poll" callee ->
+        List.exists (fun (case : Parsetree.case) ->
+          match case.pc_lhs.ppat_desc, case.pc_guard with
+          | Ppat_construct ({txt; _}, None), None ->
+              String.equal (Ast_grep.longident_to_string txt) "Masc_tui_exit_signals.Quit"
+              && raises_break case.pc_rhs
+          | _ -> false) cases
+    | _ -> false) in
+  let armed_key_exit = count_exit (fun expression ->
+    match expression.Parsetree.pexp_desc with
+    | Pexp_ifthenelse
+        ({pexp_desc = Pexp_field (receiver, {txt; _}); _}, yes, Some _)
+      when Ast_grep.expression_is_identifier "state" receiver
+           && String.equal (Ast_grep.longident_to_string txt) "quit_armed" ->
+        raises_break yes
+    | _ -> false) in
+  check int "signal poll Quit propagates Break" 1 signal_exit;
+  check int "q propagates Break only once armed" 1 armed_key_exit;
+  check int "no Break raises outside the signal and armed-key exits"
+    (signal_exit + armed_key_exit)
     (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
        ~module_path:main_path ~binding_name:"run_loop" ~callee:"raise"
        ~position:0 ~constructor:"Break");
@@ -1921,19 +2033,29 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
    chat surface -- so their wiring is pinned here. Without the startup line the
    first symptom is a recovered dispatch that can never settle. *)
 let test_missing_operator_token_is_reported () =
-  check int "startup binds the bearer to the workspace it opened" 1
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui.ml"
-       ~callee:"Masc_tui_http.install_operator_token");
-  (* Not a call count on [operator_token_present]: every surface that reports a
-     refusal now reads it, so counting occurrences says nothing about startup.
-     What must not disappear is that startup says out loud what came of binding
-     a bearer -- a silent mint reads to the operator as a broken credential
-     when the server's index has not caught up yet. *)
-  check int "startup reports what came of binding a bearer" 1
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui.ml"
-       ~callee:"Masc_tui_credential.outcome_notice");
+  (* Startup binds once; a workspace which becomes available later is bound
+     again by the guarded server-contact retry. Scope each assertion to its
+     owner so one path cannot accidentally stand in for the other. *)
+  let module_path = "bin/masc_tui.ml" in
+  let credential_boundaries = [ "main"; "react_to_server_contact" ] in
+  List.iter
+    (fun callee ->
+      List.iter
+        (fun binding_name ->
+          check int (binding_name ^ " owns one " ^ callee) 1
+            (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name
+               ~callee))
+        credential_boundaries;
+      check int ("no " ^ callee ^ " outside credential boundaries")
+        (List.fold_left
+           (fun count binding_name ->
+             count + Ast_grep.count_calls_in_value_binding ~module_path
+               ~binding_name ~callee)
+           0 credential_boundaries)
+        (Ast_grep.count_calls ~module_path ~callee))
+    [ "Masc_tui_http.install_operator_token"
+    ; "Masc_tui_credential.outcome_notice"
+    ];
   (* The mint's window is a policy, and the three the type offers mean different
      things. [Long_lived] leaves an admin secret on disk that nothing retires;
      [With_expiry] takes the workspace's operator-session day, which is the very
@@ -2322,7 +2444,34 @@ let test_the_session_filter_reads_the_transcript () =
 ;;
 
 
+(* The Board header and its rows are laid out by one function.
 
+   They were not: the rows sized their title to [cols - 68] and the header
+   claimed a fixed 20, so at eighty columns the header ran long, SCORE was
+   cut to "SC~" and REPLIES fell off the frame entirely -- two columns still
+   drawn on every row with nothing saying what they were. The mark ahead of
+   the id is one cell and the header reserved two, which put every label one
+   cell off its data.
+
+   A header that disagrees with its rows is worse than no header: it labels
+   the wrong column and the reader has no way to notice.
+
+   The shared arithmetic became a shared column description. This pins that
+   the surface draws its header and its rows from it rather than either one
+   spelling widths again: one title width, asked once, and the two rows built
+   from the description that width was measured against. *)
+let test_the_board_header_and_rows_share_one_layout () =
+  let module_path = "bin/masc_tui_render.ml" in
+  let in_board callee =
+    Ast_grep.count_calls_in_value_binding ~module_path
+      ~binding_name:"render_board_list" ~callee
+  in
+  check int "the title is sized once for the whole surface" 1
+    (in_board "board_title_width");
+  check int "the header is drawn from the column description" 1
+    (in_board "Render_schedule.board_header_row");
+  check int "and so is every row" 1 (in_board "Render_schedule.board_row")
+;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
@@ -2409,6 +2558,14 @@ let () =
           `Quick
           test_overview_state_domains_are_closed_sum;
         test_case
+          "planning cursor uses visible goal order"
+          `Quick
+          test_planning_cursor_uses_visible_goal_order;
+        test_case
+          "planning refresh reconciles navigation identity"
+          `Quick
+          test_planning_refresh_reconciles_navigation_identity;
+        test_case
           "the scroll counts back from a pinned row"
           `Quick
           test_the_scroll_counts_back_from_a_pinned_row;
@@ -2444,6 +2601,10 @@ let () =
           "the session row filter reads the transcript"
           `Quick
           test_the_session_filter_reads_the_transcript;
+        test_case
+          "the board header and rows share one layout"
+          `Quick
+          test_the_board_header_and_rows_share_one_layout;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

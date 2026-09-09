@@ -31,17 +31,19 @@ let descriptor_for tool_name =
   | descriptor :: _ -> Some descriptor
   | [] -> Descriptor.find_public tool_name
 
-(* The node tools a composition-shaped call will run, or [None] when this name
-   is not composition-shaped.
+(* Execute resolves its actual cwd, sandbox, grants and effect observation
+   before consulting the durable Gate. The interactive hook has none of that
+   context and must not insert a second permission authority ahead of it. *)
+let execution_gate_owns descriptor =
+  match descriptor.Descriptor.runtime_handler with
+  | Descriptor.Tool_execute -> true
+  | _ -> false
 
-   A [keeper_compose_<name>] entry is declared in the catalog, so the bundle
-   builder wrote its nodes into the index when it materialised the tool.
-
-   The read stays pure: an in-memory index lookup, which is what [Hooks.hook]
-   requires of whatever runs inside [pre_tool_use]. *)
 let rec verdict_for ~composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
   | None -> verdict_for_undescribed ~composition_plan_index ~tool_name ~input
+  | Some descriptor when execution_gate_owns descriptor ->
+      Run { because = "the execution Gate decides this call with its resolved context" }
   | Some descriptor -> (
       match Descriptor.readonly_for_input descriptor ~input with
       | Some true ->
@@ -76,7 +78,7 @@ let rec verdict_for ~composition_plan_index ~tool_name ~input =
    instead would not be neutral: a descriptor whose readonly answer depends on
    its input would be asked about a call it never sees, and whatever [{}]
    happens to produce would be pinned as the answer for every plan. So this
-   reads the descriptor's static hint and, failing that, the group -- both are
+   reads the descriptor's static hint and external-effect ownership -- both are
    facts about the tool rather than about one call.
 
    Today no descriptor's answer would differ ([Grep] is the only one carrying
@@ -88,6 +90,7 @@ and node_asks_for_approval node =
      descriptor list before the plan is built. Asked rather than assumed,
      because "no descriptor" is exactly the case this whole arm exists for. *)
   | None -> Some (node, "no descriptor declares what this tool does")
+  | Some descriptor when execution_gate_owns descriptor -> None
   | Some descriptor ->
     (match Descriptor.readonly_static_hint descriptor with
      | Some true -> None
@@ -144,7 +147,7 @@ and verdict_of_nodes node_tools =
   | None ->
     Run
       { because =
-          Printf.sprintf "every one of its %d nodes runs unasked"
+          Printf.sprintf "its %d nodes need no additional chat approval; executor permissions still apply"
             (List.length node_tools)
       }
 

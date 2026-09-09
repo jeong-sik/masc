@@ -1,7 +1,8 @@
 name = "masc_msx_step"
 description = """
-Advance the shared MSX machine by frames with no key held and return the \
-observation (see masc_msx_screen). Use it to let a title, a fade or a \
+Advance the shared MSX machine by frames with no key held.
+
+Returns the observation (see masc_msx_screen). Use it to let a title, a fade or a \
 level intro play out. Frames are 1/60 s; at most 300 per call."""
 additional_properties = false
 

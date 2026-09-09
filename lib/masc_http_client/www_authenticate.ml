@@ -156,14 +156,20 @@ let parse value =
       else None
   in
   (* [current] is the challenge still taking parameters; [closed] holds the
-     finished ones, newest first. *)
-  let rec elements at current closed =
+     finished ones, newest first. [starting] says whether [at] is the first
+     thing in its element -- true at the beginning of the value and just past
+     a comma. Only there may a bare token be the next scheme: the field is a
+     comma-separated list, so a token that merely follows one without a comma
+     belongs to the challenge being read, and belongs to it as a token68 or
+     an auth-param or not at all. *)
+  let rec elements ~starting at current closed =
     let at = span value ~from:at ~keep:is_ows in
     if at_end at then
       match current with
       | None -> Error No_challenge
       | Some challenge -> Ok (List.rev (close challenge :: closed))
-    else if Char.equal value.[at] comma then elements (at + 1) current closed
+    else if Char.equal value.[at] comma then
+      elements ~starting:true (at + 1) current closed
     else
       let stop = span value ~from:at ~keep:is_tchar in
       if stop = at then Error (Expected_token at)
@@ -181,9 +187,13 @@ let parse value =
               param_value (span value ~from:(after_bws + 1) ~keep:is_ows)
             in
             let* next = element_end next in
-            elements next
+            elements ~starting:false next
               (Some { scheme; credentials = Params ((name, text) :: newest_first) })
               closed
+        else if not starting then
+          (* A comma here would have ended the challenge and this token would
+             be the next scheme, so name the byte where one was needed. *)
+          Error (Expected_delimiter after_bws)
         else
           let closed =
             match current with
@@ -195,18 +205,20 @@ let parse value =
      token68 or the parameter list (whose first element may be empty). *)
   and after_scheme at scheme closed =
     let bare = Some { scheme; credentials = Params [] } in
-    if at_end at then elements at bare closed
+    if at_end at then elements ~starting:false at bare closed
     else if is_sp value.[at] then
       let at = span value ~from:at ~keep:is_sp in
       match token68 at with
       | Some (text, next) ->
-        elements next (Some { scheme; credentials = Token68 text }) closed
-      | None -> elements at bare closed
+        elements ~starting:false next
+          (Some { scheme; credentials = Token68 text })
+          closed
+      | None -> elements ~starting:false at bare closed
     else
       let* at = element_end at in
-      elements at bare closed
+      elements ~starting:false at bare closed
   in
-  elements 0 None []
+  elements ~starting:true 0 None []
 
 (* ── selection ───────────────────────────────────────────────────────── *)
 

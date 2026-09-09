@@ -165,11 +165,21 @@ let playground_file ~config ~meta name =
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
 
+(* The tag the runtime asks the daemon for, read off the constant that names
+   it rather than written out again: this probe used to inspect
+   masc-keeper-sandbox:local while a sandboxed run reached for
+   masc-sandbox:general, so a host holding the first one answered "available"
+   and the run failed on the second. *)
 let is_sandbox_available =
   lazy (
     match Masc_test_deps.fixture_sandbox_profile () with
     | Masc.Keeper_types_profile.Docker ->
-      (try Sys.command "docker image inspect masc-keeper-sandbox:local > /dev/null 2>&1" = 0
+      (try
+         Sys.command
+           (Printf.sprintf
+              "docker image inspect %s > /dev/null 2>&1"
+              (Filename.quote Keeper_sandbox_image.default_tag))
+         = 0
        with _ -> false)
     | _ -> false
   )
@@ -7177,20 +7187,39 @@ let composable_model_names () =
    state first — an artifact to read — can create it. *)
 type output_probe =
   { tool_name : string
+  ; (* Whether running this producer reaches the sandbox runtime. A probe
+       that does cannot report anything on a host without the image, and
+       naming the tools that do by hand -- the skip below matched the string
+       "Execute" -- left keeper_spawn out and reported its container failure
+       as a schema problem. *)
+    needs_sandbox : bool
   ; prepare :
       config:Masc.Workspace.config
       -> meta:Masc.Keeper_meta_contract.keeper_meta
       -> Yojson.Safe.t
   }
 
-let probe tool_name args =
-  { tool_name; prepare = (fun ~config:_ ~meta:_ -> args) }
+let probe ?(needs_sandbox = false) tool_name args =
+  { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
 let composable_output_probes =
-  [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+  [ probe
+      ~needs_sandbox:true
+      "Execute"
+      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+    (* #34263 gave the start answer a named handle so a composition can hand
+       it on. The declaration landed without a probe, and this list is the
+       only thing that runs the producer against the schema it now claims.
+       Start builds a container argv, so it needs the sandbox the same way
+       Execute does. *)
+  ; probe
+      ~needs_sandbox:true
+      "keeper_spawn"
+      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_time_now" (`Assoc [])
   ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* A tool that reads durable state needs some, or it fails before
@@ -7220,6 +7249,7 @@ let composable_output_probes =
   ; probe "masc_board_stats" (`Assoc [])
   ; probe "masc_board_list" (`Assoc [])
   ; { tool_name = "masc_goal_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* An empty list validates the envelope and nothing else. The goal
@@ -7238,6 +7268,7 @@ let composable_output_probes =
            `Assoc [])
     }
   ; { tool_name = "masc_run_list"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            (* Same reason as the goal probe: the run item's task_id, plan and
@@ -7254,14 +7285,17 @@ let composable_output_probes =
            `Assoc [])
     }
   ; { tool_name = "masc_get_metrics"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "masc_agent_fitness"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
     }
   ; { tool_name = "keeper_artifact_read"
+    ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
            let store = Tool_blob_store.create ~base_path:config.Masc.Workspace.base_path in
@@ -7417,10 +7451,26 @@ let test_composable_outputs_satisfy_declared_schema () =
           it exists to cover. One unavailable runtime is not a reason to stop
           asking the other producers whether they still match their declared
           schema. *)
+       (* keeper_spawn refuses outside a turn -- it needs the turn's spawn
+          registry to hand a handle to, and answers
+          {"error":"spawn is only available inside a keeper turn"} without
+          one. Installing it around the whole list costs the other probes
+          nothing: a tool that does not read the registry cannot see it. *)
+       let spawn_registry =
+         match
+           Spawn_registry.create
+             ~run:"composable-output-probe"
+             ~output_limit_bytes:(1 lsl 16)
+         with
+         | Some registry -> registry
+         | None -> fail "valid spawn registry was rejected"
+       in
+       Spawn_turn_registry.with_turn_registry (Some spawn_registry)
+       @@ fun () ->
        let failures =
          List.filter_map
-           (fun { tool_name; prepare } ->
-              if String.equal tool_name "Execute" && not (Lazy.force is_sandbox_available)
+           (fun { tool_name; needs_sandbox; prepare } ->
+              if needs_sandbox && not (Lazy.force is_sandbox_available)
               then None
               else
               let input = prepare ~config ~meta in

@@ -433,8 +433,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
   try
     Result.Ok
       (match row.env_name with
-       | "MASC_KEEPER_BOOTSTRAP_ENABLED" ->
-         display_bool Env_config_keeper.KeeperBootstrap.enabled
        | "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC" ->
          display_float
            Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec
@@ -444,7 +442,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC" ->
          display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec
        | "MASC_KEEPER_REACTIVE_ENABLED"
-       | "MASC_KEEPER_PROACTIVE_ENABLED"
        | "MASC_KEEPER_AUTONOMOUS_ENABLED" ->
          display_bool (Feature_flag_registry.get_bool row.env_name)
        | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ->

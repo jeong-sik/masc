@@ -15,6 +15,12 @@ val set_graphics_protocol : Masc_tui_graphics.graphics_protocol -> unit
     the spectator and the image overlay cannot disagree about what the
     terminal can do. *)
 
+val set_synchronized_output : bool -> unit
+(** Use the executable's existing terminal synchronization policy. *)
+
+val invalidate : unit -> unit
+(** Forget the last accepted frame after another surface owns the terminal. *)
+
 val set_cell_pixels : (int * int) option -> unit
 (** Tell the spectator what one character cell measures, so an image placement
     can be sized to stay inside the screen. [None] leaves it sizing in cells
@@ -24,9 +30,11 @@ val set_cell_pixels : (int * int) option -> unit
 val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
+  -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> unit
-(** Draw the frame as a truecolor mosaic. Writes the whole terminal.
+(** Retain Kitty pixels across polls, repainting only changed pixels. Other
+    terminals use the truecolor mosaic. Layout changes repaint the whole terminal.
 
     [None] is drawn as an empty body under a line that says why it is empty,
     and [connection] is what decides which reason. The cache is [None] both
@@ -58,9 +66,10 @@ type menu_action =
   | Stay  (** navigated or repainted; the menu is still up *)
   | Closed  (** the human pressed [esc] *)
   | Watch  (** spectate the machine that is already loaded *)
+  | Swap_disk of string
   | Load of string  (** plug this cartridge in *)
 
-val open_menu : write:(string -> unit) -> Masc_tui_types.state -> unit
+val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> Masc_tui_types.state -> unit
 (** Take the terminal over and draw the picker over the cartridge inventory
     [state.msx_carts]. The caller fetches the inventory first. Selection starts
     at the top row. *)

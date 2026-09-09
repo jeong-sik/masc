@@ -1,9 +1,26 @@
 (** Shell_ir — subset AST produced by the Menhir bash grammar (A1).
 
-    The arm set is closed.  Anything outside the subset (heredoc, [$()]
-    expansion, subshell, control flow, logic operators, function def,
-    glob/brace expansion, backgrounding) is rejected at parse time as
-    [Parsed.Too_complex _]. *)
+    The arm set is closed.  What the lexer refuses is rejected at parse time
+    as [Parsed.Too_complex _], and bash_lexer.mll is the list: [$] in any
+    form (parameter, [$(...)], [$((...))], backticks), here-strings, a
+    heredoc whose tag is unquoted, process substitution, the redirect forms
+    the grammar does not spell ([&>], [>|], [<>], [>&-]), backgrounding,
+    subshell parentheses, and braces.
+
+    Three things this sentence used to name are inside the subset. [&&],
+    [||] and [;] are connectors the IR holds. A heredoc with a quoted tag
+    ([<<'TAG'], [<<"TAG"]) is read, because a quoted tag means the body is
+    literal and needs no expansion pass. An unquoted [*] is not refused at
+    all — it survives as a literal argv token, so the same text means one
+    thing through a shell and another through here.
+
+    Control flow and a function definition have no rule of their own: [for],
+    [while] and [if] lex as words, and a function definition is refused only
+    because it reaches a [(].  So a loop is reported by whatever excluded
+    lexeme it happens to contain, which is a tag that names a construct and
+    not the loop.
+
+    test/test_shell_costume.ml holds this as a measured table. *)
 
 type arg_meta = {
   quoted : bool;

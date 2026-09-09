@@ -28,6 +28,7 @@ let test_every_verdict_draws_something () =
     ; ("pending", Proof.Proof_pending)
     ; ("unreadable", Proof.Proof_unreadable None)
     ; ("unreadable with detail", Proof.Proof_unreadable (Some "bad json"))
+    ; ("stale", Proof.Proof_stale (Some "previous target reached"))
     ; ("idle", Proof.Proof_idle)
     ]
   in
@@ -73,7 +74,12 @@ let test_tone_separates_a_refusal_from_a_proof () =
   let proven = tones (Detail.body ~width:60 (Proof.Proof_proven None) None) in
   let refused = tones (Detail.body ~width:60 (Proof.Proof_refuted None) None) in
   check_bool "a proof reads as proven" true (List.hd proven = Detail.Proven);
-  check_bool "a refusal reads as refused" true (List.hd refused = Detail.Refused)
+  check_bool "a refusal reads as refused" true (List.hd refused = Detail.Refused);
+  let stale = Detail.body ~width:60 (Proof.Proof_stale (Some "old target reached")) None in
+  check_bool "historical proof has no current approval tone" true
+    (List.for_all (fun tone -> tone <> Detail.Proven) (tones stale));
+  check_bool "historical evidence remains readable" true
+    (List.mem "old target reached" (texts stale))
 
 let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in

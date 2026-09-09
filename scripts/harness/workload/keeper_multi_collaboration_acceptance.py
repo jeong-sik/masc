@@ -1627,8 +1627,7 @@ class MissionRun:
                 "name": keeper,
                 "instructions": self.role_instructions(role),
                 "mention_targets": [keeper, role],
-                "proactive_enabled": False,
-                "autoboot_enabled": True,
+                "activation_mode": "on_demand",
                 # The lane is an operator decision per campaign server
                 # (--sandbox-profile); the runner never assumes one. The
                 # server refuses profiles outside its closed set, and the

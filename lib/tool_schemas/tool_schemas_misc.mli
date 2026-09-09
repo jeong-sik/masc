@@ -108,6 +108,9 @@ type misc_operation =
   | Misc_slack_read
   | Misc_msx_load
   | Misc_msx_eject
+  | Misc_msx_save
+  | Misc_msx_restore
+  | Misc_msx_change_disk
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step

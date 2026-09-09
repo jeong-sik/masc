@@ -1,6 +1,8 @@
 name = "masc_get_metrics"
 description = """
-Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history."""
+Raw performance metrics for one agent.
+
+Task completion, timing, error rates, and collaboration history."""
 additional_properties = false
 
 

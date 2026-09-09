@@ -210,13 +210,13 @@ let test_terminal_cell_width_and_fit () =
     ; "🙂", 2
     ; "Aé한🙂", 6
     ; "\x1B[31m한\x1B[0m", 2
-    ; "👍🏽", 4
+    ; "👍🏽", 2
     ; "🇰🇷", 2
-    ; "❤️", 1
-    ; "👩‍👩‍👧‍👦", 8
-    ; "1️⃣", 1
+    ; "❤️", 2
+    ; "👩‍👩‍👧‍👦", 2
+    ; "1️⃣", 2
     ; "한", 2
-    ; "\x1B[31m❤️\x1B[0m", 1
+    ; "\x1B[31m❤️\x1B[0m", 2
     ];
   check string "exact-width text is unchanged" "12345"
     (Layout.fit_width "12345" 5);
@@ -269,6 +269,67 @@ let test_terminal_cell_width_and_fit () =
         (Printf.sprintf "%d-column footer avoids autowrap" terminal_cols)
         (terminal_cols - 1) (Layout.display_width fitted))
     [ 11; 20; 40 ]
+
+(* A terminal that draws grapheme clusters gives every emoji sequence two
+   cells. Summing the scalars gave one for a symbol made emoji by VS16, four
+   for a thumb with a skin tone, and six for a family joined by ZWJ, so a chat
+   row holding one ran past the border or lost its last cells. The scalars
+   are spelled out because the glyphs hide the selectors and joiners.
+
+   The rule reads only a cluster that opens with an emoji scalar. A
+   Devanagari conjunct joined by ZWJ and a plain letter followed by VS16
+   keep the summed width, which the module measured at 2, 3, and 1 before
+   the rule existed. *)
+let test_emoji_cluster_is_two_cells () =
+  let warning = "\u{26A0}\u{FE0F}" in
+  let thumbs = "\u{1F44D}\u{1F3FD}" in
+  let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}" in
+  List.iter
+    (fun (label, text, expected) ->
+      check int (Printf.sprintf "display width of %s (%S)" label text)
+        expected (Layout.display_width text))
+    [ "warning sign + VS16", warning, 2
+    ; "thumbs up + medium skin tone", thumbs, 2
+    ; "family joined by ZWJ", family, 2
+    ; "keycap digit one", "1\u{FE0F}\u{20E3}", 2
+    ; "England flag spelled by tags"
+      , "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"
+      , 2
+    ; "white smiling face + VS15", "\u{263A}\u{FE0E}", 1
+    ; "hangul syllable", "\u{AC00}", 2
+    ; "ascii letter", "a", 1
+    ; "regional indicator pair", "\u{1F1F0}\u{1F1F7}", 2
+    ; "styled heart + VS16", "\x1B[31m\u{2764}\u{FE0F}\x1B[0m", 2
+    ; "Devanagari conjunct joined by ZWJ", "\u{0915}\u{094D}\u{200D}\u{0937}", 2
+    ; "Devanagari conjunct of three consonants"
+      , "\u{0915}\u{094D}\u{200D}\u{0937}\u{094D}\u{200D}\u{092E}"
+      , 3
+    ; "plain letter + VS16", "a\u{FE0F}", 1
+    ];
+  (* A row folded inside its budget stays inside the border. The fold is
+     pinned so a width that drifts back to the sum moves the break. *)
+  let line = String.concat " " [ warning; thumbs; family; "ok" ] in
+  check int "the line measures four two-cell words" 11
+    (Layout.display_width line);
+  check (list string) "five cells hold two words per row"
+    [ warning ^ " " ^ thumbs; family ^ " ok" ]
+    (Layout.wrap_words ~max_cells:5 line);
+  check (list string) "two cells hold one word per row"
+    [ warning; thumbs; family; "ok" ]
+    (Layout.wrap_words ~max_cells:2 line);
+  check (list string) "a hard split at four cells pairs the first two"
+    [ warning ^ thumbs; family ]
+    (Layout.split_cells ~max_cells:4 (warning ^ thumbs ^ family));
+  List.iter
+    (fun max_cells ->
+      List.iter
+        (fun row ->
+          check bool
+            (Printf.sprintf "row %S fits in %d cells" row max_cells)
+            true
+            (Layout.display_width row <= max_cells))
+        (Layout.wrap_words ~max_cells line))
+    [ 2; 3; 5; 7; 12 ]
 
 (* The count the composer's status row used to carry. That row was drawn from
    the clamped scroll position and counted from the unclamped one, so an [up]
@@ -375,18 +436,18 @@ let test_input_viewport_keeps_latest_complete_scalars () =
     (fun (grapheme, cells) ->
       check string ("overflow keeps complete grapheme " ^ grapheme)
         ("~" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
-    [ "👍🏽", 4
+    [ "👍🏽", 2
     ; "🇰🇷", 2
-    ; "❤️", 1
-    ; "👩‍👩‍👧‍👦", 8
-    ; "1️⃣", 1
+    ; "❤️", 2
+    ; "👩‍👩‍👧‍👦", 2
+    ; "1️⃣", 2
     ; "한", 2
     ];
   let repeated_hearts = String.concat "" (List.init 10 (fun _ -> "❤️")) in
   let heart_viewport = viewport 7 repeated_hearts in
   check int "repeated emoji viewport fills its cell budget" 7
     (Layout.display_width heart_viewport);
-  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️❤️❤️❤️"
+  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️"
     heart_viewport;
   let before = "abcdefghi" in
   let after = Layout.drop_last_utf8_scalar before in
@@ -409,12 +470,12 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.chat_input_prompt_cells;
   check int "mixed UTF-8 input advances by cells" 13
     (column 80 "Aé한🙂");
-  check int "emoji modifier follows xterm scalar cells" 12
+  check int "emoji modifier cluster advances by two cells" 10
     (column 80 "A👍🏽");
   check int "hangul syllables take two cells each" 11
     (column 80 "한글");
   check int "flag cluster advances by two cells" 9 (column 80 "🇰🇷");
-  check int "VS16 cluster follows xterm's one cell" 8 (column 80 "❤️");
+  check int "VS16 cluster advances by two cells" 9 (column 80 "❤️");
   check int "exact boundary reaches the pre-border spacer" 79
     (column 80 (String.make 75 'a'));
   check int "visible overflow remains in the pre-border spacer" 79
@@ -883,7 +944,7 @@ let test_history_never_splits_grapheme_clusters () =
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "grapheme clusters stay on one physical row"
-    [ "  A"; "  👍🏽"; "  🇰🇷❤️B" ] body_rows;
+    [ "  A👍🏽"; "  🇰🇷❤️"; "  B" ] body_rows;
   let reconstructed =
     body_rows
     |> List.map (fun text -> String.sub text 2 (String.length text - 2))
@@ -2161,6 +2222,8 @@ let () =
             test_repeated_dst_hour_has_distinct_rails
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
+        ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
+            `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick
             test_scroll_hint_says_how_far_back
         ; test_case "UTF-8 scalar input contract" `Quick

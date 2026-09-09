@@ -631,7 +631,7 @@ let test_uncapped_vision_fallback_reaches_provider () =
     in
     assert (!provider_calls = 1);
     match outcome with
-    | Vt.Vo_ok "uncapped vision reached provider" -> ()
+    | Vt.Vo_ok { text = "uncapped vision reached provider"; _ } -> ()
     | _ -> failwith "uncapped vision fallback should reach provider")
 
 let image_capable_vision_runtime_toml =
@@ -722,6 +722,42 @@ let test_run_vision_invalid_structured_response_is_typed () =
       assert (String_util.contains_substring detail "JSON parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
+let test_explicit_vision_runtime_selection () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-selected" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let run selected response =
+          let calls = ref [] in
+          let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+            calls := config.Llm_provider.Provider_config.model_id :: !calls;
+            response
+          in
+          let args = match artifact_args handle with
+            | `Assoc fields -> `Assoc (("runtime_id", selected) :: fields)
+            | _ -> failwith "artifact fixture must be an object"
+          in
+          let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~meta ~args () in
+          json_of_output raw, List.rev !calls
+        in
+        let json, calls = run (`String "p2.vision-b") (Ok (ok_response "selected reader")) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "runtime_id" json = "p2.vision-b");
+        assert (assoc_string "text" json = "selected reader");
+        let json, calls = run (`String "p2.vision-b")
+          (Error (Llm_provider.Http_client.HttpError
+            { code = 500; body = "selected unavailable"; retry_after_header = None })) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "error" json = "provider_error");
+        List.iter (fun (selected, code) ->
+          let json, calls = run selected (Ok (ok_response "must not run")) in
+          assert (calls = []);
+          assert (assoc_string "error" json = code))
+          [`String "missing.vision", "invalid_request";
+           `String "", "invalid_args"; `Int 1, "invalid_args"; `Null, "invalid_args"]))))
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -773,6 +809,9 @@ let test_retryable_provider_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate transient_provider_error"
         before_transient
@@ -840,6 +879,9 @@ let test_candidate_policy_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate candidate_policy_error"
         before_policy
@@ -959,7 +1001,13 @@ let test_capacity_failover_preserves_image_and_declared_caps () =
                 ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
         in
         assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
-        assert (outcome = Vt.Vo_ok "image read on the next runtime")))
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "image read on the next runtime");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
     errors
 
 let test_capacity_exhaustion_retains_size_failure () =
@@ -1060,6 +1108,9 @@ let test_credential_error_tries_next_runtime () =
       assert (!calls = 2);
       assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
       assert_metric_increment
         "vision_candidate candidate_policy_error (401)"
         before_policy
@@ -1179,6 +1230,9 @@ let test_image_over_a_candidates_cap_skips_to_the_next_without_a_call () =
         assert (!calls = 1);
         assert (!models = [ "vision-b" ]);
         assert (String.equal (assoc_string "text" json) "second runtime answered");
+        assert (assoc_string "runtime_id" json = "p2.vision-b");
+        assert (assoc_string "requested_model" json = "vision-b");
+        assert (assoc_string "response_model" json = "vision-test-model");
         assert_metric_increment
           "vision_candidate skipped image_exceeds_cap"
           before_skip
@@ -1243,7 +1297,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
 
 let test_eager_eviction_reason_preserves_typed_outcome () =
   let reason = Vi.eager_read_eviction_reason_of_outcome in
-  assert (reason (Vt.Vo_ok "text") = None);
+  assert (reason (Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "text")) = None);
   assert (reason Vt.Vo_empty = Some "eager_empty");
   assert (reason Vt.Vo_truncated = Some "eager_truncated");
   assert (reason Vt.Vo_timeout = Some "eager_timeout");
@@ -1301,7 +1355,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
            (Store.of_string handle)
        with
        | Ok stored -> assert (String.equal stored bytes)
-       | Error msg -> failwith msg);
+       | Error msg -> failwith (Store.load_error_to_string msg));
       assert_metric_increment
         "vision_ingest stored_unread"
         before
@@ -1338,7 +1392,7 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
         let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
         (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
          | Ok stored -> assert (stored = bytes)
-         | Error error -> failwith error)
+         | Error error -> failwith (Store.load_error_to_string error))
       | _ -> failwith "fallback image must carry its durable artifact"
     in
     (match projected.blocks with
@@ -1386,7 +1440,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
        let handle = artifact_handle_of_placeholder reading |> Store.of_string in
        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name) handle with
         | Ok original -> assert (original = bytes)
-        | Error detail -> failwith detail)
+        | Error detail -> failwith (Store.load_error_to_string detail))
      | _ -> failwith "semantic fallback lost its reading or artifact");
     let history = project ~mode:Vi.Store_only [ image ] in
     assert (!calls = 1);
@@ -1775,7 +1829,13 @@ let test_max_tokens_failover_preserves_image_and_candidate_wire_limits () =
         assert_metric_increment "one output limit despite duplicate configured candidate"
           before_limit
           (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels);
-        assert (outcome = Vt.Vo_ok "complete screenshot reading")))
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "complete screenshot reading");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
     [ truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens; well_formed_cut ]
 
 let test_max_tokens_exhaustion_remains_visible_tool_failure () =
@@ -1842,7 +1902,13 @@ let test_length_failover_preserves_candidate_http_recovery () =
                   ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
           in
           assert (!calls = 2);
-          assert (outcome = Vt.Vo_ok "candidate HTTP fallback"))))
+          (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "candidate HTTP fallback");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading"))))
     [ 400; 422; 429 ]
 
 let test_vision_output_tokens_default_and_env () =
@@ -1860,14 +1926,14 @@ let test_truncated_structured_response_reads_as_truncation () =
      not a malformed model. Report the real cause so the remedy (a larger
      budget) is legible instead of a misleading parser fault. *)
   (match
-     Vt.outcome_of_response
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
        (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
    with
    | Vt.Vo_truncated -> ()
    | _ -> failwith "MaxTokens-cut mid-JSON must classify as Vo_truncated");
   (* The same broken text with a clean stop is a genuine structured failure. *)
   (match
-     Vt.outcome_of_response
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
        (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
    with
    | Vt.Vo_invalid_structured_response _ -> ()
@@ -1876,8 +1942,8 @@ let test_truncated_structured_response_reads_as_truncation () =
        "mid-JSON parse failure with a clean stop must stay \
         Vo_invalid_structured_response");
   (* A well-formed reply is unaffected by the reclassification. *)
-  match Vt.outcome_of_response (ok_response "a red circle") with
-  | Vt.Vo_ok text -> assert (text = "a red circle")
+  match Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "a red circle") with
+  | Vt.Vo_ok reading -> assert (reading.text = "a red circle")
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
 let test_browser_screenshot_reaches_vision_reader () =
@@ -1970,7 +2036,31 @@ let test_browser_screenshot_rejects_invalid_client () =
     | _ -> failwith "malformed routing identity must fail before pixel persistence")
     [`String "not-a-client"; `Int 73]
 
+let test_artifact_failures_are_classified () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-artifact-errors" in
+    let dir = Vt.vision_store_dir ~keeper_name:meta.name in
+    let corrupt = store_image meta "original image" in
+    Out_channel.with_open_bin (Filename.concat dir corrupt)
+      (fun oc -> output_string oc "tampered image");
+    let unreadable = String.make 64 'b' in
+    Unix.mkdir (Filename.concat dir unreadable) 0o700;
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      failwith "artifact errors must not invoke a vision provider" in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      List.iter (fun (artifact, expected_code, expected_class) ->
+        let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+          ~net:(Eio.Stdenv.net env) ~meta ~args:(artifact_args artifact) () in
+        let json = json_of_output raw in
+        assert (assoc_string "error" json = expected_code);
+        assert (assoc_string "failure_class" json = expected_class))
+        [ "bad-reference", "invalid_artifact", "policy_rejection"
+        ; String.make 64 'a', "artifact_not_found", "workflow_rejection"
+        ; corrupt, "artifact_load_failed", "runtime_failure"
+        ; unreadable, "artifact_load_failed", "runtime_failure" ])))
+
 let () =
+  test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();
@@ -2000,6 +2090,7 @@ let () =
   test_uncapped_vision_fallback_reaches_provider ();
   test_invalid_structured_vision_response_is_runtime_failure ();
   test_run_vision_invalid_structured_response_is_typed ();
+  test_explicit_vision_runtime_selection ();
   test_retryable_provider_error_tries_next_runtime ();
   test_candidate_policy_error_tries_next_runtime ();
   test_policy_error_on_every_candidate_is_reported ();

@@ -88,7 +88,6 @@ for the full JSON Schema (draft-07).
 | `assistant_tool_content_format` | string | from base | Wire shape for assistant messages with tool calls and no visible text. Accepted values: `null`, `empty_string`. |
 | `supports_reasoning` | bool | from base | Any reasoning capability (union). |
 | `supports_extended_thinking` | bool | from base | budget\_tokens-controlled thinking. |
-| `supports_reasoning_budget` | bool | from base | Reasoning effort control. |
 | `accepted_reasoning_efforts` | string[] | from base | Optional model-specific subset of canonical reasoning effort values. Accepted values: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Omit unless verified for that model. |
 | `supports_response_format_json` | bool | from base | JSON mode (valid JSON, no schema). |
 | `supports_structured_output` | bool | from base | Provider-native schema output. |

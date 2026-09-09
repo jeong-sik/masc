@@ -1594,7 +1594,6 @@ supports_parallel_tool_calls = true
 assistant_tool_content_format = "empty_string"
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
 accepted_reasoning_efforts = ["low", "medium", "high"]
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"

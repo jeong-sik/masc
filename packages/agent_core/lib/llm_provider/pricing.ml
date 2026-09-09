@@ -158,7 +158,6 @@ let[@warning "-32"] test_catalog_entry
   ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
-  ; supports_reasoning_budget = None
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None

@@ -224,8 +224,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
           the whole list keeps a new model from declaring a dialect the
           endpoint cannot read; a per-model exception set would admit one on
           the next addition. *)
-       let expected_reasoning_budget = false
-       and expected_thinking_format = Runtime_schema.No_thinking_control in
+       let expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
@@ -234,8 +233,6 @@ let assert_ollama_cloud_seed_runtime runtimes case =
          caps.supports_multimodal_inputs;
        check bool (case.runtime_id ^ " extended thinking") case.thinking
          caps.supports_extended_thinking;
-       check bool (case.runtime_id ^ " reasoning budget") expected_reasoning_budget
-         caps.supports_reasoning_budget;
        check bool (case.runtime_id ^ " thinking control") true
          (Runtime_schema.equal_thinking_control_format
             caps.thinking_control_format
@@ -2898,7 +2895,6 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
      supports_tools = true\n\
      supports_reasoning = true\n\
      supports_extended_thinking = true\n\
-     supports_reasoning_budget = true\n\
      thinking_control_format = \"chat_template_kwargs\"\n\
      preserve_thinking_control_format = \"chat_template_kwargs_preserve_thinking\"\n"
   in

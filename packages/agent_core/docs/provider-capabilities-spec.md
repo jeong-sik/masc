@@ -62,8 +62,7 @@ infer them from model names.
 | `supports_extended_thinking` | missing | add | budget_tokens control. Claude, Gemini, GPT-5.4. |
 | `supports_think_tool` | missing | add | Anthropic-only. Mid-reasoning pause between tool calls. |
 | `supports_adaptive_reasoning` | missing | add | Model auto-selects depth. Opus 4.6, Gemini 3 dynamic. |
-| `supports_reasoning_budget` | missing | add | budget_tokens (Anthropic), reasoning_effort (OpenAI), thinking_level (Gemini). |
-| `accepted_reasoning_efforts` | exists in code | keep separate | Optional model-specific subset of canonical effort values. Do not infer this from `supports_reasoning_budget`; omit unless provider docs or live evidence confirm the accepted values. |
+| `accepted_reasoning_efforts` | exists in code | keep separate | Optional model-specific subset of canonical effort values. Omit unless provider docs or live evidence confirm the accepted values. |
 | `thinking_control_format` / `preserve_thinking_control_format` | exists in code | keep separate | Enable/depth wire shape and historical reasoning replay wire shape are independent axes. |
 | `supports_structured_output` | exists in code | keep, tighten semantics | Use only for provider-native schema-constrained output APIs. Do not use it for JSON mode or "prompt with schema text + app-side validator" patterns. |
 | `supports_response_format_json` | exists in code | keep, separate from schema guarantee | JSON mode means "return valid JSON" only. It is not a subset of native schema support and still requires caller-side shape validation. |
@@ -142,7 +141,6 @@ add specific flags for SDK features that depend on the distinction.
 
 Minimum viable split:
 - `supports_extended_thinking` — enables `thinking_budget` in agent config
-- `supports_reasoning_budget` — enables cost-aware thinking control
 - `accepted_reasoning_efforts` — constrains which canonical effort values may be serialized for a model
 - `thinking_control_format` — request-time enable/depth wire shape
 - `preserve_thinking_control_format` — historical reasoning replay/preserve wire shape
@@ -217,7 +215,6 @@ runtime distinction.
 - Wire native schema request paths only where the official provider API exposes them
 - Keep JSON mode + caller-side validation for providers whose current official docs stop at `json_object`
 - Add `supports_caching`
-- Add `supports_reasoning_budget`
 
 ### Phase 3: New modalities
 - Add `supports_computer_use`, `supports_code_execution`

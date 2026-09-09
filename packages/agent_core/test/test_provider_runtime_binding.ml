@@ -348,11 +348,7 @@ let test_local_openai_compat_capabilities_not_inflated_by_locality () =
   Alcotest.(check bool)
     "no extended thinking from locality"
     false
-    caps.supports_extended_thinking;
-  Alcotest.(check bool)
-    "no reasoning budget from locality"
-    false
-    caps.supports_reasoning_budget
+    caps.supports_extended_thinking
 ;;
 
 let test_capabilities_host_invariant_local_vs_remote () =
@@ -430,7 +426,6 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 reasoning_replay = "preserve_always"
 |}
@@ -496,7 +491,6 @@ supports_tool_choice = true
 supports_parallel_tool_calls = true
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 |}

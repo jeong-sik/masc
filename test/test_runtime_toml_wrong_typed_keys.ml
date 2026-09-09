@@ -141,11 +141,6 @@ let cases =
       "[models.m.capabilities]\nsupports-tool-choice = 1"
       "models.m.capabilities.supports-tool-choice: supports-tool-choice must be a boolean"
   ; model_case
-      "models.m.capabilities.supports-reasoning-budget = 1"
-      "[models.m.capabilities]\nsupports-reasoning-budget = 1"
-      "models.m.capabilities.supports-reasoning-budget: supports-reasoning-budget must be \
-       a boolean"
-  ; model_case
       "models.m.capabilities.emits-usage-tokens = 1"
       "[models.m.capabilities]\nemits-usage-tokens = 1"
       "models.m.capabilities.emits-usage-tokens: emits-usage-tokens must be a boolean"

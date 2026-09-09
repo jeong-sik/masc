@@ -97,6 +97,21 @@ PROVIDERS = {
 }
 
 
+def seed_skills_block() -> str:
+    """레포 seed config/runtime.toml에서 [skills] 블록을 발췌한다.
+
+    [skills] 헤더 라인부터 다음 최상위 섹션([runtime]) 직전까지, 즉
+    [[skills.sources]] entries를 포함한 블록 전체를 verbatim으로 가져온다.
+    """
+    lines = (REPO_ROOT / "config" / "runtime.toml").read_text().splitlines()
+    start = lines.index("[skills]")
+    end = next(
+        i for i in range(start + 1, len(lines))
+        if lines[i].startswith("[") and not lines[i].startswith(("[skills.", "[[skills"))
+    )
+    return "\n".join(lines[start:end]).rstrip() + "\n"
+
+
 def keeper_toml(arm: str, index: int) -> str:
     spec = ARMS[arm]
     lines = [
@@ -135,11 +150,17 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         "keepers", "keepers-default", "runtime.toml", "*.env",
         "agent-core-models-overlay.toml"))
 
-    (root / "runtime.toml").write_text(RUNTIME_TOML.format(
+    runtime_toml = RUNTIME_TOML.format(
         runtime_id=runtime_id, provider=provider, model_alias=model_alias,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
-        **pcfg))
+        **pcfg)
+    if spec["skills"]:
+        # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
+        # skills=False이면 이 블록을 빼서 skill source가 없어 어떤 skill도
+        # 로드되지 않는다 (keeper TOML의 skills.names = []와 같은 방향).
+        runtime_toml += "\n" + seed_skills_block()
+    (root / "runtime.toml").write_text(runtime_toml)
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         model_alias=model_alias, parallel=str(spec["parallel"]).lower()))
 

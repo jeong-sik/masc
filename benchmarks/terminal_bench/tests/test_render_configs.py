@@ -49,6 +49,15 @@ def test_arm_e_parallel_on():
     assert "max-concurrent = 1" in (rt_b / "runtime.toml").read_text()
 
 
+def test_arm_c_runtime_keeps_skills_sources():
+    # skills=True arm은 seed runtime.toml의 [skills]/[[skills.sources]] 블록을
+    # 보존해야 skill이 실제로 로드된다. skills=False arm은 생략한다.
+    rt_c = render_arm("c", runtime_id="anthropic.claude-fable-5", effort="high")
+    assert "[[skills.sources]]" in (rt_c / "runtime.toml").read_text()
+    rt_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
+    assert "[[skills.sources]]" not in (rt_b / "runtime.toml").read_text()
+
+
 def test_arm_f_renders_four_keepers():
     out = render_arm("f", runtime_id="anthropic.claude-fable-5", effort="high")
     keepers = sorted((out / "keepers").glob("bench-*.toml"))

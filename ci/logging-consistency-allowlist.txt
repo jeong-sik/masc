@@ -38,14 +38,7 @@ bin/main_eio.ml
 # interface, not structured server logging.
 bin/masc_trace.ml
 bin/masc_tui_loader.ml
-bin/masc_cost.ml
-# tool_parity_generator is the manual regeneration tool for the
-# tool-definition parity baselines (task-1363), run by a person via
-# `dune build @regen_tool_parity_artifacts`. Its stdout reports what it
-# regenerated; its two eprintf are TOML load failures the operator must see
-# on the terminal before committing baselines — not server records.
-bin/tool_parity_generator.ml
-# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
+bin/masc_cost.ml# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml
 

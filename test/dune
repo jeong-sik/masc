@@ -3,12 +3,6 @@
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
 
-; Run the actual generator comparison through targeted Test CI.
-(rule
- (alias runtest-tool-parity-goldens)
- (deps ../tool_parity_golden_check.stamp)
- (action (echo "Tool parity goldens matched the generator")))
-
 ; Test Environment Configuration
 
 (test

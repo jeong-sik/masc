@@ -51,5 +51,15 @@ try:
  assert any(e.get('kind')=='default' for e in events),result
 finally:
  release.set()
- if sid:call('/session/'+sid,method='DELETE')
- driver.terminate();driver.wait(timeout=10);srv.shutdown();log.close()
+ try:
+  if sid:call('/session/'+sid,method='DELETE')
+ finally:
+  try:
+   driver.terminate()
+   driver.wait(timeout=10)
+  finally:
+   try:
+    srv.shutdown()
+   finally:
+    try:srv.server_close()
+    finally:log.close()

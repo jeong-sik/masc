@@ -144,7 +144,8 @@ type model_spec =
       (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
-  ; thinking_support : bool
+  ; thinking_support : bool option
+        (** Absent inherits provider defaults; Some false explicitly disables thinking. *)
   ; preserve_thinking : bool option
   ; streaming : bool
   ; temperature : float option

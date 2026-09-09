@@ -95,7 +95,8 @@ type output_payload =
     (not an [option]): callers must commit to a typed classification at
     the catch boundary. *)
 type failure_payload =
-  { class_ : tool_failure_class
+  { effect_disposition : failure_effect_disposition
+  ; class_ : tool_failure_class
   ; message : string
   ; data : Yojson.Safe.t
   ; metadata : Yojson.Safe.t option
@@ -195,6 +196,7 @@ val make_err
   -> start_time:float
   -> ?data:Yojson.Safe.t
   -> ?metadata:Yojson.Safe.t
+  -> ?effect_disposition:failure_effect_disposition
   -> string
   -> result
 

@@ -208,7 +208,8 @@ availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) be
    named by the wizard in this terminal. For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
-3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
+3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
+   or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
    `docker info` must succeed as your current user. Then run:
 
 ```bash

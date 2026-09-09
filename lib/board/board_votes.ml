@@ -707,36 +707,34 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
     (match snapshot with
      | Error _ as e -> e
      | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
-       with_persist_lock store (fun () ->
-         (* The in-memory deletion above is the authoritative step, but it
-            also cleared the dirty flags inside the snapshot lock. Without
-            re-marking, a failed rewrite here left nothing scheduled to
-            repeat it — the deleted post resurfaced from disk on restart,
-            the same shape #26168 fixed for [flush_dirty]. *)
-         (match
-            save_jsonl_snapshot_result ~where:"rewrite_posts" ~path:(persist_path ())
-              posts_jsonl
-          with
-          | Ok () -> ()
-          | Error _ -> with_lock store (fun () -> remark_all_posts_dirty store));
-         (match
-            save_jsonl_snapshot_result ~where:"rewrite_comments"
-              ~path:(comments_path ())
-              comments_jsonl
-          with
-          | Ok () -> ()
-          | Error _ -> with_lock store (fun () -> remark_all_comments_dirty store));
-         (* The vote log rides the posts dirty cycle, same as in [flush_dirty]. *)
-         (match save_vote_log_jsonl votes_jsonl with
-          | Ok () -> ()
-          | Error _ -> with_lock store (fun () -> remark_all_posts_dirty store));
-         (* Reactions have no dirty cycle of their own — [toggle_reaction]
-            owns their durable path with a write-ahead snapshot. A failed
-            rewrite here is logged + counted by [save_jsonl_snapshot_result]
-            and leaves orphaned reaction rows on disk; re-queueing them needs
-            a dirty home that does not exist yet. *)
-         save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ())
-           reactions_jsonl);
+       let posts_result, comments_result, votes_result =
+         with_persist_lock store (fun () ->
+           (* Snapshot persistence does not acquire the state lock. Failed
+              writes are re-marked below, after releasing this lock. *)
+           let posts_result =
+             save_jsonl_snapshot_result ~where:"rewrite_posts" ~path:(persist_path ())
+               posts_jsonl
+           in
+           let comments_result =
+             save_jsonl_snapshot_result ~where:"rewrite_comments"
+               ~path:(comments_path ()) comments_jsonl
+           in
+           let votes_result = save_vote_log_jsonl votes_jsonl in
+           (* Reactions have no dirty cycle of their own; this path records
+              rewrite errors through the existing persistence observer. *)
+           save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ())
+             reactions_jsonl;
+           (posts_result, comments_result, votes_result))
+       in
+       (* The snapshot cleared dirty flags while holding the state lock.
+          Preserve failed writes for a later flush without nesting locks. *)
+       with_lock store (fun () ->
+         (match posts_result, votes_result with
+          | Ok (), Ok () -> ()
+          | Error _, _ | _, Error _ -> remark_all_posts_dirty store);
+         match comments_result with
+         | Ok () -> ()
+         | Error _ -> remark_all_comments_dirty store);
        Ok ())
 
 (** {1 Global Store}

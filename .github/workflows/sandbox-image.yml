@@ -85,3 +85,13 @@ jobs:
           path: ${{ runner.temp }}/sandbox-image
           compression-level: 0
           if-no-files-found: error
+      - name: Preserve failed build or smoke evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-sandbox-failure-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/sandbox-image/Dockerfile
+            ${{ runner.temp }}/sandbox-image/image-inspect.json
+            ${{ runner.temp }}/sandbox-image/proof
+          if-no-files-found: ignore

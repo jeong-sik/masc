@@ -1,11 +1,8 @@
 name = "masc_msx_ram_diff"
 description = """
-Report which bytes of memory changed since the last masc_msx_peek: \
-consecutive differing bytes as runs with address, length and before/after \
-hex, plus the total changed byte count. A cap of 64 runs is returned; \
-truncated says more existed. The snapshot survives machine swaps, so a \
-reload after a peek reads as wholesale change — which it is. Use it to \
-find where a game keeps its state without reading pixels."""
+Compare memory with the last masc_msx_peek snapshot.
+
+Returns address, length, before/after hex runs and total changed bytes. At most 64 runs; truncated marks overflow. Machine swaps retain the snapshot."""
 additional_properties = false
 
 defer_loading = true

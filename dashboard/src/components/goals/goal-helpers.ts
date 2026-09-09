@@ -14,6 +14,7 @@ export type GoalPhaseFilter =
   | 'all'
   | 'executing'
   | 'verifying'
+  | 'awaiting_confirmation'
   | 'completed'
   | 'dropped'
 
@@ -136,6 +137,7 @@ export function priorityStars(n: number): string {
 export function goalPhaseLabel(phase: string): string {
   switch (phase) {
     case 'executing': return '실행 중'
+    case 'awaiting_confirmation': return '사람 확인 대기'
     case 'verifying': return '검증 중'
     case 'completed': return '완료'
     case 'dropped': return '중단'
@@ -146,6 +148,7 @@ export function goalPhaseLabel(phase: string): string {
 export function goalPhaseStatus(phase: string): string {
   switch (phase) {
     case 'completed': return 'completed'
+    case 'awaiting_confirmation': return 'awaiting_verification'
     case 'verifying': return 'awaiting_verification'
     case 'dropped': return 'offline'
     case 'executing':
@@ -173,6 +176,7 @@ export function matchesGoalPhaseFilter(
 export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
     case 'executing':
+    case 'awaiting_confirmation':
     case 'verifying':
     case 'completed':
     case 'dropped':

@@ -340,6 +340,9 @@ describe('Goal proof projection through tree and detail APIs', () => {
     ['pending', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,
       request_id: 'request-v2', requested_at: '2026-09-09T00:00:00Z' }), 'current', 'pending'],
     ['proven', verificationRecord(currentProof), 'current', 'proven'],
+    ['human confirmed', verificationRecord({ state: 'human_confirmed', verdict: proofVerdict,
+      operator_id: 'operator', confirmed_at: '2026-09-10T00:00:00Z' }), 'current', 'proven'],
+    ['missing confirmation identity', verificationRecord({ state: 'human_confirmed', verdict: proofVerdict }), 'unreadable', null],
     ['refuted', verificationRecord({ state: 'proof_refuted', verdict: {
       ...proofVerdict, outcome: 'refuted', reason: 'Only 9 cases passed',
     } }), 'current', 'refuted'],

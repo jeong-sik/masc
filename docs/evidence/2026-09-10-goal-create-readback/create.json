@@ -1,0 +1,58 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.35.2"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"status\":\"ok\",\"action\":\"created\",\"goal_id\":\"memory-guide-quality\",\"goal\":{\"id\":\"memory-guide-quality\",\"criterion_revision\":\"f9c5c8e6fb96d6827e083218a4af8a07\",\"title\":\"Readable Korean memory guide PDF\",\"metric\":\"PDF pages with readable Korean text and an independently rendered layout\",\"target_value\":\"3 pages, zero missing-glyph or overlapping-text defects\",\"due_date\":null,\"priority\":3,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-09-09T22:10:29Z\",\"updated_at\":\"2026-09-09T22:10:29Z\"},\"task_goal_id_example\":\"masc_add_task({title: \\\"Implement Readable Korean memory guide PDF\\\", goal_id: \\\"memory-guide-quality\\\"})\",\"task_link_field\":\"goal_id\",\"task_link_mode\":\"structured_goal_id\",\"linked_task_title_example\":\"[child] Readable Korean memory guide PDF\"}",
+          "status": "ok",
+          "tool": "masc_goal_upsert"
+        },
+        "trace_id": "2",
+        "agent_id": "guide-integration",
+        "tool": "masc_goal_upsert",
+        "duration_ms": 3,
+        "attempts": 1,
+        "timestamp": "2026-09-09T22:10:29Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"ok\",\"action\":\"created\",\"goal_id\":\"memory-guide-quality\",\"goal\":{\"id\":\"memory-guide-quality\",\"criterion_revision\":\"f9c5c8e6fb96d6827e083218a4af8a07\",\"title\":\"Readable Korean memory guide PDF\",\"metric\":\"PDF pages with readable Korean text and an independently rendered layout\",\"target_value\":\"3 pages, zero missing-glyph or overlapping-text defects\",\"due_date\":null,\"priority\":3,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-09-09T22:10:29Z\",\"updated_at\":\"2026-09-09T22:10:29Z\"},\"task_goal_id_example\":\"masc_add_task({title: \\\"Implement Readable Korean memory guide PDF\\\", goal_id: \\\"memory-guide-quality\\\"})\",\"task_link_field\":\"goal_id\",\"task_link_mode\":\"structured_goal_id\",\"linked_task_title_example\":\"[child] Readable Korean memory guide PDF\"}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "status": "ok",
+      "action": "created",
+      "goal_id": "memory-guide-quality",
+      "goal": {
+        "id": "memory-guide-quality",
+        "criterion_revision": "f9c5c8e6fb96d6827e083218a4af8a07",
+        "title": "Readable Korean memory guide PDF",
+        "metric": "PDF pages with readable Korean text and an independently rendered layout",
+        "target_value": "3 pages, zero missing-glyph or overlapping-text defects",
+        "due_date": null,
+        "priority": 3,
+        "phase": "executing",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-09-09T22:10:29Z",
+        "updated_at": "2026-09-09T22:10:29Z"
+      },
+      "task_goal_id_example": "masc_add_task({title: \"Implement Readable Korean memory guide PDF\", goal_id: \"memory-guide-quality\"})",
+      "task_link_field": "goal_id",
+      "task_link_mode": "structured_goal_id",
+      "linked_task_title_example": "[child] Readable Korean memory guide PDF"
+    }
+  }
+}

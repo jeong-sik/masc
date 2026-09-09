@@ -51,7 +51,11 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
               let config =
                 { (Runtime_agent.default_config ~name:"runtime-token-sample"
                      ~provider_cfg ~system_prompt:scenario.system_prompt ~tools:[]) with
-                  runtime_id = Some runtime_id }
+                  runtime_id = Some runtime_id;
+                  (* Match production keeper turns (keeper_agent_run.ml turns
+                     cache_system_prompt on), so usage rows are measured on the
+                     same request shape instead of overstating cost. *)
+                  cache_system_prompt = true }
               in
               let rec turns index history = function
                 | [] -> report "completed" [ "turns", `Int (index - 1) ]; true

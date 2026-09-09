@@ -979,7 +979,7 @@ let test_input_rejected_recovery_is_not_auto_superseded () =
        plan_claim
          ~expected:(Some recovery)
          ~client_kind:Claude_code
-         ~runtime_id:"claude_code.claude-haiku-4-5"
+         ~runtime_id:"claude_code.claude-opus-5"
      with
      | Ok _ -> ()
      | Error detail -> fail ("cross-runtime claim was refused: " ^ detail));

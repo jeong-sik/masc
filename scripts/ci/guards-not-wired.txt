@@ -53,7 +53,6 @@ scripts/audit-code-smell.sh  # report; --strict enforces and is red on main at 2
 #   ignore() sites without a justification
 scripts/audit-cross-module-exhaustive-match.sh  # report: its only non-zero exit is
 #   a usage error or a missing rg
-scripts/audit-dead-surface.py  # tool: needs --modules/--exports/--stanzas
 scripts/audit-hardcoding-truth.sh  # report: prints "Status: findings", exits 0
 scripts/audit-keeper-credential-drift.sh  # report, and reads the operator's live
 #   .masc/auth/agents: its only non-zero exit is that directory being absent

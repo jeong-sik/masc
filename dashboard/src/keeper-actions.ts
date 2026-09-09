@@ -78,7 +78,6 @@ import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
 import {
-  hasTrackedKeeperChatOperation,
   trackedKeeperChatOperationsForKeeper,
   trackedKeeperChatAssistantDraftFromEntry,
   removeTrackedKeeperChatOperation,
@@ -716,7 +715,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     }
     const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
-    removeTrackedKeeperChatOperation(request.operationId)
+    // A lookup failure is not a terminal operation receipt. Keep tracking.
     finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
       delivery: 'error',
       error: message,
@@ -741,7 +740,9 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
     hydratingKeeperChatOperations.delete(key)
-    if (!hasTrackedKeeperChatOperation(request.keeperName)) {
+    const observingAnother = trackedKeeperChatOperationsForKeeper(request.keeperName)
+      .some(candidate => hydratingKeeperChatOperations.has(`${candidate.keeperName}:${candidate.operationId}`))
+    if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
       setRecordValue(keeperSending, request.keeperName, false)
       setRecordValue(keeperStreamStartedAt, request.keeperName, null)
       clearKeeperStreamSignal(request.keeperName)
@@ -1173,15 +1174,20 @@ export async function sendKeeperThreadMessage(
           ...(attachments ? { attachments } : {}),
         }, assistantId)
         upsertTrackedKeeperChatOperation(pendingRequest)
-        void cancelKeeperThreadRequest(keeperName, operationId).then(outcome => {
-          if (outcome === 'cancelling') {
-            return handoffCancelledStreamToOperationHydration(
-              pendingRequest,
-              [localId, assistantId],
-            )
-          }
-          return undefined
+        // Aborting the browser stream does not prove the server stopped.
+        // Keep the accepted operation until its cancellation is confirmed.
+        finalizeAssistantEntry(keeperName, assistantId, {
+          streamState: 'cancelling',
+          error: null,
         })
+        const outcome = await cancelKeeperThreadRequest(keeperName, operationId)
+        if (outcome !== 'cancelled') {
+          await handoffCancelledStreamToOperationHydration(
+            pendingRequest,
+            [localId, assistantId],
+          )
+          throw err
+        }
       }
       finalizeAssistantEntry(keeperName, localId, {
         delivery: 'cancelled',
@@ -1192,8 +1198,6 @@ export async function sendKeeperThreadMessage(
         }),
       })
       finalizeAssistantEntry(keeperName, assistantId, {
-        text: KEEPER_MESSAGE_CANCELLED_TEXT,
-        rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
         delivery: 'cancelled',
         streamState: null,
         error: null,

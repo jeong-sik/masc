@@ -48,7 +48,6 @@ import {
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 
-const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
@@ -468,9 +467,8 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   if (entryId) {
     flushPendingThinkingDeltas(keeperName, entryId)
     finalizeAssistantEntry(keeperName, entryId, {
-      text: KEEPER_MESSAGE_CANCELLED_TEXT,
-      rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
-      delivery: 'cancelled',
+      // Preserve partial content; only the response connection has stopped.
+      delivery: 'interrupted',
       streamState: null,
       error: null,
       timestamp: new Date().toISOString(),

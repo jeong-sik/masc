@@ -211,13 +211,26 @@ let rendered_pixels st =
       st.pixels <- Some pixels;
       pixels
 
+(* Bitmap modes draw their screens into pixels; the name table underneath is
+   leftover noise, not what the game drew. Sending it anyway cost ~2 KB per
+   observation (measured: 315 keeper screens averaged 3.7 KB), which is what
+   drowns the useful fields in a playing keeper's context. Text and tile
+   modes keep the name table — there it is the game's text. *)
+let is_bitmap_mode mode =
+  match mode with
+  | "GRAPHIC4" | "GRAPHIC5" | "GRAPHIC6" | "GRAPHIC7" -> true
+  | _ -> String.starts_with ~prefix:"UNDEFINED" mode
+;;
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
   ; mode = Msx.display_mode_to_string mode
   ; pc = Msx.dump_pc st.m
   ; halted = Msx.cpu_halted st.m
-  ; screen_text = Msx.screen_text st.m
+  ; screen_text =
+      (if is_bitmap_mode (Msx.display_mode_to_string mode) then ""
+       else Msx.screen_text st.m)
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart

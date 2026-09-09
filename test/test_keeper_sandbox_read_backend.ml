@@ -497,8 +497,8 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
       (Keeper_sandbox_remote.name endpoint);
     (match Keeper_sandbox_remote.transport endpoint with
      | Keeper_sandbox_remote.Container_exec _ -> ()
-     | Keeper_sandbox_remote.Openssh _ ->
-       Alcotest.fail "a microvm attach produced an SSH endpoint");
+     | Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Docker_exec _ ->
+       Alcotest.fail "a microvm attach produced another transport");
     Alcotest.(check string)
       "reads land on the guest work volume, not the host playground"
       Keeper_sandbox_microvm.work_volume_guest_root

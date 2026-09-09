@@ -1,9 +1,5 @@
-(** Transport-neutral runner for the remote execution lane.
-
-    One endpoint value drives the framed [masc-exec-shim] exchange
-    ({!Exec_ssh_protocol}) over either transport. The OpenSSH transport is
-    the RFC-0395 lane; the guest-exec transport is the RFC-0400 lane for a
-    microVM guest that owns its working tree. *)
+(** Framed exec-shim runner for OpenSSH, MicroVM and Docker Observe.
+    All transports use the same protocol and actual child receipts. *)
 
 type openssh =
   { endpoint : Exec_ssh_endpoint.t
@@ -31,6 +27,7 @@ type container_exec =
 type transport =
   | Openssh of openssh
   | Container_exec of container_exec
+  | Docker_exec of container_exec
 
 type t
 
@@ -57,6 +54,23 @@ val of_container_exec :
     the guest's shim must allowlist those names in its config for them to
     reach the payload. *)
 
+val of_docker_exec :
+  base_path:string ->
+  keeper_name:string ->
+  remote_root:string ->
+  gh_config_dir:string ->
+  injected_env:(string * string) list ->
+  env_allowlist:string list ->
+  connect_timeout_sec:int ->
+  max_concurrent_sessions:int ->
+  container_exec ->
+  t
+(** Docker's framed Observe transport. The runtime supplies the actual
+    running container, shim path and exec argv. Payload cwd/argv already use
+    guest paths. Only [Observe] is accepted: a Docker guest may mount host
+    files read-write, so neither [Guest_local] nor [Effect] is observational.
+    This constructor does not provision a shim or start a container. *)
+
 val name : t -> string
 (** Endpoint name for logs and error codes: the registry key for OpenSSH,
     the container name for a guest. *)
@@ -78,7 +92,7 @@ val injected_env : t -> (string * string) list
     [GIT_TERMINAL_PROMPT], then the endpoint's own injected pairs. *)
 
 val lane_prefix : transport -> string
-(** ["remote_ssh"] or ["microvm_remote"]: the prefix every lane-specific
+(** ["remote_ssh"], ["microvm_remote"] or ["docker_observe"]: the prefix every lane-specific
     error code starts with. *)
 
 val transport_argv : t -> string list
@@ -174,7 +188,8 @@ val runner :
 (** Construct a Shell IR runner. [mode] is the box the request asks the shim
     to build, {!Exec_ssh_protocol.Effect} when omitted; a caller passes
     [Observe] or [Guest_local] only for an endpoint {!observe_supported}
-    answered yes for. The local wall-clock budget includes the
+    answered yes for. Docker accepts only [Observe], even when called without
+    an explicit mode. The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the
     remote payload timeout.
 

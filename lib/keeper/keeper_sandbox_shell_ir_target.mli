@@ -9,7 +9,7 @@ type target_error =
 (** Where a request can be run boxed before the judge is asked (RFC-0422).
     [Boxed] carries a target whose runner asks the endpoint's shim for the
     observe box; [No_box] says why there is none, in the operator's words —
-    a Docker guest runs no shim, a shim may advertise no box, the endpoint
+    an endpoint may have no shim, a shim may advertise no box, the endpoint
     may not be reachable. Resolved lazily: the microvm route acquires the
     guest, which may boot it, and that is spent only when the gate has
     declined every cheaper authority and would otherwise pay the judge. *)
@@ -25,6 +25,16 @@ val protocol_mode_of_run :
 (** The box the keeper TOML names, in the words the shim's request takes:
     [Observe] asks for the shim's observe box, [Guest_local] for the one that
     lets writes land inside the guest. *)
+
+val observe_route_for_endpoint :
+  ?on_receipt:(Keeper_sandbox_remote.execution_observation -> unit) ->
+  run:Keeper_types_profile_sandbox.observation_run ->
+  timeout_sec:float ->
+  target_of_runner:(Masc_exec.Sandbox_target.runner -> Masc_exec.Sandbox_target.t) ->
+  Keeper_sandbox_remote.t ->
+  observe_route
+(** Resolve actual shim capability on a provisioned endpoint. Docker accepts
+    Observe only: its host mounts cannot use Guest_local. *)
 
 type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t

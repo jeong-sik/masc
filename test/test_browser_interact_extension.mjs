@@ -137,6 +137,8 @@ assert.equal(dispatchedReceipt.ok,true,JSON.stringify(dispatchedReceipt));
 assert.equal(dispatchedReceipt.data.tabId,7);
 assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
 assert.equal(dispatchedReceipt.data.action,'follow_link');
+assert.equal(dispatchedReceipt.data.navigationSource.documentId,viewport.documentId);
+assert.equal(dispatchedReceipt.data.navigationSource.url,page.location.href);
 console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');
 const beforeRecycledFollow=assigned.length;
 page.followAnchor.href='https://example.org/recycled-channel';

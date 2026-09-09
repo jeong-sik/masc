@@ -155,3 +155,11 @@ SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수
 채널·제목·본문을 검증한 뒤 실제 관측 URL을 새 expectedUrl로 지정한다. 미확인
 목적지는 미확인으로 남긴다. 원래 URL 검사나 이동을 무조건 반복하지 않는다.
 일치하는 URL도 사이트 내용의 준비 완료는 아니며 채널 제목과 본문을 검증한다.
+
+For same-URL follows, preserve the returned `navigationSource` together with
+`expectedUrl` on read-only retries. The destination read must observe a new
+document ID before accepting a reload. Do not drop this guard to accept the
+old document; different-URL SPA navigation may retain its document identity.
+
+Keep navigationSource when omitting expectedUrl to inspect a possible redirect;
+a source-URL observation from the original document is still pending.

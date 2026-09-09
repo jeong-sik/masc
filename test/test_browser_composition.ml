@@ -42,13 +42,15 @@ let test_click_then_regions ~fail_click ~fail_read () =
               ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
             else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
               ~data:(`Assoc ["tabId",`Int 7;"url",`String "https://example.org/after";
+                "navigationSource",`Assoc ["url",`String "https://example.org/before";"documentId",`String "observed"];
                 "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "follow_link"]) ()
         | "BrowserRead" ->
             check bool "follow-up reads regions on the pinned tab and client" true
               (Yojson.Safe.Util.member "tabId" input=`Int 7
                && Yojson.Safe.Util.member "clientId" input=Yojson.Safe.Util.member "clientId" args
                && Yojson.Safe.Util.member "mode" input=`String "regions"
-               && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/after");
+               && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/after"
+               && Yojson.Safe.Util.(input |> member "navigationSource" |> member "documentId")=`String "observed");
             if fail_read then Tool_result.make_err ~tool_name:node.tool_name
               ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "region observation unavailable"
             else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0

@@ -330,6 +330,7 @@ function interactInPage(args) {
     const destination = new URL(element.href, location.href);
     if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
     const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      navigationSource:{url:before,documentId:args.documentId},
       title:document.title,scrollX:scrollX,scrollY:scrollY};
     // Follow the observed href directly: page click handlers cannot redirect
     // this primitive into window.open or an unrelated application action.

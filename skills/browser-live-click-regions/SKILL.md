@@ -12,7 +12,7 @@ straight to that href in the pinned tab; it does not execute page click handlers
 New-window targets, downloads and non-HTTP URLs are rejected before effects.
 The successor read requires the observed destinationUrl. An old URL returns a
 transition error while preserving the follow receipt. Read the same pinned tab
-without expectedUrl to inspect its actual URL and regions; BrowserTabs can also
+without expectedUrl while retaining navigationSource to inspect its actual URL and regions; BrowserTabs can also
 confirm the tab identity. If the URL remains urlBefore, navigation may still be
 pending. A different URL may be a redirect, canonical URL or authentication page;
 it is not automatically accepted as the destination. Verify workspace, channel,
@@ -20,6 +20,11 @@ title and actual content using the site instruction. Only after verification,
 use the newly observed URL as expectedUrl for subsequent reads. A login page or
 unrelated destination remains unverified. Never repeat the original permanently
 mismatched guard or replay navigation because the read failed.
+
+For a same-URL follow, the read also requires a different document identity
+from navigationSource. Preserve that receipt with expectedUrl when retrying
+BrowserRead; do not remove this guard to accept the pre-reload document.
+A different destination URL may stay in the same document (SPA navigation).
 
 A matching URL is only a URL acknowledgement. Slack may still show the previous
 channel or loading content. Use slack-web instructions to verify channel title
@@ -142,4 +147,10 @@ name = "expectedUrl"
 kind = "output"
 node = "click"
 pointer = "/destinationUrl"
+[[compositions.nodes.input.fields]]
+name = "navigationSource"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "click"
+pointer = "/navigationSource"
 ```

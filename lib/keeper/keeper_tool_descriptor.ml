@@ -1296,8 +1296,9 @@ let msx_screen_output_schema =
       ; "bytes", integer_schema
       ]
     ~required:
+      (* [sprites] rides the response only when the call asked for it. *)
       [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
-      ; "screen_text"; "screen_view"; "tiles"; "sprites"; "artifact"
+      ; "screen_text"; "screen_view"; "tiles"; "artifact"
       ; "media_type"; "width"; "height"; "bytes" ]
 ;;
 

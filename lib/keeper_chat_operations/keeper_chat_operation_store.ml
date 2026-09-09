@@ -963,7 +963,7 @@ let claimable_queued_with_db db =
     | Some {resolution=Some _; _} -> None
     | None -> (match execution.phase with
         | Semantic.Recovering {origin; _}
-          when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+          when origin = Semantic.Interrupted_execution
                && execution.gate_obligations <> [] -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ | Semantic.Recovering _ -> None)) executions in
@@ -1505,7 +1505,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
     let* execution = direct_execution_with_db store.db operation in
     match operation.state, execution with
     | Operation.Queued, Some {Semantic.phase=Semantic.Recovering {origin; _}; gate_obligations; _}
-        when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+        when origin = Semantic.Interrupted_execution
              && gate_obligations = obligations && operation.execution_digest = execution_digest -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _ ->
       Error (Integrity_error "Gate wait commit is not confirmed") in

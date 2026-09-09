@@ -1,3 +1,4 @@
+type navigation_source = { url : string; document_id : string }
 type rect = { x : float; y : float; width : float; height : float }
 type kind = Text | Raster | Region of string | Control of { clickable : bool; editable : bool; disabled : bool }
 type node = { node_id : string; kind : kind; tag : string; text : string;
@@ -56,6 +57,13 @@ let scope_of_json = function
       Ok ({document_id;node_id} : Browser_lane.node_ref)
   | _ -> Error "scope requires exactly documentId and nodeId from an observed region"
 
+let navigation_source_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"url"] ->
+      let* document_id = get nonempty "documentId" (`Assoc fields) in
+      let* url = get nonempty "url" (`Assoc fields) in
+      Ok ({document_id;url} : navigation_source)
+  | _ -> Error "navigationSource requires exactly documentId and url from the follow receipt"
+
 let of_json json =
   let* schema = get string "schema" json in
   let* () = if schema = "masc.browser.scene.v1" then Ok () else Error "unknown semantic scene schema" in
@@ -74,7 +82,7 @@ let of_json json =
     | Some target when target.document_id <> document_id -> Error "scene scope document mismatch"
     | Some _ | None -> Ok () in
   Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated;view;scope}
-let read ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
+let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
   let started = Mtime_clock.elapsed_ns () in
   let* tab_id = match request.tab_id with Some id -> Ok id | None -> Error "scene requires tabId" in
   let* target = Browser_surface.resolved_target request in
@@ -85,7 +93,11 @@ let read ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_su
     | Some url when scene.url <> url ->
         let evidence = Yojson.Safe.to_string (`Assoc ["expectedUrl",`String url;"observedUrl",`String scene.url]) in
         Error ("destination_url_not_observed " ^ evidence ^
-          "; read this pinned tab without expectedUrl to inspect pending navigation or a possible redirect; verify destination content before pinning its observed URL; do not replay follow_link")
+          "; read this pinned tab without expectedUrl, retaining navigationSource, to inspect pending navigation or a possible redirect; verify destination content before pinning its observed URL; do not replay follow_link")
+    | Some _ | None -> Ok () in
+  let* () = match navigation_source with
+    | Some (source : navigation_source) when source.url = scene.url && scene.document_id = source.document_id ->
+        Error "same_url_document_transition_not_observed; retry only BrowserRead with navigationSource unchanged; do not replay follow_link"
     | Some _ | None -> Ok () in
   let* () = if scene.view = view && scene.scope = scope then Ok ()
     else Error "browser did not acknowledge the requested scene view/scope; update the connector" in

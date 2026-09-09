@@ -62,3 +62,19 @@ required = true
 name = "expectedUrl"
 type = "string"
 description = "For scene/regions: reject an observation whose URL differs from this destination. A matching URL is not application-content readiness; verify the observed channel title and content."
+
+[[params]]
+name = "navigationSource"
+type = "object"
+additional_properties = false
+description = "Copy from follow_link receipt. An observation at the source URL requires a new document identity. Preserve on read-only retries, including redirect inspection without expectedUrl."
+
+[[params.params]]
+name = "url"
+type = "string"
+required = true
+
+[[params.params]]
+name = "documentId"
+type = "string"
+required = true

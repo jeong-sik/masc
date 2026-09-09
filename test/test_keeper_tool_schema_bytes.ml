@@ -109,7 +109,16 @@ open Alcotest
    #34506 is the same shape and takes about 195 of that: five MSX tools
    whose first line was over the budget, the largest at 745 bytes. It fits
    under this figure, so the headroom it leaves is nearer 306. *)
-let ceiling_bytes = 98_164
+(* 2026-09-09: #34892 shipped masc_msx_step_until_change to the default
+   (All) surface -- a step that advances frames until the screen settles,
+   replacing repeated screenshot polling -- without updating this suite's
+   golden list or ceiling, so nightly 34384710653 failed both assertions:
+   the surface grew to 103,273 bytes across 111 tools at head 95146db3.
+   This reading comes from that nightly's own measurement. The PR's own
+   check never saw it because this suite runs in the nightly lane only.
+   103,273 + the 306 bytes of headroom #34506 left ≈ 103,579, rounded to
+   keep the same slack the line above argued for. *)
+let ceiling_bytes = 103_579
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -262,6 +271,7 @@ let all_surface_golden_names =
   ; "masc_msx_save"
   ; "masc_msx_screen"
   ; "masc_msx_step"
+  ; "masc_msx_step_until_change"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_run_get"

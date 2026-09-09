@@ -1426,14 +1426,6 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
   Alcotest.(check bool) "docker run skipped" false
     (String_util.contains_substring log "\nrun ")
 
-(* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
-   so what has to hold is that the argv is the container's: an [exec] against
-   the running container, as the keeper's uid, with the container cwd. If this
-   drifts from what [run_exec_with_status_split] uses, a spawn and an Execute
-   for the same command stop landing in the same place.
-
-   This pins the construction. It does not run it -- see the PR note on what
-   is left unproven. *)
 let test_image_change_selects_distinct_persistent_container () =
   let script = {|#!/bin/sh
 state_dir="$(dirname "$0")"
@@ -1510,6 +1502,14 @@ esac
     (List.exists (fun line -> String.starts_with ~prefix:"rm " line
                           || String.starts_with ~prefix:"stop " line) lines)
 
+(* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
+   so what has to hold is that the argv is the container's: an [exec] against
+   the running container, as the keeper's uid, with the container cwd. If this
+   drifts from what [run_exec_with_status_split] uses, a spawn and an Execute
+   for the same command stop landing in the same place.
+
+   This pins the construction. It does not run it -- see the PR note on what
+   is left unproven. *)
 let test_exec_argv_is_the_container_argv () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker

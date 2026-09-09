@@ -876,6 +876,24 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
   })
 
+  it('shows edit evidence for its execution without opening raw tool arguments', () => {
+    recordToolCallOutputs([toolCallOutput({
+      tool_use_id: 'edit-proof', tool: 'Edit',
+      input: { old_string: 'before edit', new_string: 'after edit' },
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1 }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    render(html`<${ChatTranscript}
+      entries=${[toolEntry({ id: 'tool-edit-proof', label: 'Edit' }),
+        toolEntry({ id: 'tool-other-execution', label: 'Edit' })]}
+      emptyText="empty" />`, container)
+    const first = container.querySelector('[data-chat-entry-id="tool-edit-proof"]')
+    const other = container.querySelector('[data-chat-entry-id="tool-other-execution"]')
+    expect(first?.querySelector('[data-chat-edit-evidence]')?.textContent).toContain('after edit')
+    expect(first?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(other?.querySelector('[data-chat-edit-evidence]')).toBeNull()
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),

@@ -581,6 +581,16 @@ let test_git_reads_use_the_box_without_a_judge_or_replay () =
     ]
 ;;
 
+let test_git_status_uses_observation_without_judge () =
+  List.iter (fun argv ->
+    with_execution_workspace @@ fun base_path ->
+    prepare_git_scenario base_path;
+    let result = require_boxed_git ~run:observe_run ~argv base_path in
+    check string "ordinary status retains its result" " M tracked.txt\n" result.stdout)
+    [ ["git"; "status"; "--porcelain"; "--untracked-files=no"]
+    ; ["sh"; "-c"; "git status --porcelain --untracked-files=no"] ]
+;;
+
 let test_git_output_and_reflog_effects_are_executed_once () =
   with_execution_workspace @@ fun base_path ->
   prepare_git_scenario base_path;
@@ -654,7 +664,9 @@ let () =
             test_manual_approval_does_not_prepare_identity
         ] )
     ; ( "git-effect-scenarios"
-      , [ test_case "Git argv and shell reads use one box without a Judge" `Quick
+      , [ test_case "ordinary Git status uses one observation without Judge" `Quick
+            test_git_status_uses_observation_without_judge
+        ; test_case "Git argv and shell reads use one box without a Judge" `Quick
             test_git_reads_use_the_box_without_a_judge_or_replay
         ; test_case "Git output and reflog changes retain their actual effects" `Quick
             test_git_output_and_reflog_effects_are_executed_once

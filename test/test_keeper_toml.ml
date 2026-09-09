@@ -552,6 +552,30 @@ let test_profile_rejects_unknown_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.typo_field"))
 
+(* A profile written before #34392 carries [autoboot_enabled] and
+   [proactive_enabled]. Naming those two as unknown is not enough to act on:
+   21 profiles failed to load and the operator had to read commit history to
+   find [activation_mode] (#34602). The message names the keys the loader
+   does accept, so the replacement is in the same line as the rejection, and
+   no removed key name lives in the code. *)
+let test_unknown_key_error_names_the_accepted_keys () =
+  let input = "[keeper]\nautoboot_enabled = true\nproactive_enabled = true\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "removed Keeper keys must fail closed"
+     | Error detail ->
+       check bool "names both removed keys" true
+         (String_util.contains_substring detail "keeper.autoboot_enabled"
+          && String_util.contains_substring detail "keeper.proactive_enabled");
+       check bool "names the accepted list" true
+         (String_util.contains_substring detail "accepted keys:");
+       check bool "the replacement is in the message" true
+         (String_util.contains_substring detail "keeper.activation_mode");
+       check bool "names the agent_core_env prefix" true
+         (String_util.contains_substring detail "keeper.agent_core_env."))
+
 (* Two RFCs put a key in [keeper.tools] within days of each other, and the
    second one's loader accepted the whole [keeper.tools.] prefix so its own
    nested key would pass. That also accepted [tools.nativ], which is the
@@ -1897,6 +1921,8 @@ let () =
         [
           test_case "rejects unknown key" `Quick
             test_profile_rejects_unknown_key;
+          test_case "unknown-key error names the accepted keys" `Quick
+            test_unknown_key_error_names_the_accepted_keys;
           test_case "parses tools.native postures" `Quick
             test_profile_parses_tools_native;
         Alcotest.test_case "a typo in [keeper.tools] fails the load" `Quick

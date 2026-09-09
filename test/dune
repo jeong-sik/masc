@@ -5047,7 +5047,7 @@
  (name test_exec_shim_observe)
  (modules test_exec_shim_observe)
  (enabled_if (= %{system} linux))
- (libraries alcotest exec_shim unix))
+ (libraries alcotest exec_shim unix eio eio_main fs_compat))
 
 (test
  (name test_shim_clock)

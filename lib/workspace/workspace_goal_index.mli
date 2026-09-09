@@ -141,3 +141,9 @@ val build_goal_task_index_for_config :
 
 val build_task_goal_index_for_config :
   Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t
+
+(** Remove one Task from every Goal under the links lock. Callers deleting
+    Tasks hold the backlog lock through this operation. Primary-only mutation;
+    missing references are a no-op. *)
+val prune_links_for_task_result :
+  Workspace_utils.config -> task_id:string -> (unit, string) result

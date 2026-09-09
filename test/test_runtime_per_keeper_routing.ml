@@ -768,6 +768,50 @@ let test_runtime_assignment_writer_clears_assignment () =
       (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
+let test_runtime_and_egress_change_share_the_published_revision () =
+  with_runtime_file (fun path ->
+    let written = match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+      ~keeper_name:"routingtest" (fun transaction ->
+        Runtime.commit_keeper_assignment ~egress_allow:["example.com"] transaction
+          ~runtime_id:(Some "runpod_mtp.qwen")) with
+      | Ok {value=Ok (Runtime.Assignment_committed write); _} -> write.revision
+      | Ok {value=Ok (Runtime.Assignment_unchanged _); _} -> fail "changed settings were reported unchanged"
+      | Ok {value=Error error; _} | Error error -> fail error in
+    check (option string) "egress write did not undo runtime assignment"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "combined write produced invalid runtime configuration" in
+    let allow = Option.map Egress_allowlist.allow_strings
+      (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest") in
+    check (option (list string)) "runtime and egress both survived" (Some ["example.com"]) allow;
+    let observed = match Runtime.observe_keeper_assignment ~runtime_config_path:path
+      ~keeper_name:"routingtest" () with
+      | Ok observation -> observation.value | Error error -> fail error in
+    check string "returned revision is the final file revision"
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson written))
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson observed)))
+;;
+
+let test_deleted_keeper_loses_assignment_and_egress_together () =
+  with_runtime_file (fun path ->
+    let source = Fs_compat.load_file path
+      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"routingtest" ~allow:["api.github.com"]
+      |> fun text -> Runtime.update_egress_allow_text text ~keeper_name:"other" ~allow:["example.com"] in
+    write_file path source;
+    (match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+       ~keeper_name:"routingtest" Runtime.commit_keeper_removal with
+     | Ok { value = Ok _; _ } -> ()
+     | Ok { value = Error detail; _ } | Error detail -> fail detail);
+    check (option string) "deleted Keeper is no longer assigned in the running process"
+      None (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "cleanup wrote invalid runtime configuration" in
+    check bool "deleted Keeper egress override is absent" true
+      (Option.is_none (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest"));
+    check bool "other Keeper egress override survives" true
+      (Option.is_some (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"other")))
+;;
+
 let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
   with_runtime_file (fun path ->
     let expected =
@@ -2205,6 +2249,10 @@ let () =
             "dashboard runtime assignment clear validates and refreshes cache"
             `Quick
             test_runtime_assignment_writer_clears_assignment
+        ; test_case "runtime and egress publish one final revision" `Quick
+            test_runtime_and_egress_change_share_the_published_revision
+        ; test_case "deleted Keeper loses assignment and egress together" `Quick
+            test_deleted_keeper_loses_assignment_and_egress_together
         ; Alcotest.test_case
             "concurrent assignment CAS admits exactly one writer"
             `Quick

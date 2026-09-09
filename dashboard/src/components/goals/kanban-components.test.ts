@@ -27,6 +27,7 @@ function makeDoneTask(index: number): Task {
 
 describe('TaskBacklog', () => {
   beforeEach(() => {
+    vi.spyOn(actions, 'fetchTaskDeletions').mockResolvedValue({ receipts: [], copies: { kind: 'consistent' } })
     resetTaskBacklogState()
     expandedTasks.value = new Set()
     resetTaskSearch()
@@ -48,19 +49,26 @@ describe('TaskBacklog', () => {
     resetTaskBacklogState()
   })
 
-  it('keeps cleanup retry available after the deleted Task card disappears', async () => {
-    tasks.value = [{ id: 'cleanup-target', title: 'Cleanup target', status: 'todo', priority: 3 }]
-    vi.spyOn(confirmation, 'requestConfirm').mockResolvedValue(true)
+  it('rehydrates pending cleanup without the deleted Task and retries its exact deletion identity', async () => {
+    tasks.value = []
+    vi.mocked(actions.fetchTaskDeletions).mockResolvedValue({
+      receipts: [{ deletionId: 'delete-original', taskId: 'cleanup-target', requestedAt: '2026-09-09T00:00:00Z',
+        cleanup: { kind: 'required', errors: ['primary link store unreadable'] } }], copies: { kind: 'consistent' },
+    })
     const remove = vi.spyOn(actions, 'deleteTask')
-      .mockResolvedValueOnce({ status: 'cleanup_failed', taskId: 'cleanup-target', errors: ['primary link store unreadable'] })
-      .mockResolvedValueOnce({ status: 'already_absent', taskId: 'cleanup-target' })
-    vi.spyOn(store, 'refreshExecution').mockImplementation(async () => { tasks.value = [] })
+    const retry = vi.spyOn(actions, 'retryTaskDeletion').mockImplementation(async () => {
+      vi.mocked(actions.fetchTaskDeletions).mockResolvedValue({ receipts: [], copies: { kind: 'consistent' } })
+      return { ok: true, errors: [] }
+    })
+    vi.spyOn(store, 'refreshExecution').mockResolvedValue()
+    const first = render(h(TaskBacklog, {}))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('cleanup-target'))
+    first.unmount()
     render(h(TaskBacklog, {}))
-    fireEvent.click(screen.getByRole('button', { name: '태스크 삭제: Cleanup target' }))
-    await waitFor(() => expect(screen.queryByText('Cleanup target')).not.toBeInTheDocument())
-    expect(screen.getByRole('alert')).toHaveTextContent('cleanup-target')
+    await waitFor(() => expect(actions.fetchTaskDeletions).toHaveBeenCalledTimes(2))
     fireEvent.click(screen.getByRole('button', { name: '삭제 후 정리 재시도' }))
-    await waitFor(() => expect(remove).toHaveBeenNthCalledWith(2, 'cleanup-target'))
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('delete-original'))
+    expect(remove).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 

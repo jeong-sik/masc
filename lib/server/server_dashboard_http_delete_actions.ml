@@ -380,10 +380,7 @@ let keeper_artifact_path config keeper_name artifact =
   match artifact with
   | Keeper_metrics_store_artifact ->
     Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
-  | Keeper_decision_log_artifact ->
-    Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
-  | Keeper_feedback_log_artifact ->
-    Some (Keeper_types_support.keeper_feedback_log_path config keeper_name)
+  | Keeper_root_logs_artifact | Keeper_runtime_configuration_artifact -> None
   | Keeper_runtime_directory_artifact ->
     Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
   | Keeper_memory_current_artifact ->
@@ -431,17 +428,70 @@ let keeper_playground_paths config keeper_name =
   |> List.sort_uniq String.compare
 ;;
 
-let purge_dashboard_keeper_artifacts config operation =
+let purge_keeper_root_logs config keeper_name =
+  let root = Keeper_fs.keeper_dir config in
+  let entries =
+    try Eio_guard.run_in_systhread ~label:"keeper-purge-log-inventory"
+      (fun () -> match Unix.opendir root with
+        | dir -> Fun.protect ~finally:(fun () -> Unix.closedir dir) (fun () ->
+            let rec read acc = match Unix.readdir dir with
+              | "." | ".." -> read acc
+              | name -> read (name :: acc)
+              | exception End_of_file -> Ok (List.rev acc) in
+            read [])
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (path_error "readdir" root exn)
+  in
+  let belongs_to_keeper basename =
+    Keeper_runtime_root_entry.classify_basename basename
+    |> List.exists (function
+      | Keeper_runtime_root_entry.Keeper { keeper_name = owner;
+          artifact = (Decision_log | Feedback_log | Tla_trace_log); _ } ->
+        String.equal owner keeper_name
+      | Keeper _ -> false)
+  in
+  let rec remove = function
+    | [] -> Ok ()
+    | basename :: rest when not (belongs_to_keeper basename) -> remove rest
+    | basename :: rest ->
+      let path = Filename.concat root basename in
+      match lstat_path path with
+      | Error _ as error -> error
+      | Ok None -> remove rest
+      | Ok (Some { Unix.st_kind = (Unix.S_REG | Unix.S_LNK); _ }) ->
+        Fs_compat.invalidate_cached_writer path;
+        (match remove_path_strict path with
+         | Error _ as error -> error
+         | Ok _ -> remove rest)
+      | Ok (Some _) -> Error ("Keeper log path is not a file: " ^ path)
+  in
+  Result.bind entries remove
+;;
+
+let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   let open Keeper_shutdown_types in
-  match operation.Keeper_shutdown_types.cleanup_intent.reason with
-  | Dashboard_keeper_purge context ->
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
-        ~keeper_name:operation.keeper_name
+        ~keeper_name:keeper_name
         context
     in
     let rec remove = function
       | [] -> Ok ()
+      | Keeper_configuration_artifact :: rest when not remove_configuration -> remove rest
+      | Keeper_runtime_configuration_artifact :: rest ->
+        (match Runtime.with_keeper_assignment_transaction
+          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path)
+          ~keeper_name:keeper_name Runtime.commit_keeper_removal with
+         | Error _ as error -> error
+         | Ok receipt ->
+           List.iter (fun warning -> Log.Keeper.warn "Keeper runtime configuration cleanup: %s"
+             (Yojson.Safe.to_string (Runtime.config_lock_warning_to_yojson warning))) receipt.warnings;
+           (match receipt.value with Error _ as error -> error | Ok _ -> remove rest))
+      | Keeper_root_logs_artifact :: rest ->
+        (match purge_keeper_root_logs config keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
       | Agent_artifact_bundle aliases :: rest ->
         (match
            purge_agent_filesystem_artifacts
@@ -454,12 +504,12 @@ let purge_dashboard_keeper_artifacts config operation =
       | Keeper_playground_bundles_artifact :: rest ->
         (match
            remove_paths_strict
-             (keeper_playground_paths config operation.keeper_name)
+             (keeper_playground_paths config keeper_name)
          with
          | Error _ as error -> error
          | Ok () -> remove rest)
       | artifact :: rest ->
-        (match keeper_artifact_path config operation.keeper_name artifact with
+        (match keeper_artifact_path config keeper_name artifact with
          | None ->
            Error "dashboard Keeper purge artifact plan lost its typed projection"
          | Some path ->
@@ -468,22 +518,22 @@ let purge_dashboard_keeper_artifacts config operation =
               Dated_jsonl.prepare_for_directory_removal
                 (Keeper_types_support.keeper_metrics_store
                    config
-                   operation.keeper_name);
+                   keeper_name);
               Keeper_status_metrics.invalidate_tool_audit_cache
                 config
-                ~keeper_name:operation.keeper_name
+                ~keeper_name:keeper_name
             | Keeper_memory_journal_artifact ->
               (* The journal is written through a memoized appender; unlinking
                  without dropping that writer would leave a same-process
                  successor keeper appending to the deleted inode, so no new
                  journal file would ever appear. *)
               Fs_compat.invalidate_cached_writer path
-            | Keeper_decision_log_artifact
-            | Keeper_feedback_log_artifact
+            | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_memory_source_current_artifact
             | Keeper_playground_bundles_artifact
+            | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
             | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
@@ -494,18 +544,18 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
                | Keeper_metrics_store_artifact
-               | Keeper_decision_log_artifact
-               | Keeper_feedback_log_artifact
+               | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_memory_journal_artifact
                | Keeper_playground_bundles_artifact
+               | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact
                | Keeper_chat_store_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
-                operation.keeper_name
+                keeper_name
                 path
                 (match outcome with
                  | Path_absent -> "absent"
@@ -513,10 +563,6 @@ let purge_dashboard_keeper_artifacts config operation =
               remove rest))
     in
     remove artifacts
-  | Operator_stop_retain_meta
-  | Operator_stop_remove_meta
-  | Supervisor_cleanup ->
-    Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
 let handle_dashboard_keeper_purge_completion config operation =
@@ -536,7 +582,7 @@ let handle_dashboard_keeper_purge_completion config operation =
         | Error error ->
           Error (Schedule_store.store_error_to_string error)
         | Ok () ->
-          (match purge_dashboard_keeper_artifacts config operation with
+          (match purge_keeper_artifacts config ~keeper_name:operation.keeper_name ~remove_configuration:true context with
            | Error _ as error -> error
            | Ok () ->
           Keeper_supervisor_publish_lifecycle.publish_lifecycle
@@ -571,9 +617,7 @@ let keeper_purge_resolve_status = function
   | Keeper_dashboard_purge.Empty_requested_name -> `Bad_request
   | Invalid_requested_name _ -> `Bad_request
   | Keeper_metadata_unreadable _ -> `Internal_server_error
-  | Keeper_metadata_required _
   | Keeper_metadata_name_mismatch _ -> `Conflict
-  | Keeper_lane_executing _ -> `Conflict
   | Keeper_owner_unavailable _ -> `Service_unavailable
   | Keeper_operation_unreadable _ -> `Internal_server_error
   (* Not 500: the record is readable and the state is exact. It is a conflict
@@ -591,7 +635,7 @@ let keeper_purge_submit_status = function
 
 let respond_keeper_purge_operation_accepted ~request reqd operation =
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
-  | Keeper_shutdown_types.Dashboard_keeper_purge context ->
+  | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
     Http.Response.json_value
       ~status:`Accepted
       ~compress:true
@@ -617,8 +661,141 @@ let respond_keeper_purge_operation_accepted ~request reqd operation =
       "dashboard purge acceptance received a non-dashboard lifecycle operation"
 ;;
 
+let cleanup_configuration_artifacts config keeper_name =
+  match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
+  | Error error -> Error (Schedule_store.store_error_to_string error)
+  | Ok () -> purge_keeper_artifacts config ~keeper_name ~remove_configuration:false
+      { Keeper_shutdown_types.requested_name = keeper_name }
+;;
+
+let respond_configuration_removal ~request reqd
+    (receipt : Keeper_configuration_removal.receipt) =
+  Http.Response.json_value ~request
+    (`Assoc ["ok", `Bool true; "accepted", `Bool true;
+      "target_kind", `String "keeper"; "operation_kind", `String "configuration_removal";
+      "keeper_name", `String receipt.keeper_name;
+      "operation_id", `String (Keeper_shutdown_types.Operation_id.to_string receipt.operation_id)]) reqd
+;;
+
+let keeper_purge_status_to_json (operation : Keeper_shutdown_types.t) =
+  let completed = match operation.phase with
+    | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } -> true
+    | _ -> false in
+  `Assoc ["completed", `Bool completed;
+    "can_retry", `Bool (match operation.phase with
+      | Finalized { completion = (Completion_pending Dashboard_keeper_purged
+          | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } -> true
+      | _ -> false);
+    "phase", `String (Keeper_shutdown_types.phase_to_string operation.phase);
+    "failure", (match operation.phase with
+      | Blocked failure -> `String failure.detail
+      | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } -> `String detail
+      | _ -> `Null);
+    "operation", Keeper_shutdown_store.to_json operation]
+;;
+
 let add_delete_action_routes router =
   router
+  |> Http.Router.post "/api/v1/dashboard/keepers/configuration-deletions/retry" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             try
+               let json = Yojson.Safe.from_string body in
+               match Safe_ops.json_string_opt "keeper_name" json, Safe_ops.json_string_opt "operation_id" json with
+               | Some keeper_name, Some raw_id ->
+                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                  | Error detail -> respond_error ~request:req reqd detail
+                  | Ok operation_id ->
+                    let config = Mcp_server.workspace_config state in
+                    match Keeper_configuration_removal.retry ~config ~keeper_name ~operation_id
+                      ~cleanup:(cleanup_configuration_artifacts config) with
+                    | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
+                    | Error error -> respond_error ~status:`Conflict ~request:req reqd
+                        (Keeper_configuration_removal.error_to_string error))
+               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+             with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/keepers/deletions/retry" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             try
+               let json = Yojson.Safe.from_string body in
+               match Safe_ops.json_string_opt "keeper_name" json,
+                     Safe_ops.json_string_opt "operation_id" json with
+               | Some keeper_name, Some raw_id ->
+                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                  | Error detail -> respond_error ~request:req reqd detail
+                  | Ok operation_id ->
+                    match Keeper_shutdown_runtime.retry_completion
+                      ~config:(Mcp_server.workspace_config state) ~keeper_name ~operation_id with
+                    | Ok operation -> respond_keeper_purge_operation_accepted ~request:req reqd operation
+                    | Error `Not_ready -> respond_error ~status:`Conflict ~request:req reqd
+                        "operation is not awaiting Dashboard purge completion"
+                    | Error (`Submit error) -> respond_error
+                        ~status:(keeper_purge_submit_status error) ~request:req reqd
+                        (Keeper_shutdown_runtime.submit_error_to_string error))
+               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+             with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
+         request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keepers/deletions" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name req reqd ->
+           let config = Mcp_server.workspace_config state in
+           match Keeper_shutdown_store.scan_inventory ~config with
+           | Error error -> respond_error ~status:`Internal_server_error ~request:req reqd
+               (Keeper_shutdown_store.error_to_string error)
+           | Ok entries ->
+             let operations, errors = List.fold_left (fun (operations, errors) entry ->
+               match entry with
+               | Keeper_shutdown_store.Operation operation ->
+                 (match operation.cleanup_intent.reason with
+                  | Dashboard_keeper_purge _ -> keeper_purge_status_to_json operation :: operations, errors
+                  | _ -> operations, errors)
+               | Corrupt_record record ->
+                 operations, `Assoc ["keeper_name", `String record.keeper_name;
+                   "operation_id", `String (Keeper_shutdown_types.Operation_id.to_string record.operation_id);
+                   "error", `String (Keeper_shutdown_store.error_to_string record.error)] :: errors)
+               ([], []) entries in
+             let configuration_removals, configuration_errors =
+               match Keeper_configuration_removal.list ~config with
+               | Ok inventory -> List.map Keeper_configuration_removal.to_json inventory.receipts, inventory.errors
+               | Error error -> [], [Keeper_configuration_removal.error_to_string error] in
+             Http.Response.json_value ~request:req
+               (`Assoc ["operations", `List (List.rev operations);
+                 "errors", `List (List.rev errors);
+                 "configuration_removals", `List configuration_removals;
+                 "configuration_errors", `List (List.map (fun error -> `String error) configuration_errors)]) reqd)
+         request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keepers/purge-status" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name req reqd ->
+           match Server_utils.query_param req "keeper_name",
+                 Server_utils.query_param req "operation_id" with
+           | Some keeper_name, Some raw_id ->
+             (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+              | Error detail -> respond_error ~request:req reqd detail
+              | Ok operation_id ->
+                let config = Mcp_server.workspace_config state in
+                match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+                | Error error ->
+                  let status = match error with
+                    | Keeper_shutdown_store.Not_found _ -> `Not_found
+                    | _ -> `Internal_server_error in
+                  respond_error ~status ~request:req reqd
+                    (Keeper_shutdown_store.error_to_string error)
+                | Ok operation ->
+                  match operation.cleanup_intent.reason with
+                  | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
+                    Http.Response.json_value ~request:req
+                      (keeper_purge_status_to_json operation) reqd
+                  | Operator_stop_retain_meta | Operator_stop_remove_meta | Supervisor_cleanup ->
+                    respond_error ~status:`Conflict ~request:req reqd
+                      "operation is not a Dashboard Keeper purge")
+           | _ -> respond_error ~request:req reqd
+                    "keeper_name and operation_id are required")
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/board/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
@@ -676,6 +853,49 @@ let add_delete_action_routes router =
              respond_error ~request:req reqd (invalid_request "post_id")
          )
        ) request reqd)
+
+  |> Http.Router.get "/api/v1/dashboard/tasks/deletions" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _agent_name req reqd ->
+           match Workspace.deletion_receipts_r (Mcp_server.workspace_config state) with
+           | Error message -> respond_error ~status:`Internal_server_error ~request:req reqd message
+           | Ok observation ->
+             let copies_state, copy_errors = match observation.copies with
+               | Workspace_backlog.Copies_consistent -> "consistent", []
+               | Workspace_backlog.Copies_unavailable errors -> "unavailable", errors in
+             Http.Response.json_value ~request:req
+               (`Assoc ["receipts", `List (List.map Masc_domain.task_deletion_receipt_to_yojson observation.receipts);
+                 "copies", `Assoc ["state", `String copies_state;
+                   "errors", `List (List.map (fun error -> `String error) copy_errors)]]) reqd)
+         request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/tasks/deletions/retry" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let json = Yojson.Safe.from_string body_str in
+               match Safe_ops.json_string_opt "deletion_id" json with
+               | None -> respond_error ~request:req reqd (invalid_request "deletion_id")
+               | Some deletion_id ->
+                 match Workspace.retry_task_deletion_r (Mcp_server.workspace_config state) ~deletion_id with
+                 | Error (Workspace.Unknown_deletion _) ->
+                   respond_error ~status:`Not_found ~request:req reqd "unknown deletion identity"
+                 | Error (Workspace.Task_identity_reused task_id) ->
+                   respond_error ~status:`Conflict ~request:req reqd
+                     ("deletion identity conflicts with a live Task: " ^ task_id)
+                 | Error (Workspace.Deletion_storage_error error) ->
+                   respond_error ~status:`Internal_server_error ~request:req reqd
+                     (Masc_domain.masc_error_to_string error)
+                 | Ok outcome ->
+                   let errors = match outcome with
+                     | Workspace.Task_deleted | Workspace.Task_already_absent -> []
+                     | Workspace.Task_delete_cleanup_failed errors -> errors in
+                   Http.Response.json_value ~request:req
+                     (`Assoc ["deletion_id", `String deletion_id; "ok", `Bool (errors=[]);
+                       "errors", `List (List.map (fun error -> `String error) errors)]) reqd
+             with Yojson.Json_error _ -> respond_error ~request:req reqd (invalid_request "deletion_id")))
+         request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -807,7 +1027,13 @@ let add_delete_action_routes router =
                       ~request:req
                       reqd
                       (Keeper_dashboard_purge.resolve_error_to_string error)
-                  | Ok (Some keeper_target) ->
+                  | Ok (Some (Keeper_dashboard_purge.Configuration_only { keeper_name; _ })) ->
+                    (match Keeper_configuration_removal.submit ~config ~keeper_name ~actor
+                      ~cleanup:(cleanup_configuration_artifacts config) with
+                     | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
+                     | Error error -> respond_error ~status:`Conflict ~request:req reqd
+                         (Keeper_configuration_removal.error_to_string error))
+                  | Ok (Some (Keeper_dashboard_purge.Runtime_keeper keeper_target)) ->
                   (match
                      Keeper_dashboard_purge.submit
                        ~config

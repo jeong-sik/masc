@@ -731,9 +731,15 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
       ({ completion = (Completion_not_requested | Completion_delivered _); _ } as
        evidence) ->
     release_finalized_admission ~config ?successor_operation_id ~evidence operation
-  | Finalized ({ completion = Completion_pending action; _ } as evidence) ->
+  | Finalized ({ completion = (Completion_pending action | Completion_delivery_failed { action; _ }); _ } as evidence) ->
     (match invoke_completion_handler ~config operation action with
-     | Error detail -> Error (Completion_failed (operation, detail))
+     | Error detail ->
+       let failed = { operation with
+         phase = Finalized { evidence with completion = Completion_delivery_failed { action; detail } };
+         updated_at = Masc_domain.now_iso () } in
+       (match replace ~config failed with
+        | Error _ as error -> error
+        | Ok persisted -> Error (Completion_failed (persisted, detail)))
      | Ok () ->
        let delivered_evidence =
          { evidence with completion = Completion_delivered action }

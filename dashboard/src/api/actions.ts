@@ -168,6 +168,65 @@ export async function deleteTask(taskId: string): Promise<TaskDeleteResult> {
   throw new Error('Invalid Task deletion settlement')
 }
 
+export type TaskDeletionReceipt = {
+  deletionId: string
+  taskId: string
+  requestedAt: string
+  cleanup: { kind: 'required'; errors: string[] } | { kind: 'verified' }
+}
+export type TaskDeletionInventory = {
+  receipts: TaskDeletionReceipt[]
+  copies: { kind: 'consistent' } | { kind: 'unavailable'; errors: string[] }
+}
+
+function deletionObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid deletion record')
+  return value as Record<string, unknown>
+}
+function deletionErrors(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
+    throw new Error('Invalid deletion errors')
+  }
+  return value
+}
+function deletionText(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error('Missing deletion identity')
+  return value
+}
+
+export async function fetchTaskDeletions(): Promise<TaskDeletionInventory> {
+  const value = deletionObject(await get<unknown>('/api/v1/dashboard/tasks/deletions'))
+  if (!Array.isArray(value.receipts)) throw new Error('Missing deletion receipts')
+  const identities = new Set<string>()
+  const receipts = value.receipts.map((raw): TaskDeletionReceipt => {
+    const row = deletionObject(raw)
+    const deletionId = deletionText(row.deletion_id)
+    if (identities.has(deletionId)) throw new Error('Duplicate deletion identity')
+    identities.add(deletionId)
+    const errors = deletionErrors(row.cleanup_errors)
+    const cleanup: TaskDeletionReceipt['cleanup'] = row.phase === 'cleanup_required'
+      ? { kind: 'required', errors }
+      : row.phase === 'cleanup_verified' && errors.length === 0
+        ? { kind: 'verified' }
+        : (() => { throw new Error('Invalid deletion cleanup phase') })()
+    return { deletionId, taskId: deletionText(row.task_id), requestedAt: deletionText(row.requested_at), cleanup }
+  })
+  const copies = deletionObject(value.copies)
+  const errors = deletionErrors(copies.errors)
+  if (copies.state === 'consistent' && errors.length === 0) return { receipts, copies: { kind: 'consistent' } }
+  if (copies.state === 'unavailable' && errors.length > 0) return { receipts, copies: { kind: 'unavailable', errors } }
+  throw new Error('Invalid deletion copy state')
+}
+
+export async function retryTaskDeletion(deletionId: string): Promise<{ ok: boolean; errors: string[] }> {
+  const value = deletionObject(await post<unknown>('/api/v1/dashboard/tasks/deletions/retry', { deletion_id: deletionId }))
+  const errors = deletionErrors(value.errors)
+  if (value.deletion_id !== deletionId || typeof value.ok !== 'boolean' || value.ok !== (errors.length === 0)) {
+    throw new Error('Invalid deletion retry receipt')
+  }
+  return { ok: value.ok, errors }
+}
+
 // Route an operator claim through the shared FSM transition tool so it is
 // persisted server-side (todo -> claimed, assignee = the dashboard actor).
 // Before this, the Work board's claim button only mutated local React state,

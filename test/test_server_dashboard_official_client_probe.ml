@@ -14,12 +14,13 @@ let write_executable prefix body =
   path
 ;;
 
-let codex_fixture () =
+let codex_fixture ?(provider_managed = false) () =
   let initialize =
     {|{"id":1,"result":{"userAgent":"fixture/0.147.0","codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux"}}|}
   in
-  let account =
-    {|{"id":2,"result":{"account":{"type":"chatgpt","email":"not-projected@example.test","planType":"pro"},"requiresOpenaiAuth":true}}|}
+  let account = if provider_managed then
+    {|{"id":2,"result":{"account":null,"requiresOpenaiAuth":false}}|}
+    else {|{"id":2,"result":{"account":{"type":"chatgpt","email":"not-projected@example.test","planType":"pro"},"requiresOpenaiAuth":true}}|}
   in
   write_executable
     "masc-dashboard-codex-probe-"
@@ -40,7 +41,7 @@ let claude_fixture () =
   write_executable
     "masc-dashboard-claude-probe-"
     ("#!/bin/sh\nset -eu\n"
-     ^ "[ \"${1-}\" = auth ] || exit 91\n"
+     ^ "[ \"${2-}\" = auth ] || exit 91\n"
      ^ "printf '%s\\n' "
      ^ shell_quote auth
      ^ "\n")
@@ -105,8 +106,8 @@ let probe runtime_id =
   | Error error -> fail error.message
 ;;
 
-let with_probe_runtime f =
-  let codex_cli = codex_fixture () in
+let with_probe_runtime ?(provider_managed = false) f =
+  let codex_cli = codex_fixture ~provider_managed () in
   let claude_cli = claude_fixture () in
   let config_path = Filename.temp_file "masc-dashboard-official-probe-" ".toml" in
   let output = open_out_bin config_path in
@@ -187,6 +188,15 @@ let test_codex_and_claude_login_are_measured_separately () =
       (json_string [ "login"; "subscription_type" ] claude))
 ;;
 
+let test_provider_managed_is_configured_only () =
+  with_probe_runtime ~provider_managed:true (fun () ->
+    let response = probe "codex.codex" in
+    check string "provider configured" "configured" (json_string [ "login"; "status" ] response);
+    check bool "authentication not proved" false (json_bool [ "login"; "authenticated" ] response);
+    check string "auth mode" "provider_managed" (json_string [ "login"; "auth_method" ] response);
+    check string "execution not measured" "not_measured" (json_string [ "execution"; "status" ] response))
+;;
+
 let test_request_shape_is_exact () =
   match
     Server_dashboard_official_client_probe.probe_body
@@ -227,6 +237,7 @@ let () =
             "Codex and Claude login evidence"
             `Quick
             test_codex_and_claude_login_are_measured_separately
+        ; test_case "provider managed is configured only" `Quick test_provider_managed_is_configured_only
         ; test_case "request shape is exact" `Quick test_request_shape_is_exact
         ; test_case
             "CLI unavailable is measured"

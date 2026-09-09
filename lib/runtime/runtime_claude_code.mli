@@ -1,14 +1,22 @@
 (** A single-turn client for the official Claude Code CLI.
 
-    This is not an Anthropic HTTP provider and it does not read API keys.
-    Claude Code owns the subscription session and model loop. MASC owns the
+    This is not an Anthropic HTTP provider. Supported credential and routing
+    environment variables are passed only to the official CLI.
+    Claude Code owns authentication, its session and model loop. MASC owns the
     child lifetime, exact SDK-control/MCP bridge, and terminal projection. *)
 
+type authentication = Claude_ai | Api_key | OAuth_token | Third_party
+
+type api_provider = First_party | Bedrock | Vertex | Foundry | Mantle
+
 type subscription = private
-  { auth_method : string
-  ; subscription_type : string
-  ; api_provider : string
+  { authentication : authentication
+  ; subscription_type : string option
+  ; api_provider : api_provider
   }
+
+val authentication_to_string : authentication -> string
+val api_provider_to_string : api_provider -> string
 
 type config =
   { cli_path : string
@@ -224,7 +232,7 @@ val probe_subscription :
   config ->
   (subscription, error) result
 (** Measure the official CLI login without submitting a model turn. The child
-    receives the same credential-scrubbed environment as [run_turn]. *)
+    receives the same credential-preserving allowlisted environment as [run_turn]. *)
 
 val cli_admitted_reasoning_effort :
   Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t
@@ -267,6 +275,6 @@ val run_turn :
   (turn_result, error) result
 (** Execute one turn through Claude Code's stream-json control protocol.
 
-    API-key and token environment variables are removed from the child. The
-    preflight requires [claude auth status --json] to report a logged-in
-    [claude.ai] subscription served by [firstParty]. *)
+    Supported API-key, token and routing environment variables are preserved.
+    Preflight uses the same settings isolation as the turn; credential validity
+    and selected-model access are established by the actual turn. *)

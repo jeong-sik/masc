@@ -7669,6 +7669,64 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
+let test_edit_manifest_through_model_projection () =
+  List.iter (fun fail_manifest ->
+    with_exec_fixture ~always_allow:true "edit-model-manifest"
+      (fun ~config ~meta ~publication_recovery ~ctx_work ->
+        let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+          ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work () in
+        Fun.protect ~finally:bundle.cleanup @@ fun () ->
+        let edit = List.find (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name "Edit") bundle.tools in
+        let target = playground_file ~config ~meta "manifest-edit.txt" in
+        Fs_compat.save_file target "before\n";
+        let store = Tool_blob_store.create ~base_path:config.base_path in
+        let root = Tool_blob_store.root_dir store in
+        let saved_root = root ^ ".fixture-saved" in
+        let blocked = ref false in
+        let invoke () = Agent_core.Tool.execute
+          ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+          edit (`Assoc ["file_path", `String target;
+            "old_string", `String "before"; "new_string", `String "after"]) in
+        let result = Fun.protect ~finally:(fun () ->
+          if !blocked then (Unix.unlink root; Unix.rename saved_root root))
+          (fun () ->
+            if fail_manifest then
+              Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_result_manifest
+                (fun () ->
+                  check string "file applied before manifest failure" "after\n" (Fs_compat.load_file target);
+                  Unix.rename root saved_root;
+                  Fs_compat.save_file root "manifest storage blocked";
+                  blocked := true)
+                invoke
+            else invoke ()) in
+        check string "edit happened exactly once" "after\n" (Fs_compat.load_file target);
+        let refs = match fail_manifest, result with
+          | false, Ok output ->
+            (match Tool_output.decode_from_agent_core output.Agent_core.Types.content with
+             | Tool_output.Decoded reference ->
+               check string "model receives durable manifest" Tool_output.artifact_manifest_mime reference.mime
+             | _ -> fail "successful Edit omitted durable manifest");
+            let payload = structured_tool_output_exn ~base_path:config.base_path output.content in
+            Tool_output.normalized_artifact_refs_in_json payload
+          | true, Error error ->
+            let payload = Yojson.Safe.from_string error.Agent_core.Types.message in
+            check string "known applied effect reaches model error" "proven_post_effect"
+              Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+            check bool "failure injection reached the manifest store" true !blocked;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check bool "terminal boundary retains applied effect" true
+                 (failure.effect_disposition = Tool_result.Proven_post_effect)
+             | _ -> fail "post-effect manifest failure lost terminal evidence");
+            Tool_output.normalized_artifact_refs_in_json payload
+          | false, Error error -> fail error.Agent_core.Types.message
+          | true, Ok _ -> fail "manifest storage failure was disguised as success" in
+        check int "both snapshot handles retained" 2 (List.length refs);
+        let bytes = List.map (fetch_artifact_exn ~base_path:config.base_path) refs in
+        check (slist string String.compare) "snapshots retain exact before and after"
+          ["before\n"; "after\n"] bytes)) [false; true]
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -7687,6 +7745,8 @@ let () =
         test_identical_keeper_invocations_join_across_production_boundaries;
       test_case "native filesystem approval preserves producer boundary" `Quick
         test_native_filesystem_approval_preserves_producer_boundary;
+      test_case "Edit manifest survives complete model projection" `Quick
+        test_edit_manifest_through_model_projection;
       test_case "Manual Gate does not defer internal memory write" `Quick
         test_manual_gate_does_not_defer_internal_memory_write;
       test_case "initialization crash is redacted from tool output" `Quick

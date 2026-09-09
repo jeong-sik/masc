@@ -14062,7 +14062,7 @@ def run_browser_pointer_regression(executable: str) -> None:
         assert len(actions)==1 and actions[0]["action"]=="click_at"
         # 30x100 terminal, 10x20 cells, square PNG: 25 rows x 50 columns,
         # after the three caption rows. Mouse reports target cell centers.
-        assert actions[0]["point"] == {"x":0.03,"y":0.06}
+        assert actions[0]["point"] == {"x":0.03,"y":0.06}, actions[0]
         image_input(b"\x1b[<0;2;5M\x1b[<0;5;8m")
         assert len(actions)==2 and actions[1]["action"]=="drag"
         assert actions[1]["from"] == {"x":0.03,"y":0.06}

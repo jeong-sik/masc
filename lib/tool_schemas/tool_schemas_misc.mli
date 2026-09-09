@@ -109,6 +109,7 @@ type misc_operation =
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
+  | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
 [@@deriving enumerate]

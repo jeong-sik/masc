@@ -91,3 +91,12 @@ This observation did not run inference and does not prove prefill acceptance,
 absence of truncation during inference, summary correctness, or whether each
 Keeper group/final synthesis fits. Only aggregate receipt metadata is committed;
 the rendered prompt, token list and private memory inventory remain outside Git.
+
+## Full-corpus execution observation
+
+`live-progress.json` captures aggregate progress from the actual 1,710-source,
+18-Keeper pass over the isolated runtime's production-memory snapshot. The same
+execution handle was polled and reported running. The first group is receiving
+streamed model output; no group or final synthesis is claimed complete. The
+process continues without a restart. Private input and streamed content remain
+outside Git. This is execution evidence, not semantic-quality or publication proof.

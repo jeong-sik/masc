@@ -649,3 +649,10 @@ val pending_count_for_keeper_in_workspace :
   base_path:string -> keeper_name:string -> (int, storage_error) result
 (** Count one keeper's pending approvals within the durable workspace store.
     Store read failures remain explicit instead of collapsing to zero. *)
+
+(** Durable observation for an operation waiting on this exact Gate request.
+    [None] is absent authority, never an implicit approval or denial. *)
+type waiting_observation = private
+  { waiting_request : pending_approval; waiting_decision : decision option }
+val observe_waiting_request : base_path:string -> id:string ->
+  (waiting_observation option, storage_error) result

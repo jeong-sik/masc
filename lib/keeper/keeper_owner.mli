@@ -344,3 +344,18 @@ module For_testing : sig
 
   val mailbox_depth : t -> int
 end
+
+val direct_gate_state : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_wait_state option, error) result
+val direct_gate_obligations : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_obligation list, error) result
+val defer_direct_gate : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  waiting:Keeper_semantic_execution.gate_wait -> (Chat_operation.t, error) result
+val resolve_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  resolution:Keeper_semantic_execution.gate_resolution -> (Chat_operation.t, error) result
+val resume_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  waiting:Keeper_semantic_execution.gate_wait -> resolution:Keeper_semantic_execution.gate_resolution -> (unit, error) result
+
+val direct_gate_waits : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result
+val discharge_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  obligation:Keeper_semantic_execution.gate_obligation -> (unit, error) result

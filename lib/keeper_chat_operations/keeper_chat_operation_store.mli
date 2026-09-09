@@ -159,3 +159,20 @@ val semantic_apply :
 (** Exact-record CAS; terminal records are immutable. Only Running occupies the
     single semantic execution slot. Startup moves interrupted Running records
     to Recovering without clearing frames, allowing unrelated work to proceed. *)
+
+(** Gate waiting remains the original queued operation, but cannot be claimed
+    until a bound durable resolution is supplied. No clock controls readiness. *)
+val has_claimable_queued : t -> (bool, error) result
+val direct_gate_state : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_wait_state option, error) result
+val direct_gate_obligations : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_obligation list, error) result
+val defer_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  waiting:Semantic.gate_wait -> (Operation.t, error) result
+val resolve_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  resolution:Semantic.gate_resolution -> (Operation.t, error) result
+val resume_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  waiting:Semantic.gate_wait -> resolution:Semantic.gate_resolution -> (unit, error) result
+
+val discharge_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  obligation:Semantic.gate_obligation -> (unit, error) result
+
+val direct_gate_waits : t -> ((Operation.Operation_id.t * Semantic.gate_wait_state) list, error) result

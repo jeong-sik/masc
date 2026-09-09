@@ -4852,3 +4852,17 @@ let pending_count_for_keeper_in_workspace ~base_path ~keeper_name =
       0
       entries)
 ;;
+
+type waiting_observation =
+  { waiting_request : pending_approval; waiting_decision : decision option }
+let observe_waiting_request ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      match SMap.find_opt id (Atomic.get deliveries), SMap.find_opt id (Atomic.get pending) with
+      | Some delivery, _ when delivery.entry.audit_base_path = base_path ->
+        Ok (Some {waiting_request=delivery.entry; waiting_decision=Some delivery.decision})
+      | None, Some entry when entry.audit_base_path = base_path ->
+        Ok (Some {waiting_request=entry; waiting_decision=None})
+      | Some _, _ | None, Some _ | None, None -> Ok None)

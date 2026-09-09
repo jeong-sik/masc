@@ -224,3 +224,18 @@ val heap_root : (Obj.t -> 'a) -> 'a
 (** Run [walk] on this module's retained state, under the lock that guards
     it, for [Heap_roots.measure] to size with [Obj.reachable_words].
     Diagnostics only: the walk stalls the process for its duration. *)
+
+val direct_gate_state : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_wait_state option, command_error) result
+val direct_gate_waits : base_path:string -> keeper_name:string ->
+  ((Keeper_chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, command_error) result
+val direct_gate_obligations : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_obligation list, command_error) result
+val defer_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> waiting:Keeper_semantic_execution.gate_wait -> (Keeper_chat_operation.t, command_error) result
+val resolve_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  resolution:Keeper_semantic_execution.gate_resolution -> (Keeper_chat_operation.t, command_error) result
+val resume_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  waiting:Keeper_semantic_execution.gate_wait -> resolution:Keeper_semantic_execution.gate_resolution -> (unit, command_error) result
+val discharge_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  obligation:Keeper_semantic_execution.gate_obligation -> (unit, command_error) result

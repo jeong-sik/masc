@@ -1184,6 +1184,59 @@ let test_health_state_change_observer_failure_is_isolated () =
             ^ Chat_operation.state_to_string state))
 ;;
 
+let test_gate_wait_releases_owner_without_repeated_children () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let waiting_p, resolve_waiting = Eio.Promise.create () in
+  let finished_p, resolve_finished = Eio.Promise.create () in
+  let attempts = ref 0 in
+  let checkpoint = Keeper_checkpoint_ref.create
+    ~trace_id:(Keeper_id.Trace_id.of_string "gate-wait-trace" |> Result.get_ok)
+    ~turn_count:2 ~canonical_checkpoint_bytes:"original Gate checkpoint" |> Result.get_ok in
+  let obligation = Keeper_semantic_execution.gate_obligation ~approval_id:"owner-gate-approval"
+    ~tool_name:"tool_execute" ~input_hash:(String.make 64 'a') |> Result.get_ok in
+  let waiting = Keeper_semantic_execution.gate_wait ~checkpoint ~obligations:[obligation] |> Result.get_ok in
+  let operation_id = operation_id "kmsg-owner-gate-wait" in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    incr attempts;
+    let owner = Eio.Promise.await owner_p in
+    let operation : Chat_operation.t = match owner_ok (claim ()) with
+      | Some value -> value | None -> fail "waiting operation was incorrectly scheduled" in
+    check bool "same Gate operation" true (Chat_operation.Operation_id.equal operation_id operation.operation_id);
+    match owner_ok (Owner.direct_gate_state owner ~operation_id) with
+    | None ->
+      Owner.defer_direct_gate owner ~operation_id ~execution_digest:operation.execution_digest ~waiting
+        |> owner_ok |> ignore;
+      Owner.Operation_deferred
+    | Some {resolution=None; _} -> fail "unresolved wait re-entered its child"
+    | Some {waiting; resolution=Some resolution} ->
+      Owner.resume_direct_gate owner ~operation_id ~waiting ~resolution |> owner_ok;
+      Owner.discharge_direct_gate owner ~operation_id ~obligation |> owner_ok;
+      Owner.Operation_succeeded {outcome_ref="original-gate-complete"} in
+  let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution =
+    match execution with
+    | Owner.Operation_deferred -> Eio.Promise.resolve resolve_waiting ()
+    | Owner.Operation_succeeded _ -> Eio.Promise.resolve resolve_finished ()
+    | Owner.Operation_failed {detail; _} -> fail detail in
+  let owner = start_owner_with_executor ~on_execution_settled ~sw
+    ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+    ~operation_executor:(Some execute) ~keeper_name:"gate-wait-owner"
+    ~initial_meta:(Some (make_meta "gate-wait-owner")) () |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  Owner.submit_operation owner ~operation_id ~source:operation_source ~input:(operation_input "original Gate task")
+    |> owner_ok |> ignore;
+  Eio.Promise.await waiting_p;
+  check int "waiting did not launch another child" 1 !attempts;
+  (match owner_ok (Owner.run_autonomous_if_idle owner (fun () -> "independent work")) with
+   | `Ran value -> check string "waiting released Owner" "independent work" value
+   | `Busy _ -> fail "Gate waiting retained Owner slot");
+  Owner.resolve_direct_gate owner ~operation_id
+    ~resolution:{Keeper_semantic_execution.obligation; decision=Keeper_semantic_execution.Gate_approved}
+    |> owner_ok |> ignore;
+  Eio.Promise.await finished_p;
+  check int "resolution resumes exactly one original child" 2 !attempts
+;;
+
 let test_runtime_deferred_child_keeps_same_operation_and_drains () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -3186,6 +3239,8 @@ let () =
             "startup Queued waits for runner readiness"
             `Quick
             test_startup_queued_waits_for_runner_readiness
+        ; test_case "Gate waiting releases Owner without repeated children" `Quick
+            test_gate_wait_releases_owner_without_repeated_children
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case

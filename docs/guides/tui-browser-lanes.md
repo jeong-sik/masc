@@ -109,9 +109,12 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Scene support requires the updated coordinator/native host and extension 0.4.0
-in the selected browser profile. Version 0.4.0 adds live `scroll_at`; after upgrading,
-reload the extension in `about:debugging` and confirm its version there. The
+Scene support requires the updated coordinator/native host and extension 0.5.0
+in the selected browser profile: 0.5.0 is the first version whose injected
+script sends the `view` and `scope` a scene read is answered against, and a
+0.4.0 build fails every scene read with `scene missing view`. 0.5.0 also carries
+live `scroll_at`. After upgrading, reload the extension in `about:debugging`
+and confirm its version there. The
 Browser Lane client list reports the browser version, not the extension version.
 Source changes and script-level Gecko evidence
 alone do not establish that an installed TUI has been updated.
@@ -157,7 +160,7 @@ per-region viewport/DOM content, not a channel-wide history collection.
 
 ### Explicit live tab activation
 
-Extension 0.5.0 adds `BrowserInteract action=activate_tab` for an explicit live
+Extension 0.6.0 adds `BrowserInteract action=activate_tab` for an explicit live
 clientId/tabId with required expectedUrl. It selects the tab without focusing its
 browser window or changing/reloading its URL. This is a tool action; reads do not
 automatically activate tabs and no TUI shortcut is added. A successful receipt

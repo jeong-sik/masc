@@ -93,6 +93,6 @@ output template은 실제 데이터 전달에 사용한다. read → 판단 → 
 A changed Slack URL or title can precede rendered channel content. If BrowserTabs
 reports the selected tab as inactive and the body remains pending or belongs to the
 previous channel, compose with the browser-lanes explicit activation guidance:
-with extension 0.5.0 or newer, use `BrowserInteract action=activate_tab` on the observed
+with extension 0.6.0 or newer, use `BrowserInteract action=activate_tab` on the observed
 clientId/tabId/expectedUrl, then read and verify the actual channel body. Do not
 activate every tab automatically or treat the activation receipt as collected context.

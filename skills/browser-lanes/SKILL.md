@@ -168,7 +168,7 @@ a source-URL observation from the original document is still pending.
 
 When an observed live tab is inactive and its body still shows pending or previous
 content after a channel transition, `BrowserInteract action=activate_tab` can select
-that exact tab. This requires extension 0.5.0 or newer and the currently advertised
+that exact tab. This requires extension 0.6.0 or newer and the currently advertised
 action schema. Preserve the observed clientId, tabId and expectedUrl. This is an
 explicit action, not an automatic step in every read or composition. It does not
 focus the browser window, change the URL or reload. Automation rejects this action.

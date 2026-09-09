@@ -1,0 +1,11 @@
+{
+  "commit": "8765238ac898a338ffb41556e4c8267e85406ac2",
+  "arch": "linux-arm64",
+  "run_attempt": 1,
+  "release_validated": false,
+  "sha256": {
+    "main_eio.exe": "6a42111069206192572f4c84169a8af1882d83da97e8f74116cb877ea4b2a733",
+    "masc_tui.exe": "f2f405847cdf1b99baa230944785c993eddb4098cadb0191c9b85e64b3111ad4",
+    "masc_browser_host.exe": "0ae1fa54848b583c27e07899cd6d2b885b97e8167a0959b114b1e0df35dc4771"
+  }
+}

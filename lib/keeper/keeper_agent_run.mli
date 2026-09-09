@@ -273,8 +273,8 @@ val run_turn
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?on_gate_deferred:(string -> unit)
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_gate_deferred:(string -> unit)
   -> ?autonomous_yield_requested:
        (unit -> (autonomous_yield_request option, string) result)
        (* Evaluated only after a typed AGENT_CORE tool boundary. Snapshot failures

@@ -18,7 +18,7 @@ let owner result = Result.map_error Owner.command_error_to_string result
 
 let observe ~base_path ~keeper_name (obligation : Semantic.gate_obligation) =
   let* observed = Keeper_approval_queue.observe_waiting_request ~base_path ~id:obligation.approval_id
-    |> Result.map_error (fun e -> e.Keeper_approval_queue.reason) in
+    |> Result.map_error Keeper_approval_queue.storage_error_to_string in
   match observed with
   | None -> Error "Gate obligation has no durable authority"
   | Some observed ->
@@ -29,7 +29,7 @@ let observe ~base_path ~keeper_name (obligation : Semantic.gate_obligation) =
 
 let bind ~base_path ~keeper_name approval_id =
   let* observed = Keeper_approval_queue.observe_waiting_request ~base_path ~id:approval_id
-    |> Result.map_error (fun e -> e.Keeper_approval_queue.reason) in
+    |> Result.map_error Keeper_approval_queue.storage_error_to_string in
   match observed with
   | None -> Error "deferred Gate request is absent from durable authority"
   | Some observed ->

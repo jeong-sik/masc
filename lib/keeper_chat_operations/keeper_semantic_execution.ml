@@ -258,7 +258,9 @@ let apply ~now action current =
              else reject ()
            | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
              unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="Gate admission requires reconciliation"})
-           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+           | Recovering {origin=(Gate_wait _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+               | Confirmed_undispatched | Interrupted_execution); _}
+           | Preparing | Ready | Suspended _ | Settled _ -> reject ())
       | Resolve_gate resolution ->
           (match current.phase with
            | Recovering {origin=Gate_wait state; _} ->

@@ -507,6 +507,25 @@ function interactInPage(args) {
 
 
 async function pageInteract(args) {
+  if (args?.action === 'activate_tab') {
+    let effectStarted = false;
+    try {
+      if (!Number.isSafeInteger(args.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+      if (typeof args.expectedUrl !== 'string' || !args.expectedUrl.trim()) throw new Error('activate_tab_requires_expected_url');
+      const before = await browser.tabs.get(args.tabId);
+      if (before.url !== args.expectedUrl) throw new Error('page_url_changed');
+      effectStarted = true;
+      await browser.tabs.update(args.tabId, {active:true});
+      const after = await browser.tabs.get(args.tabId);
+      if (after.id !== args.tabId || after.url !== args.expectedUrl || !after.active)
+        throw new Error('activated_tab_observation_changed');
+      return {tabId:args.tabId,action:'activate_tab',urlBefore:before.url,url:after.url,active:after.active,title:after.title};
+    } catch (cause) {
+      const error = new Error(String(cause?.message ?? cause));
+      error.effectStarted = effectStarted;
+      throw error;
+    }
+  }
   // Only this read-only preflight can establish that injection never began.
   // A later executeScript rejection can lose a result after a page effect.
   try {

@@ -191,3 +191,33 @@ for (const policy of ['rel','referrerpolicy']) {
   assert.equal(follow().interactionFailure.effectStarted,false);assert.equal(assigned.length,count);
 }
 console.log('PASS: top-document parent/top targets accepted and link-specific referrer policies reject pre-effect');
+
+const updates=[];
+let activeTab={id:7,url:'https://example.org/channel',title:'Channel',active:false};
+browser.tabs.get=async id=>{assert.equal(id,7);return {...activeTab};};
+browser.tabs.update=async(id,changes)=>{assert.equal(id,7);assert.deepEqual(JSON.parse(JSON.stringify(changes)),{active:true});updates.push(changes);activeTab.active=true;return {...activeTab};};
+assert.equal((await command({tabId:7,action:'activate_tab'})).error,'activate_tab_requires_expected_url');
+assert.equal((await command({tabId:7,action:'activate_tab',expectedUrl:'https://example.org/wrong'})).error,'page_url_changed');
+assert.equal(updates.length,0);
+const priorExecutions=executions;
+const activation=await command({tabId:7,action:'activate_tab',expectedUrl:activeTab.url});
+assert.equal(activation.ok,true,JSON.stringify(activation));
+assert.equal(activation.data.active,true);assert.equal(activation.data.tabId,7);
+assert.equal(activation.data.url,activeTab.url);assert.equal(updates.length,1);
+assert.equal(executions,priorExecutions,'activation does not inject or navigate the page');
+console.log('PASS: activation checks explicit tab URL then updates only active and verifies receipt');
+
+const activationArgs={tabId:7,action:'activate_tab',expectedUrl:activeTab.url};
+assert.equal((await command({...activationArgs,expectedUrl:'https://example.org/stale'})).effectPhase,'not_started');
+assert.equal((await command({...activationArgs,tabId:-1})).effectPhase,'not_started');
+assert.equal((await command({tabId:7,action:'activate_tab'})).effectPhase,'not_started');
+const getTab=browser.tabs.get,updateTab=browser.tabs.update;
+browser.tabs.get=async()=>{throw new Error('closed before activation');};
+assert.equal((await command(activationArgs)).effectPhase,'not_started');
+browser.tabs.get=getTab;
+browser.tabs.update=async()=>{throw new Error('activation transport outcome unknown');};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'dispatch failure must not authorize effect replay');
+browser.tabs.update=async(...args)=>{const result=await updateTab(...args);browser.tabs.get=async()=>{throw new Error('closed after activation');};return result;};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'post-activation verification failure is not pre-effect');
+browser.tabs.get=getTab;browser.tabs.update=updateTab;
+console.log('PASS: native dispatch distinguishes activation pre-effect failures from unknown effect outcomes');

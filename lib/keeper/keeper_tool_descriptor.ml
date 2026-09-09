@@ -643,6 +643,7 @@ let browser_interact_output_schema = `Assoc ["type",`String "object";
     "url",`Assoc ["type",`String "string"];"urlBefore",`Assoc ["type",`String "string"];
     "action",`Assoc ["type",`String "string"];
     "destinationUrl",`Assoc ["type",`String "string"];
+    "active",`Assoc ["type",`String "boolean"];
     "navigationSource",`Assoc ["type",`String "object";
       "properties",`Assoc ["url",`Assoc ["type",`String "string"];
         "documentId",`Assoc ["type",`String "string"]];

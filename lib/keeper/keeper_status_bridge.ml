@@ -199,6 +199,21 @@ let attention_fields_json_with_approval_queue
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
+      (* Every branch above reads a record someone wrote: an approval row, a
+         blocker class, an operator pause. A Keeper whose keepalive fiber is
+         gone writes none of them, so the arms above all miss it and the
+         answer used to fall through to [false]. That is how sangsu reported
+         "no attention" for two and a half hours after its turn ended on
+         "Payment required: Insufficient Balance": the provider failure left
+         no blocker class behind, nobody had paused it, and its Discord queue
+         grew from 14 entries to 53 while the surface said it was fine.
+
+         Liveness is the one fact none of the written records carry, and it
+         needs no threshold to read -- [is_running] enumerates every phase. A
+         paused Keeper is answered above, so reaching here not running means
+         nobody chose the silence. *)
+      | None when not (runtime_keepalive_running config meta) ->
+        true, Some "keepalive_stopped", Some "inspect_latest_error"
       | None -> false, None, None
   in
   let approval_queue_state, pending_approval_count =

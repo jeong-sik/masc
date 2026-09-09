@@ -87,6 +87,7 @@ select_sources() {
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
 test/test_keeper_tool_schema_bytes.ml"
 
+
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
   # nothing: PR #34247 rewrote bin/masc_tui_msx.ml, dropped the line that writes
@@ -196,7 +197,7 @@ self_test() {
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
-    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml" \
+    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
   # A module whose name is a namespace attributes nothing.
   check "an umbrella module selects nothing" "" \
@@ -216,7 +217,7 @@ self_test() {
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
-    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml" \
+    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
 
   if [ "${failures}" -eq 0 ]; then
@@ -309,6 +310,7 @@ while IFS= read -r source; do
 done <<EOF
 ${sources}
 EOF
+
 
 echo "ran ${ran}, skipped ${skipped}"
 

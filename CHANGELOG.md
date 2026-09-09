@@ -2,6 +2,25 @@
 
 ## [0.35.0] - 2026-09-08
 
+### Fresh state required
+
+Two contract changes after 0.34.0 do not read state written before them. The
+server does not convert old state; it refuses the file and says so in the boot
+log and in the tool result. Delete or rewrite these files before the new
+binary starts.
+
+- Keeper profiles, `<base>/.masc/config/keepers/*.toml` (#34392): `[keeper]`
+  takes `activation_mode = "manual" | "on_demand" | "autonomous"`. A profile
+  that still carries `autoboot_enabled` or `proactive_enabled` is rejected as
+  `unknown keeper TOML keys`; the message now lists the accepted keys. Rewrite
+  the profile, or recreate the Keeper with `masc_keeper_up`.
+- Goal store, `<base>/.masc/goals.json`, `goal_verifications.json`,
+  `goal-verification-runs.jsonl` and their `.last-good` mirrors (#34459):
+  every Goal row needs `criterion_revision`, every verdict needs `request_id`
+  and `criterion`. One row without them makes the whole file undecodable, and
+  `masc_goal_list` returns the decode error with the file path. Delete the
+  files to start with an empty Goal store.
+
 ### Installation and setup
 
 - Include the corrected macOS dependency bootstrap, Python executable selection, and loader diagnostics in the same source release as the binaries.
@@ -18,7 +37,6 @@
 - Surface scheduled wake outcomes, preserve operator prompt overrides, and repair prompt assembly and duplicate owner wake handling.
 - Improve JSONL recovery and subprocess cancellation/foreground process-group cleanup; prevent host environment expansion into sandbox command arguments.
 - Extend MSX disk image loading and playback presentation.
-
 ## [0.34.0] - 2026-09-08
 
 ### Installation and distribution

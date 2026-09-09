@@ -5014,25 +5014,18 @@ let test_invalid_keeper_config_revision_name_creates_no_artifact () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 (* keeper_up field-only update must resolve TOML-declared sandbox settings.
-   The persisted meta never carries sandbox_profile/network_mode — the meta
-   decoder pins them to the Local defaults — so an update that omitted
-   sandbox_profile used to fall back to that pin, and the fail-closed
-   playground gate rejected every field-only update on docker/microvm
-   keepers (and a TOML "none" network mode would have read back inherit). *)
+   The persisted meta never carries sandbox_profile/network_mode, so an
+   update that omitted sandbox_profile used to fall back to the decoder's
+   defaults instead of the TOML (and a TOML "none" network mode would have
+   read back inherit). *)
 let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "update-toml-profile" in
-  let gate = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND" in
-  let prev_gate = Sys.getenv_opt gate in
   Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv gate (Option.value prev_gate ~default:"0");
-      cleanup_dir base_dir)
+    ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      (* Production posture: the local playground is off. *)
-      Unix.putenv gate "0";
       let config = Masc.Workspace.default_config base_dir in
       let (_ : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")

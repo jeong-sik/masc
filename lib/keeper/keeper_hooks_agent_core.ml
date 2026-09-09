@@ -356,30 +356,24 @@ let make_hooks
            histogram still proves the hook ran. *)
         record_llm_inference_latency_metric ~telemetry:response.telemetry;
         record_response_content_quality_metric ~keeper_name:meta.name response;
-        let fmt_tok_s = Printf.sprintf "%.1f" in
         (* Capture each telemetry projection independently.  Anthropic and
            Gemini populate [request_latency_ms] (patched in AGENT_CORE api.ml) but
            leave [timings = None]; the previous single-match folded those
            three fields together and surfaced [latency_ms=0] whenever tok/s
            were missing, which hid Anthropic/Gemini latency on the log line
            and in downstream dashboards. *)
-        let prompt_tok_s_opt, decode_tok_s_opt =
+        let prompt_tok_s, decode_tok_s, cache_n, prompt_n =
           match response.telemetry with
           | Some { timings = Some t; _ } ->
-              t.prompt_per_second, t.predicted_per_second
-          | None | Some { timings = None; _ } -> None, None
+              t.prompt_per_second, t.predicted_per_second, t.cache_n, t.prompt_n
+          | None | Some { timings = None; _ } -> None, None, None, None
         in
-        let cache_n_opt, prompt_n_opt =
-          match response.telemetry with
-          | Some { timings = Some t; _ } -> t.cache_n, t.prompt_n
-          | Some { timings = None; _ } | None -> None, None
-        in
-        let latency_ms_opt =
+        let latency_ms =
           match response.telemetry with
           | Some t -> t.request_latency_ms
           | None -> None
         in
-        let wall_tok_s_opt =
+        let wall_tok_s =
           wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
             ~telemetry:response.telemetry
         in
@@ -391,42 +385,25 @@ let make_hooks
            compared across them. The window is already on the turn record;
            carrying it here makes the log self-sufficient. An absent window
            is left out of the line; it used to render [0], which reads as a
-           window of zero (25 lines in the two hours to 2026-08-22T02:03Z). *)
-        (* A field the lane does not report is left out rather than rendered
-           as a placeholder. Only llama-server timings carry prompt/decode
-           tok/s and the cache counters, so on every other lane those were
-           four permanent [-] columns per turn (2026-09-09). The thinking
-           counters follow the same rule: [thinking_kind=none] already says
-           there were no blocks, so the counters ride only on a turn that had
-           some, and the redacted count only when it is non-zero. *)
-        let thinking_fields =
-          if thinking.thinking_present then
-            [ Log.Kv.int "thinking_blocks" thinking.thinking_blocks
-            ; Log.Kv.int "thinking_chars" thinking.thinking_chars
-            ; Log.Kv.opt_map "redacted_thinking_blocks" string_of_int
-                (if thinking.redacted_thinking_blocks > 0
-                 then Some thinking.redacted_thinking_blocks
-                 else None)
-            ]
-          else []
-        in
+           window of zero (25 lines in the two hours to 2026-08-22T02:03Z).
+           Which fields the line carries is decided in [turn_log_line], where
+           a test can see it. *)
         Log.Keeper.info ~keeper_name:meta.name "%s"
-          (Log.Kv.render
-             ([ Log.Kv.int "turn" turn
-              ; Log.Kv.int "total_turns" meta.runtime.usage.total_turns
-              ; Log.Kv.str "runtime_lane" model
-              ; Log.Kv.int "tokens" total_tok
-              ; Log.Kv.opt_map "context_window" string_of_int
-                  (context_max_of_telemetry response.telemetry)
-              ; Log.Kv.opt_map "wall_tok_s" fmt_tok_s wall_tok_s_opt
-              ; Log.Kv.opt_map "prompt_tok_s" fmt_tok_s prompt_tok_s_opt
-              ; Log.Kv.opt_map "decode_tok_s" fmt_tok_s decode_tok_s_opt
-              ; Log.Kv.opt_map "cache_n" string_of_int cache_n_opt
-              ; Log.Kv.opt_map "prompt_n" string_of_int prompt_n_opt
-              ; Log.Kv.opt_map "latency_ms" string_of_int latency_ms_opt
-              ; Log.Kv.str "thinking_kind" thinking.thinking_kind
-              ]
-              @ thinking_fields));
+          (turn_log_line
+             ({ turn
+              ; total_turns = meta.runtime.usage.total_turns
+              ; runtime_lane = model
+              ; tokens = total_tok
+              ; context_window = context_max_of_telemetry response.telemetry
+              ; wall_tok_s
+              ; prompt_tok_s
+              ; decode_tok_s
+              ; cache_n
+              ; prompt_n
+              ; latency_ms
+              ; thinking
+              }
+              : turn_log_fields));
         (* Emit per-turn cost event for task attribution.
            cost_usd from AGENT_CORE Pricing.annotate_response_cost (agent-core boundary resolved). *)
         (match trajectory_acc with
@@ -581,22 +558,18 @@ let make_hooks
         (match outcome with
          | Tool_result.Error -> Log.Keeper.error
          | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
-          "keeper:%s tool_call %s"
-          (!meta_ref).name
-          (Log.Kv.render
-             [ Log.Kv.str "tool" tool_name
-               (* Which file this name's definition was read from. A tool that
-                  behaved unexpectedly is one an operator wants to open, and
-                  the record did not say where to look. A built-in ships no
-                  file, so the field is absent, which is itself the answer. *)
-             ; Log.Kv.opt "source" (Keeper_tool_definition_source.resolve tool_name)
-             ; Log.Kv.str "params" ("[" ^ input_keys ^ "]")
-             ; Log.Kv.str "input_shape" ("[" ^ input_shape ^ "]")
-             ; Log.Kv.str "outcome" outcome_s
-             ; Log.Kv.int "out_len" out_len
-             ; Log.Kv.opt "failed_params" failed_params
-             ; Log.Kv.opt "error_preview" error_preview
-             ]);
+          "%s"
+          (tool_call_log_line ~keeper_name:(!meta_ref).name
+             ({ tool = tool_name
+              ; source = Keeper_tool_definition_source.resolve tool_name
+              ; params = input_keys
+              ; input_shape
+              ; outcome = outcome_s
+              ; out_len
+              ; failed_params
+              ; error_preview
+              }
+              : tool_call_log_fields));
         (* Agent Core measures duration per invocation. Do not reconstruct it
            from Keeper-global mutable state: sibling calls may overlap. *)
         let duration_ms = hook_duration_ms in

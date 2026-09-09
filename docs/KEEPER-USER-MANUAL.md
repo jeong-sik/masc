@@ -52,7 +52,7 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 |---|---:|---|
 | `activation_mode` | — | Manual start, on-demand owner, or autonomous periodic execution |
 | `instructions` | 11/11 | The Keeper's whole prompt; rejected if empty |
-| `sandbox_profile` | 11/11 | `docker` runs in a container. `local` (host execution) is fail-closed by default — RFC-0394 |
+| `sandbox_profile` | 11/11 | `docker`, `microvm`, or `remote_ssh`. A Keeper runs in one of them or not at all |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
 | `name` | 5/11 | Display name when it differs from the filename |
@@ -60,10 +60,6 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 
 The first three are what every Keeper on that runtime sets. Treat the rest as
 answers to a question you have actually run into.
-
-A dev/test process that still needs the `local` profile can lift the gate with
-`MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1`; dispatch under the hatch logs a warning
-naming the keeper.
 
 Unknown keys fail closed. The full field contract is
 [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md).

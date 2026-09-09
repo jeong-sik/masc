@@ -3,12 +3,6 @@
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
 
-; Run the actual generator comparison through targeted Test CI.
-(rule
- (alias runtest-tool-parity-goldens)
- (deps ../tool_parity_golden_check.stamp)
- (action (echo "Tool parity goldens matched the generator")))
-
 ; Test Environment Configuration
 
 (test
@@ -5416,3 +5410,9 @@
  (name test_log_kv)
  (modules test_log_kv)
  (libraries alcotest masc_log))
+
+; The keeper turn and tool_call lines, asserted as rendered text.
+(test
+ (name test_keeper_log_lines)
+ (modules test_keeper_log_lines)
+ (libraries alcotest masc.keeper_hooks_agent_core_types masc_log))

@@ -13,8 +13,8 @@ let source = `Assoc ["channel", `String "dashboard"; "thread_id", `String "keepe
 let input = `Assoc ["message", `String "Finish the original PDF task";
   "turn_instructions", `String "Preserve task criteria";
   "attachments", `List [`Assoc ["id", `String "original-reference"; "mime_type", `String "application/pdf"]]]
-let input = Operation.canonical_json input
-  |> Result.map_error Operation.canonical_json_error_to_string |> string_ok
+let input = match Operation.canonical_json input with
+  | Ok input -> input | Error _ -> fail "invalid canonical input fixture"
 let checkpoint bytes =
   let trace_id = Keeper_id.Trace_id.of_string "direct-runtime-trace" |> string_ok in
   match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with

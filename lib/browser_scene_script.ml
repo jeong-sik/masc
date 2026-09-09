@@ -11,7 +11,7 @@ let runtime = {js|function browserScene(args) {
       throw new Error('scene_node_detached');
     return element;
   }
-  if (args.mode !== 'read') throw new Error('unknown_scene_mode');
+  if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
   if (!sameDocument) {
     // getRandomValues also works on ordinary HTTP pages, where randomUUID
     // is unavailable. The document identity carries 128 cryptographic bits.
@@ -21,6 +21,7 @@ let runtime = {js|function browserScene(args) {
       ids:new WeakMap(), nodes:new Map()};
     window[key] = state;
   }
+  if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
   for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) state.nodes.delete(id);

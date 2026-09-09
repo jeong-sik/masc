@@ -104,6 +104,9 @@ let capture request =
         field "mimeType" data, field "data" data with
   | Some (`Int actual), Some (`String url), Some (`String title),
     Some (`String "image/png"), Some (`String image) when actual = tab_id ->
+    let* viewport = match field "viewport" data with
+      | Some json -> Browser_lane.Pointer.viewport_of_json json
+      | None -> Error "screenshot lacks viewport metadata; update the browser connector" in
     let max_bytes = Keeper_vision_tool.max_image_bytes () in
     let* () = if String.length image > ((max_bytes + 2) / 3) * 4
       then Error "screenshot exceeds Vision image size limit" else Ok () in
@@ -116,5 +119,6 @@ let capture request =
       let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
       Ok (`Assoc ["source", `String lane_name; "clientId", client_id_json target; "tabId", `Int tab_id;
         "title", `String title; "url", `String url; "mimeType", `String "image/png";
-        "data", `String image; "elapsed_ms", `Float elapsed_ms])
+        "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;
+        "elapsed_ms", `Float elapsed_ms])
   | _ -> Error "screenshot response does not match the requested tab or PNG contract"

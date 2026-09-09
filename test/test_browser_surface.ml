@@ -59,7 +59,8 @@ let test_capture_identity () =
         | Browser_lane.Page_capture {tab_id=7} ->
           answer (`Assoc ["tabId", `Int !actual_id; "url", `String "https://example.org";
             "title", `String "Fixture"; "mimeType", `String "image/png";
-            "data", `String !payload])
+            "data", `String !payload; "viewport", `Assoc ["documentId",`String "fixture";
+              "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]])
         | _ -> fail "capture used an implicit or different target"));
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
       check bool "explicit capture succeeds" true

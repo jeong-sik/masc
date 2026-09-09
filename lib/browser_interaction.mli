@@ -7,3 +7,5 @@ val perform : request -> (Yojson.Safe.t, string) result
 val script : string
 (** Fixed DOM implementation. WebDriver supplies the parsed action as argument
     zero; the live extension uses the same function with JSON-encoded data. *)
+val pointer_guard_script : string
+(** Validate screenshot identity and geometry before native WebDriver pointer input. *)

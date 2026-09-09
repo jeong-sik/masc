@@ -10,7 +10,7 @@ function browserScene(args) {
       throw new Error('scene_node_detached');
     return element;
   }
-  if (args.mode !== 'read') throw new Error('unknown_scene_mode');
+  if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
   if (!sameDocument) {
     // getRandomValues also works on ordinary HTTP pages, where randomUUID
     // is unavailable. The document identity carries 128 cryptographic bits.
@@ -20,6 +20,7 @@ function browserScene(args) {
       ids:new WeakMap(), nodes:new Map()};
     window[key] = state;
   }
+  if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
   for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) state.nodes.delete(id);
@@ -111,6 +112,7 @@ function browserScene(args) {
     throw new Error('scene_response_exceeds_1_mib');
   return scene;
 }
+
 
 // masc browser lane — background bridge (B backend).
 //
@@ -230,20 +232,43 @@ async function pageCapture(args) {
   const tabId = args?.tabId;
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("tab_id_required");
   const before = await browser.tabs.get(tabId);
+  const observeViewport = async () => {
+    const [value] = await browser.tabs.executeScript(tabId, {
+      code:'(' + browserScene.toString() + ')({mode:"viewport"})'
+    });
+    if (!value) throw new Error('viewport_unavailable');
+    return value;
+  };
+  const viewport = await observeViewport();
   const dataUrl = await browser.tabs.captureTab(tabId, {format: "png"});
   const after = await browser.tabs.get(tabId);
-  if (before.url !== after.url) throw new Error("tab_navigated_during_capture");
+  const afterViewport = await observeViewport();
+  if (before.url !== after.url || Object.keys(viewport).some(key => viewport[key] !== afterViewport[key]))
+    throw new Error("viewport_changed_during_capture");
   const prefix = "data:image/png;base64,";
   if (!dataUrl.startsWith(prefix)) throw new Error("capture_is_not_png");
   return {tabId, title: after.title, url: after.url,
-    mimeType: "image/png", data: dataUrl.slice(prefix.length)};
+    mimeType: "image/png", data: dataUrl.slice(prefix.length), viewport};
 }
 
 function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
-  if (args.action === "scroll") {
+  if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
+  if (args.action === "click_at") {
+    const current = browserScene({mode:'viewport'}), expected = args.viewport;
+    if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
+      throw new Error('observed_viewport_changed');
+    const point = args.point;
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+        || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
+      throw new Error('invalid_viewport_point');
+    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+    if (element.matches(':disabled')) throw new Error('element_disabled');
+    element.click();
+  } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
@@ -293,9 +318,10 @@ function interactInPage(args) {
     title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
 }
 
+
 async function pageInteract(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'fill', 'scroll'].includes(args.action)) throw new Error("unknown_interaction_action");
+  if (!['click', 'fill', 'scroll', 'click_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,

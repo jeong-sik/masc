@@ -618,6 +618,35 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
                   (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
+let test_repo_deepseek_thinking_request () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let runtimes = match Runtime.load_list ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error detail -> fail detail in
+  let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
+      String.equal runtime.id "deepseek.deepseek-v4-pro") runtimes with
+    | Some runtime -> runtime
+    | None -> fail "direct DeepSeek seed runtime is missing" in
+  check bool "thinking remains enabled by model policy" true runtime.model.thinking_support;
+  let provider_config = agent_core_provider_config runtime in
+  List.iter (fun (enabled, effort, expected) ->
+    let config = { provider_config with
+      Llm_provider.Provider_config.enable_thinking = Some enabled;
+      reasoning_effort = effort } in
+    let request = Llm_provider.Backend_openai.build_request_assoc
+      ~config ~messages:[Llm_provider.Types.user_msg "Explain the evidence."] () in
+    let open Yojson.Safe.Util in
+    check string "actual Chat Completions thinking toggle" expected
+      (request |> member "thinking" |> member "type" |> to_string);
+    let expected_effort = Option.map Llm_provider.Reasoning_effort.to_string effort in
+    check (option string) "effort stays separate from the toggle" expected_effort
+      (request |> member "reasoning_effort" |> to_string_option))
+    [true, None, "enabled";
+     true, Some Llm_provider.Reasoning_effort.High, "enabled";
+     false, None, "disabled"]
+;;
+
 let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
@@ -4947,6 +4976,8 @@ let () =
           test_case
             "repo runtime bindings resolve through AGENT_CORE provider configs"
             `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
+          test_case "repo DeepSeek seed encodes thinking without an effort override"
+            `Quick test_repo_deepseek_thinking_request;
           test_case
             "repo runtime.toml all seeded bindings are keeper-dispatchable"
             `Quick test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable;

@@ -463,7 +463,96 @@ let earlier_match left right =
     if Re.Group.start code 0 <= Re.Group.start image 0 then left else right
   | Some _, Some _ -> left
 
+(* Official-client runtimes (codex spark and friends) carry whole turns in
+   envelope messages, so the content field arrives as raw schema JSON.
+   Rendering it verbatim drowned the chat in one giant JSON line; the
+   envelope's content_blocks are what the reader wants. A schema we do not
+   know folds to a marker instead of spilling, so the next runtime switch
+   shows a readable placeholder rather than another dump. *)
+let official_client_message_blocks raw =
+  let trimmed = String.trim raw in
+  if not (String.starts_with ~prefix:"{\"schema\":" trimmed) then None
+  else
+    match Yojson.Safe.from_string trimmed with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception _ -> None
+    | `Assoc fields -> (
+      match List.assoc_opt "schema" fields, List.assoc_opt "message" fields with
+      | Some (`String schema), Some (`Assoc message) -> (
+        match schema with
+        | "masc.official-client-context-message.v2" -> (
+          match List.assoc_opt "content_blocks" message with
+          | Some (`List blocks) ->
+            let projected =
+              List.filter_map
+                (fun json ->
+                  match json with
+                  | `Assoc block -> (
+                    match List.assoc_opt "type" block with
+                    | Some (`String "text") -> (
+                      match List.assoc_opt "text" block with
+                      | Some (`String text) when text <> "" ->
+                        Some (Text { html = escape_html text })
+                      | _ -> None)
+                    | Some (`String "thinking") -> (
+                      match List.assoc_opt "thinking" block with
+                      | Some (`String content) when content <> "" ->
+                        Some (Thinking { content; redacted = false })
+                      | _ -> None)
+                    | Some (`String "tool_use") -> (
+                      match List.assoc_opt "name" block with
+                      | Some (`String name) ->
+                        Some
+                          (Text
+                             { html =
+                                 escape_html (Printf.sprintf "[%s 도구 호출]" name)
+                             })
+                      | _ ->
+                        Some (Text { html = escape_html "[이름 없는 도구 호출]" }))
+                    | Some (`String "tool_result") ->
+                      Some (Text { html = escape_html "[도구 결과]" })
+                    | Some (`String "redacted_thinking") ->
+                      Some (Thinking { content = ""; redacted = true })
+                    | Some (`String kind) ->
+                      Some
+                        (Text
+                           { html =
+                               escape_html
+                                 (Printf.sprintf "[지원 밖 메시지 블록: %s]" kind)
+                           })
+                    | _ -> None)
+                  | _ -> None)
+                blocks
+            in
+            (* An empty projection must not hand the message back to the
+               plain-text path: broadcast omits empty blocks and the
+               dashboard would re-parse the raw envelope JSON. *)
+            (match projected with
+             | [] -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ]
+             (* sound-partial: allow — no guess: hands back the already-built
+                projection, not a default for unknown input. *)
+             | _ -> Some projected)
+          (* sound-partial: allow — fixed placeholder marker, not a guessed
+             default, when content_blocks itself is absent. *)
+          | _ -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ])
+        | other ->
+          Some
+            [ Text
+                { html =
+                    escape_html (Printf.sprintf "[외부 런타임 메시지 형식: %s]" other)
+                } ])
+      | Some (`String _), _ | None, _ ->
+        (* A known-schema envelope that does not match the codec's shape —
+           fold like an unknown schema rather than dumping it raw. *)
+        Some [ Text { html = escape_html "[형식이 다른 official-client 메시지]" } ]
+      | _ -> None)
+    | _ -> None
+;;
+
 let parse_text_to_blocks text : chat_block list =
+  match official_client_message_blocks text with
+  | Some blocks -> blocks
+  | None ->
   let rec scan acc last_index =
     let next_image =
       Option.map (fun group -> Image_match group) (Re.exec_opt ~pos:last_index md_image_re text)

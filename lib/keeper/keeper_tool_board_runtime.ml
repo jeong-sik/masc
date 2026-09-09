@@ -29,11 +29,13 @@ let snapshot_execution_of_response result response =
   match response, result.Keeper_tool_execution.disposition with
   | Snapshot_protocol.Unchanged _,
     (Tool_result.Completed _ | Tool_result.Deferred _) ->
-    Keeper_tool_execution.deferred_data data
+    Keeper_tool_execution.deferred_data
+      ~effect_disposition:Tool_result.Proven_pre_effect data
   | Snapshot_protocol.Snapshot _, Tool_result.Completed _ ->
     Keeper_tool_execution.success_data data
   | Snapshot_protocol.Snapshot _, Tool_result.Deferred _ ->
-    Keeper_tool_execution.deferred_data data
+    Keeper_tool_execution.deferred_data
+      ~effect_disposition:Tool_result.Proven_pre_effect data
   | (Snapshot_protocol.Snapshot _ | Snapshot_protocol.Unchanged _),
     Tool_result.Failed _ ->
     result

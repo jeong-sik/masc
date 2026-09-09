@@ -644,7 +644,8 @@ let handle_keeper_task_tool_with_outcome
            Keeper_tool_execution.success_data data
          | Workspace_broadcast.Pending
          | Workspace_broadcast.Deferred _ ->
-           Keeper_tool_execution.deferred_data data
+           Keeper_tool_execution.deferred_data
+             ~effect_disposition:Tool_result.Proven_post_effect data
          | Workspace_broadcast.Rejected _ ->
            Keeper_tool_execution.failure_data
              ~class_:Tool_result.Workflow_rejection

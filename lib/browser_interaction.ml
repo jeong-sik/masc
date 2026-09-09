@@ -105,13 +105,26 @@ let script = {js|function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
+  // The same predicate the scene admits a control by (browser_scene_script.ml
+  // `rendered`/`visible`). display and opacity take effect through ancestors,
+  // so a page that withdrew the target by setting opacity 0 on a wrapper
+  // leaves an element that still reports client rects and its own computed
+  // display. Checking only the element acted on a link the read surface had
+  // already stopped showing.
+  const observable = element => {
+    if (!element.getClientRects().length) return false;
+    if (getComputedStyle(element).visibility !== 'visible') return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  };
   if (args.action === "follow_link") {
     const element = browserScene({...args,mode:'resolve_link'});
     if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
       throw new Error('follow_link_requires_anchor');
-    const style = getComputedStyle(element);
-    if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
-      throw new Error('element_not_visible');
+    if (!observable(element)) throw new Error('element_not_visible');
     const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
     const normalizedTarget = target.toLowerCase();
     const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
@@ -230,9 +243,7 @@ let script = {js|function interactInPage(args) {
         throw new Error(elements.length === 0 ? "element_not_found" : "selector_is_ambiguous");
       element = elements[0];
     }
-    const style = getComputedStyle(element);
-    if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none")
-      throw new Error("element_not_visible");
+    if (!observable(element)) throw new Error("element_not_visible");
     if (element.matches(":disabled")) throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");

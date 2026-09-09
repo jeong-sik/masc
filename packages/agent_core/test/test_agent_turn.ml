@@ -2,6 +2,15 @@
 
 open Agent_core
 
+(* PR #33593 retuned deepseek prices without touching this suite; the
+   hardcoded 1.305 from af9a7190 was a copy of the pre-retune catalog.
+   Read the catalog instead, the way test_provider declared_pricing does. *)
+let declared_deepseek_price_sum () =
+  Model_catalog_test_support.install_embedded_model_catalog ~suite:"agent_turn";
+  match Llm_provider.Pricing.pricing_for_model_opt ~provider_id:"deepseek" "deepseek-v4-pro" with
+  | Some pricing -> pricing.input_per_million +. pricing.output_per_million
+  | None -> Alcotest.failf "expected catalog pricing for deepseek/deepseek-v4-pro"
+
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -397,7 +406,7 @@ let test_accumulate_usage_uses_typed_provider_and_response_model () =
   in
   Alcotest.(check (float 0.0001))
     "exact provider and returned model price"
-    1.305
+    (declared_deepseek_price_sum ())
     result.estimated_cost_usd;
   Alcotest.(check (option reject)) "no pricing gap" None result.pricing_gap
 ;;

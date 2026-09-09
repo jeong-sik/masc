@@ -5248,7 +5248,7 @@ let decode_system_log_snapshot json =
 
 let goal_store_unavailable_detail json =
   match member "ok" json, member "error_code" json, member "error" json with
-  | `Bool false, `String "goal_store_unavailable", `String detail -> Some detail
+  | `Bool false, `String ("goal_store_unavailable" | "goal_task_links_unavailable"), `String detail -> Some detail
   | _ -> None
 
 let decode_planning_snapshot json =

@@ -24,9 +24,10 @@ import type {
 } from '../types'
 
 export function goalStoreUnavailableDetail(raw: unknown): string | null {
-  if (!isRecord(raw) || raw.ok !== false || raw.error_code !== 'goal_store_unavailable') return null
+  if (!isRecord(raw) || raw.ok !== false) return null
+  if (raw.error_code !== 'goal_store_unavailable' && raw.error_code !== 'goal_task_links_unavailable') return null
   return typeof raw.error === 'string' && raw.error.length > 0
-    ? raw.error : 'Goal store unavailable'
+    ? raw.error : raw.error_code === 'goal_task_links_unavailable' ? 'Goal–Task link source unavailable' : 'Goal store unavailable'
 }
 
 export class DashboardGoalsApprovalQueueUnavailableError extends Error {

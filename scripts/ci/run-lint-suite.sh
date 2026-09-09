@@ -72,8 +72,15 @@ blocking_lints() {
   # The selector that decides which suites a pull request runs. Its fixtures
   # are changed-file lists, so they answer in a second and do not need the
   # GitHub API; the mapping they pin is what #34247 slipped past.
-  run_self_test_when_changed "Edited-tests selector self-test" \
-    scripts/ci/run-edited-tests.sh \
+  # Not run_self_test_when_changed, unlike its neighbours. The rationale there
+  # is that a checker's fixtures are synthetic, so only the checker changing
+  # can change the answer. This one's fixtures are not: they name real files
+  # under test/, and the mapping resolves them with ls at run time. Adding a
+  # suite changes the correct answer without touching this script, which is
+  # how both MSX fixtures came to name two suites while test_tui_msx_tick.ml
+  # existed -- red on main, and only seen when #34637 edited the script for
+  # another reason. It costs about a second.
+  run_lint "Edited-tests selector self-test" \
     bash scripts/ci/run-edited-tests.sh --self-test
   run_self_test_when_changed "Prompt source words self-test" \
     scripts/lint/prompt-source-words-agree.sh \

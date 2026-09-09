@@ -27,6 +27,7 @@
     "lib/runtime/runtime_adapter.ml": 2,
     "lib/runtime/runtime_claude_code.ml": 1,
     "lib/runtime/runtime_codex_app_server.ml": 2,
+    "lib/runtime/runtime_verification_codex_home.ml": 2,
     "lib/runtime_model/provider_runtime_projection.ml": 1,
     "lib/runtime_model/runtime_model_resolve.ml": 1,
     "lib/runtime_model/runtime_model_string.ml": 1,

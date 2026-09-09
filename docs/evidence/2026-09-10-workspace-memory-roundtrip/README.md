@@ -34,3 +34,20 @@ The repaired mismatch probe (`source-mismatch-repaired.json`) again refused the
 older isolated binary before any POST and retained both effective paths. Python
 syntax and boolean-versus-number comparison checks passed. Successful runtime
 roundtrip and restart/reuse evidence remain pending.
+
+## Successful isolated HTTP roundtrip
+
+The CI runtime-probe artifact 10122236589 was downloaded from run 34397389273.
+All three executable hashes matched its manifest; the server's build-commit and
+HTTP health both identified `c08357ea1f78f1a04564cc96dbd2f38eb8c4e857`.
+The manifest explicitly says release_validated=false; this is an isolated probe,
+not release or deployment validation.
+
+On a newly initialized isolated base at port 18936, the saved public Qwen fixture
+passed independent readback, repeated-publication ID equality and exactly-one
+matching inventory row. `success/` retains every checked destination JSON and
+the receipt, including effective runtime paths. No private Keeper corpus or
+authentication token is included.
+
+Persistence after restart, actual Keeper retrieval and semantic verification
+remain unmeasured. The production server was not replaced.

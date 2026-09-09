@@ -1,12 +1,5 @@
-(** Byte-identity pins for the keeper runtime tool declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
-
-    The expected values were read off [Keeper_runtime_schemas_toml.schemas]
-    before any file moved, so this suite passing *before* the TOML replaces a
-    literal is what proves the file says the same thing. Written against the
-    published list rather than a loader module, so it holds across the whole
-    migration.
+(** The publication order of [Keeper_runtime_schemas_toml.schemas], and the
+    keeper_artifact_read bounds and keeper_analyze_image enum against their owners.
 
     Two of the four build values from an owner module rather than literals:
     keeper_artifact_read takes its max_bytes bounds and default from
@@ -20,20 +13,13 @@
     readers fold them together. Every tool that emitted one was cleaned in the
     same campaign, and this pin carries the cleaned value.
 
-    Compared as parsed JSON with keys sorted, per RFC §4. *)
+    The descriptions and schemas this suite also pinned were literals read off
+    the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself. Those
+    cases are gone; what stays reads the published value. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
 
 (* name, description, input_schema (keys sorted), in the order
    Keeper_runtime_schemas_toml.schemas publishes. The three provider Files
@@ -67,24 +53,6 @@ let find name =
   with
   | Some schema -> schema
   | None -> failwith (name ^ " is absent from Keeper_runtime_schemas_toml.schemas")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
 ;;
 
 (* The order is what a model reads the tool list in, so a reordering is a
@@ -153,13 +121,8 @@ let test_analyze_image_enum_matches_its_owner () =
 let () =
   run
     "keeper_runtime_schemas_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "published order" `Quick test_the_published_order_is_unchanged
         ] )
     ; ( "owner_derivation"
       , [ test_case

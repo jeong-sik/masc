@@ -1,12 +1,5 @@
-(** Byte-identity pins for the taskboard tool toml parity declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
-
-    The expected values were read off [Tool_shard_types.taskboard_tools] before any file moved, so this
-    suite passing *before* the TOML replaces a literal is what proves the file
-    says the same thing. Written against the published list rather than a loader
-    module, so it holds across the whole migration: what a Keeper receives must
-    not move whether a declaration lives in OCaml or TOML.
+(** The publication order of [Tool_shard_types.taskboard_tools], and the
+    keeper_tasks_list status enum against [Masc_domain.valid_task_status_strings].
 
     keeper_tasks_list builds its status enum from
     [Masc_domain.valid_task_status_strings] rather than a literal. A TOML
@@ -14,22 +7,13 @@
     pinning the file against its owner, the way
     [test_operator_surface_toml_parity] pins the masc_config category enum.
 
-    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
-    not part of a JSON object's meaning, and TOML cannot place a sub-table
-    before its parent's scalar keys. *)
+    The descriptions and schemas this suite also pinned were literals read off
+    the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself. Those
+    cases are gone; what stays reads the published value. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
 
 (* name, description, input_schema (keys sorted) *)
 let expected =
@@ -58,24 +42,6 @@ let find name =
   with
   | Some schema -> schema
   | None -> failwith (name ^ " is absent from Tool_shard_types.taskboard_tools")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
 ;;
 
 (* The order is what a model reads the tool list in, so a reordering is a
@@ -136,13 +102,8 @@ let test_status_enum_still_names_every_task_status () =
 let () =
   run
     "taskboard_tool_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "published order" `Quick test_the_published_order_is_unchanged
         ] )
     ; ( "derivation"
       , [ test_case

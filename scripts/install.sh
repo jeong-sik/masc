@@ -1074,6 +1074,7 @@ require mktemp
 RUNTIME_STAGE=""
 RUNTIME_ARCHIVE=""
 RUNTIME_ARGS=()
+DRY_RUN_WITHOUT_PYTHON=0
 if [ "$(uname -s)" = Darwin ]; then
   case "$(uname -m)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
   os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
@@ -1082,7 +1083,29 @@ if [ "$(uname -s)" = Darwin ]; then
   [ "$major" -ge "$minimum" ] || die "macOS $os_version is below the released binary minimum macOS $minimum.0"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would verify and install bundled macOS libraries and Python; no Homebrew or Command Line Tools required"
-    exit 0
+    # Prefer the installed private interpreter, then a usable non-system
+    # interpreter. Never probe Apple's python3/CLT shim.
+    dry_python=""
+    installed_target=$(readlink "$PREFIX/masc" 2>/dev/null || true)
+    if [ -n "$installed_target" ]; then
+      case "$installed_target" in /*) ;; *) installed_target="$PREFIX/$installed_target" ;; esac
+      candidate="$(dirname "$installed_target")/python/bin/python3"
+      if [ -x "$candidate" ] && installer_python_ready "$candidate" >/dev/null 2>&1; then
+        dry_python="$candidate"
+      fi
+    fi
+    if [ -z "$dry_python" ]; then
+      candidate=$(command -v python3 || true)
+      case "$candidate" in
+        ''|/usr/bin/python3|/Library/Developer/*|/Applications/Xcode.app/*) ;;
+        *) if installer_python_ready "$candidate" >/dev/null 2>&1; then dry_python="$candidate"; fi ;;
+      esac
+    fi
+    if [ -n "$dry_python" ]; then
+      PATH="$(dirname "$dry_python"):$PATH"; export PATH; hash -r
+    else
+      DRY_RUN_WITHOUT_PYTHON=1
+    fi
   fi
 fi
 
@@ -1224,7 +1247,7 @@ fetch_release_checksums() {
 
 # Bootstrap only release-checksummed regular files into a fresh private tree.
 # Even --allow-unverified never authorizes executing an unchecked interpreter.
-if [ "$(uname -s)" = Darwin ]; then
+if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
   require tar
   fetch_release_checksums
   [ "$CHECKSUMS_AVAILABLE" -eq 1 ] || die "bundled Python requires release checksums"
@@ -1254,9 +1277,16 @@ if [ "$(uname -s)" = Darwin ]; then
   installer_python_ready python3 || die "bundled Python cannot start"
   RUNTIME_ARGS=(--runtime-archive "$RUNTIME_ARCHIVE")
 fi
+if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
+  case "$PREFIX" in '~') PREFIX="$HOME" ;; '~/'*) PREFIX="$HOME/${PREFIX#\~/}" ;; esac
+  case "$BASE_PATH" in '~') BASE_PATH="$HOME" ;; '~/'*) BASE_PATH="$HOME/${BASE_PATH#\~/}" ;; esac
+  case "$PREFIX" in /*) ;; *) PREFIX="$PWD/$PREFIX" ;; esac
+  case "$BASE_PATH" in /*) ;; *) BASE_PATH="$PWD/$BASE_PATH" ;; esac
+else
 require python3
 PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
 BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+fi
 log "workspace: $BASE_PATH"
 log "configuration and data: $BASE_PATH/.masc"
 
@@ -1537,7 +1567,15 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 
 # --- 4b. first-run wizard ------------------------------------------------------
-maybe_run_wizard "$BASE_PATH"
+if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
+  if [ -n "$WIZARD_PROVIDER" ]; then
+    log "[dry-run] requested provider: $WIZARD_PROVIDER; catalog validation and runtime selection require the planned bundled Python and installed binary"
+  elif [ "$WIZARD" != 0 ]; then
+    log "[dry-run] provider wizard requires the planned bundled Python and installed binary"
+  fi
+else
+  maybe_run_wizard "$BASE_PATH"
+fi
 
 # --- 4c. keeper team preset ----------------------------------------------------
 # Seeds presets/<preset>/keepers into the config root (verified via

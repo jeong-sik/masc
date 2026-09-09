@@ -274,7 +274,12 @@ let test_v2_payload_contract () =
         List.filter (fun (name, _) -> not (List.mem name ["schema"; "companions"; "runtime"])) fields)
     | json -> json) (fun _ _ binary _ ->
       check bool "new binary rejects old schema" true (match inspect binary with
-        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false))
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false));
+  List.iter (fun binary_asset ->
+    with_fixture ~change_receipt:(replace_field "binary_asset" (`String binary_asset))
+      (fun _ _ binary _ -> check bool "macOS requires bundled runtime" true (match inspect binary with
+        | Installed.Unavailable Installed.Invalid_receipt -> true | _ -> false)))
+    ["masc-macos-arm64"; "masc-macos-x64"]
 let test_invalid_v2_payload_metadata () =
   let invalid name change_receipt = with_payload_fixture ~change_receipt (fun _ _ binary _ ->
     check bool name true (match inspect binary with
@@ -293,6 +298,10 @@ let test_invalid_v2_payload_metadata () =
      "runtime path outside payload", map_runtime_files (List.map (replace_field "path" (`String "assets/index.html")));
      "runtime bad digest", map_runtime_files (List.map (replace_field "sha256" (`String "wrong")));
      "runtime negative size", map_runtime_files (List.map (replace_field "size" (`Int (-1))));
+     "runtime interpreter must be executable", map_runtime_files (List.map (function
+       | `Assoc fields as json when List.assoc_opt "path" fields = Some (`String "python/bin/python3") ->
+         replace_field "mode" (`Int 0o644) json
+       | json -> json));
      "runtime float mode", map_runtime_files (List.map (replace_field "mode" (`Float 493.)));
      "runtime unsafe mode", map_runtime_files (List.map (replace_field "mode" (`Int 0o777)))]
 let test_v2_payload_corruption () =

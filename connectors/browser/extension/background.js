@@ -1,13 +1,26 @@
 function browserScene(args) {
-  const key = Symbol.for('masc.browser.scene.v1');
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    if (typeof raw !== 'string' || (!element.hasAttribute('href')
+        && !element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href'))) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v3');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
-  if (args.mode === 'resolve') {
+  if (args.mode === 'resolve' || args.mode === 'resolve_link') {
     if (!sameDocument || args.documentId !== state.id) throw new Error('scene_document_changed');
     const ref = state.nodes.get(args.nodeId);
     const element = ref && ref.deref();
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
+    if (args.mode === 'resolve_link') {
+      if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+    }
     return element;
   }
   if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
@@ -17,16 +30,25 @@ function browserScene(args) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2,'0')).join('');
     state = {document, root:document.documentElement, id, next:0,
-      ids:new WeakMap(), nodes:new Map()};
+      ids:new WeakMap(), nodes:new Map(), links:new Map()};
     window[key] = state;
   }
   if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
-  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) state.nodes.delete(id);
+  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
+    state.nodes.delete(id); state.links.delete(id);
+  }
   const nodeId = element => {
     let id = state.ids.get(element);
-    if (!id) { id = 'n' + (++state.next); state.ids.set(element,id); }
+    const href = linkHref(element);
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
+    if (!id || (href !== null && state.links.get(id) !== href)) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); }
+      id = 'n' + (++state.next); state.ids.set(element,id);
+      if (href !== null) state.links.set(id,href);
+    }
     state.nodes.set(id,new WeakRef(element));
     return id;
   };
@@ -75,6 +97,22 @@ function browserScene(args) {
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
   };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -122,13 +160,14 @@ function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=node.matches('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || tag;
+      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
       describe('control',node,label,boxes(node.getClientRects(),node),{
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;
@@ -136,6 +175,8 @@ function browserScene(args) {
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
       describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
         boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
       continue;
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
@@ -298,9 +339,39 @@ async function pageCapture(args) {
 }
 
 function interactInPage(args) {
+  let effectStarted = false;
+  try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
+  if (args.action === "follow_link") {
+    const element = browserScene({...args,mode:'resolve_link'});
+    if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
+      throw new Error('follow_link_requires_anchor');
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
+      throw new Error('element_not_visible');
+    const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
+    const normalizedTarget = target.toLowerCase();
+    const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
+      || (window === window.top && (normalizedTarget === '_top' || normalizedTarget === '_parent'));
+    if (!sameTab) throw new Error('follow_link_requires_same_tab');
+    const rel = (element.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.includes('noreferrer') || element.hasAttribute('referrerpolicy'))
+      throw new Error('follow_link_referrer_policy_unsupported');
+    if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
+    const rawHref = typeof element.href === 'string' ? element.href : element.href.baseVal;
+    const destination = new URL(rawHref, element.baseURI || document.baseURI || location.href);
+    if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
+    const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      navigationSource:{url:before,documentId:args.documentId},
+      title:document.title,scrollX:scrollX,scrollY:scrollY};
+    // Follow the observed href directly: page click handlers cannot redirect
+    // this primitive into window.open or an unrelated application action.
+    effectStarted = true;
+    location.assign(destination.href);
+    return result;
+  }
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
@@ -315,6 +386,7 @@ function interactInPage(args) {
     if (args.action === 'click_at') {
       if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
       if (element.matches(':disabled')) throw new Error('element_disabled');
+    effectStarted = true;
       element.click();
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
@@ -374,11 +446,13 @@ function interactInPage(args) {
         }
         hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
       };
+    effectStarted = true;
       scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
     }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
+    effectStarted = true;
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
   } else if (args.action === "click" || args.action === "fill") {
     let element;
@@ -401,6 +475,7 @@ function interactInPage(args) {
     if (element.matches(":disabled")) throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
+    effectStarted = true;
       element.click();
     } else {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
@@ -412,6 +487,7 @@ function interactInPage(args) {
       const prototype = input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
       const previousValue = element.value;
+    effectStarted = true;
       setter.call(element, args.text);
       if (element.value !== args.text) {
         setter.call(element, previousValue);
@@ -424,18 +500,36 @@ function interactInPage(args) {
   } else throw new Error("unknown_interaction_action");
   return {action: args.action, urlBefore: before, url: location.href,
     title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+  } catch (error) {
+    return {interactionFailure:{message:String(error?.message ?? error),effectStarted}};
+  }
 }
 
 
 async function pageInteract(args) {
-  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  // Only this read-only preflight can establish that injection never began.
+  // A later executeScript rejection can lose a result after a page effect.
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+    const tab = await browser.tabs.get(args.tabId);
+    if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
+  } catch (cause) {
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = false;
+    throw error;
+  }
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",
     code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
   });
   if (!result) throw new Error("page_unavailable");
+  if (result.interactionFailure) {
+    const error = new Error(result.interactionFailure.message);
+    error.effectStarted = result.interactionFailure.effectStarted;
+    throw error;
+  }
   return {tabId: args.tabId, ...result};
 }
 
@@ -476,6 +570,8 @@ async function onHostMessage(msg, connection = port) {
     }
   } catch (e) {
     reply.error = String(e?.message ?? e);
+    if (msg?.verb === 'page.interact' && e?.effectStarted === false)
+      reply.effectPhase = 'not_started';
   }
   try {
     // Match the native host's bounded incoming frames, including JSON/UTF-8.

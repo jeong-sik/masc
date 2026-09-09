@@ -39,6 +39,12 @@ let parse = function
       let* value = required key in
       parser value in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String "follow_link") ->
+        let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
+        let* target = node_target () in
+        (match target with Some target -> Ok (Browser_lane.Follow_link target)
+         | None -> Error "follow_link requires an observed documentId/nodeId")
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* target = node_target () in
@@ -74,7 +80,7 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be click, fill, scroll, click_at, scroll_at or drag" in
+      | _ -> Error "action must be click, follow_link, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -88,9 +94,39 @@ let perform request =
   |> Browser_surface.decode_answer
 
 let script = {js|function interactInPage(args) {
+  let effectStarted = false;
+  try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
+  if (args.action === "follow_link") {
+    const element = browserScene({...args,mode:'resolve_link'});
+    if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
+      throw new Error('follow_link_requires_anchor');
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
+      throw new Error('element_not_visible');
+    const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
+    const normalizedTarget = target.toLowerCase();
+    const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
+      || (window === window.top && (normalizedTarget === '_top' || normalizedTarget === '_parent'));
+    if (!sameTab) throw new Error('follow_link_requires_same_tab');
+    const rel = (element.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.includes('noreferrer') || element.hasAttribute('referrerpolicy'))
+      throw new Error('follow_link_referrer_policy_unsupported');
+    if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
+    const rawHref = typeof element.href === 'string' ? element.href : element.href.baseVal;
+    const destination = new URL(rawHref, element.baseURI || document.baseURI || location.href);
+    if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
+    const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      navigationSource:{url:before,documentId:args.documentId},
+      title:document.title,scrollX:scrollX,scrollY:scrollY};
+    // Follow the observed href directly: page click handlers cannot redirect
+    // this primitive into window.open or an unrelated application action.
+    effectStarted = true;
+    location.assign(destination.href);
+    return result;
+  }
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
@@ -105,6 +141,7 @@ let script = {js|function interactInPage(args) {
     if (args.action === 'click_at') {
       if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
       if (element.matches(':disabled')) throw new Error('element_disabled');
+    effectStarted = true;
       element.click();
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
@@ -164,11 +201,13 @@ let script = {js|function interactInPage(args) {
         }
         hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
       };
+    effectStarted = true;
       scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
     }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
+    effectStarted = true;
     window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
   } else if (args.action === "click" || args.action === "fill") {
     let element;
@@ -191,6 +230,7 @@ let script = {js|function interactInPage(args) {
     if (element.matches(":disabled")) throw new Error("element_disabled");
     if (args.action === "click") {
       if (typeof element.click !== "function") throw new Error("element_not_clickable");
+    effectStarted = true;
       element.click();
     } else {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
@@ -202,6 +242,7 @@ let script = {js|function interactInPage(args) {
       const prototype = input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
       const previousValue = element.value;
+    effectStarted = true;
       setter.call(element, args.text);
       if (element.value !== args.text) {
         setter.call(element, previousValue);
@@ -214,6 +255,9 @@ let script = {js|function interactInPage(args) {
   } else throw new Error("unknown_interaction_action");
   return {action: args.action, urlBefore: before, url: location.href,
     title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+  } catch (error) {
+    return {interactionFailure:{message:String(error?.message ?? error),effectStarted}};
+  }
 }
 
 return interactInPage(arguments[0]);

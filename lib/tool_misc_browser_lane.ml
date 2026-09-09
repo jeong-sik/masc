@@ -133,7 +133,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
 
 let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
-    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope"])) fields
+    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope";"expectedUrl";"navigationSource"])) fields
     | _ -> false in
   if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
   else
@@ -146,7 +146,10 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     | Ok frame_path ->
     let mode = get_string args "mode" "text" in
     let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
-    if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+    let destination_guard_present = match args with `Assoc fields -> (List.mem_assoc "expectedUrl" fields || List.mem_assoc "navigationSource" fields) | _ -> false in
+    if destination_guard_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+      make_workflow_err ~tool_name ~start_time "expectedUrl supports top-document scene or regions only"
+    else if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
       make_workflow_err ~tool_name ~start_time "scope supports top-document scene or regions only"
     else if frame_path <> [] || mode = "frames" || mode = "dialog" then
       if lane <> "automation" then make_workflow_err ~tool_name ~start_time "frame and dialog reads require automation"
@@ -174,9 +177,21 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
               | `Assoc fields -> (match List.assoc_opt "scope" fields with
                   | None -> Ok None | Some json -> Result.map Option.some (Browser_scene.scope_of_json json))
               | _ -> Ok None in
-            let result = Result.bind scope (fun scope -> Browser_scene.read
+            let expected_url = match args with
+              | `Assoc fields -> (match List.assoc_opt "expectedUrl" fields with
+                  | None -> Ok None
+                  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+                  | Some _ -> Error "expectedUrl must be a nonempty string")
+              | _ -> Error "browser arguments must be an object" in
+            let navigation_source = match args with
+              | `Assoc fields -> (match List.assoc_opt "navigationSource" fields with
+                  | None -> Ok None
+                  | Some value -> Result.map Option.some (Browser_scene.navigation_source_of_json value))
+              | _ -> Error "browser arguments must be an object" in
+            let result = Result.bind navigation_source (fun navigation_source -> Result.bind expected_url (fun expected_url -> Result.bind scope (fun scope -> Browser_scene.read
+              ?navigation_source ?expected_url
               ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
-              ?scope {request with tab_id=Some tab_id} ~max_chars) in
+              ?scope {request with tab_id=Some tab_id} ~max_chars))) in
             match result with
             | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
             | Error detail -> make_workflow_err ~tool_name ~start_time detail)
@@ -238,16 +253,25 @@ let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
 ;;
 let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_name ~start_time args)
 
-let handle_interact ~tool_name ~start_time args : Tool_result.result =
+let handle_interact_with_phase ~tool_name ~start_time args =
+  let pre_error error = make_workflow_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect in
   match Browser_interaction.parse args with
-  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Error error -> pre_error error
   | Ok request ->
     let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
     (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with
-     | Error error -> make_workflow_err ~tool_name ~start_time error
-     | Ok target -> answer_to_result ~tool_name ~start_time
-       (Browser_lane.issue_for ~target
+     | Error error -> pre_error error
+     | Ok target ->
+       let answer = Browser_lane.issue_for ~target
          ~verb:(Browser_lane.Page_interact {tab_id=request.tab_id;
            expected_url=request.expected_url; action=request.action})
-         ~timeout_sec:default_timeout_sec |> add_client target))
+         ~timeout_sec:default_timeout_sec in
+       let phase = match answer with
+         | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent -> Tool_result.Proven_pre_effect
+         | Browser_lane.Answered (`Assoc fields) when
+             List.assoc_opt "ok" fields = Some (`Bool false)
+             && List.assoc_opt "effectPhase" fields = Some (`String "not_started") -> Tool_result.Proven_pre_effect
+         | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
+       answer_to_result ~tool_name ~start_time (add_client target answer), phase)
 ;;
+let handle_interact ~tool_name ~start_time args = fst (handle_interact_with_phase ~tool_name ~start_time args)

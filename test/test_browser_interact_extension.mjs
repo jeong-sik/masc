@@ -34,7 +34,7 @@ const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Tex
   }},
 });
 const browser = {runtime: {connectNative: () => ({onMessage: {addListener() {}}, onDisconnect: {addListener() {}}, postMessage: value => replies.push(value)})},
-  tabs: {executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
+  tabs: {get:async id=>{assert.equal(id,7);if(closed)throw new Error('tab_closed');return {id,url:page.location.href};},executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
 const context = vm.createContext({browser, TextEncoder, setTimeout, clearTimeout});
 vm.runInContext(background, context);
 async function command(args) { context.command = {id: 'interaction-fixture', verb: 'page.interact', args}; await vm.runInContext('onHostMessage(command)', context); return replies.at(-1); }
@@ -92,3 +92,102 @@ const shadowScroll = await command({...observed,action:'scroll_at',x:0,y:-120});
 assert.equal(shadowScroll.ok,true);
 assert.equal(pane.scrollTop,-120,'nested open shadow roots reach the internal scroll pane');
 console.log('PASS: nested open shadow roots target the internal scroll pane');
+
+// Following an observed href never runs an application click handler/new window.
+class Anchor {
+  constructor(target = '', href = 'https://example.org/destination') {this.localName='a';this.target=target;this.href=href;}
+  hasAttribute(name) {return name === 'href';}
+  getAttribute(name) {return name === 'target' ? this.target : null;}
+  getClientRects() {return [{}];}
+  click() {throw new Error('follow must not run window.open handlers');}
+}
+let followed, assigned = [];
+const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL, window:{},
+  browserScene: () => followed,
+  location:{href:'https://example.org/source',assign:url=>assigned.push(url)},
+  document:{title:'Still source',querySelector:()=>null},scrollX:0,scrollY:0,
+  getComputedStyle:()=>({display:'block',visibility:'visible'})});
+followPage.window.top=followPage.window;
+vm.runInContext(driverFunction,followPage);
+const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
+followed=new Anchor('_blank');
+assert.equal(follow().interactionFailure.message,'follow_link_requires_same_tab');
+assert.equal(assigned.length,0,'new-tab target rejects before navigation');
+followed=new Anchor('', 'javascript:window.open("other")');
+assert.equal(follow().interactionFailure.message,'follow_link_requires_http_url');
+assert.equal(assigned.length,0);
+followed=new Anchor();
+const receipt=follow();
+assert.equal(receipt.destinationUrl,'https://example.org/destination');
+assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
+assert.deepEqual(assigned,['https://example.org/destination']);
+
+// Exercise the actual native message dispatch and injected scene resolver.
+page.HTMLAnchorElement=Anchor;page.URL=URL;
+page.getComputedStyle=()=>({display:'block',visibility:'visible'});
+page.document.querySelector=()=>null;
+page.location.assign=url=>assigned.push(url);
+page.followAnchor=new Anchor('_blank');
+page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
+vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')].nodes.set('follow-link',new WeakRef(followAnchor));window[Symbol.for('masc.browser.scene.refs.v3')].links.set('follow-link',followAnchor.href)",page);
+const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
+assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
+page.followAnchor.target='_self';
+const dispatchedReceipt=await command(dispatchedFollow);
+assert.equal(dispatchedReceipt.ok,true,JSON.stringify(dispatchedReceipt));
+assert.equal(dispatchedReceipt.data.tabId,7);
+assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
+assert.equal(dispatchedReceipt.data.action,'follow_link');
+assert.equal(dispatchedReceipt.data.navigationSource.documentId,viewport.documentId);
+assert.equal(dispatchedReceipt.data.navigationSource.url,page.location.href);
+console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');
+const beforeRecycledFollow=assigned.length;
+page.followAnchor.href='https://example.org/recycled-channel';
+const recycledFollow=await command(dispatchedFollow);
+assert.equal(recycledFollow.error,'scene_link_destination_changed');
+assert.equal(recycledFollow.effectPhase,'not_started');
+assert.equal(assigned.length,beforeRecycledFollow,'recycled anchors cannot navigate to an unobserved destination');
+page.followAnchor.href='https://example.org/destination';
+
+
+const stale=await command({...dispatchedFollow,expectedUrl:'https://example.org/stale'});
+assert.equal(stale.effectPhase,'not_started','stale URL rejection is explicitly pre-effect through native dispatch');
+const detached=await command({...dispatchedFollow,nodeId:'detached'});
+assert.equal(detached.effectPhase,'not_started','detached reference is pre-effect');
+page.followAnchor.target='_self';
+page.location.assign=()=>{throw new Error('navigation result lost');};
+const uncertain=await command(dispatchedFollow);
+assert.equal(uncertain.ok,false);
+assert.equal(uncertain.effectPhase,undefined,'failure after navigation starts must remain unknown');
+console.log('PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure');
+
+const originalGet=browser.tabs.get,originalExecute=browser.tabs.executeScript;
+const beforePreflight=executions;
+closed=true;
+assert.equal((await command({tabId:7,action:'click',selector:'#button'})).effectPhase,'not_started');
+closed=false;
+browser.tabs.get=async()=>({id:7,url:'https://example.org/changed'});
+assert.equal((await command({tabId:7,action:'click',selector:'#button',expectedUrl:'https://example.org/old'})).effectPhase,'not_started');
+assert.equal(executions,beforePreflight,'preflight rejection never calls injection');
+browser.tabs.get=originalGet;
+browser.tabs.executeScript=async(...args)=>{await originalExecute(...args);throw new Error('injection result lost');};
+const clicksBeforeLostReply=clicked;
+const lostReply=await command({tabId:7,action:'click',selector:'#button'});
+assert.equal(clicked,clicksBeforeLostReply+1,'page effect occurred before API rejection');
+assert.equal(lostReply.ok,false);
+assert.equal(lostReply.effectPhase,undefined,'API rejection alone cannot prove pre-effect');
+browser.tabs.executeScript=originalExecute;
+console.log('PASS: preflight rejection is pre-effect; applied script with lost API result remains unknown');
+
+for (const target of ['_top','_parent']) {
+  followed=new Anchor(target);const count=assigned.length;
+  assert.equal(follow().destinationUrl,followed.href);assert.equal(assigned.length,count+1);
+}
+for (const policy of ['rel','referrerpolicy']) {
+  followed=new Anchor();const count=assigned.length;
+  followed.getAttribute=name=>name===policy ? (policy==='rel'?'noopener NoReferrer':'no-referrer') : null;
+  followed.hasAttribute=name=>name==='href'||name===policy;
+  assert.equal(follow().interactionFailure.message,'follow_link_referrer_policy_unsupported');
+  assert.equal(follow().interactionFailure.effectStarted,false);assert.equal(assigned.length,count);
+}
+console.log('PASS: top-document parent/top targets accepted and link-specific referrer policies reject pre-effect');

@@ -127,7 +127,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let rejected = interact (Browser_lane.Fill
       {selector=selector "name";text="unexpected overwrite"}) (Some (fixture_url ^ "/wrong")) in
     check "BrowserInteract rejects stale URL before overwriting input"
-      (match rejected with Browser_lane.Refused _ -> true | _ -> false);
+      (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     let submitted = success (interact (Browser_lane.Click (selector "submit")) None) in
     check "BrowserInteract returns the observed task tab" (member "tabId" submitted = `Int first);
     check "native and DOM interactions share the correct page without stale overwrite"

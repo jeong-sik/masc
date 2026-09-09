@@ -633,6 +633,23 @@ let execute_output_schema =
     ]
 ;;
 
+(* Browser reads have mode-specific payloads. Compositions can retain the whole
+   object; only the invariant interaction receipt exposes typed data edges. *)
+let browser_read_output_schema = `Assoc ["type",`String "object";
+  "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
+
+let browser_interact_output_schema = `Assoc ["type",`String "object";
+  "properties",`Assoc ["tabId",`Assoc ["type",`String "integer"];
+    "url",`Assoc ["type",`String "string"];"urlBefore",`Assoc ["type",`String "string"];
+    "action",`Assoc ["type",`String "string"];
+    "destinationUrl",`Assoc ["type",`String "string"];
+    "navigationSource",`Assoc ["type",`String "object";
+      "properties",`Assoc ["url",`Assoc ["type",`String "string"];
+        "documentId",`Assoc ["type",`String "string"]];
+      "required",`List [`String "url";`String "documentId"];"additionalProperties",`Bool false]];
+  "required",`List (List.map (fun key -> `String key) ["tabId";"url";"urlBefore";"action"]);
+  "additionalProperties",`Bool true]
+
 let public_descriptors =
   [ (descriptor
       ~capability_identity:Internal_name_identity
@@ -855,6 +872,7 @@ let public_descriptors =
       ~runtime_handler:Tool_browser_read
       ~input_translation:(Identity Validate_once_before_translation)
       ()
+      |> with_composable_output (Json_output {schema=browser_read_output_schema})
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
@@ -928,6 +946,7 @@ let public_descriptors =
       ~runtime_handler:Tool_browser_interact
       ~input_translation:(Identity Validate_once_before_translation)
       ()
+      |> with_composable_output (Json_output {schema=browser_interact_output_schema})
   ]
 ;;
 

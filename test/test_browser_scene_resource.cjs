@@ -18,17 +18,16 @@ function fixture() {
     fontSize:'16px', fontWeight:'400', whiteSpace:'normal'};
   const link = {nodeType:1, localName:'a', innerText:'A', parentElement:null,
     isConnected:true, ownerDocument:document, childNodes:[],
-    getAttribute:() => null, matches:selector => selector !== ':disabled',
+    hasAttribute:name => name === 'href', getAttribute:() => null, matches:selector => selector !== ':disabled',
     getClientRects:() => [rect], click:() => {}};
-  // The reported 9 MiB href must not even be read: it is unused in the scene.
-  Object.defineProperty(link, 'href', {get() { throw new Error('unused href was read'); }});
+  link.href='http://example.test/observed';
   document.body.childNodes.push(link);
   const context = vm.createContext({document, window:{},
     location:{href:'http://example.test/path?identity=exact#fragment'},
     innerWidth:800, innerHeight:600, scrollX:0, scrollY:0,
     getComputedStyle:() => style, HTMLInputElement:class {}, HTMLTextAreaElement:class {},
     // Model insecure-context WebCrypto: getRandomValues exists, randomUUID does not.
-    crypto:{getRandomValues:array => webcrypto.getRandomValues(array)}, TextEncoder});
+    crypto:{getRandomValues:array => webcrypto.getRandomValues(array)}, TextEncoder, URL});
   vm.runInContext(source, context);
   return {document, style, link, context,
     read:() => vm.runInContext("browserScene({mode:'read',maxChars:1})", context)};
@@ -40,15 +39,38 @@ assert.match(first.documentId, /^[a-f0-9]{32}$/);
 assert.equal(normal.read().documentId, first.documentId, 'repeat read preserves document identity');
 assert.equal(first.url, normal.context.location.href, 'complete URL identity survives');
 assert.equal(first.nodes.length, 1);
-assert.equal('href' in first.nodes[0], false);
+assert.equal(first.nodes[0].href, 'http://example.test/observed');
 assert.ok(Buffer.byteLength(JSON.stringify(first), 'utf8') <= limit);
 const oldId = first.documentId;
 normal.document.documentElement = {};
 assert.notEqual(normal.read().documentId, oldId, 'new document gets fresh random identity');
 
+// A recycled anchor remains the same DOM object, but not the same observation.
+const recycled = fixture();
+const observed = recycled.read();
+recycled.context.reference = {mode:'resolve_link',documentId:observed.documentId,nodeId:observed.nodes[0].nodeId};
+assert.equal(vm.runInContext('browserScene(reference)',recycled.context),recycled.link);
+recycled.link.href='http://example.test/recycled';
+assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_link_destination_changed/);
+const reread=recycled.read();
+assert.notEqual(reread.nodes[0].nodeId,observed.nodes[0].nodeId);
+assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/,
+  'a newer read retires the old reference instead of repinning it');
+recycled.context.reference.nodeId=reread.nodes[0].nodeId;
+assert.equal(vm.runInContext('browserScene(reference)',recycled.context),recycled.link);
+for (let revision=0;revision<100;revision++) {
+  recycled.link.href='http://example.test/revision/'+revision;
+  recycled.read();
+}
+const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')]",recycled.context);
+assert.equal(registry.nodes.size,1,'connected recycled anchor retains only its latest reference');
+assert.equal(registry.links.size,1,'superseded href pins are retired');
+assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/);
+
 for (const [name, alter] of [
   ['UTF-8 title', f => { f.document.title = '🙂'.repeat(300000); }],
   ['JSON escaping', f => { f.document.title = '"'.repeat(600000); }],
+  ['observed href', f => { f.link.href = 'http://example.test/' + 'x'.repeat(9 * limit); }],
   ['complete URL', f => { f.context.location.href = 'http://example.test/' + 'x'.repeat(9 * limit); }],
   ['node style metadata', f => { f.style.fontWeight = 'x'.repeat(2 * limit); }],
   ['rectangle arrays', f => { f.link.getClientRects = () => Array(30000).fill(rect); }],
@@ -57,4 +79,4 @@ for (const [name, alter] of [
   alter(f);
   assert.throws(f.read, /scene_response_exceeds_1_mib/, `${name} must count toward full response bytes`);
 }
-console.log('scene resources: shared-script parity, insecure-context identity, unused href, and 5 JSON/UTF-8 overflow cases passed');
+console.log('scene resources: shared-script parity, insecure-context identity, observed href, and 6 JSON/UTF-8 overflow cases passed');

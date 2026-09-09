@@ -11,6 +11,8 @@ bg=(root/'connectors/browser/extension/background.js').read_text();assert bg.sta
 html='''<!doctype html><meta charset="utf-8"><title>Semantic Zen fixture</title><style>body{font:22px sans-serif;margin:28px;background:#101d2c;color:#d8f4ee}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{padding:24px;border:1px solid #55958c;border-radius:16px}button,textarea{font:inherit;padding:10px}canvas{background:linear-gradient(45deg,#3baaa0,#662db1)}.hidden{display:none}</style><h1>한글과 실제 DOM</h1><p>Copy exact text: 별빛🙂 café</p><div style="visibility:hidden">HIDDEN_PARENT<span style="visibility:visible">VISIBLE_CHILD</span></div><div class="grid"><section><button id="increment" onclick="document.querySelector('#count').textContent=String(+document.querySelector('#count').textContent+1)">Increase</button><p id="count">0</p><label>Message<textarea id="message" aria-label="Message"></textarea></label><input type="password" value="SECRET_VALUE_MUST_NOT_APPEAR"></section><section><canvas width="180" height="100" style="font-size:0" aria-label="Gradient canvas"></canvas><p class="hidden">HIDDEN_MUST_NOT_APPEAR</p></section></div>'''
 class H(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
+  if self.path == '/redirect':
+   self.send_response(302);self.send_header('Location','/canonical');self.send_header('Content-Length','0');self.end_headers();return
   b=html.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
  def log_message(self,*args):pass
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),H);threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -26,7 +28,10 @@ def call(method,path,body=None):
  if isinstance(value,dict) and 'error' in value:raise RuntimeError(value['error']+': '+value.get('message',''))
  return value
 
-def js(script,args=[]):return call('POST','/session/'+sid+'/execute/sync',{'script':script,'args':args})
+def js(script,args=[]):
+ value=call('POST','/session/'+sid+'/execute/sync',{'script':script,'args':args})
+ if isinstance(value,dict) and 'interactionFailure' in value:raise RuntimeError(value['interactionFailure']['message'])
+ return value
 def observe():return js(scene+'\nreturn browserScene(arguments[0]);',[{'mode':'read','maxChars':50000}])
 def control(s,label):return next(n for n in s['nodes'] if n['kind']=='control' and n['text']==label)
 def act(s,n,**kw):return js(scene+interaction,[{'documentId':s['documentId'],'nodeId':n['nodeId'],'expectedUrl':s['url'],**kw}])
@@ -141,6 +146,26 @@ try:
  js("document.querySelector('#popup').onclick=()=>document.body.dataset.popupClicked='yes';")
  act(popup_scene,popup,action='click')
  check('escaped fixed popup observed reference remains clickable',js('return document.body.dataset.popupClicked;')=='yes')
+ js("document.body.innerHTML='<a id=follow href=\"#destination\" target=\"_blank\">Follow observed link</a><p>Previous channel content</p>';window.followHandlerRan=false;document.querySelector('#follow').onclick=()=>{window.followHandlerRan=true;};")
+ follow_scene=observe();follow_node=control(follow_scene,'Follow observed link')
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('new-tab follow accepted')
+ except RuntimeError as e:check('observed new-tab anchor rejects before follow','follow_link_requires_same_tab' in str(e))
+ check('rejected follow keeps original URL',js('return location.href;')==follow_scene['url'])
+ js("document.querySelector('#follow').target='_self';")
+ js("document.querySelector('#follow').href='#recycled-channel';")
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('recycled anchor followed')
+ except RuntimeError as e:check('recycled anchor href rejects before navigation','scene_link_destination_changed' in str(e) and js('return location.href;')==follow_scene['url'])
+ recycled_scene=observe();recycled_node=control(recycled_scene,'Follow observed link')
+ check('new observation exposes changed href under a new reference',recycled_node['nodeId']!=follow_node['nodeId'] and recycled_node['href'].endswith('#recycled-channel'))
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('new observation repinned old reference')
+ except RuntimeError as e:check('new observation retires old destination reference','scene_node_detached' in str(e))
+ js("document.querySelector('#follow').href='#destination';")
+ follow_scene=observe();follow_node=control(follow_scene,'Follow observed link')
+ receipt=act(follow_scene,follow_node,action='follow_link')
+ after_follow=observe()
+ check('observed same-tab href reaches destination URL',after_follow['url']==receipt['destinationUrl'])
+ check('follow bypasses application click handler',not js('return window.followHandlerRan;'))
+ check('SPA URL acknowledgement does not imply destination content readiness',after_follow['documentId']==follow_scene['documentId'] and any(n['text']=='Previous channel content' for n in after_follow['nodes']))
  js("document.body.innerHTML='<div id=host></div>';const outer=document.querySelector('#host').attachShadow({mode:'open'});outer.innerHTML='<div id=inner></div>';const inner=outer.querySelector('#inner').attachShadow({mode:'open'});inner.innerHTML='<div id=pane style=\"height:180px;width:400px;overflow:auto\"><div style=\"height:1600px\">Shadow channel context</div></div>';window.shadowPane=inner.querySelector('#pane');window.scrollTo(0,0);")
  viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
  point=js("const r=shadowPane.getBoundingClientRect();return {x:(r.x+30)/innerWidth,y:(r.y+30)/innerHeight};")
@@ -165,6 +190,47 @@ try:
  call('POST','/session/'+sid+'/execute/async',{'script':"const done=arguments[arguments.length-1];if(!frame.contentDocument)done();else frame.addEventListener('load',()=>done(),{once:true});",'args':[]})
  try:js(scene+interaction,[frame_args]);raise AssertionError('opaque frame accepted')
  except RuntimeError as e:check('inaccessible frame rejects without outer scroll','scroll_frame_inaccessible' in str(e) and js('return scrollY;')==0)
+ js("document.body.innerHTML='<a href=\"/redirect\">Canonical channel link</a>';")
+ redirect_source=observe();redirect_link=control(redirect_source,'Canonical channel link')
+ redirect_receipt=act(redirect_source,redirect_link,action='follow_link')
+ # Test-only bounded observation: never replay the navigation or use a
+ # screenshot as a loading barrier. Keep the first pending result/error.
+ redirect_deadline=time.monotonic()+10
+ first_redirect_observation=None;redirect_attempts=0;redirect_errors=[]
+ while True:
+  redirect_attempts+=1
+  try:
+   redirected=observe()
+   if first_redirect_observation is None:first_redirect_observation=redirected
+   if (redirected['url']==f'http://127.0.0.1:{server.server_port}/canonical'
+       and redirected['documentId']!=redirect_source['documentId']
+       and any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes'])):break
+  except RuntimeError as error:
+   redirect_errors.append(str(error))
+  if time.monotonic()>=redirect_deadline:
+   raise AssertionError({'redirect_wait_exhausted':True,'attempts':redirect_attempts,'first_observation':first_redirect_observation,'errors':redirect_errors})
+  time.sleep(.05)
+ (a.out/'redirect-stable.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
+ check('HTTP302 final observation differs from original href',redirect_receipt['destinationUrl'].endswith('/redirect') and redirected['url'].endswith('/canonical'))
+ check('redirect recovery reads actual destination content',any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes']))
+ (a.out/'redirect.json').write_text(json.dumps({'follow':redirect_receipt,'first_observed_url':first_redirect_observation['url'],'observation_attempts':redirect_attempts,'observation_errors':redirect_errors,'new_document_observed':redirected['documentId']!=redirect_source['documentId'],'observed_url':redirected['url'],'title':redirected['title'],'application_verified':False},ensure_ascii=False,indent=2))
+ js("""document.body.innerHTML='<a id=policy href="#policy" rel=noreferrer>Policy link</a><svg width=300 height=80><a id=vector href="#vector"><text x=10 y=40>Vector link<tspan style="display:none">HIDDEN_LABEL</tspan><tspan style="visibility:hidden">INVISIBLE_LABEL</tspan></text></a></svg>';""")
+ policy_scene=observe();policy_node=control(policy_scene,'Policy link')
+ for attribute,value in [('rel','noreferrer'),('referrerpolicy','no-referrer')]:
+  js("const a=document.querySelector('#policy');a.removeAttribute('rel');a.removeAttribute('referrerpolicy');a.setAttribute(arguments[0],arguments[1]);",[attribute,value])
+  try:act(policy_scene,policy_node,action='follow_link');raise AssertionError('link policy ignored')
+  except RuntimeError as e:check('explicit '+attribute+' rejects before follow','follow_link_referrer_policy_unsupported' in str(e) and js('return location.href;')==policy_scene['url'])
+ vector_scene=observe();vector=control(vector_scene,'Vector link')
+ check('natural SVG link label includes visible text only',vector['text']=='Vector link')
+ check('SVG anchor exposes normalized observed absolute href',isinstance(vector['href'],str) and vector['href'].endswith('#vector'))
+ js("document.querySelector('#vector').setAttribute('href','#recycled-vector');")
+ try:act(vector_scene,vector,action='follow_link');raise AssertionError('SVG animated href repointed')
+ except RuntimeError as e:check('SVG animated href mutation rejects against string pin','scene_link_destination_changed' in str(e))
+ for target in ['_top','_parent']:
+  js("document.querySelector('#vector').setAttribute('target',arguments[0]);",[target])
+  vector_scene=observe();vector=control(vector_scene,'Vector link')
+  receipt=act(vector_scene,vector,action='follow_link')
+  check('SVG '+target+' in top document follows same tab',js('return location.href;')==receipt['destinationUrl'])
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

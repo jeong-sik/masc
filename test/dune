@@ -5071,7 +5071,7 @@
 (test
  (name test_browser_lane)
  (modules test_browser_lane)
- (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
+ (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_native_host.inc)
 
@@ -5452,3 +5452,5 @@
  (action
   (run python3 %{dep:test_docker_observe_transport.py}
    %{exe:test_docker_observe_transport.exe})))
+
+(include stanzas/test_browser_composition.inc)

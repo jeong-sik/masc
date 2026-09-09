@@ -60,10 +60,13 @@ source_id를 추측하지 않는다. 해당 행이 없으면 사이트 스킬이
 포함하지 않으면 빠진 범위를 남긴다. 피드 주소를 추측하거나 로그인 세션·쿠키를 별도
 수집기로 옮기지 않는다. 특정 브라우저 화면 검증을 피드 읽기로 완료 처리하지 않는다.
 
-현재 BrowserRead에는 DOM subtree·role locator·RSS·Readability 전용 인자가 없다.
-`scene`도 접근성 트리 전체가 아니다. 의미 구조는 현재 관측에 실제로 드러난 만큼
-활용하며, 범위 추출을 실행하지 않았으면 추출했다고 하지 않는다. WebDriver는 제어
-통로다. 드라이버를 바꾸거나 composition으로 묶는 것만으로 추출 품질이 개선되지는 않는다.
+BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된 영역의
+`documentId`·`nodeId`를 `scope`로 전달하면 그 요소 아래의 화면에 보이는 내용을 읽는다.
+관측한 참조로 범위를 지정하며, 임의의 CSS selector나 role locator로 subtree를 지정하는
+인자는 없다. RSS·Readability 전용 추출 인자도 없다. `scene`은 접근성 트리 전체나
+영역의 전체 메시지 기록이 아니므로, 반환된 범위·잘림과 실제로 읽은 화면을 확인한다.
+WebDriver는 제어 통로다. 드라이버를 바꾸거나 composition으로 묶는 것만으로 추출
+품질이 개선되지는 않는다.
 
 ## 관측하고 조작하기
 
@@ -121,3 +124,42 @@ elements는 긴 selector를 포함하므로 작은 maxChars로도 큰 artifact�
 MASC에서는 `keeper_skill`에 이 스킬의 동일한 `identity`와 해당 상대 `file`을
 전달해 참조를 읽는다. 다른 Skill 호스트에서는 호스트가 제공하는 리소스 읽기를 쓴다.
 도구의 현재 스키마와 사용자의 작업 범위가 예시보다 우선한다.
+
+## 관측한 영역과 짧은 composition
+
+현재 스키마가 지원하면 BrowserRead의 `regions`로 의미 영역 목록을 읽고,
+반환된 documentId/nodeId를 `scope`로 전달해 `scene`을 읽는다. 인자를 무시한
+전체 페이지 응답을 영역 읽기의 성공으로 받아들이지 않는다. 같은 영역을
+새로 읽을 때도 scope를 유지하고, reload/detach 거절은 새 관측으로 해소한다.
+
+composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문서가 아니라
+`keeper_compose_<name>` 형태로 노출되는 호출 도구다. 현재 도구 목록에서 정확한
+이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 instruction Skill에서
+필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
+composition을 읽으려 하지 않는다.
+
+BrowserInteract 클릭 응답은 조작 접수와 원래 탭 정체를 나타낸다. 목적지 로딩 완료나
+SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수 있으므로 BrowserTabs와
+페이지 관측에서 목적지를 식별한 후 그 탭의 영역을 읽는다. URL만 바뀌어도 메시지는
+이전 채널일 수 있다. 요청 채널의 제목·영역·본문을 확인하고, 전환 중이거나 목적지가
+아직 관측되지 않으면 미확인으로 남겨 다음 관측에서 판단한다. 관측 실패 때문에
+이미 적용된 클릭을 재실행하지 않는다.
+
+관측된 같은 탭 HTTP(S) 링크를 따라갈 때 현재 도구 목록에 있는
+`keeper_compose_browser-live-click-regions`를 호출할 수 있다. 이 경로는 실제 href를
+검증하고 직접 이동하므로 클릭 핸들러를 실행하지 않는다. 새 창 대상·다운로드는
+이동 전에 거절된다. 후속 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
+전환 오류이면 같은 clientId/tabId를 expectedUrl 없이 읽어 실제 URL과 내용을
+확인한다. 원래 urlBefore이면 아직 이동 중일 수 있다. 다른 URL이면 리다이렉트·
+정규화·로그인 화면일 수 있으므로 자동 승인하지 않는다. 사이트 Skill로 workspace·
+채널·제목·본문을 검증한 뒤 실제 관측 URL을 새 expectedUrl로 지정한다. 미확인
+목적지는 미확인으로 남긴다. 원래 URL 검사나 이동을 무조건 반복하지 않는다.
+일치하는 URL도 사이트 내용의 준비 완료는 아니며 채널 제목과 본문을 검증한다.
+
+For same-URL follows, preserve the returned `navigationSource` together with
+`expectedUrl` on read-only retries. The destination read must observe a new
+document ID before accepting a reload. Do not drop this guard to accept the
+old document; different-URL SPA navigation may retain its document identity.
+
+Keep navigationSource when omitting expectedUrl to inspect a possible redirect;
+a source-URL observation from the original document is still pending.

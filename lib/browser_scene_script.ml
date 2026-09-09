@@ -1,14 +1,27 @@
 (* Same fixed function as the extension; parity is checked by the Node regression. *)
 let runtime = {js|function browserScene(args) {
-  const key = Symbol.for('masc.browser.scene.v1');
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    if (typeof raw !== 'string' || (!element.hasAttribute('href')
+        && !element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href'))) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v3');
   let state = window[key];
   const sameDocument = state && state.document === document && state.root === document.documentElement;
-  if (args.mode === 'resolve') {
+  if (args.mode === 'resolve' || args.mode === 'resolve_link') {
     if (!sameDocument || args.documentId !== state.id) throw new Error('scene_document_changed');
     const ref = state.nodes.get(args.nodeId);
     const element = ref && ref.deref();
     if (!element || !element.isConnected || element.ownerDocument !== document)
       throw new Error('scene_node_detached');
+    if (args.mode === 'resolve_link') {
+      if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+    }
     return element;
   }
   if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
@@ -18,16 +31,25 @@ let runtime = {js|function browserScene(args) {
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       byte => byte.toString(16).padStart(2,'0')).join('');
     state = {document, root:document.documentElement, id, next:0,
-      ids:new WeakMap(), nodes:new Map()};
+      ids:new WeakMap(), nodes:new Map(), links:new Map()};
     window[key] = state;
   }
   if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
   // Weak references preserve identity through reordering without retaining
   // detached page nodes for the lifetime of a single-page application.
-  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) state.nodes.delete(id);
+  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
+    state.nodes.delete(id); state.links.delete(id);
+  }
   const nodeId = element => {
     let id = state.ids.get(element);
-    if (!id) { id = 'n' + (++state.next); state.ids.set(element,id); }
+    const href = linkHref(element);
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
+    if (!id || (href !== null && state.links.get(id) !== href)) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); }
+      id = 'n' + (++state.next); state.ids.set(element,id);
+      if (href !== null) state.links.set(id,href);
+    }
     state.nodes.set(id,new WeakRef(element));
     return id;
   };
@@ -76,6 +98,22 @@ let runtime = {js|function browserScene(args) {
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
   };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -123,13 +161,14 @@ let runtime = {js|function browserScene(args) {
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
         || !rendered(node)) continue;
     const tag=node.localName;
-    const control=node.matches('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
+    const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || tag;
+      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
       describe('control',node,label,boxes(node.getClientRects(),node),{
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;
@@ -137,6 +176,8 @@ let runtime = {js|function browserScene(args) {
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
       describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
         boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
       continue;
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);

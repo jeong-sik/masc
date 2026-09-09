@@ -486,8 +486,9 @@ let handle_browser_session_with_outcome ~args =
 ;;
 
 let handle_browser_interact_with_outcome ~args =
-  Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_interact ~tool_name:"masc_browser_interact" ~start_time:0.0 args)
+  let result, failure_effect_disposition =
+    Tool_misc_browser_lane.handle_interact_with_phase ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
+  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
 ;;
 
 let handle_browser_goto_with_outcome ~args =

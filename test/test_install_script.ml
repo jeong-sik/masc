@@ -405,9 +405,8 @@ let platform_release_asset () =
    download (e.g. the --force refresh) exercise the real curl+install flow
    hermetically instead of depending on a published GitHub release for the
    HEAD version — the forced-wizard tests broke on exactly that 404 when
-   dune-project moved past the latest published release. SHA256SUMS is
-   deliberately absent: the harness passes --allow-unverified, which
-   downgrades missing checksums to a warning. *)
+   dune-project moved past the latest published release. The mirror includes
+   actual checksums, including the mandatory macOS Python bootstrap digest. *)
 let stage_release_mirror base_path =
   let dir = Filename.concat base_path (Filename.concat ".release" (release_tag ())) in
   ignore (Sys.command ("mkdir -p " ^ Filename.quote dir));
@@ -475,15 +474,72 @@ let stage_release_mirror base_path =
   (match Unix.close_process_in commit_channel with
    | Unix.WEXITED 0 -> ()
    | _ -> fail "release fixture binary must report embedded commit");
+  let runtime_args =
+    match suffix with
+    | "macos-arm64" | "macos-x64" ->
+      let runtime_root = Filename.concat dir "fixture-runtime" in
+      let runtime_archive = Filename.concat dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
+      (* This forwards to the test host's interpreter. It exercises the verified
+         bootstrap/install contract, not native Python or dylib portability. *)
+      let script =
+        {|import hashlib, io, json, os, pathlib, shlex, sys, tarfile
+root, archive, binary, commit, platform = sys.argv[1:]
+root = pathlib.Path(root)
+root.mkdir(exist_ok=True)
+probe = root / 'masc'
+if probe.is_symlink() or probe.exists():
+    probe.unlink()
+probe.symlink_to(pathlib.Path(binary).resolve())
+python = '#!/bin/sh\nexec ' + shlex.quote(os.path.realpath(sys.executable)) + ' "$@"\n'
+files = {'python/bin/python3': (python.encode(), 0o755),
+         'licenses/fixture.txt': (b'Test-only interpreter forwarding fixture.\n', 0o644),
+         'runtime-provenance.json': (json.dumps({'source_commit': commit, 'platform': platform}).encode(), 0o644)}
+with tarfile.open(archive, 'w:gz') as output:
+    for name, (data, mode) in sorted(files.items()):
+        info = tarfile.TarInfo(name)
+        info.size, info.mode = len(data), mode
+        output.addfile(info, io.BytesIO(data))
+|}
+      in
+      let command =
+        String.concat " "
+          (List.map Filename.quote
+             [ "python3"; "-c"; script; runtime_root; runtime_archive; asset; commit; suffix ])
+      in
+      check int "release fixture packages regular runtime members" 0 (Sys.command command);
+      [ "--runtime-archive"; runtime_archive; "--runtime-root"; runtime_root ]
+    | _ -> []
+  in
+  let companion_args =
+    List.concat_map
+      (fun (name, path) -> [ "--companion"; name; path ])
+      [ "masc-tui", tui; "masc-browser-host", browser_host
+      ; "masc-deployment-preflight-helper", helper
+      ; "masc-check-runtime-deployment-preflight", gate ]
+  in
   let package_command =
     String.concat " "
       (List.map Filename.quote
-         [ "python3"; bundle_helper; "package"; "--binary"; asset
+         ([ "python3"; bundle_helper; "package"; "--binary"; asset
          ; "--binary-asset"; platform_release_asset (); "--assets"; dashboard
          ; "--source-commit"; commit; "--archive"
-         ; Filename.concat dir ("masc-dashboard-" ^ suffix ^ ".tar.gz") ])
+         ; Filename.concat dir ("masc-dashboard-" ^ suffix ^ ".tar.gz") ]
+          @ companion_args @ runtime_args))
   in
   check int "release fixture packages matching dashboard" 0 (Sys.command package_command);
+  let checksum_script =
+    {|import hashlib, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
+         for path in sorted(root.iterdir()) if path.is_file() and path.name != 'SHA256SUMS']
+(root / 'SHA256SUMS').write_text('\n'.join(lines) + '\n')
+|}
+  in
+  let checksum_command =
+    String.concat " "
+      (List.map Filename.quote [ "python3"; "-c"; checksum_script; dir ])
+  in
+  check int "release fixture publishes artifact checksums" 0 (Sys.command checksum_command);
   "file://" ^ Filename.concat base_path ".release"
 ;;
 

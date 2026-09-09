@@ -78,16 +78,39 @@ def main():
                     response = {'error': {'message': 'Unexpected model invocation before authoritative Gate resolution', 'type': 'invalid_request_error'}}
                     status = 400
                 else:
+                    admission_prefix = 'resumed-admission' if index == 2 else 'after-artifact-read'
                     database = base / '.masc/keepers' / keeper / 'chat-operations.sqlite3'
                     with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as db:
                         db.row_factory = sqlite3.Row
-                        save(root / 'resumed-admission-operations.json', [dict(row) for row in db.execute('SELECT * FROM operations')])
-                        save(root / 'resumed-admission-semantic.json', [json.loads(row[0]) for row in db.execute('SELECT record_json FROM semantic_executions')])
+                        save(root / f'{admission_prefix}-operations.json', [dict(row) for row in db.execute('SELECT * FROM operations')])
+                        save(root / f'{admission_prefix}-semantic.json', [json.loads(row[0]) for row in db.execute('SELECT record_json FROM semantic_executions')])
                     snapshots = []
                     for path in (base / '.masc/traces').rglob('agent-core-snapshot-*.json'):
                         snapshots.append({'path': str(path.relative_to(base)), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'checkpoint': json.loads(path.read_text())})
-                    save(root / 'resumed-admission-checkpoints.json', snapshots)
-                    response = {'id': 'fixture-completed', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'Synthetic Gate continuation completed from its approved effect receipt.'}, 'finish_reason': 'stop'}]}
+                    save(root / f'{admission_prefix}-checkpoints.json', snapshots)
+                    if index == 2:
+                        journal = json.loads((base / '.masc/gate/replay-results.json').read_text())
+                        outcomes = [row['outcome'] for row in journal['outcomes'] if row['approval_id'] == receipt['approval_id']]
+                        if len(outcomes) != 1 or outcomes[0]['kind'] != 'applied':
+                            raise AssertionError('Approval has no actual applied replay outcome')
+                        output_ref = outcomes[0]['output_ref']['_blob']
+                        digest = output_ref['sha256']
+                        if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest) or digest == receipt['approval_id']:
+                            raise AssertionError('Replay output reference is not a full SHA-256')
+                        if digest not in json.dumps(body['messages']):
+                            raise AssertionError('Resumed model input omitted the exact full output_ref SHA-256')
+                        blob = base / '.masc/tool_blobs' / digest[:2] / digest
+                        raw_output = blob.read_bytes()
+                        if hashlib.sha256(raw_output).hexdigest() != digest or len(raw_output) != output_ref['bytes']:
+                            raise AssertionError('Replay output reference does not bind stored bytes')
+                        names = [t['function']['name'] for t in body.get('tools', [])]
+                        if 'keeper_artifact_read' not in names:
+                            raise AssertionError('Resumed model cannot access artifact read')
+                        save(root / 'approved-output-ref.json', output_ref)
+                        save(root / 'artifact-read-schema.json', next(t for t in body['tools'] if t['function']['name'] == 'keeper_artifact_read'))
+                        response = {'id': 'fixture-read-approved-output', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'read-approved-result', 'type': 'function', 'function': {'name': 'keeper_artifact_read', 'arguments': json.dumps({'sha256': digest, 'offset': 0})}}]}, 'finish_reason': 'tool_calls'}]}
+                    else:
+                        response = {'id': 'fixture-completed', 'model': 'resume-fixture', 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'Synthetic Gate continuation completed from its approved effect receipt.'}, 'finish_reason': 'stop'}]}
                     status = 200
                 response['usage'] = {'prompt_tokens': 10, 'completion_tokens': 10, 'total_tokens': 20}
                 event['response_status'] = status
@@ -265,8 +288,8 @@ def main():
         save(root / 'terminal-observation.json', observed)
         if observed['state'] != 'Succeeded':
             raise AssertionError('Original operation did not succeed')
-        if len(events) != 3 or [e['response_status'] for e in events] != [200, 429, 200]:
-            raise AssertionError('Expected completed effect/new Gate request, rate limit, and approved frozen-runtime continuation')
+        if len(events) != 4 or [e['response_status'] for e in events] != [200, 429, 200, 200]:
+            raise AssertionError('Expected completed effect/new Gate request, rate limit, approved artifact read and frozen-runtime completion')
         if not events[2]['path'].startswith('/alternate'):
             raise AssertionError('Approved operation did not use its frozen alternate runtime')
         original = events[0]['body']['messages']
@@ -274,8 +297,18 @@ def main():
         for message in [m for m in original if m['role'] == 'user']:
             if resumed.count(message) != original.count(message):
                 raise AssertionError('Original user input changed or duplicated')
-        if 'gate-effect-written' not in json.dumps(resumed):
-            raise AssertionError('Resumed model did not receive actual approved effect evidence')
+        output_ref = json.loads((root / 'approved-output-ref.json').read_text())
+        if output_ref['sha256'] not in json.dumps(resumed):
+            raise AssertionError('Resumed model input lacks usable complete output_ref')
+        read_messages = [m for m in events[3]['body']['messages'] if m['role'] == 'tool' and m.get('tool_call_id') == 'read-approved-result']
+        if len(read_messages) != 1:
+            raise AssertionError('Actual artifact read did not return to the same model continuation')
+        page = json.loads(read_messages[0]['content'])
+        if page['sha256'] != output_ref['sha256'] or not page['eof'] or hashlib.sha256(page['content'].encode()).hexdigest() != output_ref['sha256']:
+            raise AssertionError('Artifact read did not deliver the complete approved output bytes')
+        if 'gate-effect-written' not in page['content']:
+            raise AssertionError('The approved Execute output is absent from the actual artifact read')
+        save(root / 'artifact-read-result.json', page)
         effects = list((base / '.masc/playground').rglob('gate-effect.txt'))
         if len(effects) != 1 or effects[0].read_bytes() != b'one real gate effect\n':
             raise AssertionError('The real approved effect did not execute exactly once')

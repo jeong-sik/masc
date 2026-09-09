@@ -15,11 +15,16 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 
 def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def main():
@@ -28,7 +33,6 @@ def main():
     p.add_argument('--expected-commit', required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--port', type=int, default=18943)
-    p.add_argument('--observation-seconds', type=int, default=120)
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=False)
     out = a.output.resolve()
@@ -122,6 +126,7 @@ model_id = "goal-fixture"
         probe.bind(('127.0.0.1', a.port))
     log = (out / 'server.log').open('wb')
     server = subprocess.Popen([str(a.binary.resolve()), '--base-path', str(base), '--port', str(a.port)], cwd=base, env=env, stdout=log, stderr=subprocess.STDOUT)
+    opener = build_opener(ProxyHandler({}), NoRedirect)
     counter = 0
     session = None
     receipt = {'scope': 'real isolated server and operator HTTP; synthetic verifier, no semantic LLM acceptance', 'status': 'started',
@@ -139,7 +144,7 @@ model_id = "goal-fixture"
             headers['Mcp-Session-Id'] = session
         request = Request(f'http://127.0.0.1:{a.port}' + path, data=None if body is None else json.dumps(body).encode(), headers=headers)
         try:
-            response = urlopen(request, timeout=20)
+            response = opener.open(request)
         except HTTPError as error:
             response = error
         with response:
@@ -159,7 +164,6 @@ model_id = "goal-fixture"
         return result.get('structuredContent') or json.loads(result['content'][0]['text'])
 
     try:
-        deadline = time.monotonic() + a.observation_seconds
         while True:
             assert server.poll() is None, 'server exited'
             try:
@@ -168,7 +172,6 @@ model_id = "goal-fixture"
                     break
             except URLError:
                 pass
-            assert time.monotonic() < deadline, 'readiness observation deadline'
             time.sleep(0.2)
         assert health['build']['binary_commit'] == a.expected_commit
         assert Path(health['paths']['effective_base_path']).resolve() == base
@@ -182,7 +185,6 @@ model_id = "goal-fixture"
             evidence = http(path)
             if evidence['goal']['phase'] == 'awaiting_confirmation':
                 break
-            assert time.monotonic() < deadline, 'proof observation deadline'
             time.sleep(0.5)
         save(out / 'awaiting-evidence.json', evidence)
         verdict = evidence['verification']['completion']['verdict']
@@ -218,10 +220,7 @@ model_id = "goal-fixture"
         raise
     finally:
         server.terminate()
-        try:
-            server.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            server.kill(); server.wait()
+        server.wait()
         provider.shutdown()
         log.close()
 

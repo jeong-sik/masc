@@ -23,8 +23,12 @@ The inspected `vrf-d14835a4b1f16ae763aef3f80d91e4ff` snapshot contained a missin
 summary and notes, with no PNG artifact reference. The later
 `vrf-29d7aa6e465b7e1b5acd86f7305120f0` submission supplied summary text but still
 mentioned rendered pages only as notes. These submissions do not demonstrate a
-failed binary read. The model's 51200-byte statement does not match current
-source or candidate 17b9; no such limit was found in current tool/prompt source.
+failed binary read. The model's 51200-byte statement reflects a real, separate submission gate:
+`Keeper_tool_task_runtime.evidence_total_bytes_limit = 50 * 1024` rejects the
+aggregate artifact size and tells the caller to use notes. The initial audit
+searched numeric literals and missed that expression; its contrary claim was
+incorrect. This ingress repair does not remove that gate. A separate repair and
+three-image production submission proof are required.
 
 ## Verification boundaries
 

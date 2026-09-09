@@ -606,6 +606,7 @@ let dashboard_config_patch_allowed_fields =
   ; confirm_context_shrink_field
   ; expected_config_revision_field
   ; remote_endpoint_field
+  ; "sandbox_image"
   ]
   @
   dashboard_config_string_fields
@@ -756,6 +757,11 @@ let validate_dashboard_config_field key value =
   else if key = expected_config_revision_field then
     Keeper_turn_up_config_persistence.config_revision_of_yojson value
     |> Result.map ignore
+  else if key = "sandbox_image" then
+    (match value with
+     | `Null -> Ok ()
+     | `String image when String.trim image <> "" -> Ok ()
+     | other -> dashboard_field_type_error key "a nonblank string or null" other)
   else if key = remote_endpoint_field then
     (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
        whether the profile admits an endpoint at all, are decided by

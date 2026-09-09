@@ -451,7 +451,9 @@ streaming = true
 [models.deepseek-v4-pro.capabilities]
 max-output-tokens = 384000
 supports-tool-choice = true
-thinking-control-format = "reasoning-effort"
+# DeepSeek Chat Completions toggles thinking.type; reasoning_effort is a
+# separate effort control (https://api-docs.deepseek.com/guides/thinking_mode/).
+thinking-control-format = "thinking-object"
 supports-response-format-json = true
 supports-structured-output = false
 

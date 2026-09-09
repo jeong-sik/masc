@@ -82,7 +82,10 @@ val to_agent_core_typed_result :
     JSON envelope when explicit metadata is present) and maps its typed [failure_class] directly
     to AGENT_CORE [recoverable]/[error_class]. [on_externalization_error] lets an
     owning runtime keep its terminal state consistent when storage fails. The
-    provider receives only a bounded generic error and no replay instruction.
+    provider normally receives a generic projection error. A typed
+    [Proven_post_effect] failure whose artifact manifest is unavailable instead
+    remains an error carrying the applied-effect warning and normalized artifact
+    retrieval handles; it never becomes success or retries manifest projection.
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing

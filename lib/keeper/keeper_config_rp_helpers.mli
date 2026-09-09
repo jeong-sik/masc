@@ -14,7 +14,3 @@ val _rp_float :
   min_v:float ->
   max_v:float ->
   description:string -> unit -> float Runtime_params.param
-val _rp_bool :
-  key:string ->
-  default:(unit -> bool) ->
-  description:string -> unit -> bool Runtime_params.param

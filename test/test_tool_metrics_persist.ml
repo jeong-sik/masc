@@ -9,6 +9,7 @@ let make_result ~name ~success ~duration_ms : R.result =
   else
     R.Failed
       { R.class_ = Runtime_failure
+      ; effect_disposition = R.Effect_outcome_unknown
       ; message = ""
       ; data = `Null
       ; metadata = None

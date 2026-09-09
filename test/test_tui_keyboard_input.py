@@ -11475,14 +11475,19 @@ def runtime_surface_interaction(
                         f"{lane_detail_plain!r}"
                     )
 
-            lane_list = send_and_wait(
+            send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"\x1b[D",
-                b"1/2 runtime-a",
+                b"CANDIDATE",
             )
-            if b"MASC Config / Runtime detail" in CSI_RE.sub(b"", lane_list):
+            # Candidate identity also appears in the detail. Wait for the
+            # list-only column header, then inspect the replayed screen.
+            lane_screen = screen_text(bytes(output))
+            if b"1/2 runtime-a" not in lane_screen:
+                raise AssertionError("Runtime list lost the selected lane candidate")
+            if b"MASC Config / Runtime detail" in lane_screen:
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
             all_list = send_and_wait(
@@ -13871,12 +13876,16 @@ def run_browser_scene_regression(executable: str) -> None:
         palette_go(process, master, output, b"go Browser Lane", b"scene reader ready")
         frame = send_and_wait(process, master, output, b"s", b"SCENE BEFORE CLICK")
         visible = screen_text(frame)
-        for text in (b"[>1 button/link] First action", b"[2 button/link] Second action",
-                     "[image · Ctrl-O] Scene illustration".encode()):
+        # Source-context selection includes text and raster observations,
+        # not only clickable controls. Preserve their document order.
+        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+                     b"[3 button/link] Second action",
+                     "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"
-        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
-        send_and_wait(process, master, output, b"p", b"[>1 button/link] First action")
-        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
+        send_and_wait(process, master, output, b"n", b"[>2 button/link] First action")
+        send_and_wait(process, master, output, b"n", b"[>3 button/link] Second action")
+        send_and_wait(process, master, output, b"p", b"[>2 button/link] First action")
+        send_and_wait(process, master, output, b"n", b"[>3 button/link] Second action")
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
@@ -14984,7 +14993,7 @@ def msx_spectator_interaction(
     # waiting for every mosaic row to have been written. Waiting on the title
     # instead read rows that were still going out, and a half-written row is
     # narrower than the picture.
-    wait_for_output(process, master_fd, output, b"esc: back",
+    wait_for_output(process, master_fd, output, b"Esc: back",
                     start=watched_from, timeout=5.0)
     watching = bytes(output)[watched_from:]
     if b"spectating the server" not in watching:
@@ -15044,22 +15053,22 @@ def msx_size_interaction(
                     timeout=5.0)
     watched_from = len(output)
     os.write(master_fd, b"\r")
-    wait_for_output(process, master_fd, output, b"size 100%", start=watched_from,
+    wait_for_output(process, master_fd, output, b"+/-: 100%", start=watched_from,
                     timeout=5.0)
 
     down_from = len(output)
     os.write(master_fd, b"-")
-    wait_for_output(process, master_fd, output, b"size 87%", start=down_from,
+    wait_for_output(process, master_fd, output, b"+/-: 87%", start=down_from,
                     timeout=5.0)
 
     down_again = len(output)
     os.write(master_fd, b"-")
-    wait_for_output(process, master_fd, output, b"size 75%", start=down_again,
+    wait_for_output(process, master_fd, output, b"+/-: 75%", start=down_again,
                     timeout=5.0)
 
     up_from = len(output)
     os.write(master_fd, b"+")
-    wait_for_output(process, master_fd, output, b"size 87%", start=up_from,
+    wait_for_output(process, master_fd, output, b"+/-: 87%", start=up_from,
                     timeout=5.0)
 
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
@@ -15432,7 +15441,7 @@ def run_held_back_override_regression(executable: str) -> None:
         else:
             raise AssertionError("[p] never reached the prompts pane")
 
-        screen = CSI_RE.sub(b"", bytes(output))
+        screen = screen_text(bytes(output))
         if "적용 안 된 오버라이드 1개".encode() not in screen:
             raise AssertionError(
                 "the header does not count the held-back override, so a reader "
@@ -15440,6 +15449,10 @@ def run_held_back_override_regression(executable: str) -> None:
             )
         if "\u2298".encode() not in screen:
             raise AssertionError("the held-back row carries no mark of its own")
+        if b"Unknown template variables: facts_json" not in screen:
+            raise AssertionError("the rejected variable is not visible beside recovery guidance")
+        if b"You are a keeper." not in screen:
+            raise AssertionError("override notices hid the effective template body")
         if "다시 저장하면".encode() not in screen:
             raise AssertionError(
                 "the screen says the override is not applied and does not say "

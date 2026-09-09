@@ -295,7 +295,7 @@ jobs:
 
       - name: Build browser preview
         working-directory: dashboard
-        run: pnpm build
+        run: pnpm exec vite build --config vite.preview.config.ts
 
       - name: Record browser preview provenance
         env:

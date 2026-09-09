@@ -42,7 +42,7 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
 | 12 | Tools/Skills discoverability | User finds capability, full description/schema/instructions and availability with clear navigation | Browser/TUI interaction proof pending |
 | 13 | Configuration feedback | Edit/save/reload shows effective source/value and verifies next request changed; errors visible | Runtime config source exists; end-to-end proof pending |
 | 14 | Preset prompt inspection | Full preset content preview and effective selected prompt visible before/after application | UI/source audit pending |
-| 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | End-to-end edit scenario pending |
+| 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | #34924 stores patch originals; #34927 verifies and displays their diff. Component and CI-built browser scenarios pass (synthetic HTTP records, actual worker); deployed autonomous edit, full-chat integration, remote edit coverage and LSP diagnostics remain pending |
 | 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Source and rendered audit pending |
 | 17 | Shared memory agent/lane | Cross-Keeper evidence consolidated with attribution/deduplication and retrieved in subsequent work | Role, storage ownership and live scenario pending |
 | 18 | Local LLM roles | Configured local verifier/judge/librarian role produces useful checked results with measured runtime identity | Local capability discovery and comparative trial pending |

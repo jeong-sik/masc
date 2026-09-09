@@ -36,6 +36,36 @@ class DirectoryEvidence(unittest.TestCase):
                 trace = listing_trace(value)
                 self.assertEqual(acceptance.directory_execution(trace)['completion'], trace[1])
 
+    def test_separate_calls_require_same_turn_and_cwd(self):
+        pwd = listing_trace({'argv': ['pwd']})
+        ls = listing_trace({'argv': ['ls', '-la']})
+        for event in ls:
+            event['tool_use_id'] = 'listing-tool'
+        result = json.loads(pwd[1]['tool_result'])
+        result['output'] = '/home/keeper/playground/imp\n'
+        pwd[1]['tool_result'] = json.dumps(result)
+        result = json.loads(ls[1]['tool_result'])
+        result['output'] = result['output'].split('\n', 1)[1]
+        ls[1]['tool_result'] = json.dumps(result)
+        proof = acceptance.directory_execution(pwd + ls)
+        self.assertEqual(proof['pwd']['completion'], pwd[1])
+        self.assertEqual(proof['listing']['completion'], ls[1])
+        for field in ('worker_run_id', 'session_id'):
+            mismatched = copy.deepcopy(ls)
+            for event in mismatched:
+                event[field] = 'another-turn'
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                acceptance.directory_execution(pwd + mismatched)
+        for field, value in [('cwd', '/tmp'), ('via', 'host'),
+                             ('status', dict(kind='exit', code=1)),
+                             ('output_completeness', 'truncated')]:
+            mismatched = copy.deepcopy(ls)
+            result = json.loads(mismatched[1]['tool_result'])
+            result[field] = value
+            mismatched[1]['tool_result'] = json.dumps(result)
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                acceptance.directory_execution(pwd + mismatched)
+
     def test_nonlisting_or_arbitrary_argv_rejected(self):
         for value in ({'script': 'pwd'}, {'script': 'ls -la'},
                       {'argv': ['echo', 'pwd; ls -la']},

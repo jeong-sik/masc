@@ -16479,7 +16479,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()

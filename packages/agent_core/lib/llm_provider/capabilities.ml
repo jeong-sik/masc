@@ -1121,22 +1121,7 @@ let apply_declarative_capability_overrides overrides =
           with
           | Some efforts -> Some efforts
           | None -> base.accepted_reasoning_efforts)
-       (* Nothing declared here, so the value is the base's. A base can carry
-          an effort ladder that a row using it deliberately turns off:
-          [[providers]] ollama_cloud's /v1 base sets the five-step ladder, and
-          eleven rows on it declare [supports_reasoning = false] without
-          naming efforts, because they never had to -- the assembly used to
-          clear the field afterwards. #34743 removed that step, correctly:
-          it also erased efforts a row had declared for itself, which is what
-          made Backend_gemini refuse its own models.
-
-          This is the half that only reads inherited values. A row that says
-          it does not reason does not inherit a ladder; a row that declares
-          efforts keeps them, whatever else it says. *)
-       | None ->
-         if overrides.supports_reasoning = Some false
-         then None
-         else base.accepted_reasoning_efforts)
+       | None -> base.accepted_reasoning_efforts)
   ; supports_response_format_json =
       override_bool
         base.supports_response_format_json

@@ -95,6 +95,10 @@ mkdir -p "$stage" "$prefix" "$base"
 for a in "${ASSETS[@]}"; do
   cp "$BIN_DIR/$a" "$stage/$a"
 done
+# The installer uses this helper for workspace preflight even with --no-wizard.
+# Release assembly adds it from the checkout, rather than from platform dist/.
+cp "$REPO_ROOT/scripts/install-runtime-setup.py" "$stage/install-runtime-setup.py"
+ASSETS+=("install-runtime-setup.py")
 sha_tool() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 ( cd "$stage" && sha_tool "${ASSETS[@]}" > SHA256SUMS )
 

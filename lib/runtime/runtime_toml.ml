@@ -813,7 +813,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
   let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
-  let b_opt key = typed_find "a boolean" path tbl key Otoml.get_boolean in
   let reasoning_streaming_format_result =
     match typed_find "a string" path tbl "reasoning-streaming-format" Otoml.get_string with
     | Error errors -> Error errors

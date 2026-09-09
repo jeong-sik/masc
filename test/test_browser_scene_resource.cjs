@@ -27,7 +27,7 @@ function fixture() {
     innerWidth:800, innerHeight:600, scrollX:0, scrollY:0,
     getComputedStyle:() => style, HTMLInputElement:class {}, HTMLTextAreaElement:class {},
     // Model insecure-context WebCrypto: getRandomValues exists, randomUUID does not.
-    crypto:{getRandomValues:array => webcrypto.getRandomValues(array)}, TextEncoder});
+    crypto:{getRandomValues:array => webcrypto.getRandomValues(array)}, TextEncoder, URL});
   vm.runInContext(source, context);
   return {document, style, link, context,
     read:() => vm.runInContext("browserScene({mode:'read',maxChars:1})", context)};
@@ -62,7 +62,7 @@ for (let revision=0;revision<100;revision++) {
   recycled.link.href='http://example.test/revision/'+revision;
   recycled.read();
 }
-const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v2')]",recycled.context);
+const registry=vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v3')]",recycled.context);
 assert.equal(registry.nodes.size,1,'connected recycled anchor retains only its latest reference');
 assert.equal(registry.links.size,1,'superseded href pins are retired');
 assert.throws(() => vm.runInContext('browserScene(reference)',recycled.context), /scene_node_detached/);

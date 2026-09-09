@@ -123,3 +123,8 @@ lib/exec_shim/exec_shim.ml
 # this exemption is wider than the four functions that earn it. Splitting the
 # subcommands into their own module is the fix; see the follow-up issue.
 lib/keeper/keeper_github_identity.ml
+
+# setup reports incompatible workspace state as JSON directly to the calling
+# terminal before any server or log sink starts. Routing this command output
+# through server logging would hide the read-only preflight result.
+bin/masc_cli_setup.ml

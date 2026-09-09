@@ -35,7 +35,7 @@ let workspace_preflight ~base_path =
   let base_path = preflight_base_path base_path in
   let root = Filename.concat base_path Common.masc_dirname in
   let check path validate =
-    let present = try ignore (Unix.lstat path); Ok true with
+    let present = try let (_ : Unix.stats) = Unix.lstat path in Ok true with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
       | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error) in
     match present with

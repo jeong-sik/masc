@@ -446,7 +446,12 @@ blocking_pr_lints() {
 }
 
 advisory_lints() {
-  # The two that stay here, with the number that keeps them here. Both have an
+  # Text spans cannot establish OCaml binding reachability: ;; is optional,
+  # so a production caller may be inside a guessed inline-test span. Keep
+  # candidates visible without using them as a merge rejection authority.
+  run_lint "Inline-test-only candidates (advisory)" \
+    python3 scripts/ci/check-inline-test-only-values.py
+  # The two other checks that stay here, with the number that keeps them here. Both have an
   # enforcing mode and both are red in it, so "advisory" is not a policy choice
   # about their subject -- it is where they sit until the count comes down.
   #

@@ -214,6 +214,8 @@ let state_of_yojson = function
   | json ->
       Error ("goal_verification.state_of_yojson: " ^ Yojson.Safe.to_string json)
 
+let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
+
 (* {1 Persistence} *)
 
 let verifications_path config =

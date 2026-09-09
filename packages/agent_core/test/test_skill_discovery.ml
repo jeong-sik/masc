@@ -64,7 +64,7 @@ let test_registry_does_not_inject_prompt () =
   let skill = make_skill "discovery-only" "This is metadata content." in
   Skill_registry.register reg skill;
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_skill_registry reg
     |> Builder.build_safe
@@ -98,7 +98,7 @@ let test_contract_skill_injects_prompt () =
   @@ fun net ->
   let skill = make_skill "runtime-skill" "Apply this rule at runtime." in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_skill skill
     |> Builder.build_safe
@@ -127,7 +127,7 @@ let test_with_skills_batch_injects_prompt () =
   let s1 = make_skill "skill-a" "Content A." in
   let s2 = make_skill "skill-b" "Content B." in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base."
     |> Builder.with_skills [ s1; s2 ]
     |> Builder.build_safe
@@ -157,7 +157,7 @@ let test_both_paths_coexist () =
   let reg = Skill_registry.create () in
   Skill_registry.register reg (make_skill "catalog" "Catalog description.");
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_skill runtime_skill
     |> Builder.with_skill_registry reg
@@ -200,7 +200,7 @@ let test_registry_only_preserves_base_prompt () =
   let reg = Skill_registry.create () in
   Skill_registry.register reg (make_skill "meta" "Should not leak.");
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
+    Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Exactly this."
     |> Builder.with_skill_registry reg
     |> Builder.build_safe

@@ -2827,52 +2827,6 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
 
-let set_first_run_runtime ?runtime_config_path ~runtime_id () =
-  let runtime_id = String.trim runtime_id in
-  if String.equal runtime_id "" || contains_newline runtime_id
-  then Error "runtime_id must be non-empty and must not contain newlines"
-  else
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let* config =
-          Runtime_toml.parse_string content
-          |> Result.map_error runtime_parse_errors_to_string
-        in
-        let runtimes, _ = partition_bindings config config.bindings in
-        let* runtime =
-          match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
-          | Some runtime -> Ok runtime
-          | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
-        in
-        let slots, cli_slots =
-          match runtime.execution with
-          | Runtime_execution.Agent_core _ -> [ runtime_id ], []
-          | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _
-          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
-        in
-        let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
-        let next =
-          List.fold_left
-            (fun content lane_id ->
-              let path = "runtime.exact_output_lanes." ^ lane_id in
-              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
-              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
-            next
-            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
-        in
-        commit_runtime_config_text ~path next)
-    in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt)
-;;
-
-let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
-  set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
-;;
-
 (* [\[runtime.lanes."<id>"\]] is written by table path, not by the [\[runtime\]]
    array writer above: the candidates live in their own table, one per lane.
 
@@ -2892,6 +2846,74 @@ let lane_table_path lane_id =
   else
     (* [escape_string] escapes the contents; the quotes are the caller's. *)
     Printf.sprintf "runtime.lanes.\"%s\"" (Toml_line_editor.escape_string lane_id)
+;;
+
+let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
+  let runtime_id = String.trim runtime_id in
+  let candidate_ids = runtime_id :: List.map String.trim fallback_runtime_ids in
+  if String.equal runtime_id "" || contains_newline runtime_id
+  then Error "runtime_id must be non-empty and must not contain newlines"
+  else if List.exists (fun id -> String.equal id "" || contains_newline id) candidate_ids
+  then Error "fallback runtime IDs must be non-empty and must not contain newlines"
+  else if List.length (List.sort_uniq String.compare candidate_ids) <> List.length candidate_ids
+  then Error "primary and fallback runtime IDs must be distinct"
+  else
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let* config =
+          Runtime_toml.parse_string content
+          |> Result.map_error runtime_parse_errors_to_string
+        in
+        let runtimes, _ = partition_bindings config config.bindings in
+        let* runtime =
+          match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+          | Some runtime -> Ok runtime
+          | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
+        in
+        let* () =
+          List.fold_left
+            (fun result id ->
+              let* () = result in
+              if List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
+              then Ok ()
+              else Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" id))
+            (Ok ()) candidate_ids
+        in
+        let slots, cli_slots =
+          match runtime.execution with
+          | Runtime_execution.Agent_core _ -> [ runtime_id ], []
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
+        in
+        let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+        let next =
+          Toml_line_editor.edit_table_multiline_array next
+            ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids
+        in
+        let next =
+          if bind_imp then update_runtime_assignment_text next ~keeper_name:"imp" ~runtime_id
+          else next
+        in
+        let next =
+          List.fold_left
+            (fun content lane_id ->
+              let path = "runtime.exact_output_lanes." ^ lane_id in
+              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
+              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
+            next
+            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+        in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt)
+;;
+
+let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
+  set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
 let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =

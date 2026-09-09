@@ -1322,7 +1322,7 @@ let runtime_default_id =
   let doc = "Concrete runtime id to write into [runtime].default" in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
 
-let runtime_default_set_cmd_exit base_path runtime_id setup_lanes =
+let runtime_default_set_cmd_exit base_path runtime_id setup_lanes fallback_runtime_ids bind_imp =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   let result =
     try
@@ -1337,8 +1337,12 @@ let runtime_default_set_cmd_exit base_path runtime_id setup_lanes =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
           ~config_root:(Filename.dirname runtime_config_path) ()
       in
-      (if setup_lanes then Runtime.set_first_run_runtime else Runtime.set_runtime_default)
-        ~runtime_config_path ~runtime_id ()
+      if setup_lanes then
+        Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
+      else if bind_imp then Error "--setup-imp requires --setup-lanes"
+      else if fallback_runtime_ids <> [] then
+        Error "--fallback-runtime requires --setup-lanes"
+      else Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
     with Env_config_core.Config_error message -> Error message
   in
   match result with
@@ -1357,8 +1361,12 @@ let runtime_default_set_cmd =
   in
   let info = Cmd.info "runtime-default-set" ~doc in
   let setup_lanes = Arg.(value & flag & info ["setup-lanes"]
-    ~doc:"Use this runtime for the default and internal model lanes in a single-provider workspace.") in
-  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id $ setup_lanes)
+    ~doc:"Use this primary runtime for the default and internal model lanes; persist selected fallbacks in its declared lane.") in
+  let fallback_runtime_ids = Arg.(value & opt_all string [] & info ["fallback-runtime"]
+    ~docv:"RUNTIME_ID" ~doc:"Append an enabled runtime to the primary lane in option order. Requires --setup-lanes; internal exact-output lanes stay primary-only.") in
+  let bind_imp = Arg.(value & flag & info ["setup-imp"]
+    ~doc:"Explicitly select this primary lane for imp, preserving other Keeper assignments. Requires --setup-lanes.") in
+  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id $ setup_lanes $ fallback_runtime_ids $ bind_imp)
 
 let runtime_wizard_field ~field value =
   if String.exists (Char.equal '\000') value
@@ -1630,8 +1638,9 @@ let runtime_probe_cmd_exit base_path runtime_id =
                with
                | Ok sub ->
                    Printf.printf
-                     "authenticated auth_method=%s subscription_type=%s\n"
-                     sub.auth_method sub.subscription_type;
+                     "configured authentication=%s api_provider=%s\n"
+                     (Runtime_claude_code.authentication_to_string sub.authentication)
+                     (Runtime_claude_code.api_provider_to_string sub.api_provider);
                    0
                | Error e ->
                    print_string "not-authenticated\n";
@@ -1658,8 +1667,8 @@ let runtime_probe_cmd_exit base_path runtime_id =
                    config
                with
                | Ok result ->
-                   Printf.printf "authenticated subscription_type=%s\n"
-                     result.subscription.plan_type;
+                   Printf.printf "configured authentication=%s\n"
+                     (Runtime_codex_app_server.authentication_to_string result.subscription);
                    0
                | Error e ->
                    print_string "not-authenticated\n";

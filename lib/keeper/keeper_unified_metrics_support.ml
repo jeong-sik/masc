@@ -169,17 +169,6 @@ let record_turn_latency_by_model_bucket
       ; ("bucket", bucket)
       ]
     ()
-
-
-(* cost_usd is the provider's authoritative observation. Preserve every
-   reported value verbatim, including zero and invalid negative values, so the
-   anomaly remains diagnosable instead of being silently rewritten. Missing is
-   represented by the existing 0.0 aggregate identity. *)
-let estimate_usage_cost_usd usage =
-  match usage.Agent_core.Types.cost_usd with
-  | Some cost -> cost
-  | None -> 0.0
-
 let usage_trust_to_string = Keeper_usage_trust.to_string
 
 let usage_trust_reasons = Keeper_usage_trust.reasons

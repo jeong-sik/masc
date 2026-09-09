@@ -90,7 +90,7 @@ let test_builder_initial_messages () =
   @@ fun env ->
   let history = [ msg User "hi"; msg Assistant "hello" ] in
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_initial_messages history
     |> Builder.build_safe
     |> Result.get_ok

@@ -37,8 +37,6 @@ val get_int_opt : Yojson.Safe.t -> string -> int option
 
 val get_float_opt : Yojson.Safe.t -> string -> float option
 
-val get_bool_opt : Yojson.Safe.t -> string -> bool option
-
 val get_string_list : Yojson.Safe.t -> string -> string list
 
 (** {1 Machine-readable error codes}

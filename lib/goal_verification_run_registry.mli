@@ -84,3 +84,6 @@ val max_completed_retained : int
 val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
 (** Deployment-time store cut for {!storage_filename}. See
     {!Run_registry_core.Make.cut_replay_log}. *)
+
+val validate_event_json : Yojson.Safe.t -> (unit, string) result
+(** Validate one stored event without replay, compaction or writes. *)

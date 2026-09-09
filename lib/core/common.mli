@@ -78,7 +78,6 @@ type keeper_runtime_store =
   | Keeper_crash_events
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
-val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_stores : keeper_runtime_store list
 

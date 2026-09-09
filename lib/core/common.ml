@@ -147,12 +147,6 @@ let keeper_runtime_store_placement = function
   | Keeper_reaction_ledger -> Keeper_scoped_versioned
   | Keeper_runtime_manifests -> Keeper_scoped_rotated
   | Keeper_tool_usage | Keeper_trajectories -> Workspace_scoped
-
-let keeper_runtime_store_of_dirname name =
-  List.find_opt
-    (fun store -> String.equal name (keeper_runtime_store_dirname store))
-    keeper_runtime_stores
-
 let auth_dir_from_base_path ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) "auth"
 

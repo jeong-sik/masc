@@ -5,6 +5,8 @@
     [config/tools/*.toml] -- one producer against a snapshot of itself, so the
     only thing it could report was that someone edited a sentence. Those cases
     are gone; every case that stays reads the published value. *)
+
+open Alcotest
 (* Each pair binds a name to the value the module exposes under it, so a value
    repointed at another declaration -- or two values swapped -- fails here. A
    lookup that went to the file, or to the name the loaded schema carries,

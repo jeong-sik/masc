@@ -5,6 +5,8 @@
     [config/tools/*.toml] -- one producer against a snapshot of itself, so the
     only thing it could report was that someone edited a sentence. Those cases
     are gone; every case that stays reads the published value. *)
+
+open Alcotest
 (* name, description, input_schema (keys sorted) *)
 let expected =
   [ ( {|masc_agent_fitness|}

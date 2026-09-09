@@ -24,14 +24,18 @@ let accept_no_progress_should_try_next error =
 (* Access is a property of this candidate's provider/model binding. A different
    declared candidate can serve the request. This is not a retry of the same
    credential: the driver still requires its caller and effect-disposition
-   authorities before advancing to the next candidate. *)
+   authorities before advancing to the next candidate. A 402 is the same
+   kind of fact about the binding's account (RFC-0440 §3): it cannot pay, so
+   the walk moves on; [Error_domain.is_retryable] still refuses a retry of the
+   same candidate, and the quota window records the exhaustion. *)
 let candidate_access_should_try_next = function
   | Agent_core.Error.Api
-      (Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _)
+      ( Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _
+      | Agent_core.Retry.PaymentRequired _ )
     -> true
   | Agent_core.Error.Api
       ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
-      | Agent_core.Retry.ServerError _ | Agent_core.Retry.PaymentRequired _
+      | Agent_core.Retry.ServerError _
       | Agent_core.Retry.InvalidRequest _ | Agent_core.Retry.NotFound _
       | Agent_core.Retry.ContextOverflow _ | Agent_core.Retry.InputCapacity _
       | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Timeout _ )

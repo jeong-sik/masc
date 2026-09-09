@@ -745,6 +745,64 @@ supports-image-input = true
     check string "an empty lane reaches media_failover" "fixture.c"
       (target ~lane:[]))
 
+(* RFC-0440 — the media walk keeps only the candidates that take every
+   modality the run requires, in candidate order; a text run has no walk. *)
+let test_media_walk_holds_only_capable_candidates () =
+  let fixture =
+    {|[runtime]
+default = "fixture.vision"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.vision]
+api-name = "vision"
+max-context = 4096
+[models.vision.capabilities]
+supports-image-input = true
+[fixture.vision]
+|}
+  in
+  let path = Filename.temp_file "media-walk-" ".toml" in
+  let channel = open_out_bin path in
+  output_string channel fixture;
+  close_out channel;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let native =
+      match Runtime.load_list ~config_path:path with
+      | Ok (_, runtime, _, _, _) -> runtime
+      | Error error -> fail error
+    in
+    let vision id = { native with Runtime.id } in
+    let text id =
+      { native with
+        Runtime.id
+      ; model = { native.Runtime.model with Runtime_schema.capabilities = None }
+      }
+    in
+    let candidates =
+      [ text "fixture.t1"; vision "fixture.a"; text "fixture.t2"; vision "fixture.b" ]
+    in
+    let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+    let image =
+      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    in
+    check (list string)
+      "an image run walks the image-capable candidates in order"
+      [ "fixture.a"; "fixture.b" ]
+      (ids (Runtime_agent.media_walk ~candidates [ image ]));
+    check (list string)
+      "history media counts as required"
+      [ "fixture.a"; "fixture.b" ]
+      (ids
+         (Runtime_agent.media_walk ~candidates
+            ~initial_messages:
+              [ message_with_blocks [ image ] ]
+            [ Agent_core.Types.Text "follow-up" ]));
+    check (list string)
+      "a text run has no media walk"
+      []
+      (ids (Runtime_agent.media_walk ~candidates [ Agent_core.Types.Text "hi" ])))
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -753,6 +811,8 @@ let () =
             test_official_transport_caps_override_model_media_declarations
         ; test_case "media candidates: lane, media_failover, rest, deduped" `Quick
             test_media_candidates_order_dedupe_and_reroute
+        ; test_case "media walk: capable candidates only, none for text" `Quick
+            test_media_walk_holds_only_capable_candidates
         ; test_case "image on capable no reroute" `Quick
             test_image_turn_on_capable_no_reroute
         ; test_case "reroute to first capable" `Quick

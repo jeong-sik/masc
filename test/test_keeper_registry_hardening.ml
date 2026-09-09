@@ -607,6 +607,28 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config dir in
        ignore (Masc.Workspace.init config ~agent_name:(Some "external"));
+       let transition_task task_id action =
+         let submitted = Masc.Workspace.transition_task_r config
+           ~agent_name:"external" ~task_id ~action
+           ~reason:"Exercise terminal hook delivery after an explicit cancellation"
+           ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
+             Masc.Verification_protocol.create_submit_request
+               ~config ~task ~assignee ~verification_id ~claim)
+           () in
+         match submitted, action with
+         | Error _, _ -> submitted
+         | Ok _, Masc_domain.Cancel ->
+           let task = Masc.Workspace.get_tasks_raw config
+             |> List.find (fun (task : Masc_domain.task) -> String.equal task.id task_id) in
+           (match task.task_status with
+            | Masc_domain.AwaitingVerification { verification_id; intent = Masc_domain.Cancel_task; _ } ->
+              Masc.Workspace.commit_verdict_r config
+                ~authority:(Masc_domain.Human_operator { operator_id = "fixture-operator" })
+                ~verdict:Masc_domain.Verdict_approved ~task_id ~verification_id ()
+              |> Result.map (fun _ -> "operator cancellation committed")
+            | _ -> fail "cancellation did not persist an operator-review request")
+         | Ok _, _ -> submitted
+       in
        let terminal_with hook title =
          Atomic.set Workspace_hooks.task_terminal_committed_fn hook;
          ignore
@@ -624,15 +646,7 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
            | Some task -> task.id
            | None -> fail "newly added hook-degradation Task was not persisted"
          in
-         let transition action =
-           Masc.Workspace.transition_task_r
-             config
-             ~agent_name:"external"
-             ~task_id
-             ~action
-           ~reason:"Exercise terminal hook delivery after an explicit cancellation"
-             ()
-         in
+         let transition action = transition_task task_id action in
          (match transition Masc_domain.Claim with
           | Ok _ -> ()
           | Error error -> fail (Masc_domain.masc_error_to_string error));
@@ -677,15 +691,7 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
          |> List.find (fun (task : Masc_domain.task) ->
               String.equal task.title cancellation_title)
        in
-       let transition action =
-         Masc.Workspace.transition_task_r
-           config
-           ~agent_name:"external"
-           ~task_id:cancellation_task.id
-           ~action
-           ~reason:"Exercise terminal hook delivery after an explicit cancellation"
-           ()
-       in
+       let transition action = transition_task cancellation_task.id action in
        (match transition Masc_domain.Claim with
         | Ok _ -> ()
         | Error error -> fail (Masc_domain.masc_error_to_string error));

@@ -153,10 +153,10 @@ function browserScene(args) {
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
   }
-  // Some applications expose no visible landmarks. Their independently
-  // scrollable panes still provide observed, resolvable collection scopes.
-  // Use these only when the semantic outline is empty, never all divs.
-  if (view === 'regions' && root && !nodes.length && !truncated) {
+  // Landmarks and scrollable panes are independent observed properties.
+  // A site instruction chooses the relevant scope; a header must not hide
+  // an unrelated message pane from the observation.
+  if (view === 'regions' && root && !truncated) {
     for (const element of [root,...root.querySelectorAll('*')]) {
       if (truncated) break;
       if (!visible(element)) continue;
@@ -171,7 +171,9 @@ function browserScene(args) {
       const heading = element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
       const name = element.getAttribute('aria-label') || heading?.textContent
         || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
-      describe('region',element,name,rects,{role:'scroll-area'});
+      // The same element may already be a landmark: keep one reference.
+      const existing = nodes.find(node => node.nodeId === state.ids.get(element));
+      if (!existing) describe('region',element,name,rects,{role:'scroll-area'});
     }
   }
   const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];

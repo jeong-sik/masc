@@ -141,7 +141,7 @@ try:
  check('scroll-area reference resolves to channel body',any(n['text']=='Channel body' for n in selected['nodes']))
  js("document.body.insertAdjacentHTML('afterbegin','<main>Semantic body</main>');")
  preferred=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
- check('semantic landmarks take precedence over overflow fallback',len(preferred['nodes'])==1 and preferred['nodes'][0]['tag']=='main')
+ check('landmarks do not suppress separate scroll scopes',len(preferred['nodes'])==2 and any(n['tag']=='main' for n in preferred['nodes']) and any(n['text']=='Messages' for n in preferred['nodes']))
  js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
  landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
  check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)

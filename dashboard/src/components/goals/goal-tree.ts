@@ -1,6 +1,7 @@
 // Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
 import { html } from 'htm/preact'
+import { GoalConfirmationPanel } from './goal-confirmation'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
@@ -905,6 +906,10 @@ function GoalDetailPanel({
 
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
+      ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`
+        <${GoalConfirmationPanel} key=${selectedNode.id} goalId=${selectedNode.id}
+          onConfirmed=${() => { void Promise.all([refreshGoalDetail(selectedNode.id), refreshTree()]) }} />` : null}
+
 
       <${DetailTabs} active=${activeTab} />
 

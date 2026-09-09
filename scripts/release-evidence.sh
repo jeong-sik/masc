@@ -437,6 +437,40 @@ project_snapshot_keys = sorted(project_snapshot.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+
+# The matrix is rendered here from the bundle this script already loaded, not
+# read back out of the scratch directory. The receipt is the only thing that
+# outlives the run -- every capture beside it is removed on exit -- so a row
+# that lives in a deleted file is a row the reader cannot check.
+def markdown_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def lifecycle_matrix(bundle):
+    scenarios = bundle.get("scenarios", [])
+    if not scenarios:
+        return "No scenario rows were recorded in the lifecycle bundle."
+    rows = [
+        "| ID | Scenario | Status | Authority transition | User outcome |",
+        "|---|---|---|---|---|",
+    ]
+    for row in scenarios:
+        rows.append(
+            "| "
+            + " | ".join(
+                markdown_cell(row.get(field, "<missing>"))
+                for field in (
+                    "id",
+                    "name",
+                    "status",
+                    "authority_transition",
+                    "user_outcome",
+                )
+            )
+            + " |"
+        )
+    return "\n".join(rows)
+
 md = f"""# Release Evidence Bundle
 
 - Generated at: `{generated_at}`
@@ -482,17 +516,18 @@ md = f"""# Release Evidence Bundle
 - Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
 - Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
 - Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
+- Verification: source SHA, scenario results, log digests, and correlation bundle were verified before this receipt was rendered.
 
 ### Verified lifecycle matrix
 
-{pathlib.Path(lifecycle_bundle_md).read_text(encoding="utf-8")}
+{lifecycle_matrix(lifecycle)}
 
 ## Capture Retention
 
 Raw HTTP captures, authentication material, server logs, and lifecycle bundle
-files stay in private temporary storage and are removed when this command
-exits. They are not release attachments. The verified lifecycle matrix above
-is embedded in this report and is the only capture it retains.
+files remain in private temporary storage and are removed on exit. They are
+not release attachments. The verified lifecycle matrix above is rendered into
+this report and is the only capture it retains.
 
 ## Re-run
 

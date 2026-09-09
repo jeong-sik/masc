@@ -22,19 +22,21 @@ let test_click_then_regions ~fail_click ~fail_read () =
       calls := !calls @ [node.Plan.tool_name];
       let result = match node.tool_name with
         | "BrowserInteract" ->
-            check bool "click uses the observed document and link" true
-              (Yojson.Safe.Util.member "documentId" input=`String "observed"
+            check bool "follow uses the observed document and link" true
+              (Yojson.Safe.Util.member "action" input=`String "follow_link"
+               && Yojson.Safe.Util.member "documentId" input=`String "observed"
                && Yojson.Safe.Util.member "nodeId" input=`String "link");
             if fail_click then Tool_result.make_err ~tool_name:node.tool_name
               ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
             else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
               ~data:(`Assoc ["tabId",`Int 7;"url",`String "https://example.org/after";
-                "urlBefore",`String "https://example.org/before";"action",`String "click"]) ()
+                "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "click"]) ()
         | "BrowserRead" ->
             check bool "follow-up reads regions on the pinned tab and client" true
               (Yojson.Safe.Util.member "tabId" input=`Int 7
                && Yojson.Safe.Util.member "clientId" input=Yojson.Safe.Util.member "clientId" args
-               && Yojson.Safe.Util.member "mode" input=`String "regions");
+               && Yojson.Safe.Util.member "mode" input=`String "regions"
+               && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/after");
             if fail_read then Tool_result.make_err ~tool_name:node.tool_name
               ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "region observation unavailable"
             else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0

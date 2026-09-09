@@ -39,6 +39,12 @@ let parse = function
       let* value = required key in
       parser value in
     let* action = match List.assoc_opt "action" fields with
+      | Some (`String "follow_link") ->
+        let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
+        let* target = node_target () in
+        (match target with Some target -> Ok (Browser_lane.Follow_link target)
+         | None -> Error "follow_link requires an observed documentId/nodeId")
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
         let* target = node_target () in
@@ -74,7 +80,7 @@ let parse = function
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be click, fill, scroll, click_at, scroll_at or drag" in
+      | _ -> Error "action must be click, follow_link, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -91,6 +97,25 @@ let script = {js|function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
+  if (args.action === "follow_link") {
+    const element = browserScene({...args,mode:'resolve'});
+    if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
+      throw new Error('follow_link_requires_anchor');
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
+      throw new Error('element_not_visible');
+    const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
+    if (target !== '' && target.toLowerCase() !== '_self') throw new Error('follow_link_requires_same_tab');
+    if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
+    const destination = new URL(element.href, location.href);
+    if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
+    const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      title:document.title,scrollX:scrollX,scrollY:scrollY};
+    // Follow the observed href directly: page click handlers cannot redirect
+    // this primitive into window.open or an unrelated application action.
+    location.assign(destination.href);
+    return result;
+  }
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;

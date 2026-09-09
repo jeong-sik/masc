@@ -155,6 +155,20 @@ let test_scoped_scene_acknowledgement () =
       let scope : Browser_lane.node_ref = {document_id="fixture";node_id="region"} in
       let read () = Masc.Browser_scene.read ~scope (request (Some 7)) ~max_chars:1000 in
       check bool "exact scoped scene accepted" true (Result.is_ok (read ()));
+      check bool "delayed navigation cannot return old URL as destination" true
+        (Result.is_error (Masc.Browser_scene.read ~expected_url:"https://example.org/destination"
+          (request (Some 7)) ~max_chars:1000));
+      check bool "matching SPA URL is observable without new document or content readiness claim" true
+        (Result.is_ok (Masc.Browser_scene.read ~expected_url:"https://example.org"
+          (request (Some 7)) ~max_chars:1000));
+      let guarded_tool url = Masc.Tool_misc_browser_lane.handle_read
+        ~tool_name:"BrowserRead" ~start_time:0.
+        (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
+          "expectedUrl",`String url]) in
+      check bool "tool surface accepts matching destination guard" true
+        (match guarded_tool "https://example.org" with Tool_result.Completed _ -> true | _ -> false);
+      check bool "tool surface rejects old URL" true
+        (match guarded_tool "https://example.org/destination" with Tool_result.Failed _ -> true | _ -> false);
       ignores_scope := true;
       check bool "connector ignoring scope must fail rather than return whole page" true (Result.is_error (read ()));
       check bool "connector ignoring region view must fail" true

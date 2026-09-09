@@ -1,29 +1,28 @@
 ---
 name: browser-live-click-regions
-description: Click an already observed live Browser Lane link and return the resulting page regions in one ordered composition. Use after choosing a specific navigation target.
+description: Follow an observed same-tab HTTP(S) link, then read URL-guarded regions in one ordered composition. Use after choosing a specific navigation target.
 ---
 
-Use this composition after `browser-lanes` and the site's instruction Skill have
-identified the exact link to follow. Pass the observed client, tab, document,
-node, and current URL. This performs a click: loading the Skill does not itself
-select a destination or authorize unrelated effects.
+Invoke `keeper_compose_browser-live-click-regions` from the tool catalog with
+an observed same-tab HTTP(S) anchor reference. This callable composition is not
+an instruction available through keeper_skill.
 
-The click runs once. On success, its returned tabId feeds the read node, which
-lists semantic regions currently observed in that tab. If the click fails, no read is dispatched.
-Inspect both receipts and choose the actual content region with the site Skill;
-then use BrowserRead mode=scene with its documentId/nodeId as scope. Do not reuse
-the previous page's region reference after navigation or guess a region index.
+Follow_link validates the actual anchor target and href before navigating
+straight to that href in the pinned tab; it does not execute page click handlers.
+New-window targets, downloads and non-HTTP URLs are rejected before effects.
+The successor read requires the observed destinationUrl. An old URL returns a
+transition error while preserving the follow receipt: retry only BrowserRead
+mode=regions with that destinationUrl, never replay navigation due to read failure.
 
-This composition is for the live lane and requires its explicit clientId. For
-automation, use BrowserInteract and BrowserRead directly. A completed click is
-not proof that the page reached the requested channel; verify the resulting
-URL, region labels and channel content. Reload the region list if the selected
-node is replaced. Never replay a click solely because the following read failed.
+A matching URL is only a URL acknowledgement. Slack may still show the previous
+channel or loading content. Use slack-web instructions to verify channel title
+and actual messages; reobserve without navigation until evidence identifies the
+requested channel. This does not promise application readiness or complete history.
 
 ```toml composition
 [[compositions]]
 name = "browser-live-click-regions"
-description = "Click one observed live target, then read semantic regions currently observed in that tab."
+description = "Follow one observed same-tab anchor; return regions only at its intended URL. Matching URL still requires site-content verification."
 execution = "inline"
 
 [[compositions.params]]
@@ -97,7 +96,7 @@ value = "live"
 name = "action"
 [compositions.nodes.input.fields.value]
 kind = "literal"
-value = "click"
+value = "follow_link"
 
 [[compositions.nodes]]
 id = "regions"
@@ -130,4 +129,10 @@ name = "mode"
 [compositions.nodes.input.fields.value]
 kind = "literal"
 value = "regions"
+[[compositions.nodes.input.fields]]
+name = "expectedUrl"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "click"
+pointer = "/destinationUrl"
 ```

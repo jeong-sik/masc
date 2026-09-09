@@ -7,7 +7,7 @@ type t = { document_id : string; url : string; title : string; width : float; he
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
   view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
 val of_json : Yojson.Safe.t -> (t, string) result
-val read : ?view:Browser_lane.scene_view -> ?scope:Browser_lane.node_ref -> Browser_surface.request -> max_chars:int -> (Yojson.Safe.t, string) result
+val read : ?expected_url:string -> ?view:Browser_lane.scene_view -> ?scope:Browser_lane.node_ref -> Browser_surface.request -> max_chars:int -> (Yojson.Safe.t, string) result
 
 val scope_of_json : Yojson.Safe.t -> (Browser_lane.node_ref, string) result
 

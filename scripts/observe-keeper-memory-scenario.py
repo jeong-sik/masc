@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Sequential live scenario recorder; never treats observation delay as failure."""
 import argparse
+import hashlib
 import json
 import pathlib
 import time
@@ -10,6 +11,26 @@ import urllib.error
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+def bind_evidence(out, base_url, spec):
+    """Bind receipts before any network request; never adopt an unbound run."""
+    binding = {
+        'base_url': base_url.rstrip('/'),
+        'keeper': spec['keeper'],
+        'scenario_sha256': hashlib.sha256(json.dumps(
+            spec, ensure_ascii=False, sort_keys=True, separators=(',', ':')
+        ).encode()).hexdigest(),
+    }
+    manifest = out / 'scenario-binding.json'
+    if manifest.exists():
+        if json.loads(manifest.read_text()) != binding:
+            raise RuntimeError('evidence directory belongs to a different server, keeper, or scenario')
+        return
+    if any(out.iterdir()):
+        raise RuntimeError('existing evidence has no scenario binding; use a new evidence directory')
+    with manifest.open('x') as stream:
+        json.dump(binding, stream, ensure_ascii=False, indent=2)
+        stream.write('\n')
 
 def main():
     p = argparse.ArgumentParser()
@@ -21,6 +42,7 @@ def main():
     spec = json.loads(a.scenario.read_text())
     out = a.evidence_dir
     out.mkdir(parents=True, exist_ok=True)
+    bind_evidence(out, a.base_url, spec)
     headers = {'Authorization': 'Bearer ' + a.token_file.read_text().strip(),
                'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())

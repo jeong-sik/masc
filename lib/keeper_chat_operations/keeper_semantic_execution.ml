@@ -218,9 +218,11 @@ let apply ~now action current =
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Resume_runtime_retry observed ->
           (match current.phase with
-           | Recovering {origin = Runtime_retry expected; _}
-             when equal_runtime_retry expected observed -> unchanged Running
-           | Preparing | Ready | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
+           | Recovering {origin = Runtime_retry expected; _} ->
+             if equal_runtime_retry expected observed then unchanged Running else reject ()
+           | Recovering {origin = (Checkpointed _ | Unconfirmed_sources
+               | Confirmed_undispatched | Interrupted_execution); _}
+           | Preparing | Ready | Running | Suspended _ | Settled _ -> reject ())
       | Require_reconciliation diagnostic ->
           if String.trim diagnostic = "" then reject ()
           else (match recovery_origin current.phase with

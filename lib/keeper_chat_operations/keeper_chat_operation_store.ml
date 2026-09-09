@@ -1296,7 +1296,11 @@ let direct_execution_with_db db (operation : Operation.t) =
 
 let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation
-  | Some _ | None -> None
+  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
+      | Semantic.Suspended _ | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+          | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _ }
+  | None -> None
 ;;
 
 let direct_runtime_retry store ~operation_id =
@@ -1331,7 +1335,9 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
     match operation.state, pending_retry execution with
     | Operation.Queued, Some existing when String.equal operation.execution_digest execution_digest
         && Semantic.equal_runtime_retry existing continuation -> Ok operation
-    | _ -> Error (Integrity_error "direct continuation commit is not confirmed") in
+    | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
+       | Operation.Failed _ | Operation.Cancelled _), (Some _ | None) ->
+      Error (Integrity_error "direct continuation commit is not confirmed") in
   let result = with_transaction store (fun () ->
     let* operation = operation_or_unknown store.db operation_id in
     if not (String.equal operation.execution_digest execution_digest)
@@ -1361,7 +1367,8 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
   | Ok _ -> read_existing ()
   | Error (Store_unavailable _ as error) ->
     (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
-  | Error _ as error -> error
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
 ;;
 
 let resume_direct_runtime_retry store ~now ~operation_id ~observed =
@@ -1391,7 +1398,8 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
        (match semantic_get_with_db store.db expected.id with
         | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json expected -> Ok ()
         | Ok _ | Error _ -> Error error))
-  | Error _ as error -> error
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
 ;;
 
 let settle_direct_semantic_with_db db current command =
@@ -1506,10 +1514,12 @@ let settle_running_after_restart store ~now =
     let* running = with_statement store.db ~operation:"read interrupted direct operations"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
       (fun statement ->
-        let rec read acc = match Sqlite3.step statement with
-          | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-          | Sqlite3.Rc.ROW -> let* operation = decode_operation statement in read (operation :: acc)
-          | rc -> Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
+        let rec read acc =
+          let rc = Sqlite3.step statement in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then
+            let* operation = decode_operation statement in read (operation :: acc)
+          else Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
         read []) in
     let* () = List.fold_left (fun result operation ->
       let* () = result in

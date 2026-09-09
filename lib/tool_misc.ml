@@ -185,8 +185,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_act ->
       Some (Tool_misc_browser_lane.handle_act ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_slack_read ->
-      Some (Tool_misc_slack_lane.handle_read ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_msx_load ->
       Some
         (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
@@ -231,7 +229,6 @@ let is_read_only = function
      Browser_lane is this classification's source of truth. *)
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read
-  | Tool_schemas_misc.Misc_slack_read
   (* Reads the machine without moving its time. *)
   | Tool_schemas_misc.Misc_msx_screen -> true
   (* RAM introspection reads memory and moves nothing. *)

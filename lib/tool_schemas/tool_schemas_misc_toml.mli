@@ -14,7 +14,6 @@ val browser_goto : Masc_domain.tool_schema
 val browser_act : Masc_domain.tool_schema
 val browser_interact : Masc_domain.tool_schema
 
-val slack_read : Masc_domain.tool_schema
 
 (** MSX lane tools (RFC-0439 §3.5), read from config/tools/masc_msx_*.toml. *)
 val msx_load : Masc_domain.tool_schema

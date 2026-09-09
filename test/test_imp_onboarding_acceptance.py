@@ -27,7 +27,11 @@ def listing_trace(tool_input):
 
 class DirectoryEvidence(unittest.TestCase):
     def test_script_and_observed_shell_argv(self):
-        for value in ({'script': 'pwd; ls -la'}, {'argv': ['sh', '-lc', 'pwd; ls -la']}):
+        inputs = [{'script': 'pwd; ls -la'}] + [
+            {'argv': [shell, flag, 'pwd; ls -la']}
+            for shell in ('sh', 'bash', '/bin/sh', '/bin/bash')
+            for flag in ('-c', '-lc')]
+        for value in inputs:
             with self.subTest(value=value):
                 trace = listing_trace(value)
                 self.assertEqual(acceptance.directory_execution(trace)['completion'], trace[1])
@@ -35,6 +39,8 @@ class DirectoryEvidence(unittest.TestCase):
     def test_nonlisting_or_arbitrary_argv_rejected(self):
         for value in ({'script': 'pwd'}, {'script': 'ls -la'},
                       {'argv': ['echo', 'pwd; ls -la']},
+                      {'argv': ['sh', '-x', 'pwd; ls -la']},
+                      {'argv': ['env', 'sh', '-lc', 'pwd; ls -la']},
                       {'argv': ['sh', '-lc', 'pwd; ls -la', 'extra']},
                       {'argv': ['sh', '-lc', 'pwd; ls /tmp']},
                       {'argv': ['sh', '-lc', 'pwd | ls -la']}):

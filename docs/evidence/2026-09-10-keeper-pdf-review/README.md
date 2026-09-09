@@ -10,4 +10,4 @@ Final observed revision: PDF SHA-256 `74a24bed2977316e1ca028e91163ed890c303d02c1
 
 `task-verdict-rejected.json` is the actual system LLM Task verdict for submission `vrf-d14835a4b1f16ae763aef3f80d91e4ff`. It refers to the submitted PDF SHA prefix `163518c8`, not the independently reviewed v4 file `74a24bed`; the rejection and later visual review are separate observations.
 
-`rejection-delivery.log` records the actual first-verdict commit and automatic delivery/consumption of the rejection stimulus for the same Task and verification ID. This proves that notification path, not autonomous recovery completion: subsequent operator corrections also influenced the work, and the second submission still required further verification.
+`rejection-delivery.txt` records the actual first-verdict commit and automatic delivery/consumption of the rejection stimulus for the same Task and verification ID. This proves that notification path, not autonomous recovery completion: subsequent operator corrections also influenced the work, and the second submission still required further verification.

@@ -275,19 +275,7 @@ let%test "verdict_of_empty_completion: recognized non-overflow is Empty_attribut
 (** Extract a human-readable error message from a provider error body.
     Error prose remains diagnostic data only and is never classified. *)
 let extract_error_message (body : string) : string =
-  try
-    let json = Yojson.Safe.from_string body in
-    let open Yojson.Safe.Util in
-    match json |> member "error" with
-    | `String s -> s
-    | `Assoc _ as err ->
-      (match err |> member "message" with
-       | `String s -> s
-       | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> body)
-    | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> body
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Yojson.Safe.Util.Undefined _ ->
-    body
+  Option.value (Api_common.error_message_of_body body) ~default:body
 ;;
 
 (** A retry_after delay is usable only when it is finite and non-negative:

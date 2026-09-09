@@ -236,7 +236,7 @@ pin-depends: [
   ]
   [
     "ocaml-msx.dev"
-    "git+https://github.com/jeong-sik/ocaml-msx.git#3133d7c5bff436abf2e7c36ce2b7fa61333f7146"
+    "git+https://github.com/jeong-sik/ocaml-msx.git#870e61063e08ca4a0b15b939cb72a1c11aade1d3"
   ]
   [
   "ws-direct-core.0.1.0"

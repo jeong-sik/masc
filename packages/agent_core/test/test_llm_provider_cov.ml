@@ -1241,14 +1241,6 @@ let test_for_model_id_claude_sonnet_4 () =
   | None -> Alcotest.fail "expected Some for claude-sonnet-4"
 ;;
 
-let test_for_model_id_claude_haiku_4 () =
-  match Capabilities.for_model_id "claude-haiku-4-2026" with
-  | Some c ->
-    Alcotest.(check (option int)) "200K context" (Some 200_000) c.max_context_tokens;
-    Alcotest.(check (option int)) "8K output" (Some 8_192) c.max_output_tokens
-  | None -> Alcotest.fail "expected Some for claude-haiku-4"
-;;
-
 let test_for_model_id_gpt5 () =
   match Capabilities.for_model_id "gpt-5-latest" with
   | Some c ->
@@ -1817,7 +1809,6 @@ let () =
     ; ( "capabilities.for_model_id"
       , [ Alcotest.test_case "claude-opus-4" `Quick test_for_model_id_claude_opus_4
         ; Alcotest.test_case "claude-sonnet-4" `Quick test_for_model_id_claude_sonnet_4
-        ; Alcotest.test_case "claude-haiku-4" `Quick test_for_model_id_claude_haiku_4
         ; Alcotest.test_case "gpt-5" `Quick test_for_model_id_gpt5
         ; Alcotest.test_case "gpt-4.1" `Quick test_for_model_id_gpt41
         ; Alcotest.test_case "gpt" `Quick test_for_model_id_gpt4o

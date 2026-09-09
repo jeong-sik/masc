@@ -1335,8 +1335,18 @@ instructions = "Missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+(* The effective-prompt render inside [keeper_config_json] walks board
+   observation collection, which performs Eio effects — outside an Eio
+   main loop it dies with [Effect.Unhandled (Cancel.Get_context)] instead
+   of reaching the assertions. *)
+let within_eio f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
 let test_config_snapshot_exposes_sandbox_image () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
   let name = "image-config-snapshot" in
   write_file (Filename.concat keepers_dir (name ^ ".toml"))
     "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"example/documents:v1\"\ninstructions = \"image fixture\"\n";
@@ -1384,15 +1394,6 @@ instructions = "Missing sandbox profile"
     (match json_field "sources" json with
      | Some (`Assoc _) -> true
      | Some _ | None -> false)
-
-(* The effective-prompt render inside [keeper_config_json] walks board
-   observation collection, which performs Eio effects — outside an Eio
-   main loop it dies with [Effect.Unhandled (Cancel.Get_context)] instead
-   of reaching the assertions. *)
-let within_eio f =
-  Eio_main.run @@ fun env ->
-  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
-  f ()
 
 let test_config_snapshot_prompt_is_nested_only () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

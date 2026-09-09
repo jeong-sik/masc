@@ -107,9 +107,8 @@ let test_remote_endpoint_validation () =
   (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
      live layout uses — not the .masc root this fixture used to write to. *)
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
-  Unix.mkdir masc_dir 0o700;
   let config_dir = Filename.concat masc_dir "config" in
-  Unix.mkdir config_dir 0o700;
+  Fs_compat.mkdir_p config_dir;
   let runtime_path = Filename.concat config_dir "runtime.toml" in
   let oc = open_out_bin runtime_path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
@@ -1851,7 +1850,7 @@ let test_parse_rejects_unknown_keys () =
   check (list string) "known set is exactly the parse-consumed keys"
     (List.sort String.compare
        [ "name"; "runtime_id"; "activation_mode"; "mention_targets"
-       ; "max_context_override"; "sandbox_profile"
+       ; "max_context_override"; "sandbox_profile"; "sandbox_image"
        ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
        ; "instructions"
        ])
@@ -1905,7 +1904,8 @@ let test_sandbox_image_persistence () =
     | Ok defaults -> defaults.sandbox_image
     | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e) in
   check (option string) "image set on disk" (Some "registry.example/documents:v1")
-    (apply ["sandbox_image", `String "registry.example/documents:v1"]);
+    (apply ["instructions", `String "image fixture instructions";
+            "sandbox_image", `String "registry.example/documents:v1"]);
   check (option string) "omission retains image" (Some "registry.example/documents:v1")
     (apply ["instructions", `String "new instructions"]);
   check (option string) "image replacement materializes" (Some "registry.example/documents:v2")

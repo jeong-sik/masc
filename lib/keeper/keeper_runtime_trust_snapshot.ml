@@ -158,33 +158,22 @@ let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
            ?summary
            disposition)
 
-let receipt_ended_at_unix receipt =
-  match json_string_opt_member "ended_at" receipt with
-  | Some ended_at -> (
-      match Masc_domain.parse_iso8601_opt ended_at with
-      | Some ts when ts > 0.0 -> Some ts
-      | Some _ | None -> None)
-  | None -> None
-
-(* Receipt timestamps are serialized as whole-second ISO strings, while runtime
-   last-turn observations keep fractional seconds.  A same-second receipt must
-   still be allowed to explain the blocker; otherwise the runtime blocker
-   silently overrides its operator disposition. *)
-let runtime_blocker_receipt_timestamp_epsilon_sec = 1.0
+let belongs_to_current_turn ~meta ~turn_field record =
+  match json_string_opt_member "trace_id" record,
+        json_int_opt_member turn_field record with
+  | Some trace_id, Some turn_id ->
+    String.equal trace_id (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    && Int.equal turn_id meta.runtime.usage.total_turns
+  | _ -> false
 
 let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> false
-  | Some _ -> (
-    match latest_receipt with
-    | None -> true
-    | Some receipt -> (
-        match receipt_ended_at_unix receipt with
-        | Some receipt_ts ->
-          meta.runtime.usage.last_turn_ts
-          > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
-        | None -> meta.runtime.usage.last_turn_ts > 0.0))
+  | Some _ ->
+    not (Option.fold ~none:false
+           ~some:(belongs_to_current_turn ~meta ~turn_field:"turn_count")
+           latest_receipt)
 
 let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
     latest_receipt =
@@ -204,13 +193,20 @@ let runtime_blocker_timeline_ts ~observed_at_unix ~meta
 
 let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
     ~latest_receipt =
-  match Option.bind latest_decision terminal_reason_from_decision with
+  let current_decision =
+    Option.bind latest_decision (fun decision ->
+      if Option.is_none (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields)
+         || belongs_to_current_turn ~meta ~turn_field:"turn_id" decision
+      then terminal_reason_from_decision decision
+      else None)
+  in
+  match current_decision with
   | Some _ as value -> value
   | None ->
-      if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-           latest_receipt
-      then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
-      else Option.bind latest_receipt terminal_reason_from_receipt
+    if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+         latest_receipt
+    then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
+    else Option.bind latest_receipt terminal_reason_from_receipt
 
 let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
   let source_json, ts_unix_opt, reason_opt =

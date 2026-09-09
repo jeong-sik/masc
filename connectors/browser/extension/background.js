@@ -473,8 +473,18 @@ function interactInPage(args) {
 
 
 async function pageInteract(args) {
-  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  // Only this read-only preflight can establish that injection never began.
+  // A later executeScript rejection can lose a result after a page effect.
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+    const tab = await browser.tabs.get(args.tabId);
+    if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
+  } catch (cause) {
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = false;
+    throw error;
+  }
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",

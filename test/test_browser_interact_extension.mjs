@@ -34,7 +34,7 @@ const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Tex
   }},
 });
 const browser = {runtime: {connectNative: () => ({onMessage: {addListener() {}}, onDisconnect: {addListener() {}}, postMessage: value => replies.push(value)})},
-  tabs: {executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
+  tabs: {get:async id=>{assert.equal(id,7);if(closed)throw new Error('tab_closed');return {id,url:page.location.href};},executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
 const context = vm.createContext({browser, TextEncoder, setTimeout, clearTimeout});
 vm.runInContext(background, context);
 async function command(args) { context.command = {id: 'interaction-fixture', verb: 'page.interact', args}; await vm.runInContext('onHostMessage(command)', context); return replies.at(-1); }
@@ -159,3 +159,21 @@ const uncertain=await command(dispatchedFollow);
 assert.equal(uncertain.ok,false);
 assert.equal(uncertain.effectPhase,undefined,'failure after navigation starts must remain unknown');
 console.log('PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure');
+
+const originalGet=browser.tabs.get,originalExecute=browser.tabs.executeScript;
+const beforePreflight=executions;
+closed=true;
+assert.equal((await command({tabId:7,action:'click',selector:'#button'})).effectPhase,'not_started');
+closed=false;
+browser.tabs.get=async()=>({id:7,url:'https://example.org/changed'});
+assert.equal((await command({tabId:7,action:'click',selector:'#button',expectedUrl:'https://example.org/old'})).effectPhase,'not_started');
+assert.equal(executions,beforePreflight,'preflight rejection never calls injection');
+browser.tabs.get=originalGet;
+browser.tabs.executeScript=async(...args)=>{await originalExecute(...args);throw new Error('injection result lost');};
+const clicksBeforeLostReply=clicked;
+const lostReply=await command({tabId:7,action:'click',selector:'#button'});
+assert.equal(clicked,clicksBeforeLostReply+1,'page effect occurred before API rejection');
+assert.equal(lostReply.ok,false);
+assert.equal(lostReply.effectPhase,undefined,'API rejection alone cannot prove pre-effect');
+browser.tabs.executeScript=originalExecute;
+console.log('PASS: preflight rejection is pre-effect; applied script with lost API result remains unknown');

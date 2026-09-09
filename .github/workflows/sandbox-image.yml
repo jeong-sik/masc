@@ -7,6 +7,8 @@ on:
       - '.github/workflows/sandbox-image.yml'
       - 'lib/keeper_sandbox_image/**'
       - 'scripts/verify-sandbox-creative-tools.py'
+      - 'scripts/verify-sandbox-image-archive.py'
+      - 'scripts/tests/test_sandbox_image_archive.py'
 
 permissions:
   contents: read
@@ -27,6 +29,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify archive identity contract
+        run: python3 -m unittest discover -s scripts/tests -p test_sandbox_image_archive.py
       - name: Compile the embedded recipe printer
         run: |
           sudo apt-get update
@@ -59,26 +63,12 @@ jobs:
           IMAGE_ARCH: ${{ matrix.arch }}
         run: |
           docker save "$image_tag" | gzip > "$RUNNER_TEMP/sandbox-image/image.tar.gz"
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib, subprocess
-          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'sandbox-image'
-          image = json.loads((out / 'image-inspect.json').read_text())[0]
-          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          assert image['Architecture'] == os.environ['IMAGE_ARCH']
-          assert image['Config']['Labels']['org.opencontainers.image.revision'] == source
-          files = {}
-          for name in ['image.tar.gz', 'Dockerfile', 'proof/receipt.json']:
-              with (out / name).open('rb') as stream:
-                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-              files[name] = {'bytes': (out / name).stat().st_size, 'sha256': digest}
-          (out / 'manifest.json').write_text(json.dumps({
-              'source_commit': source, 'image_id': image['Id'],
-              'image_tag': os.environ['image_tag'], 'architecture': image['Architecture'],
-              'os': image['Os'], 'run_id': os.environ['GITHUB_RUN_ID'],
-              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
-              'creative_smoke': 'passed', 'files': files,
-          }, indent=2) + '\n')
-          PY
+          python3 scripts/verify-sandbox-image-archive.py \
+            --artifact-dir "$RUNNER_TEMP/sandbox-image" \
+            --expected-commit "$(git rev-parse HEAD)" --architecture "$IMAGE_ARCH" \
+            --image-tag "$image_tag" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/sandbox-image/manifest.json"
       - uses: actions/upload-artifact@v7
         with:
           name: keeper-sandbox-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}

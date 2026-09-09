@@ -22,8 +22,8 @@ val json_of_string_or_raw : string -> Yojson.Safe.t
 val error_message_of_body : string -> string option
 (** The cause a provider error body names, when it names one: the string
     under a flat [error] key or under [error.message]. [None] for a body that
-    is not JSON or carries neither, which is what an edge in front of the
-    origin returns. *)
+    is not JSON, carries neither, or carries a blank message, which is what an
+    edge in front of the origin returns. *)
 
 (** Raise [Invalid_argument] for a media source carrier unsupported by a backend.
     Backends should use this helper instead of silently reinterpreting [data] as

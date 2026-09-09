@@ -14959,19 +14959,36 @@ def msx_size_interaction(
     os.write(master_fd, b"q")
 
 
-def run_msx_retained_regression(executable: str) -> None:
+def run_msx_retained_regression(executable: str, *, retained_tick: bool = False) -> None:
     """Exercise retained Kitty pixels through the real TUI and private HTTP."""
     number = [1]
     changed = threading.Event()
     original = msx_loaded_frame_fixture()[1]
+    pixel_responses: list[dict[str, object]] = []
 
-    def tick():
+    def tick(request_body: bytes = b""):
         number[0] += 1
         body = dict(original, number=number[0])
         if changed.is_set():
             body["rgb_base64"] = base64.b64encode(
                 bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
             ).decode("ascii")
+        if retained_tick:
+            request = json.loads(request_body)
+            assert request.get("pixel_response") == "retained", request
+            encoded = body.pop("rgb_base64")
+            reference = {
+                "revision": hashlib.sha256(base64.b64decode(encoded)).hexdigest(),
+                "width": body["width"], "height": body["height"],
+            }
+            retained = request.get("known_pixels") == reference
+            body["pixels"] = dict(reference, kind="retained" if retained else "inline")
+            if not retained:
+                body["pixels"]["rgb_base64"] = encoded
+            pixel_responses.append({
+                "number": number[0], "kind": body["pixels"]["kind"],
+                "revision": reference["revision"], "bytes": len(json.dumps(body)),
+            })
         return 200, body
 
     def interact(process, master, _slave, output, _base):
@@ -14999,11 +15016,22 @@ def run_msx_retained_regression(executable: str) -> None:
         assert b"f=24" not in steady, "unchanged pixels were retransmitted"
         assert b"\x1b[2J" not in steady, "unchanged pixels erased the display"
         assert b"a=d" not in steady, "unchanged pixels deleted the image"
+        if retained_tick:
+            assert pixel_responses[0]["kind"] == "inline", pixel_responses
+            assert sum(row["kind"] == "retained" for row in pixel_responses) >= 2, pixel_responses
+            assert all(row["bytes"] < pixel_responses[0]["bytes"]
+                       for row in pixel_responses if row["kind"] == "retained")
+        before_change = len(pixel_responses)
         start = len(output)
         changed.set()
         end = footer_after(b"i=32,p=1,C=1", start)
         replacement = bytes(output[start:end])
         assert b"f=24" in replacement, "changed pixels were not transmitted"
+        if retained_tick:
+            replacements = pixel_responses[before_change:]
+            assert any(row["kind"] == "inline"
+                       and row["revision"] != pixel_responses[0]["revision"]
+                       for row in replacements), replacements
         assert b"\x1b[2J" not in replacement, "replacement erased the display"
         start = len(output)
         os.write(master, b"-")
@@ -15024,8 +15052,11 @@ def run_msx_retained_regression(executable: str) -> None:
     run_terminal_scenario(
         executable, description="MSX retains Kitty pixels between live polls",
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": (200, original), "/api/v1/msx/tick": tick},
+        http_fixtures={"/api/v1/msx/frame": (200, original),
+                       "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
     )
+    if retained_tick:
+        print(json.dumps({"msx_tick_pixels": pixel_responses}), flush=True)
 
 
 def run_msx_size_regression(executable: str) -> None:
@@ -15354,6 +15385,9 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "msx-retained":
         run_msx_retained_regression(os.path.abspath(sys.argv[1]))
+        raise SystemExit(0)
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained-tick":
+        run_msx_retained_regression(os.path.abspath(sys.argv[1]), retained_tick=True)
         raise SystemExit(0)
 
     if len(sys.argv) == 3 and sys.argv[2] == "msx-size":

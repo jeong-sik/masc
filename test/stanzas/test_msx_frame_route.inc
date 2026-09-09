@@ -2,4 +2,4 @@
 (test
  (name test_msx_frame_route)
  (modules test_msx_frame_route)
- (libraries alcotest yojson base64 unix eio eio_main masc.masc_core masc.msx_lane masc.server))
+ (libraries masc_test_deps alcotest yojson base64 unix eio eio_main masc.masc_core masc.msx_lane masc.server))

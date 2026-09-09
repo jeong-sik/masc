@@ -27,10 +27,12 @@ val msx_tick_default_frames : int
 val tick_response :
   body:string ->
   [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t
-(** Authenticated tick body handling. Only an object with an optional integer
-    [frames] is accepted; duplicate and unknown fields are refused before
+(** Authenticated tick body handling. An optional integer [frames] controls
+    advancement. [pixel_response="retained"] requests an inline/retained pixel
+    response; optional [known_pixels={revision,width,height}] advertises the
+    client's exact retained pixels. Duplicate and unknown fields are refused before
     mutation. Accepted frame counts are clamped to the lane's per-call range.
-    Stepping and frame serialization run once on the shared executor pool;
+    Stepping and atomic frame/ledger capture run once on the shared executor pool;
     an unavailable pool refuses the tick without running it inline. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

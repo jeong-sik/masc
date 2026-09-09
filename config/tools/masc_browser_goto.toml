@@ -1,20 +1,16 @@
 name = "masc_browser_goto"
 description = """
-Navigate the automation lane's browser to one http(s) URL and answer with \
-the landing url and title. The automation browser keeps its own \
-profile with no operator logins. The live lane refuses navigation verbs — \
-use BrowserInteract for explicit-tab interaction. Read the page afterwards with masc_browser_read \
-lane=automation."""
+Navigate an isolated automation tab to HTTP(S); returns landing URL/title. Read afterwards. Live navigation is refused; use BrowserInteract for live-tab actions."""
 additional_properties = false
 
 [[params]]
 name = "url"
 type = "string"
 required = true
-description = "Full http or https URL. Example: \"https://ocaml.org\"."
+description = "HTTP(S) URL."
 
 [[params]]
 name = "tabId"
 type = "integer"
-description = "Tab id from BrowserTabs to navigate. Default: the current tab."
+description = "BrowserTabs ID; default current tab."
 minimum = 0

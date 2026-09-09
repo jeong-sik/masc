@@ -154,3 +154,12 @@ Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
 observed from `BrowserRead mode=regions` as `scope`. This path selects an
 actually observed region rather than guessing a CSS path. It returns
 per-region viewport/DOM content, not a channel-wide history collection.
+
+### Explicit live tab activation
+
+Extension 0.5.0 adds `BrowserInteract action=activate_tab` for an explicit live
+clientId/tabId with required expectedUrl. It selects the tab without focusing its
+browser window or changing/reloading its URL. This is a tool action; reads do not
+automatically activate tabs and no TUI shortcut is added. A successful receipt
+includes active=true, but callers must read again to verify rendered content.
+Automation rejects activation before selecting a tab.

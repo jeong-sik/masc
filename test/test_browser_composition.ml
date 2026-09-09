@@ -19,6 +19,10 @@ let test_follow_output_contract () =
     let open Yojson.Safe.Util in
     check string "destination reference has a declared string type" "string"
       (schema |> member "properties" |> member "destinationUrl" |> member "type" |> to_string);
+    check string "activation exposes a typed active receipt" "boolean"
+      (schema |> member "properties" |> member "active" |> member "type" |> to_string);
+    check bool "other interactions need no active receipt" false
+      (List.mem (`String "active") (schema |> member "required" |> to_list));
     check bool "ordinary clicks need no destination receipt" false
       (List.mem (`String "destinationUrl") (schema |> member "required" |> to_list))
 

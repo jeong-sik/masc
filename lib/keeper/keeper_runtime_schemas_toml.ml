@@ -35,6 +35,7 @@ let schema_of_name name : Masc_domain.tool_schema =
 ;;
 
 let fusion = schema_of_name "masc_fusion"
+let fusion_decision = schema_of_name "masc_fusion_decision"
 let fusion_status = schema_of_name "masc_fusion_status"
 let artifact_read = schema_of_name "keeper_artifact_read"
 let keeper_analyze_image = schema_of_name "keeper_analyze_image"
@@ -48,6 +49,7 @@ let file_list = schema_of_name "masc_file_list"
 let schemas =
   [ artifact_read
   ; fusion
+  ; fusion_decision
   ; fusion_status
   ; file_upload
   ; file_delete

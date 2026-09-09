@@ -21,6 +21,8 @@ val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 module For_testing : sig
+  val commit_goal_confirmation_json : config:Workspace.config -> operator_id:string ->
+    Yojson.Safe.t -> (Yojson.Safe.t, string) result
   val parse_operator_verdict_json :
     Yojson.Safe.t -> (operator_verdict_request, string) result
 

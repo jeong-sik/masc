@@ -73,9 +73,8 @@
 # --- assertions that fail -------------------------------------------------
 test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
 
-# --- cannot be exercised where it stands ----------------------------------
-# The defence is live: with_deepest_existing_parent descends one component at a
-# time with Eio.Path.open_dir and never re-reads the path string. The race has
-# nowhere to enter, because a keeper can only write inside the playground and
-# playground writes skip the gate the injection point sits behind (#29858).
-test/test_keeper_fs_edit_patch                    # [2026-09-07 alone: fails, run 34136523552]
+# The complete root sweep at 95146db3ff (34384710653, 2026-09-09) reported
+# fs_edit_patch as passing: 43 tests run, 1.082s, no failure. #34924 merged
+# six minutes before that run and its race-injection commit is what the row
+# was waiting for. Remove the exemption so a future failure is visible to
+# this ratchet.

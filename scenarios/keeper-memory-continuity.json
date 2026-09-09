@@ -1,0 +1,27 @@
+{
+  "scope": "12 sequential operator-initiated creative turns on one Keeper; not autonomous, failover, compaction or 24h proof",
+  "keeper": "memory-continuity-proof",
+  "first_operation_id": "kmsg-1b27e86f5902db76f8f9ff14d50f0b52",
+  "initial_input": "연작시의 설정을 정합니다. 화자의 이름은 루메린, 고향은 은빛정류장, 약속한 시각은 04:17입니다. 이 세 설정을 앞으로 유지하세요. 지금은 이 설정으로 출발을 주제로 두 줄의 시를 써주세요.",
+  "remaining_inputs": [
+    "창밖의 비를 소재로 다음 두 줄을 이어주세요. 인물의 이름이나 고향, 시각을 다시 적지는 마세요.",
+    "장면에 낡은 우산을 추가해 두 줄을 써주세요.",
+    "방금 우산은 노란색으로 정정합니다. 바람을 소재로 다음 두 줄을 써주세요.",
+    "시점은 계속 같은 화자로 유지하고, 빈 의자를 소재로 두 줄을 써주세요.",
+    "멀리 들리는 발소리를 소재로 두 줄을 써주세요.",
+    "계절은 가을로 정합니다. 낙엽을 소재로 두 줄을 써주세요.",
+    "이제 잠깐의 침묵을 소재로 두 줄을 써주세요.",
+    "멀리 보이는 작은 불빛을 소재로 두 줄을 써주세요.",
+    "다가온 사람과 눈을 마주치는 순간을 두 줄로 써주세요.",
+    "마지막으로 기다림이 끝나는 순간을 두 줄로 써주세요.",
+    "처음에 정한 화자의 이름, 고향, 약속한 시각은 무엇이었나요? 중간에 정정한 우산 색과 정한 계절도 함께 답하세요. 대화에 없는 사실은 만들지 마세요."
+  ],
+  "expected_recall": {
+    "name": "루메린",
+    "home": "은빛정류장",
+    "time": "04:17",
+    "umbrella": "노란색",
+    "season": "가을"
+  },
+  "acceptance": "Inspect all actual outputs and original input presence. Terminal operation success alone does not prove correct recall. Do not resend an admitted operation after an observation error."
+}

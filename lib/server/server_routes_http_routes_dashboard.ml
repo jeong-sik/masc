@@ -1392,12 +1392,21 @@ let add_routes ~sw ~clock router =
   |> Http.Router.prefix_get
        Server_dashboard_fusion_run_projection.detail_prefix
        (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let status, json =
            fusion_run_detail_response
              ~registry:(Fusion_run_registry.global ())
              ~path:(Http.Request.path req)
          in
+         let json = match json with
+           | `Assoc fields ->
+             (match Server_utils.extract_path_param ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
+                (Http.Request.path req) with
+              | Some run_id -> `Assoc (("keeper_decisions", Fusion_decision.read
+                  ~config:(Mcp_server.workspace_config state) ~run_id:(Uri.pct_decode run_id)
+                  |> Fusion_decision.read_to_yojson) :: fields)
+              | None -> json)
+           | _ -> json in
          Http.Response.json_value
            ~status:(status :> Httpun.Status.t)
            ~compress:true

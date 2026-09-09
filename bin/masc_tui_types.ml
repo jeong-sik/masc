@@ -1721,12 +1721,12 @@ let next_planning_sort = function
 let planning_passes_filter filter (goal : planning_goal) =
   match filter, goal.pg_phase with
   | Planning_filter_all, _ -> true
-  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying) -> true
+  | Planning_filter_active, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation) -> true
   | Planning_filter_completed, Goal_phase.Completed -> true
   | Planning_filter_dropped, Goal_phase.Dropped -> true
   | Planning_filter_active, (Goal_phase.Completed | Goal_phase.Dropped)
-  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Dropped)
-  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed) ->
+  | Planning_filter_completed, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Dropped)
+  | Planning_filter_dropped, (Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed) ->
       false
 
 (* RFC 3339 timestamps and ISO dates compare lexicographically, so the sort
@@ -1753,8 +1753,9 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
   let phase_rank = function
     | Goal_phase.Executing -> 0
     | Goal_phase.Verifying -> 1
-    | Goal_phase.Completed -> 2
-    | Goal_phase.Dropped -> 3
+    | Goal_phase.Awaiting_confirmation -> 2
+    | Goal_phase.Completed -> 3
+    | Goal_phase.Dropped -> 4
   in
   let compare =
     match sort with

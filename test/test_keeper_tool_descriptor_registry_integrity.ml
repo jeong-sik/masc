@@ -1431,6 +1431,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_tasks_list"
     ; "keeper_time_now"
     ; "keeper_tools_list"
+    ; "keeper_workspace_memory_read"
     ; "masc_agent_card"
     ; "masc_agent_fitness"
     ; "masc_agent_timeline"

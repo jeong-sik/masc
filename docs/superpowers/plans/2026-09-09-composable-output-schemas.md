@@ -28,12 +28,12 @@
 
 ## Tool selection
 
-`~/.masc/tool_calls/` JSONL logs do not exist on this machine (only `~/.masc/tool-metrics.sqlite3`). Selection is inferred from the keeper toolset: the public LLM-native surface is exactly Execute, Grep, Read, Edit, Write, WebSearch, WebFetch, Browser* (`keeper_tool_descriptor.ml` `~public_name:` sites). Execute is already typed. The canonical keeper flow is **Grep → Read → Edit/Write**, so:
+`tool_calls/` JSONL logs do not exist under this machine's MASC runtime root (`<base-path>/.masc/`); only `tool-metrics.sqlite3` does. Selection is inferred from the keeper toolset: the public LLM-native surface is exactly Execute, Grep, Read, Edit, Write, WebSearch, WebFetch, Browser* (`keeper_tool_descriptor.ml` `~public_name:` sites). Execute is already typed. The canonical keeper flow is **Grep → Read → Edit/Write**, so:
 
 - **PR-1 (this plan, fully specified):** `Read`, `Grep`, `Write`, `Edit`. Write and Edit share one handler (`handle_file_write_with_outcome`, dispatched for both `Tool_edit_file | Tool_write_file`, `keeper_tool_runtime.ml:58-69`) and one success type, so one producer change covers both.
 - **PR-2 (recipe only, shapes to be read at their construction sites):** `keeper_memory_search` (change site known: `keeper_tool_memory_runtime.ml:447` `success (Yojson.Safe.to_string result)` → `success_data result`; probe-able like `keeper_tasks_list`), `masc_board_post`, `keeper_context_status`. **WebFetch is deferred**: its data is already typed (`tool_misc_web_fetch.ml:868` `make_ok ~data`), but the forced runtime probe would need a hermetic fetch — see Risks.
 
-Optional verification the implementing engineer may run (read-only, allowed): `sqlite3 ~/.masc/tool-metrics.sqlite3` frequency query to confirm the ranking.
+Optional verification the implementing engineer may run (read-only, allowed): `sqlite3 "<base-path>/.masc/tool-metrics.sqlite3"` (derive the path from MASC_BASE_PATH or --base-path) frequency query to confirm the ranking.
 
 ---
 
@@ -401,5 +401,5 @@ Size check: PR-1 touches 4 source files + 3 test files, ~250 new/changed lines �
 3. **WebFetch probe hermeticity.** `test_every_composable_tool_has_an_output_probe` forces a live producer run for every declared tool. WebFetch performs a real HTTP fetch (`tool_misc_web_fetch.ml`); unless `fetch_impl` is injectable or a loopback fixture exists, declaring its schema would introduce a network-dependent test. Left out of PR-1/PR-2 pending an explore pass on `fetch_impl` injection seams.
 4. **Other `success_payload` call sites in `keeper_tool_filesystem_remote_write.ml`.** Only lines 89-95/161-166 were read; mkdir/append remote successes may exist. Engineer greps the file before editing.
 5. **Route evidence / golden fixtures.** Descriptor receipt labels include `"composable_output", "opaque"→"json"` (`keeper_tool_descriptor.ml:522`). I checked `test/fixtures/tool_call_quality_benchmark/evidence_runs.json` (no `composable_output` key) and found no test pinning the label for these four descriptors, but a repo-wide golden could exist that grep didn't surface; CI is the backstop.
-6. **Tool ranking is inferred, not measured** — `~/.masc/tool_calls/` JSONL does not exist on this host; `tool-metrics.sqlite3` does. If measured usage contradicts the Read/Grep/Write/Edit choice, the plan's per-tool recipe is unchanged; only the tool set moves.
+6. **Tool ranking is inferred, not measured** — `tool_calls/` JSONL does not exist under this host's MASC runtime root; `tool-metrics.sqlite3` does. If measured usage contradicts the Read/Grep/Write/Edit choice, the plan's per-tool recipe is unchanged; only the tool set moves.
 7. **`handle_owned_read_file_with_outcome` swap (Task 2 step 4)** is optional for composition but recommended for drift avoidance; it is consumed by `lib/verification_authority_tools.ml:300`, whose tests (`test_owned_read_cwd.ml`) assert on `raw_output` — byte-identical after the change, so expected green, but flag if CI disagrees.

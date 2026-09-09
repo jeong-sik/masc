@@ -15171,21 +15171,31 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert not pending.completed.is_set(), "Esc waited for the HTTP response"
             observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
             assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
-            start = len(output)
-            pending.release.set()
-            assert wait_for_fixture_event(process, master, output, pending.completed, timeout=3.0)
-            observe_for(0.8)
-            stale = bytes(output[start:])
-            assert b"f=24" not in stale and b"i=32,p=1,C=1" not in stale, "late frame repainted a closed view"
-            assert b"frame 999 " not in stale, "late frame metadata escaped its view"
-            assert len(calls) == 1, "closed view resumed automatic ticks"
             before_get = len(get_frames)
             key(b":go msx\r", b"watch split.rom")
             assert len(get_frames) > before_get, "reopening skipped fresh observation"
             start = key(b"\r", b"F8: disk")
             assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
             expected_frame = 100 + len(get_frames)
+            assert f"frame {expected_frame} ".encode() in bytes(output[start:])
+            observe_for(0.8)
+            assert not pending.completed.is_set(), "old tick finished before reopened-view test"
+            assert len(calls) == 1, "reopening issued another mutation while one was pending"
+            # The view is open again: msx_open alone cannot suppress this old
+            # reply. Only the request's captured view identity distinguishes it.
+            start = len(output)
+            pending.release.set()
+            assert wait_for_fixture_event(process, master, output, pending.completed, timeout=3.0)
             assert wait_for_fixture_event(process, master, output, failed.requested, timeout=5.0)
+            # The next tick entering its gate proves the old completion was
+            # consumed, while preventing another response from hiding damage.
+            read_available(master, output)
+            stale = bytes(output[start:])
+            assert b"frame 999 " not in stale, "late metadata replaced the reopened snapshot"
+            expected_pixels = ((original["width"], original["height"]),
+                               base64.b64decode(original["rgb_base64"]))
+            assert all(pixels == expected_pixels for pixels in kitty_rgb_transfers(stale)), "late green pixels replaced the reopened snapshot"
+            assert len(calls) == 2, "settlement did not release exactly one pending slot"
             start = len(output)
             failed.release.set()
             await_marker(b"Refresh outcome unknown; reopen", start)

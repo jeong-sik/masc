@@ -592,7 +592,6 @@ let test_record_to_json_roundtrip () =
     ; tool_choice = Some (Types.tool_choice_to_json Types.Any)
     ; enable_thinking = Some false
     ; preserve_thinking = None
-    ; thinking_budget = Some 2048
     ; reasoning_effort = Some "high"
     ; block_index = None
     ; block_kind = None
@@ -632,7 +631,6 @@ let test_record_to_json_roundtrip () =
        | Some value -> Yojson.Safe.to_string value
        | None -> "");
     Alcotest.(check (option bool)) "enable_thinking" (Some false) decoded.enable_thinking;
-    Alcotest.(check (option int)) "thinking_budget" (Some 2048) decoded.thinking_budget
   | Error e -> Alcotest.fail (Error.to_string e)
 ;;
 
@@ -802,7 +800,6 @@ let test_record_to_json_full () =
     ; tool_choice = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; thinking_budget = None
     ; reasoning_effort = None
     ; block_index = Some 2
     ; block_kind = Some "tool_use"
@@ -882,7 +879,6 @@ let test_run_summary_yojson () =
     ; tool_choice = Some (Types.tool_choice_to_json Types.Any)
     ; enable_thinking = Some true
     ; preserve_thinking = None
-    ; thinking_budget = Some 4096
     ; reasoning_effort = Some "high"
     ; thinking_block_count = 1
     ; text_block_count = 1

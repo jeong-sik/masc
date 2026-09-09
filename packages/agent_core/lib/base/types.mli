@@ -44,7 +44,6 @@ type agent_config =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; response_format : response_format
-  ; thinking_budget : int option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; tool_choice : tool_choice option
   ; disable_parallel_tool_use : bool

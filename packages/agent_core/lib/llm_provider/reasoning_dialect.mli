@@ -89,7 +89,6 @@ type request_control_artifact =
   }
 
 type request_control_rejection =
-  | Thinking_budget_unsupported
   | Reasoning_effort_unsupported
   | Reasoning_effort_value_unsupported of Reasoning_effort.t
 
@@ -188,7 +187,6 @@ val request_control_fields
   -> t
   -> enable_thinking:bool option
   -> preserve_thinking:bool option
-  -> thinking_budget:int option
   -> reasoning_effort:Reasoning_effort.t option
   -> ?clear_thinking_object:bool
   -> unit

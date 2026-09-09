@@ -51,7 +51,6 @@ let append_decision_record
   let ( _turn_lane
       , _turn_tool_choice
       , turn_thinking_enabled
-      , _turn_thinking_budget
       , _turn_prompt_fingerprint
       , _turn_trace_id
       , _turn_session_id

@@ -60,7 +60,6 @@ let sample_record
       { temperature = None
       ; top_p = None
       ; max_tokens = None
-      ; thinking_budget = None
       ; enable_thinking = Some true
       }
   ; usage =

@@ -638,7 +638,6 @@ let log_call
       ?lane
       ?tool_choice
       ?thinking_enabled
-      ?thinking_budget
       ?prompt_fingerprint
       ?execution_id
       ?tool_use_id
@@ -745,11 +744,6 @@ let log_call
       let thinking_enabled_field =
         match thinking_enabled with
         | Some value -> [ "thinking_enabled", `Bool value ]
-        | None -> []
-      in
-      let thinking_budget_field =
-        match thinking_budget with
-        | Some value -> [ "thinking_budget", `Int value ]
         | None -> []
       in
       let prompt_fingerprint_field =
@@ -968,7 +962,6 @@ let log_call
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field
-           @ thinking_budget_field
            @ prompt_fingerprint_field
            @ execution_id_field
            @ tool_use_id_field

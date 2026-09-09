@@ -37,7 +37,6 @@ let resolve_max_prompt_bytes ~runtime_id =
    envelope-specific clamp/fallback policy. *)
 
 type seed = {
-  thinking_budget : int option;
   thinking_enabled : bool option;
   preserve_thinking : bool option;
 }
@@ -55,12 +54,12 @@ type seed = {
     id, or before [Runtime.init_default]): no per-model signal, leave the
     caller policy unchanged.
 
-    [thinking_budget] stays [None] here: no configuration produces an active
-    token budget, and the keeper's adaptive budget owns the active value. *)
+    Thinking is a toggle here, not a quantity: no configuration carries a
+    token budget any more. *)
 let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : bool option)
   : seed
   =
-  { thinking_budget = None; thinking_enabled = thinking_support; preserve_thinking }
+  { thinking_enabled = thinking_support; preserve_thinking }
 ;;
 
 let for_runtime ~name =

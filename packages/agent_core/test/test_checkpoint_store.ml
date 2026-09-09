@@ -31,7 +31,6 @@ let make_checkpoint ?(session_id = "test-session") ?(created_at = 1000.0) ()
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Types.Off
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Context.create_sync ()

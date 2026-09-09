@@ -2050,7 +2050,6 @@ let run_turn
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id settled_runtime_id
             ; max_tokens = None
-            ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }
           ~usage

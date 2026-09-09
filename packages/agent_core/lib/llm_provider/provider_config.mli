@@ -73,15 +73,9 @@ type t =
         top-level [preserve_thinking], [thinking.keep], or no request field for
         always-preserved models.
         @since 0.205.12 *)
-  ; thinking_budget : int option
-    (** Explicit token budget for provider wires that accept a numeric thinking
-        budget. [None] omits it. This value is never converted into
-        {!Reasoning_effort.t}. *)
   ; reasoning_effort : Reasoning_effort.t option
     (** Explicit effort value for provider wires that accept categorical
-        reasoning effort. [None] omits the field. This is independent of
-        [thinking_budget]; agent core never converts token counts into effort
-        categories. *)
+        reasoning effort. [None] omits the field. *)
   ; clear_thinking : bool option
   ; tool_stream : bool
   ; tool_choice : Types.tool_choice option
@@ -234,7 +228,6 @@ val make
   -> ?system_prompt:string
   -> ?enable_thinking:bool
   -> ?preserve_thinking:bool
-  -> ?thinking_budget:int
   -> ?reasoning_effort:Reasoning_effort.t
   -> ?clear_thinking:bool
   -> ?tool_stream:bool

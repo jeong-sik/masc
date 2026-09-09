@@ -18,7 +18,7 @@ let snapshot messages =
     created_at=1000.; tools=[]; tool_choice=None; disable_parallel_tool_use=false;
     temperature=None; top_p=None; top_k=None; min_p=None; reasoning_effort=None;
     enable_thinking=None; preserve_thinking=None; response_format=T.Off;
-    thinking_budget=None; cache_system_prompt=false; context=Agent_core.Context.create_sync ();
+    cache_system_prompt=false; context=Agent_core.Context.create_sync ();
     mcp_sessions=[]; working_context=None} in
   let bytes = Yojson.Safe.pretty_to_string (Agent_core.Checkpoint.to_json cp) in
   let expected_session_id = Keeper_id.Trace_id.of_string "projection-source" |> Result.get_ok in

@@ -291,7 +291,6 @@ let exact_provider_config () =
     ~system_prompt:"exact provider prompt"
     ~enable_thinking:true
     ~preserve_thinking:true
-    ~thinking_budget:4096
     ~clear_thinking:false
     ~tool_stream:true
     ~tool_choice:Types.Auto
@@ -702,24 +701,6 @@ let test_with_tool_choice () =
     (Yojson.Safe.to_string actual)
 ;;
 
-(* --- 23. with_thinking_budget --- *)
-
-let test_with_thinking_budget () =
-  with_net
-  @@ fun net ->
-  let agent =
-    Builder.create ~net ~model:"claude-sonnet-4-6"
-    |> Builder.with_enable_thinking true
-    |> Builder.with_thinking_budget 10000
-    |> Builder.build_safe
-    |> Result.get_ok
-  in
-  Alcotest.(check (option int))
-    "thinking_budget"
-    (Some 10000)
-    (Agent.state agent).config.thinking_budget
-;;
-
 let test_with_reasoning_effort () =
   with_net
   @@ fun net ->
@@ -778,7 +759,6 @@ let test_chain_multiple () =
     |> Builder.with_tool t1
     |> Builder.with_tool t2
     |> Builder.with_enable_thinking true
-    |> Builder.with_thinking_budget 5000
     |> Builder.build_safe
     |> Result.get_ok
   in
@@ -787,11 +767,7 @@ let test_chain_multiple () =
     "max_tokens"
     (Some 1024)
     (Agent.state agent).config.max_tokens;
-  Alcotest.(check int) "tool count" 2 (Tool_set.size (Agent.tools agent));
-  Alcotest.(check (option int))
-    "thinking_budget"
-    (Some 5000)
-    (Agent.state agent).config.thinking_budget
+  Alcotest.(check int) "tool count" 2 (Tool_set.size (Agent.tools agent))
 ;;
 
 (* --- 28. immutability check --- *)
@@ -830,7 +806,6 @@ let test_defaults_match_agent_create () =
     "response_format"
     (Types.show_response_format dc.response_format)
     (Types.show_response_format bc.response_format);
-  Alcotest.(check (option int)) "thinking_budget" dc.thinking_budget bc.thinking_budget;
   Alcotest.(check bool)
     "cache_system_prompt"
     dc.cache_system_prompt
@@ -913,7 +888,6 @@ let () =
             `Quick
             test_with_contract_injects_context_metadata
         ; Alcotest.test_case "tool_choice" `Quick test_with_tool_choice
-        ; Alcotest.test_case "thinking_budget" `Quick test_with_thinking_budget
         ; Alcotest.test_case "reasoning_effort" `Quick test_with_reasoning_effort
         ] )
     ; ( "build"

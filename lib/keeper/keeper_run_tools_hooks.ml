@@ -731,11 +731,7 @@ let assemble_hooks
                 in
                 let current_params =
                   { current_params with
-                    thinking_budget =
-                      (match runtime_seed.thinking_budget with
-                       | Some _ as configured -> configured
-                       | None -> current_params.thinking_budget)
-                  ; enable_thinking =
+                    enable_thinking =
                       (match runtime_seed.thinking_enabled with
                        | Some enabled -> Some enabled
                        | None -> current_params.enable_thinking)
@@ -977,7 +973,6 @@ let assemble_hooks
                             (Agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
                   ~thinking_enabled:thinking_enabled_effective
-                  ?thinking_budget:current_params.thinking_budget
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

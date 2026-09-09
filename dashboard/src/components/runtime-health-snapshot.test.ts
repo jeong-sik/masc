@@ -160,7 +160,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
           enable_thinking: true,
           preserve_thinking: true,
           clear_thinking: false,
-          thinking_budget: 4096,
           resolved_reasoning_effort: 'medium',
           glm_clear_thinking: false,
           glm_replay_reasoning: false,

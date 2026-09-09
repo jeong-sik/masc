@@ -106,7 +106,6 @@ let test_card_json_export () =
     |> Builder.with_name "researcher"
     |> Builder.with_tools [ tool ]
     |> Builder.with_enable_thinking true
-    |> Builder.with_thinking_budget 2000
     |> build_exn
   in
   let card = Agent.card ~supported_interfaces:card_interfaces agent in

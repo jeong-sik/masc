@@ -40,7 +40,6 @@ let make_checkpoint
       ?(context = Context.create_sync ())
       ?(enable_thinking = None)
       ?(preserve_thinking = None)
-      ?(thinking_budget = None)
       ?(reasoning_effort = None)
       ?(mcp_sessions = [])
       ()
@@ -65,7 +64,6 @@ let make_checkpoint
   ; enable_thinking
   ; preserve_thinking
   ; response_format = Types.Off
-  ; thinking_budget
   ; reasoning_effort
   ; cache_system_prompt = false
   ; context
@@ -245,13 +243,13 @@ let () =
       , [ test_case "image carriers remain canonical" `Quick
             test_image_carriers_remain_canonical ] )
     ; ( "version"
-      , [ test_case "checkpoint_version is 10" `Quick (fun () ->
-            check int "version" 10 Checkpoint.checkpoint_version)
+      , [ test_case "checkpoint_version is 11" `Quick (fun () ->
+            check int "version" 11 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
             let v = Yojson.Safe.Util.(json |> member "version" |> to_int) in
-            check int "version" 10 v)
+            check int "version" 11 v)
         ; test_case "wrong version returns Error" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
@@ -1115,7 +1113,7 @@ let () =
             let p1 = List.hd t.parameters in
             check string "param name" "city" p1.name;
             check bool "required" true p1.required)
-        ; test_case "authoritative schema is a v10 wire" `Quick (fun () ->
+        ; test_case "authoritative schema is a v11 wire" `Quick (fun () ->
             let input_schema : Yojson.Safe.t =
               `Assoc
                 [ "type", `String "object"
@@ -1135,7 +1133,7 @@ let () =
             in
             let json = Checkpoint.to_json (make_checkpoint ~tools:[ tool ] ()) in
             let open Yojson.Safe.Util in
-            check int "new wire version" 10 (json |> member "version" |> to_int);
+            check int "new wire version" 11 (json |> member "version" |> to_int);
             check
               string
               "authoritative schema persisted"
@@ -1371,7 +1369,6 @@ let () =
                 ~model:"claude-sonnet-4-6"
                 ~enable_thinking:(Some true)
                 ~preserve_thinking:(Some true)
-                ~thinking_budget:(Some 2048)
                 ~reasoning_effort:(Some Llm_provider.Reasoning_effort.High)
                 ()
             in
@@ -1381,7 +1378,6 @@ let () =
               ; system_prompt = Some "current runtime prompt"
               ; enable_thinking = Some false
               ; preserve_thinking = Some false
-              ; thinking_budget = Some 512
               ; reasoning_effort = Some Llm_provider.Reasoning_effort.Max
               }
             in
@@ -1406,11 +1402,6 @@ let () =
               (Some false)
               state.config.preserve_thinking;
             check
-              (option int)
-              "thinking_budget from override"
-              (Some 512)
-              state.config.thinking_budget;
-            check
               (option string)
               "reasoning_effort from override"
               (Some "max")
@@ -1422,7 +1413,6 @@ let () =
               make_checkpoint
                 ~enable_thinking:(Some true)
                 ~preserve_thinking:(Some true)
-                ~thinking_budget:(Some 2048)
                 ~reasoning_effort:(Some Llm_provider.Reasoning_effort.High)
                 ()
             in
@@ -1440,11 +1430,6 @@ let () =
               "preserve_thinking from caller"
               None
               state.config.preserve_thinking;
-            check
-              (option int)
-              "thinking_budget from caller"
-              None
-              state.config.thinking_budget;
             check
               (option string)
               "reasoning_effort from caller"
@@ -1754,7 +1739,7 @@ let () =
               | other -> other
             in
             check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects unknown nested message field" `Quick (fun () ->
+        ; test_case "current v11 rejects unknown nested message field" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -1775,7 +1760,7 @@ let () =
               "unknown message field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects normalized empty metadata" `Quick (fun () ->
+        ; test_case "current v11 rejects normalized empty metadata" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -1792,7 +1777,7 @@ let () =
                    (update_first_json (append_json_field "metadata" (`Assoc [])))
             in
             check bool "empty metadata" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 preserves blank reasoning content" `Quick (fun () ->
+        ; test_case "current v11 preserves blank reasoning content" `Quick (fun () ->
             let message : Types.message =
               { role = Types.Assistant
               ; content =
@@ -1839,7 +1824,7 @@ let () =
                |> index 0
                |> member "reasoning_content"
                |> to_string))
-        ; test_case "current v10 rejects duplicate nested content field" `Quick (fun () ->
+        ; test_case "current v11 rejects duplicate nested content field" `Quick (fun () ->
             let message : Types.message =
               { role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -1865,7 +1850,7 @@ let () =
               "duplicate content field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects unknown nested tool field" `Quick (fun () ->
+        ; test_case "current v11 rejects unknown nested tool field" `Quick (fun () ->
             let bad =
               make_checkpoint ~tools:[ sample_tool_schema ] ()
               |> Checkpoint.to_json
@@ -1878,7 +1863,7 @@ let () =
               "unknown tool field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects noncanonical response format" `Quick (fun () ->
+        ; test_case "current v11 rejects noncanonical response format" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -1889,7 +1874,7 @@ let () =
               "legacy response format"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects malformed nested MCP headers" `Quick (fun () ->
+        ; test_case "current v11 rejects malformed nested MCP headers" `Quick (fun () ->
             let session : Mcp_session.info =
               { server_name = "http-tools"
               ; command = "http"
@@ -1909,7 +1894,7 @@ let () =
                    (update_first_json (replace_json_field "http_headers" (`Assoc [])))
             in
             check bool "malformed headers" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects duplicate context keys" `Quick (fun () ->
+        ; test_case "current v11 rejects duplicate context keys" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -1918,7 +1903,7 @@ let () =
                    (`Assoc [ "channel", `String "one"; "channel", `String "two" ])
             in
             check bool "duplicate context" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v10 rejects normalized reasoning effort" `Quick (fun () ->
+        ; test_case "current v11 rejects normalized reasoning effort" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json

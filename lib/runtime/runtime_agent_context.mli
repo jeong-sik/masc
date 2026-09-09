@@ -97,10 +97,6 @@ type config = {
   max_tool_rounds : int option;
   context_injector : Agent_core.Hooks.context_injector option;
   context : Agent_core.Context.t option;
-  thinking_budget : int option;
-      (** Token budget for extended thinking, forwarded to AGENT_CORE
-          [Builder.with_thinking_budget]. Only meaningful when
-          [enable_thinking = Some true]. *)
   top_p : float option;
       (** Nucleus sampling probability forwarded to AGENT_CORE [Builder.with_top_p].
           [None] leaves the provider/model default intact. *)

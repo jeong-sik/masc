@@ -281,7 +281,6 @@ let exact_config (target : request_target) response_format =
   ; system_prompt = None
   ; enable_thinking = target.config.enable_thinking
   ; preserve_thinking = None
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; clear_thinking = None
   ; tool_stream = false

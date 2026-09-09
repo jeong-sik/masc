@@ -359,7 +359,6 @@ let checkpoint_with_messages
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Off
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create ()

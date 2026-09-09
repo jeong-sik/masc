@@ -9002,15 +9002,14 @@ let decode_goal_detail_timeline json =
   match goal_store_unavailable_detail json with
   | Some detail -> Ok (Goal_timeline_unavailable detail)
   | None ->
-  match member "timeline" json with
-  | `Null ->
-      let detail =
-        match member "operator_detail" (member "approval_queue_state" json) with
-        | `String detail -> detail
-        | _ -> "approval queue store is unreadable"
-      in
-      Ok (Goal_timeline_unavailable detail)
-  | `List items ->
+  match Json_util.assoc_member_opt "timeline" json with
+  | Some `Null ->
+      let state = member "approval_queue_state" json in
+      (match member "state" state, member "operator_detail" state with
+       | `String "unavailable", `String detail when String.trim detail <> "" ->
+           Ok (Goal_timeline_unavailable detail)
+       | _ -> Error "goal detail has a null timeline without an unavailable source state")
+  | Some (`List items) ->
       let rec loop acc = function
         | [] -> Ok (Goal_timeline_ready (List.rev acc))
         | item :: rest ->
@@ -9018,7 +9017,8 @@ let decode_goal_detail_timeline json =
             loop (event :: acc) rest
       in
       loop [] items
-  | _ -> Error "goal detail timeline is neither a list nor null"
+  | None -> Error "goal detail response has no timeline"
+  | Some _ -> Error "goal detail timeline is neither a list nor null"
 
 (* One task's event history (GET /api/v1/dashboard/tasks/history). Rows are
    raw event-stream lines, not a uniform projection, so every field except

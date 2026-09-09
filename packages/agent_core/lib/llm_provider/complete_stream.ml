@@ -242,7 +242,7 @@ let%test "Ollama done without reason finalizes typed incomplete" =
      accumulate_events acc (fst (Streaming.ollama_chunk_to_events st chunk))
    | Streaming.Ollama_provider_error _ | Streaming.Ollama_parse_failed _ -> ());
   match Complete_stream_acc.finalize_stream_acc acc with
-  | Error (Types.Stream_incomplete { reason = "stream_terminated_without_stop_reason" })
+  | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" })
     -> true
   | Error _ | Ok _ -> false
 ;;

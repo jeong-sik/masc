@@ -403,7 +403,8 @@ val fusion_status_json
     process-wide [Fusion_run_registry.global] via {!fusion_status_json}, scoped
     to [meta.name]. *)
 val handle_masc_fusion_status
-  :  meta:Keeper_meta_contract.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> unit
   -> string

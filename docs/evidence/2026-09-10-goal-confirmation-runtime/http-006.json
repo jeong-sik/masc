@@ -1,0 +1,19 @@
+{
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 0,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "goal-confirmation-fixture",
+        "version": "1"
+      }
+    }
+  },
+  "authenticated": true,
+  "status": 200,
+  "raw": "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"masc\",\"title\":\"MASC MCP Server\",\"version\":\"0.35.2\"},\"com.github.yousleepwhen.masc/server\":{\"serverStartedAt\":\"2026-09-09T23:11:54Z\",\"serverVersion\":\"0.35.2\",\"profile\":\"full\"}},\"resultType\":\"complete\",\"protocolVersion\":\"2025-03-26\",\"serverInfo\":{\"name\":\"masc\",\"title\":\"MASC MCP Server\",\"version\":\"0.35.2\",\"description\":\"Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources.\",\"websiteUrl\":\"https://github.com/yousleepwhen/masc\",\"icons\":[{\"src\":\"data:image/svg+xml;utf8,%3Csvg%20xmlns='http:%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width='64'%20height='64'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%237C3AED'%2F%3E%3Ctext%20x='32'%20y='38'%20font-family='Arial,%20sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20fill='%23F5F3FF'%3EMM%3C%2Ftext%3E%3C%2Fsvg%3E\",\"mimeType\":\"image/svg+xml\",\"sizes\":[\"any\"]}]},\"capabilities\":{\"tools\":{\"listChanged\":true},\"resources\":{\"subscribe\":true,\"listChanged\":false},\"prompts\":{\"listChanged\":false}},\"instructions\":\"MASC (Multi-Agent Shared Context) enables AI agent collaboration.\\nPROJECT: Agents sharing the same base path (.masc/ folder) align together.\\nCLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool\\nsurfaces use the configured cluster/default label).\\nREAD: use resources/list + resources/read (status/tasks/agents/events/schema)\\nfor snapshots.\\nWRITE: task state changes are CAS-guarded; pass expected_version.\"}}"
+}

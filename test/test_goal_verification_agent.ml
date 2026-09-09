@@ -270,7 +270,7 @@ let test_proof_pending_drains_to_completed () =
     ~slots:(fun () -> Ok [ "verifier-a" ])
     ~reviewer:(recording_reviewer (ref []) [ "verifier-a", Stub_approve "all 3 services verified" ])
     (fun () -> drain config);
-  check string "goal completed via the drained proof" "completed"
+  check string "goal completed via the drained proof" "awaiting_confirmation"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
@@ -365,7 +365,7 @@ let test_goal_proof_reads_the_workspace_playground () =
     ~reviewer
     (fun () -> drain config);
   check int "the judge performed one read" 1 !reads;
-  check string "the measured goal completed" "completed" (stored_phase config goal_id)
+  check string "the measured goal completed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
 (* A refutation is not terminal. The goal goes back to Executing, the producer
@@ -451,7 +451,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   review ();
   check (list string) "the same judge answered twice, differently"
     [ "reject"; "approve" ] !verdicts;
-  check string "the measured goal completed on the retry" "completed"
+  check string "the measured goal completed on the retry" "awaiting_confirmation"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
@@ -611,7 +611,7 @@ let test_malformed_reply_fails_over_to_the_next_slot () =
   check (list string) "failover follows the declared slot order"
     [ "verifier-a"; "verifier-b" ]
     !calls;
-  check string "the second slot's verdict completed the goal" "completed"
+  check string "the second slot's verdict completed the goal" "awaiting_confirmation"
     (stored_phase config goal_id)
 ;;
 
@@ -686,7 +686,7 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
     ~reviewer:
       (recording_reviewer (ref []) [ "verifier-a", Stub_approve "verified after re-arm" ])
     (fun () -> drain config);
-  check string "the re-armed gate completes" "completed"
+  check string "the re-armed gate completes" "awaiting_confirmation"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
@@ -762,7 +762,7 @@ let test_committed_proven_proof_reconciles_without_review () =
   in
   check bool "reconciliation does not call the model again" false
     (has_completion_work goal_id work);
-  check string "proven verdict converges to completed" "completed"
+  check string "proven verdict converges to completed" "awaiting_confirmation"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
@@ -801,7 +801,7 @@ let review_while_editing_goal config ctx goal_id edits =
 
 let check_obsolete_proof_not_applied config goal_id =
   check bool "obsolete approval cannot complete the goal" false
-    (String.equal "completed" (stored_phase config goal_id));
+    (String.equal "awaiting_confirmation" (stored_phase config goal_id));
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven _ ->
     fail "obsolete approval must not become durable proven evidence"
@@ -852,7 +852,7 @@ let test_priority_edit_during_review_preserves_approval () =
    | Some goal -> check int "priority edit is retained" 1 goal.Goal_store.priority
    | None -> fail "goal disappeared after editing its priority");
   check string "priority does not change the reviewed success criterion"
-    "completed" (stored_phase config goal_id);
+    "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven _ -> ()
   | _ -> fail "an unchanged criterion must retain its proven verdict"
@@ -985,7 +985,7 @@ let test_wake_after_deferred_persist_survives_active_scan () =
             | Ok () -> () | Error message -> fail message)));
   check bool "wake was consumed while old claim active" true !scanned_while_active;
   check int "release delivered exactly one new review" 2 (List.length !calls);
-  check string "new proof completed without another external wake" "completed" (stored_phase config goal_id)
+  check string "new proof completed without another external wake" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
 let test_pending_before_phase_waits_for_explicit_request () =
@@ -1011,7 +1011,7 @@ let test_pending_before_phase_waits_for_explicit_request () =
     ~reviewer:(recording_reviewer calls ["verifier-a", Stub_approve "measured"])
     (fun () -> drain config);
   check int "converged request reviewed once" 1 (List.length !calls);
-  check string "matching proof applied" "completed" (stored_phase config goal_id)
+  check string "matching proof applied" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
 let test_new_request_rejects_old_answer_for_same_criterion () =

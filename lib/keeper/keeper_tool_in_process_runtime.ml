@@ -2263,9 +2263,14 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
     | Some _ | None -> not_found ())
 ;;
 
-let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
+let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
   let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
-  fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id
+  let status = fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id in
+  if run_id = "" then status else
+    match Yojson.Safe.from_string status with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("keeper_decisions",
+        Fusion_decision.read_for_keeper ~config ~keeper:meta.name ~run_id |> Fusion_decision.read_to_yojson) :: fields))
+    | _ -> status
 ;;
 
 (* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the

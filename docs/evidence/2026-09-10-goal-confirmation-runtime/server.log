@@ -1,0 +1,138 @@
+[2026-09-10 08:11:53] [INFO] [MCP] Tag registry initialized: 151 tools registered
+[2026-09-10 08:11:54] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-09-10 08:11:54] [INFO] [Server] [auto 127.0.0.1:18943] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-10 08:11:54] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-10 08:11:54] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-10 08:11:54] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-10 08:11:54] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-10 08:11:54] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/config
+[2026-09-10 08:11:54] [INFO] [Server] installed 10 builtin Skill package(s)
+[2026-09-10 08:11:54] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-10 08:11:54] [INFO] [Misc] model_catalog: deployment overlay /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+[2026-09-10 08:11:54] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":null,"source":"default"}}
+[2026-09-10 08:11:54] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 08:11:54] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 08:11:54] [INFO] [Backend] Board: JSONL default backend
+[2026-09-10 08:11:54] [INFO] [Board] Board flusher actor started
+[2026-09-10 08:11:54] [INFO] [Board] JSONL backend initialized
+[2026-09-10 08:11:54] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4-flash
+[2026-09-10 08:11:54] [INFO] [Server] Skill snapshot ready at boot: snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d skills=0 rejections=0
+[2026-09-10 08:11:54] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published with deployment overlay /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/config/agent-core-models-overlay.toml
+[2026-09-10 08:11:54] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-09-10 08:11:54] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-09-10 08:11:54] [INFO] [Server] publication recovery owner discovery settled
+[2026-09-10 08:11:54] [WARN] [Server] startup admin token drift repaired for admin via MASC_ADMIN_TOKEN
+[2026-09-10 08:11:54] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-09-10 08:11:54] [INFO] [Keeper] keeper_owner: installed 0 single-owner actor(s) before persistence recovery
+[2026-09-10 08:11:54] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000081 examined=0 failures=0
+[2026-09-10 08:11:54] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000139 examined=0 failures=0
+[2026-09-10 08:11:54] [INFO] [Keeper] boot reconcile: examined=0 readable=0 quarantined=0 failed=0
+[2026-09-10 08:11:54] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000067 examined=0 failures=0
+[2026-09-10 08:11:54] [INFO] [Server] Runtime_params restored from /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base
+[2026-09-10 08:11:54] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-09-10 08:11:54] [INFO] [Server] Domain_pool created (14 domains) for dashboard/keeper compute
+[2026-09-10 08:11:54] [INFO] [ServerBootstrap] resolved: source=local_masc path=/Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/config
+[2026-09-10 08:11:54] [INFO] [Misc] prompt assets synced from binary: 25 copied, 0 overwritten
+[2026-09-10 08:11:54] [INFO] [Misc] tool assets synced from binary: 167 copied, 0 overwritten
+[2026-09-10 08:11:54] [INFO] [Misc] mcp assets synced from binary: 2 copied, 0 overwritten
+[2026-09-10 08:11:54] [INFO] [Server] keeper_gate: installed durable queue base_path=/Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base pending=0 replayed=0 replay_failed=0
+[2026-09-10 08:11:54] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task_group: starting initialize (parallel, 1 tasks)
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task_group: finished initialize
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task_group: starting cleanup (parallel, 1 tasks)
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task: starting jsonl_prune
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task: finished jsonl_prune
+[2026-09-10 08:11:54] [INFO] [Server] lazy_task_group: finished cleanup
+[2026-09-10 08:11:54] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-09-10 08:11:54] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-09-10 08:11:54] [INFO] [startup] subsystems: keeper loops started
+[2026-09-10 08:11:54] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-09-10 08:11:54] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-09-10 08:11:54] [INFO] [Server] host_fd_pressure_poller: started path=/Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-09-10 08:11:54] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-09-10 08:11:54] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 08:11:54] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 08:11:54] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-09-10 08:11:54] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-09-10 08:11:54] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-09-10 08:11:54] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-09-10 08:11:54] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-09-10 08:11:54] [INFO] [Server] browser-lane: automation has no browser.webdriver_url
+[2026-09-10 08:11:54] [WARN] [Server] imessage: in-process gateway not started (chat.db at /Users/dancer/Library/Messages/chat.db is not readable: grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access)
+MASC MCP Server listening on http://127.0.0.1:18943
+   Base path: /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base
+   MASC dir: /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc
+   Process cwd: /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base
+   MASC_BASE_PATH(env): /Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+[2026-09-10 08:11:54] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting execution refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting mission refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-09-10 08:11:54] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-09-10 08:11:54] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-09-10 08:11:54] [INFO] [Dashboard] board surface pre-warmed (0.8ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (0.8ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] config surface pre-warmed (1.4ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] planning surface pre-warmed (1.8ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-09-10 08:11:54] [INFO] [Dashboard] light shell cache pre-warmed (9.1ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] shell cache pre-warmed (10.5ms)
+[2026-09-10 08:11:54] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (10.6ms total)
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call: masc_goal_upsert (id=7, session=mcp_VUlerOm_I20_2OSS)
+[2026-09-10 08:11:54] [INFO] [Session] [AgentRegistry] New identity: admin (session=c62b16ca, mcp=mcp_VUlerOm_I20_2OSS)
+[2026-09-10 08:11:54] [INFO] [Session] Session registered: admin (total: 1)
+[2026-09-10 08:11:54] [INFO] [MCP] masc_goal_upsert -> {"status":"ok","action":"created","goal_id":"goal-1788995514248-d795c8d8","goal"...
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call completed: masc_goal_upsert (outcome=ok)
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call: masc_goal_transition (id=8, session=mcp_VUlerOm_I20_2OSS)
+[2026-09-10 08:11:54] [INFO] [Misc] goal verifier scheduled goal_id=goal-1788995514248-d795c8d8
+[2026-09-10 08:11:54] [INFO] [MCP] masc_goal_transition -> {"status":"ok","goal_id":"goal-1788995514248-d795c8d8","action":"request_complet...
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call completed: masc_goal_transition (outcome=ok)
+[2026-09-10 08:11:54] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=0.063
+[2026-09-10 08:11:54] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/playground argument={"file_path":"/Users/dancer/.masc-integration/goal-confirmation-0f9-probe2/base/.masc/playground/fixture/evidence.txt"} outcome=resolved
+[2026-09-10 08:11:54] [INFO] [agent_core:agent] turn completed turn=1 elapsed_run_sec=0.006 turn_duration_sec=0.006 model=goal-fixture stop=tools_executed tool_rounds=1 tool_round_ceiling=none
+[2026-09-10 08:11:54] [INFO] [agent_core:agent] turn completed turn=2 elapsed_run_sec=0.008 turn_duration_sec=0.003 model=goal-fixture stop=tools_executed tool_rounds=2 tool_round_ceiling=none
+[2026-09-10 08:11:54] [INFO] [agent_core:agent] turn completed turn=3 elapsed_run_sec=0.012 turn_duration_sec=0.003 model=goal-fixture stop=end_turn
+[2026-09-10 08:11:54] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=11
+[2026-09-10 08:11:54] [INFO] [Misc] [goal-proof-review] goal_id=goal-1788995514248-d795c8d8 LLM approved runtime=goal_fixture.proof reason=Synthetic verifier read the real fixture file and observed exactly one marker.
+[2026-09-10 08:11:54] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-09c3080593623610457448344366df4c seq=1 bytes=179
+[2026-09-10 08:11:54] [INFO] [Keeper] fleet projection request_id=wmsg-09c3080593623610457448344366df4c from=verifier_exact recipients=0 appended=0 failed=0
+[2026-09-10 08:11:54] [INFO] [Misc] goal verifier committed goal_id=goal-1788995514248-d795c8d8 verdict=APPROVE
+[2026-09-10 08:11:54] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call: masc_goal_transition (id=18, session=mcp_VUlerOm_I20_2OSS)
+[2026-09-10 08:11:54] [INFO] [MCP] masc_goal_transition -> {"status":"ok","goal_id":"goal-1788995514248-d795c8d8","action":"reopen","goal":...
+[2026-09-10 08:11:54] [INFO] [MCP] tools/call completed: masc_goal_transition (outcome=ok)
+[2026-09-10 08:11:54] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-09-10 08:11:54] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-09-10 08:11:54] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-09-10 08:11:55] [INFO] [Server] Cancelling orchestrator...
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] orchestrator cancelled (0.00s)
+[2026-09-10 08:11:55] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-09-10 08:11:55] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 08:11:55] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 08:11:55] [INFO] [Pulse] stopped after 2 beats
+[2026-09-10 08:11:55] [INFO] [Server] [auto 127.0.0.1:18943] stats: h2=0 h1=16
+[2026-09-10 08:11:55] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-09-10 08:11:55] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-09-10 08:11:55] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-09-10 08:11:55] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-09-10 08:11:55] [INFO] [Server] MASC MCP: Shutdown complete.

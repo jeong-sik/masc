@@ -29,6 +29,9 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 let build_forest ~(config : Workspace.config) ~goals ~tasks
     ~(pending_approvals : Yojson.Safe.t list) =
+  match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+  | Error detail -> Error detail
+  | Ok goal_task_links ->
   let keeper_metas =
     Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
@@ -41,7 +44,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
     |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
-  let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
+  let goal_task_index = Workspace_goal_index.build_task_goal_index ~goal_task_links () in
   let context =
     {
       now_ts = Time_compat.now ();
@@ -57,7 +60,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
       goal_task_index;
     }
   in
-  goals |> List.map (build_tree context goals)
+  Ok (goals |> List.map (build_tree context goals))
 
 
 
@@ -166,6 +169,13 @@ let goal_store_unavailable_json detail =
     ; "error", `String detail
     ]
 
+let goal_task_links_unavailable_json detail =
+  `Assoc
+    [ "ok", `Bool false
+    ; "error_code", `String "goal_task_links_unavailable"
+    ; "error", `String detail
+    ]
+
 let goal_detail_json_ready ~(config : Workspace.config)
     ~(pending_approvals : Yojson.Safe.t list) ~goal_id :
     (Yojson.Safe.t, string) result =
@@ -175,7 +185,9 @@ let goal_detail_json_ready ~(config : Workspace.config)
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
-  let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
+  match build_forest ~config ~goals ~tasks ~pending_approvals with
+  | Error detail -> Ok (goal_task_links_unavailable_json detail)
+  | Ok forest ->
   let all_nodes = flatten_tree [] forest in
   match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
@@ -264,7 +276,9 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
-  let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
+  match build_forest ~config ~goals ~tasks ~pending_approvals with
+  | Error detail -> goal_task_links_unavailable_json detail
+  | Ok forest ->
   let all_nodes = flatten_tree [] forest in
   let total_goals = List.length goals in
   let total_tasks =

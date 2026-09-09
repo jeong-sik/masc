@@ -786,6 +786,15 @@ let test_goal_store_unavailable_preserves_source_detail () =
       Alcotest.(check string) "detail source failure is not a Gate failure" detail message
   | _ -> Alcotest.fail "Goal detail source failure was not preserved"
 
+let test_goal_link_source_unavailable_preserves_detail () =
+  let detail = "goal_task_links: primary registry is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
+                      "error", `String detail ] in
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "link source failure is retained" detail message
+  | _ -> Alcotest.fail "link source failure became an empty or successful detail"
+
 let test_decode_planning_snapshot_current_contract () =
   match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
   | Error err -> Alcotest.fail err
@@ -8662,6 +8671,8 @@ let () =
           test_decode_planning_snapshot_current_contract;
         Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
           test_goal_store_unavailable_preserves_source_detail;
+        test_case "Goal link source unavailable retains detail" `Quick
+          test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
         Alcotest.test_case "goal carries the judge verdict" `Quick

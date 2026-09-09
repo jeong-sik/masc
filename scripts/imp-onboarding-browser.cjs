@@ -2,9 +2,40 @@
 // Credentials are read from the disposable workspace, never placed in the URL.
 const fs = require('node:fs');
 const path = require('node:path');
-const [baseUrl, tokenFile, outputDir, playwrightModule, browserExecutable] = process.argv.slice(2);
-const { chromium } = require(playwrightModule);
-(async () => {
+async function waitForDurableOperation(page, operationUrl, token, requestId, { timeoutMs = 120000, now = Date.now } = {}) {
+  const deadline = now() + timeoutMs;
+  let observed = false;
+  while (now() < deadline) {
+    const response = await page.request.get(operationUrl, {
+      headers: { Authorization: 'Bearer ' + token }, timeout: Math.min(10000, Math.max(1, deadline - now())),
+    });
+    if (!response.ok()) {
+      // A browser request event (or even SSE HTTP200 headers) precedes durable
+      // admission. Only this typed absence is transient before first visibility.
+      if (!observed && response.status() === 404) {
+        const missing = await response.json();
+        if (missing.schema === 'masc.keeper_chat_operation.error.v1' && missing.error === 'unknown_operation') {
+          await page.waitForTimeout(250);
+          continue;
+        }
+      }
+      throw new Error('Browser operation lookup failed: HTTP ' + response.status());
+    }
+    const operation = await response.json();
+    if (operation.schema !== 'masc.keeper_chat_operation.v1' || operation.operation_id !== requestId) {
+      throw new Error('Browser operation identity or schema mismatch');
+    }
+    observed = true;
+    if (['Succeeded', 'Failed', 'Cancelled'].includes(operation.state)) return operation;
+    if (!['Queued', 'Running'].includes(operation.state)) throw new Error('Unknown browser operation state');
+    await page.waitForTimeout(250);
+  }
+  throw new Error(observed ? 'Browser operation did not settle before deadline' : 'Browser operation was not admitted before deadline');
+}
+
+async function main() {
+  const [baseUrl, tokenFile, outputDir, playwrightModule, browserExecutable] = process.argv.slice(2);
+  const { chromium } = require(playwrightModule);
   const browser = await chromium.launch({ headless: true, executablePath: browserExecutable });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1050 } });
@@ -30,21 +61,7 @@ const { chromium } = require(playwrightModule);
     // Text can precede settlement, and history hydration can replace SSE
     // presentation metadata. Read the exact durable operation before cleanup.
     const operationUrl = baseUrl + '/api/v1/keepers/imp/chat/operations/' + encodeURIComponent(requestId);
-    const deadline = Date.now() + 120000;
-    let operation;
-    while (Date.now() < deadline) {
-      const response = await page.request.get(operationUrl, {
-        headers: { Authorization: 'Bearer ' + token }, timeout: 10000,
-      });
-      if (!response.ok()) throw new Error('Browser operation lookup failed: HTTP ' + response.status());
-      operation = await response.json();
-      if (operation.schema !== 'masc.keeper_chat_operation.v1' || operation.operation_id !== requestId) {
-        throw new Error('Browser operation identity or schema mismatch');
-      }
-      if (['Succeeded', 'Failed', 'Cancelled'].includes(operation.state)) break;
-      if (!['Queued', 'Running'].includes(operation.state)) throw new Error('Unknown browser operation state');
-      await page.waitForTimeout(250);
-    }
+    const operation = await waitForDurableOperation(page, operationUrl, token, requestId);
     if (operation?.state !== 'Succeeded' || typeof operation.completed_at !== 'number' ||
         typeof operation.outcome_ref !== 'string' || !operation.outcome_ref) {
       throw new Error('Browser operation did not succeed with a durable terminal outcome');
@@ -80,4 +97,7 @@ const { chromium } = require(playwrightModule);
   } finally {
     await browser.close();
   }
-})().catch(error => { process.stderr.write(error.message + '\n'); process.exitCode = 1; });
+}
+
+module.exports = { waitForDurableOperation };
+if (require.main === module) main().catch(error => { process.stderr.write(error.message + '\n'); process.exitCode = 1; });

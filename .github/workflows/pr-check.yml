@@ -107,6 +107,11 @@ jobs:
           python3 test/test_installer_uninstall.py -v
           python3 test/test_install_runtime_setup.py -v
 
+      - name: Verify onboarding oracle ordering and sibling selection
+        run: |
+          node --test test/test_imp_onboarding_browser.cjs
+          python3 test/test_imp_onboarding_acceptance.py
+
       - name: Blocking lints
         run: |
           bash scripts/ci/run-lint-suite.sh blocking-pr \

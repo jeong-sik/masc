@@ -22,6 +22,7 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+BROWSER_SCRIPT = Path(__file__).with_name('imp-onboarding-browser.cjs')
 
 
 def request(url, token=None, body=None):
@@ -381,7 +382,7 @@ def measure(args):
                 (output / 'backlog.json').write_bytes((base / '.masc/tasks/backlog.json').read_bytes())
                 (output / 'health.json').write_text(json.dumps(health, indent=2))
                 if args.playwright_module:
-                    run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
+                    run('node', str(BROWSER_SCRIPT), url,
                         str(base / '.masc/auth/local-admin.token'), str(output),
                         args.playwright_module, args.browser_executable)
                 receipt = dict(

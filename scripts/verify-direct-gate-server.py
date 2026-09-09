@@ -16,7 +16,15 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+HTTP = build_opener(ProxyHandler({}), NoRedirect())
 
 
 def save(path, value):
@@ -50,6 +58,22 @@ def main():
             pass
 
         def do_POST(self):
+            try:
+                self.respond_fixture()
+            except Exception as error:
+                detail = str(error).replace(token, '[WITHHELD]')
+                save(root / 'provider-error.json', {'class': type(error).__name__, 'message': detail, 'event_count': len(events)})
+                raw = json.dumps({'error': {'type': 'fixture_failure', 'message': detail}}).encode()
+                try:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        def respond_fixture(self):
             nonlocal primary_count
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             with lock:
@@ -166,7 +190,7 @@ def main():
         raise ValueError('Downloaded runtime probe manifest does not bind this binary')
     args.binary.chmod(args.binary.stat().st_mode | 0o100)
     save(root / 'ci-provenance.json', {'run_id': args.ci_run, 'head_sha': run['head_sha'], 'artifact': artifact, 'manifest': manifest})
-    receipt = {'scope': 'real durable Gate and same-operation continuation with synthetic provider; no semantic LLM acceptance', 'expected_commit': args.expected_commit, 'base_path': str(base), 'port': args.port, 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(), 'status': 'started'}
+    receipt = {'scope': 'real durable Gate and same-operation continuation with synthetic provider; no semantic LLM acceptance', 'expected_commit': args.expected_commit, 'base_path': str(base), 'port': args.port, 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(), 'status': 'started', 'limitations': ['synthetic provider, no semantic LLM acceptance', 'no attachment or channel-session input in this scenario', 'no server restart in this scenario', 'does not prove automatic recovery from unavailable Gate authority']}
     save(root / 'receipt.json', receipt)
     with socket.socket() as check:
         check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -183,7 +207,7 @@ def main():
         if session:
             req.add_header('Mcp-Session-Id', session)
         try:
-            response = urlopen(req, timeout=20)
+            response = HTTP.open(req, timeout=20)
         except HTTPError as error:
             raw = error.read().decode()
             save(root / f'http-error-{counter}.json', {'status': error.code, 'body': raw.replace(token, '[WITHHELD]')})

@@ -50,3 +50,21 @@ ledger here. Use attempt-ledger evidence separately.
 Validation status: source inspection only; no local build, live provider sample
 or installed-command verification has been performed. Compare the same scenario
 on named source/build revisions before making an optimization claim.
+
+## Evidence identity
+
+The manifest records `binary_commit`, `executable_sha256`, `provenance_source`,
+`source_fingerprint` and `started_at` from the existing build identity service.
+Unknown fields remain null. The binary commit never falls back to the current
+checkout's HEAD. `self_observed` executable identity is not launcher-verified
+build provenance; preserve that distinction when comparing reports.
+
+`scenario_source_sha256` hashes the exact bytes read and parsed in one file read,
+not a later reopening of the path. Formatting changes produce a different digest.
+Every sample row carries the manifest's `run_id`, taken from the existing process
+identity. Join logs by `(run_id, sample_index, turn)`, not runtime ID alone.
+One CLI invocation owns one run, including repeated samples of the same runtime.
+
+Config revision, scenario digest and build identity establish comparison inputs;
+they do not prove token savings or equal answer quality. No live sampling evidence
+has been collected for these fields yet.

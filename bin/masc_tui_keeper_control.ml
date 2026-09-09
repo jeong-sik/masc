@@ -25,6 +25,7 @@ let response_detail ~status body =
 
 type liveness =
   | Unobserved
+  | Invalid of string
   | Absent
   | Present of Decode.keeper_runtime
 
@@ -40,14 +41,22 @@ type roster =
       { observed : Decode.keeper_runtime list
       ; total : int
       }
+  | Roster_invalid of
+      { observed : Decode.keeper_runtime list
+      ; errors : (string * string) list
+      ; complete : bool
+      }
   | Roster_complete of Decode.keeper_runtime list
 
-let roster_of_reading ~rows ~truncated ~total =
+let roster_of_reading ~errors ~rows ~truncated ~total =
   (* [count] short of [total] is the same fact as truncation: rows that belong
      here are missing. The route drops a keeper whose metadata it cannot read,
      and that keeper's fiber is still running. *)
   let observed_count = List.length rows in
-  if truncated || observed_count < total then
+  if errors <> [] then
+    Roster_invalid { observed = rows; errors;
+      complete = not truncated && observed_count + List.length errors >= total }
+  else if truncated || observed_count < total then
     Roster_partial { observed = rows; total = max total observed_count }
   else Roster_complete rows
 
@@ -80,6 +89,12 @@ let find_row rows name =
 
 let liveness_of_roster roster name =
   match roster with
+  | Roster_invalid { observed; errors; complete } -> (
+      match List.assoc_opt name errors with
+      | Some detail -> Invalid detail
+      | None -> (match find_row observed name with
+          | Some row -> Present row
+          | None -> if complete then Absent else Unobserved))
   | Roster_unobserved -> Unobserved
   | Roster_partial { observed; total = _ } -> (
       match find_row observed name with
@@ -103,20 +118,19 @@ let liveness_of_roster roster name =
    about the reading, not a state the keeper is in. *)
 let health reading =
   match reading.liveness with
-  | Unobserved | Absent -> None
+  | Unobserved | Invalid _ | Absent -> None
   | Present runtime -> Some runtime.Decode.kr_health
 
 let next_action reading =
   match reading.liveness with
-  | Unobserved | Absent -> None
+  | Unobserved | Invalid _ | Absent -> None
   | Present runtime -> runtime.Decode.kr_next_action
 
-(* Three outcomes, not two. A roster that was never read and a roster that
-   answered without this keeper are different facts: the first says nothing
-   about the keeper, the second says no fiber is running it. Spelling both
-   "unread" would fold a reading into the absence of one. *)
+(* Failed configuration, unread status and observed absence are distinct
+   readings; none supplies an invented heartbeat state. *)
 let health_label reading =
   match reading.liveness with
+  | Invalid _ -> "config error"
   | Unobserved -> "unread"
   | Absent -> "absent"
   | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
@@ -214,7 +228,7 @@ let requires_confirmation = function
    stops and joins the exact lane before removing its artifacts. *)
 let available reading =
   match reading.liveness with
-  | Unobserved -> []
+  | Unobserved | Invalid _ -> [ Delete ]
   | Absent -> [ Boot; Delete ]
   | Present runtime ->
       if not runtime.Decode.kr_keepalive_running then [ Boot; Delete ]
@@ -223,7 +237,7 @@ let available reading =
 
 let primary reading =
   match available reading with
-  | [] -> None
+  | [] | [ Delete ] -> None
   | first :: _ -> Some first
 
 type step =

@@ -5753,7 +5753,7 @@ let keeper_message_identity ~max_cells state keeper_name =
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
-        | Keeper_control.Absent | Keeper_control.Unobserved -> None
+        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
       in
       let status_color =
         keeper_action_color (Keeper_control.next_action reading)
@@ -6231,13 +6231,22 @@ let render_keeper_list (state : state) =
 
   (* The roster's own failure. The rows below still come from disk so they stay
      on screen; this says the live half of every one of them is missing, which
-     is why the lifecycle keys stop offering anything. *)
+     does not prevent confirmed deletion through the authoritative server. *)
   (match state.keeper_roster_error with
    | Some err ->
        box_line buf cols
          ((Theme.warn ()) ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
   (match state.keeper_roster with
+   | Keeper_control.Roster_invalid { errors; _ } ->
+       box_line buf cols
+         (Printf.sprintf "%s  configuration errors: %d; select a keeper for details%s"
+            (Theme.warn ()) (List.length errors) Ansi.reset);
+       (match selected_reading with
+        | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
+            box_line buf cols ((Theme.warn ()) ^ "  "
+              ^ Terminal_text.single_line (name ^ ": " ^ detail) ^ Ansi.reset)
+        | Some _ | None -> ())
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
@@ -6291,7 +6300,7 @@ let render_keeper_list (state : state) =
           let runtime =
             match reading.Keeper_control.liveness with
             | Keeper_control.Present row -> Some row
-            | Keeper_control.Absent | Keeper_control.Unobserved -> None
+            | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
           in
           let turn =
             List.find_map

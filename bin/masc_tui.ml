@@ -10033,6 +10033,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
           (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
              (Keeper_control.action_label action)
              (match reading.Keeper_control.liveness with
+              | Keeper_control.Invalid detail -> detail
               | Keeper_control.Unobserved ->
                   "the live roster has not been read"
               | Keeper_control.Absent | Keeper_control.Present _ ->
@@ -12918,7 +12919,7 @@ let terminal_title_runtime state keeper_name =
       (fun keeper ->
         match (keeper_reading state keeper).Keeper_control.liveness with
         | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-        | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
 ;;
 
 let terminal_title_snapshot state =

@@ -47,6 +47,24 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
   Exact evidence disclosure, retry, empty state and mobile overflow were checked.
   Its running-server integration and Keeper reuse are not yet demonstrated.
 
+## Delivery update at 2026-09-09T19:32Z
+
+- #34939, #34940 and #34941 are now merged. #34941's exact source
+  `790323dccdb291fa13390acf1f1f43408efd7ac3` passed CI and its six
+  proposal-storage scenarios in run 34393840993. #34940's publication CLI
+  passed all twelve scenarios with its declared jsonschema dependency.
+- The isolated CI-built runtime exposed 1,710 sources from 23 copied snapshots
+  across 18 Keeper identities. Production remains a separate deployment; this
+  does not establish that its context/proposal endpoints are available.
+- The full single-request input measured 518,293 native tokenizer tokens against
+  a loaded context of 262,144. The Keeper-group pass is now receiving its first
+  group's stream; final synthesis, semantic assessment and publication remain
+  open. See [aggregate evidence](../evidence/2026-09-10-workspace-memory-pass/README.md).
+- #34943 Keeper retrieval is still open. The TUI exhaustive-match failure was
+  repaired and the rebased source is undergoing CI. Overview statistics are
+  implemented in a separate worktree; review found a pending-cache loading issue
+  that is being repaired before browser verification.
+
 ## Acceptance matrix
 
 | # | Requirement | Evidence needed to close | Current state / next work |

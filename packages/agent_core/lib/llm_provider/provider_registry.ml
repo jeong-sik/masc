@@ -186,12 +186,6 @@ let refresh_llama_endpoints ~sw ~net ~endpoints =
 (** Current active endpoint list (snapshot). *)
 let active_llama_endpoints () = Array.to_list (Atomic.get llama_endpoints_ref)
 
-let discovered_max_context () = Discovery.discovered_per_slot_context ()
-
-let discovered_endpoint_max_context (url : string) =
-  Discovery.discovered_context_for_url url
-;;
-
 let default () =
   let t = create () in
   let capabilities_for_registered_label label =

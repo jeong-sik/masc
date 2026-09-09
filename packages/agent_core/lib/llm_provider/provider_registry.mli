@@ -107,16 +107,3 @@ val refresh_llama_endpoints
 (** Current active endpoint list (snapshot after last refresh).
     @since 0.86.0 *)
 val active_llama_endpoints : unit -> Discovery.endpoint list
-
-(** Per-slot context tokens from the last discovery probe.
-    Returns [None] if no probe has completed yet.
-    Delegates to {!Discovery.discovered_per_slot_context}.
-    @since 0.100.8 *)
-val discovered_max_context : unit -> int option
-
-(** Per-slot context for a specific endpoint URL.
-    Delegates to {!Discovery.discovered_context_for_url}.
-    Returns [None] when no valid context has been discovered for this URL
-    (either not probed or probed without reporting valid context properties).
-    @since 0.100.8 *)
-val discovered_endpoint_max_context : string -> int option

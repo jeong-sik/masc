@@ -76,14 +76,7 @@ val with_raw_trace_run_classified_result
 
 (** Execute [f] within a raw-trace run, handling start/finish recording
     and lifecycle status updates.  [f] receives [Some active_run] when
-    raw-trace is configured, [None] otherwise. *)
-val with_raw_trace_run
-  :  t
-  -> string
-  -> (Raw_trace.active_run option -> (Types.api_response, Error.t) result)
-  -> (Types.api_response, Error.t) result
-
-(** Error-polymorphic form of {!with_raw_trace_run}.  [of_core_error] lifts
+    raw-trace is configured, [None] otherwise.  [of_core_error] lifts
     trace-infrastructure failures into the caller's carrier, while
     [error_to_string] is used only for lifecycle/raw-trace diagnostics.
 

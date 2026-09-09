@@ -27,18 +27,31 @@ const { chromium } = require(playwrightModule);
     await page.getByRole('button', { name: '전송', exact: true }).first().click();
     const requestId = (await sentRequest).postDataJSON().request_id;
     if (typeof requestId !== 'string' || !requestId) throw new Error('Browser chat request has no operation identity');
-    // Text can precede settlement. Wait for this operation's terminal SSE
-    // projection so server cleanup cannot interrupt the browser turn.
-    await page.waitForFunction(id => [...document.querySelectorAll('[data-chat-role="assistant"]')].some(node =>
-      node.getAttribute('data-chat-stream-contract-request-id') === id &&
-      ['RUN_FINISHED', 'RUN_ERROR'].includes(node.getAttribute('data-chat-stream-contract-event'))),
-    requestId, { timeout: 120000 });
-    const reply = page.locator('[data-chat-role="assistant"]').filter({ hasText: 'IMP_BROWSER_OK' }).last();
-    if (await reply.getAttribute('data-chat-stream-contract-request-id') !== requestId ||
-        await reply.getAttribute('data-chat-stream-contract-event') !== 'RUN_FINISHED' ||
-        await reply.getAttribute('data-chat-stream-state') !== 'complete') {
-      throw new Error('Browser chat did not finish successfully for the submitted operation');
+    // Text can precede settlement, and history hydration can replace SSE
+    // presentation metadata. Read the exact durable operation before cleanup.
+    const operationUrl = baseUrl + '/api/v1/keepers/imp/chat/operations/' + encodeURIComponent(requestId);
+    const deadline = Date.now() + 120000;
+    let operation;
+    while (Date.now() < deadline) {
+      const response = await page.request.get(operationUrl, {
+        headers: { Authorization: 'Bearer ' + token }, timeout: 10000,
+      });
+      if (!response.ok()) throw new Error('Browser operation lookup failed: HTTP ' + response.status());
+      operation = await response.json();
+      if (operation.schema !== 'masc.keeper_chat_operation.v1' || operation.operation_id !== requestId) {
+        throw new Error('Browser operation identity or schema mismatch');
+      }
+      if (['Succeeded', 'Failed', 'Cancelled'].includes(operation.state)) break;
+      if (!['Queued', 'Running'].includes(operation.state)) throw new Error('Unknown browser operation state');
+      await page.waitForTimeout(250);
     }
+    if (operation?.state !== 'Succeeded' || typeof operation.completed_at !== 'number' ||
+        typeof operation.outcome_ref !== 'string' || !operation.outcome_ref) {
+      throw new Error('Browser operation did not succeed with a durable terminal outcome');
+    }
+    const reply = page.locator('[data-chat-role="assistant"][data-chat-stream-state="complete"]')
+      .filter({ hasText: 'IMP_BROWSER_OK' }).last();
+    await reply.waitFor({ timeout: 30000 });
     const gateObservation = await page.locator('.v2-statchip.attn').evaluateAll(nodes =>
       nodes.map(node => ({ label: node.textContent, detail: node.getAttribute('title') })));
     fs.writeFileSync(path.join(outputDir, 'browser-gate-observation.json'),
@@ -47,8 +60,9 @@ const { chromium } = require(playwrightModule);
     await page.screenshot({ path: path.join(outputDir, 'imp-browser-chat.png'), fullPage: false });
     fs.writeFileSync(path.join(outputDir, 'browser-receipt.json'), JSON.stringify({
       url: page.url(), keeper: 'imp', interaction: 'typed and sent a real chat message',
-      assistantReply: await reply.innerText(), requestId, terminalEvent: 'RUN_FINISHED',
-      streamState: 'complete', fixtureModel: false,
+      assistantReply: await reply.innerText(), requestId, terminalState: operation.state,
+      completedAt: operation.completed_at, outcomeRef: operation.outcome_ref,
+      terminalEvidenceSource: 'durable_chat_operation', streamState: 'complete', fixtureModel: false,
     }, null, 2));
   } finally {
     await browser.close();

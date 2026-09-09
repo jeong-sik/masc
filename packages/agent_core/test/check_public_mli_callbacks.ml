@@ -98,6 +98,7 @@ let trusted_qualified_argument_types =
     (fun trusted name -> String_set.add name trusted)
     String_set.empty
     [ "Eio.Buf_read.t"
+    ; "Eio.Flow.source_ty"
     ; "Eio.Net.ty"
     ; "Eio.Resource.t"
     ; "Eio.Switch.t"

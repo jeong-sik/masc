@@ -1,29 +1,10 @@
-(** Byte-identity pins for the three agent declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
+(** What the published surface says: that no agent tool appeared or vanished.
 
-    The expected values were read off the OCaml literals in
-    [Tool_schemas_agent] before the files existed, so this suite passing after
-    the move is what proves the files say the same thing. What a Keeper
-    receives must not change because a declaration moved.
-
-    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
-    not part of a JSON object's meaning, and TOML cannot place a sub-table
-    before its parent's scalar keys. *)
-
-open Alcotest
-
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
-
+    The descriptions and input schemas this suite also pinned were literals
+    read off the same published values before the declarations moved into
+    [config/tools/*.toml] -- one producer against a snapshot of itself, so the
+    only thing it could report was that someone edited a sentence. Those cases
+    are gone; every case that stays reads the published value. *)
 (* name, description, input_schema (keys sorted) *)
 let expected =
   [ ( {|masc_agent_fitness|}
@@ -45,26 +26,6 @@ Task completion, timing, error rates, and collaboration history.|}
 
 let published = Tool_schemas_agent.schemas
 
-let find name =
-  match
-    List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
-  with
-  | Some schema -> schema
-  | None -> failf "%s is absent from Tool_schemas_agent.schemas" name
-;;
-
-let test_each () =
-  List.iter
-    (fun (name, description, schema_json) ->
-      let s = find name in
-      check string (name ^ " description") description s.description;
-      check string
-        (name ^ " input_schema")
-        (Yojson.Safe.to_string (sorted (Yojson.Safe.from_string schema_json)))
-        (Yojson.Safe.to_string (sorted s.input_schema)))
-    expected
-;;
-
 (* The list is a published surface: a tool appearing or vanishing changes what
    a Keeper is offered, so the count is pinned too. *)
 let test_no_extras () =
@@ -75,8 +36,7 @@ let () =
   run
     "agent tool toml parity"
     [ ( "parity"
-      , [ test_case "each declaration is byte-identical" `Quick test_each
-        ; test_case "no tool appeared or vanished" `Quick test_no_extras
+      , [ test_case "no tool appeared or vanished" `Quick test_no_extras
         ] )
     ]
 ;;

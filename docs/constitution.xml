@@ -53,15 +53,15 @@
     <goal src="lib/goal/goal_phase.mli">
       <rule>큰 단위의 목표를 설정한다.</rule>
       <rule>반드시 정량적인 성공 조건을 지정해야 생성할 수 있다.
-            [parity B1: 현재 코드에서는 metric/target_value 가 option — 구현 예정]</rule>
+            [parity B1: Goal_store.upsert_goal 은 새 Goal 생성 시 metric/target_value 두 값을 비어 있지 않게 요구한다.]</rule>
       <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가
             현실에 실재하고 도달 가능한지 체크한다.
-            [parity B2: goal 경로에 verifier 와이어링 없음 — 구현 예정]</rule>
+            [parity B2: 완료 증명 verifier 는 연결되어 있다. 생성 시 성공조건의 실재성·도달 가능성 심사는 별도로 구현해야 한다.]</rule>
       <rule>1개의 Goal 에 여러 Task 가 관련될 수 있다.</rule>
       <rule>삭제(취소) 가능. 사유는 전용 필드가 아니라 transition 공용 note 로 기록한다
             (workspace_goals.ml 의 last_review_note).</rule>
       <rule>완료 조건: 생성 시 지정한 성공조건을 Verifier 가 증명 + 사람의 최종 확인.
-            [parity B3: 현재 Request_complete → Completed 즉시 전이 — 구현 예정]</rule>
+            [parity B3: Request_complete → Verifying → Record_proof_proven → Completed. 사람의 최종 확인 단계는 아직 필요하다.]</rule>
       <lifecycle>
         <phase>Executing</phase>
         <phase>Blocked</phase>

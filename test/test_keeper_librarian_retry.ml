@@ -1184,9 +1184,10 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         (* Keeper_memory_os_events.append_all writes events off-main *)
         let events_to_append : Events.event list =
           [ { recorded_at = 1_000_000.
-            ; memory_id = "mem-test-1"
+            ; memory_id = Memory.memory_id fact_initial
             ; trace_id = "trace-event-offload"
-            ; kind = Events.Revised { superseded_by = "mem-test-2" }
+            ; kind = Events.Revised
+                { superseded_by = Memory.memory_id (fact ~claim:"Offloaded fact 1 corrected") }
             }
           ]
         in
@@ -1194,7 +1195,8 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
           Domain_pool_ref.submit_io_or_inline (fun () ->
             Events.append_all ~keepers_dir ~keeper_id events_to_append)
         in
-        check int "no append errors" 0 (List.length append_errors);
+        check (list string) "no append errors" []
+          (List.map Events.append_error_to_string append_errors);
         let read_events = Events.read ~keepers_dir ~keeper_id in
         check int "one event read from sidecar" 1 (List.length read_events);
 

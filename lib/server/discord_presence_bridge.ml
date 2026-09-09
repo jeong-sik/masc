@@ -58,7 +58,33 @@ let live_keeper_presence ~base_path =
   |> Result.map List.rev
 ;;
 
-let update_presence ~workspace_config =
+(* Written out over every pair so a new [presence_status] constructor is a
+   compile error here rather than a status the bridge re-sends forever. *)
+let same_status (a : Discord_gateway_state.presence_status) b =
+  let module S = Discord_gateway_state in
+  match a, b with
+  | S.Online, S.Online | S.Idle, S.Idle | S.Dnd, S.Dnd | S.Invisible, S.Invisible ->
+    true
+  | S.Online, (S.Idle | S.Dnd | S.Invisible)
+  | S.Idle, (S.Online | S.Dnd | S.Invisible)
+  | S.Dnd, (S.Online | S.Idle | S.Invisible)
+  | S.Invisible, (S.Online | S.Idle | S.Dnd) -> false
+;;
+
+(* The gateway frame and its "presence update" log line go out only when the
+   status changes. Every poll used to re-send the same status: 61 identical
+   "presence update: online" lines and as many Discord frames in 41 minutes
+   (2026-09-09). A disconnected gateway forgets the last send, because the
+   reconnect identifies as Online by default and the next connected poll has
+   to publish the real status again. *)
+let presence_transition ~last computed =
+  match last, computed with
+  | Some previous, Some next when same_status previous next -> None, last
+  | (None | Some _), (Some _ as next) -> next, next
+  | (None | Some _), None -> None, None
+;;
+
+let update_presence ~workspace_config ~last =
   let base_path = workspace_config.Workspace.base_path in
   match live_keeper_presence ~base_path with
   | Error detail ->
@@ -66,11 +92,14 @@ let update_presence ~workspace_config =
       "discord_presence_bridge: binding read failed: %s"
       (Channel_gate_discord_state.binding_lookup_error_to_string detail)
   | Ok keepers ->
-    (match
-       presence_status_for_keepers
-         ~gateway_connected:(Channel_gate_discord_state.connected ())
-         keepers
-     with
+    let computed =
+      presence_status_for_keepers
+        ~gateway_connected:(Channel_gate_discord_state.connected ())
+        keepers
+    in
+    let to_send, next_last = presence_transition ~last:!last computed in
+    last := next_last;
+    (match to_send with
      | None -> ()
      | Some status -> Discord_gateway_client.set_presence status)
 ;;
@@ -78,8 +107,9 @@ let update_presence ~workspace_config =
 (* ── Fiber entry ────────────────────────────────────────────────── *)
 
 let start ~sw:_ ~clock ~workspace_config () =
+  let last = ref None in
   let rec loop () =
-    (try update_presence ~workspace_config with
+    (try update_presence ~workspace_config ~last with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Discord.warn

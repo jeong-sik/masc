@@ -48,6 +48,30 @@ let test_no_running_bound_keeper_sets_idle () =
     (Bridge.presence_status_for_keepers ~gateway_connected:true keepers)
 ;;
 
+let check_transition label ~last computed ~send ~remember =
+  let to_send, next_last = Bridge.presence_transition ~last computed in
+  check string (label ^ ": send") (status_name send) (status_name to_send);
+  check string (label ^ ": remember") (status_name remember) (status_name next_last)
+;;
+
+(* Every 30 s poll used to re-send the same status: 61 identical
+   "presence update: online" lines in 41 minutes (2026-09-09). *)
+let test_unchanged_status_is_not_resent () =
+  check_transition "first poll" ~last:None (Some Gateway.Online)
+    ~send:(Some Gateway.Online) ~remember:(Some Gateway.Online);
+  check_transition "same again" ~last:(Some Gateway.Online) (Some Gateway.Online)
+    ~send:None ~remember:(Some Gateway.Online);
+  check_transition "changed" ~last:(Some Gateway.Online) (Some Gateway.Idle)
+    ~send:(Some Gateway.Idle) ~remember:(Some Gateway.Idle)
+;;
+
+let test_disconnect_forgets_the_last_send () =
+  check_transition "disconnected" ~last:(Some Gateway.Online) None
+    ~send:None ~remember:None;
+  check_transition "reconnected" ~last:None (Some Gateway.Online)
+    ~send:(Some Gateway.Online) ~remember:(Some Gateway.Online)
+;;
+
 let () =
   run
     "discord_presence_bridge"
@@ -64,6 +88,16 @@ let () =
             "sets idle when no running keeper has a Discord binding"
             `Quick
             test_no_running_bound_keeper_sets_idle
+        ] )
+    ; ( "send on change"
+      , [ test_case
+            "an unchanged status is not re-sent"
+            `Quick
+            test_unchanged_status_is_not_resent
+        ; test_case
+            "a disconnect forgets the last send"
+            `Quick
+            test_disconnect_forgets_the_last_send
         ] )
     ]
 ;;

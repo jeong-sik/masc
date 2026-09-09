@@ -22,6 +22,16 @@ val presence_status_for_keepers :
     least one running keeper has a Discord channel binding, and [Some Idle]
     otherwise. *)
 
+val presence_transition :
+  last:Discord_gateway_state.presence_status option ->
+  Discord_gateway_state.presence_status option ->
+  Discord_gateway_state.presence_status option
+  * Discord_gateway_state.presence_status option
+(** [presence_transition ~last computed] is [(to_send, next_last)]: the status
+    to publish this poll, if it differs from the last one published, and what
+    to remember. A [None] computed status (gateway disconnected) forgets the
+    last send so the next connected poll publishes again. *)
+
 val start :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

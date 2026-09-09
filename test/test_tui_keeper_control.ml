@@ -694,17 +694,7 @@ let test_roster_decode_rejects_an_unknown_phase () =
         {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
         err
 
-(* A keeper row whose metadata reading produced no error detail: the row is
-   marked [status:"error"], carries no [effective_meta_error] object, and so
-   reaches [decode_keeper_runtime] — which required health/phase/paused/
-   runtime_id, all readings of the metadata that failed, and refused the
-   whole roster (the TUI then drew its "not running" fallback over every
-   keeper). Now the row decodes to the reading it actually has and the
-   rest of the roster stays visible. A field that IS present but unknown
-   still refuses, as the two tests above pin. Rows that DO carry an
-   [effective_meta_error] object are partitioned into the errors list by
-   [decode_keeper_runtime_list] before this decoder runs — the other tests
-   in this file pin that pairing. *)
+(* A detail-less error is retained as unavailable, never a runtime snapshot. *)
 let error_row name = Printf.sprintf
     {|{"status":"error","runtime_class":"keeper","name":%S,
        "keepalive_running":false,
@@ -720,28 +710,26 @@ let test_roster_decodes_an_error_row_without_refusing_the_rest () =
   in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.failf "roster must decode past an error row: %s" detail
-  | Ok (rows, _, _, _) ->
-      Alcotest.(check int) "both rows survive" 2 (List.length rows);
-      let broken =
-        List.find (fun r -> String.equal r.Decode.kr_name "broken-meta") rows
-      in
-      Alcotest.(check string)
-        "the unreadable keeper reads as degraded"
-        "degraded"
-        (Decode.keeper_health_to_string broken.Decode.kr_health);
-      Alcotest.(check string)
-        "its phase is the offline reading" "offline"
-        (Decode.keeper_phase_to_string broken.Decode.kr_phase);
-      Alcotest.(check string)
-        "its sandbox profile is empty, not invented" ""
-        broken.Decode.kr_sandbox_profile;
-      let good =
-        List.find (fun r -> String.equal r.Decode.kr_name "healthy-one") rows
-      in
-      Alcotest.(check string)
-        "the healthy row is untouched"
-        "healthy"
-        (Decode.keeper_health_to_string good.Decode.kr_health)
+  | Ok (rows, errors, _, _) ->
+      Alcotest.(check int) "only observed runtime rows survive" 1 (List.length rows);
+      Alcotest.(check (list (pair string string))) "missing metadata stays an error"
+        ["broken-meta", "Keeper metadata unavailable; the server supplied no error detail"] errors;
+      Alcotest.(check string) "healthy row retained" "healthy-one" (List.hd rows).Decode.kr_name
+
+let test_actual_producer_error_is_isolated () =
+  let producer_row = Yojson.Safe.from_string
+    {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
+       "keepalive_running":false,"meta":null,"created_at":null,"updated_at":null,
+       "effective_meta_error":{"keeper":"broken-meta","message":"metadata unreadable",
+       "terminal_reason":"effective_meta_read_failed","severity":"error",
+       "operator_action_required":true,"next_action":"fix_keeper_toml_or_keeper_instructions"}}|} in
+  let json = `Assoc ["keepers", `List [Yojson.Safe.from_string (gate_row "healthy-one"); producer_row]] in
+  match Decode.decode_keeper_runtime_list json with
+  | Error message -> Alcotest.fail message
+  | Ok (rows, errors, _, _) ->
+    Alcotest.(check int) "healthy Keeper remains visible" 1 (List.length rows);
+    Alcotest.(check (list (pair string string))) "producer error retained verbatim"
+      ["broken-meta", "metadata unreadable"] errors
 
 (* Present-but-unknown health stays a refusal even though an absent one now
    falls back: the fallback is for readings that do not exist, not for
@@ -1059,6 +1047,8 @@ let () =
             test_roster_decode_rejects_an_unknown_phase
         ; Alcotest.test_case "an error row decodes without refusing the rest" `Quick
             test_roster_decodes_an_error_row_without_refusing_the_rest
+        ; Alcotest.test_case "actual producer error stays isolated" `Quick
+            test_actual_producer_error_is_isolated
         ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick
             test_roster_decode_rejects_present_unknown_health_on_error_row
         ] )

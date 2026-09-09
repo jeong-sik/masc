@@ -1055,17 +1055,10 @@ val decode_keeper_runtime_list :
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.
 
-    The one tolerated absence is the route's own error row —
-    [status:"error"], a keeper whose metadata reading produced no error
-    detail. Rows that carry an explicit [effective_meta_error] object are
-    partitioned into the errors list before this decoder runs, so this is
-    the shape that reaches it: no [health], [phase], [meta.sandbox_profile],
-    [runtime_id], [paused], [activation_mode], or [keepalive_running],
-    because those readings do not exist to send. It decodes to what it has
-    (health [KH_degraded], phase [Offline], empty profile) instead of
-    refusing the whole roster; before task-1485 one such row blanked every
-    keeper. On any other row a missing field is still producer drift and
-    still fails the reading. *)
+    A [status:"error"] row without structured metadata error is retained in
+    the error list with its message or an explicit unavailable explanation.
+    No lifecycle, activation, runtime or paused state is inferred from missing
+    metadata. Healthy rows keep their required-field contract. *)
 
 (** Lifecycle value shown by the Lanes surface. The composite endpoint is an
     operator projection whose vocabulary can grow before this binary does, so

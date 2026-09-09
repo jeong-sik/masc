@@ -93,7 +93,12 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
    status bridge correctly reports keepalive_stopped even for a Pass receipt. *)
 let snapshot_with_running_keeper ~(config : Masc.Workspace.config)
     ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
-  let stopped = K.snapshot_json ~config ~meta in
+  (* Observe both phases immediately; the public snapshot has a short-lived
+     cache keyed to turn and approval state, not registry transitions. *)
+  let snapshot () = K.For_testing.snapshot_json_inner_with_pending_reader
+    ~read_pending:Masc.Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config ~meta in
+  let stopped = snapshot () in
   Alcotest.(check bool) "a stopped keeper still requires attention" true
     Yojson.Safe.Util.(stopped |> member "needs_attention" |> to_bool);
   Alcotest.(check string) "stopped attention has its own cause" "keepalive_stopped"
@@ -107,7 +112,7 @@ let snapshot_with_running_keeper ~(config : Masc.Workspace.config)
     (fun () ->
       Alcotest.(check bool) "fixture keeper is Running" true
         (Masc.Keeper_registry.is_running ~base_path:config.base_path meta.name);
-      K.snapshot_json ~config ~meta)
+      snapshot ())
 ;;
 
 let test_trust_blocker_uses_structured_state () =
@@ -139,6 +144,7 @@ let test_trust_blocker_uses_structured_state () =
 let test_active_blocker_overrides_success_until_cleared () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
   let base_dir = temp_dir () in
   let config = Masc.Workspace.default_config base_dir in
   let initial = make_meta "runtime-trust-receipt-scope" in

@@ -81,7 +81,7 @@ and does not fix loader or OS compatibility problems.
 ## Install
 
 ```bash
-TAG=v0.35.0
+TAG=v0.34.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 less /tmp/masc-install.sh

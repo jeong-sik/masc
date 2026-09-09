@@ -69,7 +69,7 @@ describe('IdePersistencePanel', () => {
     expect(screen.getByTestId('ide-persistence-lifecycle')).toBeTruthy()
   })
 
-  it.each(['Running', 'Restarting', 'Failing'])('reports heartbeat rather than invented save state for %s', async phase => {
+  it.each(['Running', 'Restarting', 'Failing'] as const)('reports heartbeat rather than invented save state for %s', async phase => {
     activeKeeperName.value = 'sangsu'
     keepers.value = [{ name: 'sangsu', status: 'online', phase,
       last_heartbeat: '2026-05-06T00:00:00Z' }]

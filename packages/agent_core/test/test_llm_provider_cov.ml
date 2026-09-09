@@ -57,7 +57,7 @@ let system_msg s : Types.message =
   { role = System; content = [ Text s ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let gemini25_flash_model = "gemini-2.5-flash"
+let gemini25_flash_model = "gemini-3.7-flash"
 
 let gemini25_url ?api_key:_ ~stream () =
   let action = if stream then "streamGenerateContent" else "generateContent" in

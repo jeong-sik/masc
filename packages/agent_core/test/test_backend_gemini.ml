@@ -4,7 +4,7 @@ open Llm_provider
 (* ── Helpers ────────────────────────────────────────── *)
 
 let gemini_config
-      ?(model_id = "gemini-2.5-flash")
+      ?(model_id = "gemini-3.7-flash")
       ?enable_thinking
       ?thinking_budget
       ?reasoning_effort
@@ -183,30 +183,34 @@ let test_system_from_messages () =
   check int "one content (no system)" 1 (List.length contents)
 ;;
 
-let test_thinking_config () =
+(* [thinkingBudget] was Gemini 2.5's wire. No catalog row asks for it and no
+   model serves it, so passing one is a caller error rather than a second
+   dialect to pick between. *)
+let test_thinking_budget_is_refused () =
   let config = gemini_config ~enable_thinking:true ~thinking_budget:8000 () in
   let messages = [ Types.user_msg "Think about this." ] in
-  let body = Backend_gemini.build_request ~config ~messages () in
-  let json = parse_body body in
-  let gen = json |> member "generationConfig" in
-  let tc = gen |> member "thinkingConfig" in
-  check bool "has thinkingConfig" true (tc <> `Null);
-  check int "thinkingBudget" 8000 (tc |> member "thinkingBudget" |> to_int);
-  check bool "includeThoughts" true (tc |> member "includeThoughts" |> to_bool)
-;;
-
-let test_thinking_disabled_requires_exact_numeric_wire () =
-  let config = gemini_config ~enable_thinking:false () in
-  let messages = [ Types.user_msg "Keep it short." ] in
   match Backend_gemini.build_request ~config ~messages () with
-  | _ -> fail "expected exact numeric-wire rejection"
+  | _ -> fail "expected a thinkingBudget rejection"
   | exception Invalid_argument message ->
     check
       string
       "rejection"
-      "Backend_gemini.build_request: enable_thinking=false has no exact Gemini boolean \
-       wire; pass an explicit thinking_budget only when the selected model supports that \
-       numeric value"
+      "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
+       thinkingLevel wire; pass reasoning_effort"
+      message
+;;
+
+let test_thinking_disabled_has_no_representation () =
+  let config = gemini_config ~enable_thinking:false () in
+  let messages = [ Types.user_msg "Keep it short." ] in
+  match Backend_gemini.build_request ~config ~messages () with
+  | _ -> fail "expected a thinkingLevel rejection"
+  | exception Invalid_argument message ->
+    check
+      string
+      "rejection"
+      "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
+       thinkingLevel representation"
       message
 ;;
 
@@ -494,11 +498,11 @@ let test_parse_text_response () =
       "promptTokenCount": 10,
       "candidatesTokenCount": 5
     },
-    "modelVersion": "gemini-2.5-flash"
+    "modelVersion": "gemini-3.7-flash"
   }|}
   in
   let resp = Backend_gemini.parse_response json in
-  check string "model" "gemini-2.5-flash" resp.model;
+  check string "model" "gemini-3.7-flash" resp.model;
   (match resp.stop_reason with
    | Types.EndTurn -> ()
    | _ -> fail "expected EndTurn");
@@ -604,7 +608,7 @@ let function_call_with_thought_signature_json () =
       "finishReason": "STOP"
     }],
     "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 8},
-    "modelVersion": "gemini-2.5-flash"
+    "modelVersion": "gemini-3.7-flash"
   }|}
 ;;
 
@@ -1733,11 +1737,11 @@ let () =
             test_unsupported_explicit_seed_is_rejected
         ; test_case "system instruction from config" `Quick test_system_instruction
         ; test_case "system from messages" `Quick test_system_from_messages
-        ; test_case "thinking config" `Quick test_thinking_config
+        ; test_case "thinking budget is refused" `Quick test_thinking_budget_is_refused
         ; test_case
             "thinking disabled requires exact numeric wire"
             `Quick
-            test_thinking_disabled_requires_exact_numeric_wire
+            test_thinking_disabled_has_no_representation
         ; test_case "gemini 3 uses thinkingLevel" `Quick test_gemini3_uses_thinking_level
         ; test_case "gemini 3 disable is rejected" `Quick test_gemini3_disable_is_rejected
         ; test_case "tools" `Quick test_tools

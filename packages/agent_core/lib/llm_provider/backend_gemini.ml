@@ -47,11 +47,11 @@ let warn_parallel_disable_unsupported ~model_id =
     mark ())
 ;;
 
-type thinking_control =
-  | Thinking_budget
-  | Thinking_level of Reasoning_effort.t list
-
-let thinking_control_for_config (config : Provider_config.t) =
+(* Gemini publishes one thinking wire: [thinkingLevel], a name from the
+   model's declared effort vocabulary. The [thinkingBudget] integer wire is
+   gone -- no catalog row asks for it, and the only one that ever did was
+   [gemini-2.5], a retired model kept alive by test fixtures. *)
+let accepted_efforts_for_config (config : Provider_config.t) =
   let caps =
     match Provider_config.capabilities_for_config_model config with
     | Some caps -> caps
@@ -62,20 +62,12 @@ let thinking_control_for_config (config : Provider_config.t) =
             contract"
            config.model_id)
   in
-  match caps.accepted_reasoning_efforts, caps.supports_reasoning_budget with
-  | Some [], true -> Thinking_budget
-  | Some (_ :: _ as accepted), false -> Thinking_level accepted
-  | None, _ ->
+  match caps.accepted_reasoning_efforts with
+  | Some (_ :: _ as accepted) -> accepted
+  | None | Some [] ->
     invalid_arg
       (Printf.sprintf
-         "Backend_gemini.build_request: model %S has no declared thinking-control \
-          contract"
-         config.model_id)
-  | Some [], false | Some (_ :: _), true ->
-    invalid_arg
-      (Printf.sprintf
-         "Backend_gemini.build_request: model %S has an inconsistent thinking-control \
-          contract"
+         "Backend_gemini.build_request: model %S declares no thinkingLevel vocabulary"
          config.model_id)
 ;;
 
@@ -94,48 +86,27 @@ let thinking_config_of_config (config : Provider_config.t) =
   match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
   | None, None, None -> None
   | _ ->
-    (match thinking_control_for_config config with
-     | Thinking_level accepted ->
-       (match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
-        | _, Some _, _ ->
-          invalid_arg
-            "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
-             thinkingLevel wire; pass reasoning_effort"
-        | Some false, None, _ ->
-          invalid_arg
-            "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
-             thinkingLevel representation"
-        | Some true, None, Some effort ->
-          Some
-            (`Assoc
-                [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort)
-                ; "includeThoughts", `Bool true
-                ])
-        | Some true, None, None -> Some (`Assoc [ "includeThoughts", `Bool true ])
-        | None, None, Some effort ->
-          Some
-            (`Assoc
-                [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort) ])
-        | None, None, None -> None)
-     | Thinking_budget ->
-       (match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
-        | _, _, Some _ ->
-          invalid_arg
-            "Backend_gemini.build_request: reasoning_effort cannot target a Gemini \
-             thinkingBudget wire; pass thinking_budget"
-        | Some false, _, None ->
-          invalid_arg
-            "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
-             boolean wire; pass an explicit thinking_budget only when the selected model \
-             supports that numeric value"
-        | Some true, Some budget, None ->
-          Some (`Assoc [ "thinkingBudget", `Int budget; "includeThoughts", `Bool true ])
-        | Some true, None, None ->
-          invalid_arg
-            "Backend_gemini.build_request: enable_thinking=true on a thinkingBudget wire \
-             requires an explicit thinking_budget"
-        | None, Some budget, None -> Some (`Assoc [ "thinkingBudget", `Int budget ])
-        | None, None, None -> None))
+    let accepted = accepted_efforts_for_config config in
+    (match config.enable_thinking, config.thinking_budget, config.reasoning_effort with
+     | _, Some _, _ ->
+       invalid_arg
+         "Backend_gemini.build_request: thinking_budget cannot target a Gemini \
+          thinkingLevel wire; pass reasoning_effort"
+     | Some false, None, _ ->
+       invalid_arg
+         "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
+          thinkingLevel representation"
+     | Some true, None, Some effort ->
+       Some
+         (`Assoc
+             [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort)
+             ; "includeThoughts", `Bool true
+             ])
+     | Some true, None, None -> Some (`Assoc [ "includeThoughts", `Bool true ])
+     | None, None, Some effort ->
+       Some
+         (`Assoc [ "thinkingLevel", `String (thinking_level_of_effort ~accepted effort) ])
+     | None, None, None -> None)
 ;;
 
 let gemini_role_of_agent_core = function
@@ -738,7 +709,6 @@ let build_request_artifact
           "Backend_gemini.build_request: model %S does not support seed"
           config.model_id)
    | true, None | false, None -> ());
-  (* Gemini 3+ uses [thinkingLevel]; Gemini 2.5 uses [thinkingBudget]. *)
   (match thinking_config_of_config config with
    | Some thinking_config ->
      gen_config := ("thinkingConfig", thinking_config) :: !gen_config

@@ -264,7 +264,7 @@ let test_gemini_catalog_drives_capabilities () =
     "gemini-3.1-pro-preview ctx"
     (Some 1_000_000)
     (ctx "gemini-3.1-pro-preview");
-  check (option int) "gemini-2.5-flash ctx" (Some 1_000_000) (ctx "gemini-2.5-flash")
+  check (option int) "gemini-3.7-flash ctx" (Some 1_048_576) (ctx "gemini-3.7-flash")
 ;;
 
 let test_lookup_kimi_k2_native_cloud_suffix () =
@@ -2937,7 +2937,7 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
 
    The discriminator is a field the row sets and the provider base does not:
    [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
-   what made Backend_gemini refuse "gemini-2.5-flash" with "no declared
+   what made Backend_gemini refuse its own models with "no declared
    thinking-control contract" -- so [Some _] here means the row was read. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke

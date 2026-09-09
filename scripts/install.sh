@@ -1309,15 +1309,25 @@ masc_reported_version() {
 # Automatic upgrades apply only to ordered stable release versions. Unknown
 # development/prerelease strings and downgrades still require an explicit force.
 is_stable_upgrade() {
-  python3 - "$1" "${2#v}" <<'PY_VERSION'
-import re, sys
-
-def release(value):
-    return tuple(map(int, value.split('.'))) if re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', value) else None
-
-installed, requested = map(release, sys.argv[1:])
-sys.exit(0 if installed is not None and requested is not None and installed < requested else 1)
-PY_VERSION
+  # Keep version planning available before the private Python bootstrap.
+  # Decimal components are compared without shell integer overflow.
+  local installed="$1" requested="${2#v}" left right index
+  local LC_ALL=C
+  local installed_parts requested_parts
+  [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  IFS=. read -r -a installed_parts <<< "$installed"
+  IFS=. read -r -a requested_parts <<< "$requested"
+  for index in 0 1 2; do
+    left="${installed_parts[$index]}"; right="${requested_parts[$index]}"
+    while [ "${#left}" -gt 1 ] && [[ "$left" = 0* ]]; do left="${left#0}"; done
+    while [ "${#right}" -gt 1 ] && [[ "$right" = 0* ]]; do right="${right#0}"; done
+    [ "${#left}" -lt "${#right}" ] && return 0
+    [ "${#left}" -gt "${#right}" ] && return 1
+    [[ "$left" < "$right" ]] && return 0
+    [[ "$left" > "$right" ]] && return 1
+  done
+  return 1
 }
 
 SKIP_DL=0

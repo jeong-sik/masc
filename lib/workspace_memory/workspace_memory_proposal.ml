@@ -4,6 +4,7 @@ type exclusion = { source_id : string; reason : string }
 type t = { raw : Yojson.Safe.t; claims : claim list;
            conflicts : conflict list; exclusions : exclusion list }
 type error = Invalid of string | Unavailable of string
+type binding = Fact of string * int | Change of string | Invalidation of string * int
 let ( let* ) = Result.bind
 let to_json t = t.raw
 let claims t = t.claims
@@ -58,12 +59,12 @@ let decode raw =
     let* () = match field "metadata" j with `Assoc _ -> Ok () | _ -> Error "Snapshot metadata must be an object" in
     Ok sid) snapshots in
   let* () = if unique snapshot_ids then Ok () else Error "Duplicate snapshot identity" in
-  let* source_ids = traverse (fun j ->
+  let* source_bindings = traverse (fun j ->
     let* sid = text (field "source_id" j) in
     let* snapshot = text (field "snapshot_id" j) in
     let* snapshot_json = match List.find_opt (fun s -> field "snapshot_id" s = `String snapshot) snapshots with
       | None -> Error "Unknown source snapshot" | Some s -> Ok s in
-    let* () = match field "fact" j, field "evidence_path" j with
+    let* binding = match field "fact" j, field "evidence_path" j with
       | (`Assoc _ as fact), `Null ->
         let* _ = text (field "claim" fact) in
         let* () = if field "keeper_id" j = field "keeper_id" snapshot_json
@@ -72,17 +73,21 @@ let decode raw =
           then Ok () else Error "Source attribution differs from snapshot" in
         (match field "revision" j, field "fact_index" j with
          | `Int revision, `Int index when revision > 0 && index >= 0
-             && field "revision" (field "metadata" snapshot_json) = `Int revision -> Ok ()
+             && field "revision" (field "metadata" snapshot_json) = `Int revision -> Ok (Fact (snapshot, index))
          | _ -> Error "Invalid source revision or fact index")
       | `Null, `List [`String "change"] ->
         (match field "change" (field "metadata" snapshot_json) with
-         | `Assoc _ -> Ok () | _ -> Error "Missing change evidence")
+         | `Assoc _ -> Ok (Change snapshot) | _ -> Error "Missing change evidence")
       | `Null, `List [`String "invalidations"; `Int index] ->
         (match field "invalidations" (field "metadata" snapshot_json) with
-         | `List xs when index >= 0 && index < List.length xs -> Ok ()
+         | `List xs when index >= 0 && index < List.length xs -> Ok (Invalidation (snapshot, index))
          | _ -> Error "Invalid invalidation evidence reference")
       | _ -> Error "Source must contain a fact or known metadata evidence path" in
-    Ok sid) sources in
+    Ok (sid, binding)) sources in
+  let source_ids = List.map fst source_bindings in
+  let bindings = List.map snd source_bindings in
+  let* () = if List.length bindings = List.length (List.sort_uniq Stdlib.compare bindings)
+    then Ok () else Error "Duplicate source evidence binding" in
   let* () = if unique source_ids then Ok () else Error "Duplicate source identity" in
   let proposal = field "proposal" raw in
   let* () = exact ["shared_claims"; "conflicts"; "excluded"] proposal in

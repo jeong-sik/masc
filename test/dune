@@ -213,7 +213,6 @@
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
-  test_workspace_memory_proposals
   test_keeper_exact_flow_detail
   test_dashboard_execute_output
   test_tool_assignment_telemetry
@@ -564,7 +563,6 @@
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
-  test_workspace_memory_proposals
   test_keeper_exact_flow_detail
   test_dashboard_execute_output
   test_tool_assignment_telemetry
@@ -5482,3 +5480,9 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_setup_cli)))
+
+(test
+ (name test_workspace_memory_proposals)
+ (modules test_workspace_memory_proposals)
+ (libraries alcotest yojson masc masc.server)
+ (deps ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))

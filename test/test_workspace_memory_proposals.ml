@@ -63,7 +63,54 @@ let test_corruption () =
   ignore (Api.get ~base_path ~id:None |> expect `Service_unavailable);
   ignore (Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `Service_unavailable);
   ignore (Api.get ~base_path ~id:(Some "../elsewhere") |> expect `Bad_request)
+let test_evidence_bindings () =
+  let base_path = Filename.temp_dir "workspace-proposals-bindings" "" in
+  let input = fixture () in
+  let sources = field "sources" input |> Yojson.Safe.Util.to_list in
+  let original = List.hd sources in
+  let duplicate = original |> replace "source_id" (str "contradiction")
+    |> replace "fact" (obj ["claim", str "PDF has a million pages"]) in
+  let proposal = field "proposal" input |> replace "excluded"
+    (`List [obj ["source_id", str "contradiction"; "reason", str "contradicts writer"]]) in
+  let bad = input |> replace "sources" (`List (duplicate :: sources)) |> replace "proposal" proposal in
+  ignore (Api.post ~base_path (Yojson.Safe.to_string bad) |> expect `Bad_request);
+  let snapshot = obj ["snapshot_id", str "retraction"; "keeper_id", str "analyst";
+    "store", str "source_bound"; "snapshot_sha256", str hash;
+    "metadata", obj ["revision", `Int 2;
+      "change", obj ["removed", `List [str "Retracted measurement"]];
+      "invalidations", `List [obj ["reason", str "source file changed"]]]] in
+  let evidence source_id path = obj ["source_id", str source_id;
+    "snapshot_id", str "retraction"; "evidence_path", `List path] in
+  let change = evidence "change" [str "change"] in
+  let invalidation = evidence "invalidation" [str "invalidations"; `Int 0] in
+  let retraction = input |> replace "snapshots" (`List [snapshot])
+    |> replace "sources" (`List [change; invalidation])
+    |> replace "proposal" (obj ["shared_claims", `List [obj [
+      "claim", str "Analyst withdrew the measurement after its source changed";
+      "source_ids", `List [str "change"; str "invalidation"]]];
+      "conflicts", `List []; "excluded", `List []]) in
+  let saved = Api.post ~base_path (Yojson.Safe.to_string retraction) |> expect `OK in
+  let fetched = Api.get ~base_path ~id:(Some (get_id saved)) |> expect `OK in
+  json_equal "zero-current-fact retractions preserve evidence" (canonical retraction) (field "proposal" fetched);
+  List.iter (fun evidence ->
+    let duplicate = replace "source_id" (str "duplicate") evidence in
+    let proposal = field "proposal" retraction |> replace "excluded"
+      (`List [obj ["source_id", str "duplicate"; "reason", str "duplicate"]]) in
+    let bad = retraction |> replace "sources" (`List [change; invalidation; duplicate])
+      |> replace "proposal" proposal in
+    ignore (Api.post ~base_path (Yojson.Safe.to_string bad) |> expect `Bad_request))
+    [change; invalidation]
+let test_real_curator () =
+  let base_path = Filename.temp_dir "workspace-proposals-real" "" in
+  (* Actual saved output of the local Qwen3.8-27B run, not a model-shaped mock. *)
+  let input = Yojson.Safe.from_file
+    "../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json" in
+  let saved = Api.post ~base_path (Yojson.Safe.to_string input) |> expect `OK in
+  let fetched = Api.get ~base_path ~id:(Some (get_id saved)) |> expect `OK in
+  json_equal "recorded model output survives server round-trip" (canonical input) (field "proposal" fetched)
 let () = Alcotest.run "workspace memory proposals" ["behavior", [
   Alcotest.test_case "submit, restart read, attribution and idempotence" `Quick test_persist;
   Alcotest.test_case "malformed references refused before persistence" `Quick test_invalid;
-  Alcotest.test_case "missing and corruption remain distinct" `Quick test_corruption]]
+  Alcotest.test_case "missing and corruption remain distinct" `Quick test_corruption;
+  Alcotest.test_case "unique evidence bindings and zero-fact retractions" `Quick test_evidence_bindings;
+  Alcotest.test_case "real saved local curator proposal" `Quick test_real_curator]]

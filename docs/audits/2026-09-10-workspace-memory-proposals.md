@@ -25,11 +25,13 @@ editing interface.
 
 The decoder creates typed claims, conflicts and exclusions, rejects unknown or
 uncovered source references, overlapping exclusions, duplicate identities,
-unknown snapshot links and invalid evidence paths. It preserves owners, full
+unknown snapshot links, invalid evidence paths and duplicate snapshot-slot bindings. It preserves owners, full
 fact objects, gaps and snapshot metadata. These checks validate the submitted
 structure; source digests and model claims are not independently revalidated.
 
 Behavior tests cover persistent readback with conflicting owners and gaps,
-idempotence, refusal before writing, and missing versus corrupt storage.
+idempotence, refusal before writing, and missing versus corrupt storage. They also
+ingest the saved local Qwen3.8-27B proposal and round-trip zero-fact retraction
+evidence, rejecting duplicated fact, change and invalidation bindings.
 No local build was run; compiled validation belongs to CI. Authentication and
 deployment still require live HTTP verification before claiming runtime use.

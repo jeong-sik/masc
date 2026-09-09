@@ -1,5 +1,18 @@
 # Changelog
 
+
+## [0.35.1] - 2026-09-09
+
+### Installation
+
+- Choose Claude Code and Codex models from numbered choices, including Claude Sonnet 5 and GPT-6 Astra. Use observed client context limits when available and exact catalog context otherwise; keep explicit custom-model setup available.
+- Upgrade older stable binaries without requiring `--force`, preserving workspace configuration. Separate installer options from PATH setup and make script inspection optional instead of blocking installation in a pager.
+- Package the macOS Python runtime and non-system shared libraries with immutable, checksummed release files so installing MASC does not require Homebrew. Keep Docker and model-runtime authentication as explicit prerequisites.
+
+### Verification
+
+- Verify imp conversations and required tools in the same fresh workspace produced by the installer. Preserve selected runtime and keeper configuration, reject prior imp evidence, and bind successful measurements to new requests and the observed model.
+
 ## [0.35.0] - 2026-09-09
 
 ### Fresh state required

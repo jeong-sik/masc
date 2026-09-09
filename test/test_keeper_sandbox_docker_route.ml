@@ -1434,6 +1434,82 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
 
    This pins the construction. It does not run it -- see the PR note on what
    is left unproven. *)
+let test_image_change_selects_distinct_persistent_container () =
+  let script = {|#!/bin/sh
+state_dir="$(dirname "$0")"
+printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+case "$1" in
+  info) printf '[]\n'; exit 0 ;;
+  image) printf '[]\n'; exit 0 ;;
+  inspect)
+    for arg do name="$arg"; done
+    if [ ! -f "$state_dir/$name" ]; then
+      printf 'no such container\n' >&2; exit 1
+    fi
+    case "$3" in *State.Running*) printf 'true\n';; *) printf 'fixture-id\n';; esac
+    exit 0 ;;
+  run)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --name) name="$2"; shift 2;; *) shift;; esac
+    done
+    touch "$state_dir/$name"
+    printf 'fixture-id\n'; exit 0 ;;
+  ps) exit 0 ;;
+  rm|stop) printf 'unexpected destructive action\n' >&2; exit 2 ;;
+  *) printf 'unexpected fixture command\n' >&2; exit 2 ;;
+esac
+|} in
+  with_fake_docker script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "image-adoption.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let sentinel = Filename.concat playground "existing-work.txt" in
+  write_file sentinel "preserved workspace";
+  let runtime image =
+    Keeper_turn_sandbox_runtime.create ~config
+      ~meta:{ meta with sandbox_image = Some image } () in
+  let select runtime =
+    match Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true
+      runtime ~cwd:playground ~command_argv:["printf"; "probe"] with
+    | Error detail -> Alcotest.fail detail
+    | Ok argv ->
+      let name = match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+        | Running {container_name} -> container_name
+        | Not_started -> Alcotest.fail "real Docker route never started" in
+      Alcotest.(check bool) "exec targets selected persistent container" true
+        (List.mem name argv);
+      name in
+  let old = runtime "fixture:old" in
+  let first = select old in
+  let same = select (runtime "fixture:old") in
+  Alcotest.(check string) "same image adopts existing container" first same;
+  let next = runtime "fixture:documents" in
+  let second = select next in
+  Alcotest.(check bool) "new image selects another container" false (first = second);
+  Alcotest.(check string) "same new image adopts" second
+    (select (runtime "fixture:documents"));
+  Alcotest.(check string) "existing turn retains its container" first (select old);
+  Alcotest.(check string) "workspace root survives image change"
+    (Keeper_turn_sandbox_runtime.host_root old)
+    (Keeper_turn_sandbox_runtime.host_root next);
+  Alcotest.(check string) "workspace contents retained" "preserved workspace" (read_file sentinel);
+  let lines = String.split_on_char '\n' (read_file log_path) in
+  let runs = List.filter (String.starts_with ~prefix:"run ") lines in
+  Alcotest.(check int) "only two actual Docker create subprocesses" 2 (List.length runs);
+  List.iter (fun image ->
+    Alcotest.(check bool) "creation uses requested image" true
+      (List.exists (fun line -> List.mem image (String.split_on_char ' ' line)) runs))
+    ["fixture:old"; "fixture:documents"];
+  Alcotest.(check bool) "old container is never stopped or removed" false
+    (List.exists (fun line -> String.starts_with ~prefix:"rm " line
+                          || String.starts_with ~prefix:"stop " line) lines)
+
 let test_exec_argv_is_the_container_argv () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2506,6 +2582,9 @@ let () =
             "docker run does not retry generic timeout"
             `Quick
             test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "image change preserves old container and adopts matching image"
+            `Quick test_image_change_selects_distinct_persistent_container;
           Alcotest.test_case
             "exec_argv is the container argv"
             `Quick

@@ -39,6 +39,9 @@ for name in ("card.png", "card.jpg", "card.gif"):
 svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="white"/><text x="40" y="120" font-family="NanumGothic" font-size="32">{title}</text></svg>'
 (out / "diagram.svg").write_text(svg)
 cairosvg.svg2png(bytestring=svg.encode(), write_to=str(out / "diagram.png"))
+with Image.open(out / "diagram.png") as im:
+    im.load()
+    assert im.size == (640, 360)
 pdfmetrics.registerFont(TTFont("Korean", font_path))
 pdf = canvas.Canvas(str(out / "guide.pdf"))
 pdf.setFont("Korean", 24)
@@ -59,6 +62,9 @@ run("libreoffice", "-env:UserInstallation=file:///tmp/masc-creative-proof-office
 assert title in run("pdftotext", str(out / "slides.pdf"), "-")
 run("pdftoppm", "-singlefile", "-png", "-scale-to", "1000",
     str(out / "slides.pdf"), str(out / "slides-render"))
+with Image.open(out / "slides-render.png") as im:
+    im.load()
+    assert min(im.size) > 0 and max(im.size) == 1000
 
 # A one-second fixture exercises encoding/decoding; it is not a runtime budget.
 with wave.open(str(out / "tone.wav"), "wb") as wav:

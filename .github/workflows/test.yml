@@ -242,9 +242,9 @@ jobs:
           # as red for an image nothing here builds. The recipe lives in the
           # binary (Keeper_sandbox_image.dockerfile) so that `masc
           # sandbox-image` works on a host with no checkout; --print is how
-          # it is read without a checkout's copy going stale. Debian slim
-          # plus bash, ripgrep and git, so this is a short build, and it is
-          # shared by full and targeted lanes.
+          # it is read without a checkout's copy going stale. The general
+          # image includes repository and creative-document tools; its build
+          # is shared by full and targeted lanes.
           opam exec -- dune build --root . bin/main_eio.exe
           ./_build/default/bin/main_eio.exe sandbox-image --print \
             | docker build -t masc-sandbox:general -

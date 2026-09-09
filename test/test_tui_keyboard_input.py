@@ -12004,7 +12004,7 @@ def seed_goal_linked_task(base_path: str) -> None:
     with open(
         os.path.join(tasks_dir, "goal_task_links.json"), "w", encoding="utf-8"
     ) as handle:
-        json.dump({"goal-ssim-501": ["task-linked-501"]}, handle)
+        json.dump({"links": [{"goal_id": "goal-ssim-501", "task_ids": ["task-linked-501"]}]}, handle)
 
 
 def fusion_list_detail_interaction(
@@ -12020,21 +12020,11 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The surface title, not the task id: this scenario seeds the goal the
-        # verdict judges, and that goal lists the same task on Planning, so
-        # tabbing on the id stops one surface early. Reading the whole stream
-        # for the headers then let a frame drawn while tabbing past answer for
-        # the one on screen, which is how the assertions below passed against
-        # a list nobody was looking at.
-        #
-        # The verdicts are a Planning tab, not a top-level surface. They were
-        # one, called Harness, and Masc_tui_types.surface_ring no longer
-        # carries that name -- so tabbing for it spent every press without the
-        # screen ever existing. Planning opens on Goals and [v] walks its three
-        # stops.
-        tab_until(process, master_fd, output, b"MASC Planning")
-        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review")
-        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Verdicts")
+        # Task Verdicts belongs to Planning; Tab cycles top-level families,
+        # whereas v selects the three Planning tabs without skipping coverage.
+        palette_go(process, master_fd, output, b"go planning", b"MASC Planning")
+        send_and_wait(process, master_fd, output, b"v", b"Task Review")
+        send_and_wait(process, master_fd, output, b"v", b"automatic Gate rulings")
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
@@ -12045,7 +12035,7 @@ def fusion_list_detail_interaction(
                 master_fd,
                 output,
                 rows=30,
-                columns=120,
+                columns=220,
                 needle=b"EVALUATOR",
                 controls=(FULL_REDRAW,),
             ),
@@ -12085,6 +12075,7 @@ def fusion_list_detail_interaction(
             b"approve",
             b"glm-coding",
             b"Fallback",
+            b"masc://planning/goal-ssim-501",
             b"left/Esc:list",
         ):
             if needle not in verdict_plain:

@@ -31,13 +31,33 @@ let test_writes_runtime_toml () =
   check bool "prompts present" true
     (Sys.is_directory (Filename.concat dst "prompts"))
 
-(* The whole reason the seed is filtered: the shipped keeper examples autoboot
-   into a sandbox the host may not have, so a fresh workspace gets no roster. *)
-let test_writes_no_keeper_manifests () =
+(* The seed is filtered because the repo's own keeper examples autoboot into
+   a sandbox the host may not have. Since #34310 a fresh workspace still gets a
+   roster: exactly the manifests [keepers-default/] holds, landing under
+   [keepers/], and none of them may autoboot. The expected names come from the
+   embedded listing through the same mapping the seeder uses, so a manifest
+   added to the default set is covered without editing this case. *)
+let test_writes_the_default_roster_with_autoboot_off () =
   let dst = fresh_dst () in
   ignore (Seed.seed_missing_from_embedded ~dst : int);
-  check (list string) "no keeper manifests" []
-    (entries_of (Filename.concat dst "keepers"))
+  let expected =
+    Embedded_config.file_list
+    |> List.filter_map Common.fresh_config_root_keeper_seed_target
+    |> List.map Filename.basename
+    |> List.sort_uniq String.compare
+  in
+  check bool "the default roster names at least one Keeper" true (expected <> []);
+  let keepers = Filename.concat dst "keepers" in
+  check (list string) "exactly the default roster" expected
+    (List.sort String.compare (entries_of keepers));
+  List.iter
+    (fun name ->
+       match Keeper_toml_loader.parse_toml (read_file (Filename.concat keepers name)) with
+       | Error detail -> fail (name ^ " did not parse: " ^ detail)
+       | Ok doc ->
+         check (option bool) (name ^ " waits to be started") (Some false)
+           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled"))
+    expected
 
 let test_writes_no_dune_file () =
   let dst = fresh_dst () in
@@ -73,9 +93,26 @@ let test_backfill_repairs_only_startup_required () =
   check int "second call is a no-op" 0
     (Seed.backfill_startup_required_from_embedded ~config_root)
 
+(* The packages the binary ships are whatever the embedded listing holds, so
+   the expectation is read from that listing rather than typed in: a typed
+   count went stale twice as packages were added (#34256 shipped five,
+   #34480 and #34498 made it seven). *)
+let embedded_packages () =
+  Embedded_skills.file_list
+  |> List.filter_map (fun rel ->
+       (* The seeder's own rule: a package is a directory that holds SKILL.md
+          directly, not any first path segment. *)
+       match String.split_on_char '/' rel with
+       | [ package; "SKILL.md" ] -> Some package
+       | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ -> None)
+  |> List.sort_uniq String.compare
+
 let test_builtin_skill_package () =
   let base_path = fresh_dst () in
-  check int "five complete first-party packages" 5
+  let packages = embedded_packages () in
+  check bool "the embedded listing names at least one package" true (packages <> []);
+  check int "every embedded package is a complete first-party package"
+    (List.length packages)
     (Seed.seed_missing_builtin_skills ~base_path);
   let root = Filename.concat base_path ".masc/skills" in
   List.iter
@@ -94,7 +131,7 @@ let test_builtin_skill_package () =
   check string "operator body survives" "operator's own skill" (read_file body);
   check bool "operator resource deletion survives" false (Sys.file_exists resource);
   check (list string) "all packages present without staging residue"
-    [ "browser-design"; "browser-lanes"; "evidence-review"; "frontend-implement"; "frontend-verify" ]
+    packages
     (List.sort String.compare (entries_of root))
 
 let () =
@@ -104,8 +141,8 @@ let () =
     ; ( "seed_missing_from_embedded"
       , [ test_case "writes runtime.toml and prompts" `Quick
             test_writes_runtime_toml
-        ; test_case "writes no keeper manifests" `Quick
-            test_writes_no_keeper_manifests
+        ; test_case "writes the default roster with autoboot off" `Quick
+            test_writes_the_default_roster_with_autoboot_off
         ; test_case "writes no dune file" `Quick test_writes_no_dune_file
         ; test_case "second pass keeps operator edits" `Quick
             test_second_pass_keeps_operator_edits

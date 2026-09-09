@@ -248,6 +248,38 @@ let test_tool_identity_does_not_bypass_externalization () =
     check_tool "opaque_tool_a";
     check_tool "opaque_tool_b")
 
+let test_stored_failure_keeps_immediate_context () =
+  with_temp_base_path (fun base_path ->
+    let store = Tool_blob_store.create ~base_path in
+    let expected_preview =
+      "failure_class=runtime_failure — " ^ runtime_failure_next_move
+    in
+    let check result =
+      match B.to_agent_core_typed_result ~base_path
+              ~model_projection:(O.Store_above { threshold_bytes = 64 }) result with
+      | Ok _ -> Alcotest.fail "stored failure must remain an error"
+      | Error { message; _ } ->
+        match O.decode_from_agent_core message with
+        | O.Not_marker -> Alcotest.fail "expected stored failure reference"
+        | O.Invalid_marker { detail } -> Alcotest.fail detail
+        | O.Decoded reference ->
+          Alcotest.(check string) "failure guidance is visible before reading artifact"
+            expected_preview reference.preview;
+          match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+          | Ok (Some _) -> ()
+          | Ok None -> Alcotest.fail "stored failure payload is missing"
+          | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+    in
+    check (tool_error ~tool_name:"Execute" (String.make 1024 'e'));
+    let child = Tool_blob_store.put_durable store ~bytes:"process stderr" ~mime:"text/plain" in
+    let result = Tool_result.make_err ~tool_name:"Execute"
+        ~class_:Tool_result.Runtime_failure ~start_time:0.0
+        ~data:(`Assoc [ "stderr", O.normalized_artifact_ref_to_json child ])
+        "process failed" in
+    match B.attach_artifact_manifest ~base_path result with
+    | Ok result -> check result
+    | Error { message; _ } -> Alcotest.fail message)
+
 let test_to_agent_core_typed_error_inlined () =
   match B.to_agent_core_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
@@ -670,6 +702,8 @@ let () =
             test_artifact_reader_owns_inline_projection;
           Alcotest.test_case "tool name does not bypass externalization" `Quick
             test_tool_identity_does_not_bypass_externalization;
+          Alcotest.test_case "stored failure keeps immediate guidance" `Quick
+            test_stored_failure_keeps_immediate_context;
           Alcotest.test_case "error inlined" `Quick test_to_agent_core_typed_error_inlined;
           Alcotest.test_case "error JSON cannot override typed metadata" `Quick
             test_to_agent_core_typed_error_ignores_json_metadata;

@@ -70,9 +70,14 @@ let with_ws name fn =
   Fun.protect
     ~finally:(fun () ->
       Masc.Eval_calibration.For_testing.reset_store ();
+      Time_compat.clear_clock ();
       cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
+      (* Resubmission can contend with the authority's final workspace-lock
+         release. The production lock retry needs the same Eio clock that
+         server startup installs; never replace it with a blocking sleep. *)
+      Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       (* The production calibration store is process-wide. Each case owns a
          different workspace, so bind its store explicitly and reset it only

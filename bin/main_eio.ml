@@ -1550,13 +1550,15 @@ let runtime_wizard_parse_errors errors =
     Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "; "
 
-let runtime_wizard_catalog_cmd_exit base_path =
+let runtime_wizard_catalog_cmd_exit base_path json =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime_toml.parse_file runtime_config_path with
   | Error errors ->
       Printf.eprintf "runtime-wizard-catalog failed: %s\n"
         (runtime_wizard_parse_errors errors);
       1
+  | Ok cfg when json ->
+      print_endline (Yojson.Safe.to_string (Runtime_wizard_inventory.to_json cfg)); 0
   | Ok cfg ->
       (match runtime_wizard_catalog_records cfg with
        | Error msg ->
@@ -1571,7 +1573,8 @@ let runtime_wizard_catalog_cmd =
     "Print the typed provider catalog used by the first-run install wizard."
   in
   let info = Cmd.info "runtime-wizard-catalog" ~doc in
-  Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path)
+  let json = Arg.(value & flag & info [ "json" ] ~doc:"Print every enabled provider/model binding as JSON.") in
+  Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path $ json)
 
 (* A subscription runtime signs in through its own CLI. This asks whether it is
    signed in *right now*, reusing the same login checks the server's official-
@@ -1587,6 +1590,57 @@ let runtime_wizard_catalog_cmd =
    (2, an HTTP provider) / unsupported (3, antigravity has no login probe) /
    the runtime id is not configured (4). *)
 let runtime_probe_subscription_timeout_s = 20.0
+
+let runtime_verification_timeout_s = 120.0
+
+let verify_runtime_execution runtime timeout_s =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let private_path = Filename.concat (Filename.get_temp_dir_name ())
+      ("masc-runtime-verify-" ^ Random_id.hex ~bytes:16) in
+    Unix.mkdir private_path 0o700;
+    Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
+    Eio_context.set_env env;
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
+      ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
+
+let runtime_verify_cmd_exit base_path runtime_id timeout_s =
+  let unavailable code message =
+    print_endline (Yojson.Safe.to_string (`Assoc [
+      "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
+      "model", `Null; "observed_model", `Null; "status", `String "unavailable";
+      "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
+      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+  if not (Float.is_finite timeout_s) || timeout_s <= 0. then
+    unavailable "invalid_timeout" "Verification timeout must be finite and positive."
+  else
+    let config_path = runtime_config_path_for_base_path base_path in
+    let loaded = try
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root:(Filename.dirname config_path) () in
+      Runtime.load_list ~config_path
+      with Env_config_core.Config_error message -> Error message in
+    match loaded with
+    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    | Ok (runtimes, _, _, _, _) ->
+      match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
+      | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
+      | Some runtime ->
+        (try
+          let result = verify_runtime_execution runtime timeout_s in
+          print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
+          Runtime_verification.exit_code result
+         with Eio.Io _ | Unix.Unix_error _ | Sys_error _ ->
+           unavailable "client_unavailable" "The isolated verification session could not start or finish.")
+
+let runtime_verify_cmd =
+  let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
+  let timeout = Arg.(value & opt float runtime_verification_timeout_s & info ["timeout"] ~docv:"SECONDS"
+    ~doc:"Deadline for this explicit readiness measurement, including client admission and model/tool roundtrip.") in
+  Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
+    Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
@@ -2490,26 +2544,39 @@ let runtime_model_info_cmd =
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
-  match Runtime.load_list ~config_path with
+  let loaded =
+    try
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
+      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root:(Filename.dirname config_path) () in
+      Runtime.load_list ~config_path
+    with Env_config_core.Config_error message -> Error message
+  in
+  match loaded with
   | Error message -> prerr_endline message; 1
-  | Ok (runtimes, default, assignments, _, _) ->
-    let selected = match List.assoc_opt "imp" assignments with
-      | None -> Some default
-      | Some id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes in
+  | Ok (runtimes, default, assignments, _, lanes) ->
+    let selected =
+      Option.bind
+        (Runtime_verification.initial_runtime_id ~default_runtime_id:default.id
+          ~assignments ~lanes ~keeper_name:"imp")
+        (fun id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
     match selected with
     | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
     | Some runtime ->
-      Printf.printf "Model connection: %s\n%!" runtime.id;
+      Printf.printf "Model connection: %s / %s\n%!" runtime.provider.display_name runtime.model.api_name;
       if not runtime.model.tools_support then (
         prerr_endline "This model has tool calling disabled. Select a tool-capable model in the installation wizard before starting imp."; 1)
-      else match runtime.execution with
-      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _ ->
-        runtime_probe_cmd_exit base_path runtime.id
-      | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
-        match runtime.provider.credentials with
-        | Some (Runtime_schema.Env key) when Option.fold ~none:true ~some:(fun value -> String.equal value "") (Sys.getenv_opt key) ->
-          Printf.eprintf "Set %s in this terminal, then rerun setup. No credential is stored by setup.\n" key; 1
-        | _ -> 0
+      else
+        let result = verify_runtime_execution runtime runtime_verification_timeout_s in
+        let code = Runtime_verification.exit_code result in
+        if code = 0 then print_endline "Model response and harmless tool roundtrip verified."
+        else (
+          (match result.failure, runtime.provider.credentials with
+           | Some (Runtime_verification.Unavailable Missing_credential), Some (Runtime_schema.Env key) ->
+             Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
+           | _ -> ());
+          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
+        code
 
 let setup_cmd_exit base_path port no_tui =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -2532,6 +2599,11 @@ let setup_cmd_exit base_path port no_tui =
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
         ~agent:default_login_agent ~token:None ~keeper_name:"imp"
         ~declaration:(`Assoc ["name", `String "imp"]))
+
+let setup_preflight_cmd =
+  let info = Cmd.info "setup-preflight"
+    ~doc:"Read existing Keeper and Goal state without initialization or writes." in
+  Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
 
 let setup_cmd =
   let no_tui = Arg.(value & flag & info ["no-tui"]
@@ -2572,6 +2644,7 @@ let cmd =
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
     ; runtime_token_sample_cmd
+    ; runtime_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
@@ -2579,6 +2652,7 @@ let cmd =
     ; keeper_github_cmd
     ; sandbox_image_cmd
     ; setup_cmd
+    ; setup_preflight_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

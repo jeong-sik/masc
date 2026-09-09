@@ -241,7 +241,7 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;
         require_ok "Starting imp" start_keeper;
-        Printf.printf "\nimp is started. Model replies are verified by your first conversation.\n\
+        Printf.printf "\nimp is started. Send your first message to begin the conversation.\n\
           Keepers: select imp, open its chat, and say hello. Then ask it to create a Board post\n\
           and a Task, list its sandbox directory, and fetch https://example.com.\n\
           If a tool asks permission, answer in the chat.\n%!";

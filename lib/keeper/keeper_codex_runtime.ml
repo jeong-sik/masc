@@ -662,6 +662,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
+      ; isolated_home = None
       ; model = config.model
       ; native = native_posture
       ; developer_instructions

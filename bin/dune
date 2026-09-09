@@ -26,6 +26,7 @@
   digestif
   masc_tui_editor
   masc.crypto_rng
+  masc.masc_random_id
   masc.dashboard
   masc.operator
   masc.server

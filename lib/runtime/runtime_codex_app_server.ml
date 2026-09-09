@@ -21,6 +21,7 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; isolated_home : string option
   ; model : string option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
@@ -46,6 +47,7 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
+  ; isolated_home = None
   ; model = None
   ; developer_instructions = None
   ; native = Runtime_native_tools.codex_default
@@ -1449,6 +1451,11 @@ let terminate_spawned_process ~clock proc stdin_w =
    Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
 let client_argv (config : config) =
   [ config.cli_path; "app-server"; "--stdio" ]
+  @ (match config.isolated_home with
+     | None -> []
+     | Some home ->
+       Runtime_verification_codex_home.cli_overrides ~home
+       |> List.concat_map (fun override -> [ "-c"; override ]))
   @ (match config.native with
      | Runtime_native_tools.Native_read ->
        [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
@@ -1464,7 +1471,12 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     let stderr_tail = ref "" in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
-        ~env:environment
+        ~env:(match config.isolated_home with
+          | None -> environment
+          | Some path ->
+            environment |> Array.to_list
+            |> List.filter (fun entry -> env_key entry <> "CODEX_HOME")
+            |> fun entries -> Array.of_list (("CODEX_HOME=" ^ path) :: entries))
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         (client_argv config)
     in

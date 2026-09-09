@@ -14630,6 +14630,15 @@ and is loaded on demand through keeper_skill.
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            discard_frame_for_new_size frame_presenter render_schedule;
+           (* Geometry changes redraw the cached snapshot immediately; an
+              in-flight tick must not own resize presentation either. *)
+           if state.msx_open then begin
+             if state.msx_menu_open then
+               Masc_tui_msx.render_menu ~write:write_to_terminal state
+             else
+               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+                 ~connection:state.connection_status state.msx_frame
+           end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())

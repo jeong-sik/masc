@@ -65,15 +65,49 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
   implemented in a separate worktree; review found a pending-cache loading issue
   that is being repaired before browser verification.
 
+## Verified update at 2026-09-09T22:27Z
+
+- #34960, #34963, #34967, #34972 and #34974 are merged. The isolated
+  17b9 candidate includes Edit result persistence, image configuration and image
+  adoption. It does not include the later thinking-presence or Gate continuation
+  work, and it is not the production deployment.
+- The actual Keeper selected the configured creative image while its old
+  container remained running. ReportLab, CairoSVG, Nanum and Poppler were
+  independently observed. PyMuPDF and pypdf are absent; an inaccurate operator
+  instruction was corrected. The PDF remains the rejected 15,691-byte file
+  with SHA256 `3b7534e691b1a8cb53b9049a9d931e5a5c8fa37466f62d836aea492d26829e0e`.
+  See [image adoption](../evidence/2026-09-10-image-adoption/README.md).
+- The real Keeper Edit returned success and a durable manifest with both
+  historical snapshots; all three hashes/lengths were checked. Evidence is
+  submitted in #34977. This is not yet the corresponding live chat diff or LSP proof.
+- #34972 has CI-built browser evidence for the actual IDE heartbeat panel with
+  synthetic inputs, including four states and a 390px viewport. It removes
+  unsupported saved/conflict claims; it does not establish memo persistence or
+  full IDE behavior. See [browser evidence](../evidence/2026-09-10-ide-heartbeat/README.md).
+- Goal creation already requires nonblank metric and target fields. Actual
+  isolated MCP accepted a declared criterion, rejected a missing target, and
+  returned only the accepted Goal with its original criterion revision.
+  Completion proof is wired; creation feasibility and human final confirmation
+  remain separate. #34976 is open and has failed compilation/type checks under
+  repair; no completed human-confirmation runtime is claimed.
+- Fusion already persists deliberation results to Board/chat and exposes runs.
+  Missing behavior is work attribution and the Keeper's adopted/rejected choice
+  with reasons, rather than absence of result storage. A separate implementation
+  is in progress; no autonomous decision-use proof exists yet.
+- The local whole-corpus process was still live when polled. Its first group
+  reported 72,047 chunks, 215,838 thinking characters and zero content characters
+  at 22:23:47Z. There is no completed whole-corpus synthesis to accept. The live
+  process was not restarted because of elapsed time or slow output.
+
 ## Acceptance matrix
 
 | # | Requirement | Evidence needed to close | Current state / next work |
 |---|---|---|---|
 | 1 | Goal/Task focus | Autonomous action receipts linked to assigned goal and remaining acceptance criteria across turns | Prompt section found in measured agent input (#34938); autonomous scenario still needed |
-| 2 | Important decisions use Fusion and are recorded | Real decision request, durable run, result, adopted/rejected reasons linked to work | Handler and result fragments exist; behavior unverified |
-| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context merged (#34909/#34919); live recovery/continuity scenarios pending |
+| 2 | Important decisions use Fusion and are recorded | Real decision request, durable run, result, adopted/rejected reasons linked to work | Durable deliberation runs exist; originating work and Keeper decision-use attribution are missing; implementation and behavior proof pending |
+| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context and actual creation/readback proven; human final confirmation implementation #34976 is under CI repair; live recovery/continuity pending |
 | 4 | Keepers do non-code work | Research and creative tasks completed with independent verification | No current scenario proof |
-| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Prompt intervention; tool availability and real outputs pending |
+| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Creative image tools and actual Keeper image adoption proven (#34974); PDF remains rejected; useful document/image/audio/video outputs still required |
 | 6 | Initiative | Role-appropriate autonomous work initiated and advanced without repeated user nudges | Prompt intervention; live sequence pending |
 | 7 | Requests to owner/operator | Specific actionable ask, answer, resumed dependent work, independent progress while waiting | Prompt intervention; live ask lifecycle pending |
 | 8 | Keeper delegation | Scoped assignment, recipient action, evidence returned and integrated, no duplicate ownership | Prompt intervention; two-Keeper scenario pending |
@@ -84,7 +118,7 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
 | 13 | Configuration feedback | Edit/save/reload shows effective source/value and verifies next request changed; errors visible | Keeper override save/readback/editor and measured input join proven (#34938); other settings and behavioral feedback pending |
 | 14 | Preset prompt inspection | Full preset content preview and effective selected prompt visible before/after application | Full preset/effective preview and CI-built browser proof in #34912; deployed current screen verification pending |
 | 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | #34924 stores patch originals; #34927 verifies and displays their diff. Component and CI-built browser scenarios pass (synthetic HTTP records, actual worker); full ChatTranscript scenarios also passed; deployed autonomous edit, remote edit coverage and LSP diagnostics remain pending |
-| 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Source and rendered audit pending |
+| 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Unsupported saved/conflict labels removed with actual-component browser proof (#34972); repository-scoped history/comments/memo persistence still pending |
 | 17 | Shared memory agent/lane | Cross-Keeper evidence consolidated with attribution/deduplication and retrieved in subsequent work | Local standalone curator exists; proposal store/readback/UI in #34940/#34941/#34942; actual Keeper retrieval and live consolidation pending |
 | 18 | Local LLM roles | Configured local verifier/judge/librarian role produces useful checked results with measured runtime identity | Local 8B failures and 27B useful synthetic results measured; broad quality, live role integration and provider/runtime comparisons pending |
 

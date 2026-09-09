@@ -63,6 +63,7 @@ type phase =
   | Preparing
   | Ready
   | Running
+  | Resuming_runtime_retry of runtime_retry
   | Recovering of recovery
   | Suspended of Keeper_checkpoint_ref.t
   | Settled of terminal
@@ -98,11 +99,11 @@ let error_to_string = function
   | Revision_exhausted -> "semantic execution revision exhausted"
 
 let phase_name = function
-  | Preparing -> "preparing" | Ready -> "ready" | Running -> "running"
+  | Preparing -> "preparing" | Ready -> "ready" | Running | Resuming_runtime_retry _ -> "running"
   | Recovering _ -> "recovering" | Suspended _ -> "suspended" | Settled _ -> "settled"
 let is_terminal execution = match execution.phase with
   | Settled _ -> true
-  | Preparing | Ready | Running | Recovering _ | Suspended _ -> false
+  | Preparing | Ready | Running | Resuming_runtime_retry _ | Recovering _ | Suspended _ -> false
 let scope execution = execution.id
 let valid_time value = Float.is_finite value && value >= 0.
 let valid_terminal = function Failed detail -> String.trim detail <> "" | Completed | Cancelled -> true
@@ -156,7 +157,7 @@ let projected_sources current projections =
 let recovery_origin = function
   | Preparing -> Some Unconfirmed_sources
   | Ready -> Some Confirmed_undispatched
-  | Running -> Some Interrupted_execution
+  | Running | Resuming_runtime_retry _ -> Some Interrupted_execution
   | Suspended checkpoint -> Some (Checkpointed checkpoint)
   | Recovering recovery -> Some recovery.origin
   | Settled _ -> None
@@ -170,11 +171,11 @@ let apply ~now action current =
       | Confirm_sources ->
           (match current.phase with
            | Preparing -> unchanged Ready
-           | Ready | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
+           | Ready | Running | Resuming_runtime_retry _ | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Begin_execution ->
           (match current.phase with
            | Ready -> unchanged Running
-           | Preparing | Running | Recovering _ | Suspended _ | Settled _ -> reject ())
+           | Preparing | Running | Resuming_runtime_retry _ | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Recheck_sources projections ->
           let recheck phase =
             let* sources = projected_sources current projections in
@@ -187,7 +188,7 @@ let apply ~now action current =
                 | Unconfirmed_sources -> recheck Preparing
                 | Confirmed_undispatched -> recheck Ready
                 | Checkpointed _ | Interrupted_execution | Runtime_retry _ -> reject ())
-           | Running | Suspended _ | Settled _ -> reject ())
+           | Running | Resuming_runtime_retry _ | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
           let resume expected =
             if Keeper_checkpoint_ref.equal expected checkpoint then unchanged Running
@@ -199,30 +200,31 @@ let apply ~now action current =
                (match recovery.origin with
                 | Checkpointed expected -> resume expected
                 | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ -> reject ())
-           | Preparing | Ready | Running | Settled _ -> reject ())
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Settled _ -> reject ())
       | Record_observation observation ->
           (match current.phase with
-           | Running ->
+           | Running | Resuming_runtime_retry _ ->
                Snapshot.record current.frame ~scope:(scope current) observation
-               |> Result.map (fun frame -> Running, frame, current.current_sources)
+               |> Result.map (fun frame -> current.phase, frame, current.current_sources)
                |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error))
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend checkpoint ->
           (match current.phase with
            | Running -> unchanged (Suspended checkpoint)
+           | Resuming_runtime_retry _ -> reject ()
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_runtime_retry retry ->
           (match current.phase with
-           | Running -> unchanged (Recovering {origin = Runtime_retry retry;
+           | Running | Resuming_runtime_retry _ -> unchanged (Recovering {origin = Runtime_retry retry;
                diagnostic = "checkpointed runtime retry awaits its frozen continuation"})
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Resume_runtime_retry observed ->
           (match current.phase with
            | Recovering {origin = Runtime_retry expected; _} ->
-             if equal_runtime_retry expected observed then unchanged Running else reject ()
+             if equal_runtime_retry expected observed then unchanged (Resuming_runtime_retry expected) else reject ()
            | Recovering {origin = (Checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
-           | Preparing | Ready | Running | Suspended _ | Settled _ -> reject ())
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Settled _ -> reject ())
       | Require_reconciliation diagnostic ->
           if String.trim diagnostic = "" then reject ()
           else (match recovery_origin current.phase with
@@ -233,11 +235,11 @@ let apply ~now action current =
           else (match terminal with
             | Completed ->
                 (match current.phase with
-                 | Running -> unchanged (Settled terminal)
+                 | Running | Resuming_runtime_retry _ -> unchanged (Settled terminal)
                  | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
             | Cancelled | Failed _ ->
                 (match current.phase with
-                 | Preparing | Ready | Running | Recovering _ | Suspended _ -> unchanged (Settled terminal)
+                 | Preparing | Ready | Running | Resuming_runtime_retry _ | Recovering _ | Suspended _ -> unchanged (Settled terminal)
                  | Settled _ -> reject ())) in
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
     then Ok current
@@ -245,7 +247,7 @@ let apply ~now action current =
     else
       let input = match phase with
         | Settled _ -> None
-        | Preparing | Ready | Running | Suspended _ | Recovering _ -> current.input in
+        | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Recovering _ -> current.input in
       Ok { current with revision = Int64.succ current.revision; phase; frame; current_sources; input; updated_at = now }
 
 let source_to_json source =
@@ -278,6 +280,8 @@ let phase_json = function
   | Preparing -> `Assoc ["kind", `String "preparing"]
   | Ready -> `Assoc ["kind", `String "ready"]
   | Running -> `Assoc ["kind", `String "running"]
+  | Resuming_runtime_retry retry -> `Assoc ["kind", `String "resuming_runtime_retry";
+      "origin", recovery_origin_json (Runtime_retry retry)]
   | Recovering recovery ->
       `Assoc ["kind", `String "recovering"; "origin", recovery_origin_json recovery.origin;
               "detail", `String recovery.diagnostic]
@@ -381,6 +385,13 @@ let phase_of_json json =
   | "preparing" | "ready" | "running" ->
       let* _ = exact ["kind"] json in
       Ok (if kind = "preparing" then Preparing else if kind = "ready" then Ready else Running)
+  | "resuming_runtime_retry" ->
+      let* fields = exact ["kind";"origin"] json in
+      let* origin = recovery_origin_of_json (field "origin" fields) in
+      (match origin with
+       | Runtime_retry retry -> Ok (Resuming_runtime_retry retry)
+       | Checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution ->
+         Error "resuming runtime requires its frozen continuation")
   | "recovering" ->
       let* fields = exact ["kind";"origin";"detail"] json in
       let* diagnostic = string "detail" fields in
@@ -432,9 +443,9 @@ let of_json json =
           else Error "admitted input digest does not match payload" in
     let* () = match phase, input with
       | Settled _, None -> Ok ()
-      | (Preparing | Ready | Running | Suspended _ | Recovering _), Some _ -> Ok ()
+      | (Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Recovering _), Some _ -> Ok ()
       | Settled _, Some _ -> Error "settled execution retains an input body"
-      | (Preparing | Ready | Running | Suspended _ | Recovering _), None ->
+      | (Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Recovering _), None ->
           Error "outstanding execution has no admitted input" in
     let* observations = Snapshot.observations frame ~scope:expected
       |> Result.map_error Snapshot.error_to_string in
@@ -442,6 +453,7 @@ let of_json json =
       | Preparing -> observations = []
       | Ready -> revision >= 1L && observations = []
       | Running -> revision >= 2L
+      | Resuming_runtime_retry _ -> revision >= 4L
       | Suspended _ -> revision >= 3L
       | Recovering recovery ->
           (match recovery.origin with

@@ -3,6 +3,10 @@ module Reducer = Keeper_chat_operation_reducer
 module Id = Operation.Operation_id
 module Semantic = Keeper_semantic_execution
 
+let semantic_is_running = function
+  | Semantic.Running | Semantic.Resuming_runtime_retry _ -> true
+  | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _ | Semantic.Recovering _ | Semantic.Settled _ -> false
+
 let scope_key id = Yojson.Safe.to_string (Keeper_execution_scope_id.to_json id)
 
 type t =
@@ -1265,10 +1269,10 @@ let semantic_apply store ~expected ~now action =
           if owners = [] then Ok ()
           else Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners)) in
       let* () = match next.phase with
-        | Semantic.Running ->
-            if current.phase = Semantic.Running then Ok () else
+        | Semantic.Running | Semantic.Resuming_runtime_retry _ ->
+            if semantic_is_running current.phase then Ok () else
             let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
-            (match List.find_opt (fun (execution : Semantic.t) -> execution.phase = Semantic.Running) outstanding with
+            (match List.find_opt (fun (execution : Semantic.t) -> semantic_is_running execution.phase) outstanding with
              | Some running -> Error (Execution_slot_busy running.id)
              | None -> Ok ())
         | Semantic.Preparing | Semantic.Ready | Semantic.Suspended _ | Semantic.Recovering _ | Semantic.Settled _ -> Ok () in
@@ -1296,7 +1300,7 @@ let direct_execution_with_db db (operation : Operation.t) =
 
 let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation
-  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
+  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
       | Semantic.Suspended _ | Semantic.Settled _
       | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _ }
@@ -1385,7 +1389,7 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
       | Some expected ->
         let* next = semantic_transition ~now (Semantic.Resume_runtime_retry observed) expected in
         let* outstanding = semantic_rows store.db ~active_only:true in
-        if List.exists (fun (entry : Semantic.t) -> entry.phase = Semantic.Running
+        if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
         then Error (Integrity_error "another semantic execution owns the running slot")
         else (expected_next := Some next; update_semantic store.db ~expected next)) in
@@ -1406,7 +1410,12 @@ let settle_direct_semantic_with_db db current command =
   let* execution = direct_execution_with_db db current in
   match execution with
   | None -> Ok ()
-  | Some expected ->
+  | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
+      | Semantic.Suspended _ | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+          | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _} -> Ok ()
+  | Some ({Semantic.phase = (Semantic.Resuming_runtime_retry _
+      | Semantic.Recovering {origin = Semantic.Runtime_retry _; _}); _} as expected) ->
     let* now, terminal = match command with
       | Reducer.Cancel_queued {completed_at} -> Ok (completed_at, Semantic.Cancelled)
       | Reducer.Succeed_running {completed_at; _} -> Ok (completed_at, Semantic.Completed)
@@ -1494,7 +1503,7 @@ let reconcile_semantic_running_with_db db ~now =
   List.fold_left (fun result (execution : Semantic.t) ->
     let* count = result in
     match execution.phase with
-    | Semantic.Running ->
+    | Semantic.Running | Semantic.Resuming_runtime_retry _ ->
         let* next = Semantic.apply ~now
           (Semantic.Require_reconciliation "process restarted during semantic execution") execution
           |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in

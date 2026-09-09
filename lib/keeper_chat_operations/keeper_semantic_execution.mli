@@ -44,6 +44,7 @@ type phase =
   | Preparing
   | Ready
   | Running
+  | Resuming_runtime_retry of runtime_retry
   | Recovering of recovery
   | Suspended of Keeper_checkpoint_ref.t
   | Settled of terminal

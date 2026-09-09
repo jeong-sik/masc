@@ -41,3 +41,13 @@ validate actual checkpoint/effect ownership, pass its frozen suffix to the next
 attempt, skip re-admitting the checkpointed user input, retain the original
 channel/attachments/task context, and emit a continuing operation outcome instead
 of terminal failure. Real provider fallback and owner-restart proof remain open.
+
+CI follow-up: the first compiled targeted run (`34399750678`) exposed a
+real ownership regression: ordinary suspended semantic work must survive
+request delivery. Runtime continuation now enters the distinct typed
+`Resuming_runtime_retry` phase (projected to the existing SQL `running` slot),
+and the operation terminal transaction settles only runtime-owned semantic
+phases. The existing suspended-approval lifetime test remains unchanged.
+New fixture input comparisons now use the store's canonical JSON representation;
+they still compare the complete input, including attachment and instruction fields.
+This repair requires another exact-head CI run; it is not a passing-test claim.

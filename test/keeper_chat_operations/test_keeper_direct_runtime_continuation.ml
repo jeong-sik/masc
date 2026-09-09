@@ -13,6 +13,8 @@ let source = `Assoc ["channel", `String "dashboard"; "thread_id", `String "keepe
 let input = `Assoc ["message", `String "Finish the original PDF task";
   "turn_instructions", `String "Preserve task criteria";
   "attachments", `List [`Assoc ["id", `String "original-reference"; "mime_type", `String "application/pdf"]]]
+let input = Operation.canonical_json input
+  |> Result.map_error Operation.canonical_json_error_to_string |> string_ok
 let checkpoint bytes =
   let trace_id = Keeper_id.Trace_id.of_string "direct-runtime-trace" |> string_ok in
   match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with
@@ -134,7 +136,10 @@ let test_resume_uncertain_commit_is_read_back () = with_path (fun path -> with_o
   ignore (claim store);
   Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
   Store.resume_direct_runtime_retry store ~now:13. ~operation_id ~observed:retry |> ok;
-  check bool "resumed phase independently confirmed" true ((execution store).phase = Semantic.Running);
+  check bool "resumed phase independently confirmed" true (match (execution store).phase with
+      | Semantic.Resuming_runtime_retry observed -> Semantic.equal_runtime_retry retry observed
+      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Suspended _
+      | Semantic.Recovering _ | Semantic.Settled _ -> false);
   check bool "input retained while execution is active" true ((current store).input = Some input)))
 
 let test_cancel_releases_both_inputs () = with_path (fun path -> with_open path (fun store ->

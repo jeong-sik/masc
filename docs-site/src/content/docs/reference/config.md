@@ -38,7 +38,7 @@ server's environment; the fifth is local.
 | --- | --- | --- |
 | `ollama_cloud` | `ollama.com/v1` | `OLLAMA_CLOUD_API_KEY` |
 | `deepseek` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY_SB` |
+| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY` |
 | `kimi_coding` | `api.kimi.com/coding/v1` | `KIMI_API_KEY` |
 | `ollama` | `localhost:11434` | none |
 

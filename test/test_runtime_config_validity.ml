@@ -1064,17 +1064,8 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
    rot in place and the operator finds out months later. Both tests below
    uncomment one region and drive the real resolver over the result.
 
-   A region runs from its heading to the first live TOML line after it. Only
+   A region runs from its declaration to the first live TOML line after it. Only
    lines that look like TOML get uncommented; the prose around them stays put. *)
-let line_contains ~(needle : string) (haystack : string) : bool =
-  let nl = String.length needle and hl = String.length haystack in
-  nl <= hl
-  && (let rec scan i =
-        i + nl <= hl && (String.equal (String.sub haystack i nl) needle || scan (i + 1))
-      in
-      scan 0)
-;;
-
 (* Anchor examples at their actual commented declarations, not editorial
    headings. Materialized runtime IDs and capabilities below remain the gate. *)
 let self_hosted_example_marker = "[providers.llama_server]"

@@ -48,7 +48,10 @@ usage object may already be zero-filled by provider adapters.** These are
 normalized counters, not proof that every cache field was reported on the wire.
 No cache-hit ratio or token saving is inferred from them. Lower-level retries,
 failed partial streams and provider-internal actions are not an exhaustive cost
-ledger here. Use attempt-ledger evidence separately.
+ledger here. Use attempt-ledger evidence separately. The sampler turns
+`cache_system_prompt` on like production keeper turns do, so sampled request
+shape (including Anthropic-style cache_control breakpoints) matches the turns
+whose cost is being measured.
 
 Validation status: source inspection only; no local build, live provider sample
 or installed-command verification has been performed. Compare the same scenario

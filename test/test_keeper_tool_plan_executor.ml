@@ -218,6 +218,35 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        fail "tool failure became a plan error")
 ;;
 
+let test_output_validation_precedes_node_observation () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let called = ref [] in
+  let observed = ref None in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    called := node_name node :: !called;
+    Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data:`Null)
+  in
+  let observe_node_result result = observed := Some result; Ok () in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ())
+          ~dispatch ~observe_node_result () with
+  | Ok _ -> fail "invalid output must not complete the plan"
+  | Error failure ->
+    check (list string) "invalid producer stops dependent nodes" [ "producer" ] !called;
+    (match !observed with
+     | None -> fail "invalid-output node was not observed"
+     | Some node ->
+       check bool "observer sees output validation failure" true
+         (Option.is_some node.Executor.output_validation_error);
+       check bool "original producer completion is retained" true
+         (Tool_result.is_success node.result);
+       check bool "original invalid bytes are retained" true
+         (Yojson.Safe.equal `Null (Tool_result.data node.result)));
+    match failure.cause with
+    | Executor.Plan_execution_failed { error = Plan.Output_validation_failed _; _ } -> ()
+    | _ -> fail "output validation lost its typed plan failure"
+;;
+
 let test_observation_failure_settles_siblings_and_stops_downstream () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
@@ -426,6 +455,10 @@ let () =
             `Quick
             test_failed_sibling_stops_downstream_after_batch_settlement
         ; test_case
+            "output validation precedes node observation"
+            `Quick
+            test_output_validation_precedes_node_observation
+        ; Alcotest.test_case
             "observation failure settles siblings and stops downstream"
             `Quick
             test_observation_failure_settles_siblings_and_stops_downstream

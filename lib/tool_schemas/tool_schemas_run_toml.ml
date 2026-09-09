@@ -6,8 +6,8 @@
     partial run surface, so a reader of these values never has to ask whether a
     schema loaded.
 
-    [test_run_tool_toml_parity] pins all four against what the list published
-    before the move. *)
+    [test_run_tool_toml_parity] keeps the publication order; the descriptions
+    and schemas it also pinned were copies of these values. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in

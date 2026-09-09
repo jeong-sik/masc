@@ -18,3 +18,5 @@ python3 scripts/verify-direct-resume-server.py \
 ```
 
 The harness rejects an existing output directory, verifies running binary/base identity before submitting work, and stops only its own subprocess. The observation deadline bounds this external probe and does not alter Keeper runtime policy.
+
+Run 10 had a harness observer bug: it checked `.masc/playground/<keeper>` instead of the producer's `.masc/playground/docker/<keeper>` and therefore recorded `effect_exists=false` despite the successful effect. Runs 11 and 12 corrected this path and passed all effect assertions. The harness now derives the observed path directly from the successful tool receipt and requires it to remain inside the isolated base. Run 12 is the sole accepted receipt here; the stale run 10 receipt is not presented as passing evidence.

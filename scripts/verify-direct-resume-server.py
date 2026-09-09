@@ -213,6 +213,9 @@ def main():
         tool_receipts = [m for m in alternate if m['role'] == 'tool' and m.get('tool_call_id') == 'effect-once']
         if len(tool_receipts) != 1 or json.loads(tool_receipts[0]['content']).get('ok') is not True:
             raise AssertionError('Alternate did not receive successful original Write receipt')
+        effect = Path(json.loads(tool_receipts[0]['content'])['path'])
+        if not effect.resolve().is_relative_to(base.resolve()):
+            raise AssertionError('Effect receipt escaped isolated base')
         if effect.read_bytes() != b'one real filesystem effect\n':
             raise AssertionError('Actual filesystem bytes differ')
         rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines()]

@@ -145,11 +145,83 @@ let test_retry_repairs_failed_recovery_copy () =
     [false; true]
 ;;
 
+let test_cache_failure_is_partial_and_retryable () =
+  List.iter (fun fail_write -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "cached-agent"));
+    let target = make_task config "target" in
+    let agent = match Workspace.get_agents_raw config with
+      | [agent] -> agent | _ -> Alcotest.fail "expected fixture agent" in
+    let path = Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent.name ^ ".json") in
+    Workspace.write_json config path
+      (Masc_domain.agent_to_yojson {agent with current_task=Some target; status=Masc_domain.Busy});
+    let original = Fs_compat.load_file path in
+    let delete () = Workspace.delete_task_r config ~task_id:target in
+    let result = if fail_write then
+      Task_cache_invariant.For_testing.with_before_cache_write
+        (fun actual ->
+          Alcotest.(check string) "fault at matching agent write" path actual;
+          Sys.rename path (path ^ ".saved"); Unix.mkdir path 0o755)
+        delete
+      else (write_string path "{broken"; delete ()) in
+    (match result with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "cache failure must not claim settled deletion");
+    Alcotest.(check int) "deletion committed" 0 (List.length (Workspace.read_backlog config).tasks);
+    if fail_write then (Unix.rmdir path; Sys.rename (path ^ ".saved") path)
+    else write_string path original;
+    let revision = (Workspace.read_backlog config).version in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "cache retry failed");
+    (match Workspace.read_json config path |> Masc_domain.agent_of_yojson with
+     | Ok cleared -> Alcotest.(check (option string)) "cache actually cleared" None cleared.current_task
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check int) "cache retry preserves revision" revision (Workspace.read_backlog config).version))
+    [false; true]
+;;
+
+let test_memory_cache_mirror_failure_retries_without_rewriting_primary () =
+  with_temp_config (fun original_config ->
+    let config = {original_config with backend=Workspace_utils.Memory (Backend.Memory.create ())} in
+    ignore (Workspace.init config ~agent_name:(Some "memory-cached-agent"));
+    let target = make_task config "target" in
+    let other = make_task config "other" in
+    let agent = match Workspace.get_agents_raw config with
+      | [agent] -> agent | _ -> Alcotest.fail "expected memory agent" in
+    let path = Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent.name ^ ".json") in
+    Workspace.write_json config path
+      (Masc_domain.agent_to_yojson {agent with current_task=Some target; status=Masc_domain.Busy});
+    let result = Task_cache_invariant.For_testing.with_before_cache_write
+      (fun actual -> Sys.rename actual (actual ^ ".saved"); Unix.mkdir actual 0o755)
+      (fun () -> Workspace.delete_task_r config ~task_id:target) in
+    (match result with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "Memory mirror failure must remain partial");
+    let primary = match Workspace.read_json_result config path with
+      | Ok json -> json | Error message -> Alcotest.fail message in
+    (match Masc_domain.agent_of_yojson primary with
+     | Ok agent -> Alcotest.(check (option string)) "primary already cleared" None agent.current_task
+     | Error message -> Alcotest.fail message);
+    (* A new assignment can arrive before the cleanup retry. Its primary
+       identity must survive repair of the old local mirror. *)
+    let primary = Masc_domain.agent_to_yojson {agent with current_task=Some other; status=Masc_domain.Busy} in
+    (match Workspace.write_json_commit_result config path primary with
+     | Ok {mirror_error=Some _} -> ()
+     | _ -> Alcotest.fail "expected blocked local mirror for new primary assignment");
+    Unix.rmdir path; Sys.rename (path ^ ".saved") path;
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "mirror retry failed");
+    Alcotest.(check bool) "retry leaves primary identical" true (Workspace.read_json_result config path = Ok primary);
+    Alcotest.(check bool) "mirror now matches current primary" true
+      (Yojson.Safe.from_file path = primary))
+;;
+
 let () =
   Alcotest.run
     "Workspace task delete"
     [ ( "delete"
-      , [ Alcotest.test_case "retry repairs both stores' failed recovery writes" `Quick test_retry_repairs_failed_recovery_copy
+      , [ Alcotest.test_case "Memory cache mirror retry preserves primary" `Quick test_memory_cache_mirror_failure_retries_without_rewriting_primary
+        ; Alcotest.test_case "cache read and write failures remain retryable" `Quick test_cache_failure_is_partial_and_retryable
+        ; Alcotest.test_case "retry repairs both stores' failed recovery writes" `Quick test_retry_repairs_failed_recovery_copy
         ; Alcotest.test_case "only deleted Task references removed" `Quick test_deletion_prunes_only_its_references
         ; Alcotest.test_case "failed cleanup remains retryable after deletion" `Quick test_cleanup_failure_and_idempotent_retry
         ; Alcotest.test_case "uncommitted backlog failure preserves links" `Quick test_backlog_failure_does_not_touch_links

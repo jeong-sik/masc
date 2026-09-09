@@ -38,15 +38,12 @@ let delete_task_r config ~task_id : task_delete_outcome Masc_domain.masc_result 
       let cleanup_errors = match Workspace_goal_index.prune_links_for_task_result config ~task_id with
         | Ok () -> [] | Error message -> [message] in
       let cache_errors =
-        try
-          Task_cache_invariant.clear_stale_agent_task_for_task config
-            ~cause:Task_cache_invariant.After_commit ~task_id
-            ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
-            ~module_name:"workspace_task.delete_task_r";
-          []
-        with
-        | Eio.Cancel.Cancelled _ as error -> raise error
-        | error -> [Printexc.to_string error] in
+        match Task_cache_invariant.clear_stale_agent_task_for_task_result config
+          ~cause:Task_cache_invariant.After_commit ~task_id
+          ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
+          ~module_name:"workspace_task.delete_task_r" with
+        | Ok () -> []
+        | Error errors -> errors in
       match commit_errors @ cleanup_errors @ cache_errors with
       | [] -> Ok (match task with Some _ -> Task_deleted | None -> Task_already_absent)
       | errors -> Ok (Task_delete_cleanup_failed errors)))

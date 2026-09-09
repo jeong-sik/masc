@@ -18,3 +18,16 @@ completion will not close this scenario on its own. This operator-seeded task is
 not evidence of unprompted initiative or a 10-turn/24-hour continuity run.
 
 No output artifact or successful collaboration is claimed by this initial capture.
+
+## Terminal observation
+
+The same operation later entered `Failed` with `failure_kind: Turn_exception`
+and `turn_failed: Rate limited: Rate limit reached for requests`.
+`failed-operation.json` records this terminal state. No response artifact or
+completion is claimed. The Keeper status subsequently reported its fiber alive
+with no queued/running chat operation. Its turn-2872 receipt says
+`api_error_rate_limited`, one attempt, `fallback_applied: false` and
+`degraded_retry_applied: false`, despite an operator disposition of
+`fail_open_next_runtime`. Source tracing is needed to determine whether the
+failed direct request is retained for subsequent work; no restart or duplicate
+request has been issued merely because this one failed.

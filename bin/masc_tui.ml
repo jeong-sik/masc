@@ -4210,10 +4210,10 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scope:target ~host ~port ~view ~tab_id ()))
-        | Scene_click {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ())))
+              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -16539,7 +16539,7 @@ and is loaded on demand through keeper_skill.
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                       | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
-                            node_id=node.node_id;expected_url=scene.content.url})
+                            node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }

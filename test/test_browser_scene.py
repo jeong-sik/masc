@@ -120,11 +120,20 @@ try:
  check('scoped read returns fewer bytes than whole visible scene',len(json.dumps(scoped))<len(json.dumps(whole)))
  link=control(scoped,'Observed thread');act(scoped,link,action='click')
  check('scoped link retains usable observed click reference',js('return location.hash;')=='#thread')
+ refreshed=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}])
+ check('same-document link refresh preserves region scope',refreshed['scope']==scope and all('sidebar' not in n['text'] for n in refreshed['nodes']))
  region_measurement={'whole_scene_bytes':len(json.dumps(whole,ensure_ascii=False).encode()),'scoped_scene_bytes':len(json.dumps(scoped,ensure_ascii=False).encode()),'regions_bytes':len(json.dumps(regions,ensure_ascii=False).encode())}
  (a.out/'regions.json').write_text(json.dumps({'outline':regions,'scoped':scoped,'measurement':region_measurement},ensure_ascii=False,indent=2))
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
+ landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)
+ for landmark in landmarks['nodes']:
+  selected={'documentId':landmarks['documentId'],'nodeId':landmark['nodeId']}
+  read=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':selected,'maxChars':5000}])
+  check('landmark scope reads '+landmark['text'],read['scope']==selected and len(read['nodes'])==1)
  js("document.body.innerHTML='<div style=\"overflow:hidden;width:50px;height:50px\"><div style=\"position:fixed;left:400px;top:120px\"><button id=popup>Visible fixed popup</button></div></div>';")
  popup_scene=observe()
  popup=control(popup_scene,'Visible fixed popup')

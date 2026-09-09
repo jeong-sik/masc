@@ -2851,7 +2851,7 @@ module Browser_lane_view = struct
     | Scene_read of int
     | Scene_regions of int
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
-    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
+    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
@@ -3056,6 +3056,7 @@ module Browser_lane_view = struct
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
           | Scene_focus {target;_} -> Browser_lane.Content, Some target
+          | Scene_click {scope;_} -> Browser_lane.Content, scope
           | _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t

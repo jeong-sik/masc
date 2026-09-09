@@ -97,7 +97,7 @@ let runtime = {js|function browserScene(args) {
   const view = args.view === undefined ? 'content' : args.view;
   if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
   if (view === 'regions' && root) {
-    const selector = 'main,nav,aside,section,article,[role=main],[role=navigation],[role=complementary],[role=region],[role=log]';
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
     for (const region of regions) {
       if (truncated) break;

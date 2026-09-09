@@ -1459,7 +1459,7 @@ let test_gemini_reasoning_dialect_uses_thinking_config () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ()
   in

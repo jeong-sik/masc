@@ -14703,10 +14703,14 @@ and is loaded on demand through keeper_skill.
           | None -> None
         else None
       in
-      (* A deliberate interaction owns the cached view from this point.
-         Invalidate any pending poll before a menu action, press or close so
-         its delayed snapshot cannot overwrite the action's newer result. *)
-      Option.iter (fun _ -> invalidate_msx_poll ()) msx_key;
+      (* Menu decisions, game input and closing own a new view. Pure size or
+         non-game input keeps the snapshot current; completion renders using
+         the geometry the UI owns at that later instant. *)
+      (match msx_key with
+       | Some _ when state.msx_menu_open -> invalidate_msx_poll ()
+       | Some ("esc" | "f6" | "f7" | "f8") -> invalidate_msx_poll ()
+       | Some name when Option.is_some (msx_server_key name) -> invalidate_msx_poll ()
+       | Some _ | None -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -14793,7 +14797,7 @@ and is loaded on demand through keeper_skill.
                    ~port:state.port ~keys:[ server_key ]
                with
                | Ok _ | Error _ -> ());
-              observe_msx_frame state;
+              observe_msx_frame ~clear_notice:true state;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame

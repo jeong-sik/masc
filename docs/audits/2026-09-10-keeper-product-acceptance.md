@@ -41,11 +41,11 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
 | 11 | TUI/Dashboard statistics | Rendered token, latency, outcome, goal progress and collaboration data matched to receipts | Source has metrics; screenshots and denominator checks pending |
 | 12 | Tools/Skills discoverability | User finds capability, full description/schema/instructions and availability with clear navigation | Browser/TUI interaction proof pending |
 | 13 | Configuration feedback | Edit/save/reload shows effective source/value and verifies next request changed; errors visible | Runtime config source exists; end-to-end proof pending |
-| 14 | Preset prompt inspection | Full preset content preview and effective selected prompt visible before/after application | UI/source audit pending |
-| 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | End-to-end edit scenario pending |
+| 14 | Preset prompt inspection | Full preset content preview and effective selected prompt visible before/after application | PR #34912: CI-built browser compared 246 effective sources and captured desktop/mobile; production application and TUI remain unverified |
+| 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | PR #34914: recorded Edit input previews; logger trims/redacts values, so lossless diff and LSP remain unverified |
 | 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Source and rendered audit pending |
 | 17 | Shared memory agent/lane | Cross-Keeper evidence consolidated with attribution/deduplication and retrieved in subsequent work | Role, storage ownership and live scenario pending |
-| 18 | Local LLM roles | Configured local verifier/judge/librarian role produces useful checked results with measured runtime identity | Local capability discovery and comparative trial pending |
+| 18 | Local LLM roles | Configured local verifier/judge/librarian role produces useful checked results with measured runtime identity | Ollama exposes 32 installed models; exact-output lanes currently use remote slots. Local synthetic evaluation under docs/evidence/2026-09-10-local-memory; runtime role integration remains open |
 
 ## Delivery sequence and proof requirements
 

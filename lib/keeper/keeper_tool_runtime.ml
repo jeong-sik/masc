@@ -122,6 +122,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -200,6 +201,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -474,11 +476,28 @@ let handle_in_process ctx descriptor args =
          ?continuation_channel:ctx.continuation_channel
          ~args
          ())
+  | Tool_masc_fusion_decision ->
+    let result =
+      let open Result.Syntax in
+      let* proposal = Fusion_decision.parse args in
+      let* turn_id = match ctx.gate_context with
+        | Some context -> (match (context ()).Keeper_gate.turn_id with
+            | Some turn_id -> Ok turn_id | None -> Error "decision requires exact current turn context")
+        | None -> Error "decision requires exact current turn context" in
+      Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name
+        ~turn_ref:(Ids.Turn_ref.make
+          ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id) ~absolute_turn:turn_id)
+        proposal in
+    Some (match result with
+      | Ok recorded -> Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true; "decision", recorded.event;
+          "cleanup_warning", (match recorded.cleanup_warning with Some detail -> `String detail | None -> `Null)])
+      | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection detail)
   | Tool_masc_fusion_status ->
     (* read-only: reads the in-memory run registry, no server context needed. *)
     Some
       (Keeper_tool_execution.success
          (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+            ~config:ctx.config
             ~meta:ctx.meta
             ~args
             ()))

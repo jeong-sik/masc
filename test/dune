@@ -5173,6 +5173,11 @@
    masc_tui_ansi))
 
 (test
+ (name test_tui_interactive)
+ (modules test_tui_interactive)
+ (libraries alcotest masc_tui_types masc_tui_interactive))
+
+(test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
  (libraries masc_tui_runtime_config_view))

@@ -1410,6 +1410,13 @@
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
 (library
+ (name masc_tui_interactive)
+;; An interactive surface contract plus the MSX backend: renderer-independent
+;; input focus and frame handoff for panes that own their own loop.
+ (modules masc_tui_interactive)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_msx)
 ;; The MSX spectator screen, over the opam path-pinned ocaml-msx core.
 ;; pin: opam pin add ocaml-msx --kind=path <core repo>

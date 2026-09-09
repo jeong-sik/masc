@@ -44,3 +44,18 @@ when unmounted or when the period changes. There is no retry cap or elapsed-time
 failure. Added tests exercise the actual pending envelope followed by available
 metrics, available-but-empty results, unmount cleanup and an old pending request
 finishing after a period change.
+
+## CI-built browser verification
+
+Verified source `3766afb7ce0a1a536585f9626c85a4f8539e0ade` using preview
+artifact 10121768265 from run 34396472298. The harness checked every asset hash
+against preview provenance before rendering. Desktop and 390px mobile screenshots
+were visually inspected; mobile records now use readable per-runtime blocks.
+Pending-to-available refresh, missing versus zero, period changes, ledger failure,
+HTTP failure/retry and navigation to details passed, with no page errors or mobile
+overflow. `browser/receipt.json` and PNGs contain the evidence.
+
+The metric responses are explicit synthetic fixtures over a live backend, not
+measured production usage. The visible build mismatch warning is expected because
+CI frontend assets run over the separately deployed server. This is not a
+production deployment or proof of actual ledger totals.

@@ -62,3 +62,19 @@ instance ID changed while source commit and effective paths stayed the same.
 `success/restart-readback.json` records those identities and returned proposal.
 This proves persistence across this graceful process restart; it does not prove
 crash/power-loss durability or actual Keeper use.
+
+## Actual Keeper list retrieval
+
+A separate on-demand Keeper in the isolated runtime invoked
+`keeper_workspace_memory_read` with `{}` and completed operation
+`kmsg-6b7057abb90a24d2561b8d95f6e87fa3`. The tool-call record reports success
+and the saved proposal. Its answer preserves the report-format conflict, the
+12-to-21-second correction, proposal ID and source IDs s1–s4, while stating that
+semantic verification was not performed. `keeper-reuse/` contains the operation,
+selected tool receipt and answer.
+
+The answer also overinterprets missing source_bound stores as inability to read
+original text. The full proposal still contains ordinary-source facts; a follow-up
+asks the Keeper to inspect by ID and reconsider. That follow-up is not yet counted
+as successful. The first cloud provider hit a weekly quota; an explicit operator
+runtime switch preceded this success, not automatic failover.

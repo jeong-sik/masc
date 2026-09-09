@@ -2068,7 +2068,7 @@ let test_readiness_home_overrides_inherited_home () =
         let output = open_out_bin wrapper in
         output_string output "#!/bin/sh\n";
         output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote isolated_home ^ " ] || exit 73\n");
-        output_string output "case \"$*\" in *'mcp_servers.\"dangerous\".enabled=false'*) ;; *) exit 74;; esac\n";
+        output_string output "case \"$*\" in *'mcp_servers={\"dangerous\"={enabled=false}}'*) ;; *) exit 74;; esac\n";
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;

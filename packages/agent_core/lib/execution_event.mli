@@ -83,7 +83,6 @@ type node_kind =
     journal allocates the attempt's occurrence identity when the node opens. *)
 val provider_attempt : ordinal:int -> Binding_identity.t -> (node_kind, string) result
 
-val pp_node_kind : Format.formatter -> node_kind -> unit
 val show_node_kind : node_kind -> string
 
 type node
@@ -99,7 +98,6 @@ val node_id : node -> Node_id.t
 val node_run_id : node -> Run_id.t
 val parent_node_id : node -> Node_id.t option
 val node_kind : node -> node_kind
-val equal_node : node -> node -> bool
 
 (** Typed progress carriers. Streaming deltas and provider/tool progress remain
     opaque codec-owned JSON. Final output, tool-use input, and tool-result

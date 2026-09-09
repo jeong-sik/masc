@@ -73,8 +73,9 @@ val read_goal_task_links :
 val read_goal_task_links_authoritative_r :
   Workspace_utils_backend_setup.config ->
   ((string * string list) list, string) result
-(** Read only the primary registry. An absent registry is empty; an unreadable
-    primary is an error even when a recovery snapshot is available. *)
+(** Read only the primary registry. Only absence of both primary and recovery
+    means a new empty registry. A missing, unreadable, or malformed primary is
+    an error when a recovery snapshot exists. Link mutations use this reader. *)
 
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :

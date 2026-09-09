@@ -1,6 +1,10 @@
 type reference = { revision : string; width : int; height : int }
 type pixels = { reference : reference; rgb : string }
 type scope = { host : string; port : int; headers : (string * string) list }
+
+let same_scope a b =
+  String.equal a.host b.host && Int.equal a.port b.port && a.headers = b.headers
+
 type t = {
   mutex : Mutex.t;
   mutable scope : scope option;
@@ -94,7 +98,8 @@ let decode previous json =
 let fetch t ~host ~port ~headers ~request =
   let scope = { host; port; headers } and token = ref () in
   let previous = Mutex.protect t.mutex (fun () ->
-    if t.scope <> Some scope then t.pixels <- None;
+    if not (Option.fold ~none:false ~some:(same_scope scope) t.scope) then
+      t.pixels <- None;
     t.scope <- Some scope;
     t.request_token <- token;
     t.pixels) in

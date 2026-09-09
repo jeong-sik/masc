@@ -279,9 +279,11 @@ let test_census_report () =
      have, so a per-runtime transport failure on those three reaches the same
      decision as a MASC defect.
 
-   - Quota reaches opposite decisions depending on which constructor carries
-     it: [Provider (HardQuota _)] rotates, [Api (PaymentRequired _)] does not.
-     The condition is the same; the routing differs. *)
+   - Quota rotates under either constructor that carries it: [Provider
+     (HardQuota _)] and [Api (PaymentRequired _)] both move the lane to its
+     next declared candidate. They disagreed until RFC-0440 §3 read the 402 as
+     a fact about the binding's account rather than as an HTTP retry code; the
+     condition was always the same and only the routing differed. *)
 let expected_rotation =
   [ "provider:hard_quota", true
   ; "provider:network_error", true
@@ -301,7 +303,7 @@ let expected_rotation =
   ; "provider:unavailable", true
   ; "provider:server_error_transient", true
   ; "api:network_error", true
-  ; "api:payment_required", false
+  ; "api:payment_required", true
   ; "api:rate_limited", true
   ; "api:server_error", true
   ; "config:invalid", false

@@ -121,6 +121,10 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type elicitation_mode = Form | Openai_form | Url
+
+type elicitation_cancel_reason = Host_input_unavailable
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -135,6 +139,11 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Elicitation_cancelled of
+      { server_name : string
+      ; mode : elicitation_mode
+      ; reason : elicitation_cancel_reason
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -829,6 +838,51 @@ let token_usage_notification ~thread_id ~turn_id params =
          })
 ;;
 
+(* Codex MCP requests include approvals and forms, independently of shell
+   approvalPolicy. This host cannot collect their input. Cancel that request,
+   never grant permission or attribute a denial to the user, and let Codex
+   continue with the MASC dynamic tools whose own gates remain authoritative.
+   Schema: codex app-server generate-json-schema (0.153.4),
+   McpServerElicitationRequestParams / McpServerElicitationRequestResponse. *)
+let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params =
+  let stage = "mcpServer/elicitation/request" in
+  let* fields = assoc_at stage params in
+  let* request_thread = required_string stage "threadId" fields in
+  let* request_turn = optional_string stage "turnId" fields in
+  let* server_name = required_string stage "serverName" fields in
+  let* _message = required_string_any stage "message" fields in
+  let* mode_name = required_string stage "mode" fields in
+  let* mode =
+    match mode_name with
+    | "form" ->
+      let* schema = required_member stage "requestedSchema" fields in
+      let* schema_fields = assoc_at stage schema in
+      let* schema_type = required_string stage "type" schema_fields in
+      let* properties = required_member stage "properties" schema_fields in
+      let* _properties = assoc_at stage properties in
+      if String.equal schema_type "object" then Ok Form
+      else protocol_error stage "form requestedSchema.type must be object"
+    | "openai/form" | "openaiForm" ->
+      let* _schema = required_member stage "requestedSchema" fields in
+      Ok Openai_form
+    | "url" ->
+      let* _url = required_string stage "url" fields in
+      let* _elicitation_id = required_string stage "elicitationId" fields in
+      Ok Url
+    | _ -> protocol_error stage "unknown elicitation mode"
+  in
+  if not (String.equal request_thread thread_id)
+     || (match request_turn with Some value -> not (String.equal value turn_id) | None -> false)
+  then protocol_error stage "elicitation identity does not match the active thread/turn"
+  else (
+    io.send (`Assoc [ "id", id; "result", `Assoc ["action", `String "cancel"; "content", `Null] ]);
+    Log.Runtime_agent.info
+      "Codex MCP elicitation cancelled because host input is unavailable (server=%s)" server_name;
+    emit_stream_event on_stream_event
+      (Elicitation_cancelled { server_name; mode; reason = Host_input_unavailable });
+    Ok ())
+;;
+
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
     ~seen_fallback ~seen_usage ~on_stream_event =
   let* message = io.receive () in
@@ -857,6 +911,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_fallback
       ~seen_usage
       ~on_stream_event
+  | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
+    let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
+    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
+      ~seen_final ~seen_fallback ~seen_usage ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -1320,6 +1378,20 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
+(* A read posture keeps Codex's permissions read-only, but shell execution
+   would still run in the host cwd rather than the Keeper's Docker sandbox.
+   Supported app-server CLI overrides outrank inherited config. ShellTool=false
+   suppresses both shell and unified exec registration; disable both explicitly.
+   Native_full retains its explicitly selected vendor execution surface.
+   Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
+let client_argv (config : config) =
+  [ config.cli_path; "app-server"; "--stdio" ]
+  @ (match config.native with
+     | Runtime_native_tools.Native_read ->
+       [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
+     | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
+;;
+
 let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -1330,7 +1402,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
       Eio.Process.spawn ~sw mgr ~cwd
         ~env:(subscription_only_environment ())
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-        [ config.cli_path; "app-server"; "--stdio" ]
+        (client_argv config)
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;

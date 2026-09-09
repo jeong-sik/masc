@@ -110,31 +110,17 @@ let fixture_script
     (fun name ->
        output_string output
          (Printf.sprintf "[ \"${%s+x}\" != x ] || exit 90\n" name))
-    [ "ANTHROPIC_API_KEY"
-    ; "ANTHROPIC_AUTH_TOKEN"
-    ; "ANTHROPIC_API_URL"
-    ; "ANTHROPIC_BASE_URL"
-    ; "ANTHROPIC_BEDROCK_BASE_URL"
-    ; "ANTHROPIC_VERTEX_BASE_URL"
-    ; "ANTHROPIC_VERTEX_PROJECT_ID"
-    ; "CLAUDE_CODE_OAUTH_TOKEN"
-    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
-    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
-    ; "CLAUDE_CODE_USE_BEDROCK"
-    ; "CLAUDE_CODE_USE_VERTEX"
-    ; "CLOUD_ML_REGION"
-    ; "MASC_CLAUDE_SECRET_CANARY"
-    ];
+    [ "ANTHROPIC_API_URL"; "MASC_CLAUDE_SECRET_CANARY" ];
   output_string output "[ -n \"${HOME-}\" ] || exit 91\n";
   output_string output "[ -n \"${USER-}\" ] || exit 97\n";
   output_string output
     "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
   output_string output
     "[ \"${CLAUDE_AGENT_SDK_VERSION-}\" = masc-ocaml ] || exit 93\n";
-  output_string output "if [ \"${1-}\" = auth ]; then\n";
+  output_string output "if [ \"${2-}\" = auth ]; then\n";
   output_string output
     ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");
-  output_string output "  exit 0\n";
+  output_string output (if (try Yojson.Safe.Util.member "loggedIn" (Yojson.Safe.from_string auth_json) = `Bool false with _ -> false) then "  exit 1\n" else "  exit 0\n");
   output_string output "fi\n";
   output_string output "session=''\n";
   output_string output "for arg in \"$@\"; do\n";
@@ -244,23 +230,7 @@ let test_validation_is_process_free () =
 ;;
 
 let test_subscription_turn_and_env_scrub () =
-  List.iter
-    (fun name -> Unix.putenv name "hostile-fixture-value")
-    [ "ANTHROPIC_API_KEY"
-    ; "ANTHROPIC_AUTH_TOKEN"
-    ; "ANTHROPIC_API_URL"
-    ; "ANTHROPIC_BASE_URL"
-    ; "ANTHROPIC_BEDROCK_BASE_URL"
-    ; "ANTHROPIC_VERTEX_BASE_URL"
-    ; "ANTHROPIC_VERTEX_PROJECT_ID"
-    ; "CLAUDE_CODE_OAUTH_TOKEN"
-    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
-    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
-    ; "CLAUDE_CODE_USE_BEDROCK"
-    ; "CLAUDE_CODE_USE_VERTEX"
-    ; "CLOUD_ML_REGION"
-    ; "MASC_CLAUDE_SECRET_CANARY"
-    ];
+  Unix.putenv "MASC_CLAUDE_SECRET_CANARY" "must-not-reach-child";
   with_fixture [ Emit assistant; Emit result ] (fun path ->
     match run_fixture path with
     | Error error -> fail (Runtime_claude_code.error_to_string error)
@@ -268,9 +238,32 @@ let test_subscription_turn_and_env_scrub () =
       check string "text" "MASC_CLAUDE_OK" turn.text;
       check string "turn" "turn-fixture-1" turn.turn_id;
       check string "model" "claude-fixture" turn.model;
-      check string "subscription" "team" turn.subscription.subscription_type;
+      check (option string) "subscription" (Some "team") turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
       check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+let test_routed_credentials_reach_probe_and_turn () =
+  let bindings = [ "ANTHROPIC_AUTH_TOKEN", "fixture-token";
+    "ANTHROPIC_BASE_URL", "https://gateway.example.test/anthropic";
+    "MASC_CLAUDE_SECRET_CANARY", "not-cli-auth" ] in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings in
+  List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+  Fun.protect ~finally:(fun () -> List.iter (fun (key, value) ->
+    Unix.putenv key (Option.value value ~default:"")) previous) (fun () ->
+    with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+      let wrapper = Filename.temp_file "claude-auth-environment-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let out = open_out wrapper in
+        output_string out "#!/bin/sh\nset -eu\n";
+        output_string out "[ \"$ANTHROPIC_AUTH_TOKEN\" = fixture-token ] || exit 71\n";
+        output_string out "[ \"$ANTHROPIC_BASE_URL\" = https://gateway.example.test/anthropic ] || exit 72\n";
+        output_string out "if [ \"${2-}\" = auth ]; then [ \"$1\" = --setting-sources= ] || exit 73; fi\n";
+        output_string out ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out out; Unix.chmod wrapper 0o700;
+        match run_fixture wrapper with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok turn -> check string "turn completed" "MASC_CLAUDE_OK" turn.text)))
 ;;
 
 let test_prompt_transmission_boundary () =
@@ -514,15 +507,37 @@ let test_partial_result_usage_does_not_fail_the_turn () =
       check bool "partial usage yields none" true (Option.is_none turn.usage))
 ;;
 
-let test_non_subscription_auth_is_rejected () =
-  let auth_json =
-    {|{"loggedIn":true,"authMethod":"apiKey","subscriptionType":"api","apiProvider":"firstParty"}|}
-  in
-  with_fixture ~auth_json [] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Subscription_required _) -> ()
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "API-key Claude auth was admitted as subscription")
+let test_supported_authentication_modes () =
+  List.iter (fun (method_name, provider) ->
+    let auth_json = Yojson.Safe.to_string (`Assoc
+      [ "loggedIn", `Bool true; "authMethod", `String method_name
+      ; "subscriptionType", `Null; "apiProvider", `String provider ]) in
+    with_fixture ~auth_json [ Emit assistant; Emit result ] (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        check string "actual turn completed" "MASC_CLAUDE_OK" turn.text;
+        check string "authentication" method_name
+          (Runtime_claude_code.authentication_to_string turn.subscription.authentication);
+        check string "provider" provider
+          (Runtime_claude_code.api_provider_to_string turn.subscription.api_provider);
+        check (option string) "optional plan" None turn.subscription.subscription_type))
+    [ "claude.ai", "firstParty"; "api_key", "firstParty"
+    ; "oauth_token", "firstParty"; "third_party", "bedrock"
+    ; "third_party", "vertex"; "third_party", "foundry"; "third_party", "mantle" ];
+  with_fixture ~auth_json:{|{"loggedIn":true,"authMethod":"unknown","apiProvider":"firstParty"}|} []
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "unknown authentication admitted")
+;;
+
+let test_logged_out_status_exit_one () =
+  with_fixture ~auth_json:{|{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}|} []
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Subscription_required _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "logged-out CLI admitted")
 ;;
 
 let test_missing_cli_is_not_reported_as_logout () =
@@ -1976,6 +1991,7 @@ let () =
             "subscription auth and env scrub"
             `Quick
             test_subscription_turn_and_env_scrub
+        ; test_case "routed credentials reach probe and turn" `Quick test_routed_credentials_reach_probe_and_turn
         ; test_case
             "progress resets stream idle timeout"
             `Quick
@@ -2005,9 +2021,10 @@ let () =
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
         ; test_case
-            "non-subscription rejected"
+            "supported CLI authentication modes"
             `Quick
-            test_non_subscription_auth_is_rejected
+            test_supported_authentication_modes
+        ; test_case "logged-out status exit one" `Quick test_logged_out_status_exit_one
         ; test_case
             "missing CLI differs from logout"
             `Quick

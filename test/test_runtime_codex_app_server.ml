@@ -628,7 +628,7 @@ let test_chatgpt_subscription_turn () =
         check string "thread" "thread-1" result.thread_id;
         check string "turn" "turn-1" result.turn_id;
         check string "model" "gpt-fixture" result.model;
-        check string "plan" "pro" result.subscription.plan_type;
+        check (option string) "plan" (Some "pro") (match result.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> Some plan_type | _ -> None);
         check bool "new thread" false result.resumed)
 ;;
 
@@ -796,7 +796,7 @@ let test_subscription_probe_stops_before_thread () =
       match outcome with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok probe ->
-        check string "plan" "pro" probe.subscription.plan_type;
+        check (option string) "plan" (Some "pro") (match probe.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> Some plan_type | _ -> None);
         check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
 ;;
 
@@ -946,17 +946,22 @@ let test_thread_resume_rejects_identity_mismatch () =
        | Ok _ -> fail "thread/resume admitted a different returned thread id")
 ;;
 
-let test_api_key_account_is_rejected () =
-  let api_key_account =
-    {|{"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}}|}
-  in
-  with_fixture
-    [ init_result; api_key_account; thread_result; turn_result; item_completed; turn_completed ]
-    (fun path ->
-      match run_fixture path with
-      | Error (Runtime_codex_app_server.Subscription_required _) -> ()
-      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> fail "API-key account incorrectly admitted as subscription")
+let test_supported_account_modes () =
+  List.iter (fun (account, requires_auth, expected) ->
+    let account_result = Yojson.Safe.to_string (`Assoc
+      [ "id", `Int 2; "result", `Assoc
+        [ "account", account; "requiresOpenaiAuth", `Bool requires_auth ] ]) in
+    with_fixture
+      [ init_result; account_result; thread_result; turn_result; item_completed; turn_completed ]
+      (fun path -> match run_fixture path with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok turn ->
+          check string "authentication" expected
+            (Runtime_codex_app_server.authentication_to_string turn.subscription);
+          check string "actual turn completed" "MASC_SUBSCRIPTION_OK" turn.text))
+    [ `Assoc [ "type", `String "apiKey" ], true, "api_key"
+    ; `Null, false, "provider_managed"
+    ; `Assoc [ "type", `String "amazonBedrock" ], true, "amazon_bedrock" ]
 ;;
 
 let test_malformed_json_fails_closed () =
@@ -1999,6 +2004,44 @@ let test_child_environment_is_allowlisted () =
                  | Error error ->
                    fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> ())))
+;;
+
+let test_declared_provider_environment () =
+  let home = Filename.temp_file "codex-auth-home-" "" in
+  Sys.remove home; Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let bindings = [ "CODEX_HOME", home; "MASC_FIXTURE_PROVIDER_KEY", "fixture-key";
+    "MASC_FIXTURE_PROVIDER_HEADER", "fixture-header";
+    "MASC_CODEX_SECRET_CANARY", "not-declared" ] in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings in
+  List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (key, value) -> Unix.putenv key (Option.value value ~default:"")) previous;
+    if Sys.file_exists config_path then Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out config_path in
+    output_string output "[model_providers.fixture]\nenv_key = \"MASC_FIXTURE_PROVIDER_KEY\"\nenv_http_headers = { Authorization = \"MASC_FIXTURE_PROVIDER_HEADER\" }\n";
+    close_out output;
+    with_fixture [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "codex-auth-environment-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output "[ \"$MASC_FIXTURE_PROVIDER_KEY\" = fixture-key ] || exit 71\n";
+          output_string output "[ \"$MASC_FIXTURE_PROVIDER_HEADER\" = fixture-header ] || exit 72\n";
+          output_string output "[ \"${MASC_CODEX_SECRET_CANARY+x}\" != x ] || exit 73\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output; Unix.chmod wrapper 0o700;
+          match run_fixture wrapper with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok turn -> check string "turn completed" "MASC_SUBSCRIPTION_OK" turn.text));
+    let output = open_out config_path in
+    output_string output "[model_providers.fixture]\nenv_key = 42\n"; close_out output;
+    match run_fixture "/not/spawned/invalid-provider-config" with
+    | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ -> fail "malformed credential declaration admitted")
 ;;
 
 let write_fixture_file path content =
@@ -4030,7 +4073,7 @@ let test_live_chatgpt_subscription () =
     | Ok result ->
       check string "live response" "MASC_SUBSCRIPTION_OK" result.text;
       check bool "subscription plan is present" true
-        (String.trim result.subscription.plan_type <> "")
+        (match result.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> String.trim plan_type <> "" | _ -> false)
 ;;
 
 let test_live_dynamic_tool_subscription () =
@@ -4413,7 +4456,8 @@ let () =
             "child environment is allowlisted"
             `Quick
             test_child_environment_is_allowlisted
-        ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
+        ; test_case "declared provider environment only" `Quick test_declared_provider_environment
+        ; test_case "supported account modes complete turns" `Quick test_supported_account_modes
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case
             "duplicate object keys fail closed"

@@ -625,7 +625,7 @@ api_key_env = "OLLAMA_CLOUD_API_KEY"
 capabilities_base = "ollama_cloud"
 
 [[models]]
-id_prefix = "claude-opus-4-6"
+id_prefix = "claude-opus-5"
 base = "anthropic"
 supports_tools = true
 supports_tool_choice = true
@@ -663,7 +663,7 @@ supports_named_tool_choice = false
        let anthropic =
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.Anthropic
-           ~model_id:"claude-opus-4-6"
+           ~model_id:"claude-opus-5"
            ~base_url:"https://api.anthropic.com"
            ~tool_choice:named
            ()

@@ -258,6 +258,24 @@ let handle_step ~tool_name ~start_time args =
   of_lane ~tool_name ~start_time (Msx_lane.step ~frames:(get_int args "frames" 60))
 ;;
 
+(* 화면이 안착할 때까지 한 번에 논다 — 키퍼가 step+screen 을 반복하며
+   장면 전환을 기다리는 턴을 대신한다. changed=false + stable=true 는
+   "이 장면은 키를 기다린다"의 후보 신호다. *)
+let handle_step_until_change ~tool_name ~start_time args =
+  match
+    Msx_lane.step_until_change ~max_frames:(get_int args "max_frames" 300)
+  with
+  | Ok (observation, r) ->
+    of_lane ~tool_name ~start_time
+      ~extra:
+        [ ("frames_run", `Int r.Msx_lane.frames_run)
+        ; ("changed", `Bool r.changed)
+        ; ("stable", `Bool r.stable)
+        ]
+      (Ok observation)
+  | Error e -> of_lane ~tool_name ~start_time (Error e)
+;;
+
 let handle_press ~tool_name ~start_time ~who args =
   let names = get_string_list args "keys" in
   let rec parse acc = function

@@ -139,6 +139,78 @@ let test_load_and_clock () =
   check bool "screen after eject is a workflow rejection" true (rejected r)
 ;;
 
+(* 판별 코어는 순수하다 — 지문 문자열만으로 안정·변화·깜빡임 무시를
+   증명한다. ROM 도 머신도 없는 CI 가 이 도구의 판정 근거다. *)
+let test_screen_change_core () =
+  let module S = Msx_lane.Screen_change in
+  let cfg = S.default in
+  let a = String.make 100 'x' in
+  let blink = String.concat "" [ String.make 46 'x'; "y"; String.make 53 'x' ] in
+  let scene = String.make 100 'z' in
+  let other = String.make 100 'q' in
+  check int "one blinking cell is one differing cell" 1 (S.differing_cells a blink);
+  check bool "a different length is a different screen"
+    true
+    (S.differing_cells a "short" > cfg.cell_threshold);
+  let f = S.replay cfg [ a; blink; blink ] in
+  check bool "a blink does not keep the screen moving" true (S.settled cfg f);
+  check bool "a blink that settles is not a change" false (S.changed cfg a f);
+  (* A flash that returns to the starting screen is not a change either —
+     this is what tells a key-wait scene from a transition. *)
+  let f = S.replay cfg [ a; scene; a; a; a ] in
+  check bool "a flash that returns settles" true (S.settled cfg f);
+  check bool "a flash that returns is not a change" false (S.changed cfg a f);
+  let f = S.replay cfg [ a; scene; scene ] in
+  check bool "one equal sample after a scene change is not settled yet"
+    false (S.settled cfg f);
+  let f = S.replay cfg [ a; scene; scene; scene ] in
+  check bool "a new scene settles on the second equal sample"
+    true (S.settled cfg f);
+  check bool "a new scene reports changed" true (S.changed cfg a f);
+  let f = S.replay cfg [ a; scene; other ] in
+  check bool "a still-moving screen does not settle" false (S.settled cfg f);
+  check bool "a still-moving screen reports changed" true (S.changed cfg a f)
+;;
+
+let test_step_until_change () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes without ROMs" true (is_completed r);
+  (* A ROM-less machine's screen settles once the VDP stops changing: the run
+     stops before the budget. The exact frame is machine-dependent, so the
+     test pins the properties. *)
+  let r =
+    dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 120) ]
+  in
+  check bool "step_until_change completes" true (is_completed r);
+  check bool "settles before the budget runs out"
+    true
+    (frame_of r < Msx_lane.boot_frames + 120);
+  (* On an already-settled screen — the key-wait scene shape — the very next
+     run reports changed=false, stable=true. *)
+  let r =
+    dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 120) ]
+  in
+  check bool "a settled screen reports changed=false (key-wait candidate)"
+    true
+    (match member "changed" (Tool_result.data r) with
+     | Some (`Bool false) -> true
+     | _ -> false);
+  check bool "a settled screen reports stable=true"
+    true
+    (match member "stable" (Tool_result.data r) with
+     | Some (`Bool true) -> true
+     | _ -> false);
+  let r =
+    dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 301) ]
+  in
+  check bool "a budget over the cap is refused" true (rejected r);
+  let r =
+    dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 0) ]
+  in
+  check bool "a zero budget is refused" true (rejected r)
+;;
+
 let test_press_ledger () =
   with_workspace @@ fun base_path ->
   ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
@@ -693,6 +765,8 @@ let () =
     [ ( "lane"
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
+        ; test_case "screen change core (pure)" `Quick test_screen_change_core
+        ; test_case "step until change" `Quick test_step_until_change
         ; test_case "press writes the ledger" `Quick test_press_ledger
         ; test_case "Backspace sequence ledger" `Quick test_backspace_sequence_ledger
         ; test_case "press validation" `Quick test_press_validation

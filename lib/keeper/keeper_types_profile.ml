@@ -153,6 +153,10 @@ let load_keeper_instructions ~toml_path _name defaults =
       ; detail = "keeper TOML must set a non-empty keeper.instructions"
       }
 
+let materialization_defaults_of_content ~path bytes =
+  Result.bind (inspect_keeper_toml_content ~path bytes) (fun (name, defaults) ->
+    load_keeper_instructions ~toml_path:path name defaults)
+
 let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt
     name :
@@ -244,21 +248,17 @@ let load_declarative_materialization_defaults ~base_path name =
          ; detail
          }
      | Ok bytes ->
-       (match inspect_keeper_toml_content ~path bytes with
+       (match materialization_defaults_of_content ~path bytes with
         | Error _ as error -> error
-        | Ok (loaded_name, defaults) ->
-          (match load_keeper_instructions ~toml_path:path loaded_name defaults with
-           | Error _ as error -> error
-           | Ok profile_defaults ->
-             Ok
-               { profile_defaults
-               ; manifest_snapshot =
-                   Declarative_manifest_present
-                     { path
-                     ; sha256 =
-                         Digestif.SHA256.(digest_string bytes |> to_hex)
-                     }
-               })))
+        | Ok profile_defaults ->
+          Ok
+            { profile_defaults
+            ; manifest_snapshot =
+                Declarative_manifest_present
+                  { path
+                  ; sha256 = Digestif.SHA256.(digest_string bytes |> to_hex)
+                  }
+            }))
 
 type keeper_toml_config_error = {
   keeper_name : string;

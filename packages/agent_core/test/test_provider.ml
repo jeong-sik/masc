@@ -51,9 +51,9 @@ let test_file_object_decode () =
 ;;
 
 let test_pricing_sonnet () =
-  let p = declared_pricing "claude-sonnet-4-6-20250514" in
-  Alcotest.(check (float 0.001)) "input/M" 3.0 p.input_per_million;
-  Alcotest.(check (float 0.001)) "output/M" 15.0 p.output_per_million;
+  let p = declared_pricing "claude-sonnet-5-20260101" in
+  Alcotest.(check (float 0.001)) "input/M" 2.0 p.input_per_million;
+  Alcotest.(check (float 0.001)) "output/M" 10.0 p.output_per_million;
   Alcotest.(check (option (float 0.001)))
     "cache_write"
     (Some 1.25)
@@ -129,7 +129,7 @@ let test_pricing_unknown () =
 ;;
 
 let test_estimate_cost () =
-  let p = declared_pricing "claude-sonnet-4-6" in
+  let p = declared_pricing "claude-sonnet-5" in
   let cost =
     Llm_provider.Pricing.estimate_cost
       ~pricing:p
@@ -152,20 +152,20 @@ let test_provider_config_rebinds_model_specific_context () =
   let parent =
     Llm_provider.Provider_config.make
       ~kind:Anthropic
-      ~model_id:"claude-opus-4-1"
+      ~model_id:"claude-opus-5"
       ~base_url:"https://api.anthropic.com"
       ~max_context:12_345
       ~model_capabilities_override:parent_capabilities
       ()
   in
-  let target_config = Types.default_config ~model:"claude-sonnet-4-5" in
+  let target_config = Types.default_config ~model:"claude-sonnet-5" in
   let target =
     Agent_turn.provider_config_with_agent_config ~config:target_config parent
   in
   let expected =
     let clean_target =
       { parent with
-        model_id = "claude-sonnet-4-5"
+        model_id = "claude-sonnet-5"
       ; max_context = None
       ; model_capabilities_override = None
       ; supports_structured_output_override = None
@@ -175,7 +175,7 @@ let test_provider_config_rebinds_model_specific_context () =
       (Llm_provider.Provider_config.capabilities_for_config_model clean_target)
       (fun capabilities -> capabilities.max_context_tokens)
   in
-  Alcotest.(check string) "target model" "claude-sonnet-4-5" target.model_id;
+  Alcotest.(check string) "target model" "claude-sonnet-5" target.model_id;
   Alcotest.(check (option int)) "target context SSOT" expected target.max_context;
   Alcotest.(check bool)
     "parent model capability override is not inherited"

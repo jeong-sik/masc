@@ -290,7 +290,7 @@ let test_anthropic_and_gemini_declare_document_input () =
          (Capabilities.for_model_id model_id
           |> Option.map (fun (c : Capabilities.capabilities) -> c.supports_document_input)
          ))
-    [ "claude-opus-4-8", true; "gemini-3.5-flash", true; "gpt-5.2", false ]
+    [ "claude-opus-5", true; "gemini-3.5-flash", true; "gpt-5.2", false ]
 ;;
 
 let test_catalog_row_can_declare_document_input () =

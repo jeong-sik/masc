@@ -16,24 +16,25 @@ let validate_json validate body =
   | exception Yojson.Json_error detail -> Error detail
 
 let validate_run_log body =
-  List.mapi (fun index line -> index + 1, line) (String.split_on_char '\n' body)
+  if String.length body > 0 && body.[String.length body - 1] <> '\n' then
+    Error "Incomplete JSONL tail: the final event must end with a newline"
+  else List.mapi (fun index line -> index + 1, line) (String.split_on_char '\n' body)
   |> List.fold_left (fun result (line_number, line) ->
     Result.bind result (fun () ->
       if String.trim line = "" then Ok () else
         validate_json Masc.Goal_verification_run_registry.validate_event_json line
         |> Result.map_error (fun detail -> Printf.sprintf "line %d: %s" line_number detail))) (Ok ())
 
-let validate_keeper_profile body =
-  Result.bind (Keeper_toml_loader.parse_toml body) (fun doc ->
-    Result.map (fun _ -> ()) (Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml doc))
+let validate_keeper_profile ~path body =
+  Masc.Keeper_types_profile.materialization_defaults_of_content ~path body
+  |> Result.map (fun _ -> ())
+  |> Result.map_error Masc.Keeper_types_profile.keeper_toml_load_error_to_string
 
 let preflight_base_path base_path =
   let normalized = Env_config.normalize_masc_base_path_input base_path in
   if Filename.is_relative normalized then Filename.concat (Sys.getcwd ()) normalized else normalized
 
-let workspace_preflight ~base_path =
-  let base_path = preflight_base_path base_path in
-  let root = Filename.concat base_path Common.masc_dirname in
+let workspace_preflight_at_root ~root =
   let check path validate =
     let present = try let (_ : Unix.stats) = Unix.lstat path in Ok true with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
@@ -41,7 +42,7 @@ let workspace_preflight ~base_path =
     match present with
     | Ok false -> []
     | Error detail -> [{path; kind = Unreadable_state; detail}]
-    | Ok true -> match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:base_path path with
+    | Ok true -> match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path with
     | Ok None -> []
     | Error _ -> [{path; kind = Unreadable_state;
         detail = "Cannot read an owned regular state file. Check the path, permissions and symlinks; no file was changed."}]
@@ -61,7 +62,8 @@ let workspace_preflight ~base_path =
         collect []) in
       names |> List.sort String.compare
       |> List.filter (fun name -> Filename.check_suffix name ".toml")
-      |> List.concat_map (fun name -> check (Filename.concat directory name) validate_keeper_profile)
+      |> List.concat_map (fun name -> let path = Filename.concat directory name in
+        check path (validate_keeper_profile ~path))
     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> []
     | exception Unix.Unix_error (error, _, _) ->
       [{path = directory; kind = Unreadable_state; detail = Unix.error_message error}]
@@ -81,6 +83,30 @@ let workspace_preflight ~base_path =
   match keeper_issues @ store_issues with
   | [] -> Workspace_ready
   | issues -> Workspace_needs_attention issues
+
+let workspace_preflight ~base_path =
+  let requested_root = Filename.concat (preflight_base_path base_path) Common.masc_dirname in
+  (* Deployment may link .masc to a volume. Resolve that root once, then apply
+     owned-child checks below the physical root rather than through the link. *)
+  let unreadable detail = Workspace_needs_attention
+    [{path = requested_root; kind = Unreadable_state; detail}] in
+  try
+    match Unix.lstat requested_root with
+    | _ ->
+      let root = Fs_compat.realpath requested_root in
+      let before = Unix.stat root in
+      if before.Unix.st_kind <> Unix.S_DIR then unreadable "MASC root is not a directory"
+      else
+        let result = workspace_preflight_at_root ~root in
+        let after = Unix.stat root in
+        if before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino
+           && String.equal root (Fs_compat.realpath requested_root)
+        then result
+        else unreadable "MASC root changed during preflight; no file was changed"
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Workspace_ready
+  with
+  | Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
+  | Sys_error detail -> unreadable detail
 
 let workspace_preflight_json ~base_path preflight =
   let status, issues = match preflight with

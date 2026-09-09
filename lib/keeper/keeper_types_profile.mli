@@ -124,6 +124,11 @@ type declarative_materialization_defaults =
   ; manifest_snapshot : declarative_manifest_snapshot
   }
 
+(** Validate the complete materialization contract from already captured bytes,
+    without re-reading the manifest or mutating workspace state. *)
+val materialization_defaults_of_content :
+  path:string -> string -> (keeper_profile_defaults, keeper_toml_load_error) result
+
 val load_declarative_materialization_defaults :
   base_path:string ->
   string ->

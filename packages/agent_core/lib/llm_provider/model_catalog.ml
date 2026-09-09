@@ -680,7 +680,7 @@ let%test "parse_entry leaves task undeclared as None" =
 let%test "parse_entry parses Anthropic thinking control as typed catalog data" =
   let entry =
     Otoml.Parser.from_string
-      "id_prefix = \"claude-sonnet-4-6\"\n\
+      "id_prefix = \"thinking-control-parse-fixture\"\n\
        anthropic_thinking_control = \"adaptive_preferred\""
   in
   match parse_entry entry with

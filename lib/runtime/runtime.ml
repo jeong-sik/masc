@@ -1772,7 +1772,7 @@ let max_output_tokens_of_runtime_id (id : string) : int option =
 
 let thinking_support_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
-  | Some rt -> Some rt.model.thinking_support
+  | Some rt -> rt.model.thinking_support
   | None -> None
 ;;
 

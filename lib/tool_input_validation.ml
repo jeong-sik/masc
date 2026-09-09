@@ -873,7 +873,8 @@ let reject_validation ~class_ ~(schema : Yojson.Safe.t option) ~name ~reason ~me
   in
   Tool_dispatch.Reject
     (Tool_result.Failed
-       { Tool_result.class_ = class_
+       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = class_
        ; message
        ; data
        ; metadata = None
@@ -894,7 +895,8 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
   Log.Tool_validation.error "%s" message;
   Tool_dispatch.Reject
     (Tool_result.Failed
-       { Tool_result.class_ = Tool_result.Runtime_failure
+       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
        ; message
        ; data =
            `Assoc
@@ -1037,7 +1039,8 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
          actual category instead of bucketing as "unclassified". *)
       Tool_dispatch.Reject
         (Tool_result.Failed
-           { Tool_result.class_ = Tool_result.Policy_rejection
+           { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Policy_rejection
            ; message
            ; data =
                `Assoc

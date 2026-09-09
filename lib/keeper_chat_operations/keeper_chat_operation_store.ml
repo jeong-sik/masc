@@ -955,6 +955,16 @@ let gate_state = function
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _}
   | None -> None
 
+let interrupted_direct_execution = function
+  | Semantic.Recovering {origin; _} ->
+    (match origin with
+     | Semantic.Interrupted_execution -> true
+     | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+     | Semantic.Checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ -> false)
+  | Semantic.Preparing | Semantic.Ready | Semantic.Running
+  | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+  | Semantic.Suspended _ | Semantic.Settled _ -> false
+
 let claimable_queued_with_db db =
   let* executions = semantic_rows db ~active_only:true in
   let blocked = List.filter_map (fun (execution : Semantic.t) ->
@@ -962,8 +972,8 @@ let claimable_queued_with_db db =
     | Some {resolution=None; _} -> Some execution.id
     | Some {resolution=Some _; _} -> None
     | None -> (match execution.phase with
-        | Semantic.Recovering {origin; _}
-          when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+        | Semantic.Recovering _
+          when interrupted_direct_execution execution.phase
                && execution.gate_obligations <> [] -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ | Semantic.Recovering _ -> None)) executions in
@@ -1504,8 +1514,8 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
     let* operation = operation_or_unknown store.db operation_id in
     let* execution = direct_execution_with_db store.db operation in
     match operation.state, execution with
-    | Operation.Queued, Some {Semantic.phase=Semantic.Recovering {origin; _}; gate_obligations; _}
-        when (match origin with Semantic.Interrupted_execution -> true | _ -> false)
+    | Operation.Queued, Some {Semantic.phase; gate_obligations; _}
+        when interrupted_direct_execution phase
              && gate_obligations = obligations && operation.execution_digest = execution_digest -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _ ->
       Error (Integrity_error "Gate wait commit is not confirmed") in

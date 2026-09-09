@@ -1,0 +1,7 @@
+[2026-09-10 06:19:18] [INFO] [runtime_agent] agent_core-deepseek.deepseek-v4-pro: resume checkpoint_turn_count=58
+[2026-09-10 06:19:18] [WARN] [agent_core:pipeline] pipeline stage failed stage=route error="[route] Invalid request (attempt_rejected): model \"deepseek-v4-pro\" declares thinking control, but the resolved typed dialect cannot encode enable_thinking=true...(408B)"
+[2026-09-10 06:27:54] [INFO] [runtime_agent] agent_core-deepseek.deepseek-v4-pro: resume checkpoint_turn_count=58
+[2026-09-10 06:27:55] [WARN] [agent_core:pipeline] pipeline stage failed stage=route error="[route] Payment required: Insufficient Balance"
+[2026-09-10 06:27:55] [INFO] [agent_core:agent] turn completed turn=59 elapsed_run_sec=0.875 turn_duration_sec=0.875 model=deepseek-v4-pro stop="error:Payment required: Insufficient Balance"
+[2026-09-10 06:27:55] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash: resume checkpoint_turn_count=58
+[2026-09-10 06:27:56] [WARN] [Keeper] keeper_stream: request terminal keeper=memory-guide-proof request_id=kmsg-d38dd9285c0abac2c47c6d0923330e1d status=error message=Rate limited: you (yousleepwhen) have reached your weekly usage limit, add usage credits: https://ollama.com/settings (ref: 78a06e61-57f3-40da-9222-1e34ac9d0401)

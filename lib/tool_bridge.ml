@@ -353,7 +353,7 @@ let to_agent_core_typed_result
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_core.Types.content; _meta = Some metadata })
-  | Tool_result.Failed { class_; message; data; metadata; _ } ->
+  | Tool_result.Failed { effect_disposition; class_; message; data; metadata; _ } ->
     let failure_class = Tool_result.tool_failure_class_to_string class_ in
     let next_move = failure_next_move class_ in
     (* Keep producer recovery details in model content. Data already carried
@@ -411,6 +411,21 @@ let to_agent_core_typed_result
         Printf.sprintf "failure_class=%s — %s" failure_class next_move
       | None -> Printf.sprintf "failure_class=%s" failure_class
     in
+    let references = Tool_output.normalized_artifact_refs_in_json data in
+    match effect_disposition, references, artifact_manifest_from_metadata metadata with
+    | Tool_result.Proven_post_effect, (_ :: _), Error _ ->
+      (* This is an error result for an already-applied effect. A second
+         manifest projection would erase that evidence with a generic storage
+         error. Return retrieval handles in the typed failure path, never Ok. *)
+      make_tool_error ~recoverable:false
+        ~error_class:(agent_core_error_class_of_tool_failure_class class_)
+        (Yojson.Safe.to_string (`Assoc [
+          "message", `String "The effect was applied, but result manifest storage failed. Read the recorded artifacts or current target; do not repeat the effect.";
+          "masc.tool_disposition", `String "failed";
+          "effect_disposition", `String (Tool_result.failure_effect_disposition_to_string effect_disposition);
+          "failure_class", `String failure_class;
+          "artifact_refs", `List (List.map Tool_output.normalized_artifact_ref_to_json references)]))
+    | _ ->
     project_result
       ~stored_preview
       ?base_path

@@ -47,12 +47,11 @@ type seed = {
     The keeper turn loop ([Keeper_run_tools_hooks]) consumes [thinking_enabled]
     as an explicit runtime-model policy: [Some false] forces thinking OFF for
     the turn, while [Some true] actively enables thinking for that runtime.
-    This keeps Qwen3.6 thinking on even if the legacy global default remains
-    false.
+    An explicit model policy takes precedence over the fleet request policy.
 
-    [None] argument means the runtime id is not in the loaded config (unknown
-    id, or before [Runtime.init_default]): no per-model signal, leave the
-    caller policy unchanged.
+    [None] means the model leaves the policy unset, or the runtime id is not
+    loaded. Preserve that absence so provider defaults remain authoritative
+    unless the caller explicitly configured a thinking request.
 
     Thinking is a toggle here, not a quantity: no configuration carries a
     token budget any more. *)

@@ -588,13 +588,23 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
          ~candidate_preference_of:(fun (runtime : Runtime.t) ->
            Some runtime.Runtime.candidate_preference)
 
-(* RFC-0440 §3: the runtime the decision dispatches first, then the rest of the
-   media walk (every candidate that takes the media, live ones first), then the
-   lane's remaining candidates as the degrade tail — per-attempt projection
-   drops the image there (PR-C replaces this tail with delegation). A text turn
-   has an empty media walk and keeps [first_runtime :: remaining_runtimes]. *)
+(* RFC-0440 §3: the media walk (every candidate that takes the media, live ones
+   first), then the lane's remaining candidates as the degrade tail — per-attempt
+   projection drops the image there (PR-C replaces this tail with delegation). A
+   text turn has an empty media walk and keeps [first_runtime :: remaining_runtimes].
+
+   The walk leads, [first_runtime] does not. Putting the dispatch head at 0
+   unconditionally undid the liveness ordering in the one case it is needed:
+   when the assigned runtime takes the media itself,
+   [decide_modality_reroute_for_runtime_candidates] answers [No_reroute_needed]
+   on capability alone and never looks at the account, so a head already
+   exhausted by a 402/429 stayed in front of the live out-of-lane candidate and
+   every image turn hit it first again. When the head is live it is the walk's
+   own head, so leading with the walk changes nothing; after a reroute the
+   target is the walk head for the same reason, and the dedupe drops the second
+   mention either way. *)
 let attempt_runtimes_for_turn ~media_walk ~first_runtime ~remaining_runtimes =
-  dedupe_runtimes_preserve_order (first_runtime :: (media_walk @ remaining_runtimes))
+  dedupe_runtimes_preserve_order (media_walk @ (first_runtime :: remaining_runtimes))
 
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
     ~goal_blocks ~first_candidate ~candidates =

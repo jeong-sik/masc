@@ -7,6 +7,7 @@ Existing mode reuses an explicitly supplied fresh wizard workspace and authentic
 home without reconfiguring their runtime or imp; prior imp history is rejected. No fixture model or approval bypass is used.
 """
 import argparse
+import contextlib
 from contextlib import contextmanager
 import hashlib
 import json
@@ -14,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import shlex
+import sqlite3
 import socket
 import subprocess
 import tempfile
@@ -167,6 +169,38 @@ def directory_execution(traces):
 PRESERVED_CONFIGURATION = ('runtime.toml', 'agent-core-models-overlay.toml', 'keepers/imp.toml')
 
 
+def outstanding_chat_operations(keeper):
+    """Queued or running chat operations the server would drain at boot.
+
+    The three record directories below hold what a past run *finished*. An
+    operation that never ran leaves nothing in them and sits in the keeper's
+    own queue instead, a sibling file the directory scan does not see. The
+    server drains it on the next boot, and its tool executions land in this
+    run's traces: `completed` below is every tool_execution_finished record in
+    the window, and a raw-trace record carries no request id to filter on
+    (Raw_trace.record_tool_execution_finished takes invocation, tool_name,
+    tool_result and tool_error). So a drained leftover is counted as proof this
+    run produced.
+
+    'queued' and 'running' are the store's own words for outstanding, declared
+    in the operations table's CHECK constraint
+    (lib/keeper_chat_operations/keeper_chat_operation_store.ml).
+    """
+    queue = keeper / 'chat-operations.sqlite3'
+    if not queue.exists():
+        return 0
+    with contextlib.closing(sqlite3.connect(f'file:{queue}?mode=ro', uri=True)) as db:
+        try:
+            row = db.execute(
+                "SELECT COUNT(*) FROM operations WHERE state IN ('queued', 'running')"
+            ).fetchone()
+        except sqlite3.DatabaseError as error:
+            # A queue this cannot read is not a queue this can call empty.
+            raise RuntimeError(
+                'acceptance cannot read the chat operation queue: ' + str(error))
+    return row[0] if row else 0
+
+
 def require_unmeasured_workspace(base):
     """Existing mode accepts a fresh wizard workspace, never prior chat proof."""
     keeper = base / '.masc/keepers/imp'
@@ -175,6 +209,11 @@ def require_unmeasured_workspace(base):
         if folder.exists() and any(path.is_file() and path.stat().st_size
                                    for path in folder.rglob('*')):
             raise RuntimeError('acceptance requires a workspace without prior imp history: ' + name)
+    outstanding = outstanding_chat_operations(keeper)
+    if outstanding:
+        raise RuntimeError(
+            'acceptance requires a workspace with no chat operations waiting to run; '
+            f'the queue holds {outstanding}')
 
 
 def persisted_ids(base):

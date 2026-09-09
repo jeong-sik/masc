@@ -4490,7 +4490,6 @@ describe('fetchRuntimeProviders', () => {
                 max_context: 128000,
                 thinking_support: true,
                 preserve_thinking: true,
-                max_thinking_budget: 32768,
                 streaming: true,
                 temperature: 0.65,
                 top_p: 0.91,

@@ -32,6 +32,12 @@ let parse = function
     let excludes keys =
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
+    let required key = match List.assoc_opt key fields with
+      | Some value -> Ok value
+      | None -> Error ("pointer action requires " ^ key) in
+    let geometry parser key =
+      let* value = required key in
+      parser value in
     let* action = match List.assoc_opt "action" fields with
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
@@ -49,20 +55,26 @@ let parse = function
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
+      | Some (`String "scroll_at") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"from";"to"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
+        let* x = integer "x" in let* y = integer "y" in
+        Ok (Browser_lane.Scroll_at {point;viewport;x;y})
       | Some (`String ("click_at" | "drag" as action)) ->
         let* () = excludes (["selector"; "text"; "documentId"; "nodeId"; "x"; "y"] @
           if action = "click_at" then ["from"; "to"] else ["point"]) in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "pointer actions require expectedUrl" in
-        let value key = match List.assoc_opt key fields with Some json -> json | None -> `Null in
-        let* viewport = Browser_lane.Pointer.viewport_of_json (value "viewport") in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         if action = "click_at" then
-          let* point = Browser_lane.Pointer.point_of_json (value "point") in
+          let* point = geometry Browser_lane.Pointer.point_of_json "point" in
           Ok (Browser_lane.Click_at {point;viewport})
         else
-          let* from = Browser_lane.Pointer.point_of_json (value "from") in
-          let* to_ = Browser_lane.Pointer.point_of_json (value "to") in
+          let* from = geometry Browser_lane.Pointer.point_of_json "from" in
+          let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           Ok (Browser_lane.Drag {from;to_;viewport})
-      | _ -> Error "action must be click, fill, scroll, click_at or drag" in
+      | _ -> Error "action must be click, fill, scroll, click_at, scroll_at or drag" in
     Ok { source = base.source; tab_id; client_id=base.client_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -80,7 +92,7 @@ let script = {js|function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
-  if (args.action === "click_at") {
+  if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
       throw new Error('observed_viewport_changed');
@@ -88,10 +100,72 @@ let script = {js|function interactInPage(args) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
-    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
-    if (element.matches(':disabled')) throw new Error('element_disabled');
-    element.click();
+    let element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    if (!element) throw new Error('point_has_no_element');
+    if (args.action === 'click_at') {
+      if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+      if (element.matches(':disabled')) throw new Error('element_disabled');
+      element.click();
+    } else {
+      if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+        throw new Error('scroll_coordinates_must_be_integers');
+      // Hit testing stops at shadow hosts and frame elements. Resolve both
+      // before scrolling; never redirect an inaccessible frame hit to its page.
+      let hitWindow = window, hitX = point.x * innerWidth, hitY = point.y * innerHeight;
+      for (;;) {
+        if (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+          const inner = element.shadowRoot.elementFromPoint(hitX, hitY);
+          if (inner && inner !== element) { element = inner; continue; }
+        }
+        if (element.localName !== 'iframe' && element.localName !== 'frame') break;
+        let childDocument;
+        try { childDocument = element.contentDocument; }
+        catch { throw new Error('scroll_frame_inaccessible'); }
+        if (!childDocument || !childDocument.defaultView) throw new Error('scroll_frame_inaccessible');
+        // A bounding rectangle cannot invert rotation, skew or perspective.
+        // Reject transformed frames/ancestors before either scroll axis acts.
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          if (style.transform !== 'none' || style.perspective !== 'none'
+              || (style.rotate && style.rotate !== 'none')
+              || (style.scale && style.scale !== 'none')
+              || (style.translate && style.translate !== 'none')
+              || (style.zoom && style.zoom !== 'normal' && Number(style.zoom) !== 1))
+            throw new Error('scroll_frame_geometry_unsupported');
+        }
+        const rect = element.getBoundingClientRect(), style = hitWindow.getComputedStyle(element);
+        hitX -= rect.left + element.clientLeft + Number.parseFloat(style.paddingLeft);
+        hitY -= rect.top + element.clientTop + Number.parseFloat(style.paddingTop);
+        hitWindow = childDocument.defaultView;
+        if (hitX < 0 || hitY < 0 || hitX >= hitWindow.innerWidth || hitY >= hitWindow.innerHeight)
+          throw new Error('scroll_point_outside_frame_content');
+        element = childDocument.elementFromPoint(hitX, hitY);
+        if (!element) throw new Error('point_has_no_element');
+      }
+      // Follow actual scroll containers under the pointer. Slack's message
+      // pane scrolls independently of document.body and its channel sidebar.
+      const scrollAxis = (delta, axis) => {
+        if (delta === 0) return;
+        const vertical = axis === 'y';
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          const overflow = vertical ? style.overflowY : style.overflowX;
+          const position = vertical ? node.scrollTop : node.scrollLeft;
+          const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
+          if ((overflow === 'auto' || overflow === 'scroll') && maximum > 0) {
+            node.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+            const after = vertical ? node.scrollTop : node.scrollLeft;
+            // Reverse-flow chat and RTL scrollers may have negative positions.
+            // The browser's actual movement establishes consumption, not a range guess.
+            if (after !== position) return;
+            const chain = vertical ? style.overscrollBehaviorY : style.overscrollBehaviorX;
+            if (chain === 'contain' || chain === 'none') return;
+          }
+        }
+        hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+      };
+      scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
+    }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");

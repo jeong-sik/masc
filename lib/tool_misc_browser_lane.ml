@@ -133,7 +133,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
 
 let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
-    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId"])) fields
+    | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope"])) fields
     | _ -> false in
   if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
   else
@@ -145,7 +145,10 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     | Error detail -> make_workflow_err ~tool_name ~start_time detail
     | Ok frame_path ->
     let mode = get_string args "mode" "text" in
-    if frame_path <> [] || mode = "frames" || mode = "dialog" then
+    let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
+    if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+      make_workflow_err ~tool_name ~start_time "scope supports top-document scene or regions only"
+    else if frame_path <> [] || mode = "frames" || mode = "dialog" then
       if lane <> "automation" then make_workflow_err ~tool_name ~start_time "frame and dialog reads require automation"
       else (match get_int_opt args "tabId" with
         | None -> make_workflow_err ~tool_name ~start_time "contextual read requires an observed tabId"
@@ -164,10 +167,17 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
     else
     let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
     match get_string args "mode" "text" with
-    | "scene" ->
+    | ("scene" | "regions") as mode ->
       (match get_int_opt args "tabId" with
        | Some tab_id when tab_id >= 0 ->
-           (match Browser_scene.read {request with tab_id=Some tab_id} ~max_chars with
+           (let scope = match args with
+              | `Assoc fields -> (match List.assoc_opt "scope" fields with
+                  | None -> Ok None | Some json -> Result.map Option.some (Browser_scene.scope_of_json json))
+              | _ -> Ok None in
+            let result = Result.bind scope (fun scope -> Browser_scene.read
+              ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
+              ?scope {request with tab_id=Some tab_id} ~max_chars) in
+            match result with
             | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
             | Error detail -> make_workflow_err ~tool_name ~start_time detail)
        | _ -> make_workflow_err ~tool_name ~start_time "scene requires an observed tabId")
@@ -193,7 +203,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
       let verb = match mode with
         | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
         | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
-        | _ -> Error "mode must be text, elements, scene, screenshot, frames, dialog or downloads" in
+        | _ -> Error "mode must be text, elements, scene, regions, screenshot, frames, dialog or downloads" in
       match verb with
       | Error detail -> make_workflow_err ~tool_name ~start_time detail
       | Ok verb ->

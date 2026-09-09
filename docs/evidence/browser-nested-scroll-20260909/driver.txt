@@ -1,0 +1,16 @@
+1788936628252	geckodriver	INFO	Listening on 127.0.0.1:51343
+1788936628658	mozrunner::runner	INFO	Running command: MOZ_CRASHREPORTER="1" MOZ_CRASHREPORTER_NO_REPORT="1" MOZ_CRASHREPORTER_SHUTDOWN="1" "/Users/dancer/Library/ ... e" "-headless" "-foreground" "-no-remote" "-profile" "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/rust_mozprofiletnjg3j"
+*** You are running in headless mode.
+JavaScript warning: resource://services-settings/Utils.sys.mjs, line 125: unreachable code after return statement
+1788936633060	Marionette	INFO	Marionette enabled
+1788936634278	Marionette	INFO	Listening on port 51359
+Read port: 51359
+Read port: 51359
+console.error: [Exception... "Component returned failure code: 0x80040111 (NS_ERROR_NOT_AVAILABLE) [nsIContentSniffer.getMIMETypeFromContent]"  nsresult: "0x80040111 (NS_ERROR_NOT_AVAILABLE)"  location: "JS frame :: resource:///modules/FaviconLoader.sys.mjs :: onStopRequest :: line 353"  data: no]
+console.error: (new NotFoundError("Could not find fa0fc42c-d91d-fca7-34eb-806ff46062dc in cache or dump", "resource://services-settings/Attachments.sys.mjs", 48))
+console.warn: "Unable to find the attachment for" "fa0fc42c-d91d-fca7-34eb-806ff46062dc"
+console.error: [Exception... "Component returned failure code: 0x80040111 (NS_ERROR_NOT_AVAILABLE) [nsIContentSniffer.getMIMETypeFromContent]"  nsresult: "0x80040111 (NS_ERROR_NOT_AVAILABLE)"  location: "JS frame :: resource:///modules/FaviconLoader.sys.mjs :: onStopRequest :: line 353"  data: no]
+console.error: [Exception... "Component returned failure code: 0x80040111 (NS_ERROR_NOT_AVAILABLE) [nsIContentSniffer.getMIMETypeFromContent]"  nsresult: "0x80040111 (NS_ERROR_NOT_AVAILABLE)"  location: "JS frame :: resource:///modules/FaviconLoader.sys.mjs :: onStopRequest :: line 353"  data: no]
+1788936653415	Marionette	INFO	Stopped listening on port 51359
+JavaScript error: chrome://juggler/content/Helper.js, line 82: NS_ERROR_FAILURE: Component returned failure code: 0x80004005 (NS_ERROR_FAILURE) [nsIWebProgress.removeProgressListener]
+1788936664376	webdriver::server	INFO	Shutting down

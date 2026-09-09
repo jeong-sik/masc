@@ -8,6 +8,7 @@ module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Ask_layout = Masc_tui_ask_layout
 module Board_read_layout = Masc_tui_board_read_layout
+module Browser_lane_layout = Masc_tui_browser_lane_layout
 module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
@@ -3847,6 +3848,33 @@ let render_board_list (state : state) =
 (* Owned by the single render loop, like the chat Markdown cache. Only the
    currently read document is retained; input and live status are never cached. *)
 let board_read_layout = Board_read_layout.create ()
+
+(* One slot for the browser scene on screen. Module state rather than a field
+   on [state], like [board_read_layout]: a wrapped row is a derived reading,
+   not authority, and the input layer would otherwise invalidate it at every
+   scroll. *)
+let browser_lane_layout = Browser_lane_layout.create ()
+
+let browser_lane_rows ~cols (view : Browser_lane_view.t) =
+  (* The same three branches browser_lane_page_lines takes, so the key holds
+     every input that decides a row. *)
+  let content =
+    match view.Browser_lane_view.scene with
+    | Some scene -> Browser_lane_layout.Scene scene.content.Masc.Browser_scene.nodes
+    | None ->
+      (match view.Browser_lane_view.reading with
+       | Some { page = Some page; _ } -> Browser_lane_layout.Page page.text
+       | Some _ | None -> Browser_lane_layout.Empty)
+  in
+  let source =
+    { Browser_lane_layout.content
+    ; scene_cursor = view.Browser_lane_view.scene_cursor
+    ; columns = cols
+    }
+  in
+  Browser_lane_layout.get browser_lane_layout ~source ~render:(fun () ->
+    browser_lane_page_lines ~cols view)
+;;
 
 (** Render the Board surface (read view). *)
 (* The read post alone -- borders, header, body, comments -- at [cols]
@@ -13799,7 +13827,7 @@ let render_changes (state : state) =
 let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let room = max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6)) in
-  max 0 (List.length (browser_lane_page_lines ~cols view) - room)
+  max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
 
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
@@ -13820,7 +13848,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -13828,11 +13856,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
+        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
-        | Loading (_, Viewport_scroll _) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
@@ -13913,15 +13943,19 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | None -> "  Source unavailable"
             | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
       c.push_divider ();
-      let lines = browser_lane_page_lines ~cols view in
+      let lines = browser_lane_rows ~cols view in
+      let total = Browser_lane_layout.count lines in
       let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
-      let max_scroll = max 0 (List.length lines - room) in
+      let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
-      lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
-      |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
+      (* Read the window out of the retained array. [List.filteri] walked every
+         row of a 50,000-character page to reach the ones on screen. *)
+      for index = scroll to min (scroll + room - 1) (total - 1) do
+        c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
+      done;
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane"
-           (if lines = [] then 0 else scroll + 1) (List.length lines)))
+           (if total = 0 then 0 else scroll + 1) total))
 
 let render_connectors (state : state) =
   match browser_lane_on_screen state with

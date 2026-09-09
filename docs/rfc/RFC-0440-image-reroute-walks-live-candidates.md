@@ -32,16 +32,16 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 1. **reroute 후보는 lane 후보뿐이다.** `keeper_turn_driver.ml` 의 `lane_modality_reroute_decision ~first_candidate ~remaining_runtimes` 는 그 키퍼 lane 의 나머지 후보만 넘긴다. `runtime_agent.ml:782` 주석은 "media_failover order, then declaration order" 라고 적었지만 드라이버는 그렇게 부르지 않는다. runtime.toml 의 glm-5.3 lane 주석(2026-09-06)이 이 사실을 알고 vision 모델을 lane 2순위에 끼워 넣었다.
 2. **선택은 순수하고 liveness 를 모른다.** `Runtime_agent.decide_modality_reroute` 는 `List.find_opt` 로 "이미지를 받는다고 선언한 첫 후보" 를 고른다. 주석 그대로 "no provider liveness (deferred to RFC-0260)". 직전 턴의 402 는 다음 턴의 선택에 아무 영향이 없다.
-3. **도구 경로는 다르게 걷는다.** `keeper_vision_tool.vision_runtime_candidates` 는 `media_failover` 를 먼저, 나머지 런타임을 뒤에 세우고 `Runtime_attempt_fsm.should_try_next` 로 후보를 넘어간다. 그리고 `Keeper_vision_ingest.delegates_media` 는 lane 에 이미지를 받는 후보가 하나라도 있으면 위임하지 않는다 — 그 후보가 죽어 있어도.
+3. **도구 경로는 다르게 걷고, 직전 402 를 모른다.** `keeper_vision_tool.vision_runtime_candidates` 는 `media_failover` 를 먼저, 나머지 런타임을 뒤에 세우고 4xx 는 그 후보의 verdict 로 보아 즉시 다음 후보로 간다. 다만 순서가 선언 순서 그대로여서, 직전 읽기에서 402 를 준 후보를 다음 읽기에서도 먼저 부른다. (2026-09-09 정정: `Keeper_vision_ingest.delegates_media` 는 체크포인트를 저장할 때 인라인 이미지를 아티팩트로 바꾸는지만 정한다. 턴 안의 위임은 드라이버의 `project_input_for_attempt` 가 이미지를 못 받는 후보마다 eager read 로 이미 한다. 이 문서의 첫 판은 `delegates_media` 가 위임을 막는다고 잘못 적었다.)
 
-세 사실이 합쳐지면: lane 에 죽은 vision 후보 하나가 있는 키퍼는 위임도 못 받고(3), 그 후보만 고르고(1·2), 실패하면 lane 의 텍스트 failover(luna)로 튀었다가 같은 후보로 돌아온다.
+세 사실이 합쳐지면: lane 에 죽은 vision 후보 하나가 있는 키퍼는 그 후보만 고르고(1·2), 402 에서 걸음이 멈추고(키퍼 walk 는 402 를 다음 후보로 보지 않았다, PR-B 에서 확인), 다음 턴에 같은 후보로 돌아온다(2·3).
 
 ## 3. 판단
 
 - 후보 집합은 한 곳이 답한다. "키퍼 K 의 이미지 후보" 는 lane 의 이미지 후보 → `media_failover` → 나머지 선언 런타임 중 이미지를 받는 것(선언 순서)을 이어 붙이고 중복을 뺀 목록이다. 지금 `keeper_vision_tool` 이 쓰는 꼬리(선언 순서)를 그대로 포함하므로 도구 경로가 잃는 후보는 없고, reroute 는 lane 밖 후보를 얻는다. 두 경로가 같은 함수를 부른다.
 - reroute 는 걸음이다. 후보가 402·429·`insufficient_quota` 같은 `should_try_next` 오류로 끝나면 같은 걸음에서 다음 이미지 후보로 간다. 같은 턴에서 같은 후보를 다시 방문하지 않는다. lane 의 텍스트 failover 는 이미지를 받지 못하는 후보라 이 걸음에 끼지 않는다.
-- 바닥은 위임이다. 살아 있는 이미지 후보가 없으면 `No_capable_runtime` 으로 이미지를 떨구는 대신 `Keeper_vision_ingest` 의 eager read 로 내려간다. 읽기 결과가 텍스트로 들어가므로 키퍼의 lane 은 그대로다.
-- `delegates_media` 는 "이미지를 받는 후보가 있나" 가 아니라 "살아 있는 이미지 후보가 있나" 를 본다. 이번 턴의 걸음 결과가 그 답이다.
+- 바닥은 위임이다. 이미지를 받지 못하는 후보에 닿으면 드라이버가 후보마다 eager read 로 내려간다(이미 그렇다). 읽기 결과가 텍스트로 들어가므로 키퍼의 lane 은 그대로다.
+- 읽기 경로도 같은 창을 본다. `vision_runtime_candidates` 는 `Runtime_quota_window` 순서로 후보를 세우고, 읽기에서 받은 402 는 그 창에 기록하며, 답이 온 계정은 기록을 지운다. `delegates_media` 는 바꾸지 않는다(§2 정정).
 - 새 상수·임계값·카운터는 없다. 후보 집합과 걸음 규칙만 바뀐다.
 
 ## 4. 하지 않는 것
@@ -53,7 +53,7 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 ## 5. 오늘의 임시 조치 (WORKAROUND)
 
-`<base-path>/.masc/config/runtime.toml` 에서 `media_failover` 머리를 `claude_code.claude-haiku-4-5`, `glm-coding.glm-4.6v` 로 올리고, glm-5.3 lane 에 `claude_code.claude-haiku-4-5` 를 deepseek 앞에 넣었다. 첫 번째만 고르는 구조를 그대로 둔 채 첫 번째를 살아 있는 것으로 바꾼 것이라 워크어라운드다. §7 PR-A 가 들어가면 lane 에 끼운 haiku 는 뺀다.
+`<base-path>/.masc/config/runtime.toml` 에서 `media_failover` 머리를 `claude_code.claude-haiku-4-5`, `glm-coding.glm-4.6v` 로 올리고, glm-5.3 lane 에 `claude_code.claude-haiku-4-5` 를 deepseek 앞에 넣었다. 첫 번째만 고르는 구조를 그대로 둔 채 첫 번째를 살아 있는 것으로 바꾼 것이라 워크어라운드다. §7 PR-B 가 들어가면 lane 에 끼운 haiku 는 뺀다. PR-A 만으로는 lane 의 죽은 vision 후보가 여전히 먼저 뽑힌다.
 
 ## 6. 검증
 
@@ -65,7 +65,7 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 1. PR-A: 이미지 후보 집합 함수 하나 + reroute 와 vision tool 이 그것을 쓰게. 테스트: 두 경로가 같은 목록을 본다.
 2. PR-B: reroute 걸음 — `should_try_next` 오류에서 다음 이미지 후보로, 같은 턴 재방문 없음.
-3. PR-C: 바닥을 위임으로. `delegates_media` 가 걸음 결과를 본다.
+3. PR-C: 읽기 걸음 — `vision_runtime_candidates` 를 quota 창 순서로, 읽기의 402 를 창에 기록, 답이 오면 지움. `delegates_media` 는 바꾸지 않는다(§2 정정).
 
 각 PR 은 §6 의 해당 단위 테스트를 함께 낸다.
 

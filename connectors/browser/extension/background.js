@@ -52,10 +52,29 @@ function browserScene(args) {
     return true;
   };
   const visible = element => rendered(element) && css(element).visibility === 'visible';
-  const boxes = rects => Array.from(rects).filter(r =>
-    Number.isFinite(r.x) && Number.isFinite(r.y) && r.width > 0 && r.height > 0
-    && r.right > 0 && r.bottom > 0 && r.x < innerWidth && r.y < innerHeight)
-    .map(r => ({x:r.x,y:r.y,width:r.width,height:r.height}));
+  const boxes = (rects, element) => {
+    let left=0,top=0,right=innerWidth,bottom=innerHeight;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const style=css(ancestor);
+      const clipsX=['auto','scroll','hidden','clip'].includes(style.overflowX);
+      const clipsY=['auto','scroll','hidden','clip'].includes(style.overflowY);
+      if (clipsX || clipsY) {
+        const r=ancestor.getBoundingClientRect();
+        if (clipsX) {left=Math.max(left,r.left);right=Math.min(right,r.right);}
+        if (clipsY) {top=Math.max(top,r.top);bottom=Math.min(bottom,r.bottom);}
+      }
+      // Positioned descendants can escape overflow ancestors before their
+      // containing block. We do not reconstruct CSS containing blocks here:
+      // retain uncertain geometry instead of hiding a visible popup. This
+      // can include positioned content clipped by a transformed ancestor.
+      if (style.position === 'fixed' || style.position === 'absolute') break;
+    }
+    return Array.from(rects).filter(r => Number.isFinite(r.x) && Number.isFinite(r.y))
+      .map(r => ({x:Math.max(left,r.x),y:Math.max(top,r.y),
+        width:Math.min(right,r.right)-Math.max(left,r.x),
+        height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
+      .filter(r => r.width>0 && r.height>0);
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -73,14 +92,31 @@ function browserScene(args) {
       color:style.color,fontSize:Number.parseFloat(style.fontSize),
       fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra});
   };
-  const stack = document.body ? Array.from(document.body.childNodes).reverse() : [];
+  const root = args.scope ? browserScene({...args.scope,mode:'resolve'}) : document.body;
+  const view = args.view === undefined ? 'content' : args.view;
+  if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
+  if (view === 'regions' && root) {
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
+    const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
+    for (const region of regions) {
+      if (truncated) break;
+      if (!visible(region)) continue;
+      const role = region.getAttribute('role') || region.localName;
+      const labelledBy = (region.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById(id)?.textContent || '').join(' ').trim();
+      const heading = region.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
+      const name = region.getAttribute('aria-label') || labelledBy || heading?.textContent || role;
+      describe('region',region,name,boxes(region.getClientRects(),region),{role});
+    }
+  }
+  const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];
   while (stack.length && !truncated) {
     const node=stack.pop();
     if (node.nodeType === 3) {
       const element=node.parentElement;
       if (!element || !node.textContent.trim() || !visible(element)) continue;
       const range=document.createRange(); range.selectNodeContents(node);
-      describe('text',element,node.textContent,boxes(range.getClientRects()));
+      describe('text',element,node.textContent,boxes(range.getClientRects(),element));
       continue;
     }
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
@@ -92,20 +128,21 @@ function browserScene(args) {
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');
-      describe('control',node,label,boxes(node.getClientRects()),{
+      describe('control',node,label,boxes(node.getClientRects(),node),{
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
         clickable:typeof node.click === 'function' && !node.matches(':disabled')});
       continue;
     }
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
       describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
-        boxes(node.getClientRects()));
+        boxes(node.getClientRects(),node));
       continue;
     }
     for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
   }
   const scene = {schema:'masc.browser.scene.v1',documentId:state.id,url:location.href,title:document.title,
     viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},nodes,chars,truncated,
+    scope:args.scope || null,view,
     coverage:'top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness'};
   // Refuse rather than shorten URL/document identity or return partial JSON.
   if (new TextEncoder().encode(JSON.stringify(scene)).byteLength > responseByteLimit)
@@ -230,7 +267,7 @@ async function pageScene(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
   const [scene] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",
-    code: '(' + browserScene.toString() + ')(' + JSON.stringify({mode:'read',maxChars:args.maxChars}) + ')',
+    code: '(' + browserScene.toString() + ')(' + JSON.stringify({mode:'read',maxChars:args.maxChars,view:args.view,scope:args.scope}) + ')',
   });
   if (!scene) throw new Error('scene_unavailable');
   return {tabId:args.tabId,...scene};
@@ -265,7 +302,7 @@ function interactInPage(args) {
     throw new Error("page_url_changed");
   const before = location.href;
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
-  if (args.action === "click_at") {
+  if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
     if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
       throw new Error('observed_viewport_changed');
@@ -273,10 +310,72 @@ function interactInPage(args) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
-    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
-    if (!element || typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
-    if (element.matches(':disabled')) throw new Error('element_disabled');
-    element.click();
+    let element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    if (!element) throw new Error('point_has_no_element');
+    if (args.action === 'click_at') {
+      if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+      if (element.matches(':disabled')) throw new Error('element_disabled');
+      element.click();
+    } else {
+      if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+        throw new Error('scroll_coordinates_must_be_integers');
+      // Hit testing stops at shadow hosts and frame elements. Resolve both
+      // before scrolling; never redirect an inaccessible frame hit to its page.
+      let hitWindow = window, hitX = point.x * innerWidth, hitY = point.y * innerHeight;
+      for (;;) {
+        if (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+          const inner = element.shadowRoot.elementFromPoint(hitX, hitY);
+          if (inner && inner !== element) { element = inner; continue; }
+        }
+        if (element.localName !== 'iframe' && element.localName !== 'frame') break;
+        let childDocument;
+        try { childDocument = element.contentDocument; }
+        catch { throw new Error('scroll_frame_inaccessible'); }
+        if (!childDocument || !childDocument.defaultView) throw new Error('scroll_frame_inaccessible');
+        // A bounding rectangle cannot invert rotation, skew or perspective.
+        // Reject transformed frames/ancestors before either scroll axis acts.
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          if (style.transform !== 'none' || style.perspective !== 'none'
+              || (style.rotate && style.rotate !== 'none')
+              || (style.scale && style.scale !== 'none')
+              || (style.translate && style.translate !== 'none')
+              || (style.zoom && style.zoom !== 'normal' && Number(style.zoom) !== 1))
+            throw new Error('scroll_frame_geometry_unsupported');
+        }
+        const rect = element.getBoundingClientRect(), style = hitWindow.getComputedStyle(element);
+        hitX -= rect.left + element.clientLeft + Number.parseFloat(style.paddingLeft);
+        hitY -= rect.top + element.clientTop + Number.parseFloat(style.paddingTop);
+        hitWindow = childDocument.defaultView;
+        if (hitX < 0 || hitY < 0 || hitX >= hitWindow.innerWidth || hitY >= hitWindow.innerHeight)
+          throw new Error('scroll_point_outside_frame_content');
+        element = childDocument.elementFromPoint(hitX, hitY);
+        if (!element) throw new Error('point_has_no_element');
+      }
+      // Follow actual scroll containers under the pointer. Slack's message
+      // pane scrolls independently of document.body and its channel sidebar.
+      const scrollAxis = (delta, axis) => {
+        if (delta === 0) return;
+        const vertical = axis === 'y';
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          const overflow = vertical ? style.overflowY : style.overflowX;
+          const position = vertical ? node.scrollTop : node.scrollLeft;
+          const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
+          if ((overflow === 'auto' || overflow === 'scroll') && maximum > 0) {
+            node.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+            const after = vertical ? node.scrollTop : node.scrollLeft;
+            // Reverse-flow chat and RTL scrollers may have negative positions.
+            // The browser's actual movement establishes consumption, not a range guess.
+            if (after !== position) return;
+            const chain = vertical ? style.overscrollBehaviorY : style.overscrollBehaviorX;
+            if (chain === 'contain' || chain === 'none') return;
+          }
+        }
+        hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+      };
+      scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
+    }
   } else if (args.action === "scroll") {
     if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
       throw new Error("scroll_coordinates_must_be_integers");
@@ -330,7 +429,7 @@ function interactInPage(args) {
 
 async function pageInteract(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'fill', 'scroll', 'click_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  if (!['click', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",

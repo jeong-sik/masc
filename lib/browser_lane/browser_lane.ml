@@ -17,9 +17,12 @@ module Action = Browser_action
 module Upload_lease = Browser_upload_lease
 
 type node_ref = { document_id : string; node_id : string }
+type scene_view = Content | Regions
+
 type interaction = Click of string | Fill of { selector : string; text : string }
   | Scroll of { x : int; y : int }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport }
+  | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
   | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport }
   | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
 
@@ -28,7 +31,7 @@ type verb =
   | Page_read of { tab_id : int option; max_chars : int option }
   | Page_downloads of { tab_id : int }
   | Page_capture of { tab_id : int }
-  | Page_scene of { tab_id : int; max_chars : int }
+  | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
@@ -62,6 +65,9 @@ let verb_to_string = function
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let fields = match action with
+    | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
+        "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
+        "x",`Int x; "y",`Int y]
     | Click_at {point;viewport} -> ["action", `String "click_at";
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Drag {from;to_;viewport} -> ["action", `String "drag";
@@ -74,6 +80,12 @@ let interaction_args ~tab_id ~expected_url action =
     | Scroll {x; y} -> ["action", `String "scroll"; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
     (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
+
+let scene_args ~tab_id ~max_chars ~view ~scope =
+  `Assoc (["tabId",`Int tab_id;"maxChars",`Int max_chars;
+    "view",`String (match view with Content -> "content" | Regions -> "regions")]
+    @ (match scope with None -> [] | Some target -> ["scope",`Assoc [
+      "documentId",`String target.document_id;"nodeId",`String target.node_id]]))
 
 let verb_json = function
   | Tabs_list -> `Assoc [ ("verb", `String "tabs.list"); ("args", `Assoc []) ]
@@ -89,8 +101,8 @@ let verb_json = function
       ]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
-  | Page_scene {tab_id;max_chars} ->
-    `Assoc ["verb",`String "page.scene";"args",`Assoc ["tabId",`Int tab_id;"maxChars",`Int max_chars]]
+  | Page_scene {tab_id;max_chars;view;scope} ->
+    `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
   | Page_interact { tab_id; expected_url; action } ->

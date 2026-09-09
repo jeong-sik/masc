@@ -75,7 +75,7 @@ let () =
     font_size=16.;font_weight="400";white_space="normal";source_context=Masc.Browser_source_context.Unmapped } in
   let content : Masc.Browser_scene.t = {
     document_id="document";url="https://example.org";title="Scene";
-    width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false } in
+    width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false;view=Content;scope=None } in
   let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
   let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
   let lines = Masc_tui_types.browser_lane_page_lines ~cols:80 view in
@@ -89,6 +89,17 @@ let () =
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
   assert ((Lane.accept_scene ~generation:42 (Ok {scene with tab_id=2}) pending).scene = None);
   assert ((Lane.accept_scene ~generation:42 (Ok scene) pending).scene = Some scene);
+  let target = {Browser_lane.document_id="document";node_id="region"} in
+  let focused = {pending with load=Loading (42,Scene_focus {tab_id=1;target})} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scene) focused).scene=None);
+  let scoped_scene = {scene with content={content with scope=Some target}} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) focused).scene=Some scoped_scene);
+  let clicked = {focused with load=Loading (42,Scene_click {tab_id=1;
+    document_id=content.document_id;node_id=node.node_id;expected_url=content.url;scope=Some target})} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) clicked).scene=Some scoped_scene);
+  assert ((Lane.accept_scene ~generation:42 (Ok scene) clicked).scene=None);
+  let invalidated = Lane.accept_scene ~generation:42 (Error "scene_document_changed") clicked in
+  assert (invalidated.scene=None && invalidated.load=Failed "scene_document_changed");
   assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
   let located : Masc.Browser_source_context.location = {file="dashboard/src/a.ts";line=2;column=3;
     kind=Template;digest=String.make 64 'a'} in
@@ -102,3 +113,27 @@ let () =
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
        assert (json |> member "source" |> member "sha256" |> to_string = located.digest));
   print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"
+
+(* Repeated ids are what the target index is for: a scene can hold the same
+   node twice, and both copies must carry the number of its first appearance.
+   The projection used to answer this by rescanning the deduplicated list for
+   every node, which rebuilt that list each time. *)
+let () =
+  let node node_id text : Masc.Browser_scene.node =
+    { node_id; kind = Text; tag = "p"; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped } in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/doc"; title = "Doc";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    nodes = [node "a" "first"; node "b" "second"; node "a" "first again"; node "c" "third"] } in
+  let view = { (Lane.create ()) with
+    scene = Some { source = Live; client_id = None; tab_id = 1; content; elapsed_ms = 1. };
+    scene_cursor = 2 } in
+  if List.length (Lane.scene_targets view) <> 3 then
+    failwith "repeated node ids must collapse to one target each";
+  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
+  if lines <> ["[1 p] first"; "[2 p] second"; "[1 p] first again"; "[>3 p] third"] then
+    failwith "each node must carry the number of its id's first appearance, and the cursor its marker";
+  print_endline "PASS repeated scene node ids keep one number each"

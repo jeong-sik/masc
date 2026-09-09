@@ -108,7 +108,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
             streaming: true,
             preserve_thinking: true,
             thinking_support: true,
-            max_thinking_budget: 4096,
             capabilities: {
               thinking_control_format: 'chat-template-kwargs',
               max_output_tokens: 8192,

@@ -43,7 +43,7 @@ let test_disable_parallel () =
   let config =
     Provider_config.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~disable_parallel_tool_use:true
       ()
@@ -64,7 +64,7 @@ let test_cache_system_prompt () =
   let config =
     Provider_config.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~cache_system_prompt:true
       ~system_prompt:"Be helpful."
@@ -85,7 +85,7 @@ let test_vertex_ai_url () =
   let config =
     Provider_config.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://us-central1-aiplatform.googleapis.com/v1beta1"
       ~api_key:""
       ()
@@ -93,7 +93,7 @@ let test_vertex_ai_url () =
   let url = Complete_sampling.gemini_url ~config ~stream:false in
   check "no ?key= in URL" (not (string_has url "key="));
   check "has :generateContent" (string_has url ":generateContent");
-  check "has model in path" (string_has url "gemini-2.5-flash");
+  check "has model in path" (string_has url "gemini-3.7-flash");
   Printf.printf "  URL: %s\n" url;
   let stream_url = Complete_sampling.gemini_url ~config ~stream:true in
   check
@@ -108,7 +108,7 @@ let test_vertex_ai_url () =
 let test_sse_function_call () =
   Printf.printf "=== SSE streaming functionCall ===\n";
   let chunk_data =
-    {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Seoul"}},"thoughtSignature":"abc123"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":44,"candidatesTokenCount":15},"modelVersion":"gemini-2.5-flash"}|}
+    {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Seoul"}},"thoughtSignature":"abc123"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":44,"candidatesTokenCount":15},"modelVersion":"gemini-3.7-flash"}|}
   in
   match parse_gemini_chunk chunk_data with
   | Some chunk ->
@@ -176,7 +176,7 @@ let test_tool_use_id_roundtrip () =
   let config =
     Provider_config.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ()
   in

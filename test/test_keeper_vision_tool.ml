@@ -217,7 +217,7 @@ let test_message_of_request () =
    no runtime cache loaded in this unit context it is Error; the value is what
    matters (never raises). *)
 let test_first_vision_runtime_id_total () =
-  match Vt.first_vision_runtime_id () with
+  match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
   | Ok _ | Error _ -> ()
 
 let test_provider_for_vision_preserves_configured_max_tokens () =
@@ -593,7 +593,7 @@ max-request-body-bytes = 65536
 
 let test_provider_for_vision_uses_runtime_temperature () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
-    match Vt.first_vision_runtime_id () with
+    match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
     | Error msg -> failwith ("expected configured vision runtime: " ^ msg)
     | Ok runtime_id ->
       (match Runtime.get_runtime_by_id runtime_id with
@@ -661,12 +661,12 @@ let test_temp_runtime_toml_restores_runtime_cache () =
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
     assert (Runtime.get_runtime_ids () = before));
-  assert (Vt.vision_runtime_ids () = [])
+  assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [])
 
 let test_image_capable_vision_runtime_is_admitted_without_schema_capability () =
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
-    assert (Vt.vision_runtime_ids () = [ "local.vision" ]);
-    (match Vt.first_vision_runtime_id () with
+    assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [ "local.vision" ]);
+    (match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
      | Ok "local.vision" -> ()
      | Ok runtime_id -> failwith ("unexpected vision runtime admitted: " ^ runtime_id)
      | Error msg -> failwith ("image-capable runtime was rejected: " ^ msg)))
@@ -890,6 +890,73 @@ let test_candidate_policy_error_tries_next_runtime () =
         "vision_candidate provider_response"
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* RFC-0440 §3: a candidate whose account answered a hard quota rejection moves
+   behind the live ones; a success on that account clears the observation. *)
+let test_vision_candidates_follow_quota_window () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let now = Unix.gettimeofday () in
+      let scope id =
+        match Runtime.get_runtime_by_id id with
+        | Some rt -> Runtime.quota_scope_of_runtime rt
+        | None -> failwith ("missing runtime " ^ id)
+      in
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
+      Runtime_quota_window.note_observed_exhausted ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]);
+      Runtime_quota_window.note_succeeded ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ])))
+
+(* RFC-0440 §3: a 402 from the read walk is recorded on that account, the walk
+   moves on at once, and the answering account is recorded as live. *)
+let test_vision_402_marks_the_account_exhausted_and_moves_on () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      Runtime_quota_window.reset_for_testing ();
+      Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+        let meta = make_meta "vision-402-failover" in
+        let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+        let scope id =
+          match Runtime.get_runtime_by_id id with
+          | Some rt -> Runtime.quota_scope_of_runtime rt
+          | None -> failwith ("missing runtime " ^ id)
+        in
+        let calls = ref 0 in
+        let models = ref [] in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+          incr calls;
+          models := config.Llm_provider.Provider_config.model_id :: !models;
+          if !calls = 1 then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 402
+                 ; body = "{\"error\":{\"message\":\"Insufficient Balance\"}}"
+                 ; retry_after_header = None
+                 })
+          else Ok (ok_response "second account answered")
+        in
+        let raw =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.handle
+                ~complete
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env)
+                ~meta
+                ~args:(artifact_args handle)
+                ()))
+        in
+        let json = json_of_output raw in
+        assert (!calls = 2);
+        assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+        assert (String.equal (assoc_string "text" json) "second account answered");
+        let now = Unix.gettimeofday () in
+        assert (Runtime_quota_window.is_exhausted ~scope:(scope "p1.vision-a") ~now);
+        assert (not (Runtime_quota_window.is_exhausted ~scope:(scope "p2.vision-b") ~now));
+        assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]))))
 
 (* When every candidate answers 400 the walk still ends as a policy rejection
    carrying the last verdict, so a keeper learns the field, not "no runtime". *)
@@ -2157,4 +2224,6 @@ let () =
   test_evicted_history_has_no_image_modality ();
   test_delegates_media_follows_lane_capability ();
   test_delegates_media_matches_antigravity_transport ();
+  test_vision_candidates_follow_quota_window ();
+  test_vision_402_marks_the_account_exhausted_and_moves_on ();
   print_endline "test_keeper_vision_tool: all assertions passed"

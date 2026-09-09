@@ -281,11 +281,12 @@ let execute_unlocked t = function
       let* _ = call t session `POST "/url" (Some (`Assoc ["url", `String url])) in
       page_summary t session)
   | Browser_lane.Page_act action -> fst (execute_action t action)
-  | Browser_lane.Page_scene {tab_id=id;max_chars} ->
+  | Browser_lane.Page_scene {tab_id=id;max_chars;view;scope} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
-      let* data = script t session Browser_scene_script.read
-        [`Assoc ["mode",`String "read";"maxChars",`Int max_chars]] in
+      let args = match Browser_lane.scene_args ~tab_id:id ~max_chars ~view ~scope with
+        | `Assoc fields -> `Assoc (("mode",`String "read")::fields) | json -> json in
+      let* data = script t session Browser_scene_script.read [args] in
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int id) :: fields))
       | _ -> Error (Protocol "malformed semantic scene"))
@@ -327,6 +328,7 @@ let execute_unlocked t = function
       let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
       let* result = match action with
         | Browser_lane.Click_at {point;viewport}
+        | Browser_lane.Scroll_at {point;viewport;_}
         | Browser_lane.Drag {from=point;viewport;_} ->
           let* before = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_guard_script) [args] in
           let move (point : Browser_lane.Pointer.point) = `Assoc [
@@ -337,13 +339,27 @@ let execute_unlocked t = function
           let moves = match action with
             | Browser_lane.Drag {to_;_} -> [move to_]
             | _ -> [] in
-          let actions = `Assoc ["actions",`List [`Assoc [
+          let pointer_actions = `Assoc ["actions",`List [`Assoc [
             "type",`String "pointer"; "id",`String "masc-browser-pointer";
             "parameters",`Assoc ["pointerType",`String "mouse"];
             "actions",`List ([move point;button "pointerDown"] @ moves @ [button "pointerUp"])]]] in
+          let actions = match action with
+            | Browser_lane.Scroll_at {x;y;_} -> `Assoc ["actions",`List [`Assoc [
+                "type",`String "wheel";"id",`String "masc-browser-wheel";
+                "actions",`List [`Assoc ["type",`String "scroll";"duration",`Int 0;
+                  "origin",`String "viewport";
+                  "x",`Int (int_of_float (point.x *. viewport.width));
+                  "y",`Int (int_of_float (point.y *. viewport.height));
+                  "deltaX",`Int x;"deltaY",`Int y]]]]]
+            | _ -> pointer_actions in
           (* Release even if transport cancellation interrupts a pressed gesture.
              The enclosing session lock remains held throughout cleanup. *)
-          let applied, released =
+          let applied, released = match action with
+            | Browser_lane.Scroll_at _ ->
+                (* Wheel actions do not press buttons. Session acquisition
+                   already recovers any older pending pointer release. *)
+                call t session `POST "/actions" (Some actions), Ok ()
+            | _ ->
             let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->
@@ -352,7 +368,7 @@ let execute_unlocked t = function
                 released := Some result);
               session.pointer_state <- Release_required;
               call t session `POST "/actions" (Some actions)) in
-            applied, (match !released with Some result -> result
+            applied, (match !released with Some result -> Result.map (fun _ -> ()) result
               | None -> Error (Protocol "pointer cleanup did not run")) in
           let* _ = applied in
           let* _ = released in
@@ -360,7 +376,7 @@ let execute_unlocked t = function
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
-               ("action",`String (match action with Browser_lane.Click_at _ -> "click_at" | _ -> "drag")) :: fields))
+               ("action",`String (match action with Browser_lane.Click_at _ -> "click_at" | Browser_lane.Scroll_at _ -> "scroll_at" | _ -> "drag")) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt"))
         | _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in

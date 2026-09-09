@@ -13847,17 +13847,28 @@ def run_browser_scene_regression(executable: str) -> None:
     def scene(body):
         request = json.loads(body)
         scenes.append(request)
-        assert request == target, "scene read lost client/tab ownership"
+        assert {k:request[k] for k in target} == target, "scene read lost client/tab ownership"
         changed = bool(actions)
+        view = request.get("view")
+        scope = request.get("scope")
+        assert view in ("content","regions")
+        region = dict(node("channel-region","region","Channel messages"),role="main")
+        if view == "regions":
+            nodes = [region]
+        elif scope:
+            assert scope == {"documentId":"document-after","nodeId":"channel-region"}
+            nodes = [node("message","text","SCOPED CHANNEL CONTENT")]
+        else:
+            nodes = [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
+                node("first-control", "control", "First action"),
+                node("second-control", "control", "Second action"),
+                node("image", "raster", "Scene illustration")]
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
-            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1",
+            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1", "view":view, "scope":scope,
             "documentId": "document-after" if changed else "document-before",
             "url": url, "title": "scene", "truncated": False,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
-            "nodes": [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
-                node("first-control", "control", "First action"),
-                node("second-control", "control", "Second action"),
-                node("image", "raster", "Scene illustration")]}}
+            "nodes": nodes}}
 
     def click(body):
         request = json.loads(body)
@@ -13889,6 +13900,12 @@ def run_browser_scene_regression(executable: str) -> None:
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
+        send_and_wait(process, master, output, b"v", b"Channel messages")
+        assert scenes[-1]["view"] == "regions" and len(actions)==1
+        send_and_wait(process, master, output, b"\r", b"SCOPED CHANNEL CONTENT")
+        focused = scenes[-1]
+        send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
+        assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
 
@@ -13896,7 +13913,7 @@ def run_browser_scene_regression(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
-def run_browser_viewport_regression(executable: str) -> None:
+def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = True) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     captures, actions = [], []
@@ -13927,7 +13944,9 @@ def run_browser_viewport_regression(executable: str) -> None:
     def scroll(body):
         request = json.loads(body)
         actions.append(request)
-        assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=120)
+        expected_point = {"x":0.5,"y":0.5} if len(actions)==1 or not cell_geometry else {"x":9.5/60,"y":6.5/30}
+        assert request == dict(target, expectedUrl=url, action="scroll_at", x=0, y=120,
+            point=expected_point,viewport={"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0})
         if len(actions) == 2:
             blocked.set()
             if not release.wait(timeout=10):
@@ -13954,7 +13973,9 @@ def run_browser_viewport_regression(executable: str) -> None:
             return bytes(output[start:end_of_needle(output, footer, image_end)])
 
         palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
-        image_input(b"\x0f")
+        initial_image = image_input(b"\x0f")
+        if not cell_geometry:
+            assert b"wheel:center" in initial_image, "missing center-wheel fallback hint"
         image_input(b"j")
         assert len(actions) == 1 and len(captures) == 2
         # Global shortcuts and pasted text belong to the visible viewport.
@@ -13993,7 +14014,7 @@ def run_browser_viewport_regression(executable: str) -> None:
     try:
         run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
             interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
-            preload_input=GRAPHICS_SUPPORTED_REPLY)
+            preload_input=(b"\x1b[6;20;10t" if cell_geometry else b"")+GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
 
@@ -14072,6 +14093,7 @@ def run_browser_pointer_regression(executable: str) -> None:
 def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
+    run_browser_viewport_regression(executable, cell_geometry=False)
     fixtures = overview_event_http_fixtures()
     client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []

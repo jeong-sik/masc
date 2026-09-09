@@ -227,7 +227,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
         max_context: 128000,
         thinking_support: true,
         preserve_thinking: true,
-        max_thinking_budget: 4096,
         streaming: true,
         temperature: 0.2,
         capabilities: {

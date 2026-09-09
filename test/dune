@@ -3657,6 +3657,11 @@
  (libraries alcotest masc_tui_board_read_layout masc_tui_types masc_tui_board_detail))
 
 (test
+ (name test_tui_browser_lane_layout)
+ (modules test_tui_browser_lane_layout)
+ (libraries alcotest masc masc_tui_browser_lane_layout))
+
+(test
  (name test_tui_board_read_scroll)
  (modules test_tui_board_read_scroll)
  (libraries alcotest masc_tui_board_detail masc_tui_render_schedule))
@@ -5138,7 +5143,7 @@
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries yojson masc masc_tui_types masc_tui_message_layout))
+ (libraries yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)

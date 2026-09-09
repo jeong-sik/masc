@@ -1,18 +1,3 @@
-// The bundle-generation banner: the screen says when it is older than the
-// server serving it.
-//
-// The server already knows — /health carries dashboard_surface with "stale"
-// (build-stamp older than the server binary) or "missing" (no stamp to
-// compare) — but that verdict only lived in a JSON nobody watches while
-// using the UI. The cost of not surfacing it is an operator reading an old
-// screen as the current one: a merged feature "isn't there", a removed
-// control still renders (2026-08-27: an evening of "merged? 흠" against a
-// bundle three merges behind). One strip under the top bar closes that.
-//
-// Absent field (an older server) renders nothing: with no verdict there is
-// nothing true to warn about, and a banner that cries on "unknown" would be
-// permanently on somewhere.
-
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
@@ -36,38 +21,33 @@ export interface BundleStaleBannerModel {
   nextAction: string
 }
 
-const REBUILD_ACTION = 'cd dashboard && pnpm run build 후 새로고침'
+const ARTIFACT_ACTION = '같은 소스 커밋의 CI 서버·대시보드 아티팩트를 설치한 뒤 새로고침'
 
-function stampClock(iso: string | undefined): string | null {
-  if (!iso) return null
-  // The ISO instant is exact but unreadable at a glance; the clock part is
-  // what tells "this morning's bundle" from "last week's".
-  const match = /T(\d{2}:\d{2})/.exec(iso)
-  return match ? match[1]! : iso
-}
-
-/** What the strip should say, or null when the screen is current — or when
- *  the server gave no verdict (older server: unknown is not stale). */
+/** Display the server's source and availability verdict without age guesses. */
 export function bundleStaleBannerModel(
   surface: DashboardSurfaceHealth | null | undefined,
 ): BundleStaleBannerModel | null {
   if (!surface) return null
   switch (surface.status) {
-    case 'stale': {
-      const bundle = stampClock(surface.build_stamp_at)
-      const server = stampClock(surface.binary_built_at)
-      const generations =
-        bundle && server ? ` (번들 ${bundle} < 서버 ${server})` : ''
+    case 'mismatched': {
+      const bundle = surface.dashboard_source_commit
+      const server = surface.binary_source_commit
+      const sources = bundle && server ? ` (대시보드 ${bundle}, 서버 ${server})` : ''
       return {
-        message: `지금 보고 있는 대시보드가 서버보다 낡았습니다${generations} — 새 기능이 화면에 없을 수 있어요.`,
-        nextAction: surface.next_action?.trim() || REBUILD_ACTION,
+        message: `대시보드와 서버의 소스 커밋이 다릅니다${sources}.`,
+        nextAction: ARTIFACT_ACTION,
       }
     }
-    case 'missing':
+    case 'unknown':
       return {
-        message:
-          '대시보드 번들의 build-stamp 가 없어 이 화면이 최신인지 확인할 수 없습니다.',
-        nextAction: surface.next_action?.trim() || REBUILD_ACTION,
+        message: '대시보드 또는 서버의 빌드 소스를 확인할 수 없습니다. 파일 시각으로 일치 여부를 판단하지 않습니다.',
+        nextAction: ARTIFACT_ACTION,
+      }
+    case 'missing':
+    case 'unavailable':
+      return {
+        message: '대시보드 아티팩트가 없거나 검증할 수 없습니다.',
+        nextAction: ARTIFACT_ACTION,
       }
     default:
       return null

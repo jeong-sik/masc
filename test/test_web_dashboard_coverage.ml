@@ -10,6 +10,7 @@ open Alcotest
 
 module Web_dashboard = Masc.Web_dashboard
 module Build_identity = Masc.Build_identity
+module Installed_dashboard = Masc.Installed_dashboard
 
 (* Under `dune test`, the working directory differs from the project root,
    so assets_root() can't find assets/dashboard/index.html.
@@ -492,193 +493,89 @@ let test_safe_asset_relative_path_rejects_absolute () =
   check bool "absolute path rejected" false
     (Web_dashboard.is_safe_asset_relative_path "/etc/passwd")
 
-(* ============================================================
-   bundle_freshness Tests — .build-stamp vs. running binary mtime
-   ============================================================ *)
+(* The health projection reads actual served identity bytes. Deliberately
+   unrelated stamp times must not alter source equality. *)
+let source_commit = String.make 40 'a'
+let other_commit = String.make 40 'b'
 
-(* Guaranteed older than any real build, and deliberately not 0.0: passing
-   0.0 for both atime and mtime to Unix.utimes means "set to the current
-   time" (POSIX utimes(path, NULL) semantics), not "set to the Unix epoch" —
-   an easy Stdlib-API trap that would have made this fixture a no-op. *)
-let long_ago = 1.0
-
-let with_temp_dashboard_root ?stamp_mtime f =
-  let root = make_temp_dashboard_root "freshness" "freshness-marker" in
+let with_temp_dashboard_root ?identity ?stamp_mtime f =
+  let root = make_temp_dashboard_root "provenance" "provenance-marker" in
+  let dashboard = Filename.concat root "assets/dashboard" in
+  let identity_path = Filename.concat dashboard ".build-identity.json" in
+  let stamp = Filename.concat dashboard ".build-stamp" in
   Fun.protect
     (fun () ->
-      (match stamp_mtime with
-       | None -> ()
-       | Some mtime ->
-         let stamp =
-           Filename.concat (Filename.concat (Filename.concat root "assets") "dashboard")
-             ".build-stamp"
-         in
-         write_file stamp "";
-         Unix.utimes stamp mtime mtime);
-      with_env [ ("MASC_ASSETS_DIR", Filename.concat root "assets"); ("MASC_BASE_PATH", "") ] f)
+      Option.iter (write_file identity_path) identity;
+      Option.iter (fun mtime -> write_file stamp ""; Unix.utimes stamp mtime mtime) stamp_mtime;
+      with_env ["MASC_ASSETS_DIR", Filename.concat root "assets"; "MASC_BASE_PATH", ""] f)
     ~finally:(fun () ->
-      let stamp =
-        Filename.concat (Filename.concat (Filename.concat root "assets") "dashboard")
-          ".build-stamp"
-      in
-      if Sys.file_exists stamp then Sys.remove stamp;
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path) [identity_path; stamp];
       cleanup_temp_dashboard_root root)
 
-let test_bundle_freshness_missing_stamp () =
-  with_temp_dashboard_root (fun () ->
-    check bool "missing stamp reported, not silently fresh" true
-      (match Web_dashboard.bundle_freshness () with
-       | Missing_stamp -> true
-       | Fresh | Stale _ -> false))
-
-let test_bundle_freshness_stale_when_stamp_predates_binary () =
-  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
-    check bool "stamp older than the running binary is reported stale" true
-      (match Web_dashboard.bundle_freshness () with
-       | Stale _ -> true
-       | Fresh | Missing_stamp -> false))
-
-let test_bundle_freshness_fresh_when_stamp_after_binary () =
-  (* A stamp far in the future is always newer than the test binary's real
-     build mtime — exercises the Fresh branch without needing to touch the
-     binary itself. *)
-  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
-  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
-    check bool "stamp newer than the running binary is fresh" true
-      (match Web_dashboard.bundle_freshness () with
-       | Fresh -> true
-       | Stale _ | Missing_stamp -> false))
-
-let test_bundle_freshness_build_stamp_path_under_dashboard_assets () =
-  with_temp_dashboard_root (fun () ->
-    check bool "build_stamp_path lives under assets/dashboard/" true
-      (String_util.contains_substring
-         (Option.get (Web_dashboard.build_stamp_path ()))
-         "/dashboard/.build-stamp"))
-
-(* log_bundle_freshness_warning has no return value to assert on (there is no
-   existing Log capture harness in this suite) — these are smoke tests
-   confirming it does not raise in any of the three bundle_freshness states,
-   covering the Missing_stamp / Stale / Fresh match arms. *)
-let test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp () =
-  with_temp_dashboard_root (fun () -> Web_dashboard.log_bundle_freshness_warning ())
-
-let test_log_bundle_freshness_warning_does_not_raise_on_stale () =
-  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
-    Web_dashboard.log_bundle_freshness_warning ())
-
-let test_log_bundle_freshness_warning_does_not_raise_on_fresh () =
-  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
-  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
-    Web_dashboard.log_bundle_freshness_warning ())
-
-(* ============================================================
-   surface_status_json: /health projection of the dashboard surface
-   ============================================================ *)
+let identity commit = Yojson.Safe.to_string
+  (`Assoc ["schema", `String "masc.dashboard-build.v1"; "source_commit", `String commit])
 
 let assoc_field name = function
-  | `Assoc kvs -> List.assoc_opt name kvs
+  | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
+let status_of json = match assoc_field "status" json with
+  | Some (`String status) -> status | _ -> fail "status missing"
+let recovery_field name json = Option.bind (assoc_field "recovery" json) (assoc_field name)
+let recovery_kind_of json = match recovery_field "kind" json with
+  | Some (`String kind) -> kind | _ -> fail "recovery kind missing"
+let recovery_reason_of json = match recovery_field "reason" json with
+  | Some (`String reason) -> reason | _ -> fail "recovery reason missing"
+let restart_required_of json = match recovery_field "restart_required" json with
+  | Some (`Bool required) -> required | _ -> fail "restart flag missing"
+let health ?(binary_commit = Some source_commit) () =
+  Web_dashboard.For_testing.surface_status_json ~binary_commit Installed_dashboard.Not_installed
 
-let status_of json =
-  match assoc_field "status" json with
-  | Some (`String s) -> s
-  | _ -> "<no-status>"
+let test_surface_source_matches_across_build_times () =
+  List.iter (fun stamp_mtime ->
+    with_temp_dashboard_root ~identity:(identity source_commit) ~stamp_mtime (fun () ->
+      let json = health () in
+      check string "same source, independent build time" "ok" (status_of json);
+      check string "no repair" "none" (recovery_kind_of json);
+      check bool "served index present" true (assoc_field "index_present" json = Some (`Bool true));
+      check bool "index digest retained" true
+        (match assoc_field "index_sha256" json with Some (`String digest) -> String.length digest = 64 | _ -> false);
+      List.iter (fun field -> check bool (field ^ " is projected") true (assoc_field field json <> None))
+        ["asset_tree_sha256"; "asset_file_count"; "dashboard_manifest_root";
+         "build_input_sha256"; "build_head_tree"; "build_index_tree";
+         "build_environment_path_identity_sha256"; "build_environment_path_executable_sha256";
+         "build_environment_path_executable_count"; "build_environment_profile_sha256"; "build_runtime"];
+      check bool "matching declaration is not verified installation" true
+        (assoc_field "installed_release" json = Some `Null);
+      check bool "declaration scope is explicit" true
+        (assoc_field "source_provenance" json = Some (`String "declared_build_source"))))
+    [1.; Unix.gettimeofday () +. 86400.]
 
-let index_present_of json =
-  match assoc_field "index_present" json with
-  | Some (`Bool b) -> b
-  | _ -> fail "index_present field missing"
+let test_surface_source_mismatch () =
+  with_temp_dashboard_root ~identity:(identity other_commit) (fun () ->
+    let json = health () in
+    check string "different sources" "mismatched" (status_of json);
+    check bool "actual dashboard source" true
+      (assoc_field "dashboard_source_commit" json = Some (`String other_commit));
+    check bool "embedded server source" true
+      (assoc_field "binary_source_commit" json = Some (`String source_commit));
+    check string "CI artifact action" "install_matching_ci_artifacts" (recovery_kind_of json))
 
-let recovery_field name json =
-  match assoc_field "recovery" json with
-  | Some (`Assoc recovery) -> List.assoc_opt name recovery
-  | _ -> None
+let test_surface_unknown_identity () =
+  List.iter (fun identity ->
+    with_temp_dashboard_root ?identity ~stamp_mtime:1. (fun () ->
+      let json = health () in
+      check string "missing or invalid identity is unknown" "unknown" (status_of json);
+      check string "unknown source cause" "unbound_identity_unavailable" (recovery_reason_of json)))
+    [None; Some "{"; Some "{}"; Some (identity "");
+     Some {|{"schema":"masc.dashboard-build.v1","source_commit":null}|}];
+  with_temp_dashboard_root ~identity:(identity source_commit) (fun () ->
+    check string "missing embedded server identity is unknown" "unknown"
+      (status_of (health ~binary_commit:None ())))
 
-let recovery_kind_of json =
-  match recovery_field "kind" json with
-  | Some (`String kind) -> kind
-  | _ -> "<no-recovery-kind>"
-
-let recovery_reason_of json =
-  match recovery_field "reason" json with
-  | Some (`String reason) -> reason
-  | _ -> "<no-recovery-reason>"
-
-let restart_required_of json =
-  match recovery_field "restart_required" json with
-  | Some (`Bool restart_required) -> restart_required
-  | _ -> fail "recovery.restart_required field missing"
-
-let test_surface_status_ok_when_fresh_and_index_present () =
-  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
-  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
-    let json = Web_dashboard.surface_status_json () in
-    check string "status" "ok" (status_of json);
-    check bool "index_present" true (index_present_of json);
-    check string "recovery kind" "none" (recovery_kind_of json);
-    check bool "restart not required" false (restart_required_of json);
-    check bool "build_stamp_at present" true
-      (assoc_field "build_stamp_at" json <> None);
-    check string "index identity is SHA-256" "64"
-      (match assoc_field "index_sha256" json with
-       | Some (`String digest) -> string_of_int (String.length digest)
-       | _ -> "missing");
-    check string "build stamp path is inspectable"
-      (Option.get (Web_dashboard.build_stamp_path ()))
-      (match assoc_field "build_stamp_path" json with
-       | Some (`String path) -> path
-       | _ -> "missing");
-    List.iter
-      (fun field ->
-        check bool (field ^ " is projected") true (assoc_field field json <> None))
-      [ "asset_tree_sha256"
-      ; "asset_file_count"
-      ; "dashboard_manifest_root"
-      ; "build_input_sha256"
-      ; "build_head_tree"
-      ; "build_index_tree"
-      ; "build_environment_path_identity_sha256"
-      ; "build_environment_path_executable_sha256"
-      ; "build_environment_path_executable_count"
-      ; "build_environment_profile_sha256"
-      ; "build_runtime"
-      ])
-
-let test_surface_status_stale_when_stamp_predates_binary () =
-  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
-    let json = Web_dashboard.surface_status_json () in
-    check string "status" "stale" (status_of json);
-    check bool "binary_built_at present" true
-      (assoc_field "binary_built_at" json <> None);
-    check string "recovery kind" "build_in_place" (recovery_kind_of json);
-    check string "recovery reason" "unbound_assets_stale" (recovery_reason_of json);
-    check bool "restart not required" false (restart_required_of json))
-
-let test_surface_status_missing_without_stamp () =
-  with_temp_dashboard_root (fun () ->
-    let json = Web_dashboard.surface_status_json () in
-    check string "status" "missing" (status_of json);
-    check bool "index_present stays true" true (index_present_of json);
-    check string "recovery kind" "build_in_place" (recovery_kind_of json);
-    check string "recovery reason" "unbound_assets_missing" (recovery_reason_of json);
-    check bool "restart not required" false (restart_required_of json))
-
-let test_surface_status_missing_when_index_absent_despite_fresh_stamp () =
-  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
-  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
-    (* Partially-deployed tree: the stamp survived, index.html did not. *)
-    let index =
-      Filename.concat
-        (Filename.concat (Option.get (Web_dashboard.assets_root ())) "dashboard")
-        "index.html"
-    in
-    if Sys.file_exists index then Sys.remove index;
-    let json = Web_dashboard.surface_status_json () in
-    check string "status" "missing" (status_of json);
-    check bool "index_present" false (index_present_of json);
-    check string "recovery kind" "build_in_place" (recovery_kind_of json);
-    check bool "restart not required" false (restart_required_of json))
+let test_surface_missing_index () =
+  with_temp_dashboard_root ~identity:(identity source_commit) (fun () ->
+    Sys.remove (Filename.concat (Option.get (Web_dashboard.assets_root ())) "dashboard/index.html");
+    check string "missing served index is independent" "missing" (status_of (health ())))
 
 let check_recovery_json ~kind ~reason ~restart_required recovery =
   let json =
@@ -694,7 +591,7 @@ let test_surface_recovery_exact_states () =
     Web_dashboard.For_testing.surface_recovery
       ~asset_resolution:Build_identity.Dashboard_assets_unavailable
       ~loaded_index:(Error Web_dashboard.Asset_build_unavailable)
-      ~freshness:Web_dashboard.Missing_stamp
+      ~freshness:Web_dashboard.Unknown_identity
   in
   check_recovery_json
     ~kind:"restart_with_exact_build"
@@ -712,7 +609,7 @@ let test_surface_recovery_exact_states () =
            (Web_dashboard.Asset_binding_invalid
               (Build_identity.Dashboard_source_root_invalid
                  Build_identity.Source_root_inode_differs)))
-      ~freshness:Web_dashboard.Missing_stamp
+      ~freshness:Web_dashboard.Unknown_identity
   in
   check_recovery_json
     ~kind:"repair_exact_artifacts_and_restart"
@@ -772,20 +669,11 @@ let () =
       test_case "reject empty segment" `Quick test_safe_asset_relative_path_rejects_empty_segment;
       test_case "reject absolute path" `Quick test_safe_asset_relative_path_rejects_absolute;
     ];
-    "bundle_freshness", [
-      test_case "missing stamp" `Quick test_bundle_freshness_missing_stamp;
-      test_case "stale when stamp predates binary" `Quick test_bundle_freshness_stale_when_stamp_predates_binary;
-      test_case "fresh when stamp postdates binary" `Quick test_bundle_freshness_fresh_when_stamp_after_binary;
-      test_case "build_stamp_path under dashboard assets" `Quick test_bundle_freshness_build_stamp_path_under_dashboard_assets;
-      test_case "warn does not raise on missing stamp" `Quick test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp;
-      test_case "warn does not raise on stale" `Quick test_log_bundle_freshness_warning_does_not_raise_on_stale;
-      test_case "warn does not raise on fresh" `Quick test_log_bundle_freshness_warning_does_not_raise_on_fresh;
-    ];
-    "surface_status", [
-      test_case "ok when fresh and index present" `Quick test_surface_status_ok_when_fresh_and_index_present;
-      test_case "stale when stamp predates binary" `Quick test_surface_status_stale_when_stamp_predates_binary;
-      test_case "missing without stamp" `Quick test_surface_status_missing_without_stamp;
-      test_case "missing when index absent despite fresh stamp" `Quick test_surface_status_missing_when_index_absent_despite_fresh_stamp;
+    "source_provenance", [
+      test_case "same source at different build times" `Quick test_surface_source_matches_across_build_times;
+      test_case "different source commits" `Quick test_surface_source_mismatch;
+      test_case "missing and malformed identity" `Quick test_surface_unknown_identity;
+      test_case "missing served index" `Quick test_surface_missing_index;
       test_case "exact recovery actions require restart" `Quick test_surface_recovery_exact_states;
     ];
   ]

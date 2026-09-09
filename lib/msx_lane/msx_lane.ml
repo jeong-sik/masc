@@ -561,6 +561,14 @@ let decode_checkpoint json =
 ;;
 
 let restore ~path ~ledger_dir =
+  (* A slot that was never saved is the caller naming one that does not
+     exist, which is an argument problem and refusable. Reaching the read
+     first turned it into [Unreadable], and the tool answered with a runtime
+     failure -- the caller cannot tell from that whether the machine changed.
+     [Unreadable] keeps its meaning: a file that is there and will not read. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
   let decoded =
     try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
     | Sys_error message -> Error (Unreadable message)

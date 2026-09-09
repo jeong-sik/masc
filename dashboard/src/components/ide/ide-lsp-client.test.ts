@@ -12,7 +12,7 @@ import {
 } from './ide-lsp-client'
 import {
   TRANSPORT_RETRY_BASE_MS,
-  TRANSPORT_RETRY_MAX_ATTEMPTS,
+  TRANSPORT_RETRY_MAX_MS,
 } from '../../config/constants'
 
 const mockSockets: MockWebSocket[] = []
@@ -335,26 +335,33 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
-  it('stops reconnecting after the retry budget is exhausted', () => {
+  it('recovers diagnostics after a prolonged transport outage', async () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     installWebSocketMock()
-    const errors: unknown[] = []
-    const conn = new LspConnection(() => {}, err => errors.push(err))
+    const diagnostics = vi.fn()
+    const ready = vi.fn()
+    const conn = new LspConnection(diagnostics, () => {}, ready)
     conn.connect()
 
-    for (let attempt = 1; attempt <= TRANSPORT_RETRY_MAX_ATTEMPTS; attempt += 1) {
+    // Simulate a day of unsuccessful connections, then a server returning.
+    let elapsed = 0
+    while (elapsed < 24 * 60 * 60 * 1000) {
       mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
-      vi.advanceTimersByTime(60_000)
-      expect(mockSockets).toHaveLength(attempt + 1)
+      vi.advanceTimersByTime(TRANSPORT_RETRY_MAX_MS)
+      elapsed += TRANSPORT_RETRY_MAX_MS
     }
-
-    mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
-    vi.advanceTimersByTime(60_000)
-
-    expect(mockSockets).toHaveLength(TRANSPORT_RETRY_MAX_ATTEMPTS + 1)
-    expect(errors.some(err => err instanceof Error && err.message.includes('exhausted'))).toBe(true)
+    const recovered = mockSockets[mockSockets.length - 1]!
+    await completeHandshake(recovered)
+    recovered.message({ method: 'textDocument/publishDiagnostics', params: {
+      uri: 'file:///workspace/masc/lib/example.ml',
+      diagnostics: [{ range: { start: { line: 2, character: 0 }, end: { line: 2, character: 3 } }, message: 'Unbound value', severity: 1 }],
+    } })
+    expect(ready).toHaveBeenCalledTimes(1)
+    expect(diagnostics).toHaveBeenCalledWith('file:///workspace/masc/lib/example.ml', expect.any(Map))
+    expect(diagnostics.mock.calls[0]![1].get(3)[0].message).toBe('Unbound value')
     conn.dispose()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('does not reconnect after terminal LSP close codes', async () => {

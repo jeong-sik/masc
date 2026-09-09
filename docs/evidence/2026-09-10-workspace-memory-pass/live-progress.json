@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-09-09T19:32:39.067005+00:00",
+  "execution_source_commit": "0f0db74d7a9586c23002e67a973621c9ce34b978",
+  "process_handle": 75433,
+  "process_handle_poll": "running",
+  "context_sha256": "8ec4495727fa9533096ee6732668a43c658537a163014be6edf0ed5235ea6409",
+  "group_count": 18,
+  "source_count": 1710,
+  "progress": {
+    "phase": "curating_keeper",
+    "keeper_id": "analyst",
+    "completed_group_ids": [],
+    "observed_at": "2026-09-09T19:15:29.658523+00:00"
+  },
+  "group_progress": [
+    {
+      "phase": "receiving",
+      "chunks": 3380,
+      "content_characters": 0,
+      "thinking_characters": 13857,
+      "observed_at": "2026-09-09T19:32:38.975842+00:00"
+    }
+  ],
+  "final_proposal_observed": false,
+  "semantic_verification": "not_performed"
+}

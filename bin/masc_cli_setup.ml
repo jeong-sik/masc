@@ -92,6 +92,7 @@ let workspace_preflight ~base_path =
     [{path = requested_root; kind = Unreadable_state; detail}] in
   try
     match Unix.lstat requested_root with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Workspace_ready
     | _ ->
       let root = Fs_compat.realpath requested_root in
       let before = Unix.stat root in
@@ -103,7 +104,6 @@ let workspace_preflight ~base_path =
            && String.equal root (Fs_compat.realpath requested_root)
         then result
         else unreadable "MASC root changed during preflight; no file was changed"
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Workspace_ready
   with
   | Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
   | Sys_error detail -> unreadable detail

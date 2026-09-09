@@ -22,6 +22,7 @@ let every_construct : Masc_exec.Parsed.reason_too_complex list =
   [ `Heredoc
   ; `Here_string
   ; `Cmd_subst
+  ; `Shell_builtin "eval"
   ; `Proc_subst
   ; `Subshell
   ; `Arith_expansion
@@ -43,6 +44,7 @@ let _every_construct_is_listed : Masc_exec.Parsed.reason_too_complex -> unit
   | `Heredoc
   | `Here_string
   | `Cmd_subst
+  | `Shell_builtin _
   | `Proc_subst
   | `Subshell
   | `Arith_expansion
@@ -128,6 +130,7 @@ let test_each_rewrite_names_the_right_move () =
     [ `Heredoc
     ; `Here_string
     ; `Cmd_subst
+    ; `Shell_builtin "eval"
     ; `Param_expansion
     ; `Arith_expansion
     ; `Glob_brace
@@ -152,6 +155,22 @@ let test_the_redirect_advice_does_not_forbid_what_bash_takes () =
          false
          (mentions ~needle:claim sentence))
     [ "stdin"; "has no operator" ]
+;;
+
+(* The eval refusal is the one [`Shell_builtin] case with a corpus behind it
+   (RFC-shell-ir-typed-command-substitution §1: 16 [eval $(opam env)] calls).
+   The advice must say why the wrapper can simply go away. *)
+let test_the_eval_advice_says_to_drop_the_wrapper () =
+  let sentence = Rewrite.to_string (rewrite_of (`Shell_builtin "eval")) in
+  Alcotest.(check bool)
+    (Printf.sprintf "mentions dropping the wrapper: %S" sentence)
+    true
+    (mentions ~needle:"drop the eval" sentence);
+  let sentence = Rewrite.to_string (rewrite_of (`Shell_builtin "source")) in
+  Alcotest.(check bool)
+    (Printf.sprintf "source advice names the running shell: %S" sentence)
+    true
+    (mentions ~needle:"running shell" sentence)
 ;;
 
 let test_a_nested_pipeline_is_flattened_not_refused () =
@@ -207,6 +226,10 @@ let () =
             "the redirect advice does not forbid what bash takes"
             `Quick
             test_the_redirect_advice_does_not_forbid_what_bash_takes
+        ; Alcotest.test_case
+            "the eval advice says to drop the wrapper"
+            `Quick
+            test_the_eval_advice_says_to_drop_the_wrapper
         ; Alcotest.test_case
             "a nested pipeline is flattened, not refused"
             `Quick

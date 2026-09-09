@@ -86,6 +86,20 @@ type stage_error =
   | Stage_parse_error of Parsed.parse_error
   | Stage_outside_subset of Parsed.reason_too_complex
 
+(* [eval]/[source]/[.] are not programs; they are the running shell
+   re-parsing text.  The execution surface for a script is [<shell> -c
+   <script>], where these genuinely re-parse (RFC
+   shell-ir-typed-command-substitution §2.4), so the IR — which has no
+   re-parse step — refuses them by name.  This refusal predates the opening
+   of [$(...)]: a substitution that reaches one must meet the same closed
+   vocabulary as any other construct.
+
+   Deliberately at the parser's bin position rather than in
+   [Exec_program.of_string]: the typed argv lane spawns argv directly (no
+   shell), where [eval] already fails as ENOENT, and the RFC asks for no
+   change there. *)
+let shell_builtins = [ "eval"; "source"; "." ]
+
 let raw_to_simple
       ((args, redirects) : Shell_ir.arg list * Redirect_scope.t list)
     : (Shell_ir.simple, stage_error) result =
@@ -100,6 +114,9 @@ let raw_to_simple
     match bin_word with
     | `Expansion -> Error (Stage_outside_subset `Param_expansion)
     | `Word bin_str -> (
+      if List.mem bin_str shell_builtins
+      then Error (Stage_outside_subset (`Shell_builtin bin_str))
+      else
       match Exec_program.of_string bin_str with
       | Error (`Unknown _) ->
         (* A0 guarantees Exec_program.of_string only errors on empty input.  That

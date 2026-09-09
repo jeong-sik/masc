@@ -426,7 +426,11 @@ let test_too_complex_reason_tags_are_stable () =
   Alcotest.(check string)
     "cmd_subst tag"
     "cmd_subst"
-    (Gate.too_complex_reason_tag (Gate.Unsupported_construct `Cmd_subst))
+    (Gate.too_complex_reason_tag (Gate.Unsupported_construct `Cmd_subst));
+  Alcotest.(check string)
+    "shell_builtin tag"
+    "shell_builtin"
+    (Gate.too_complex_reason_tag (Gate.Unsupported_construct (`Shell_builtin "eval")))
 ;;
 
 (* {1 Phase 0 PR-A2 corpus extension — three new fixtures}

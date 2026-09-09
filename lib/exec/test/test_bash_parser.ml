@@ -329,6 +329,24 @@ let test_cmd_subst_backtick_rejected () =
   | Parsed.Too_complex `Cmd_subst -> ()
   | _ -> assert false
 
+(* [eval]/[source]/[.] re-parse their arguments in the running shell, which
+   no IR node holds — refused by name in bin position (RFC
+   shell-ir-typed-command-substitution §2.4). *)
+let test_eval_refused_as_shell_builtin () =
+  match Bash.parse_string "eval echo ok" with
+  | Parsed.Too_complex (`Shell_builtin "eval") -> ()
+  | _ -> assert false
+
+let test_source_refused_as_shell_builtin () =
+  match Bash.parse_string "source foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin "source") -> ()
+  | _ -> assert false
+
+let test_dot_refused_as_shell_builtin () =
+  match Bash.parse_string ". foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin ".") -> ()
+  | _ -> assert false
+
 let test_arith_expansion_rejected () =
   (* "$((" must out-rank "$(" — ocamllex longest match, no ordered list. *)
   match Bash.parse_string "echo $((1 + 2))" with
@@ -666,6 +684,9 @@ let () =
   test_here_string_rejected ();
   test_cmd_subst_paren_rejected ();
   test_cmd_subst_backtick_rejected ();
+  test_eval_refused_as_shell_builtin ();
+  test_source_refused_as_shell_builtin ();
+  test_dot_refused_as_shell_builtin ();
   test_arith_expansion_rejected ();
   test_background_rejected ();
   test_subshell_rejected ();

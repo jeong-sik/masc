@@ -175,6 +175,7 @@ let too_complex_reason_tag = function
   | Unsupported_construct `Heredoc -> "heredoc"
   | Unsupported_construct `Here_string -> "here_string"
   | Unsupported_construct `Cmd_subst -> "cmd_subst"
+  | Unsupported_construct (`Shell_builtin _) -> "shell_builtin"
   | Unsupported_construct `Proc_subst -> "proc_subst"
   | Unsupported_construct `Subshell -> "subshell"
   | Unsupported_construct `Arith_expansion -> "arith_expansion"

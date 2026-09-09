@@ -129,6 +129,7 @@ let block_reason_of_exec_too_complex
   | Unsupported_nested_pipeline
   | Unsupported_construct
       ( `Cmd_subst
+      | `Shell_builtin _
       | `Subshell
       | `Arith_expansion
       | `Param_expansion

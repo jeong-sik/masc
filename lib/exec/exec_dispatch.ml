@@ -367,9 +367,9 @@ let strip_trailing_newlines s =
   let kept = keep n in
   if kept = n then s else String.sub s 0 kept
 
-(* The wall clock enters only as budget arithmetic — how much of the
-   caller's timeout a substitution may still spend — never as a scheduling
-   decision of its own. *)
+(* NDT-OK: the wall clock enters only as budget arithmetic — how much of
+   the caller's timeout a substitution may still spend — never as a
+   scheduling decision of its own. *)
 let remaining_timeout ~started = function
   | None -> None
   | Some budget -> Some (budget -. (Unix.gettimeofday () -. started))
@@ -461,6 +461,8 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
   if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
     unsupported_expansion_result ()
   else
+  (* NDT-OK: budget arithmetic only — see [remaining_timeout]; the clock
+     never picks a branch here. *)
   let started = Unix.gettimeofday () in
   let s, subst_stderr = eval_substitutions ?base_host_env ?timeout_sec ~started s in
   (* The parent runs in what remains of its budget after its substitutions

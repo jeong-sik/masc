@@ -398,7 +398,7 @@ and subst_body depth buf = parse
   | '(' { Buffer.add_char buf '('; subst_body (depth + 1) buf lexbuf }
   | ')' {
       if depth = 1
-      then ()  (* the closer of the opening [$(]: consumed, not copied *)
+      then Buffer.contents buf  (* closer of the opening [$(]: consumed, not copied *)
       else (Buffer.add_char buf ')'; subst_body (depth - 1) buf lexbuf)
     }
   | '\'' { Buffer.add_char buf '\''; subst_sq buf lexbuf; subst_body depth buf lexbuf }

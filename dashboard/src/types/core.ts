@@ -662,6 +662,7 @@ export type KeeperApprovalLifecyclePhase =
   | 'replay_failed'
   | 'replay_indeterminate'
   | 'continuation_recorded'
+  | 'continuation_failed'
 
 export interface KeeperApprovalLifecycle {
   approvalId: string

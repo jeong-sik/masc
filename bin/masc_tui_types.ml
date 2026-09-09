@@ -511,7 +511,10 @@ let project_gate_history ~visibility entries =
                 true, Some phase
             | Approval_requested | Approval_resolved_approved
             | Approval_replay_applied -> problem, Some phase
-            | Approval_continuation_recorded -> problem, last)
+            | Approval_continuation_recorded -> problem, last
+            (* The turn that received the replay failed. The run stays open
+               so the row is seen; not an outcome, so [last] holds. *)
+            | Approval_continuation_failed -> true, last)
             (false, None) phases
         in
         match reversed, has_problem, last_outcome with

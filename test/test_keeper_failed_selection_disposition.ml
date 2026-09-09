@@ -73,14 +73,152 @@ let test_every_failure_route_preserves_batch () =
   ; "deterministic request", exhausted "deterministic request" KFR.Deterministic_request
   ; "configuration mismatch", exhausted "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted "provider integration" KFR.Provider_integration
-  ; "effect fenced", exhausted "effect fenced" KFR.Provider_attempt_effect_fenced
-  ; "tool correction lost", exhausted "tool correction lost" KFR.Tool_correction_lost
+  ; ( "effect fenced"
+    , exhausted "effect fenced"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
+  ; ( "effect fenced without observation"
+    , exhausted "effect fenced without observation"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
+  ; ( "tool correction lost"
+    , exhausted "tool correction lost"
+        (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
+  ; ( "tool correction lost without observation"
+    , exhausted "tool correction lost without observation"
+        (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
   ]
   |> List.iter (fun (label, route) ->
     assert_no_queue_action label (failed_outcome route);
     assert_no_queue_action
       (label ^ " with deferred runtime")
       (failed_outcome ~deferred_runtime_lane:deferred_lane route))
+;;
+
+(* #32956: a failed turn settles the HITL continuation it was handed only
+   when the provider answered the request that carried the replay evidence.
+   These are the routes the driver produces after an answer: the accept gate
+   rejected it, a tool it called failed terminally, or an attempt was fenced
+   after a tool effect. *)
+let exhausted_route label terminal =
+  KFR.Exhausted_visible_alive
+    { terminal; provenance = KFR.Masc_internal_error; detail = label }
+;;
+
+let observed_failure_routes =
+  [ "no progress truncated", KFR.Rotate_now { rotate = KFR.No_progress_truncated }
+  ; "no progress empty", KFR.Rotate_now { rotate = KFR.No_progress_empty }
+  ; ( "no progress thinking only"
+    , KFR.Rotate_now { rotate = KFR.No_progress_thinking_only } )
+  ; "contract violation", exhausted_route "contract violation" KFR.Contract_violation
+  ; ( "terminal effect runtime failure"
+    , exhausted_route "terminal effect runtime failure" KFR.Terminal_effect_runtime_failure )
+  ; ( "effect fenced after a tool effect"
+    , exhausted_route "effect fenced"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
+  ; ( "tool correction lost after a tool effect"
+    , exhausted_route "tool correction lost"
+        (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
+  ]
+;;
+
+(* Nothing the model said is on record for these: the request was refused,
+   never answered, or the answer is unreadable. *)
+let unobserved_failure_routes =
+  [ ( "provider timeout"
+    , KFR.Retry_after_observed
+        { retry_class = KFR.Provider_timeout; retry_after = None } )
+  ; ( "server error"
+    , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
+  ; "auth failed", KFR.Rotate_now { rotate = KFR.Auth_failed }
+  ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
+  ; "attempt rejected", KFR.Rotate_now { rotate = KFR.Attempt_rejected }
+  ; "context overflow", exhausted_route "context overflow" KFR.Context_overflow
+  ; "configuration mismatch", exhausted_route "configuration mismatch" KFR.Config_mismatch
+  ; "provider integration", exhausted_route "provider integration" KFR.Provider_integration
+  ; "internal opaque", exhausted_route "internal opaque" KFR.Internal_opaque
+    (* The lanes set this before any answer: claude-code on spawn, codex when
+       the turn input could not be written. A continuation that fails this
+       way must keep its wake, or the model never sees the replay. *)
+  ; ( "effect fenced without observation"
+    , exhausted_route "effect fenced without observation"
+        (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
+  ; ( "tool correction lost without observation"
+    , exhausted_route "tool correction lost without observation"
+        (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
+  ]
+;;
+
+let test_failure_after_an_answer_settles_continuation_as_failed () =
+  List.iter
+    (fun (label, route) ->
+       match Loop.continuation_settlement_of_cycle_outcome (Some (failed_outcome route)) with
+       | Loop.Continuation_settled_failed { route = settled } ->
+         check bool (label ^ ": the settlement carries the turn's route") true (settled = route)
+       | Loop.Continuation_settled_recorded ->
+         failf "%s: a failed turn was settled as a recorded continuation" label
+       | Loop.Continuation_unsettled ->
+         failf "%s: a failure after the provider answered left the continuation unsettled" label)
+    observed_failure_routes
+;;
+
+let test_failure_before_an_answer_leaves_continuation_unsettled () =
+  List.iter
+    (fun (label, route) ->
+       match Loop.continuation_settlement_of_cycle_outcome (Some (failed_outcome route)) with
+       | Loop.Continuation_unsettled -> ()
+       | Loop.Continuation_settled_recorded ->
+         failf "%s: a failed turn was settled as a recorded continuation" label
+       | Loop.Continuation_settled_failed _ ->
+         failf "%s: a failure with no answer on record settled the continuation" label)
+    unobserved_failure_routes
+;;
+
+(* The settlement is a chat-store receipt, not a queue action: the batch of a
+   failed turn stays pending whether or not the provider answered. *)
+let test_failure_after_an_answer_still_leaves_batch_pending () =
+  List.iter
+    (fun (label, route) ->
+       assert_no_queue_action label (failed_outcome route);
+       assert_no_queue_action
+         (label ^ " with deferred runtime")
+         (failed_outcome ~deferred_runtime_lane:deferred_lane route))
+    observed_failure_routes
+;;
+
+let test_recorded_settlement_follows_the_batch_disposition () =
+  let meta = test_meta () in
+  (match
+     Loop.continuation_settlement_of_cycle_outcome
+       (Some
+          (Cycle.Completed
+             { meta; continuation_route = Turn.Continuation_route_addressed }))
+   with
+   | Loop.Continuation_settled_recorded -> ()
+   | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
+     fail "a completed turn did not record its continuation");
+  List.iter
+    (fun (label, checkpoint_reason) ->
+       match
+         Loop.continuation_settlement_of_cycle_outcome
+           (Some
+              (Cycle.Checkpointed
+                 { meta
+                 ; checkpoint_reason
+                 ; continuation_route = Turn.Continuation_no_terminal_effect_receipt
+                 }))
+       with
+       | Loop.Continuation_settled_recorded -> ()
+       | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
+         failf "%s: a checkpoint did not record its continuation" label)
+    [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
+    ; "operation queued", Turn.Operation_queued
+    ];
+  List.iter
+    (fun outcome ->
+       match Loop.continuation_settlement_of_cycle_outcome outcome with
+       | Loop.Continuation_unsettled -> ()
+       | Loop.Continuation_settled_recorded | Loop.Continuation_settled_failed _ ->
+         fail "an unfinished turn settled the continuation")
+    [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
 ;;
 
 let test_nonterminal_outcomes_preserve_batch () =
@@ -233,6 +371,24 @@ let () =
             "every checkpoint reason projects HITL continuation"
             `Quick
             test_every_checkpoint_reason_records_hitl_continuation
+        ] )
+    ; ( "failed turn settles the continuation only after an answer"
+      , [ test_case
+            "a failure after the provider answered settles as failed"
+            `Quick
+            test_failure_after_an_answer_settles_continuation_as_failed
+        ; test_case
+            "a failure with no answer on record stays unsettled"
+            `Quick
+            test_failure_before_an_answer_leaves_continuation_unsettled
+        ; test_case
+            "a settled failure still leaves the batch pending"
+            `Quick
+            test_failure_after_an_answer_still_leaves_batch_pending
+        ; test_case
+            "recorded settlement follows the batch disposition"
+            `Quick
+            test_recorded_settlement_follows_the_batch_disposition
         ] )
     ]
 ;;

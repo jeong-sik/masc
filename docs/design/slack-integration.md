@@ -1,10 +1,5 @@
 # Slack API connector
 
-`masc_slack_read` reads the API collector buffer, not browser tabs. With
-`channel_id` it returns collected messages newest first; without it, a
-per-channel summary. This in-memory buffer is neither full history nor an
-on-demand thread API.
-
 The optional existing REST collector (`server_slack_poll_lane`) runs independently
 of Browser Lane. It uses the configured bot token, bound channels and
 `[slack] poll_enabled`; its buffer is not represented as browser observations.

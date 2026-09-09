@@ -29,8 +29,6 @@ let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
-let slack_read_schema : tool_schema = Tool_schemas_misc_toml.slack_read
-
 (* MSX lane (RFC-0439 §3.5): one machine per workspace, keys from the TUI and
    from keepers. Deferred in their TOML so the schemas ride a request only
    once a model names one. *)
@@ -67,7 +65,7 @@ let browser_lane_schemas =
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
    dedicated projections above. *)
 let schemas : tool_schema list =
-  (slack_read_schema :: msx_schemas) @ Tool_schemas_operator_surface.schemas
+  msx_schemas @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
   | Start
@@ -134,7 +132,6 @@ type misc_operation =
   | Misc_browser_goto
   | Misc_browser_act
   | Misc_browser_interact
-  | Misc_slack_read
   | Misc_msx_load
   | Misc_msx_eject
   | Misc_msx_save
@@ -166,7 +163,6 @@ let misc_tool_name = function
   | Misc_browser_goto -> "masc_browser_goto"
   | Misc_browser_act -> "masc_browser_act"
   | Misc_browser_interact -> "masc_browser_interact"
-  | Misc_slack_read -> "masc_slack_read"
   | Misc_msx_load -> "masc_msx_load"
   | Misc_msx_eject -> "masc_msx_eject"
   | Misc_msx_save -> "masc_msx_save"
@@ -197,7 +193,6 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact -> None
-  | Misc_slack_read
   | Misc_msx_load
   | Misc_msx_eject
   | Misc_msx_save

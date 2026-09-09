@@ -2594,8 +2594,6 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
-  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
-       "slack_read" "masc_slack_read" ~readonly:true
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

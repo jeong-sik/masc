@@ -64,7 +64,6 @@ type t =
   ; model_capabilities_override : Capabilities.capabilities option
   ; keep_alive : string option
   ; return_progress : bool
-  ; internal_model_rotation_count : int option
   ; num_ctx : int option
   ; seed : int option
   ; previous_response_id : string option
@@ -105,7 +104,6 @@ let make
       ?model_capabilities_override
       ?keep_alive
       ?(return_progress = false)
-      ?internal_model_rotation_count
       ?num_ctx
       ?seed
       ?previous_response_id
@@ -164,7 +162,6 @@ let make
   ; model_capabilities_override
   ; keep_alive
   ; return_progress
-  ; internal_model_rotation_count
   ; num_ctx
   ; seed
   ; previous_response_id

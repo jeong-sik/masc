@@ -780,7 +780,6 @@ let test_no_measure_one_post_and_wire_authority () =
       ; "retries"
       ; "max_retries"
       ; "fallbacks"
-      ; "internal_model_rotation_count"
       ];
     check
       bool

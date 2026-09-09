@@ -4403,7 +4403,6 @@ describe('fetchRuntimeProviders', () => {
               supports_structured_output_override: null,
               has_model_capabilities_override: true,
               keep_alive: '30m',
-              internal_model_rotation_count: null,
               num_ctx: 131072,
               seed: 42,
               has_previous_response_id: false,

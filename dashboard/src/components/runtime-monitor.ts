@@ -423,7 +423,6 @@ function runtimeParameterDetailRows(
     detailRow('request', 'schema override', onOffText(request?.supports_structured_output_override)),
     detailRow('request', 'capability override', boolText(request?.has_model_capabilities_override)),
     detailRow('request', 'seed', numberText(request?.seed)),
-    detailRow('request', 'rotation count', numberText(request?.internal_model_rotation_count)),
     detailRow('request', 'num_ctx', numberText(request?.num_ctx)),
     detailRow('request', 'keep alive', request?.keep_alive),
     detailRow('request', 'previous response', boolText(request?.has_previous_response_id)),

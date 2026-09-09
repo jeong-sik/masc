@@ -61,7 +61,6 @@ let request_fingerprint
                      ; model_capabilities_override
                      ; keep_alive
                      ; return_progress
-                     ; internal_model_rotation_count
                      ; num_ctx
                      ; seed
                      ; previous_response_id
@@ -77,8 +76,7 @@ let request_fingerprint
      [max_request_body_bytes], [connect_timeout_s] and
      [max_concurrent_requests] are transport limits enforced on this side;
      [return_progress] and [tool_stream] select how the answer is delivered,
-     not what is asked; [internal_model_rotation_count] is a local attempt
-     counter; [supports_*_override] and [model_capabilities_override] gate
+     not what is asked; [supports_*_override] and [model_capabilities_override] gate
      which of the fields below may be sent at all, and those fields are
      already in the key. *)
   ignore max_request_body_bytes;
@@ -86,7 +84,6 @@ let request_fingerprint
   ignore max_concurrent_requests;
   ignore return_progress;
   ignore tool_stream;
-  ignore internal_model_rotation_count;
   ignore supports_tool_choice_override;
   ignore supports_structured_output_override;
   ignore model_capabilities_override;

@@ -1643,7 +1643,6 @@ let runtime_request_config_json (rt : Runtime.t) =
       , Json_util.bool_opt_to_json cfg.supports_structured_output_override )
     ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
-    ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count
     ; "num_ctx", Json_util.int_opt_to_json cfg.num_ctx
     ; "return_progress", `Bool cfg.return_progress
     ; "seed", Json_util.int_opt_to_json cfg.seed

@@ -135,7 +135,6 @@ type t =
       must explicitly provide {"-1"}. Honored only by the Ollama backend;
       ignored by other kinds.
       @since 0.171.0 *)
-  ; internal_model_rotation_count : int option
     (** Number of model attempts the subprocess CLI is configured to
       cycle through internally before yielding a final response.
       [None] = Agent Core has no opinion (the default for non-CLI providers
@@ -241,7 +240,6 @@ val make
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?keep_alive:string
   -> ?return_progress:bool
-  -> ?internal_model_rotation_count:int
   -> ?num_ctx:int
   -> ?seed:int
   -> ?previous_response_id:string

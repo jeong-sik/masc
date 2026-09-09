@@ -1123,7 +1123,6 @@ describe('SettingsSurface', () => {
             supports_structured_output_override: true,
             has_model_capabilities_override: true,
             keep_alive: '30m',
-            internal_model_rotation_count: 2,
             num_ctx: 131072,
             seed: 42,
             has_previous_response_id: true,

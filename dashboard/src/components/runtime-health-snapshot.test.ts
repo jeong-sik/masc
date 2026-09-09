@@ -159,7 +159,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
           supports_structured_output_override: true,
           has_model_capabilities_override: true,
           seed: 7,
-          internal_model_rotation_count: 1,
           num_ctx: 32768,
           keep_alive: '5m',
           has_previous_response_id: false,

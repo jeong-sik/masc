@@ -289,7 +289,6 @@ let exact_config (target : request_target) response_format =
   ; response_format
   ; cache_system_prompt = false
   ; keep_alive = None
-  ; internal_model_rotation_count = None
   ; previous_response_id = None
   ; max_concurrent_requests = None
   ; model_capabilities_override = Some target.capabilities

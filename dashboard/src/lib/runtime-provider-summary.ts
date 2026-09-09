@@ -146,9 +146,6 @@ export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapsh
       : null,
     request.has_model_capabilities_override ? 'cap-override' : null,
     typeof request.seed === 'number' ? `seed:${request.seed}` : null,
-    typeof request.internal_model_rotation_count === 'number'
-      ? `rotation:${request.internal_model_rotation_count}`
-      : null,
     typeof request.num_ctx === 'number' ? `num_ctx:${request.num_ctx}` : null,
     request.keep_alive ? `keep:${request.keep_alive}` : null,
     request.has_previous_response_id ? 'previous-response' : null,

@@ -55,7 +55,6 @@ export interface DashboardRuntimeRequestConfig {
   supports_structured_output_override?: boolean | null
   has_model_capabilities_override?: boolean
   keep_alive?: string | null
-  internal_model_rotation_count?: number | null
   num_ctx?: number | null
   seed?: number | null
   has_previous_response_id?: boolean
@@ -479,7 +478,6 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
     supports_structured_output_override: asBoolean(raw.supports_structured_output_override) ?? null,
     has_model_capabilities_override: asBoolean(raw.has_model_capabilities_override),
     keep_alive: asNullableString(raw.keep_alive),
-    internal_model_rotation_count: asNumber(raw.internal_model_rotation_count) ?? null,
     num_ctx: asNumber(raw.num_ctx) ?? null,
     seed: asNumber(raw.seed) ?? null,
     has_previous_response_id: asBoolean(raw.has_previous_response_id),

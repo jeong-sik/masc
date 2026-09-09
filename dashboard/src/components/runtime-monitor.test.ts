@@ -116,7 +116,6 @@ describe('RuntimeMonitor', () => {
             supports_structured_output_override: false,
             has_model_capabilities_override: true,
             keep_alive: '30m',
-            internal_model_rotation_count: 2,
             num_ctx: 131072,
             seed: 42,
             has_previous_response_id: true,
@@ -371,7 +370,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('glm:replay')
     expect(container.textContent).toContain('tool-stream:on')
     expect(container.textContent).toContain('schema-override:off')
-    expect(container.textContent).toContain('rotation:2')
     expect(container.textContent).toContain('declared · api:chat-completions')
     expect(container.textContent).toContain('auth:env:RUNPOD_API_KEY')
     expect(container.textContent).toContain('snapshot · source:runtime.toml')

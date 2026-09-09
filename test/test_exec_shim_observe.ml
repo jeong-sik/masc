@@ -77,7 +77,7 @@ let test_observe_discard_without_persistent_effects () =
                (snd (Unix.waitpid [] shell) = Unix.WEXITED 0);
              let diff_status right =
                let git = Unix.create_process "git"
-                 [| "git"; "diff"; "--no-index"; "--no-ext-diff";
+                 [| "git"; "-C"; root; "diff"; "--no-index"; "--no-ext-diff";
                     "--no-textconv"; "--exit-code"; persistent; right |]
                  Unix.stdin Unix.stdout Unix.stderr in
                snd (Unix.waitpid [] git)

@@ -150,7 +150,6 @@ type capabilities =
   ; (* ── Thinking / reasoning ──────────────────────────── *)
     supports_reasoning : bool (** Any form of reasoning/thinking *)
   ; supports_extended_thinking : bool (** budget_tokens / reasoning_effort *)
-  ; supports_reasoning_budget : bool (** Controllable reasoning depth *)
   ; accepted_reasoning_efforts : Reasoning_effort.t list option
     (** Model/provider-specific subset of canonical reasoning efforts accepted
         by the request wire format. [None] means no subset is declared and the
@@ -259,7 +258,6 @@ let default_capabilities =
   ; tool_schema_conformance = Rich_json_schema
   ; supports_reasoning = false
   ; supports_extended_thinking = false
-  ; supports_reasoning_budget = false
   ; accepted_reasoning_efforts = None
   ; thinking_control_format = No_thinking_control
   ; preserve_thinking_control_format = No_preserve_thinking_control
@@ -387,7 +385,6 @@ let anthropic_capabilities =
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
   ; supports_image_input = true
@@ -444,7 +441,6 @@ let kimi_capabilities =
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = false
   ; thinking_control_format = No_thinking_control
   ; preserve_thinking_control_format = Always_preserved_thinking
   ; reasoning_replay_override =
@@ -511,7 +507,6 @@ let openai_compat_chat_extended_capabilities =
   { openai_compat_chat_capabilities with
     supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = true
   ; thinking_control_format = Reasoning_effort
   ; supports_top_k = true
   ; supports_min_p = true
@@ -524,7 +519,6 @@ let mimo_capabilities =
   ; max_output_tokens = Some 128_000
   ; supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = false
   ; thinking_control_format = Thinking_object_only
   ; content_inline_reasoning = No_content_inline_reasoning
   ; reasoning_output_format = Split_reasoning_fields
@@ -700,7 +694,6 @@ let gemini_capabilities =
   ; supports_parallel_tool_calls = true
   ; supports_reasoning = true
   ; supports_extended_thinking = true
-  ; supports_reasoning_budget = true
   ; supports_response_format_json = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
@@ -941,7 +934,6 @@ type declarative_capability_overrides =
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
-  ; supports_reasoning_budget : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -987,7 +979,6 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
-  ; supports_reasoning_budget = entry.supports_reasoning_budget
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
@@ -1107,8 +1098,6 @@ let apply_declarative_capability_overrides overrides =
       override_bool base.supports_reasoning overrides.supports_reasoning
   ; supports_extended_thinking =
       override_bool base.supports_extended_thinking overrides.supports_extended_thinking
-  ; supports_reasoning_budget =
-      override_bool base.supports_reasoning_budget overrides.supports_reasoning_budget
   ; accepted_reasoning_efforts =
       (match overrides.accepted_reasoning_efforts with
        | Some values ->
@@ -1313,7 +1302,6 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; tool_schema_conformance = entry.tool_schema_conformance
   ; supports_reasoning = entry.supports_reasoning
   ; supports_extended_thinking = entry.supports_extended_thinking
-  ; supports_reasoning_budget = entry.supports_reasoning_budget
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
@@ -1602,7 +1590,6 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
-  ; supports_reasoning_budget = None
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
@@ -1653,7 +1640,6 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; tool_schema_conformance = None
   ; supports_reasoning = None
   ; supports_extended_thinking = None
-  ; supports_reasoning_budget = None
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
@@ -1899,7 +1885,6 @@ let test_catalog_entries =
     ; supports_named_tool_choice = Some false
     ; supports_reasoning = Some true
     ; supports_extended_thinking = Some true
-    ; supports_reasoning_budget = Some false
     ; thinking_control_format = Some (Chat_template_token "<|think|>")
     ; supports_multimodal_inputs = Some true
     ; supports_image_input = Some true
@@ -2146,7 +2131,6 @@ let%test "for_model_id hf.co/unsloth Gemma 4 QAT uses template token thinking" =
   | Some c ->
     c.supports_reasoning
     && c.supports_extended_thinking
-    && (not c.supports_reasoning_budget)
     && c.thinking_control_format = Chat_template_token "<|think|>"
     && c.modality_priority = Modality.Visual_first
   | None -> false
@@ -2169,7 +2153,6 @@ let%test "for_model_id hf.co/google Gemma 4 QAT uses template token thinking" =
   | Some c ->
     c.supports_reasoning
     && c.supports_extended_thinking
-    && (not c.supports_reasoning_budget)
     && c.thinking_control_format = Chat_template_token "<|think|>"
   | None -> false
 ;;

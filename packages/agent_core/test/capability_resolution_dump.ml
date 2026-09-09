@@ -21,8 +21,7 @@ let describe (caps : Capabilities.capabilities option) =
   | None -> "none"
   | Some c ->
     Printf.sprintf
-      "budget=%b efforts=%s"
-      c.supports_reasoning_budget
+      "efforts=%s"
       (match c.accepted_reasoning_efforts with
        | None -> "-"
        | Some [] -> "[]"

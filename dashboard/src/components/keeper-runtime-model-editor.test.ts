@@ -108,7 +108,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     supports_image_input: true,
     supports_audio_input: false,
     supports_video_input: false,
-    supports_reasoning_budget: true,
     supports_response_format_json: true,
     supports_structured_output: true,
     supports_system_prompt: true,
@@ -137,7 +136,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
       assistant_tool_content_format: 'empty-string',
       supports_reasoning: true,
       supports_extended_thinking: true,
-      supports_reasoning_budget: true,
       accepted_reasoning_efforts: ['low', 'medium', 'high'],
       thinking_control_format: 'chat-template-kwargs',
       preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
@@ -235,7 +233,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
           supports_named_tool_choice: true,
           supports_parallel_tool_calls: true,
           supports_extended_thinking: true,
-          supports_reasoning_budget: true,
           thinking_control_format: 'chat-template-kwargs',
           supports_response_format_json: true,
           supports_structured_output: true,
@@ -337,67 +334,6 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
     expect(container.textContent).toContain('claude')
     expect(container.textContent).toContain('caps:declared')
     expect(container.textContent).toContain('api:chat-completions')
-  })
-
-  it('sources the reasoning-budget pill from effective_capabilities, not the top-level snapshot field', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
-    const base = makeRuntimeProvider('a.one', 'Provider A', 'claude')
-    refs.providers.mockReset()
-    refs.providers.mockResolvedValue({
-      providers: [
-        {
-          ...base,
-          // Top-level field says "off" — this is the runtime.toml-mirrored,
-          // wire-inert value. If the pill still read it, this test would fail.
-          supports_reasoning_budget: false,
-          effective_capabilities: {
-            ...base.effective_capabilities,
-            supports_reasoning_budget: true,
-          },
-        },
-        makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
-      ],
-    })
-    render(
-      html`<${KeeperRuntimeModelEditor} keeperName="editable-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
-      container,
-    )
-    await flush()
-    await flush()
-
-    const pill = Array.from(container.querySelectorAll('span')).find(node =>
-      node.textContent?.trim().startsWith('reasoning-budget'),
-    )
-    expect(pill?.textContent).toContain('reasoning-budget on')
-  })
-
-  it('renders a missing effective capability as unknown instead of off', async () => {
-    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
-    const base = makeRuntimeProvider('a.one', 'Provider A', 'claude')
-    refs.providers.mockReset()
-    refs.providers.mockResolvedValue({
-      providers: [
-        {
-          ...base,
-          supports_reasoning_budget: false,
-          effective_capabilities: null,
-        },
-      ],
-    })
-
-    render(
-      html`<${KeeperRuntimeModelEditor} keeperName="unknown-capability-keeper" />`,
-      container,
-    )
-    await flush()
-    await flush()
-
-    const pill = Array.from(container.querySelectorAll('span')).find(node =>
-      node.textContent?.trim().startsWith('reasoning-budget'),
-    )
-    expect(pill?.getAttribute('data-capability-state')).toBe('unknown')
-    expect(pill?.textContent).toContain('reasoning-budget unknown')
-    expect(pill?.textContent).not.toContain('reasoning-budget off')
   })
 
   it('deep-links to the 설정 런타임 tab: focuses runtime then invokes onOpenRuntimeConfig', async () => {

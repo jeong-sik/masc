@@ -813,7 +813,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
   let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
-  let b_opt key = typed_find "a boolean" path tbl key Otoml.get_boolean in
   let reasoning_streaming_format_result =
     match typed_find "a string" path tbl "reasoning-streaming-format" Otoml.get_string with
     | Error errors -> Error errors
@@ -871,10 +870,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_named_tool_choice = b "supports-named-tool-choice" in
   let* supports_parallel_tool_calls = b "supports-parallel-tool-calls" in
   let* supports_extended_thinking = b "supports-extended-thinking" in
-  let* declared_supports_reasoning_budget = b_opt "supports-reasoning-budget" in
-  let supports_reasoning_budget =
-    Option.value ~default:false declared_supports_reasoning_budget
-  in
   let* supports_image_input = b "supports-image-input" in
   let* supports_audio_input = b "supports-audio-input" in
   let* supports_video_input = b "supports-video-input" in
@@ -899,8 +894,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; supports_named_tool_choice
     ; supports_parallel_tool_calls
     ; supports_extended_thinking
-    ; supports_reasoning_budget
-    ; declared_supports_reasoning_budget
     ; thinking_control_format
     ; declared_thinking_control_format =
         (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with

@@ -23,7 +23,6 @@ type model_entry =
   ; tool_schema_conformance : string option
   ; supports_reasoning : bool option
   ; supports_extended_thinking : bool option
-  ; supports_reasoning_budget : bool option
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
@@ -333,7 +332,6 @@ let known_entry_keys =
   ; "tool_schema_conformance"
   ; "supports_reasoning"
   ; "supports_extended_thinking"
-  ; "supports_reasoning_budget"
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
@@ -456,9 +454,6 @@ let parse_entry entry_toml =
   in
   let* supports_extended_thinking =
     bool_field ~entry_id:id_prefix "supports_extended_thinking" entry_toml
-  in
-  let* supports_reasoning_budget =
-    bool_field ~entry_id:id_prefix "supports_reasoning_budget" entry_toml
   in
   let* accepted_reasoning_efforts =
     canonical_string_list_opt
@@ -606,7 +601,6 @@ let parse_entry entry_toml =
     ; tool_schema_conformance
     ; supports_reasoning
     ; supports_extended_thinking
-    ; supports_reasoning_budget
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output

@@ -94,7 +94,6 @@ let test_anthropic_capabilities () =
   check bool "has tools" true c.supports_tools;
   check bool "has parallel tools" true c.supports_parallel_tool_calls;
   check bool "has extended thinking" true c.supports_extended_thinking;
-  check bool "has reasoning budget" true c.supports_reasoning_budget;
   check bool "has image" true c.supports_image_input;
   check bool "has caching" true c.supports_caching;
   check bool "has computer use" true c.supports_computer_use;
@@ -590,7 +589,6 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
     check bool (label ^ " named tool_choice disabled") false c.supports_named_tool_choice;
     check bool (label ^ " reasoning") true c.supports_reasoning;
     check bool (label ^ " extended thinking") true c.supports_extended_thinking;
-    check bool (label ^ " reasoning budget disabled") false c.supports_reasoning_budget;
     check
       bool
       (label ^ " chat_template_token thinking control")
@@ -678,7 +676,6 @@ let test_lookup_minimax_m3_official_chat_dialect () =
     check bool "rejects named forced tool_choice" false c.supports_named_tool_choice;
     check bool "reasoning" true c.supports_reasoning;
     check bool "extended thinking" true c.supports_extended_thinking;
-    check bool "no reasoning depth budget" false c.supports_reasoning_budget;
     check_thinking_control
       "uses MiniMax adaptive thinking object"
       Capabilities.Thinking_object_adaptive
@@ -884,11 +881,6 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
          check bool (model_id ^ " tools") true c.supports_tools;
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
          check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
-         check
-           bool
-           (model_id ^ " no reasoning budget control")
-           false
-           c.supports_reasoning_budget;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -983,11 +975,6 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
   | Some c ->
     check bool "qwen3.5:397b reasoning" true c.supports_reasoning;
     check bool "qwen3.5:397b extended thinking" true c.supports_extended_thinking;
-    check
-      bool
-      "qwen3.5:397b no reasoning budget control"
-      false
-      c.supports_reasoning_budget;
     check_thinking_control
       "qwen3.5:397b reasoning rides the /v1 effort control"
       Capabilities.Reasoning_effort
@@ -1019,11 +1006,6 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
        | Some c ->
          check bool (model_id ^ " reasoning") true c.supports_reasoning;
          check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
-         check
-           bool
-           (model_id ^ " no reasoning budget control")
-           false
-           c.supports_reasoning_budget;
          check_thinking_control
            (model_id ^ " reasoning rides the /v1 effort control")
            Capabilities.Reasoning_effort
@@ -2747,7 +2729,6 @@ let test_manifest_and_catalog_common_override_parity () =
             "assistant_tool_content_format": "empty_string",
             "supports_reasoning": true,
             "supports_extended_thinking": true,
-            "supports_reasoning_budget": true,
             "accepted_reasoning_efforts": ["low", "medium"],
             "supports_response_format_json": true,
             "supports_structured_output": true,
@@ -2791,7 +2772,6 @@ supports_parallel_tool_calls = true
 assistant_tool_content_format = "empty_string"
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
 accepted_reasoning_efforts = ["low", "medium"]
 supports_response_format_json = true
 supports_structured_output = true

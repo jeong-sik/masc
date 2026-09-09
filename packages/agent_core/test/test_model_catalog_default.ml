@@ -156,11 +156,6 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
            (model_id ^ " reasoning")
            (Some true)
            entry.supports_reasoning;
-         check
-           (option bool)
-           (model_id ^ " no reasoning budget control")
-           (Some false)
-           entry.supports_reasoning_budget;
          (* The row states no thinking control of its own. It used to, and the
             value it stated was a wire: ollama_cloud is reachable over both
             the native /api/chat and the OpenAI-compatible /v1, and a row

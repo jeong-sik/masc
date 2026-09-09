@@ -66,9 +66,6 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     typeof item.supports_image_input === 'boolean' ? `image:${item.supports_image_input ? 'on' : 'off'}` : null,
     typeof item.supports_audio_input === 'boolean' ? `audio:${item.supports_audio_input ? 'on' : 'off'}` : null,
     typeof item.supports_video_input === 'boolean' ? `video:${item.supports_video_input ? 'on' : 'off'}` : null,
-    typeof item.supports_reasoning_budget === 'boolean'
-      ? `reasoning-budget:${item.supports_reasoning_budget ? 'on' : 'off'}`
-      : null,
     item.thinking_control_format ? `thinking-control:${item.thinking_control_format}` : null,
     controls.length > 0 ? `controls:${controls.join(',')}` : null,
     note ? `note:${note}` : null,
@@ -203,7 +200,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
     caps?.supports_extended_thinking ? 'extended-thinking' : null,
-    caps?.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
     caps?.supports_caching ? 'cache' : null,
     caps?.supports_prompt_caching
@@ -297,7 +293,6 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.assistant_tool_content_format ? `tool-content:${caps.assistant_tool_content_format}` : null,
     caps.supports_reasoning ? 'reasoning' : null,
     caps.supports_extended_thinking ? 'extended-thinking' : null,
-    caps.supports_reasoning_budget ? 'reasoning-budget' : null,
     caps.accepted_reasoning_efforts && caps.accepted_reasoning_efforts.length > 0
       ? `effort:${caps.accepted_reasoning_efforts.join(',')}`
       : null,

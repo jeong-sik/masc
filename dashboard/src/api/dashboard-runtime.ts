@@ -90,7 +90,6 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_named_tool_choice?: boolean
   supports_parallel_tool_calls?: boolean
   supports_extended_thinking?: boolean
-  supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
   supports_image_input?: boolean
   supports_audio_input?: boolean
@@ -163,7 +162,6 @@ export interface DashboardRuntimeEffectiveCapabilities {
   assistant_tool_content_format?: string | null
   supports_reasoning?: boolean
   supports_extended_thinking?: boolean
-  supports_reasoning_budget?: boolean
   accepted_reasoning_efforts: string[] | null
   thinking_control_format?: string | null
   preserve_thinking_control_format?: string | null
@@ -231,7 +229,6 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_image_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
-  supports_reasoning_budget?: boolean
   thinking_control_format?: string | null
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
@@ -548,7 +545,6 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
     supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
-    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
@@ -642,7 +638,6 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     assistant_tool_content_format: asNullableString(raw.assistant_tool_content_format),
     supports_reasoning: asBoolean(raw.supports_reasoning),
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
-    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
     // Keep the server-projected wire opaque. The OCaml/Agent Core capability enum is
     // the SSOT; duplicating its variants here would drift on the next catalog
@@ -715,7 +710,6 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_image_input: asBoolean(raw.supports_image_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
-    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     thinking_control_format: asNullableString(raw.thinking_control_format),
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),

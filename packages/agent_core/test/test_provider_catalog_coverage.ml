@@ -110,7 +110,6 @@ let test_full_entry_parses_auth_and_capabilities () =
               "supports_parallel_tool_calls": true,
               "supports_reasoning": true,
               "supports_extended_thinking": true,
-              "supports_reasoning_budget": true,
               "supports_response_format_json": true,
               "supports_structured_output": true,
               "supports_multimodal_inputs": true,
@@ -156,7 +155,6 @@ let test_full_entry_parses_auth_and_capabilities () =
   check bool "supports parallel calls" true caps.supports_parallel_tool_calls;
   check bool "reasoning" true caps.supports_reasoning;
   check bool "extended thinking" true caps.supports_extended_thinking;
-  check bool "reasoning budget" true caps.supports_reasoning_budget;
   check bool "json response" true caps.supports_response_format_json;
   check bool "structured output" true caps.supports_structured_output;
   check bool "multimodal" true caps.supports_multimodal_inputs;

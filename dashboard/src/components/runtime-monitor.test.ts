@@ -71,7 +71,6 @@ describe('RuntimeMonitor', () => {
           supports_image_input: true,
           supports_audio_input: true,
           supports_video_input: false,
-          supports_reasoning_budget: true,
           thinking_control_format: 'reasoning-effort',
           supports_response_format_json: true,
           supports_structured_output: true,
@@ -143,7 +142,6 @@ describe('RuntimeMonitor', () => {
             assistant_tool_content_format: 'null',
             supports_reasoning: true,
             supports_extended_thinking: true,
-            supports_reasoning_budget: true,
             accepted_reasoning_efforts: ['low', 'medium', 'high'],
             thinking_control_format: 'chat-template-kwargs',
             preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
@@ -215,7 +213,6 @@ describe('RuntimeMonitor', () => {
                 supports_named_tool_choice: true,
                 supports_parallel_tool_calls: true,
                 supports_extended_thinking: true,
-                supports_reasoning_budget: true,
                 thinking_control_format: 'chat-template-kwargs',
                 supports_image_input: true,
                 supports_audio_input: true,
@@ -407,7 +404,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('sampling:top_k,min_p,seed')
     expect(container.textContent).toContain('tools:on · thinking:on · streaming:on')
     expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')
-    expect(container.textContent).toContain('reasoning-budget:on')
     expect(container.textContent).toContain('thinking-control:reasoning-effort')
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
@@ -415,13 +411,13 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('note:verified by runtime discovery')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
+      'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in:0.1')
     expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')
     expect(container.textContent).toContain('source:agent-core-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
-    expect(container.textContent).toContain('reasoning · extended-thinking · reasoning-budget · effort:low,medium,high')
+    expect(container.textContent).toContain('reasoning · extended-thinking · effort:low,medium,high')
     expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
     expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('input:multimodal,image,audio')
@@ -471,7 +467,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('effective · tools')
     expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
     expect(container.textContent).toContain('effective · reasoning')
-    expect(container.textContent).toContain('reasoning,extended,budget,effort low,medium,high')
+    expect(container.textContent).toContain('reasoning,extended,effort low,medium,high')
     expect(container.textContent).toContain('effective · thinking wire')
     expect(container.textContent).toContain('chat-template-kwargs')
     expect(container.textContent).toContain('effective · preserve wire')

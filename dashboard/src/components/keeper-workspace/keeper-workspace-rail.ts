@@ -274,9 +274,7 @@ function resolveRuntimeEffortState(
       return {
         status: 'ready',
         mode,
-        adjustable:
-          capabilities.supports_reasoning_budget === true
-          || acceptedEfforts.length > 0,
+        adjustable: acceptedEfforts.length > 0,
         acceptedEfforts,
       }
     }

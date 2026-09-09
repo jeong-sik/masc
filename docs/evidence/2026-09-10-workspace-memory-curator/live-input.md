@@ -17,8 +17,9 @@ Bearer header; model requests do not carry it. Neither source nor model requests
 follow redirects or use environment proxies.
 
 The output captures source HTTP status and exact response bytes before decoding.
-A credential echoed by the source is withheld from disk and refused before model
-forwarding. Failed HTTP, malformed JSON, unsupported context contracts and failed
+If the response contains the literal credential bytes, the response is withheld
+from disk and refused before model forwarding. This check does not detect encoded
+or transformed representations of the credential. Failed HTTP, malformed JSON, unsupported context contracts and failed
 Keeper discovery produce a failed receipt without calling the model. Successful
 captures retain context SHA-256, individual snapshot metadata and source coverage
 in the existing proposal artifacts.
@@ -31,3 +32,13 @@ Validation: 10 CLI scenarios passed with local HTTP fixtures, including live
 source capture through model proposal, source-only authentication, HTTP 401,
 redirect refusal, unsupported schema, and credential-echo refusal. This is a
 fixture integration result; live deployed endpoint/model execution is separate.
+
+## Deployed endpoint observation
+
+At 2026-09-09T18:23:18Z the local deployed MASC endpoint returned HTTP 404.
+The CLI wrote a terminal failed receipt in 0.00297 seconds and produced no model
+request, model response, or proposal artifact. The reviewed receipt and HTTP
+status are captured in `live-unavailable-receipt.json` and
+`live-unavailable-context.http.json`; raw runtime response data is not included.
+This proves the unavailable-source failure path only. Successful ingestion from
+the deployed server and a subsequent real local-model proposal remain unverified.

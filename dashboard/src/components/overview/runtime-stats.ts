@@ -62,16 +62,16 @@ export function OverviewRuntimeStats() {
           : html`<p class="text-xs">비용 원장 읽기 상태 미보고</p>`}
       ${state.kind === 'pending' ? null : data.models.length === 0 ? html`<p role="status">${ledger ? '반환된 집계에 런타임 기록이 없습니다.' : '아직 관측할 런타임 집계가 반환되지 않았습니다. 초기 캐시 응답이거나 해당 기간의 기록이 없을 수 있습니다.'}</p>`
         : html`<div class="max-w-full overflow-x-auto" tabIndex=${0} role="region" aria-label="런타임별 토큰·지연·결과">
-          <table class="w-full text-sm"><thead><tr class="border-b border-border">
+          <table class="block w-full text-sm md:table"><thead class="hidden md:table-header-group"><tr class="border-b border-border">
             <th scope="col" class="p-2 text-left">런타임</th><th scope="col" class="p-2 text-left">기록 결과</th>
             <th scope="col" class="p-2 text-left">보고된 토큰</th><th scope="col" class="p-2 text-left">보고된 지연</th>
             <th scope="col" class="p-2 text-left">관측 누락</th>
-          </tr></thead><tbody>${data.models.map(row => html`<tr key=${row.model_id} class="border-b border-border align-top">
-            <th scope="row" class="p-2 text-left break-all">${row.model_id}</th>
-            <td class="p-2 whitespace-nowrap">오류 없음 ${number(row.success_count)}<br />오류 ${number(row.error_count)}</td>
-            <td class="p-2 whitespace-nowrap">입력 ${number(row.total_input_tokens)}<br />출력 ${number(row.total_output_tokens)}</td>
-            <td class="p-2 whitespace-nowrap">p50 ${number(row.p50_latency_ms, ' ms')}<br />p95 ${number(row.p95_latency_ms, ' ms')}</td>
-            <td class="p-2">사용량 보고 ${number(row.usage_sample_count)} · 누락 ${number(row.usage_missing_count)}<br />텔레메트리 보고 ${number(row.telemetry_sample_count)} · 누락 ${number(row.telemetry_missing_count)}
+          </tr></thead><tbody class="block md:table-row-group">${data.models.map(row => html`<tr key=${row.model_id} class="grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top">
+            <th scope="row" class="col-span-2 block p-2 text-left break-all md:table-cell">${row.model_id}</th>
+            <td class="block p-2 whitespace-nowrap md:table-cell"><span class="block text-xs text-text-muted md:hidden">기록 결과</span>오류 없음 ${number(row.success_count)}<br />오류 ${number(row.error_count)}</td>
+            <td class="block p-2 whitespace-nowrap md:table-cell"><span class="block text-xs text-text-muted md:hidden">보고된 토큰</span>입력 ${number(row.total_input_tokens)}<br />출력 ${number(row.total_output_tokens)}</td>
+            <td class="block p-2 whitespace-nowrap md:table-cell"><span class="block text-xs text-text-muted md:hidden">보고된 지연</span>p50 ${number(row.p50_latency_ms, ' ms')}<br />p95 ${number(row.p95_latency_ms, ' ms')}</td>
+            <td class="col-span-2 block p-2 md:table-cell"><span class="block text-xs text-text-muted md:hidden">관측 누락</span>사용량 보고 ${number(row.usage_sample_count)} · 누락 ${number(row.usage_missing_count)}<br />텔레메트리 보고 ${number(row.telemetry_sample_count)} · 누락 ${number(row.telemetry_missing_count)}
               ${row.primary_coverage_reason ? html`<p class="break-words">사유: ${row.primary_coverage_reason}</p>` : null}
             </td>
           </tr>`)}</tbody></table>

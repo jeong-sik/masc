@@ -5465,3 +5465,14 @@
    %{exe:test_docker_observe_transport.exe})))
 
 (include stanzas/test_browser_composition.inc)
+
+(rule
+ (alias runtest-test_setup_cli)
+ (deps test_setup_cli.py ../bin/main_eio.exe
+       (source_tree ../scripts/fixtures/release-evidence))
+ (action
+  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_setup_cli)))

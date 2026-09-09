@@ -10,15 +10,21 @@
 
 let module_path = "lib/keeper/keeper_hooks_agent_core.ml"
 
-(* The format string is wrapped across source lines, so the literal is
-   matched by substring rather than exactly. *)
+(* The line is rendered by [Keeper_hooks_agent_core_types.tool_call_log_line],
+   so the key literal lives there; test_keeper_log_lines asserts the rendered
+   text, this guard only keeps the key from being dropped. *)
+let renderer_path =
+  "lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.ml"
+
 let test_the_failure_line_carries_the_arguments () =
-  let n = Ast_grep.count_string_literals ~module_path ~needle:"failed_params=" in
+  let n =
+    Ast_grep.count_string_literals ~module_path:renderer_path ~needle:"failed_params"
+  in
   if n < 1 then
     Alcotest.failf
       "the tool_call log line must carry the failed call's arguments; \
        failed_params appears %d time(s) in %s"
-      n module_path
+      n renderer_path
 ;;
 
 (* Redaction is what makes it safe to write them. Without it this turns every

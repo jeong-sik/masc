@@ -60,7 +60,7 @@ let test_observation_table_is_fully_read () =
   passes "wc" [ "wc"; "-l"; "f" ];
   passes "echo" [ "echo"; "hello"; "world" ];
   passes "printf" [ "printf"; "%s"; "x" ];
-  passes "git status through -C" [ "git"; "-C"; "repos/masc"; "status"; "--short"; "--branch" ];
+  requires_observation "git status through -C" [ "git"; "-C"; "repos/masc"; "status"; "--short"; "--branch" ];
   passes "git branch listing" [ "git"; "branch"; "-a" ];
   passes "git rev-list count against upstream"
     [ "git"; "-C"; "clone-probe"; "rev-list"; "--count"; "HEAD..origin/main" ];
@@ -227,7 +227,8 @@ let microvm = Some Keeper_types_profile_sandbox.Micro_vm
 let remote_ssh = Some Keeper_types_profile_sandbox.Remote_ssh
 
 let git_execution_cases =
-  [ Readonly.Diff, [ "git"; "diff"; "--output=changes.patch" ]
+  [ Readonly.Status, [ "git"; "status"; "--short" ]
+  ; Readonly.Diff, [ "git"; "diff"; "--output=changes.patch" ]
   ; Readonly.Log, [ "git"; "log"; "--output=history.txt" ]
   ; Readonly.Show, [ "git"; "show"; "--output=commit.txt" ]
   ; Readonly.Grep, [ "git"; "grep"; "--open-files-in-pager=cat"; "needle" ]
@@ -507,7 +508,7 @@ let test_script_classification_unit () =
   (* Every command the IR shows is judged by the argv tables. *)
   observation "bare ls" "ls";
   observation "ls with flags" "ls -la /tmp";
-  observation "git status through -C" "git -C repos/masc status";
+  script_requires_observation "git status through -C" "git -C repos/masc status";
   observation "repeated spaces" "uname  -a";
   observation "a tab is a word boundary, like the shell reads it" "ls\t-la";
   observation "quoted argument" "grep 'x y' f";
@@ -575,8 +576,8 @@ let test_observation_scripts_pass_the_table () =
     true
     (executes_script ~operation:"tool_execute" ~sandbox_profile:docker "ls -la /home/keeper");
   check bool
-    "git status script under microvm reads without judgment"
-    true
+    "git status script under microvm needs execution observation"
+    false
     (executes_script ~operation:"tool_execute" ~sandbox_profile:microvm "git -C repos/masc status");
   check bool
     "same script under remote_ssh still faces the judge"

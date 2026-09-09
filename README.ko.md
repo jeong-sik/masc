@@ -76,16 +76,11 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 마법사가 보고하는 축은 둘입니다.
 
-- **모델 출처.** 시드된 `runtime.toml`에는 프로바이더 다섯이 들어 있습니다.
-  Ollama Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, 로컬 Ollama.
-  클라우드 프로바이더는 환경 변수 이름으로, 로컬 서버는 헬스체크 경로를 찔러
-  `reachable`/`not running`으로 보여 줍니다. llama-server, vLLM, MLX 와 구독형
-  CLI(Claude Code, Codex, Antigravity)는 같은 파일에 주석 처리된 템플릿으로
-  있습니다. 주석을 풀면 마법사 목록에 오르고 CLI 는 `PATH`에 있으면
-  `installed`, 자체 로그인 확인을 통과하면 `signed in`으로 보입니다. 모델
-  바인딩이 둘 이상인 템플릿(Claude Code)은 그중 하나에 `wizard-default =
-  true`를 달아야 하고, 없으면 마법사가 건너뜁니다. Anthropic 과 OpenAI 는
-  아직 시드 블록이 없습니다. `--provider <id>`를 주면 묻지 않고 고릅니다.
+- **모델 출처.** 마법사는 `.masc/config/runtime.toml`이 선언한 것을 보여 줍니다.
+  거기 시드된 프로바이더와, 주석을 푼 템플릿입니다. 각각은 응답했는지, 자격
+  증명이 아직 필요한지, 아예 없는지로 표시됩니다. 프로바이더 목록과 각각이 읽는
+  환경 변수, 템플릿은 전부 그 파일에 있고 마법사가 따로 만들어 넣지 않습니다.
+  `--provider <id>`를 주면 묻지 않고 고릅니다.
 - **실행 샌드박스.** `docker`, `microvm`, `remote_ssh` 중 이 컴퓨터가 줄 수
   있는 것. 마법사는 보고만 하고 고르지 않습니다. 샌드박스는 Keeper마다
   정하거나, 자기 선택을 들고 있는 `--team <preset>`이 정합니다.

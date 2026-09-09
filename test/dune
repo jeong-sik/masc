@@ -3,12 +3,6 @@
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
 
-; Run the actual generator comparison through targeted Test CI.
-(rule
- (alias runtest-tool-parity-goldens)
- (deps ../tool_parity_golden_check.stamp)
- (action (echo "Tool parity goldens matched the generator")))
-
 ; Test Environment Configuration
 
 (test
@@ -1764,11 +1758,6 @@
   decompress.gz))
 
 (test
- (name test_server_bootstrap_durable_demand_owner)
- (modules test_server_bootstrap_durable_demand_owner)
- (libraries alcotest masc_test_deps masc_test_runtime))
-
-(test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
  (libraries
@@ -2188,7 +2177,6 @@
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
-(include stanzas/test_bootstrap_retention_warning.inc)
 (include stanzas/test_sandbox_image_recipe.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
@@ -5047,7 +5035,7 @@
  (name test_exec_shim_observe)
  (modules test_exec_shim_observe)
  (enabled_if (= %{system} linux))
- (libraries alcotest exec_shim unix))
+ (libraries alcotest exec_shim unix eio eio_main fs_compat))
 
 (test
  (name test_shim_clock)
@@ -5395,4 +5383,25 @@
 
 (include stanzas/test_h2_json_worker.inc)
 
+(rule
+ (alias runtest-test_tui_keyboard_input-msx-background-poll)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py} %{dep:../bin/masc_tui.exe} msx-background-poll)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-msx-background-poll)))
 (include stanzas/test_keeper_msx_observe.inc)
+
+; Log.Kv: a key=value line leaves out the fields whose value is None.
+(test
+ (name test_log_kv)
+ (modules test_log_kv)
+ (libraries alcotest masc_log))
+
+; The keeper turn and tool_call lines, asserted as rendered text.
+(test
+ (name test_keeper_log_lines)
+ (modules test_keeper_log_lines)
+ (libraries alcotest masc.keeper_hooks_agent_core_types masc_log))

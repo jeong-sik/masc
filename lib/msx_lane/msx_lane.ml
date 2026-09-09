@@ -55,6 +55,9 @@ let key_of_string s : (key, string) result =
   | "backspace" -> Ok Msx.Backspace
   | "trigger_a" -> Ok Msx.Trigger_a
   | "trigger_b" -> Ok Msx.Trigger_b
+  | "shift" -> Ok Msx.Shift
+  | "ctrl" -> Ok Msx.Ctrl
+  | "graph" -> Ok Msx.Graph
   | "f1" -> Ok (Msx.Function 1)
   | "f2" -> Ok (Msx.Function 2)
   | "f3" -> Ok (Msx.Function 3)
@@ -66,7 +69,7 @@ let key_of_string s : (key, string) result =
     Error
       (Printf.sprintf
          "unknown key %S: use up, down, left, right, space, esc, return, backspace, \
-          trigger_a, trigger_b, f1-f5, or one character"
+          trigger_a, trigger_b, shift, ctrl, graph, f1-f5, or one character"
          k)
 ;;
 
@@ -81,6 +84,9 @@ let key_to_string : key -> string = function
   | Msx.Backspace -> "backspace"
   | Msx.Trigger_a -> "trigger_a"
   | Msx.Trigger_b -> "trigger_b"
+  | Msx.Shift -> "shift"
+  | Msx.Ctrl -> "ctrl"
+  | Msx.Graph -> "graph"
   | Msx.Function n -> Printf.sprintf "f%d" n
   | Msx.Char c -> String.make 1 c
 ;;
@@ -205,13 +211,26 @@ let rendered_pixels st =
       st.pixels <- Some pixels;
       pixels
 
+(* Bitmap modes draw their screens into pixels; the name table underneath is
+   leftover noise, not what the game drew. Sending it anyway cost ~2 KB per
+   observation (measured: 315 keeper screens averaged 3.7 KB), which is what
+   drowns the useful fields in a playing keeper's context. Text and tile
+   modes keep the name table — there it is the game's text. *)
+let is_bitmap_mode mode =
+  match mode with
+  | "GRAPHIC4" | "GRAPHIC5" | "GRAPHIC6" | "GRAPHIC7" -> true
+  | _ -> String.starts_with ~prefix:"UNDEFINED" mode
+;;
+
 let observe st =
   let mode = Msx.display_mode st.m in
   { frame = st.frame
   ; mode = Msx.display_mode_to_string mode
   ; pc = Msx.dump_pc st.m
   ; halted = Msx.cpu_halted st.m
-  ; screen_text = Msx.screen_text st.m
+  ; screen_text =
+      (if is_bitmap_mode (Msx.display_mode_to_string mode) then ""
+       else Msx.screen_text st.m)
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
@@ -570,6 +589,14 @@ let decode_checkpoint json =
 ;;
 
 let restore ~path ~ledger_dir =
+  (* A slot that was never saved is the caller naming one that does not
+     exist, which is an argument problem and refusable. Reaching the read
+     first turned it into [Unreadable], and the tool answered with a runtime
+     failure -- the caller cannot tell from that whether the machine changed.
+     [Unreadable] keeps its meaning: a file that is there and will not read. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
   let decoded =
     try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
     | Sys_error message -> Error (Unreadable message)

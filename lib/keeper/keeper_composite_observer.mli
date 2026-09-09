@@ -237,13 +237,6 @@ type snapshot = {
       (** Board consumption cursor (ts + last consumed post id). Always
           present; [ts = 0.0] / [post_id = None] before the keeper has
           consumed any board post. *)
-  board_wakeups : int;
-      (** Number of distinct board-wakeup dedup keys currently held.
-          The registry keeps a content-fingerprint debounce ledger
-          ([board_wakeups : float StringMap.t], cleared per turn); this
-          field projects its cardinality so the dashboard can show how many
-          board stimuli woke the keeper in the current window without
-          leaking the high-cardinality fingerprint keys. *)
   fiber_stop_flag : bool;
       (** Snapshot of [registry_entry.fiber_stop] at observation time.
           When [true] without a corresponding stopped/dead phase, the

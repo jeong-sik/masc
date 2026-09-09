@@ -358,6 +358,12 @@ path = "/api/tags"
 # a fresh install does not claim the local CLI is installed or logged in.
 # There is deliberately no credentials table: Claude Code owns its stored
 # claude.ai login, and MASC removes API/token environment fallbacks.
+#
+# Uncommenting this block alone is not enough to pick it in the wizard. It
+# declares two model bindings, and two enabled bindings without a flag is a
+# real choice the wizard refuses to guess -- it fails rather than install a
+# model nobody named. Put `wizard-default = true` under the one you want.
+# A template with a single binding needs no flag.
 # [providers.claude_code]
 # display-name = "Claude Code Subscription"
 # protocol = "claude-code"

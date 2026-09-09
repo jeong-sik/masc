@@ -689,9 +689,17 @@ let add_delete_action_routes router =
              | Some task_id ->
              let config = (Mcp_server.workspace_config state) in
              match Workspace.delete_task_r config ~task_id with
-             | Ok () -> respond_ok ~request:req reqd
+             | Ok outcome ->
+               let status, errors = match outcome with
+                 | Workspace.Task_deleted -> "deleted", []
+                 | Workspace.Task_already_absent -> "already_absent", []
+                 | Workspace.Task_delete_cleanup_failed errors -> "cleanup_failed", errors in
+               Http.Response.json_value ~request:req
+                 (`Assoc ["ok", `Bool (errors = []); "task_id", `String task_id;
+                   "task_deleted", `Bool true; "status", `String status;
+                   "errors", `List (List.map (fun error -> `String error) errors)]) reqd
              | Error err ->
-                 respond_error ~status:`Not_found ~request:req reqd
+                 respond_error ~status:`Internal_server_error ~request:req reqd
                    (Printf.sprintf "task delete failed: %s"
                       (Masc_domain.masc_error_to_string err))
            with Yojson.Json_error _ ->

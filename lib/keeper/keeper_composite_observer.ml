@@ -98,7 +98,6 @@ type snapshot = {
   last_skip : last_skip option;
   turn_attempt : turn_attempt option;
   board_cursor : board_cursor;
-  board_wakeups : int;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
   idle_seconds : int;
@@ -445,7 +444,6 @@ let observe
        | None -> None);
     board_cursor =
       { bc_ts = entry.board_cursor_ts; bc_post_id = entry.board_cursor_post_id };
-    board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
     idle_seconds =
@@ -618,7 +616,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       "ts", `Float s.board_cursor.bc_ts;
       "post_id", Json_util.string_opt_to_json s.board_cursor.bc_post_id;
     ];
-    "board_wakeups", `Int s.board_wakeups;
     "fiber_stop_flag", `Bool s.fiber_stop_flag;
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;
     "idle_seconds", `Int s.idle_seconds;

@@ -225,14 +225,12 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_skip!.reasons).toEqual(['cooldown_pending', 'no_signal'])
   })
 
-  it('parses board_cursor and board_wakeups (A-PR-2 G10)', () => {
+  it('parses board_cursor (A-PR-2 G10)', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,
       board_cursor: { ts: 1234.5, post_id: 'post-42' },
-      board_wakeups: 2,
     })
     expect(result.board_cursor).toEqual({ ts: 1234.5, post_id: 'post-42' })
-    expect(result.board_wakeups).toBe(2)
   })
 
   it('parses an objective turn-attempt observation', () => {
@@ -249,7 +247,6 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_skip).toBeUndefined()
     expect(result.turn_attempt).toBeUndefined()
     expect(result.board_cursor).toBeUndefined()
-    expect(result.board_wakeups).toBeUndefined()
   })
 
   it('parses optional execution receipt summary', () => {

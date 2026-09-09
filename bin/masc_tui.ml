@@ -1704,7 +1704,17 @@ type identity_login_result =
   | Login_attached of string
   | Login_failed of string
 
+(* The UI domain owns these refs. A posted tick is a mutation: closing its
+   view invalidates presentation, never cancels or retries the request. Keep
+   the pending request until its terminal mailbox result, even across reopen. *)
+type msx_poll_request = { poll_view : unit ref; poll_port : int }
+let msx_poll_view = ref (ref ())
+type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
+let msx_pending_poll = ref Poll_idle
+let invalidate_msx_poll () = msx_poll_view := ref ()
+
 type async_msg =
+  | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -2532,6 +2542,31 @@ let launch_voice_config_load state ~mailbox =
     enqueue_async
       mailbox
       (Voice_config_loaded (Error "Eio switch is unavailable", None))
+;;
+
+let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
+  match !msx_pending_poll with
+  | Poll_pending _ | Poll_failed -> ()
+  | Poll_idle ->
+      let request = { poll_view = !msx_poll_view; poll_port = state.port } in
+      msx_pending_poll := Poll_pending request;
+      let run () =
+        let frame =
+          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Msx_frame_loaded (request, frame))
+      in
+      (try
+         match Eio_context.get_switch_opt () with
+         | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+         | None -> enqueue_async mailbox (Msx_frame_loaded (request, Error "Eio switch is unavailable"))
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> enqueue_async mailbox
+           (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -6586,6 +6621,18 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
+  state.msx_frame <-
+    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  (* An explicit fresh observation can rearm polling after a lost tick reply.
+     It cannot settle an outstanding request whose result has yet to arrive. *)
+  match !msx_pending_poll with
+  | Poll_failed when Option.is_some state.msx_frame ->
+      msx_pending_poll := Poll_idle;
+      if clear_notice then state.msx_notice <- None
+  | Poll_idle | Poll_pending _ | Poll_failed -> ()
+;;
+
 (* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
    before watching one. Fetch the frame so the menu can offer "watch" when a
    game is already loaded, and the inventory so there is something to pick.
@@ -6596,6 +6643,7 @@ let write_to_terminal payload =
    palette's "go MSX" both land here, so the two doors stay one door -- which
    is why the menu goes in the function rather than at the key. *)
 let open_msx_screen (state : Masc_tui_types.state) =
+  invalidate_msx_poll ();
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
   state.image_request_generation <- state.image_request_generation + 1;
@@ -6605,8 +6653,7 @@ let open_msx_screen (state : Masc_tui_types.state) =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false
   end;
-  state.msx_frame <-
-    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  observe_msx_frame ~clear_notice:true state;
   state.msx_carts <-
     Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
@@ -11688,6 +11735,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Error _ ->
                notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
       end
+  | Msx_frame_loaded (request, result) ->
+      (match !msx_pending_poll with
+       | Poll_pending pending when pending == request ->
+           (match result with
+            | Error _ when request.poll_port <> state.port ->
+                msx_pending_poll := Poll_idle
+            | Error detail ->
+                (* A lost HTTP response does not prove the server stopped its
+                   mutation. Observe explicitly before another automatic tick. *)
+                msx_pending_poll := Poll_failed;
+                let notice = "Refresh outcome unknown; reopen before continuing: " ^ detail in
+                state.msx_notice <- Some notice;
+                if state.msx_open then
+                  if state.msx_menu_open then
+                    Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
+                  else
+                    Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+                      ~connection:state.connection_status state.msx_frame
+            | Ok frame ->
+                msx_pending_poll := Poll_idle;
+                if request.poll_view == !msx_poll_view && request.poll_port = state.port
+                   && state.msx_open && not state.msx_menu_open then begin
+                  state.msx_frame <- frame;
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+                    ~connection:state.connection_status state.msx_frame
+                end)
+       | Poll_pending _ | Poll_idle | Poll_failed -> ())
   | Keeper_turns_loaded result ->
       (match result with
        | Ok rows ->
@@ -14528,7 +14603,9 @@ and is loaded on demand through keeper_skill.
         if state.msx_open then
           if state.msx_menu_open then
             Masc_tui_msx.render_menu ~write:write_to_terminal state
-          else state.msx_last_poll_ns <- 0L
+          else
+            Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+              ~connection:state.connection_status state.msx_frame
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
@@ -14541,10 +14618,7 @@ and is loaded on demand through keeper_skill.
           (* The poll advances the machine a step and reads the frame it lands
              on (RFC-0439 §3.2): a game flows while it is watched, even when no
              keeper is pressing. A plain read would freeze between presses. *)
-          state.msx_frame <-
-            Masc_tui_http.tick_msx ~host:server_peer_host ~port:state.port;
-          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame
+          launch_msx_poll state ~mailbox:async_messages
         end
       end;
       let input = read_input ~timeout:input_timeout input_reader () in
@@ -14558,6 +14632,15 @@ and is loaded on demand through keeper_skill.
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
            discard_frame_for_new_size frame_presenter render_schedule;
+           (* Geometry changes redraw the cached snapshot immediately; an
+              in-flight tick must not own resize presentation either. *)
+           if state.msx_open then begin
+             if state.msx_menu_open then
+               Masc_tui_msx.render_menu ~write:write_to_terminal state
+             else
+               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+                 ~connection:state.connection_status state.msx_frame
+           end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())
@@ -14620,6 +14703,14 @@ and is loaded on demand through keeper_skill.
           | None -> None
         else None
       in
+      (* Menu decisions, game input and closing own a new view. Pure size or
+         non-game input keeps the snapshot current; completion renders using
+         the geometry the UI owns at that later instant. *)
+      (match msx_key with
+       | Some _ when state.msx_menu_open -> invalidate_msx_poll ()
+       | Some ("esc" | "f6" | "f7" | "f8") -> invalidate_msx_poll ()
+       | Some name when Option.is_some (msx_server_key name) -> invalidate_msx_poll ()
+       | Some _ | None -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -14659,9 +14750,7 @@ and is loaded on demand through keeper_skill.
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
-                  state.msx_frame <-
-                    Masc_tui_http.fetch_msx_frame ~host:server_peer_host
-                      ~port:state.port;
+                  observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame
@@ -14679,7 +14768,7 @@ and is loaded on demand through keeper_skill.
           state.msx_notice <- Some (match result with
             | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
             | Error message -> "Checkpoint failed: " ^ message);
-          state.msx_frame <- Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+          observe_msx_frame state;
           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
           Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
             ~connection:state.connection_status state.msx_frame
@@ -14708,8 +14797,7 @@ and is loaded on demand through keeper_skill.
                    ~port:state.port ~keys:[ server_key ]
                with
                | Ok _ | Error _ -> ());
-              state.msx_frame <-
-                Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+              observe_msx_frame ~clear_notice:true state;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame

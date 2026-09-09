@@ -363,12 +363,13 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    lands on (RFC-0439 §3.2, poll-cadence tick). The spectator poll calls this
    instead of a plain frame read so a game flows even when no keeper is pressing.
    The step size is the server's default -- the cadence policy lives there, not
-   here -- so the body carries no frame count. [None] on any transport or shape
-   error, same as a frame read. The request captures its operator bearer once.
+   here -- so the body carries no frame count. Transport/shape errors remain
+   distinct from [Ok None] (no machine); a lost mutation response must not
+   silently trigger another automatic tick. The operator bearer is captured once.
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) : Masc_tui_types.msx_frame option =
+let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
@@ -376,9 +377,7 @@ let tick_msx ~(host : string) ~(port : int) : Masc_tui_types.msx_frame option =
     | Error _ as error -> error
     | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
   in
-  match Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request with
-  | Ok frame -> frame
-  | Error _ -> None
+  Masc_tui_msx_tick.fetch msx_tick_cache ~host ~port ~headers ~request
 ;;
 
 

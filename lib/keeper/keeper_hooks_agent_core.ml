@@ -356,67 +356,54 @@ let make_hooks
            histogram still proves the hook ran. *)
         record_llm_inference_latency_metric ~telemetry:response.telemetry;
         record_response_content_quality_metric ~keeper_name:meta.name response;
-        let fmt_tok_s = function
-          | Some v -> Printf.sprintf "%.1f" v
-          | None -> "-"
-        in
         (* Capture each telemetry projection independently.  Anthropic and
            Gemini populate [request_latency_ms] (patched in AGENT_CORE api.ml) but
            leave [timings = None]; the previous single-match folded those
            three fields together and surfaced [latency_ms=0] whenever tok/s
            were missing, which hid Anthropic/Gemini latency on the log line
            and in downstream dashboards. *)
-        let prompt_tok_s_opt, decode_tok_s_opt =
+        let prompt_tok_s, decode_tok_s, cache_n, prompt_n =
           match response.telemetry with
           | Some { timings = Some t; _ } ->
-              t.prompt_per_second, t.predicted_per_second
-          | None | Some { timings = None; _ } -> None, None
+              t.prompt_per_second, t.predicted_per_second, t.cache_n, t.prompt_n
+          | None | Some { timings = None; _ } -> None, None, None, None
         in
-        let latency_ms_opt =
+        let latency_ms =
           match response.telemetry with
           | Some t -> t.request_latency_ms
           | None -> None
         in
-        let wall_tok_s_opt =
+        let wall_tok_s =
           wall_tokens_per_second ~usage_missing ~output_tokens:output_tok
             ~telemetry:response.telemetry
         in
         record_llm_tok_s_metrics ~telemetry:response.telemetry;
-        let wall_tok_s = fmt_tok_s wall_tok_s_opt in
-        let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
-        let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         let thinking = summarize_thinking_blocks response.content in
         (* [tokens] alone is a numerator. Runtimes in one fleet declare
            windows from 200K to 1M, so the same absolute count means a
            different amount of pressure per keeper and the log cannot be
            compared across them. The window is already on the turn record;
            carrying it here makes the log self-sufficient. An absent window
-           renders ["-"], the same as the other unread counters on this line;
-           it used to render [0], which reads as a window of zero (25 lines in
-           the two hours to 2026-08-22T02:03Z). *)
-        let fmt_int_opt = function
-          | Some v -> string_of_int v
-          | None -> "-"
-        in
-        let context_window =
-          fmt_int_opt (context_max_of_telemetry response.telemetry)
-        in
-        let latency_ms = fmt_int_opt latency_ms_opt in
-        let cache_n_log, prompt_n_log =
-          match response.telemetry with
-          | Some { timings = Some t; _ } ->
-            fmt_int_opt t.cache_n, fmt_int_opt t.prompt_n
-          | Some { timings = None; _ } | None -> "-", "-"
-        in
-        Log.Keeper.info ~keeper_name:meta.name
-          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%s wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s cache_n=%s prompt_n=%s latency_ms=%s thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
-          turn meta.runtime.usage.total_turns model total_tok context_window
-          wall_tok_s prompt_tok_s decode_tok_s cache_n_log prompt_n_log latency_ms
-          thinking.thinking_present
-          thinking.thinking_blocks
-          thinking.thinking_chars
-          thinking.redacted_thinking_blocks
-          thinking.thinking_kind;
+           is left out of the line; it used to render [0], which reads as a
+           window of zero (25 lines in the two hours to 2026-08-22T02:03Z).
+           Which fields the line carries is decided in [turn_log_line], where
+           a test can see it. *)
+        Log.Keeper.info ~keeper_name:meta.name "%s"
+          (turn_log_line
+             ({ turn
+              ; total_turns = meta.runtime.usage.total_turns
+              ; runtime_lane = model
+              ; tokens = total_tok
+              ; context_window = context_max_of_telemetry response.telemetry
+              ; wall_tok_s
+              ; prompt_tok_s
+              ; decode_tok_s
+              ; cache_n
+              ; prompt_n
+              ; latency_ms
+              ; thinking
+              }
+              : turn_log_fields));
         (* Emit per-turn cost event for task attribution.
            cost_usd from AGENT_CORE Pricing.annotate_response_cost (agent-core boundary resolved). *)
         (match trajectory_acc with
@@ -544,11 +531,12 @@ let make_hooks
         let input_shape = tool_input_shape_for_log input in
         let error_preview =
           match output with
-          | Ok _ -> "-"
+          | Ok _ -> None
           | Error _ ->
-            output_text
-            |> Observability_redact.redact_preview ~max_len:240
-            |> one_line_preview_for_log
+            Some
+              (output_text
+               |> Observability_redact.redact_preview ~max_len:240
+               |> one_line_preview_for_log)
         in
         (* [params] carries key names only, which answers what the model
            reached for but not what it asked for. A repository audit could see
@@ -556,35 +544,32 @@ let make_hooks
            invented an org" and "the keeper never ran gh" read the same
            afterwards (#23822). On failure the redacted argument values go
            beside it; a successful call still logs keys only, so the added
-           bytes land only where someone is reading back. *)
+           bytes land only where someone is reading back. On success both
+           fields are absent from the line rather than rendered as [-]. *)
         let failed_params =
           match output with
-          | Ok _ -> "-"
+          | Ok _ -> None
           | Error _ ->
-            Observability_redact.redact_json_value input
-            |> Yojson.Safe.to_string
-            |> one_line_preview_for_log
+            Some
+              (Observability_redact.redact_json_value input
+               |> Yojson.Safe.to_string
+               |> one_line_preview_for_log)
         in
         (match outcome with
          | Tool_result.Error -> Log.Keeper.error
          | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
-          "keeper:%s tool_call tool=%s source=%s params=[%s] input_shape=[%s] \
-           outcome=%s out_len=%d failed_params=%s error_preview=%s"
-          (!meta_ref).name
-          tool_name
-          (* Which file this name's definition was read from. A tool that
-             behaved unexpectedly is one an operator wants to open, and the
-             record did not say where to look. [-] is a built-in, which ships
-             no file — itself the answer. *)
-          (match Keeper_tool_definition_source.resolve tool_name with
-           | Some rel -> rel
-           | None -> "-")
-          input_keys
-          input_shape
-          outcome_s
-          out_len
-          failed_params
-          error_preview;
+          "%s"
+          (tool_call_log_line ~keeper_name:(!meta_ref).name
+             ({ tool = tool_name
+              ; source = Keeper_tool_definition_source.resolve tool_name
+              ; params = input_keys
+              ; input_shape
+              ; outcome = outcome_s
+              ; out_len
+              ; failed_params
+              ; error_preview
+              }
+              : tool_call_log_fields));
         (* Agent Core measures duration per invocation. Do not reconstruct it
            from Keeper-global mutable state: sibling calls may overlap. *)
         let duration_ms = hook_duration_ms in

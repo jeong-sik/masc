@@ -27,7 +27,11 @@ let persist_for_state agent stage state =
             (Checkpoint_saved
                { checkpoint_id = Printf.sprintf "%s-%d" stage_label turn; timestamp })
         | None -> ());
-       Log.info
+       (* Three checkpoint stages per turn are bookkeeping, not events an
+          operator reads: at Info they were 493 of 9,119 lines in 41 minutes
+          (2026-09-09), three lines under every turn summary. The sink
+          failure below stays at Error. *)
+       Log.debug
          _log
          "turn checkpoint persisted"
          [ S ("stage", stage_label)

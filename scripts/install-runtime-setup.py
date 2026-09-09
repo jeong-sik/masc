@@ -775,9 +775,14 @@ def wizard(binary, base_path, timeout):
                 return dict(configured=False, readiness='deferred', base_path=str(base_path))
             primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
             ordered = [selected.pop(primary)]
-            while len(selected) > 1:
-                index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
-                ordered.append(selected.pop(index))
+            if len(selected) > 1:
+                print('Fallback order:\n' + '\n'.join('  {}. {}'.format(index, terminal_text(names[value]))
+                                                       for index, value in enumerate(selected, 1)), file=sys.stderr)
+                customize = pick('Fallback order', ['Keep this order', 'Choose a different order'])[0]
+                if customize:
+                    while len(selected) > 1:
+                        index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
+                        ordered.append(selected.pop(index))
             ordered += selected
             print('Checking a real response and a harmless tool call for each selected connection…', file=sys.stderr)
             while ordered:

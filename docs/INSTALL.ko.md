@@ -152,13 +152,15 @@ CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를
 이 경로는 `masc setup`이 포함된 **0.35.2 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
-1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
-   런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
-   레인에도 연결합니다. 두 번째 모델 구독은 필요하지 않습니다.
-2. Claude Code·Codex는 CLI를 설치하고 해당 CLI에서 로그인한 뒤 이 터미널에서
-   응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
-   터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
-   모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+1. 모델 선택 화면을 열기 전에 보유한 런타임을 준비합니다. Claude Code·Codex는
+   CLI를 설치하고 로그인한 뒤 이 터미널에서 응답하는지 확인합니다.
+   API 방식은 인증 환경변수(Z.AI는 `ZAI_API_KEY`)를 이 터미널에서 설정합니다.
+   로컬 모델은 서버를 시작하고 도구 호출이 가능한 모델을 로드합니다.
+   MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+2. 설치기를 `--base-path "$HOME/masc-workspace"`로 실행하고 연결을 여러 개
+   선택할 수 있습니다. imp의 기본 모델과 대체 순서를 고르면 실제 응답·도구
+   검사를 거쳐 저장합니다. 내부 보조 lane은 기본 모델을 사용하므로 별도
+   모델 구독이 필요하지 않습니다.
 3. macOS에서는 [Docker Desktop 설치 안내](https://docs.docker.com/desktop/setup/install/mac-install/),
    Linux에서는 [Docker Engine 설치 안내](https://docs.docker.com/engine/install/)를 따라 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.

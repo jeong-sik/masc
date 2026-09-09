@@ -60,13 +60,12 @@ product grows (see [Dashboard](#dashboard)).
 
 ### First conversation: 0.35.2
 
-After selecting your model in the installer wizard, authenticate its CLI or export
-its API credential and start Docker. Then run:
-
-Choose a numbered model or enter an exact model ID. The wizard shows the source
-of its context limit; Codex's observed client limit takes precedence over the
-catalog. If no limit is known, enter the documented value. Claude Code and Codex
-enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
+First sign in to your model CLI or export its API credential, and start Docker.
+In the installer, use **↑/↓, Space and Enter** to select one or more models, then
+choose imp's primary connection and fallback order. The wizard checks each model's
+response and tool use before saving. Context limits come from the connection's
+metadata; an unknown limit offers reselection or an advanced field. Z.AI uses
+`ZAI_API_KEY`. Then start imp:
 
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
@@ -74,7 +73,7 @@ masc setup --base-path "$HOME/masc-workspace"
 
 Setup prepares the default image, starts the workspace server and `imp`, and opens
 the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
-and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0351).
+and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0352).
 Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary availability.
 
 ### Published binaries

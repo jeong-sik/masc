@@ -167,15 +167,16 @@ automatically.
 This is the 0.35.2 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
-1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
-   the model runtime you own. Runtime setup binds that selection to the helper
-   lanes with `--setup-lanes`; you do not need a second model subscription.
-2. Authenticate that runtime before starting MASC. For Claude Code or Codex,
-   install its CLI and complete its own login, then confirm it can answer a
-   prompt in this terminal. For an API runtime, export the credential variable
-   named by the wizard in this terminal. For a local model, start its server
+1. Prepare the runtime you own before opening the model wizard. For Claude Code
+   or Codex, install its CLI and complete its login, then confirm it can answer a
+   prompt in this terminal. For an API runtime, export its credential variable
+   here (for example, `ZAI_API_KEY` for Z.AI). For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
+2. Run the installer with `--base-path "$HOME/masc-workspace"` and select one or
+   more connections. Choose imp's primary model and fallback order. The wizard
+   checks actual responses and tool use before saving. Helper lanes use your
+   primary model; you do not need a second subscription.
 3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
    or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
    `docker info` must succeed as your current user. Then run:

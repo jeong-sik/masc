@@ -42,9 +42,10 @@ availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) be
 3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
    `docker info` must succeed as your current user. Then run:
 
-For Claude Code and Codex, the wizard uses the installed catalog for known
-model context sizes and enables CLI tools and streaming automatically. Unknown
-models ask for their context size. Z.AI credentials use `ZAI_API_KEY`.
+Choose a numbered model or enter an exact model ID. The wizard shows the source
+of its context limit; Codex's observed client limit takes precedence over the
+catalog. If no limit is known, enter the documented value. Claude Code and Codex
+enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
 
 ```bash
 masc setup --base-path "$HOME/masc-workspace"

@@ -3657,23 +3657,8 @@ def open_loaded_planning(
     master_fd: int,
     output: bytearray,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        FRAME_END,
-        start=cluster_end,
-        timeout=3.0,
-    )
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    # No Approvals waypoint here. Masc_tui_types.is_surface_active keeps that
-    # surface off the ring while there is nothing pending, and these fixtures
-    # seed nothing, so the walk burned every key on a screen that does not
-    # exist. The walk to Board passes wherever Approvals would have been.
-    tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (0)"))
-    tab_until(process, master_fd, output, b"plan-alpha-29424")
+    # Navigate by named surface so Planning tests do not depend on tab order.
+    palette_go(process, master_fd, output, b"go Planning", b"plan-alpha-29424")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:

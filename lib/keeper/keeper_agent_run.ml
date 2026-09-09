@@ -684,15 +684,7 @@ module For_testing = struct
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let official_client_tool_boundary = official_client_tool_boundary
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
-  type direct_continuation =
-  | Runtime_continuation of Keeper_direct_runtime_continuation.admission
-  | Gate_continuation of Keeper_direct_gate_continuation.admission
-
-let direct_checkpoint = function
-  | Runtime_continuation admission -> Keeper_direct_runtime_continuation.checkpoint admission
-  | Gate_continuation admission -> Keeper_direct_gate_continuation.checkpoint admission
-
-let progress_keeper_tool_names_for_contract =
+  let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization

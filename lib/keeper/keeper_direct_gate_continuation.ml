@@ -7,7 +7,6 @@ module Snapshot = Keeper_repetition_snapshot
 type admission =
   { checkpoint : Agent_core.Checkpoint.t
   ; source_reference : Keeper_checkpoint_ref.t
-  ; waiting : Semantic.gate_wait
   ; selected : Semantic.gate_resolution
   ; resolution : Keeper_event_queue.hitl_resolution
   }
@@ -170,7 +169,7 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
        decision=(match selected.decision with Semantic.Gate_approved -> Keeper_event_queue.Hitl_approved
          | Semantic.Gate_denied detail -> Keeper_event_queue.Hitl_rejected detail);
        channel=observed.waiting_request.continuation_channel} in
-    Ok (Some {checkpoint; source_reference=waiting.checkpoint; waiting; selected; resolution})
+    Ok (Some {checkpoint; source_reference=waiting.checkpoint; selected; resolution})
 
 let discharge ~config ~keeper_name ~operation_id ~user_message ~checkpoint admission =
   let* identity, message = match admission.selected.decision with

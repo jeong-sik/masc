@@ -867,7 +867,9 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "Execute"
+    [ "BrowserInteract"
+    ; "BrowserRead"
+    ; "Execute"
     ; "keeper_artifact_read"
     ; "keeper_lane_status"
       (* keeper_spawn answers a start with the handle every later spawn call

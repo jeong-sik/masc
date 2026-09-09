@@ -1,14 +1,11 @@
 name = "masc_msx_step_until_change"
 description = """
-Advance the shared MSX machine until the screen settles, no key held.
+Advance MSX until the screen settles, without holding a key.
 
-Samples the coarse screen view every 6 frames; two near-equal samples in a row \
-stop the run (a blinking cursor alone does not count as change). Returns the \
-observation (see masc_msx_screen) plus frames_run, changed (the screen now \
-differs from the start — false on a settled screen suggests the scene waits \
-for a key) and stable (true when it settled, false when max_frames ran out). \
-Cheaper than repeated masc_msx_step + masc_msx_screen: one call covers a \
-title, fade or level intro."""
+Samples every 6 frames; two near-equal coarse views stop it (cursor blink ignored).
+Returns masc_msx_screen observation plus frames_run, changed versus the start,
+and stable (false at max_frames). A settled unchanged screen may await a key.
+Use for title/fade/level intros instead of repeated step and screen calls."""
 additional_properties = false
 
 defer_loading = true
@@ -16,7 +13,6 @@ defer_loading = true
 [[params]]
 name = "max_frames"
 type = "integer"
-description = "Frame budget for the run. Default 300 (five seconds)."
 minimum = 1
 maximum = 300
 default = 300

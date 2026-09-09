@@ -194,9 +194,15 @@ let with_exec_fixture
   else
   let dir = temp_dir name in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      if bind_eio_context then Time_compat.clear_clock ();
+      cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
+      (* Eio_context.with_test_env scopes its own registry only. Browser_lane's
+         asynchronous response loop sleeps through Time_compat, which needs the
+         same live clock until this fixture's switch has fully shut down. *)
+      if bind_eio_context then Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run @@ fun sw ->
       if process
@@ -7198,7 +7204,11 @@ let probe ?(needs_sandbox = false) tool_name args =
   { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
 let composable_output_probes =
-  [ probe
+  [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 1])
+  ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 1;
+      "action",`String "scroll";"x",`Int 0;"y",`Int 100;
+      "expectedUrl",`String "https://example.org/probe"])
+  ; probe
       ~needs_sandbox:true
       "Execute"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
@@ -7422,8 +7432,53 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()))
+       (* The seam is the primitive WebDriver HTTP transport. Execute/sync
+          evaluates the actual production JavaScript, then Browser_webdriver
+          constructs the response consumed by Keeper and the schema validator. *)
+       let module Driver = Masc.Browser_webdriver in
+       let request ~method_ ~path ~body =
+         match method_, path with
+         | `POST, "/session" -> Ok (`Assoc [
+             "sessionId", `String "owned";
+             "capabilities", `Assoc ["webSocketUrl",
+               `String "ws://localhost:1234/session/owned"]])
+         | `GET, "/session/owned/window/handles" -> Ok (`List [`String "fixture"])
+         | `GET, "/session/owned/window" -> Ok (`String "fixture")
+         | `POST, "/session/owned/window"
+         | `POST, "/session/owned/frame"
+         | `DELETE, "/session/owned" -> Ok `Null
+         | `POST, "/session/owned/execute/sync" ->
+           let input = match body with
+             | Some json -> Yojson.Safe.to_string json
+             | None -> fail "execute/sync requires script and args" in
+           let channel = Unix.open_process_args_in "node"
+             [|"node"; "fixtures/browser-webdriver-script.cjs"; input|] in
+           let output = Buffer.create 256 in
+           (try while true do
+              Buffer.add_string output (input_line channel);
+              Buffer.add_char output '\n'
+            done with End_of_file -> ());
+           (match Unix.close_process_in channel with
+            | Unix.WEXITED 0 -> Ok (Yojson.Safe.from_string (Buffer.contents output))
+            | _ -> fail "production browser JavaScript fixture failed")
+         | _ -> fail ("unexpected primitive WebDriver request: " ^ path)
+       in
+       let start_downloads ~session_id:_ ~websocket_url:_ =
+         Ok Masc.Browser_downloads.{
+           read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+           check=(fun () -> Ok ()); close=(fun () -> ())}
+       in
+       let driver = Driver.create ~start_downloads ~request () in
+       Browser_lane.install_automation_executor (Some (Driver.execute driver));
+       Fun.protect ~finally:(fun () ->
+         Browser_lane.install_automation_executor None;
+         ignore (Driver.close driver);
+         ignore (Msx_lane.eject ()))
        @@ fun () ->
+       List.iter (fun verb -> match Driver.execute driver verb with
+         | Browser_lane.Answered _ -> ()
+         | _ -> fail "browser producer fixture initialization failed")
+         [Browser_lane.Session_open {headless=Some true}; Browser_lane.Tabs_list];
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)
        ignore (Workspace.init config ~agent_name:None);

@@ -262,6 +262,9 @@ let all_surface_golden_names =
   ; "masc_msx_save"
   ; "masc_msx_screen"
   ; "masc_msx_step"
+  (* The existing settle action advances frames to a stable observation; record
+     its deliberate model-visible addition without increasing the byte ceiling. *)
+  ; "masc_msx_step_until_change"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_run_get"

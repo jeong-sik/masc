@@ -106,12 +106,15 @@ def validate_proposal(proposal, sources):
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
-        raise ValueError('Local model endpoint must not redirect')
+        return None  # Preserve the response without following the redirect.
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--context', type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--context', type=Path)
+    source.add_argument('--context-url')
+    parser.add_argument('--token-file', type=Path)
     parser.add_argument('--endpoint', required=True)
     parser.add_argument('--model', required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -121,11 +124,17 @@ def main():
         raise ValueError('This local curator requires a loopback Ollama endpoint')
     if endpoint.scheme not in ('http', 'https') or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in ('', '/'):
         raise ValueError('Provide a local HTTP(S) origin')
-    raw_context = args.context.read_bytes()
-    context = json.loads(raw_context)
-    sources, gaps, snapshots = collect(context)
+    if args.token_file and not args.context_url:
+        parser.error('--token-file requires --context-url')
+    if args.context_url:
+        source_url = urllib.parse.urlsplit(args.context_url)
+        if (source_url.scheme not in ('http', 'https') or source_url.username or source_url.password
+                or source_url.query or source_url.fragment
+                or source_url.path != '/api/v1/dashboard/workspace-memory-context'):
+            raise ValueError('Provide the local MASC workspace-memory-context endpoint without URL credentials')
+        if source_url.hostname != 'localhost' and not ipaddress.ip_address(source_url.hostname or '').is_loopback:
+            raise ValueError('Workspace context source must be loopback')
     args.output.mkdir(parents=True, exist_ok=False)
-    (args.output / 'context.json').write_bytes(raw_context)
     def save(name, value):
         target = args.output / name
         temporary = target.with_name(target.name + '.tmp')
@@ -143,7 +152,7 @@ def main():
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            if payload is not None and payload.get('stream') is True and response.status < 400:
+            if payload is not None and payload.get('stream') is True and response.status < 300:
                 save(f'{name}.http.json', {'status': response.status, 'url': response.url})
                 content, thinking = [], []
                 chunks = 0
@@ -180,14 +189,45 @@ def main():
             raw = response.read()
             (args.output / f'{name}.response.raw').write_bytes(raw)
             save(f'{name}.http.json', {'status': response.status, 'url': response.url})
-            if response.status >= 400:
+            if response.status >= 300:
                 raise ValueError(f'{path} returned HTTP {response.status}')
             return json.loads(raw)
     started = time.monotonic()
     receipt = {'started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'context_sha256': hashlib.sha256(raw_context).hexdigest(), 'model': args.model,
+        'context_source': {'kind': 'http', 'url': args.context_url} if args.context_url else {'kind': 'file'},
+        'model': args.model,
         'endpoint': args.endpoint, 'semantic_verification': 'not_performed', 'runtime_mutation': False}
     try:
+        if args.context_url:
+            headers = {'Accept': 'application/json'}
+            token = args.token_file.read_text().strip() if args.token_file else None
+            if args.token_file and (not token or any(character.isspace() for character in token)):
+                raise ValueError('Token file must contain one nonblank bearer credential')
+            if token:
+                headers['Authorization'] = 'Bearer ' + token
+            source_request = urllib.request.Request(args.context_url, headers=headers)
+            try:
+                source_response = opener.open(source_request)
+            except urllib.error.HTTPError as error:
+                source_response = error
+            with source_response:
+                raw_context = source_response.read()
+                # Refuse header echoes before persistence or model forwarding.
+                if token and token.encode() in raw_context:
+                    save('context.http.json', {'status': source_response.status,
+                        'url': args.context_url, 'body': 'withheld_credential_echo'})
+                    raise ValueError('Context response echoed the credential; body withheld')
+                (args.output / 'context.response.raw').write_bytes(raw_context)
+                save('context.http.json', {'status': source_response.status, 'url': args.context_url})
+                if not 200 <= source_response.status < 300:
+                    raise ValueError(f'Workspace context returned HTTP {source_response.status}')
+            del token, headers, source_request
+        else:
+            raw_context = args.context.read_bytes()
+        (args.output / 'context.json').write_bytes(raw_context)
+        receipt['context_sha256'] = hashlib.sha256(raw_context).hexdigest()
+        context = json.loads(raw_context)
+        sources, gaps, snapshots = collect(context)
         tags = request('/api/tags')
         save('models.json', tags)
         selected = [model for model in tags['models'] if model.get('name') == args.model]

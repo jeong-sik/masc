@@ -14,18 +14,30 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class CuratorScenario(unittest.TestCase):
-    def run_curator(self, proposal, context=None, response_fields=None, raw_response=None, http_status=200):
+    def run_curator(self, proposal, context=None, response_fields=None, raw_response=None, http_status=200, live_status=None, live_body=None):
+        observed = []
+        secret = 'test-only-private-bearer'
+        source_bytes = (ROOT / 'docs/evidence/2026-09-10-workspace-memory-curator/input.json').read_bytes() if live_body is None else live_body
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
 
             def do_GET(self):
+                observed.append((self.path, self.headers.get('Authorization')))
+                if self.path == '/api/v1/dashboard/workspace-memory-context':
+                    self.send_response(live_status)
+                    if live_status == 302:
+                        self.send_header('Location', '/credential-leak')
+                    self.end_headers()
+                    self.wfile.write(source_bytes)
+                    return
                 self.send_response(200)
                 self.end_headers()
                 value = {'models': [{'name': 'local-test', 'digest': 'fixture-digest'}]} if self.path == '/api/tags' else {'version': 'fixture'}
                 self.wfile.write(json.dumps(value).encode())
 
             def do_POST(self):
+                observed.append((self.path, self.headers.get('Authorization')))
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 assert request['model'] == 'local-test'
                 assert request['stream'] is True
@@ -45,19 +57,57 @@ class CuratorScenario(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
+                credential = Path(directory) / 'token'
+                credential.write_text(secret + '\n')
+                source_args = ['--context', str(context_path)] if live_status is None else [
+                    '--context-url', f'http://127.0.0.1:{server.server_port}/api/v1/dashboard/workspace-memory-context',
+                    '--token-file', str(credential)]
                 result = subprocess.run([sys.executable, str(ROOT / 'scripts/curate-workspace-memory.py'),
-                    '--context', str(context_path),
+                    *source_args,
                     '--endpoint', f'http://127.0.0.1:{server.server_port}', '--model', 'local-test',
                     '--output', str(output)], capture_output=True, text=True)
                 receipt = json.loads((output / 'receipt.json').read_text())
                 artifact = json.loads((output / 'proposal.json').read_text()) if (output / 'proposal.json').exists() else None
-                captured = json.loads((output / 'request.json').read_text())
+                captured = json.loads((output / 'request.json').read_text()) if (output / 'request.json').exists() else None
+                self.observed = observed
                 self.captures = {path.name: path.read_bytes() for path in output.iterdir()}
                 return result, receipt, artifact, captured
             finally:
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+    def test_authenticated_context_is_captured_and_credential_stays_at_source(self):
+        proposal = {'shared_claims': [], 'conflicts': [], 'excluded': [
+            {'source_id': f's{i}', 'reason': 'Review needed'} for i in range(1, 5)]}
+        result, receipt, artifact, _ = self.run_curator(proposal, live_status=200)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(artifact['proposal'], proposal)
+        self.assertEqual(receipt['context_source']['kind'], 'http')
+        self.assertEqual(self.captures['context.response.raw'], self.captures['context.json'])
+        self.assertEqual(self.observed[0], ('/api/v1/dashboard/workspace-memory-context', 'Bearer test-only-private-bearer'))
+        self.assertTrue(all(auth is None for _, auth in self.observed[1:]))
+        self.assertTrue(all(b'test-only-private-bearer' not in body for body in self.captures.values()))
+
+    def test_bad_source_never_calls_model_and_keeps_failure_evidence(self):
+        for status, body in [(401, b'Unauthorized'), (302, b'redirect'), (200, b'{"schema":"wrong"}')]:
+            with self.subTest(status=status, body=body):
+                result, receipt, artifact, _ = self.run_curator({}, live_status=status, live_body=body)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(receipt['status'], 'failed')
+                self.assertIsNone(artifact)
+                self.assertEqual(len(self.observed), 1)
+                self.assertEqual(self.captures['context.response.raw'], body)
+                self.assertEqual(json.loads(self.captures['context.http.json'])['status'], status)
+
+    def test_source_credential_echo_is_not_saved_or_forwarded(self):
+        result, receipt, artifact, _ = self.run_curator({}, live_status=200, live_body=b'test-only-private-bearer')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.observed), 1)
+        self.assertIsNone(artifact)
+        self.assertIn('body withheld', receipt['error'])
+        self.assertNotIn('context.response.raw', self.captures)
+        self.assertTrue(all(b'test-only-private-bearer' not in body for body in self.captures.values()))
 
     def test_proposal_preserves_revision_and_conflict_provenance(self):
         proposal = {'shared_claims': [{'claim': 'Analyst corrected M to 21 seconds.', 'source_ids': ['s3', 's4']}],

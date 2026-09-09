@@ -2195,7 +2195,6 @@
 
 (include stanzas/test_slack_connector_config.inc)
 
-(include stanzas/test_slack_read_tool.inc)
 
 (include stanzas/test_msx_tools.inc)
 

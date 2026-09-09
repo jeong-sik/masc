@@ -34,8 +34,6 @@ val control_schema : control_operation -> Masc_domain.tool_schema
 val control_schemas : Masc_domain.tool_schema list
 (** Canonical control schemas used by registration. *)
 
-val slack_read_schema : Masc_domain.tool_schema
-
 val msx_schemas : Masc_domain.tool_schema list
 (** MSX lane tools (RFC-0439 §3.5): load, eject, screen, press, step. *)
 val web_search_schema : Masc_domain.tool_schema
@@ -105,7 +103,6 @@ type misc_operation =
   | Misc_browser_goto
   | Misc_browser_act
   | Misc_browser_interact
-  | Misc_slack_read
   | Misc_msx_load
   | Misc_msx_eject
   | Misc_msx_save

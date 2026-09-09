@@ -271,7 +271,6 @@ let all_surface_golden_names =
   ; "masc_schedule_get"
   ; "masc_schedule_list"
   ; "masc_schedule_update"
-  ; "masc_slack_read"
   ; "masc_task_history"
   ; "masc_task_set_goal"
   ]

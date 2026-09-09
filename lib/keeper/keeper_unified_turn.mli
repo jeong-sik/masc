@@ -197,10 +197,17 @@ val hitl_replay_yield_request
 val continuation_channel_of_wake :
   Keeper_registry.wake_reason -> Keeper_continuation_channel.t option
 (** The channel a turn woken by [wake] continues on: a single payload's
-    routable channel, or for a batch (RFC-0377, one connector conversation's
-    backlog) the newest member's channel when every member is the same
-    conversation. [None] for an empty wake, a proactive tick, a chat request,
-    an unroutable payload, or a batch spanning conversations. *)
+    routable channel, or for a batch (RFC-0377) the last member's channel when
+    every member has a routable channel and all are the same conversation
+    ([Keeper_continuation_channel.same_conversation]). Intake orders the wake
+    by the queue's urgency-stable order, not arrival, so "last" is not
+    "latest"; the members agree on the conversation, so the choice decides
+    only which member's per-message stamps a reply inherits. The result feeds
+    [Keeper_surface_post] defaults (an omitted [channel_id], Slack
+    [thread_ts]) exactly as a single-payload wake's channel does. [None] for
+    an empty wake, a proactive tick, a chat request, an unroutable payload, a
+    batch with a member lacking a routable channel, or a batch spanning
+    conversations. *)
 
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)

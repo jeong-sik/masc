@@ -455,7 +455,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
       ~started_at:2.0;
     let result =
-      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
+      Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
         ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
     in
     check bool "emit succeeds" true (Result.is_ok result);
@@ -559,7 +559,7 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
     let replay =
-      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+      Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
         ~judge_usage ~tool_trace
     in
@@ -587,7 +587,7 @@ let test_emit_success_projects_board_chat_and_registry () =
             ~base_path:base_dir
             ~keeper_name:keeper));
     let conflicting_replay =
-      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+      Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question:(question ^ " changed") ~panel
         ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
     in
@@ -958,11 +958,24 @@ let test_completion_stimulus_persists_without_live_registry () =
     | None -> fail "completion stimulus must persist without a live registry entry")
 ;;
 
-let test_tool_handle_async_success_projects_running_then_completed () =
+let test_tool_handle_async_success_projects_running_then_completed ?(with_context=false) () =
   with_isolated_eio_base_path "fusion-tool-async-success"
     (fun env sw base_dir registry ->
     let keeper = "fusion-tool-keeper" in
     let question = "Which async fusion path should ship?" in
+    let config = Workspace.default_config base_dir in
+    let source_context = if not with_context then None else (
+      ignore (Workspace.init config ~agent_name:(Some keeper));
+      let goal, _ = Goal_store.upsert_goal config ~title:"Choose async delivery" ~metric:"durable replies" ~target_value:"1" () |> Result.get_ok in
+      let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
+        ~title:"Compare paths" ~priority:2 ~description:"Keep the original request bound" |> Result.get_ok in
+      Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id () |> Result.get_ok |> ignore;
+      Some (Fusion_request_context.capture ~config ~keeper
+        ~turn_ref:(Some (Ids.Turn_ref.make ~trace_id:"originating-fusion-turn" ~absolute_turn:19))
+        ~args:(`Assoc ["prompt", `String question; "task_id", `String task.task_id;
+          "decision_context", `String "Candidate B preserves restart evidence; compare against A"])
+        |> Result.get_ok)) in
+    let actual_prompt = match source_context with None -> question | Some context -> Fusion_request_context.render context in
     let resolved_answer = "Ship the async handler path with typed sink evidence." in
     let panel_usage = { Fusion_types.input_tokens = 23; output_tokens = 29 } in
     let judge_usage = { Fusion_types.input_tokens = 31; output_tokens = 37 } in
@@ -982,10 +995,11 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     in
     let release_promise, resolve_release = Eio.Promise.create () in
     let computed_promise, resolve_computed = Eio.Promise.create () in
-    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~request:_ () =
+    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~(request : Fusion_types.fusion_request) () =
+      check string "actual computation receives captured work context" actual_prompt request.prompt;
       Eio.Promise.await release_promise;
       let evidence : Fusion_types.deliberation_evidence =
-        { question
+        { question = actual_prompt
         ; panel
         ; judge = Ok synthesis
         ; judges
@@ -997,7 +1011,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       Fusion_orchestrator.Computed evidence
     in
     let response =
-      Fusion_tool.For_test.handle_with_compute ~compute ~sw
+      Fusion_tool.For_test.handle_with_compute ~compute ~sw ?source_context
         ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0
         ~policy:(fusion_tool_policy ()) ~registry
         ~args:(`Assoc [ ("prompt", `String question) ])
@@ -1011,6 +1025,11 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     check string "handle response status" "fusion_started"
       (string_field "fusion_tool.response" response_fields "status");
     let run_id = string_field "fusion_tool.response" response_fields "run_id" in
+    let retained = Fusion_delivery_obligation.load ~base_path:base_dir
+      ~request_id:(Keeper_chat_delivery_identity.Request_id.of_string run_id |> Result.get_ok) |> Result.get_ok in
+    check bool "accepted durable request retains the same source context" true
+      (Option.map Fusion_request_context.to_yojson retained.payload.source_context
+       = Option.map Fusion_request_context.to_yojson source_context);
     check bool "delivery tells keeper not to poll" true
       (contains
          ~needle:"No need to poll masc_fusion_status"
@@ -1038,6 +1057,14 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       | Some post -> post
       | None -> fail "background success should create a board post indexed by run_id"
     in
+    (match source_context with
+     | None -> ()
+     | Some context ->
+       let meta = match post.meta_json with Some json -> json | None -> fail "context evidence absent" in
+       check bool "durable Board evidence preserves exact input snapshot" true
+         (Yojson.Safe.Util.member "source_context" meta = Fusion_request_context.to_yojson context);
+       check bool "original turn reaches durable typed origin" true
+         (match post.origin with Some origin -> origin.turn_ref = Fusion_request_context.turn_ref context | None -> false));
     let post_id = Board.Post_id.to_string post.id in
     (match post.origin with
      | Some origin ->
@@ -1155,7 +1182,9 @@ let () =
         ; test_case
             "tool handle returns Running then async success projects evidence"
             `Quick
-            test_tool_handle_async_success_projects_running_then_completed
+            (test_tool_handle_async_success_projects_running_then_completed ~with_context:false)
+        ; test_case "actual Fusion request and durable result share Task Goal turn context" `Quick
+            (test_tool_handle_async_success_projects_running_then_completed ~with_context:true)
         ; test_case
             "scheduled wake is actionable (non-empty, carries message)"
             `Quick

@@ -473,6 +473,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_masc_fusion_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?gate_context:ctx.gate_context
          ?continuation_channel:ctx.continuation_channel
          ~args
          ())

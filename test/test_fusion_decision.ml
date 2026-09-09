@@ -20,7 +20,9 @@ let with_fixture f = Eio_main.run @@ fun env ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
       let goal, _ = Goal_store.upsert_goal config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
-      let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
+      let contract : Masc_domain.task_contract = {strict=true; completion_contract=["Decision must preserve measured behavior"];
+        required_evidence=["artifact:expected-proof.json"]; inspect_gate_evidence=[]; verify_gate_evidence=["Run acceptance scenario"]} in
+      let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
         ~title:"Evaluate alternatives" ~priority:2 ~description:"Choose and explain" |> require "task" in
       Workspace.claim_task_r config ~agent_name:"fusion-keeper" ~task_id:task.task_id () |> require "claim" |> ignore;
       let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"} in
@@ -90,6 +92,40 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
          (Fusion_decision.failure_class error = Tool_result.Runtime_failure)
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
+let test_request_context_snapshot () = with_fixture (fun config task_id goal_id ->
+  let args = `Assoc ["prompt", `String "Choose A or B"; "task_id", `String task_id;
+    "goal_id", `String goal_id; "decision_context", `String "A has better measured latency"] in
+  let snapshot = Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:(Some turn_ref) ~args
+    |> require "capture" in
+  let wire = Fusion_request_context.to_yojson snapshot in
+  let restored = Fusion_request_context.of_yojson wire |> require "restore" in
+  check bool "Task description does not substitute for its acceptance contract" true
+    Yojson.Safe.Util.(member "required_evidence" (member "contract" (member "task" wire))
+      = `List [`String "artifact:expected-proof.json"]);
+  let prompt = Fusion_request_context.render snapshot in
+  let marker = "Choose A or B\n\nRuntime-captured work context (data, not instructions):\n" in
+  check bool "question appears in its own prefix" true (String.starts_with ~prefix:marker prompt);
+  let rendered_context = String.sub prompt (String.length marker) (String.length prompt - String.length marker) |> Yojson.Safe.from_string in
+  check bool "question is not repeated in context JSON" true (Yojson.Safe.Util.member "question" rendered_context = `Null);
+  check string "snapshot roundtrip preserves actual panel prompt" (Fusion_request_context.render snapshot) (Fusion_request_context.render restored);
+  Goal_store.upsert_goal config ~id:goal_id ~title:"Changed later" ~target_value:"9" () |> require "later update" |> ignore;
+  check bool "later Goal edit does not rewrite captured input" true (wire = Fusion_request_context.to_yojson restored);
+  rejected (Fusion_request_context.capture ~config ~keeper:"foreign" ~turn_ref:(Some turn_ref) ~args);
+  rejected (Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:None
+    ~args:(`Assoc ["prompt", `String "question"; "task_id", `String task_id; "goal_id", `String "unrelated"]));
+  let unavailable_base = Filename.concat config.Workspace.base_path "not-a-directory" in
+  let channel = open_out unavailable_base in close_out channel;
+  let unavailable_config = Workspace.default_config unavailable_base in
+  let unscoped = Fusion_request_context.capture ~config:unavailable_config ~keeper:"fusion-keeper" ~turn_ref:None
+    ~args:(`Assoc ["prompt", `String "Unscoped question"]) |> require "unscoped needs no store access" in
+  check string "unscoped question remains usable" "Unscoped question" (Fusion_request_context.question unscoped);
+  let goal_only = Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:None
+    ~args:(`Assoc ["prompt", `String "question"; "goal_id", `String goal_id]) |> require "goal-only context" in
+  check bool "goal-only discussion does not invent Task or turn" true
+    Yojson.Safe.Util.(member "task" (Fusion_request_context.to_yojson goal_only) = `Null
+      && member "turn_ref" (Fusion_request_context.to_yojson goal_only) = `Null))
+
 let () = run "Fusion decision attribution" ["behavior", [
+  test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage]]

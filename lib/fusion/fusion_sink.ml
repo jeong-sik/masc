@@ -513,7 +513,7 @@ let delivery_key_of_run_id run_id =
     Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
 ;;
 
-let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
+let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
       ~judge_usage ~(tool_trace : Fusion_types.tool_trace) :
     (unit, string) result =
   let ( let* ) = Result.bind in
@@ -580,7 +580,9 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
     let meta_json =
       Some
         (`Assoc
-           ([ ("question", `String question)
+           ([ ("source_context", (match source_context with None -> `Null | Some context -> Fusion_request_context.to_yojson context))
+            ; ("question", `String (match source_context with None -> question | Some context -> Fusion_request_context.question context))
+            ; ("model_prompt", `String question)
            ; ("started_at", `Float started_at)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
@@ -599,11 +601,11 @@ let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~j
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
     (* RFC-0233 §7: typed origin. [fusion_run_id] is the sole run identity and
-       indexes [posts_by_run_id]. [turn_ref = None]: fusion is an out-of-band
-       server-root-switch fork, so the triggering keeper's turn_ref is not in
-       this scope; threading it through [fusion_request] is a separate change. *)
+       indexes [posts_by_run_id]. The optional source context carries the
+       actual originating turn across the server-root-switch fork. Unattributed
+       requests keep [None]; no turn is reconstructed at publication time. *)
     let origin : Board.post_origin =
-      { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
+      { turn_ref = Option.bind source_context Fusion_request_context.turn_ref; source = Some "fusion"; fusion_run_id = Some run_id }
     in
     let* board_result =
       match

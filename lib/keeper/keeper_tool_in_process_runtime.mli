@@ -365,6 +365,7 @@ val handle_masc_schedule_with_outcome
 val handle_masc_fusion_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> args:Yojson.Safe.t
   -> unit

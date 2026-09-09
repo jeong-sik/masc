@@ -1894,7 +1894,11 @@ let test_sandbox_image_persistence () =
     let parsed = match parse_stating_a_profile ctx (`Assoc (("name", `String name) :: fields)) with
       | Ok parsed -> parsed
       | Error result -> fail (Keeper_types_profile.tool_result_body result) in
-    let meta = { meta with sandbox_image = parsed.profile_defaults.sandbox_image } in
+    let instructions = match parsed.instructions_opt with
+      | Some instructions -> instructions
+      | None -> fail "image fixture did not resolve Keeper instructions" in
+    let meta = { meta with instructions;
+      sandbox_image = parsed.profile_defaults.sandbox_image } in
     (match Keeper_turn_up_config_persistence.persist
        ~expected_revision:(current_revision_exn ctx.config name)
        ~config:ctx.config ~parsed ~meta () with

@@ -91,7 +91,14 @@ let rec reap_group t owner set_exit_status =
            | Running | Killed -> ());
           if not (exited_without_reaping t.pid) then None
           else (
-            kill_group t Sys.sigkill;
+            (* [Killed] records an already successful whole-group SIGKILL.
+               Repeating it after exit can fail on Darwin's zombie-only group.
+               Normal completion still kills descendants before PID release. *)
+            (match owner.phase with
+             | Killed -> ()
+             | Running | Terminating _ ->
+               kill_group t Sys.sigkill;
+               owner.phase <- Killed);
             let reaped, status = Unix.waitpid [ WNOHANG ] t.pid in
             assert (reaped = t.pid);
             Promise.resolve set_exit_status status;

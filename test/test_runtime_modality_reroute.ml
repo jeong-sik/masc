@@ -663,12 +663,96 @@ max-request-body-bytes = 65536
     check bool "native image declaration remains effective" true native_caps.supports_image_input;
     check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
 
+(* RFC-0440 — the media candidate set is one ordered, id-unique list: the lane
+   first, then [runtime.media_failover] resolved in declared order (ids that
+   resolve to nothing are skipped), then the remaining declared runtimes. No
+   capability filter: a text-only lane candidate stays in the set and the
+   reroute decision passes over it. *)
+let test_media_candidates_order_dedupe_and_reroute () =
+  let fixture =
+    {|[runtime]
+default = "fixture.vision"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.vision]
+api-name = "vision"
+max-context = 4096
+[models.vision.capabilities]
+supports-image-input = true
+[fixture.vision]
+|}
+  in
+  let path = Filename.temp_file "media-candidates-" ".toml" in
+  let channel = open_out_bin path in
+  output_string channel fixture;
+  close_out channel;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let native =
+      match Runtime.load_list ~config_path:path with
+      | Ok (_, runtime, _, _, _) -> runtime
+      | Error error -> fail error
+    in
+    let vision id = { native with Runtime.id } in
+    let text =
+      { native with
+        Runtime.id = "fixture.text"
+      ; model = { native.Runtime.model with Runtime_schema.capabilities = None }
+      }
+    in
+    let a = vision "fixture.a" in
+    let b = vision "fixture.b" in
+    let c = vision "fixture.c" in
+    let d = vision "fixture.d" in
+    let ids = List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) in
+    let runtimes = [ text; a; b; c; d ] in
+    let media_failover = [ "fixture.c"; "fixture.missing"; "fixture.a" ] in
+    let candidates ~lane =
+      Runtime_agent.media_candidates_of ~lane ~runtimes ~media_failover
+    in
+    check (list string)
+      "lane, then media_failover, then the rest; ids unique"
+      [ "fixture.d"; "fixture.text"; "fixture.c"; "fixture.a"; "fixture.b" ]
+      (ids (candidates ~lane:[ d; text ]));
+    check (list string)
+      "no lane: media_failover leads, an unresolved id is skipped"
+      [ "fixture.c"; "fixture.a"; "fixture.text"; "fixture.b"; "fixture.d" ]
+      (ids (candidates ~lane:[]));
+    check (list string)
+      "no media_failover: declaration order"
+      [ "fixture.text"; "fixture.a"; "fixture.b"; "fixture.c"; "fixture.d" ]
+      (ids
+         (Runtime_agent.media_candidates_of ~lane:[] ~runtimes
+            ~media_failover:[]));
+    let image =
+      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    in
+    let target ~lane =
+      match
+        Runtime_agent.decide_modality_reroute_for_runtime_candidates
+          ~assigned:text ~candidates:(candidates ~lane) [ image ]
+      with
+      | Runtime_agent.Reroute { target; _ } -> target.Runtime.id
+      | Runtime_agent.No_reroute_needed ->
+        fail "a text-only head must reroute an image turn"
+      | Runtime_agent.No_capable_runtime _ ->
+        fail "the set holds an image-capable runtime"
+    in
+    check string "a capable lane candidate precedes media_failover" "fixture.d"
+      (target ~lane:[ d; text ]);
+    check string "a lane with no capable candidate reaches media_failover"
+      "fixture.c" (target ~lane:[ text ]);
+    check string "an empty lane reaches media_failover" "fixture.c"
+      (target ~lane:[]))
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
       , [ test_case "text turn no reroute" `Quick test_text_turn_no_reroute
         ; test_case "official transport constrains advertised model media" `Quick
             test_official_transport_caps_override_model_media_declarations
+        ; test_case "media candidates: lane, media_failover, rest, deduped" `Quick
+            test_media_candidates_order_dedupe_and_reroute
         ; test_case "image on capable no reroute" `Quick
             test_image_turn_on_capable_no_reroute
         ; test_case "reroute to first capable" `Quick

@@ -86,25 +86,13 @@ let vision_runtime_candidates ()
      re-derive this from [supports_image_input] / [supports_multimodal_inputs]
      here: the SSOT admits "image" on [supports_image_input] alone, and the
      modality reroute, the capability gate, and this vision pick must share one
-     predicate or a vision pick can land on a runtime the gate then rejects. *)
-  let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
-  let by_id id =
-    List.find_opt (fun (rt : Runtime.t) -> String.equal rt.Runtime.id id) runtimes
-  in
-  let from_failover = List.filter_map by_id media_failover in
-  let rest =
-    List.filter
-      (fun (rt : Runtime.t) -> not (List.mem rt.Runtime.id media_failover))
-      runtimes
-  in
-  let rec unique_runtimes seen = function
-    | [] -> []
-    | (rt : Runtime.t) :: rest ->
-      if List.mem rt.id seen then unique_runtimes seen rest
-      else rt :: unique_runtimes (rt.id :: seen) rest
-  in
-  from_failover @ rest
-  |> unique_runtimes []
+     predicate or a vision pick can land on a runtime the gate then rejects.
+     The candidate order is the RFC-0440 set the keeper reroute walks
+     ([Runtime_agent.media_candidates] with no lane: [runtime.media_failover]
+     first, then the remaining declared runtimes). Only [Agent_core] runtimes
+     qualify here because this tool calls the provider itself; an official
+     client carries inline images for the reroute but has no provider config. *)
+  Runtime_agent.media_candidates ~lane:[]
   |> List.filter_map (fun (rt : Runtime.t) ->
        match rt.Runtime.execution with
        | Runtime_execution.Codex_app_server _

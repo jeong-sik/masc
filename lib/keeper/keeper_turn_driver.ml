@@ -565,11 +565,22 @@ let dedupe_runtimes_preserve_order runtimes =
   in
   loop [] [] runtimes
 
+(* RFC-0440: a live lane reroutes over its remaining candidates, then
+   [runtime.media_failover], then the other declared runtimes, so an image turn
+   on a lane whose capable head is down reaches a capable runtime declared
+   elsewhere. A deferred lane offers no candidates: its walk dispatches the
+   frozen suffix ([lane_candidate_ids] in [run_agent_turn]), so a decision that
+   moved the head would be recorded as a reroute the walk never performs. *)
+let modality_reroute_candidates ~deferred_runtime_lane ~remaining_runtimes =
+  match deferred_runtime_lane with
+  | Some _ -> []
+  | None -> Runtime_agent.media_candidates ~lane:remaining_runtimes
+
 let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
-    ~goal_blocks ~first_candidate ~remaining_runtimes =
+    ~goal_blocks ~first_candidate ~candidates =
   Runtime_agent.decide_modality_reroute_for_runtime_candidates
     ~assigned:first_candidate
-    ~candidates:remaining_runtimes
+    ~candidates
     ~checkpoint_messages
     ~initial_messages
     goal_blocks
@@ -1025,8 +1036,8 @@ let run_named
   in
   (* This decision orders the walk: a [Reroute] moves a capable candidate to
      the head and drops the assigned one. On a deferred lane the suffix order
-     was frozen before pre-dispatch shaping, so [remaining_runtimes] is [[]]
-     above and the decision can only be [No_reroute_needed] or
+     was frozen before pre-dispatch shaping, so [modality_reroute_candidates]
+     is [[]] and the decision can only be [No_reroute_needed] or
      [No_capable_runtime], neither of which moves the head. The media degrade
      itself is not decided here for any lane: every attempt projects the input
      against the runtime it dispatches to ([project_input_for_attempt] inside
@@ -1039,7 +1050,8 @@ let run_named
       ~initial_messages
       ~goal_blocks:current_goal_blocks
       ~first_candidate
-      ~remaining_runtimes
+      ~candidates:
+        (modality_reroute_candidates ~deferred_runtime_lane ~remaining_runtimes)
   in
   let first_runtime =
     snd
@@ -1745,6 +1757,7 @@ module For_testing = struct
   let first_runtime_after_modality_reroute =
     first_runtime_after_modality_reroute
 
+  let modality_reroute_candidates = modality_reroute_candidates
   let lane_modality_reroute_decision = lane_modality_reroute_decision
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
   let resolve_runtime_candidates = resolve_runtime_candidates

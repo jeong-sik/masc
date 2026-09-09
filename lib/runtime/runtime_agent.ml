@@ -751,6 +751,35 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
        ~default:Runtime_schema.model_capabilities_default)
   |> apply_execution_input_capabilities rt.execution
 
+(* RFC-0440: one candidate set for every media consumer. The keeper reroute
+   (RFC-0265) used to see only the lane it dispatched on and the vision tool
+   only [runtime.media_failover]; a lane whose one image-capable head was down
+   therefore dropped the image while a capable runtime sat unused in
+   [media_failover]. Order: the lane's own candidates first (the operator's
+   preference for this keeper), then [runtime.media_failover] in declared
+   order, then every other declared runtime in declaration order. Ids are
+   unique, first occurrence wins. No capability or execution filter here: the
+   reroute filters by the modalities the turn actually requires, and the
+   vision tool narrows to [Agent_core] because it calls the provider itself. *)
+let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
+    ~(media_failover : string list) : Runtime.t list =
+  let by_id id =
+    List.find_opt
+      (fun (runtime : Runtime.t) -> String.equal runtime.Runtime.id id)
+      runtimes
+  in
+  let rec dedupe seen = function
+    | [] -> []
+    | (runtime : Runtime.t) :: rest ->
+      if List.mem runtime.Runtime.id seen then dedupe seen rest
+      else runtime :: dedupe (runtime.Runtime.id :: seen) rest
+  in
+  dedupe [] (List.concat [ lane; List.filter_map by_id media_failover; runtimes ])
+
+let media_candidates ~lane =
+  let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
+  media_candidates_of ~lane ~runtimes ~media_failover
+
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
     ~(config : config)

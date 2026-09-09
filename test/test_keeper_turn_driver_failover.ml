@@ -824,7 +824,7 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
           ~initial_messages:[]
           ~goal_blocks:[ image_block ]
           ~first_candidate
-          ~remaining_runtimes
+          ~candidates:remaining_runtimes
       in
       (match decision_for_image with
        | Runtime_agent.No_capable_runtime { required } ->
@@ -1501,7 +1501,7 @@ let test_text_official_client_history_stays_admissible () =
        Alcotest.fail "expected exactly one checkpoint_not_replayed row");
     ())
 
-let test_lane_media_reroute_stays_within_lane () =
+let test_lane_media_reroute_prefers_lane_candidate () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     match Runtime.resolve_assignment "resilient" with
     | `Missing | `Unavailable _ ->
@@ -1538,17 +1538,74 @@ let test_lane_media_reroute_stays_within_lane () =
           ~initial_messages:[]
           ~goal_blocks:[ image_block ]
           ~first_candidate
-          ~remaining_runtimes
+          ~candidates:
+            (Driver.For_testing.modality_reroute_candidates
+               ~deferred_runtime_lane:None
+               ~remaining_runtimes)
       with
       | Runtime_agent.Reroute { target; _ } ->
         Alcotest.(check string)
-          "reroute uses lane candidate, not global media_failover"
+          "a capable lane candidate precedes global media_failover"
           "lanevision.vision_model"
           target.Runtime.id
       | Runtime_agent.No_reroute_needed ->
         Alcotest.fail "text-only first candidate should require image reroute"
       | Runtime_agent.No_capable_runtime _ ->
         Alcotest.fail "lane second candidate should be image-capable")
+
+(* RFC-0440: a lane whose remaining candidates cannot take the image reroutes
+   to [runtime.media_failover]; a deferred lane offers no candidates, because
+   its walk dispatches the frozen suffix and would never perform the move. *)
+let test_lane_media_reroute_reaches_media_failover () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id =
+      match Runtime.get_runtime_by_id id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" id
+    in
+    let image_block =
+      Agent_core.Types.Image
+        { media_type = "image/png"
+        ; data = Base64.encode_string "image"
+        ; source_type = Agent_core.Types.Base64
+        }
+    in
+    (match
+       Driver.For_testing.lane_modality_reroute_decision
+         ~checkpoint_messages:[]
+         ~initial_messages:[]
+         ~goal_blocks:[ image_block ]
+         ~first_candidate:(runtime "primary.text_model")
+         ~candidates:
+           (Driver.For_testing.modality_reroute_candidates
+              ~deferred_runtime_lane:None
+              ~remaining_runtimes:[])
+     with
+     | Runtime_agent.Reroute { target; _ } ->
+       Alcotest.(check string)
+         "a lane with no capable candidate reroutes to media_failover"
+         "outsidevision.vision_model"
+         target.Runtime.id
+     | Runtime_agent.No_reroute_needed ->
+       Alcotest.fail "a text-only head must reroute an image turn"
+     | Runtime_agent.No_capable_runtime _ ->
+       Alcotest.fail "media_failover holds an image-capable runtime");
+    let deferred =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"resilient"
+        ~failed_runtime_id:"primary.text_model"
+        ~next_runtime_id:"lanevision.vision_model"
+        ~later_runtime_ids:[]
+        ~failure:(retryable_network_error "previous cycle failed")
+    in
+    Alcotest.(check (list string))
+      "a deferred lane offers no reroute candidates"
+      []
+      (List.map
+         (fun (runtime : Runtime.t) -> runtime.Runtime.id)
+         (Driver.For_testing.modality_reroute_candidates
+            ~deferred_runtime_lane:(Some deferred)
+            ~remaining_runtimes:[ runtime "lanevision.vision_model" ])))
 
 let test_runtime_dedupe_preserves_first_occurrence () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
@@ -3160,9 +3217,13 @@ let () =
             `Quick
             test_text_official_client_history_stays_admissible;
           Alcotest.test_case
-            "lane media reroute stays within lane"
+            "lane media reroute prefers a lane candidate"
             `Quick
-            test_lane_media_reroute_stays_within_lane;
+            test_lane_media_reroute_prefers_lane_candidate;
+          Alcotest.test_case
+            "lane media reroute reaches media_failover"
+            `Quick
+            test_lane_media_reroute_reaches_media_failover;
           Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick

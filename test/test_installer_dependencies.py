@@ -66,6 +66,19 @@ class PortableBootstrap(unittest.TestCase):
         self.assertGreater(len(marker.read_text().splitlines()), 1)
         self.assertIn('[dry-run] would install verified binary/dashboard bundle', result.stdout)
 
+    def test_dry_run_upgrades_stable_release_without_usable_python(self):
+        binary = self.fixture.prefix / 'masc'
+        old_bytes = b'#!/bin/sh\necho 0.34.0\n'
+        binary.write_bytes(old_bytes)
+        binary.chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v0.35.1',
+                                     '--no-wizard', '--no-seed', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('from 0.34.0 to 0.35.1; preserving workspace config', result.stdout)
+        self.assertIn('[dry-run] would download to', result.stdout)
+        self.assertEqual(binary.read_bytes(), old_bytes)
+        self.assertFalse((self.fixture.root / 'workspace').exists())
+
     def test_dry_run_preserves_version_conflict(self):
         self.fixture.old()
         result = self.run_installer(['--dry-run', '--version', 'v9.9.9', '--no-wizard'])

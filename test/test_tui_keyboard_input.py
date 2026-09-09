@@ -11650,6 +11650,13 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             ],
         },
     )
+    fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+        200,
+        {"status": "found", "schedule_id": "schedule-proof-701",
+         "wakes": [{"status": "succeeded", "started_at_iso": "2026-08-25T09:30:00Z",
+                    "finished_at_iso": "2026-08-25T09:30:01Z", "error": None}],
+         "wake_retention_per_schedule": 32},
+    )
     return fixtures
 
 
@@ -11707,26 +11714,46 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
         )
         evidence = send_and_wait(
-            process, master_fd, output, b"\x1b[6~", b"matched_pending"
+            process, master_fd, output, b"\x1b[6~", b"WAKES (1 retained"
         )
         evidence_plain = CSI_RE.sub(b"", evidence)
         for needle in (
-            b"LAST WAKE",
+            b"WAKES (1 retained, ceiling 32 per schedule)",
             b"DELIVERY EVIDENCE",
             b"pending=2",
             b"matched_consumed_ack",
+        ):
+            if needle not in evidence_plain:
+                raise AssertionError(
+                    f"Schedule wake/delivery page omitted {needle!r}: {evidence_plain!r}"
+                )
+        # Delivery identity and the work-result boundary follow the queue
+        # summary. Read their page rather than treating one viewport as all
+        # retained evidence; the operator can reach both with PgDn.
+        result_page = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"Keeper Calls or Activity"
+        )
+        result_plain = CSI_RE.sub(b"", result_page)
+        for needle in (
+            b"Keeper evidence",
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
             b"2026-08-25T09:30:20",
-            b"no schedule-to-tool/result join",
-            b"Keeper Calls or Acting",
+            b"Turn finished",
+            b"WORK RESULT",
+            b"bounded by its start and finish rows",
+            b"Keeper Calls or Activity",
         ):
-            if needle not in evidence_plain:
+            if needle not in result_plain:
                 raise AssertionError(
-                    f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
+                    f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
+        returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
+        returned_plain = CSI_RE.sub(b"", returned)
+        for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
+            if needle not in returned_plain:
+                raise AssertionError(f"Left did not restore the selected Schedule row: {returned_plain!r}")
         # The harness is 100 columns wide. Padding the id to a reserved width
         # used to push the instruction tail past the box border, so require
         # the words an operator needs to press the key a second time.

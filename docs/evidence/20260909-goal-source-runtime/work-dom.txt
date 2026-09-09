@@ -1,0 +1,58 @@
+Skip to main content
+작업
+0 실행 가능
+✓ 정상
+◷ 예약
+Connected
+Client WS · silent
+Verified @dashboard · admin
+Chat
+⌘J
+v0.34.0 · 9174a4f208
+Tweaks
+지금 보고 있는 대시보드가 서버보다 낡았습니다 (번들 18:34 < 서버 18:45) — 새 기능이 화면에 없을 수 있어요. cd dashboard && pnpm run build 후 새로고침
+M
+WORK
+PLANS & GOALS
+REPOSITORIES
+VERIFICATION
+GOAL STORE
+작업 · 목표
+
+Goals · Tasks · Keepers · 우선순위와 검증 상태
+
+리스트
+칸반
+검증
+＋ 새 목표
+목표 데이터를 읽을 수 없습니다 · goal_of_yojson: criterion_revision must be a non-blank string; goal_of_yojson: criterion_revision must be a non-blank string
+활성 목표
+—
+전체 작업
+0
+진행 중
+0
+검증 대기
+0
+백로그
+0
+목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 백로그에서 claim
+운영 상태
+목표 확인 불가
+»
+진행
+0
+검증
+0
+백로그
+0
+할 일
+0
+지금 상황
+목표 상태 확인 불가 · goal_of_yojson: criterion_revision must be a non-blank string; goal_of_yojson: criterion_revision must be a non-blank string
+해야 할 일
+대기 중인 작업 없음
+최근 한 일
+완료된 task 없음
+Chat
+목표 데이터를 일부 불러오지 못했습니다

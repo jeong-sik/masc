@@ -19,3 +19,11 @@ turn-record string fields did not contain the complete inserted section; this
 does not establish its absence from provider input, which may be stored by
 reference. Actual subsequent input admission and autonomous behavior remain
 unverified. No Keeper was restarted or force-woken for this observation.
+
+A later observation (`admitted-prompt.json`) joins the saved code-reviewer
+agent-core system prompt to the turn-record keeper_instructions block by exact
+SHA-256 and byte count. That saved system prompt contains the entire inserted
+section. This establishes its presence in the measured agent input for that
+record, beyond registry display. It does not prove the Keeper followed the
+instructions or completed any autonomy/Fusion/delegation scenario. Full private
+conversation snapshots are not copied into this public evidence directory.

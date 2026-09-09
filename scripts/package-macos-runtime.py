@@ -121,6 +121,25 @@ def audit_macho_tree(stage):
         run('codesign', '--force', '--sign', '-', str(binary))
         run('codesign', '--verify', '--strict', str(binary))
 
+
+def publish_binary(source, destination):
+    # Dune-derived distribution files can be read-only. Prepare a new inode in
+    # the destination filesystem; replacing its directory entry neither writes
+    # the previous file nor follows a previous symlink.
+    descriptor, name = tempfile.mkstemp(prefix='.' + destination.name + '-', dir=destination.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'wb') as output:
+            with source.open('rb') as input_file:
+                shutil.copyfileobj(input_file, output)
+            output.flush()
+            os.fchmod(output.fileno(), source.stat().st_mode & 0o777)
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def package(dist, stage, platform, commit, lock_path):
     if stage.exists():
         raise ValueError('runtime stage must be new')
@@ -215,7 +234,7 @@ def package(dist, stage, platform, commit, lock_path):
                 info.size, info.mode, info.mtime = len(data), path.stat().st_mode & 0o777, 0
                 output.addfile(info, io.BytesIO(data))
     for name in NAMES:
-        shutil.copy2(stage / name, dist / (name + '-' + platform))
+        publish_binary(stage / name, dist / (name + '-' + platform))
 
 
 if __name__ == '__main__':

@@ -142,3 +142,15 @@ unavailable, the wheel also uses the center and the footer shows `wheel:center`.
 The automation lane sends native browser wheel input; the live lane finds the
 scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
 same tab again.
+
+`v` lists the page's observed semantic regions -- `main`, `navigation`,
+`region`, `article`. `n`/`p` selects a region; Enter reads only that region's
+content, and `r` re-reads the same region. Pressing `v` again returns to the
+region list. A stale reference is rejected once the region is replaced or the
+page reloads. A connector that does not support region reading and returns
+the whole page instead is not treated as success.
+
+Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
+observed from `BrowserRead mode=regions` as `scope`. This path selects an
+actually observed region rather than guessing a CSS path. It returns
+per-region viewport/DOM content, not a channel-wide history collection.

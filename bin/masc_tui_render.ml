@@ -13811,7 +13811,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -13819,6 +13819,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()

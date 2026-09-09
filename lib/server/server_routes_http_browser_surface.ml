@@ -49,9 +49,7 @@ let add_routes router =
            Result.bind (Browser_surface.parse_request json) Browser_surface.read)))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/scene"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
-         read_body request reqd (fun json ->
-           Result.bind (Browser_surface.parse_capture_request json)
-             (fun target -> Browser_scene.read target ~max_chars:50_000))))
+         read_body request reqd Browser_scene.read_request))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/screenshot"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
          read_body request reqd (fun json ->

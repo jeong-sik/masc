@@ -13847,17 +13847,28 @@ def run_browser_scene_regression(executable: str) -> None:
     def scene(body):
         request = json.loads(body)
         scenes.append(request)
-        assert request == target, "scene read lost client/tab ownership"
+        assert {k:request[k] for k in target} == target, "scene read lost client/tab ownership"
         changed = bool(actions)
+        view = request.get("view")
+        scope = request.get("scope")
+        assert view in ("content","regions")
+        region = dict(node("channel-region","region","Channel messages"),role="main")
+        if view == "regions":
+            nodes = [region]
+        elif scope:
+            assert scope == {"documentId":"document-after","nodeId":"channel-region"}
+            nodes = [node("message","text","SCOPED CHANNEL CONTENT")]
+        else:
+            nodes = [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
+                node("first-control", "control", "First action"),
+                node("second-control", "control", "Second action"),
+                node("image", "raster", "Scene illustration")]
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
-            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1",
+            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1", "view":view, "scope":scope,
             "documentId": "document-after" if changed else "document-before",
             "url": url, "title": "scene", "truncated": False,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
-            "nodes": [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
-                node("first-control", "control", "First action"),
-                node("second-control", "control", "Second action"),
-                node("image", "raster", "Scene illustration")]}}
+            "nodes": nodes}}
 
     def click(body):
         request = json.loads(body)
@@ -13889,6 +13900,12 @@ def run_browser_scene_regression(executable: str) -> None:
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
+        send_and_wait(process, master, output, b"v", b"Channel messages")
+        assert scenes[-1]["view"] == "regions" and len(actions)==1
+        send_and_wait(process, master, output, b"\r", b"SCOPED CHANNEL CONTENT")
+        focused = scenes[-1]
+        send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
+        assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
 

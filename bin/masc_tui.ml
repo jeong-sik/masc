@@ -4177,7 +4177,7 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4191,7 +4191,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4214,11 +4214,17 @@ let launch_browser_lane state ~mailbox operation =
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Scene_read tab_id -> Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id))
-        | Scene_click {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
+        | Scene_regions tab_id -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scope:target ~host ~port ~view ~tab_id ()))
+        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id)))
+              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -16484,7 +16490,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -16513,6 +16519,10 @@ and is loaded on demand through keeper_skill.
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
+                 | "v" when not (busy view) ->
+                     (match view.selected_tab with Some tab_id ->
+                       launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id)
+                      | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
@@ -16520,7 +16530,12 @@ and is loaded on demand through keeper_skill.
                       | None, None -> ())
                  | "r" ->
                      (match view.scene, view.selected_tab with
-                      | Some _, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | Some scene, Some tab_id ->
+                          let operation = match scene.content.scope, scene.content.view with
+                            | Some target, _ -> Scene_focus {tab_id;target}
+                            | None, Browser_lane.Regions -> Scene_regions tab_id
+                            | None, Browser_lane.Content -> Scene_read tab_id in
+                          launch_browser_lane state ~mailbox:async_messages operation
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
@@ -16533,9 +16548,12 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
+                      | Some scene, Some ({kind=Region _;_} as node) ->
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                       | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
-                            node_id=node.node_id;expected_url=scene.content.url})
+                            node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }

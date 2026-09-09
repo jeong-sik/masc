@@ -1,9 +1,10 @@
 type rect = { x : float; y : float; width : float; height : float }
-type kind = Text | Raster | Control of { clickable : bool; editable : bool; disabled : bool }
+type kind = Text | Raster | Region of string | Control of { clickable : bool; editable : bool; disabled : bool }
 type node = { node_id : string; kind : kind; tag : string; text : string;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 type t = { document_id : string; url : string; title : string; width : float; height : float;
-  scroll_x : float; scroll_y : float; nodes : node list; truncated : bool }
+  scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
+  view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
 let ( let* ) = Result.bind
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some v -> Ok v | None -> Error ("scene missing " ^ name))
@@ -39,6 +40,7 @@ let node json =
   let* kind = get string "kind" json in
   let* kind = match kind with
     | "text" -> Ok Text | "raster" -> Ok Raster
+    | "region" -> let* role = get nonempty "role" json in Ok (Region role)
     | "control" -> let* clickable = get boolean "clickable" json in
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
       Ok (Control {clickable;editable;disabled})
@@ -47,6 +49,13 @@ let node json =
     | Ok value -> Browser_source_context.of_json value
     | Error _ -> Browser_source_context.Unmapped in
   Ok {node_id;kind;tag;text;rects;color;font_size;font_weight;white_space;source_context}
+let scope_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->
+      let* document_id = get nonempty "documentId" (`Assoc fields) in
+      let* node_id = get nonempty "nodeId" (`Assoc fields) in
+      Ok ({document_id;node_id} : Browser_lane.node_ref)
+  | _ -> Error "scope requires exactly documentId and nodeId from an observed region"
+
 let of_json json =
   let* schema = get string "schema" json in
   let* () = if schema = "masc.browser.scene.v1" then Ok () else Error "unknown semantic scene schema" in
@@ -56,14 +65,24 @@ let of_json json =
   let* width = get positive "width" viewport in let* height = get positive "height" viewport in
   let* scroll_x = get number "scrollX" viewport in let* scroll_y = get number "scrollY" viewport in
   let* nodes = get (list node) "nodes" json in let* truncated = get boolean "truncated" json in
-  Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated}
-let read (request : Browser_surface.request) ~max_chars =
+  let* view = get string "view" json in
+  let* view = match view with "content" -> Ok Browser_lane.Content | "regions" -> Ok Browser_lane.Regions
+    | _ -> Error "unknown scene view acknowledgement" in
+  let* scope = field "scope" json in
+  let* scope = match scope with `Null -> Ok None | value -> Result.map Option.some (scope_of_json value) in
+  let* () = match scope with
+    | Some target when target.document_id <> document_id -> Error "scene scope document mismatch"
+    | Some _ | None -> Ok () in
+  Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated;view;scope}
+let read ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
   let started = Mtime_clock.elapsed_ns () in
   let* tab_id = match request.tab_id with Some id -> Ok id | None -> Error "scene requires tabId" in
   let* target = Browser_surface.resolved_target request in
-  let* json = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars})
+  let* json = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
     ~timeout_sec:20. |> Browser_surface.decode_answer in
-  let* _scene = of_json json in
+  let* scene = of_json json in
+  let* () = if scene.view = view && scene.scope = scope then Ok ()
+    else Error "browser did not acknowledge the requested scene view/scope; update the connector" in
   let* actual = field "tabId" json in
   let* () = if actual = `Int tab_id then Ok () else Error "scene tab identity mismatch" in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
@@ -71,3 +90,26 @@ let read (request : Browser_surface.request) ~max_chars =
   | `Assoc fields -> Ok (`Assoc (fields @ ["source",`String (match request.source with Live -> "live" | Automation -> "automation");
       "clientId",Browser_surface.client_id_json target;"elapsed_ms",`Float elapsed_ms]))
   | _ -> Error "scene must be an object"
+
+
+let read_request = function
+  | `Assoc fields ->
+      let allowed = ["lane";"clientId";"tabId";"view";"scope";"maxChars"] in
+      let keys = List.map fst fields in
+      let* () = if List.for_all (fun key -> List.mem key allowed) keys
+        && List.length keys=List.length (List.sort_uniq String.compare keys)
+        then Ok () else Error "unknown or duplicate scene argument" in
+      let* request = Browser_surface.parse_capture_request (`Assoc
+        (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields)) in
+      let* view = match List.assoc_opt "view" fields with
+        | None | Some (`String "content") -> Ok Browser_lane.Content
+        | Some (`String "regions") -> Ok Browser_lane.Regions
+        | _ -> Error "scene view must be content or regions" in
+      let* scope = match List.assoc_opt "scope" fields with
+        | None -> Ok None | Some json -> Result.map Option.some (scope_of_json json) in
+      let* max_chars = match List.assoc_opt "maxChars" fields with
+        | None -> Ok 50_000
+        | Some (`Int value) when value>=1 && value<=100_000 -> Ok value
+        | _ -> Error "maxChars must be between 1 and 100000" in
+      read ~view ?scope request ~max_chars
+  | _ -> Error "scene request must be an object"

@@ -13913,7 +13913,7 @@ def run_browser_viewport_regression(executable: str) -> None:
         assert request == target, "viewport capture lost its explicit target"
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "title": "owned", "url": url + "changed" if changed[0] else url,
-            "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+            "mimeType": "image/png", "data": png[0], "viewport": {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}, "elapsed_ms": 13.0}}
 
     def scroll(body):
         request = json.loads(body)
@@ -13989,7 +13989,75 @@ def run_browser_viewport_regression(executable: str) -> None:
         release.set()
 
 
+def run_browser_pointer_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    actions, captures, png = [], [], [""]
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    url = "https://example.org/"
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":url,"text":"pointer fixture","chars":15,"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        captures.append(request)
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "tabId":2,"title":"owned","url":url,"mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+
+    def act(body):
+        request = json.loads(body)
+        assert request["lane"] == "automation" and request["tabId"] == 2
+        assert "clientId" not in request and request["expectedUrl"] == url
+        assert request["viewport"] == viewport
+        actions.append(request)
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        palette_go(process, master, output, b"go Browser Lane", b"pointer fixture")
+        send_and_wait(process, master, output, b"a", b"pointer fixture")
+        def image_input(data):
+            read_available(master, output)
+            start = len(output)
+            os.write(master, data)
+            wait_for_output(process, master, output, b"Esc: back", start=start, timeout=3)
+        image_input(b"\x0f")
+        # Caption clicks are consumed without dispatch; no double action on press.
+        os.write(master, b"\x1b[<0;2;1M\x1b[<0;2;1m")
+        wait_for_terminal_input_consumed(slave)
+        assert not actions
+        image_input(b"\x1b[<0;2;5M\x1b[<0;2;5m")
+        assert len(actions)==1 and actions[0]["action"]=="click_at"
+        # 30x100 terminal, 10x20 cells, square PNG: 25 rows x 50 columns,
+        # after the three caption rows. Mouse reports target cell centers.
+        assert actions[0]["point"] == {"x":0.03,"y":0.06}
+        image_input(b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        assert len(actions)==2 and actions[1]["action"]=="drag"
+        assert actions[1]["from"] == {"x":0.03,"y":0.06}
+        assert actions[1]["to"] == {"x":0.09,"y":0.18} and len(captures)==3
+        send_and_wait(process, master, output, b"\x1b", b"pointer fixture")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        os.write(master,b"q")
+
+    run_terminal_scenario(executable, description="Browser screenshot mouse click and drag routing",
+        interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,
+        preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     fixtures = overview_event_http_fixtures()
     client_id = "11111111-1111-4111-8111-111111111111"
@@ -14023,7 +14091,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
         return 200, {"ok": True, "data": {
             "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
-            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "viewport": {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}, "elapsed_ms": 13.0}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)

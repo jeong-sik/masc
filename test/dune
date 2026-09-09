@@ -5131,7 +5131,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc_tui_types))
+ (libraries masc.browser_lane masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)

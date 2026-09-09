@@ -20,7 +20,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
-| `Ctrl-O` | Preview a PNG screenshot of the selected tab; any key returns |
+| `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
@@ -36,18 +36,30 @@ The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
 The URL editor controls the isolated automation session. Keepers can separately
 use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
-the TUI reader itself does not send those interaction commands.
+the TUI scene supports observed-element clicks, and the screenshot view supports
+mouse clicks and scrolling. Text entry into the page remains a Keeper tool action.
 
 Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
 the tab-list and page-read phases; automation startup and navigation allow 65.
 Requests run in switch-owned Eio daemon fibers and return through the TUI mailbox.
 
 `Ctrl-O` captures the explicitly selected tab through the authenticated screenshot
-endpoint. The preview keeps the source, tab, text position, and URL draft; any new
-input cancels a pending preview. A closed tab produces a visible failure rather
+endpoint. The preview keeps the source, tab, text position, and URL draft. A closed tab produces a visible failure rather
 than capturing a different active tab. Use `r` to rediscover available tabs.
 The image is not staged or sent to a Keeper. PNG preview uses the terminal's
 existing image support; unsupported terminals receive an explanation in Browser.
+
+In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
+`j`/`k` scroll the actual page, and `r` refreshes the screenshot. The automation
+lane also supports pressing the left button, moving, and releasing to drag with
+trusted browser pointer actions. Live drag reports that automation is required.
+Each completed action captures the resulting page again in the same Lane.
+
+Mouse coordinates require the terminal's measured cell size. If that measurement
+is unavailable, the footer explains that click/drag is unavailable; scrolling
+and refresh remain usable. Inputs retain the captured document identity, viewport
+size, scroll position and URL. A changed observation requires a fresh screenshot
+before another pointer action can execute.
 
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 

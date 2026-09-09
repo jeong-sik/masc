@@ -331,3 +331,69 @@ let assert_transition_allowed ?ctx ~(from_state: _ turn_state) ~(to_state: _ tur
    this pure library to the keeper. It stays in the keeper-side shim
    ([Keeper_turn_fsm]) alongside the other emission glue. The pure FSM
    (states + transition matrix) is the entire contents of this module. *)
+
+(* Every state the FSM can hold, as values, so a reader can ask the machine
+   itself what it does instead of drawing a picture beside it that goes stale.
+
+   The reasons are listed out rather than sampled. [classify_transition]
+   branches on them -- [Runtime_routing -> Failed (Failure_runtime_unavailable
+   _)] is a different arm from [Failure_no_capable_provider] -- so one
+   representative per constructor would drop most of the failure edges, and
+   drop them silently: the enumeration would still typecheck and the diagram
+   would just be missing lines nobody counted.
+
+   The two witness functions below exist to break the build when a reason is
+   added. They are matched exhaustively and never called, which is cheaper
+   than discovering the omission from a diagram that looks plausible. *)
+
+let _failure_reason_witness : failure_reason -> unit = function
+  | Failure_runtime_unavailable _ -> ()
+  | Failure_no_capable_provider _ -> ()
+  | Failure_provider_error _ -> ()
+  | Failure_receipt_lost _ -> ()
+  | Failure_runtime_error _ -> ()
+  | Failure_unexpected_exception _ -> ()
+
+let _cancel_reason_witness : cancel_reason -> unit = function
+  | Cancelled_supervisor_stop -> ()
+  | Cancelled_external -> ()
+  | Cancelled_phase_gate_close -> ()
+  | Cancelled_provider_timeout -> ()
+  | Cancelled_fleet_shutdown -> ()
+  | Cancelled_input_required -> ()
+
+let all_failure_reasons =
+  [
+    Failure_runtime_unavailable { base = "-"; resolved = None };
+    Failure_no_capable_provider { runtime_id = "-"; detail = "-" };
+    Failure_provider_error { kind = "-"; detail = "-" };
+    Failure_receipt_lost { primary_error = "-"; fallback_path = None };
+    Failure_runtime_error "-";
+    Failure_unexpected_exception { exn = "-"; backtrace = None };
+  ]
+
+let all_cancel_reasons =
+  [
+    Cancelled_supervisor_stop;
+    Cancelled_external;
+    Cancelled_phase_gate_close;
+    Cancelled_provider_timeout;
+    Cancelled_fleet_shutdown;
+    Cancelled_input_required;
+  ]
+
+let all_states =
+  [
+    Any Idle;
+    Any Phase_gating;
+    Any Runtime_routing;
+    Any Awaiting_provider;
+    Any Streaming;
+    Any Awaiting_tool_result;
+    Any Completing;
+    Any Done;
+  ]
+  @ List.map (fun reason -> Any (Failed reason)) all_failure_reasons
+  @ List.map (fun reason -> Any (Cancelled reason)) all_cancel_reasons
+
+let any_state_symbol (Any s) = to_tla_symbol s

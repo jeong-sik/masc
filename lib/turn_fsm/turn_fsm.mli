@@ -133,3 +133,19 @@ val idle_symbols : string list
 val is_active : _ turn_state -> bool
 val is_terminal : _ turn_state -> bool
 val is_idle : _ turn_state -> bool
+
+val all_states : any_state list
+(** Every state the FSM can hold, as values, so a reader can ask the machine
+    what it does instead of keeping a picture beside it.
+
+    [Failed] and [Cancelled] appear once per reason, not once each:
+    {!classify_transition} branches on the reason -- [Runtime_routing] reaches
+    [Failed] by three separate arms -- so a single representative would drop
+    most failure edges and drop them silently. *)
+
+val all_failure_reasons : failure_reason list
+val all_cancel_reasons : cancel_reason list
+
+val any_state_symbol : any_state -> string
+(** The TLA symbol, without the reason {!any_state_label} appends. Two
+    [Failed] states share a symbol and differ by label. *)

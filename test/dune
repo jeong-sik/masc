@@ -2530,6 +2530,7 @@
 (include stanzas/test_task_status_vocabulary.inc)
 
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
+(include stanzas/test_turn_fsm_mermaid.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 

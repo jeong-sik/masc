@@ -474,6 +474,15 @@ let frame_of (st : machine) =
 let frame () = locked (fun () -> Option.map frame_of !state)
 ;;
 
+let step_frame ~frames =
+  with_machine (fun st ->
+    match check_frames ~what:"frames" frames with
+    | Error _ as error -> error
+    | Ok () ->
+        advance st frames;
+        Ok (frame_of st, List.rev st.entries))
+;;
+
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
 ;;
 

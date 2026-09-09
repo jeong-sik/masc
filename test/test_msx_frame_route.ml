@@ -28,6 +28,54 @@ let frame_number json =
   match member "number" json with
   | Some (`Int n) -> n | _ -> fail "missing frame number"
 
+let pixels_object json =
+  match member "pixels" json with Some (`Assoc fields) -> fields | _ -> fail "missing pixels"
+
+let retained_request ?(frames = 1) json =
+  let fields = pixels_object json in
+  let reference = List.map (fun name -> name, List.assoc name fields)
+      ["revision"; "width"; "height"] in
+  Yojson.Safe.to_string (`Assoc ["frames", `Int frames;
+    "pixel_response", `String "retained"; "known_pixels", `Assoc reference])
+
+let assert_pixels_kind expected json =
+  check (option string) "pixel representation" (Some expected)
+    (match List.assoc_opt "kind" (pixels_object json) with Some (`String s) -> Some s | _ -> None)
+
+let test_retained_tick () =
+  with_tick_machine (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let first_status, first = Route.tick_response
+            ~body:{|{"frames":1,"pixel_response":"retained"}|} in
+        check bool "first tick succeeds" true (first_status = `OK);
+        assert_pixels_kind "inline" first;
+        let before = frame_number first in
+        let status, next = Route.tick_response ~body:(retained_request first) in
+        check bool "retained tick succeeds" true (status = `OK);
+        assert_pixels_kind "retained" next;
+        check int "retention still advances exactly once" (before + 1) (frame_number next);
+        check bool "retained response carries no encoded pixels" false
+          (List.mem_assoc "rgb_base64" (pixels_object next));
+        (match Lane.step_frame ~frames:1 with
+         | Error error -> fail (Lane.error_to_string error)
+         | Ok (snapshot, ledger) ->
+             ignore (Lane.step ~frames:1);
+             check int "captured frame remains at its own atomic step" (before + 2) snapshot.number;
+             check bool "captured ledger is immutable" true (ledger = []));
+        ignore (Lane.press ~who:"bob" ~keys:[Result.get_ok (Lane.key_of_string "space")] ~hold_frames:1 ~step_frames:1 ~sequence:false);
+        let _, after_press = Route.tick_response ~body:(retained_request next) in
+        assert_pixels_kind "retained" after_press;
+        check bool "fresh players survive retained pixels" true
+          (match member "players" after_press with Some (`List players) ->
+            List.exists (fun json -> member "who" json = Some (`String "bob")) players | _ -> false);
+        ignore (Lane.eject ());
+        let status, empty = Route.tick_response ~body:(retained_request next) in
+        check bool "missing machine remains a successful empty observation" true
+          (status = `OK && member "loaded" empty = Some (`Bool false));
+        check bool "empty machine never advertises stale pixels" true (member "pixels" empty = None)))))
+
 let test_tick_validation_precedes_mutation () =
   with_tick_machine (fun () ->
     let before = frame_number (Route.frame_json ()) in
@@ -41,7 +89,11 @@ let test_tick_validation_precedes_mutation () =
         [ ""; "{"; "null"; "[]"; "18"; {|{"frames":"18"}|}
         ; {|{"frames":1.5}|}; {|{"frames":true}|}; {|{"frames":null}|}
         ; {|{"frames":1,"frames":2}|}; {|{"frames":1,"unexpected":true}|}
-        ; {|{"unexpected":18}|} ];
+        ; {|{"unexpected":18}|}
+        ; {|{"pixel_response":"unknown"}|}; {|{"pixel_response":null}|}
+        ; {|{"known_pixels":{}}|}; {|{"pixel_response":"retained","known_pixels":{}}|}
+        ; {|{"pixel_response":"retained","pixel_response":"retained"}|}
+        ; {|{"pixel_response":"retained","known_pixels":{"revision":"bad","width":1,"height":1}}|} ];
       let status, _ = Route.tick_response ~body:"{}" in
       check bool "missing executor cannot fall back to inline mutation" true
         (status = `Service_unavailable);
@@ -151,6 +203,25 @@ let test_encoded_pixel_snapshot () =
       (allocation < float_of_int (100 * String.length encoded));
     let save_path = Filename.concat base_path "before.json" in
     ignore (require (Lane.save ~path:save_path));
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let status, first_tick = Route.tick_response
+            ~body:{|{"frames":2,"pixel_response":"retained"}|} in
+        check bool "real guest tick succeeds" true (status = `OK);
+        assert_pixels_kind "inline" first_tick;
+        let _, same_pixels = Route.tick_response ~body:(retained_request ~frames:2 first_tick) in
+        assert_pixels_kind "retained" same_pixels;
+        let _, changed_pixels = Route.tick_response ~body:(retained_request same_pixels) in
+        assert_pixels_kind "inline" changed_pixels;
+        let pixel_fields = pixels_object changed_pixels in
+        let rgb = match List.assoc "rgb_base64" pixel_fields with
+          | `String encoded -> Base64.decode_exn encoded | _ -> fail "missing inline bytes" in
+        (match Lane.frame () with Some actual -> check string "changed tick pixels match guest" actual.rgb rgb
+         | None -> fail "guest disappeared");
+        check bool "changed pixels have exact SHA256" true
+          (List.assoc "revision" pixel_fields = `String Digestif.SHA256.(to_hex (digest_string rgb))))));
+    ignore (require (Lane.restore ~path:save_path ~ledger_dir));
     ignore (require (Lane.step ~frames:1));
     let advanced = Route.frame_json () in
     check int "clock remains live" (frame_number first + 1) (frame_number advanced);
@@ -267,7 +338,8 @@ let () =
               (match member "message" bad with Some (`String m) -> Some m | _ -> None))
         ] )
     ; ( "tick"
-      , [ test_case "invalid ticks never mutate and missing workers refuse" `Quick
+      , [ test_case "retained pixels keep atomic advancement and fresh metadata" `Quick test_retained_tick
+        ; test_case "invalid ticks never mutate and missing workers refuse" `Quick
             test_tick_validation_precedes_mutation
         ; test_case "accepted ticks advance once on the worker and return pixels" `Quick
             test_tick_worker_advances_and_returns_frame

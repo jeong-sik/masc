@@ -416,7 +416,7 @@ let test_checkpoint_resume_roundtrip () =
     make_checkpoint
       ~session_id:"rt-sess"
       ~agent_name:"rt-agent"
-      ~model:"claude-haiku-4-5"
+      ~model:"claude-opus-5"
       ~system_prompt:(Some "Be brief.")
       ~messages:sample_messages
       ~usage:sample_usage

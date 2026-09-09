@@ -1015,8 +1015,11 @@ let test_safe_cohttp_response_flow_zero_length_read () =
   let source = Eio.Flow.string_source "hello world" in
   let safe_flow = Http_client.safe_cohttp_response_flow source in
   let zero_dst = Cstruct.create 0 in
-  let n = Eio.Flow.single_read safe_flow zero_dst in
-  Alcotest.(check int) "zero-length read returns 0" 0 n;
+  (* Eio.Flow.single_read requires a nonempty destination before invoking
+     the resource implementation. A refused read must not consume the body. *)
+  (match Eio.Flow.single_read safe_flow zero_dst with
+   | _ -> Alcotest.fail "Eio's source API must reject an empty destination"
+   | exception Assert_failure _ -> ());
   let dst = Cstruct.create 20 in
   let n2 = Eio.Flow.single_read safe_flow dst in
   Alcotest.(check string)
@@ -1200,7 +1203,7 @@ let () =
             `Quick
             test_safe_cohttp_response_flow_eof_on_empty
         ; Alcotest.test_case
-            "zero length read returns 0 without advancing"
+            "empty read violates the Eio precondition without advancing"
             `Quick
             test_safe_cohttp_response_flow_zero_length_read
         ; Alcotest.test_case

@@ -87,9 +87,12 @@ It verifies and installs the assets for the selected release.
 TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
 ```
+
+Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
+
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
 and runs a one-time wizard (`--no-wizard` skips it). The 0.35.0 wizard

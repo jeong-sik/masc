@@ -82,10 +82,18 @@ and does not fix loader or OS compatibility problems.
 TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+After installation, run this separate command to update PATH in the current terminal.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
+
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 `--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
 for the workspace path that will hold `.masc`. For a new workspace it
@@ -102,8 +110,15 @@ checksum stops the install.
 `--no-wizard` skips model selection. `--provider <id>` selects from the
 provider catalog in `runtime.toml`. The wizard detects the model servers that
 are available and the sign-in state of CLIs, selects `[runtime].default`, and
-stores no API key. Without a model, installing the server and using the status
-screens still works.
+stores no API key. Model setup shows numbered choices from the CLI's local
+model list, the HTTP server's `/models` response, or the installed MASC catalog
+when a CLI list is unavailable. Select a number or enter an exact model ID;
+blank input does not select a model. Listed models are suggestions, not proof
+that your account can use them. The wizard fills the context window from the
+selected entry and shows its source; Codex's observed effective context takes
+precedence over a catalog limit. If no limit is known, it asks for the documented
+or server-configured token count. Without a model, installing the server and
+using the status screens still works.
 
 ## First-install wizard
 

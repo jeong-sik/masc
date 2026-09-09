@@ -15,3 +15,9 @@ Seven CLI scenarios pass, including multi-event Unicode assembly and EOF without
 a terminal event. This is local HTTP-fixture evidence. The earlier nonstreamed
 27B run was neither interrupted nor restarted by this change. An actual streamed
 model run is still needed before claiming live progress observation.
+
+A new held-out input (`input-stream.json`) changes the measurement units and
+values and introduces an unresolved dataset-count disagreement. The actual local
+27B streamed run has begun receiving events. `stream-observation.json` captures
+one intermediate progress observation, not its final result. Earlier successful
+nonstreamed output is not reused as this run's outcome.

@@ -94,7 +94,10 @@
 (test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
- (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
+ ; masc.config for Env_config_sandbox.Runtime.image_source_strings: the
+ ; reader's image_source is parallel to the server's, and the suite is what
+ ; holds the two spellings together.
+ (libraries alcotest masc masc.config masc_tui_keeper_sandbox yojson str))
 
 (tests
  (names

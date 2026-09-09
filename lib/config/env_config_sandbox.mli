@@ -57,11 +57,36 @@ end
 module Runtime : sig
   val docker_image : unit -> string
 
-  val image_declared_or_default : string option -> string
-  (** The image a Keeper runs in: its own [sandbox_image] where it declared
-      one, {!docker_image} where it did not. Whitespace is not part of a tag,
-      so the declaration is trimmed and one that trims to nothing counts as
-      undeclared. *)
+  type image_source =
+    | Keeper_declared  (** the Keeper's own [sandbox_image] *)
+    | Workspace_env  (** [MASC_KEEPER_SANDBOX_DOCKER_IMAGE] *)
+    | Built_in  (** {!Keeper_sandbox_image.default_tag} *)
+
+  type image_choice =
+    { tag : string
+    ; source : image_source
+    }
+
+  val resolve_image : string option -> image_choice
+  (** The image a Keeper runs in, and which of the three named it: its own
+      [sandbox_image] where it declared one, {!docker_image} where it did
+      not. Whitespace is not part of a tag, so the declaration is trimmed and
+      one that trims to nothing counts as undeclared.
+
+      A path that starts a container wants [tag] and writes [.tag]; that it
+      has to say so is the point. Answering with the tag alone let a fleet
+      that all works on MASC run eight Keepers on an image with no
+      toolchain, with nothing but the Keepers' own complaints to say so. *)
+
+  val image_source_to_string : image_source -> string
+  (** ["keeper_declared"], ["workspace_env"], ["built_in"] — what a surface
+      puts beside the tag. *)
+
+  val image_sources_all : image_source list
+  val image_source_strings : string list
+  (** Every source, and every spelling, derived from
+      {!image_source_to_string} rather than typed again. The TUI reader keeps
+      a parallel sum and the suite checks it against this list. *)
 
   val microvm_remove_timeout_sec : unit -> float
   (** How long to wait for a microvm guest to be removed. Removing one is a

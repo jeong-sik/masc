@@ -230,10 +230,19 @@ let test_relax_fs_propagates_to_derived () =
    inline, and one of the six trimmed it while the other five handed the
    surrounding whitespace to the runtime as part of the tag. These pin the one
    reading they now share. *)
+let tag_of declared = (S.Runtime.resolve_image declared).S.Runtime.tag
+
+let source_of declared =
+  S.Runtime.image_source_to_string
+    (S.Runtime.resolve_image declared).S.Runtime.source
+
 let test_declared_image_wins () =
   check string "the Keeper's own tag"
     "example.invalid/keeper:v3"
-    (S.Runtime.image_declared_or_default (Some "example.invalid/keeper:v3"))
+    (tag_of (Some "example.invalid/keeper:v3"));
+  check string "and says the Keeper named it"
+    "keeper_declared"
+    (source_of (Some "example.invalid/keeper:v3"))
 
 (* Named rather than left to the ambient environment: an operator who exports
    MASC_KEEPER_SANDBOX_DOCKER_IMAGE is a correct configuration, and a test that
@@ -243,19 +252,30 @@ let test_undeclared_image_is_the_configured_one () =
     (Some "example.invalid/fallback:v1") (fun () ->
       check string "no declaration falls to the configured image"
         "example.invalid/fallback:v1"
-        (S.Runtime.image_declared_or_default None))
+        (tag_of None);
+      check string "and says the workspace named it"
+        "workspace_env"
+        (source_of None))
+
+(* Built_in is the third answer and is not reachable from here: [with_env]
+   spells an absent variable as "", which is a value the resolver reads back,
+   so this binary can never see the name unset. It is pinned in
+   test_sandbox_image_recipe.ml, which runs where the name really is unset. *)
 
 let test_whitespace_is_not_part_of_the_tag () =
   check string "a declaration is trimmed"
     "example.invalid/keeper:v3"
-    (S.Runtime.image_declared_or_default (Some "  example.invalid/keeper:v3\n"))
+    (tag_of (Some "  example.invalid/keeper:v3\n"))
 
 let test_a_declaration_of_only_whitespace_is_no_declaration () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
     (Some "example.invalid/fallback:v1") (fun () ->
       check string "whitespace declares nothing"
         "example.invalid/fallback:v1"
-        (S.Runtime.image_declared_or_default (Some "   ")))
+        (tag_of (Some "   "));
+      check string "and is not counted as a declaration"
+        "workspace_env"
+        (source_of (Some "   ")))
 
 let () =
   run "env_config_sandbox"

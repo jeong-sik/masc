@@ -10,8 +10,8 @@ let run_process argv =
   | program :: _ ->
     let pid = Unix.create_process program (Array.of_list argv)
         Unix.stdin Unix.stdout Unix.stderr in
-    (* The subscription probe installs process signal handlers before setup
-       launches Docker or the TUI. EINTR is a wakeup, not the child status. *)
+    (* A signal can interrupt waiting for Docker or the TUI. EINTR is a
+       wakeup, not the child status; keep waiting for this same child. *)
     let rec wait () =
       try snd (Unix.waitpid [] pid)
       with Unix.Unix_error (Unix.EINTR, _, _) -> wait ()

@@ -98,6 +98,22 @@ let runtime = {js|function browserScene(args) {
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
   };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -147,7 +163,7 @@ let runtime = {js|function browserScene(args) {
     const tag=node.localName;
     const control=linkHref(node) !== null || node.matches('button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]');
     if (control && visible(node)) {
-      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || tag;
+      const label=node.getAttribute('aria-label') || node.getAttribute('placeholder') || node.innerText || svgVisibleText(node) || tag;
       const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
       const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
         && !node.readOnly && !node.matches(':disabled');

@@ -372,7 +372,16 @@ let start_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
              Fun.protect
                ~finally:(fun () -> release_worker operation)
                (fun () ->
-                  try run_worker ~config ~entry operation with
+                  try
+                    (* A previous worker can settle between the caller's read
+                       and our claim. Never replay its stale cleanup snapshot. *)
+                    (match Keeper_shutdown_store.load ~config
+                       ~keeper_name:operation.keeper_name operation.operation_id with
+                     | Ok current -> run_worker ~config ~entry current
+                     | Error error -> Log.Keeper.error
+                         "shutdown worker could not reload operation %s: %s"
+                         (worker_key operation) (Keeper_shutdown_store.error_to_string error))
+                  with
                   | Eio.Cancel.Cancelled _ ->
                     Log.Keeper.info
                       "Keeper shutdown worker cancelled by server teardown; durable recovery retained: keeper=%s operation=%s"
@@ -411,6 +420,25 @@ let existing_operation_intent ~request (operation : Keeper_shutdown_types.t) =
       operation.cleanup_intent
   then Ok operation
   else Error (Existing_operation_intent_mismatch operation)
+;;
+
+let rec retry_completion ~config ~keeper_name ~operation_id =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then Eio_context.run_on_owner_domain (fun () ->
+    retry_completion ~config ~keeper_name ~operation_id)
+  else
+    match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+    | Error error -> Error (`Submit (Existing_operation_load_error error))
+    | Ok operation ->
+      match operation.cleanup_intent.reason, operation.phase with
+      | Dashboard_keeper_purge _, Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } ->
+        Ok operation
+      | Dashboard_keeper_purge _, Finalized { completion =
+          (Completion_pending Dashboard_keeper_purged
+          | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
+        start_or_error ~config ~entry:None operation |> Result.map_error (fun error -> `Submit error)
+      | _ -> Error `Not_ready
 ;;
 
 let rec submit ~config ~entry ~request =
@@ -631,6 +659,11 @@ let recover_operation_with_corrupt_owner_fence
      the observation. Corrupt siblings are still handled by
      restore_inventory_admission. *)
   match operation.phase with
+  | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } ->
+    (* Retained deletion evidence has no authority over a new same-name Keeper. *)
+    Ok operation
+  | Superseded _ when (match operation.cleanup_intent.reason with
+      | Dashboard_keeper_purge _ -> true | _ -> false) -> Ok operation
   | Owner_absent _
   | Operator_absence_acknowledged _ -> Ok operation
   | Prepared

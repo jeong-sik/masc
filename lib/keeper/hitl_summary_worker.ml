@@ -316,10 +316,14 @@ let output_requirement =
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
+type prepared_transport =
+  | Http_attempt of Exact_output.flow_attempt
+  | Cli_only
+
 type prepared_flow =
   { entry : pending_approval
   ; generated_at : float
-  ; attempt : Exact_output.flow_attempt
+  ; transport : prepared_transport
   ; cli_slots : string list
         (* Official-client runtime ids the lane walks after every catalog
            slot is exhausted, carried from the resolved lane declaration
@@ -398,20 +402,20 @@ let prepare_flow
     |> Result.map_error (fun detail ->
       "HITL exact-lane preference unavailable: " ^ detail)
   in
-  let* snapshot =
-    snapshot_resolved_lane
-      ~messages:(messages_for_summary ~system_prompt ~context_bundle)
-      resolved
-  in
-  let* attempt =
-    Exact_output.start_flow snapshot
-    |> Result.map_error (fun _ ->
-      "HITL exact-output flow attempt allocation failed")
+  let* transport =
+    match resolved.selected_slots, resolved.cli_slots with
+    | [], _ :: _ -> Ok Cli_only
+    | _ ->
+      let* snapshot = snapshot_resolved_lane
+        ~messages:(messages_for_summary ~system_prompt ~context_bundle) resolved in
+      Exact_output.start_flow snapshot
+      |> Result.map (fun attempt -> Http_attempt attempt)
+      |> Result.map_error (fun _ -> "HITL exact-output flow attempt allocation failed")
   in
   Ok
     { entry
     ; generated_at = Time_compat.now ()
-    ; attempt
+    ; transport
     ; cli_slots = resolved.Registry.cli_slots
     ; system_prompt
     ; context_bundle
@@ -427,7 +431,10 @@ let snapshot_topology_readiness () =
   in
   let* candidates = flow_candidates resolved.selected_slots in
   match candidates with
-  | [] -> Error "HITL exact-output lane has no usable candidates"
+  | [] ->
+    if List.exists (fun runtime_id -> Fusion_official_client.is_official_client ~runtime_id) resolved.cli_slots
+    then Ok ()
+    else Error "HITL exact-output lane has no usable HTTP or official-client candidates"
   | first :: rest ->
     Exact_output.snapshot_flow
       ~first
@@ -1470,6 +1477,16 @@ let execute_prepared_flow_with_queue_ops_current
     Ok ()
   in
   try
+    match prepared.transport with
+    | Cli_only ->
+      (match try_cli_slots ~queue_ops ~cli_runner ~bound:None prepared ~on_summary with
+       | Cli_summary | Cli_settled -> ()
+       | Cli_no_slots | Cli_fell_back ->
+         settle_current_or_signal ~queue_ops prepared.entry
+           ~reason:"HITL CLI-only lane could not bind a runtime"
+           ~cause:Exact_flow_execution_failed);
+      Executed
+    | Http_attempt attempt ->
     match
       Exact_output.execute_flow_once
         ~net
@@ -1479,7 +1496,7 @@ let execute_prepared_flow_with_queue_ops_current
         ~before_dispatch:guarded_before_dispatch
         ~before_advance:guarded_before_advance
         ~validate:(validate_success prepared)
-        prepared.attempt
+        attempt
     with
     | Ok success ->
       handle_validated_success
@@ -2032,7 +2049,10 @@ module For_testing = struct
       ()
   ;;
 
-  let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt
+  let flow_evidence prepared =
+    match prepared.transport with
+    | Cli_only -> None
+    | Http_attempt attempt -> Some (Exact_output.flow_attempt_evidence attempt)
   let system_prompt = system_prompt
   let lane_id = lane_id
 end

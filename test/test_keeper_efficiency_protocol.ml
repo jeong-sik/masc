@@ -74,12 +74,12 @@ let test_unchanged_snapshot_preserves_deferred_disposition () =
   | Some data ->
     check_json
       "unchanged deferred payload"
-      (`Assoc [ "kind", `String "unchanged"; "revision", `String "board:7" ])
+      (`String "approval required")
       data
   | None -> Alcotest.fail "unchanged deferred response lost its payload"
 ;;
 
-let test_unchanged_snapshot_defers_completed_producer () =
+let test_unchanged_snapshot_preserves_completed_producer () =
   let result = Masc.Keeper_tool_execution.success_data (`String "board snapshot") in
   let response = Masc.Snapshot_protocol.Unchanged { revision = "board:8" } in
   let projected =
@@ -88,9 +88,9 @@ let test_unchanged_snapshot_defers_completed_producer () =
       response
   in
   (match projected.disposition with
-   | Tool_result.Deferred () -> ()
-   | Tool_result.Completed () ->
-     Alcotest.fail "unchanged response completed a polling read"
+   | Tool_result.Completed () -> ()
+   | Tool_result.Deferred () ->
+     Alcotest.fail "unchanged response deferred a completed read"
    | Tool_result.Failed _ ->
      Alcotest.fail "unchanged response failed a completed producer");
   match projected.data with
@@ -112,8 +112,8 @@ let () =
             `Quick
             test_unchanged_snapshot_preserves_deferred_disposition
         ; Alcotest.test_case
-            "unchanged defers a completed producer"
+            "unchanged preserves a completed producer"
             `Quick
-            test_unchanged_snapshot_defers_completed_producer
+            test_unchanged_snapshot_preserves_completed_producer
         ] ) ]
 ;;

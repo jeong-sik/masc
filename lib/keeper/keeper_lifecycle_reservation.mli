@@ -8,6 +8,7 @@
 type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
   | Paused_work_disposition
   | Keepalive_launch
+  | Configuration_removal
 
 type token
 

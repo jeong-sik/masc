@@ -31,6 +31,7 @@ type node_result = private
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
+  ; output_validation_error : Keeper_tool_plan.execution_error option
   ; tool_use_id : string
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option

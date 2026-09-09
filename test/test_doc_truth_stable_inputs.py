@@ -40,6 +40,29 @@ class StableDocumentationInputs(unittest.TestCase):
         self.assertEqual((after.returncode, after.stdout, after.stderr),
                          (before.returncode, before.stdout, before.stderr))
 
+    def test_candidate_install_pin_requires_explicit_availability_notice(self):
+        names = ("README.md", "README.ko.md", "docs/INSTALL.md", "docs/INSTALL.ko.md")
+        originals = {name: (self.repo / name).read_text() for name in names}
+        version = re.search(r"(?m)^\(version ([^)]+)\)",
+                            (self.repo / "dune-project").read_text()).group(1)
+        notice = f"> Installation target: v{version} (check tag availability on GitHub Releases)."
+        try:
+            for name, text in originals.items():
+                text = re.sub(r"(?m)^TAG=v[^ ]+$", "TAG=v" + version, text)
+                if name.startswith("README") and notice not in text:
+                    text = notice + "\n\n" + text
+                (self.repo / name).write_text(text)
+            accepted = self.run_script("check-doc-truth.sh")
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+            readme = self.repo / "README.md"
+            readme.write_text(readme.read_text().replace(notice, ""))
+            refused = self.run_script("check-doc-truth.sh")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("Installation target:", refused.stderr)
+        finally:
+            for name, text in originals.items():
+                (self.repo / name).write_text(text)
+
     def test_checked_in_version_mismatch_still_fails(self):
         path = self.repo / "dune-project"
         original = path.read_text()

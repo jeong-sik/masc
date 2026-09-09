@@ -20,7 +20,7 @@ module type Backend = sig
     max_bytes:int ->
     timeout_sec:float ->
     unit ->
-    (string, string) result
+    (string, Keeper_sandbox_read_backend.read_error) result
 
   val run_command_with_status :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
@@ -64,7 +64,7 @@ module type S = sig
     max_bytes:int ->
     timeout_sec:float ->
     unit ->
-    (string, string) result
+    (string, Keeper_sandbox_read_backend.read_error) result
 
   val run_command_with_status :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->

@@ -711,6 +711,11 @@ let test_boot_recovery_keeps_failed_pending_completion_fenced () =
      | outcomes ->
        failf "unexpected pending completion outcome count: %d" (List.length outcomes));
     check_intake_fenced "failed pending completion" ~config operation;
+    (match Keeper_shutdown_store.load ~config ~keeper_name:operation.keeper_name operation.operation_id with
+     | Ok { phase = Finalized { completion = Completion_delivery_failed { detail; _ }; _ }; _ } ->
+       check string "cleanup failure survives a fresh store read" "completion unavailable" detail
+     | Ok _ -> fail "cleanup failure was not persisted"
+     | Error error -> fail (Keeper_shutdown_store.error_to_string error));
     check_create_meta_rejected "failed pending completion" ~config operation)
 ;;
 
@@ -762,7 +767,14 @@ let test_boot_recovery_settles_pending_completion_after_removal () =
         (Option.is_none
            (Keeper_shutdown_intake_fence.shutdown_operation_id
               ~base_path:config.base_path
-              ~keeper_name:name)))
+              ~keeper_name:name));
+      (match Keeper_shutdown_store.load ~config ~keeper_name:name operation.operation_id with
+       | Ok { phase = Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ }; _ } -> ()
+       | Ok _ -> fail "retained purge receipt is not delivered"
+       | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+      List.iter (function Ok _ -> () | Error detail -> fail detail)
+        (Keeper_shutdown_runtime.recover_at_boot ~config);
+      check int "another boot does not replay completed deletion" 1 (List.length !delivered))
 ;;
 
 module Reconciliation = Keeper_shutdown_reconciliation

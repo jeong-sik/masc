@@ -50,7 +50,9 @@ type t = {
   keeper_name : string;
   trace_id : string;
   turn_count : int option;
+      (** Absolute Keeper turn identity, shared with runtime manifest rows. *)
   agent_core_turn_count : int option;
+      (** Internal agent loop iterations within this Keeper turn. *)
   current_task_id : string option;
   outcome : outcome_kind;
   terminal_reason_code : string;

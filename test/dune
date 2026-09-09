@@ -1939,6 +1939,7 @@
 (test
  (name test_completion_trust_harness)
  (modules test_completion_trust_harness)
+ (deps (source_tree ../config/prompts))
  (libraries masc_test_deps))
 
 ; Scheduled internal automation domain guardrails.

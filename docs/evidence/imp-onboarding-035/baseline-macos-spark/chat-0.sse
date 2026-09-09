@@ -1,0 +1,34 @@
+retry: 1500
+
+data: {"type":"CUSTOM","threadId":"default","timestamp":1788930482.372864,"name":"KEEPER_CHAT_OPERATION_ACCEPTED","value":{"operation_id":"kmsg-onboarding-88129-0","state":"Queued","queued_count":1}}
+
+id: 0
+data: {"type":"RUN_STARTED","threadId":"keeper:imp","timestamp":1788930482.376384,"runId":"keeper-operation-run-kmsg-onboarding-88129-0"}
+
+id: 1
+data: {"type":"TEXT_MESSAGE_START","threadId":"keeper:imp","timestamp":1788930482.376565,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","messageId":"keeper-operation-message-kmsg-onboarding-88129-0","role":"assistant"}
+
+id: 2
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930482.401976,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","name":"KEEPER_RUNTIME_ATTEMPT_STARTED","value":null}
+
+id: 3
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930484.57422,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","name":"KEEPER_STREAM_MESSAGE_START","value":{"provider_message_id":"01a08490-e93b-7921-9bf4-1a5ac9c27f0f","model":"gpt-5.3-codex-spark"}}
+
+id: 4
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:imp","timestamp":1788930487.838689,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","messageId":"keeper-operation-message-kmsg-onboarding-88129-0","delta":"I'm in the sandbox at `/Users/dancer/masc-imp-acceptance-88129`."}
+
+id: 5
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930487.886762,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","name":"KEEPER_STREAM_MESSAGE_DELTA","value":{"stop_reason":"end_turn"}}
+
+id: 6
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930487.887089,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}
+
+id: 7
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930487.912793,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","name":"KEEPER_REPLY_DETAILS","value":{"reply":"I'm in the sandbox at `/Users/dancer/masc-imp-acceptance-88129`.","turn_outcome":"visible_reply","turn_ref":"trace-1788930482261-00000#1"}}
+
+id: 8
+data: {"type":"TEXT_MESSAGE_END","threadId":"keeper:imp","timestamp":1788930487.912953,"runId":"keeper-operation-run-kmsg-onboarding-88129-0","messageId":"keeper-operation-message-kmsg-onboarding-88129-0"}
+
+id: 9
+data: {"type":"RUN_FINISHED","threadId":"keeper:imp","timestamp":1788930487.913133,"runId":"keeper-operation-run-kmsg-onboarding-88129-0"}
+

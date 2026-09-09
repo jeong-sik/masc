@@ -3,7 +3,7 @@
 import { html } from 'htm/preact'
 import { useTaskSearchText, TaskSearchFeedback } from '../common/task-search-text'
 import { signal } from '@preact/signals'
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
@@ -14,7 +14,7 @@ import { RichContent } from '../common/rich-content'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
 import { tasksByStatus, refreshExecution, executionLoading, executionLoaded, executionError } from '../../store'
-import { deleteTask, fetchTaskDetail } from '../../api/actions'
+import { deleteTask, fetchTaskDetail, fetchTaskDeletions, retryTaskDeletion, type TaskDeletionInventory } from '../../api/actions'
 import type { Task } from '../../types'
 import {
   expandedTasks,
@@ -344,36 +344,69 @@ function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
   `
 }
 
-const pendingTaskCleanups = signal<Array<{ taskId: string; errors: string[] }>>([])
+const deletionInventory = signal<TaskDeletionInventory | null>(null)
+const deletionLoadError = signal<string | null>(null)
+let deletionLoadGeneration = 0
+
+async function refreshDeletionInventory() {
+  const generation = ++deletionLoadGeneration
+  try {
+    const value = await fetchTaskDeletions()
+    if (generation === deletionLoadGeneration) {
+      deletionInventory.value = value
+      deletionLoadError.value = null
+    }
+  } catch (error) {
+    if (generation === deletionLoadGeneration) {
+      deletionLoadError.value = error instanceof Error ? error.message : '삭제 정리 기록을 불러오지 못했습니다'
+    }
+  }
+}
 
 async function settleTaskDeletion(taskId: string) {
-  const result = await deleteTask(taskId)
-  pendingTaskCleanups.value = pendingTaskCleanups.value.filter(item => item.taskId !== taskId)
-  if (result.status === 'cleanup_failed') {
-    pendingTaskCleanups.value = [...pendingTaskCleanups.value, result]
-    showToast('태스크는 삭제됐지만 삭제 후 정리가 실패했습니다. 아래에서 재시도할 수 있습니다.', 'error')
-  } else {
-    showToast('태스크 삭제와 삭제 후 정리를 완료했습니다', 'success')
+  ++deletionLoadGeneration
+  try {
+    const result = await deleteTask(taskId)
+    showToast(result.status === 'cleanup_failed'
+      ? '태스크는 삭제됐지만 정리가 남아 있습니다.' : '태스크 삭제와 정리를 완료했습니다',
+      result.status === 'cleanup_failed' ? 'error' : 'success')
+  } finally {
+    await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })])
   }
-  await refreshExecution({ force: true })
 }
 
 function TaskCleanupFailures() {
   const [retrying, setRetrying] = useState<string | null>(null)
-  async function retry(taskId: string) {
-    setRetrying(taskId)
-    try { await settleTaskDeletion(taskId) }
-    catch (error) { showToast(error instanceof Error ? error.message : '삭제 후 정리 재시도 실패', 'error') }
-    finally { setRetrying(null) }
+  useEffect(() => { void refreshDeletionInventory() }, [])
+  const inventory = deletionInventory.value
+  const copyErrors = inventory?.copies.kind === 'unavailable' ? inventory.copies.errors : []
+  const pending = inventory?.receipts.filter(item => item.cleanup.kind === 'required' || copyErrors.length > 0) ?? []
+  async function retry(deletionId: string) {
+    setRetrying(deletionId)
+    ++deletionLoadGeneration
+    try {
+      const result = await retryTaskDeletion(deletionId)
+      if (!result.ok) showToast(result.errors.join('\n'), 'error')
+    } catch (error) { showToast(error instanceof Error ? error.message : '삭제 후 정리 재시도 실패', 'error') }
+    finally {
+      await Promise.all([refreshDeletionInventory(), refreshExecution({ force: true })])
+      setRetrying(null)
+    }
   }
-  return html`${pendingTaskCleanups.value.map(item => html`
-    <section key=${item.taskId} role="alert" class="mb-3 border border-[var(--color-err-border)] p-3">
-      <p>태스크 ${item.taskId}는 삭제됐습니다. 삭제 후 정리가 남아 있습니다.</p>
-      <pre class="whitespace-pre-wrap">${item.errors.join('\n')}</pre>
-      <${ActionButton} disabled=${retrying !== null} onClick=${() => void retry(item.taskId)}>
-        ${retrying === item.taskId ? '정리 중...' : '삭제 후 정리 재시도'}
-      <//>
-    </section>`)} `
+  return html`
+    ${deletionLoadError.value ? html`<section role="alert" class="mb-3 border border-[var(--color-err-border)] p-3">
+      <p>삭제 정리 상태를 확인하지 못했습니다. 이전 기록이 표시될 수 있습니다.</p>
+      <pre class="whitespace-pre-wrap">${deletionLoadError.value}</pre>
+      <${ActionButton} onClick=${() => void refreshDeletionInventory()}>삭제 정리 기록 다시 읽기<//>
+    </section>` : null}
+    ${pending.map(item => html`
+      <section key=${item.deletionId} role="alert" class="mb-3 border border-[var(--color-err-border)] p-3">
+        <p>태스크 ${item.taskId} 삭제 후 정리가 남아 있습니다.</p>
+        <pre class="whitespace-pre-wrap">${[...(item.cleanup.kind === 'required' ? item.cleanup.errors : []), ...copyErrors].join('\n')}</pre>
+        <${ActionButton} disabled=${retrying !== null} onClick=${() => void retry(item.deletionId)}>
+          ${retrying === item.deletionId ? '정리 중...' : '삭제 후 정리 재시도'}
+        <//>
+      </section>`)} `
 }
 
 export function TaskBacklog() {

@@ -5,8 +5,8 @@
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a partial library
     surface, so a reader of these values never has to ask whether a schema
-    loaded. [test_library_tool_toml_parity] pins both against what the OCaml
-    literals published before they moved. *)
+    loaded. [test_library_tool_toml_parity] keeps the publication order; the
+    descriptions and schemas it also pinned were copies of these values. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in

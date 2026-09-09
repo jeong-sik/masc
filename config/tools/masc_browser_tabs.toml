@@ -1,16 +1,15 @@
 name = "masc_browser_tabs"
 description = """
-List open tabs in the selected live Firefox/Zen connection or isolated configured Gecko automation browser. Returns {clientId, tabs}, where each tab has {id, active, title, url}; live tabs also include index/windowId. Carry the returned live clientId and tab id into BrowserRead/BrowserInteract. Automation clientId is null. If live selection is ambiguous or stale, the error includes current clients metadata and a retry instruction without dispatching a command. Choose the intended clientId and retry explicitly."""
+List {clientId,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation clientId is null."""
 additional_properties = false
 
 [[params]]
 name = "lane"
 type = "string"
 enum = ["live", "automation"]
-description = "Which browser lane to ask. Default: live."
 default = "live"
 
 [[params]]
 name = "clientId"
 type = "string"
-description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."
+description = "Live UUID from BrowserTabs/Read; required for multiple clients, stale fails. Omit on automation."

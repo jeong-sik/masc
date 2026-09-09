@@ -7198,7 +7198,11 @@ let probe ?(needs_sandbox = false) tool_name args =
   { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
 let composable_output_probes =
-  [ probe
+  [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 7])
+  ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 7;
+      "action",`String "scroll";"x",`Int 0;"y",`Int 100;
+      "expectedUrl",`String "https://example.org/probe"])
+  ; probe
       ~needs_sandbox:true
       "Execute"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
@@ -7422,7 +7426,28 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()))
+       (* Substitute only the external browser transport. The actual Keeper
+          dispatcher and BrowserRead/Interact result producers still run and
+          their resulting values pass through the composition plan validator. *)
+       Browser_lane.install_automation_executor (Some (function
+         | Browser_lane.Tabs_list -> Browser_lane.Answered (`Assoc ["ok",`Bool true;
+             "data",`List [`Assoc ["id",`Int 7;"active",`Bool true;
+               "title",`String "Probe";"url",`String "https://example.org/probe"]]])
+         | Browser_lane.Page_read {tab_id=Some 7;_} ->
+           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+             "tabId",`Int 7;"url",`String "https://example.org/probe";
+             "title",`String "Probe";"text",`String "Observed page";
+             "chars",`Int 13;"truncated",`Bool false]])
+         | Browser_lane.Page_interact {tab_id=7;action=Browser_lane.Scroll {x=0;y=100};_} ->
+           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+             "tabId",`Int 7;"action",`String "scroll";
+             "urlBefore",`String "https://example.org/probe";
+             "url",`String "https://example.org/probe";
+             "scrollX",`Int 0;"scrollY",`Int 100]])
+         | _ -> fail "composable browser probe dispatched an unexpected verb"));
+       Fun.protect ~finally:(fun () ->
+         Browser_lane.install_automation_executor None;
+         ignore (Msx_lane.eject ()))
        @@ fun () ->
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)

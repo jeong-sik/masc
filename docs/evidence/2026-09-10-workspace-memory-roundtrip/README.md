@@ -51,3 +51,14 @@ authentication token is included.
 
 Persistence after restart, actual Keeper retrieval and semantic verification
 remain unmeasured. The production server was not replaced.
+
+## Process restart persistence
+
+The isolated listener was identified by PID and exact command, then terminated
+with SIGTERM; its execution handle exited with code zero. The same binary and
+base path were started again. Before any further POST, GET by the previous ID
+returned canonical JSON identical to the pre-restart readback. The runtime
+instance ID changed while source commit and effective paths stayed the same.
+`success/restart-readback.json` records those identities and returned proposal.
+This proves persistence across this graceful process restart; it does not prove
+crash/power-loss durability or actual Keeper use.

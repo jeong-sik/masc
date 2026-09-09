@@ -108,7 +108,7 @@ is-default = true
     let settled, resolve_settled = Eio.Promise.create () in
     let ready = ref true in
     let execute ~sw:turn_sw ~keeper_name:_ ~claim =
-      let operation = match claim () |> require "claim" with
+      let operation : Keeper_chat_operation.t = match claim () |> require "claim" with
         | Some operation -> operation | None -> fail "operation lost at restart" in
       seen_operations := operation.operation_id :: !seen_operations;
       check bool "same original operation" true

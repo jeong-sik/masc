@@ -2997,56 +2997,58 @@ let test_a_non_reasoning_row_inherits_no_effort_ladder () =
       (Option.is_none c.accepted_reasoning_efforts)
 ;;
 
+(* [openrouter] is a [[providers]] entry and not a wire kind, so its base is
+   one that answers; [gemini-3-flash-preview] has a bare row declaring its own
+   effort ladder and no openrouter-scoped twin. That pair is what makes the
+   ordering observable at all: for a wire-kind label like [gemini] or [glm]
+   the base never answers ([Model_catalog.provider_entry_for_label] returns
+   [None] for every wire kind), so base-before-bare and bare-before-base
+   return the same row and a test on such a label proves nothing.
+
+   Read together the two tests below pin both directions: with the fallback on
+   the row answers, with it off the base does, and the two differ. *)
+let bare_ladder_owner = "openrouter", "gemini-3-flash-preview"
+
+let ladder_of ~allow_bare_fallback =
+  let provider_label, model_id = bare_ladder_owner in
+  match
+    Capabilities.for_provider_model_id
+      ~wire:None
+      ~allow_bare_fallback
+      ~provider_label
+      ~model_id
+  with
+  | Some (c : Capabilities.capabilities) ->
+    Option.map (List.map Reasoning_effort.to_string) c.accepted_reasoning_efforts
+  | None ->
+    failf "%s/%s resolved to no capabilities at all" provider_label model_id
+;;
+
 let test_a_bare_row_outranks_the_provider_base () =
-  let resolved label model_id =
-    match
-      Capabilities.for_provider_model_id
-        ~wire:None
-        ~allow_bare_fallback:true
-        ~provider_label:label
-        ~model_id
-    with
-    | Some (c : Capabilities.capabilities) -> c.accepted_reasoning_efforts
-    | None -> failf "%s/%s resolved to no capabilities at all" label model_id
-  in
-  List.iter
-    (fun (label, model_id) ->
-       match resolved label model_id with
-       | Some (_ :: _) -> ()
-       | Some [] ->
-         failf "%s/%s read a row that declares no accepted efforts" label model_id
-       | None ->
-         failf
-           "%s/%s fell through to the provider base; the bare row naming it was not read"
-           label
-           model_id)
-    [ "gemini", "gemini-3-flash-preview" ]
+  check
+    (option (list string))
+    "the bare row's own ladder is what answers"
+    (Some [ "minimal"; "low"; "medium"; "high" ])
+    (ladder_of ~allow_bare_fallback:true);
+  (* Without this the test would pass under base-before-bare too. *)
+  check
+    bool
+    "and the provider base would have said something else"
+    true
+    (ladder_of ~allow_bare_fallback:true <> ladder_of ~allow_bare_fallback:false)
 ;;
 
 (* The reorder is gated on [allow_bare_fallback]: a config that named a
    [provider_id] must not pick up a bare row, because a scoped provider's base
-   can deliberately differ from the provider-independent value.
-
-   [glm-coding] is a [[providers]] entry and not a wire kind, so it is a label
-   the base actually answers for; [glm-4.5v] has a bare row and no
-   [glm-coding]-scoped twin, so the base is what is left once the bare row is
-   refused. A wire-kind label would prove nothing here: the base never answers
-   for one, so the result would be [None] whatever the gate did. *)
+   can deliberately differ from the provider-independent value. Asserting the
+   base's own answer rather than merely "not the row" would pin a value this
+   test does not own; asserting the difference is what the gate decides. *)
 let test_a_named_provider_still_refuses_the_bare_row () =
-  match
-    Capabilities.for_provider_model_id
-      ~wire:None
-      ~allow_bare_fallback:false
-      ~provider_label:"glm-coding"
-      ~model_id:"glm-4.5v"
-  with
-  | None -> failf "the provider base should still answer here"
-  | Some (c : Capabilities.capabilities) ->
-    check
-      bool
-      "a named provider reads the base, which declares no accepted efforts"
-      true
-      (Option.is_none c.accepted_reasoning_efforts)
+  check
+    bool
+    "a named provider does not pick up the bare row's ladder"
+    true
+    (ladder_of ~allow_bare_fallback:false <> ladder_of ~allow_bare_fallback:true)
 ;;
 
 let test_prefix_ordering_invariant () =

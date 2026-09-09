@@ -80,6 +80,36 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_claude_catalog_selection_needs_no_model_or_context_guess(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / 'masc'
+            binary.write_text("#!/bin/sh\ncase \"$1\" in\nruntime-model-list) printf '%s\\n' '{\"models\":[{\"id\":\"claude-fixture-model\",\"label\":\"Claude fixture\",\"max_context\":123000}]}' ;;\nruntime-model-info) printf '%s\\n' '{\"model\":\"claude-fixture-model\",\"max_context\":123000}' ;;\nesac\n")
+            binary.chmod(0o755)
+            helper = shlex.quote(str(ROOT / 'scripts/install-runtime-setup.py'))
+            body = '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' + helper + ' "$2"; }\nconfigure_runtime_source /fixture claude_code\n'
+            result, terminal = run_shell(body, b'1\n')
+            self.assertEqual(result.returncode, 0, terminal)
+            self.assertIn('Installed MASC model catalog', terminal)
+            self.assertIn('1) Claude fixture', terminal)
+            self.assertIn('123,000 tokens', terminal)
+            self.assertIn('No number to enter', terminal)
+            self.assertIn('model claude-fixture-model', result.stdout)
+            self.assertNotIn('Documented/configured context limit', terminal)
+
+    def test_custom_unknown_model_has_explained_context_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / 'masc'
+            binary.write_text('#!/bin/sh\nexit 1\n')
+            binary.chmod(0o755)
+            helper = shlex.quote(str(ROOT / 'scripts/install-runtime-setup.py'))
+            body = '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' + helper + ' "$2"; }\nconfigure_runtime_source /fixture claude_code\n'
+            result, terminal = run_shell(body, b'custom-model\n000\n8k\n8192\n')
+            self.assertEqual(result.returncode, 0, terminal)
+            self.assertIn('amount of text', terminal)
+            self.assertIn('Do not guess', terminal)
+            self.assertIn('without commas or units', terminal)
+            self.assertIn('model custom-model', result.stdout)
+
     def test_local_authentication_challenge_is_not_reported_as_stopped(self):
         class AuthRequired(http.server.BaseHTTPRequestHandler):
             def do_GET(self):

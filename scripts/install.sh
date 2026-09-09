@@ -687,17 +687,6 @@ runtime_setup_input() {
   printf '%s' "$answer"
 }
 
-runtime_setup_integer() {
-  local answer
-  while true; do
-    answer=$(runtime_setup_input "$1") || return 1
-    case "$answer" in
-      ''|*[!0-9]*|0) warn "enter a positive whole number" ;;
-      *) printf '%s' "$answer"; return 0 ;;
-    esac
-  done
-}
-
 runtime_setup_yes_no() {
   local answer
   while true; do
@@ -712,7 +701,7 @@ runtime_setup_yes_no() {
 
 configure_runtime_source() {
   local base_path="$1" source="$2" endpoint="" key_env="" credential="" timeout=""
-  local model context tools streaming helper spec receipt
+  local model context tools streaming helper spec receipt selection
   printf '\nConfigure %s. This connects to your server or CLI; it does not install model weights or authenticate an account.\n' "$source" >&2
   case "$source" in
     llama_cpp|vllm|openai_compatible)
@@ -724,23 +713,20 @@ configure_runtime_source() {
       timeout=$(runtime_setup_input 'Antigravity request timeout in seconds') || die "runtime setup cancelled"
       ;;
   esac
-  model=$(runtime_setup_input 'Model ID from your server or CLI') || die "runtime setup cancelled"
+  helper=$(mktemp)
+  PARTIAL_FILES+=("$helper")
+  fetch_bundle_asset install-runtime-setup.py "$helper"
+  selection=$(python3 "$helper" --binary "$DEST" --base-path "$base_path" \
+    --select-model "$source" --endpoint "$endpoint" --credential-env "$key_env" \
+    --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S") || die "model selection cancelled or unavailable"
+  model=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["model"])' <<< "$selection")
+  context=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["max_context"])' <<< "$selection")
   case "$source" in
     claude_code|codex)
-      # The official clients support MASC dynamic tools and streaming. Their
-      # installed model catalog supplies the context; no capability quiz.
-      local model_info
-      if model_info=$("$DEST" runtime-model-info "$model" 2>/dev/null); then
-        context=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["max_context"])' <<< "$model_info")
-        log "using installed model catalog context: $context tokens"
-      else
-        context=$(runtime_setup_integer 'Model not in the installed catalog; enter its context window in tokens') || die "runtime setup cancelled"
-      fi
       tools=y
       streaming=y
       ;;
     *)
-      context=$(runtime_setup_integer 'Configured model context window in tokens') || die "runtime setup cancelled"
       tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
       streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
       ;;
@@ -749,9 +735,8 @@ configure_runtime_source() {
     log "[dry-run] would configure $source with model $model in $base_path/.masc/config"
     return 0
   fi
-  helper=$(mktemp); spec=$(mktemp); receipt=$(mktemp)
-  PARTIAL_FILES+=("$helper" "$spec" "$receipt")
-  fetch_bundle_asset install-runtime-setup.py "$helper"
+  spec=$(mktemp); receipt=$(mktemp)
+  PARTIAL_FILES+=("$spec" "$receipt")
   python3 - "$spec" "$source" "$endpoint" "$key_env" "$credential" "$timeout" "$model" "$context" "$tools" "$streaming" <<'PYRUNTIME'
 import json, sys
 path, choice, endpoint, key_env, credential, timeout, model, context, tools, streaming = sys.argv[1:]
@@ -1389,6 +1374,20 @@ masc_reported_version() {
   run_masc_with_install_env "$bin" --version 2>/dev/null | tail -n1
 }
 
+# Automatic upgrades apply only to ordered stable release versions. Unknown
+# development/prerelease strings and downgrades still require an explicit force.
+is_stable_upgrade() {
+  python3 - "$1" "${2#v}" <<'PY_VERSION'
+import re, sys
+
+def release(value):
+    return tuple(map(int, value.split('.'))) if re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', value) else None
+
+installed, requested = map(release, sys.argv[1:])
+sys.exit(0 if installed is not None and requested is not None and installed < requested else 1)
+PY_VERSION
+}
+
 SKIP_DL=0
 if [ -e "$DEST" ]; then
   # The pipeline `... | tail -n1` masks the binary's own exit status, so
@@ -1400,6 +1399,8 @@ if [ -e "$DEST" ]; then
       SKIP_DL=1
     elif [ "$existing_ver" = "${VERSION#v}" ]; then
       warn "existing $DEST already reports $existing_ver; refreshing because --force is set"
+    elif [ "$FORCE" -eq 0 ] && is_stable_upgrade "$existing_ver" "$VERSION"; then
+      log "upgrading $DEST from $existing_ver to ${VERSION#v}; preserving workspace config"
     elif [ "$FORCE" -eq 0 ]; then
       warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; pass --force to overwrite"
       exit 1

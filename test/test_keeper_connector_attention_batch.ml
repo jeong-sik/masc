@@ -523,26 +523,27 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
     ]
 ;;
 
-(* #32096: mismatch and missing/inapplicable receipt evidence say nothing
-   about model intent, so the connector-attention row must not be recorded
-   as Ignored — [Batch_ack_attention_only] settles it as
-   [Settle_pending_in_queue]. #32277: refusing the queue ACK as well
-   replayed the same admitted batch into every later turn (one board post
-   re-promoted 297 times, a 10-15s wake churn), so the completed turn still
-   consumes its batch. *)
-let test_batch_disposition_keeps_unsettled_evidence_pending () =
-  let meta = test_meta "batch-disposition-pending" in
+(* #34655: a completed turn acks its connector attention whether or not it
+   produced a reply/ignore receipt. Holding the rows back until an exact
+   receipt existed (#32096) made "read but not answered" a wake reason, and
+   the same Discord rows were re-promoted on every wake (17 rows for a day;
+   3,711 consumption lines on 2026-09-08, 36 turns in thirty minutes on
+   2026-09-09). The turn's disposition stays on the reaction ledger's
+   turn_finished row; the message stays in the external-attention store.
+   #32277 is the same rule for board rows. *)
+let test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt () =
+  let meta = test_meta "batch-disposition-no-receipt" in
   List.iter
     (fun route ->
        match
          Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
            (Some (completed_outcome ~route meta))
        with
-       | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
-       | Keeper_heartbeat_loop.Batch_ack_completed ->
+       | Keeper_heartbeat_loop.Batch_ack_completed -> ()
+       | Keeper_heartbeat_loop.Batch_ack_attention_only ->
          fail
-           "unsettled route evidence must not label the attention row \
-            (no judgement was made)"
+           "a completed turn without a reply receipt retained its connector \
+            attention — the rows come back on every wake (#34655)"
        | Keeper_heartbeat_loop.Batch_no_action ->
          fail
            "a completed turn must consume its admitted batch — leaving it \
@@ -961,7 +962,7 @@ let () =
         ; test_case
             "unsettled route evidence stays pending, never Ignored"
             `Quick
-            test_batch_disposition_keeps_unsettled_evidence_pending
+            test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt
         ] )
     ]
 ;;

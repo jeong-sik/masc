@@ -29,8 +29,11 @@ let to_json (config : Runtime_schema.config) =
              in
              let credential =
                match provider.credentials with
-               | Some (Runtime_schema.Env name) -> [ "api_key_env", `String name ]
-               | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> []
+               | Some (Runtime_schema.Env name) ->
+                 [ "credential_kind", `String "env"; "api_key_env", `String name ]
+               | Some (Runtime_schema.File _) -> [ "credential_kind", `String "file" ]
+               | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
+               | None -> [ "credential_kind", `String "none" ]
              in
              Some
                (`Assoc

@@ -165,7 +165,9 @@ wizard-default = true
            bool
            "inline secret not exposed"
            false
-           (List.mem_assoc "api_key_env" (to_assoc row)))
+           (List.mem_assoc "api_key_env" (to_assoc row));
+         check string "credential kind retained without value" "inline"
+           (row |> member "credential_kind" |> to_string))
       rows;
     check
       bool

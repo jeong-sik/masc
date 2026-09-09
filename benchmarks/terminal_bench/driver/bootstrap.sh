@@ -26,6 +26,13 @@ else
   rm -f "$MASC_CONFIG_DIR/.write-test"
 fi
 
+# ship skills into the base-path source root for skills-on arms
+if [[ -d "$MASC_CONFIG_DIR/skills" ]]; then
+  mkdir -p "$MASC_BASE_PATH/.masc"
+  rm -rf "$MASC_BASE_PATH/.masc/skills"
+  cp -r "$MASC_CONFIG_DIR/skills" "$MASC_BASE_PATH/.masc/skills"
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \

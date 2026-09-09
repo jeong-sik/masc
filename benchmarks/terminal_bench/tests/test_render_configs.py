@@ -3,7 +3,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "configs"))
 
-from render_configs import ARMS, keeper_toml, render_arm  # noqa: E402
+from render_configs import (  # noqa: E402
+    ARMS,
+    composition_skill_names,
+    instruction_skill_names,
+    keeper_toml,
+    render_arm,
+)
+
+
+def test_skill_classification_matches_repo():
+    # skills/ 아래 10개 중 composition skill은 ```toml composition 블록을
+    # 가진 2개뿐이다 (2026-09-10 repo 사실 확인).
+    assert composition_skill_names() == ["browser-live-click-regions", "msx-observe"]
+    assert instruction_skill_names() == [
+        "browser-design", "browser-lanes", "evidence-review",
+        "frontend-implement", "frontend-verify", "msx-play",
+        "observe-act-verify", "slack-web",
+    ]
 
 
 def test_arms_cover_spec():
@@ -31,12 +48,24 @@ def test_arm_b_skills_off():
 
 def test_arm_c_skills_on_no_composition():
     keeper = keeper_toml("c", 1)
-    assert "skills.names" not in keeper  # 생략 = profile skills 전부
-    assert "attached_allow" in keeper  # spawn/composition 도구 차단
-    # allowlist는 실재하는 비-composition 도구만 담는다.
-    assert "keeper_spawn" not in keeper
-    assert "keeper_composition" not in keeper
-    assert "masc_keeper_delegate" not in keeper
+    # composition OFF = skills.names를 비-composition skill로 명시 제한한다.
+    # (tools.attached_allow는 built-in을 gate하지 못하는 no-op이라 폐기.)
+    assert "skills.names = [" in keeper
+    for name in instruction_skill_names():
+        assert f'"{name}"' in keeper
+    for name in composition_skill_names():
+        assert f'"{name}"' not in keeper
+    assert "attached_allow" not in keeper
+
+
+def test_skills_tree_copied_only_for_skills_arms():
+    out_c = render_arm("c", runtime_id="anthropic.claude-fable-5", effort="high")
+    skill_dirs = sorted(p.name for p in (out_c / "skills").iterdir() if p.is_dir())
+    # keeper 측 names 리스트가 제한을 담당하고, source tree는 10개 전부 실어
+    # 두 메커니즘이 서로를 honest하게 유지한다.
+    assert skill_dirs == sorted(instruction_skill_names() + composition_skill_names())
+    out_b = render_arm("b", runtime_id="anthropic.claude-fable-5", effort="high")
+    assert not (out_b / "skills").exists()
 
 
 def test_arm_e_parallel_on():

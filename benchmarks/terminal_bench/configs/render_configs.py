@@ -35,17 +35,37 @@ ARMS: dict[str, dict] = {
     "h": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=True),
 }
 
-# composition을 싣지 않는 keeper coordination/파일 도구. 이름은 전부
-# config/tools/*.toml basename으로 확인했다. skills가 켜진 arm에서
-# composition=False이면 이 목록만 attached_allow에 남겨 spawn/composition
-# 계열(keeper_spawn*, keeper_composition_*, masc_keeper_delegate*)을 차단한다.
-NON_COMPOSITION_TOOLS = [
-    "tool_execute", "tool_read_file", "tool_write_file", "tool_edit_file",
-    "tool_search_files", "Read", "Write", "Edit", "Grep",
-    "keeper_tasks_list", "keeper_tasks_audit",
-    "keeper_memory_search", "keeper_memory_write",
-    "masc_board_list", "masc_board_post", "masc_board_search",
-]
+# composition skill 판정 마커: SKILL.md 안에 ```toml composition fenced block이
+# 있으면 그 skill은 keeper_compose_<name> 도구를 만든다. arm c(composition OFF)는
+# skills.names를 이 마커가 없는 skill로만 제한해 composition 도구가 아예
+# 존재하지 않게 한다 — tools.attached_allow는 OAuth attached-service 도구만
+# filter하고 built-in/composition 도구는 gate하지 못하는 no-op이라 쓰지 않는다
+# (keeper_run_tools_setup.ml: Keeper_identity_tool_allow.apply 대상 확인).
+COMPOSITION_FENCE = "```toml composition"
+
+
+def _skill_names() -> list[str]:
+    return sorted(
+        p.parent.name
+        for p in (REPO_ROOT / "skills").glob("*/SKILL.md")
+    )
+
+
+def composition_skill_names() -> list[str]:
+    return sorted(
+        name
+        for name in _skill_names()
+        if any(
+            line.startswith(COMPOSITION_FENCE)
+            for line in (REPO_ROOT / "skills" / name / "SKILL.md").read_text().splitlines()
+        )
+    )
+
+
+def instruction_skill_names() -> list[str]:
+    composition = set(composition_skill_names())
+    return [name for name in _skill_names() if name not in composition]
+
 
 RUNTIME_TOML = """\
 [runtime]
@@ -124,8 +144,11 @@ def keeper_toml(arm: str, index: int) -> str:
         # 명시적 빈 배열 = skills 없음 (키 생략은 "전부"라 반대 의미).
         lines += ["", "skills.names = []"]
     elif not spec["composition"]:
-        tools = ", ".join(f'"{t}"' for t in NON_COMPOSITION_TOOLS)
-        lines += ["", f"tools.attached_allow = [{tools}]"]
+        # composition OFF: skills.names를 비-composition skill로 명시 제한한다.
+        # composition skill이 scope 밖이면 keeper_compose_<name> 도구 자체가
+        # 만들어지지 않는다. 키 생략(arms d-h)은 전 skill 허용.
+        names = ", ".join(f'"{n}"' for n in instruction_skill_names())
+        lines += ["", f"skills.names = [{names}]"]
     return "\n".join(lines) + "\n"
 
 
@@ -163,6 +186,13 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     (root / "runtime.toml").write_text(runtime_toml)
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         model_alias=model_alias, parallel=str(spec["parallel"]).lower()))
+
+    # skills=True arm은 skill source tree를 함께 싣는다. bootstrap.sh가 이를
+    # $MASC_BASE_PATH/.masc/skills/로 옮겨 [[skills.sources]]가 resolve한다.
+    # keeper 측 skills.names가 arm별 제한을 담당하므로 tree는 전부 싣는다.
+    # skills=False이면 디렉터리 자체를 만들지 않는다.
+    if spec["skills"]:
+        shutil.copytree(REPO_ROOT / "skills", root / "skills")
 
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)

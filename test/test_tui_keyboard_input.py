@@ -5204,7 +5204,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
 
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # Admit the run before holding its terminal reply. Withholding the HTTP
-    # response itself truthfully renders WAITING TO START, never ACTIVE TURN.
+    # response itself truthfully renders WAITING TO START, never IN PROGRESS.
     gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
 
     def terminal_response(request_body: bytes) -> RawHttpResponse | StreamingHttpResponse:
@@ -5282,17 +5282,14 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         # it, and the pane says so itself. Waiting on the fixture's own event
         # instead would stop pumping the terminal, and a TUI whose output
         # nobody reads blocks before it ever posts.
-        # The pane names the running turn "ACTIVE TURN"; the "(sending …)"
-        # spelling this waited on is gone, and the next wait already asks for
-        # the surviving one. Waiting here for the same words keeps the frame
-        # this step captures -- footer_while_sending is read off it -- while
-        # asking for something the pane still draws.
-        sending = send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        # RUN_STARTED is now present in the fixture stream, so the current
+        # Working transcript must render IN PROGRESS before input queues.
+        sending = send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
         wait_for_output(
             process,
             master_fd,
             output,
-            b"ACTIVE TURN",
+            b"IN PROGRESS",
             start=0,
             timeout=5.0,
         )
@@ -5474,7 +5471,7 @@ def chat_steer_interaction(
             b"original",
             composer_showing(b"original"),
         )
-        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
 
         send_and_wait(
             process,
@@ -5639,7 +5636,9 @@ def chat_reconcile_interaction(
         send_and_wait(
             process, master_fd, output, b"uncertain", composer_showing(b"uncertain")
         )
-        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        # The first connection fails before any RUN_STARTED. Its replacement
+        # is intentionally withheld: assert reconciliation, not a running turn.
+        send_and_wait(process, master_fd, output, b"\r", b"reconciling")
         if not wait_for_fixture_event(
             process,
             master_fd,

@@ -175,6 +175,15 @@ class NativeHost(unittest.TestCase):
                 self.process.stdin.flush()
             self.assertEqual(self.server.results.get(timeout=5), reply)
 
+    def test_interaction_pre_effect_metadata_roundtrip(self):
+        command = {"id": "pre-effect", "verb": "page.interact", "args": {"tabId": 42}}
+        self.server.commands.put(command)
+        self.assertEqual(read_frame(self.process.stdout), command)
+        reply = {"id": "pre-effect", "ok": False, "error": "scene_node_detached", "effectPhase": "not_started"}
+        self.process.stdin.write(encode_frame(reply))
+        self.process.stdin.flush()
+        self.assertEqual(self.server.results.get(timeout=5), reply)
+
     def test_screenshot_reply_larger_than_command_limit(self):
         command = {"id": "screenshot", "verb": "page.capture", "args": {"tabId": 73}}
         self.server.commands.put(command)

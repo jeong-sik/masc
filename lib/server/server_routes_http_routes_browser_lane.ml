@@ -127,12 +127,15 @@ let add_routes router =
                | Ok client_info -> (
                  match List.assoc_opt "id" fields with
                  | Some (`String id) ->
+                   let phase = match List.assoc_opt "ok" fields, List.assoc_opt "effectPhase" fields with
+                     | Some (`Bool false), Some (`String "not_started") -> ["effectPhase", `String "not_started"]
+                     | _ -> [] in
                    let payload =
                      `Assoc
-                       [ ("ok", match List.assoc_opt "ok" fields with Some (`Bool v) -> `Bool v | _ -> `Bool false)
+                       ([ ("ok", match List.assoc_opt "ok" fields with Some (`Bool v) -> `Bool v | _ -> `Bool false)
                        ; ("data", Option.value (List.assoc_opt "data" fields) ~default:`Null)
                        ; ("error", Option.value (List.assoc_opt "error" fields) ~default:`Null)
-                       ]
+                       ] @ phase)
                    in
                    (match Browser_lane.deliver_result ~client_id:client_info.client_id ~id ~payload with
                     | Ok () -> respond ~status:`OK []

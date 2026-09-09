@@ -84,3 +84,15 @@ scoped operator answer, and API readback. The answer was recorded and its wake
 reported delivered. This proves one requested-scenario permission escalation,
 not general spontaneous proactivity or completed follow-through. No PDF/SVG
 creation or rendered-artifact validation is claimed by these receipts.
+
+## Subsequent artifact and replay verification
+
+The SVG was subsequently created and rendered in Chromium; see
+[the first-draft review](svg-first-draft/README.md). Its producer receipt joins
+a successful Keeper Write path and byte count to independently retrieved SVG
+bytes. The input log is truncated, so no full logged-input hash match is claimed.
+The draft is semantically rejected and a correction is queued.
+
+`home-guide-replay-results.json` verifies approved Execute output blobs.
+The two package probes reached Docker but exited 1 because PDF packages were
+absent. Gate `applied` proves replay, not package import or PDF creation.

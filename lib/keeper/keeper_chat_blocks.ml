@@ -474,6 +474,7 @@ let official_client_message_blocks raw =
   if not (String.starts_with ~prefix:"{\"schema\":" trimmed) then None
   else
     match Yojson.Safe.from_string trimmed with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception _ -> None
     | `Assoc fields -> (
       match List.assoc_opt "schema" fields, List.assoc_opt "message" fields with
@@ -526,6 +527,10 @@ let official_client_message_blocks raw =
             (* An empty projection must not hand the message back to the
                plain-text path: broadcast omits empty blocks and the
                dashboard would re-parse the raw envelope JSON. *)
+            (* sound-partial: allow — the catch-all arms below never guess at
+               the unknown content; they hand back a fixed placeholder marker
+               so the reader sees "something unrenderable arrived" instead of
+               either a silent drop or the raw envelope JSON. *)
             (match projected with
              | [] -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ]
              | _ -> Some projected)

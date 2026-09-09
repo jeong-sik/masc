@@ -149,8 +149,11 @@ let core_error_cases : (string * CoreError.t * string) list =
     (* The kind comes from the constant the producer uses and the reason
        reader matches against, not from a literal here. #32612 gave this
        concept one spelling and this row kept the retired one, which is the
-       drift a hand-typed copy of a shared constant produces. The suffix
-       stays spelled out: it is this row's own input, not shared vocabulary. *)
+       drift a hand-typed copy of a shared constant produces. This row is
+       also the one arm without the agent_error_ prefix its neighbours carry,
+       so a second spelling here would decode as Unknown and leave the
+       receipt unmapped. The suffix stays spelled out: it is this row's own
+       input, not shared vocabulary. *)
   ; ( "Agent/TerminalToolEffectFailed"
     , terminal_effect_core_error
     , Keeper_internal_error.terminal_effect_failed_kind

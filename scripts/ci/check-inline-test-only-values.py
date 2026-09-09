@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail on a value whose only callers are inline tests.
+"""Report candidates that may have only inline-test callers.
+
+This is a lexical advisory, not an OCaml reachability proof. Inline tests need
+not end with ;;, comments and strings may contain names, and a same-line
+production use is not counted. Release compilation is the authority; findings
+must be checked against source before removing code or suppressing warnings.
 
 `dune build --release` drops ppx inline tests. A top-level value that no
 `.mli` exports and that nothing outside a `let%test` block calls therefore
@@ -134,20 +139,18 @@ def main(argv: list[str]) -> int:
     )
     found = violations(root)
     if not found:
-        print("[inline-test-only] OK - every unexported value has a caller outside its tests")
+        print("[inline-test-only] no candidates found by lexical scan")
         return 0
     print(
-        f"[inline-test-only] FAIL - {len(found)} value(s) reachable only from inline tests.\n"
-        "`dune build --release` drops those tests, leaving the value with no\n"
-        "caller and the build red under -w +32 -warn-error +a.\n",
+        f"[inline-test-only] {len(found)} candidate(s) need reachability review.\n"
+        "Lexical test spans can include real production callers; verify against\n"
+        "OCaml source and release compilation before changing code.\n",
         file=sys.stderr,
     )
     for path, line, name in found:
         print(f"  {path}:{line}  {name}", file=sys.stderr)
     print(
-        "\nDelete the value and assert through the surface production uses, or\n"
-        'annotate the binding `let[@warning "-32"] name = ...` when the helper\n'
-        "exists for the test on purpose.",
+        "\nA candidate is not proof that deleting or annotating the value is safe.",
         file=sys.stderr,
     )
     return 1

@@ -222,12 +222,12 @@ describe('Work', () => {
       }
     })
 
-    it('shows Goal source failure instead of zero goals and normal circulation', () => {
+    it.each(['goals.json: criterion_revision is missing', 'goal_task_links: primary registry is missing'])('shows source failure instead of zero goals: %s', detail => {
       goals.value = []
       goalTreeData.value = null
-      goalTreeError.value = 'goals.json: criterion_revision is missing'
+      goalTreeError.value = detail
       render(html`<${Work} />`)
-      expect(screen.getByTestId('work-goal-source-error').textContent).toContain('criterion_revision is missing')
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain(detail)
       expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
       expect(screen.queryByTestId('wka-flagged-calm')).toBeNull()
       expect(screen.queryByText('주의 목표 없음 · 정상 순환')).toBeNull()

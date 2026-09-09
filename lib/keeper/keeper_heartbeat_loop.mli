@@ -177,6 +177,24 @@ val batch_disposition_of_cycle_outcome :
     input-required, or skipped outcome leaves the whole batch pending.
     Provider/runtime failure is not authority to discard input. *)
 
+type continuation_settlement =
+  | Continuation_settled_recorded
+  | Continuation_settled_failed of
+      { route : Keeper_runtime_failure_route.route }
+  | Continuation_unsettled
+
+val continuation_settlement_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option -> continuation_settlement
+(** How the turn settles the HITL continuation it was handed.
+    [Continuation_settled_recorded] follows the batch disposition above: a
+    completed or checkpointed turn. [Continuation_settled_failed] is a failed
+    turn whose route satisfies {!Keeper_runtime_failure_route.response_observed}:
+    the provider answered the request that carried the replay evidence, so
+    the evidence is not carried into the next cycle (#32956). Every other
+    failure, and every cancelled, input-required, or skipped outcome, leaves
+    the continuation unsettled. The queue disposition of a failed turn stays
+    [Batch_no_action] either way. *)
+
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)

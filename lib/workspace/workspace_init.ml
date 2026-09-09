@@ -39,7 +39,7 @@ let init config ~agent_name =
     | Error msg -> Log.Workspace.warn "init: local sync of root state failed: %s" msg);
   if not (path_exists_root config root_backlog_path)
   then (
-    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+    let root_backlog = { tasks = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 } in
     write_json_root config root_backlog_path (backlog_to_yojson root_backlog))
   else (
     let root_backlog_json = read_json_root config root_backlog_path in
@@ -136,7 +136,16 @@ let reset config =
         |> Array.iter (fun name ->
           Workspace_query.safe_yield ();
           rm_rf (Filename.concat path name));
-        Unix.rmdir path)
+        Unix.rmdir path;
+        (* A writer that has appended here remembers the directory exists and
+           skips the mkdir on its next append, so the open lands on a path
+           that is gone. Fs_compat names this case: "use when
+           application-owned code removes a directory that a later memoized
+           writer may recreate". The audit log is the one that showed it --
+           an init after a reset raised Sys_error on
+           .masc/audit/YYYY-MM/DD.jsonl -- and every dated store under .masc
+           is written the same way. *)
+        Fs_compat.invalidate_mkdir_memo path)
       else Sys.remove path
     in
     rm_rf (masc_dir config);

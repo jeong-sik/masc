@@ -448,6 +448,40 @@ describe('ChatTranscript', () => {
     expect(container.querySelectorAll('[data-chat-approval-id="appr_01typed"]')).toHaveLength(3)
   })
 
+  it('renders a failed continuation as its own typed card', () => {
+    // #32956: the turn that received the replay failed after the provider
+    // answered. The card says so and says the approval is not re-delivered.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'approval-continuation-failed',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '',
+            approvalLifecycle: {
+              approvalId: 'appr_02failed',
+              toolName: 'Execute',
+              phase: 'continuation_failed',
+              artifactSha256: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const failed = container.querySelector('[data-chat-approval-lifecycle="continuation_failed"]')
+    expect(failed).not.toBeNull()
+    expect(failed?.textContent).toContain('이어가기 실패')
+    expect(failed?.textContent).toContain('승인 결과를 받은 턴이 실패')
+    expect(failed?.textContent).toContain('다시 전달하지 않습니다')
+    expect(failed?.textContent).toContain('appr_02failed')
+  })
+
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_agent_core_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(

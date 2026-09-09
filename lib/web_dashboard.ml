@@ -245,43 +245,42 @@ let dashboard_asset_root () =
   | Build_identity.Dashboard_asset_not_manifested -> None
 ;;
 
-let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
-
 type bundle_freshness =
   | Fresh
-  | Stale of { stamp_mtime : float; binary_mtime : float }
-  | Missing_stamp
+  | Mismatched of { dashboard_commit : string; binary_commit : string }
+  | Unknown_identity
 
-(** Compare the dashboard bundle's [.build-stamp] mtime (touched by
-    [scripts/build-dashboard-if-needed.sh] on every successful build) against
-    the running server binary's mtime. A stamp older than the binary means a
-    new server was shipped without rebuilding the SPA — the exact drift that
-    let a removed HTTP route (#24332) keep getting called by a still-stale
-    bundle. [Missing_stamp] covers both "never built" and any stat failure on
-    the stamp path, so a broken assets_root resolution is never silently
-    treated as fresh. *)
-let source_bundle_freshness () =
+(* Unbound assets declare their build source; this does not verify the served
+   asset tree. Installed and source-bound manifests retain their own integrity
+   checks. File timestamps are observations, never source identity. *)
+let source_bundle_freshness ~binary_commit () =
   match Build_identity.resolve_dashboard_asset "index.html" with
   | Build_identity.Dashboard_asset_bound _ ->
     (match Build_identity.resolve_dashboard_asset ".build-stamp" with
      | Build_identity.Dashboard_asset_bound _ -> Fresh
-     | _ -> Missing_stamp)
+     | _ -> Unknown_identity)
   | Build_identity.Dashboard_assets_invalid _
   | Build_identity.Dashboard_assets_unavailable
-  | Build_identity.Dashboard_asset_not_manifested -> Missing_stamp
+  | Build_identity.Dashboard_asset_not_manifested -> Unknown_identity
   | Build_identity.Dashboard_assets_unbound ->
-    (match Option.bind (build_stamp_path ()) mtime_of with
-     | None -> Missing_stamp
-     | Some stamp_mtime ->
-    (match mtime_of Sys.executable_name with
-     | None ->
-       (* Can't stat our own binary (unusual, e.g. exec'd via a symlink the
-          OS deleted from under us) — nothing to compare against, so this is
-          not evidence of staleness either way. *)
-       Fresh
-     | Some binary_mtime ->
-       if stamp_mtime < binary_mtime then Stale { stamp_mtime; binary_mtime }
-       else Fresh))
+    (match binary_commit,
+           load_dashboard_asset_for_selection Installed_dashboard.Not_installed
+             ".build-identity.json" with
+     | Some binary_commit, Ok body ->
+       (try
+          match Yojson.Safe.from_string body with
+          | `Assoc fields ->
+            (match List.assoc_opt "schema" fields,
+                   List.assoc_opt "source_commit" fields with
+             | Some (`String "masc.dashboard-build.v1"), Some (`String dashboard_commit)
+               when String.length dashboard_commit = 40
+                    && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) dashboard_commit ->
+               if String.equal dashboard_commit binary_commit then Fresh
+               else Mismatched { dashboard_commit; binary_commit }
+             | _ -> Unknown_identity)
+          | _ -> Unknown_identity
+        with Yojson.Json_error _ -> Unknown_identity)
+     | _ -> Unknown_identity)
 
 (* Request-local observation: installed freshness and the final health verdict
    share one fully verified stamp read, never a result from an earlier request. *)
@@ -290,8 +289,8 @@ type bundle_observation =
   | Installed_unavailable of Installed_dashboard.error
   | Installed_stamp of (unit, Installed_dashboard.error) result
 
-let observe_bundle = function
-  | Installed_dashboard.Not_installed -> Source_bundle (source_bundle_freshness ())
+let observe_bundle ~binary_commit = function
+  | Installed_dashboard.Not_installed -> Source_bundle (source_bundle_freshness ~binary_commit ())
   | Installed_dashboard.Unavailable e -> Installed_unavailable e
   | Installed_dashboard.Bound binding ->
     Installed_stamp
@@ -300,33 +299,27 @@ let observe_bundle = function
 let observed_freshness = function
   | Source_bundle freshness -> freshness
   | Installed_stamp (Ok ()) -> Fresh
-  | Installed_stamp (Error _) | Installed_unavailable _ -> Missing_stamp
+  | Installed_stamp (Error _) | Installed_unavailable _ -> Unknown_identity
 
 let bundle_freshness () =
-  observed_freshness (observe_bundle (installed_selection ()))
+  observed_freshness (observe_bundle ~binary_commit:Build_identity.embedded_commit (installed_selection ()))
 
-(** Log a boot-time WARN when the served bundle is stale or missing. Never
-    silent: a missing stamp warns just as loudly as a stale one. Intended to
-    be called once during server startup (see
-    Server_runtime_bootstrap.run). *)
+(** Emit the same provenance verdict exposed by health. *)
 let log_bundle_freshness_warning () =
   match bundle_freshness () with
   | Fresh -> ()
-  | Missing_stamp ->
+  | Unknown_identity ->
     Log.Dashboard.warn
-      "bundle build-stamp unavailable at %s — dashboard assets may be missing \
-       or unbuilt; inspect /health dashboard_surface.recovery"
-      (Option.value ~default:"<bound-dashboard-unavailable>" (build_stamp_path ()))
-  | Stale { stamp_mtime; binary_mtime } ->
+      "dashboard source identity unavailable — inspect /health dashboard_surface.recovery"
+  | Mismatched { dashboard_commit; binary_commit } ->
     Log.Dashboard.warn
-      "bundle build-stamp %s older than server binary %s — inspect /health \
-       dashboard_surface.recovery"
-      (iso8601_of_unix_seconds stamp_mtime)
-      (iso8601_of_unix_seconds binary_mtime)
+      "dashboard source %s differs from server source %s — inspect /health dashboard_surface.recovery"
+      dashboard_commit binary_commit
 
 type recovery_reason =
   | Unbound_assets_missing
-  | Unbound_assets_stale
+  | Unbound_source_mismatch
+  | Unbound_identity_unavailable
   | Build_receipt_unavailable
   | Binding_invalid
   | Manifest_entry_missing
@@ -335,7 +328,7 @@ type recovery_reason =
 
 type surface_recovery =
   | No_recovery
-  | Build_in_place of recovery_reason
+  | Install_matching_ci_artifacts of recovery_reason
   | Restart_with_exact_build
   | Repair_exact_artifacts_and_restart of recovery_reason
 
@@ -348,9 +341,9 @@ let surface_recovery
   | Build_identity.Dashboard_assets_unbound ->
     (match loaded_index, freshness with
      | Ok _, Fresh -> No_recovery
-     | Error _, Fresh -> Build_in_place Unbound_assets_missing
-     | _, Stale _ -> Build_in_place Unbound_assets_stale
-     | _, Missing_stamp -> Build_in_place Unbound_assets_missing)
+     | Error _, _ -> Install_matching_ci_artifacts Unbound_assets_missing
+     | Ok _, Mismatched _ -> Install_matching_ci_artifacts Unbound_source_mismatch
+     | Ok _, Unknown_identity -> Install_matching_ci_artifacts Unbound_identity_unavailable)
   | Build_identity.Dashboard_assets_unavailable -> Restart_with_exact_build
   | Build_identity.Dashboard_assets_invalid _ ->
     Repair_exact_artifacts_and_restart Binding_invalid
@@ -367,13 +360,14 @@ let surface_recovery
      | Error (Asset_exact_read_failed _), _ ->
        Repair_exact_artifacts_and_restart Exact_read_failed
      | Error Asset_build_unavailable, _ -> Restart_with_exact_build
-     | Ok _, (Missing_stamp | Stale _) ->
+     | Ok _, (Unknown_identity | Mismatched _) ->
        Repair_exact_artifacts_and_restart Bound_assets_incomplete)
 ;;
 
 let recovery_reason_string = function
   | Unbound_assets_missing -> "unbound_assets_missing"
-  | Unbound_assets_stale -> "unbound_assets_stale"
+  | Unbound_source_mismatch -> "unbound_source_mismatch"
+  | Unbound_identity_unavailable -> "unbound_identity_unavailable"
   | Build_receipt_unavailable -> "build_receipt_unavailable"
   | Binding_invalid -> "binding_invalid"
   | Manifest_entry_missing -> "manifest_entry_missing"
@@ -388,9 +382,9 @@ let surface_recovery_json = function
       ; "reason", `String "surface_ready"
       ; "restart_required", `Bool false
       ]
-  | Build_in_place reason ->
+  | Install_matching_ci_artifacts reason ->
     `Assoc
-      [ "kind", `String "build_in_place"
+      [ "kind", `String "install_matching_ci_artifacts"
       ; "reason", `String (recovery_reason_string reason)
       ; "restart_required", `Bool false
       ]
@@ -408,18 +402,13 @@ let surface_recovery_json = function
       ]
 ;;
 
-(** Health projection of the dashboard surface. The boot-time WARN from
-    {!log_bundle_freshness_warning} scrolls away with the log ring; this JSON
-    keeps the same verdict visible on every [/health] probe, so an operator
-    (or an audit) can see a dark dashboard surface without replaying startup
-    logs. [status] is ["ok"], ["stale"], or ["missing"]; a present build-stamp
-    with no [index.html] still reports ["missing"] because the index is what
-    actually serves. *)
-let surface_status_json_for_selection installed =
+(** Source identity and asset availability remain separate in health. *)
+let surface_status_json_for_selection
+      ?(binary_commit = Build_identity.embedded_commit) installed =
   let asset_resolution = Build_identity.resolve_dashboard_asset "index.html" in
   let manifest_identity = Build_identity.dashboard_manifest_identity () in
   let loaded_index = load_dashboard_asset_for_selection installed "index.html" in
-  let bundle = observe_bundle installed in
+  let bundle = observe_bundle ~binary_commit installed in
   let freshness = observed_freshness bundle in
   let index_present = Result.is_ok loaded_index in
   let bound_invalid =
@@ -432,24 +421,19 @@ let surface_status_json_for_selection installed =
   in
   let freshness_status, freshness_fields =
     match freshness with
-    | Missing_stamp -> ("missing", [])
-    | Stale { stamp_mtime; binary_mtime } ->
-      ( "stale"
-      , [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime))
-        ; ("binary_built_at", `String (iso8601_of_unix_seconds binary_mtime))
-        ] )
+    | Unknown_identity -> ("unknown", [])
+    | Mismatched { dashboard_commit; binary_commit } ->
+      ( "mismatched"
+      , [ "dashboard_source_commit", `String dashboard_commit
+        ; "binary_source_commit", `String binary_commit ] )
     | Fresh ->
-      let stamp_field =
-        let stamp_mtime = match installed with
-          | Installed_dashboard.Bound binding -> Installed_dashboard.build_stamp_mtime binding
-          | Installed_dashboard.Unavailable _ -> None
-          | Installed_dashboard.Not_installed -> Option.bind (build_stamp_path ()) mtime_of in
-        match stamp_mtime with
-        | Some stamp_mtime ->
-          [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime)) ]
-        | None -> []
-      in
-      ("ok", stamp_field)
+      let stamp = match installed with
+        | Installed_dashboard.Bound binding -> Installed_dashboard.build_stamp_mtime binding
+        | Installed_dashboard.Unavailable _ -> None
+        | Installed_dashboard.Not_installed -> Option.bind (build_stamp_path ()) mtime_of in
+      ("ok", match stamp with
+       | Some stamp -> ["build_stamp_at", `String (Time_codec.rfc3339_of_unix stamp)]
+       | None -> [])
   in
   (* A missing index.html trumps freshness: the index is what actually
      serves, so a stale-or-fresh stamp without it is still a dark surface. *)
@@ -489,6 +473,11 @@ let surface_status_json_for_selection installed =
     ([ ("schema", `String "masc.dashboard_surface.v1")
      ; ("installed_release", installed_evidence)
      ; ("status", `String status)
+     ; ("source_provenance", `String
+          (match installed, asset_resolution with
+           | Installed_dashboard.Bound _, _ -> "installed_manifest"
+           | _, Build_identity.Dashboard_asset_bound _ -> "source_manifest"
+           | _ -> (match freshness with Unknown_identity -> "unknown" | _ -> "declared_build_source")))
      ; ("index_present", `Bool index_present)
      ; ("assets_root", Json_util.string_opt_to_json surface_assets_root)
      ; ("dashboard_asset_root", Json_util.string_opt_to_json surface_dashboard_root)

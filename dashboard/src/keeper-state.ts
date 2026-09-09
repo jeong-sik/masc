@@ -222,6 +222,7 @@ const APPROVAL_LIFECYCLE_PHASES = new Set<KeeperApprovalLifecyclePhase>([
   'replay_failed',
   'replay_indeterminate',
   'continuation_recorded',
+  'continuation_failed',
 ])
 
 function normalizeApprovalLifecycle(raw: unknown): KeeperApprovalLifecycle | null {

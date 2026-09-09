@@ -146,10 +146,18 @@ let core_error_cases : (string * CoreError.t * string) list =
            ; detail = "hook failed"
            })
     , "agent_error_hook_execution_failed:hook=post_tool_use,stage=execute" )
+    (* The kind comes from the constant the producer uses and the reason
+       reader matches against, not from a literal here. #32612 gave this
+       concept one spelling and this row kept the retired one, which is the
+       drift a hand-typed copy of a shared constant produces. This row is
+       also the one arm without the agent_error_ prefix its neighbours carry,
+       so a second spelling here would decode as Unknown and leave the
+       receipt unmapped. The suffix stays spelled out: it is this row's own
+       input, not shared vocabulary. *)
   ; ( "Agent/TerminalToolEffectFailed"
     , terminal_effect_core_error
-    , "agent_error_terminal_tool_effect_failed:tool_use_id=tool-terminal,effect_disposition=proven_post_effect"
-    )
+    , Keeper_internal_error.terminal_effect_failed_kind
+      ^ ":tool_use_id=tool-terminal,effect_disposition=proven_post_effect" )
   ; ( "Agent/TerminalToolDurabilityFailed"
     , terminal_durability_core_error
     , "agent_error_terminal_tool_durability_failed:tool_use_id=tool-durable,effect_disposition=effect_outcome_unknown"

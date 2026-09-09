@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import tailwindcss from '@tailwindcss/vite'
@@ -101,13 +103,32 @@ function dashboardModulePreloadContractPlugin(): Plugin {
 
 // Emit the marker with the bundle itself: pnpm build, Docker, and the shell
 // wrapper all run Vite, whose emptyOutDir removes any previous marker.
-// The server currently reads this file's mtime; its contents record the real
-// build time rather than a deployment-time claim about freshness.
+// Time is diagnostic; source identity is declared only for a clean checkout.
 function dashboardBuildStampPlugin(): Plugin {
+  const cwd = fileURLToPath(new URL('..', import.meta.url))
+  const cleanSourceCommit = (): string | null => {
+    try {
+      const git = (...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+      return git('status', '--porcelain', '--untracked-files=normal') === ''
+        ? git('rev-parse', 'HEAD') : null
+    } catch {
+      return null
+    }
+  }
+  let startedFrom: string | null = null
   return {
     apply: 'build',
     name: 'masc-dashboard-build-stamp',
+    buildStart() {
+      startedFrom = cleanSourceCommit()
+    },
     generateBundle() {
+      const sourceCommit = startedFrom === cleanSourceCommit() ? startedFrom : null
+      this.emitFile({
+        type: 'asset',
+        fileName: '.build-identity.json',
+        source: `${JSON.stringify({ schema: 'masc.dashboard-build.v1', source_commit: sourceCommit })}\n`,
+      })
       this.emitFile({
         type: 'asset',
         fileName: '.build-stamp',

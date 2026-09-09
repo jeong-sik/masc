@@ -22,6 +22,8 @@ name: CI
 # Lint, dashboard, ratchets, and the ci-gate no longer run anywhere.
 
 on:
+  push:
+    branches: [main]
   workflow_call:
     inputs:
       candidate_verification:

@@ -167,18 +167,20 @@ let handle_load ~base_path request reqd =
    slot. A turn in a turn-based game can run to minutes, so the window is wide. *)
 let players_window_frames = 3600
 
-let recent_players ~now =
+let recent_players_of ~now entries =
   let last : (string, int) Hashtbl.t = Hashtbl.create 8 in
   List.iter
     (fun (e : Msx_lane.entry) ->
       Hashtbl.replace last e.Msx_lane.who e.Msx_lane.at_frame)
-    (Msx_lane.ledger ());
+    entries;
   Hashtbl.fold
     (fun who f acc ->
       if now - f <= players_window_frames then (who, f) :: acc else acc)
     last []
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
+
+let recent_players ~now = recent_players_of ~now (Msx_lane.ledger ())
 
 (* The lane owns immutable RGB snapshots and reuses their identity until a
    machine mutation. Cache only pixel encoding: clock and player metadata must
@@ -232,15 +234,86 @@ let msx_tick_default_frames = 18
 
 let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call requested)
 
+type pixel_reference = { revision : string; width : int; height : int }
+type pixel_response = Full_frame | Retained_pixels of pixel_reference option
+
+let decode_pixel_reference = function
+  | `Assoc fields when List.length fields = 3 ->
+      (match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
+             List.assoc_opt "height" fields with
+       | Some (`String revision), Some (`Int width), Some (`Int height)
+         when String.length revision = 64 && width > 0 && height > 0
+              && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
+           Ok { revision; width; height }
+       | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
+  | _ -> Error "known_pixels requires exactly revision, width and height"
+
 let decode_tick body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error _ -> Error "tick body must be valid JSON"
-  | `Assoc [] -> Ok msx_tick_default_frames
-  | `Assoc [ "frames", `Int frames ] -> Ok (clamp_tick_frames frames)
-  | `Assoc [ "frames", _ ] -> Error "frames must be an integer"
-  | `Assoc _ -> Error "tick accepts only one optional frames field"
+  | `Assoc fields ->
+      let ( let* ) = Result.bind in
+      let names = List.map fst fields in
+      let* () =
+        if List.length names <> List.length (List.sort_uniq String.compare names)
+           || List.exists (fun name -> not (List.mem name ["frames"; "pixel_response"; "known_pixels"])) names
+        then Error "tick has duplicate or unknown fields" else Ok () in
+      let* frames = match List.assoc_opt "frames" fields with
+        | None -> Ok msx_tick_default_frames
+        | Some (`Int n) -> Ok (clamp_tick_frames n)
+        | Some _ -> Error "frames must be an integer" in
+      let* pixels = match List.assoc_opt "pixel_response" fields, List.assoc_opt "known_pixels" fields with
+        | None, None -> Ok Full_frame
+        | Some (`String "retained"), None -> Ok (Retained_pixels None)
+        | Some (`String "retained"), Some value ->
+            Result.map (fun reference -> Retained_pixels (Some reference)) (decode_pixel_reference value)
+        | _ -> Error "known_pixels requires pixel_response=retained" in
+      Ok (frames, pixels)
   | _ -> Error "tick body must be an object"
 ;;
+
+type prepared_pixels = { rgb : string; encoded : string; reference : pixel_reference }
+let tick_pixels_mutex = Mutex.create ()
+let tick_pixels : prepared_pixels option ref = ref None
+
+let prepare_tick_pixels (frame : Msx_lane.frame) =
+  let previous = Mutex.protect tick_pixels_mutex (fun () -> !tick_pixels) in
+  match previous with
+  | Some pixels when pixels.reference.width = frame.width
+                     && pixels.reference.height = frame.height
+                     && String.equal pixels.rgb frame.rgb -> pixels
+  | Some _ | None ->
+      (* Advance invalidates the lane's RGB object even for identical pixels.
+         Compare bytes before hashing/encoding; CPU work never holds this lock. *)
+      let pixels =
+        { rgb = frame.rgb; encoded = Base64.encode_string frame.rgb;
+          reference = { width = frame.width; height = frame.height;
+            revision = Digestif.SHA256.(to_hex (digest_string frame.rgb)) } } in
+      Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
+      pixels
+
+let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
+  let pixel_fields = match pixel_response with
+    | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
+    | Retained_pixels known ->
+        let pixels = prepare_tick_pixels frame in
+        let retained = known = Some pixels.reference in
+        let fields =
+          ["kind", `String (if retained then "retained" else "inline");
+           "revision", `String pixels.reference.revision;
+           "width", `Int frame.width; "height", `Int frame.height] in
+        ["pixels", `Assoc (if retained then fields
+           else fields @ ["rgb_base64", `String pixels.encoded])] in
+  `Assoc
+    (["loaded", `Bool true; "number", `Int frame.number;
+      "width", `Int frame.width; "height", `Int frame.height;
+      "mode", `String frame.mode;
+      "cartridge", (match frame.cartridge with Some s -> `String s | None -> `Null);
+      "disk", (match frame.disk with Some s -> `String s | None -> `Null);
+      "players", `List (List.map (fun (who, last) ->
+        `Assoc ["who", `String who; "last_frame", `Int last;
+                "frames_ago", `Int (frame.number - last)])
+          (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
 let tick_response ~body =
   let error status message =
@@ -248,13 +321,14 @@ let tick_response ~body =
   in
   match decode_tick body with
   | Error detail -> error `Bad_request detail
-  | Ok frames ->
+  | Ok (frames, pixel_response) ->
     (* This is a mutation: the best-effort executor adapter can replay failed
        work inline. Strict submission never retries or falls back to the HTTP
        domain. The worker owns both emulation and the frame's serialization. *)
     match Executor_pool_ref.submit_strict (fun () ->
-      match Msx_lane.step ~frames with
-      | Ok _ | Error Msx_lane.No_machine -> `OK, frame_json ()
+      match Msx_lane.step_frame ~frames with
+      | Ok (frame, entries) -> `OK, tick_frame_json pixel_response frame entries
+      | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
@@ -276,7 +350,8 @@ let tick_response ~body =
 let handle_tick request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let status, json = tick_response ~body in
-      respond_json_value_with_cors ~status request reqd json)
+      Http.Response.json_value_on_cpu ~status ~request
+        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
 
 let checkpoint_response ~base_path ~restore ~body =
@@ -340,7 +415,7 @@ let add_routes router =
   |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
        with_public_read
          (fun _state req reqd ->
-           Http.Response.json_value ~compress:true ~request:req (frame_json ()) reqd)
+           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
          request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read

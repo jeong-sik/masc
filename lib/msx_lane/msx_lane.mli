@@ -55,7 +55,10 @@ type entry = { at_frame : int; who : string; key_name : string; down : bool }
 type error =
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
-  | Unreadable of string  (** a ROM or cartridge path that cannot be read *)
+  | Unreadable of string
+      (** a file that is there and will not read: a ROM, a cartridge, a
+          checkpoint. A path that does not exist is [Invalid_request] --
+          the caller named it. *)
 
 val error_to_string : error -> string
 
@@ -130,6 +133,10 @@ val frame : unit -> frame option
     A spectator renders this; the pixels are the client's to downsample.
     Repeated reads of the same machine state reuse immutable rendered pixels.
     Advancing, loading, restoring, or replacing media invalidates that snapshot. *)
+
+val step_frame : frames:int -> (frame * entry list, error) result
+(** Advance once and capture the resulting pixels, metadata and oldest-first
+    input ledger under one machine lock. Encoding happens outside that lock. *)
 
 val capture : unit -> (observation * frame, error) result
 (** Copy observation and pixels under the same machine lock. Does not advance

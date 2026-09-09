@@ -323,6 +323,12 @@ def end_of_needle(
     return found.end()
 
 
+# The Planning goal table's column row, which Render_schedule.planning_header_row
+# writes and only the list pane draws. The widths between the names follow the
+# terminal, so the names are what the pattern pins.
+PLANNING_LIST_HEADER = re.compile(rb"PHASE\s+JUDGE\s+PRI\s+OPEN\s+TITLE")
+
+
 def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     """A screen header, matched across the emphasis that closes the title.
 
@@ -332,6 +338,23 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     styling rather than about what the screen is showing.
     """
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
+
+
+def approvals_header(count: int) -> re.Pattern[bytes]:
+    """The Approvals title and the number of asks on it.
+
+    What follows the number inside the parens is where those asks came from --
+    held calls, Gate rows, operator entries -- and the renderer writes that
+    breakdown whenever the count is above zero. Spelling the header as
+    "(3)" asserted the parenthesis closes right after the number, which is a
+    fact about that breakdown rather than about how many asks are waiting.
+    """
+    return re.compile(
+        re.escape(b"MASC Approvals")
+        + rb"(?:\x1b\[[0-9;]*m)* \("
+        + str(count).encode()
+        + rb"[ )]"
+    )
 
 
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
@@ -452,7 +475,12 @@ def send_and_wait(
 ) -> bytes:
     read_available(master_fd, output)
     start = len(output)
-    os.write(master_fd, data)
+    # Through write_all, not os.write: the master is non-blocking and the
+    # terminal's input queue holds about a kilobyte, so a single write of a
+    # longer payload returns short and the rest is dropped without an error.
+    # A scenario that types 1,819 bytes and waits for the tail was waiting on
+    # bytes the terminal never received -- 1,022 of them arrived.
+    write_all(master_fd, output, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
     needle_end = end_of_needle(output, needle, start)
     wait_for_output(
@@ -1152,8 +1180,7 @@ def keeper_runtime_http_fixtures(
                     "paused": False,
                     "phase": "running",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": True,
+                    "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                 },
                 {
@@ -1165,8 +1192,7 @@ def keeper_runtime_http_fixtures(
                     "paused": True,
                     "phase": "paused",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": False,
+                    "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                 },
             ],
@@ -2840,26 +2866,39 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (
-        BOARD_CELL_BODY.encode(),
-        b"comment-1",
-        b"comment-2",
-        b"comment-3",
-        b"j/k:scroll",
-    ):
+    # One comment row at this height. The surface spends the rest on its box,
+    # on the key footer, and on the "post rows" line it writes because the
+    # thread does not fit -- so the budget the thread is left with is the
+    # smallest one this pane hands out.
+    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"j/k:scroll"):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
         raise AssertionError(f"Board comment leaked Markdown source markers: {board!r}")
-    if b"comment-4" in board or b"comment-5" in board:
-        raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+    for hidden in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+        if hidden in board:
+            raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
 
-    send_and_wait(process, master_fd, output, b"j", b"comment-4")
-    send_and_wait(process, master_fd, output, b"j", b"comment-5")
+    # With one comment row, each press moves the thread by one, and the whole
+    # thread is still reachable.
+    for comment in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+        send_and_wait(process, master_fd, output, b"j", comment)
     os.write(master_fd, b"q")
 
 
 EVENT_RANGE_RE = re.compile(rb"TUI Session Events (\d+)-(\d+)/(\d+)")
+
+
+def manual_refresh_run(drawn: bytes, where: str) -> int:
+    """How many manual refreshes the newest event row stands for.
+
+    The panel folds a run of identical events into one row and writes the
+    length as a ×N tail; a run of one carries no tail at all.
+    """
+    match = re.search(rb"Manual refresh (?:\xc3\x97(\d+))?", screen_text(drawn))
+    if match is None:
+        raise AssertionError(f"{where} drew no manual refresh row: {drawn!r}")
+    return int(match.group(1)) if match.group(1) else 1
 
 
 def event_total(frame: bytes, where: str) -> int:
@@ -2970,6 +3009,21 @@ def assert_overview_event_rows(
                 master_fd,
                 output,
                 b"j",
+                event_range(first, first + window - 1, total),
+            )
+
+    def scroll_to_newest(total: int, window: int = 2) -> None:
+        """Press k until the window rests against the newest event.
+
+        That is where the collapsed run of manual refreshes is drawn; the
+        oldest window this scenario pins does not carry it.
+        """
+        for first in range(total - window, 0, -1):
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"k",
                 event_range(first, first + window - 1, total),
             )
 
@@ -3128,17 +3182,21 @@ def assert_overview_event_rows(
         final_cursor=b"\x1b[?25l",
     )
     scroll_to_oldest(total, start_offset=max(0, total - OVERVIEW_PANEL_ROW_CAP))
-    # The r adds the manual-refresh event, and the observer may add a feed
-    # event of its own on the same refresh. How many arrive is the runtime's
-    # business; what is asserted is that the pin held. So the total is read
-    # back off the redrawn frame rather than predicted.
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"r",
-        re.compile(rb"TUI Session Events \d+-\d+/\d+"),
+    # A manual refresh while the newest row is already a manual refresh does
+    # not add a row. The panel collapses a run of identical events into one
+    # with a ×N tail, keyed on event type and content alone
+    # (Masc_tui_types.overview_event_collapse_key), so the count beside the
+    # title stays where it is and the run grows instead. Asserting the count
+    # went up waited on a row the panel had folded away.
+    scroll_to_newest(total)
+    before_run = manual_refresh_run(
+        bytes(output), "Overview before the refresh"
     )
+    scroll_to_oldest(total)
+    # Written rather than waited on: the fold leaves every row of the oldest
+    # window exactly as it was, and a differential redraw sends nothing for a
+    # row that did not change.
+    os.write(master_fd, b"r")
     drain_until_quiet(process, master_fd, output)
     anchored = resize_and_wait(
         process,
@@ -3151,17 +3209,25 @@ def assert_overview_event_rows(
         final_cursor=b"\x1b[?25l",
     )
     after_r_total = event_total(anchored, "99-column Overview")
-    if after_r_total <= total:
+    if after_r_total != total:
         raise AssertionError(
-            f"the refresh did not add an event ({total} -> {after_r_total}): {anchored!r}"
+            f"the folded refresh changed the row count ({total} -> "
+            f"{after_r_total}): {anchored!r}"
         )
     if oldest_window(2, after_r_total) not in anchored:
-        raise AssertionError(f"event prepend broke the oldest pin: {anchored!r}")
-    # The oldest event on screen is the whole claim: the pin followed the
-    # prepend. Which younger event shares the two-row window depends on how
-    # many feed events the runtime logged, which is not this test's claim.
+        raise AssertionError(f"the added event broke the oldest pin: {anchored!r}")
+    # The oldest event on screen is the whole claim: the pin held while the
+    # event arrived. Which younger event shares the two-row window depends on
+    # how many feed events the runtime logged, which is not this test's claim.
     if b"TUI started" not in anchored:
-        raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
+        raise AssertionError(f"the added event changed the manual anchor: {anchored!r}")
+    scroll_to_newest(total)
+    after_run = manual_refresh_run(bytes(output), "Overview after the refresh")
+    if after_run <= before_run:
+        raise AssertionError(
+            f"the refresh did not reach the event log ({before_run} -> {after_run})"
+        )
+    scroll_to_oldest(total)
 
     send_and_wait(
         process,
@@ -3531,9 +3597,7 @@ def approval_selection_identity_interaction(
             process,
             master_fd,
             output,
-            screen_header(
-                b"MASC Approvals", b" (3)"
-            ),
+            approvals_header(3),
         )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
@@ -3555,15 +3619,11 @@ def approval_selection_identity_interaction(
             master_fd,
             output,
             b"r",
-            screen_header(
-                b"MASC Approvals", b" (4)"
-            ),
+            approvals_header(4),
         )
         refreshed_frame = frame_containing(
             refreshed,
-            screen_header(
-                b"MASC Approvals", b" (4)"
-            ),
+            approvals_header(4),
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed_frame)
         if not re.search(
@@ -3609,23 +3669,8 @@ def open_loaded_planning(
     master_fd: int,
     output: bytearray,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        FRAME_END,
-        start=cluster_end,
-        timeout=3.0,
-    )
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    # No Approvals waypoint here. Masc_tui_types.is_surface_active keeps that
-    # surface off the ring while there is nothing pending, and these fixtures
-    # seed nothing, so the walk burned every key on a screen that does not
-    # exist. The walk to Board passes wherever Approvals would have been.
-    tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (0)"))
-    tab_until(process, master_fd, output, b"plan-alpha-29424")
+    # Navigate by named surface so Planning tests do not depend on tab order.
+    palette_go(process, master_fd, output, b"go Planning", b"plan-alpha-29424")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
@@ -3794,11 +3839,14 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
         # What has to hold is that the surface fell back to the list rather
         # than drawing a detail for a goal the snapshot no longer carries.
         # The footer stopped answering that: it is built from the key table
-        # now and publishes "Left / Esc:back" in both modes. The goal link and
-        # the timeline heading are drawn by the detail pane alone, so their
-        # absence is the reading -- and a stricter one than a hint's spelling.
+        # now and publishes "Left / Esc:back" in both modes, and it never says
+        # "Enter:detail" -- the Planning row spells that key "Right / Enter"
+        # (Masc_tui_keys, Planning) and this width does not reach it anyway.
+        # The column header is the list pane's own line and the goal link and
+        # timeline heading are the detail pane's, so the two together say
+        # which mode drew the screen.
         if (
-            b"Enter:detail" not in recovered
+            not PLANNING_LIST_HEADER.search(recovered)
             or b"masc://planning/" in recovered
             or b"TIMELINE" in recovered
         ):
@@ -10516,7 +10564,7 @@ def changes_keeper_and_arrow_detail_interaction(
         raise AssertionError(
             f"the diff drew no footer: {second_diff_plain[-800:]!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports
     # what it could use and the loop stores that. Without the report the
@@ -10550,7 +10598,7 @@ def changes_keeper_and_arrow_detail_interaction(
     send_and_wait(
         process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
     )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(
         process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
     )
@@ -10566,7 +10614,7 @@ def changes_keeper_and_arrow_detail_interaction(
     detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"-1 +1")
     if b"MASC Change" not in CSI_RE.sub(b"", detail):
         raise AssertionError(f"Right did not open the selected diff: {detail!r}")
-    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
         raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
     # v opens the row's file on the Code surface, read through the keeper's
@@ -10637,7 +10685,7 @@ def enter_outside_changes_interaction(
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
-    if "Turn" not in back_plain:
+    if "TURN" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
             f"Acting armed a view it does not own: {back_plain!r}"
@@ -10939,7 +10987,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Esc:code" not in history_plain:
+    if "Left / Esc:back" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
@@ -10974,12 +11022,15 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
-    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
+    if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
+            or "▸ y" not in choices_plain
+            or re.search(r"│\s+x\s+│", choices_plain) is None):
         raise AssertionError(
             f"the candidate list missed the second name: {choices!r}"
         )
-    # Enter alone runs the highlighted candidate (def y): the answer names
+    # Enter alone runs the highlighted candidate (y): the answer names
     # the location and the cursor jumps to it.
     picked = send_and_wait(
         process, master_fd, output, b"\r", b"y: lib/a.ml:1"
@@ -11649,6 +11700,13 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             ],
         },
     )
+    fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+        200,
+        {"status": "found", "schedule_id": "schedule-proof-701",
+         "wakes": [{"status": "succeeded", "started_at_iso": "2026-08-25T09:30:00Z",
+                    "finished_at_iso": "2026-08-25T09:30:01Z", "error": None}],
+         "wake_retention_per_schedule": 32},
+    )
     return fixtures
 
 
@@ -11706,26 +11764,46 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
         )
         evidence = send_and_wait(
-            process, master_fd, output, b"\x1b[6~", b"matched_pending"
+            process, master_fd, output, b"\x1b[6~", b"WAKES (1 retained"
         )
         evidence_plain = CSI_RE.sub(b"", evidence)
         for needle in (
-            b"LAST WAKE",
+            b"WAKES (1 retained, ceiling 32 per schedule)",
             b"DELIVERY EVIDENCE",
             b"pending=2",
             b"matched_consumed_ack",
+        ):
+            if needle not in evidence_plain:
+                raise AssertionError(
+                    f"Schedule wake/delivery page omitted {needle!r}: {evidence_plain!r}"
+                )
+        # Delivery identity and the work-result boundary follow the queue
+        # summary. Read their page rather than treating one viewport as all
+        # retained evidence; the operator can reach both with PgDn.
+        result_page = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"Keeper Calls or Activity"
+        )
+        result_plain = CSI_RE.sub(b"", result_page)
+        for needle in (
+            b"Keeper evidence",
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
             b"2026-08-25T09:30:20",
-            b"no schedule-to-tool/result join",
-            b"Keeper Calls or Acting",
+            b"Turn finished",
+            b"WORK RESULT",
+            b"bounded by its start and finish rows",
+            b"Keeper Calls or Activity",
         ):
-            if needle not in evidence_plain:
+            if needle not in result_plain:
                 raise AssertionError(
-                    f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
+                    f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
+        returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
+        returned_plain = CSI_RE.sub(b"", returned)
+        for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
+            if needle not in returned_plain:
+                raise AssertionError(f"Left did not restore the selected Schedule row: {returned_plain!r}")
         # The harness is 100 columns wide. Padding the id to a reserved width
         # used to push the instruction tail past the box border, so require
         # the words an operator needs to press the key a second time.
@@ -11976,7 +12054,7 @@ def seed_goal_linked_task(base_path: str) -> None:
     with open(
         os.path.join(tasks_dir, "goal_task_links.json"), "w", encoding="utf-8"
     ) as handle:
-        json.dump({"goal-ssim-501": ["task-linked-501"]}, handle)
+        json.dump({"links": [{"goal_id": "goal-ssim-501", "task_ids": ["task-linked-501"]}]}, handle)
 
 
 def fusion_list_detail_interaction(
@@ -11992,16 +12070,11 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The surface title, not the task id: this scenario seeds the goal the
-        # verdict judges, and that goal lists the same task on Planning, so
-        # tabbing on the id stops one surface early.
-        # The surface title, not the task id: this scenario seeds the goal the
-        # verdict judges, and that goal lists the same task on Planning, so
-        # tabbing on the id stops one surface early. Reading the whole stream
-        # for the headers then let a Harness frame drawn while tabbing past
-        # answer for the one on screen, which is how the assertions below
-        # passed against a list nobody was looking at.
-        tab_until(process, master_fd, output, b"MASC Harness")
+        # Task Verdicts belongs to Planning; Tab cycles top-level families,
+        # whereas v selects the three Planning tabs without skipping coverage.
+        palette_go(process, master_fd, output, b"go planning", b"MASC Planning")
+        send_and_wait(process, master_fd, output, b"v", b"Task Review")
+        send_and_wait(process, master_fd, output, b"v", b"automatic Gate rulings")
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
@@ -12012,12 +12085,15 @@ def fusion_list_detail_interaction(
                 master_fd,
                 output,
                 rows=30,
-                columns=120,
-                needle=b"Evaluator",
+                columns=220,
+                needle=b"EVALUATOR",
                 controls=(FULL_REDRAW,),
             ),
         )
-        for needle in (b"Gate", b"Verdict", b"Evaluator"):
+        # The column row is upper case. Spelled in title case, "Verdict" was
+        # still found -- in the tab label "Task Verdicts" one row above -- so
+        # only two of these three ever said anything about the list.
+        for needle in (b"GATE", b"VERDICT", b"EVALUATOR"):
             if needle not in harness_plain:
                 raise AssertionError(
                     f"Harness list omitted {needle!r}: {harness_plain!r}"
@@ -12035,7 +12111,7 @@ def fusion_list_detail_interaction(
             b"masc://overview/tasks/task-linked-501",
         )
         verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"HARNESS VERDICT"
+            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
         )
         verdict_plain = CSI_RE.sub(b"", verdict)
         # The verdict names a task; the task names its goals; a goal declares
@@ -12049,6 +12125,7 @@ def fusion_list_detail_interaction(
             b"approve",
             b"glm-coding",
             b"Fallback",
+            b"masc://planning/goal-ssim-501",
             b"left/Esc:list",
         ):
             if needle not in verdict_plain:
@@ -12067,7 +12144,12 @@ def fusion_list_detail_interaction(
             raise AssertionError(
                 f"the verdict says nothing about what it aims at: {verdict_plain!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
+        # Back on the list, whose tab label carries the count. The word came
+        # off when the count was split into page and ledger: it reads "(1)"
+        # here and "(8 of 4197)" against a server with a backlog.
+        send_and_wait(
+            process, master_fd, output, b"\x1b[D", b"\xe2\x96\xb8Task Verdicts (1)"
+        )
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -12128,11 +12210,16 @@ def fusion_list_detail_interaction(
             b"K:calling Keeper  B:Board evidence  Enter:open  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
-        footer_frame = resize_and_wait(
+        resize_and_wait(
             process, master_fd, output, rows=30, columns=200,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
         )
-        if footer not in CSI_RE.sub(b"", footer_frame):
+        # The footer is one row and the resize repaints the list before it, so
+        # the frame that carries the title does not carry the hints. Wait for
+        # the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        footer_frame = bytes(output)
+        if footer not in screen_text(footer_frame):
             raise AssertionError(
                 f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
             )
@@ -12187,10 +12274,14 @@ def fusion_list_detail_interaction(
             output,
             b"masc://fusion/fusion-target-501",
         )
-        panel = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\x1b[6~", b"panel-failure-second-501"
         )
-        panel_plain = CSI_RE.sub(b"", panel)
+        # The page lands over several frames -- the responses, then the judge
+        # section under them -- so the frame the first row arrives in does not
+        # hold the rest. Wait for the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        panel_plain = screen_text(bytes(output))
         for needle in (
             b"panel-answer-first-501",
             b"panel-failure-second-501",
@@ -12201,16 +12292,23 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )
-        if (
-            b"3  JUDGE" not in panel_plain
-            or b"judge-proof-501" not in panel_plain
-            or b"Judge topology: judge-of-judges" not in panel_plain
-            or b"First 1 [synthesized] ollama_cloud.minimax-m3" not in panel_plain
-            or b"First 2 [failed] ollama_cloud.deepseek-v4-pro" not in panel_plain
+        for needle in (
+            b"3  JUDGE",
+            b"judge-proof-501",
+            # The topology was a sentence ("Judge topology: judge-of-judges")
+            # and is now the row that draws it: the lens counts, then the
+            # shape they add up to.
+            "first ×2".encode(),
+            "meta ×1".encode(),
+            b"judge-of-judges",
+            b"First 1 [synthesized] ollama_cloud.minimax-m3",
+            b"First 2 [failed] ollama_cloud.deepseek-v4-pro",
         ):
-            raise AssertionError(
-                f"Fusion detail lost its judge section or lenses: {panel_plain!r}"
-            )
+            if needle not in panel_plain:
+                raise AssertionError(
+                    f"Fusion detail lost its judge section or lenses "
+                    f"({needle!r}): {panel_plain!r}"
+                )
         # The lens cards grew the detail past one page: the flow now ends on
         # the page after the panel one.
         tail = send_and_wait(
@@ -12240,7 +12338,7 @@ def fusion_list_detail_interaction(
     return interact
 
 
-def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
+def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse, SequencedHttpResponse]:
     """The feed initialize is held at the gate so the frame lands while the
     operator is already on the Fusion surface.
 
@@ -12272,17 +12370,18 @@ def fusion_live_reload_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]
         ),
         content_type="text/event-stream",
     )
-    fixtures[FUSION_RUNS_PATH] = SequencedHttpResponse(
+    run_list = SequencedHttpResponse(
         [
             fusion_runs_response([alpha]),
             fusion_runs_response([alpha, target]),
         ]
     )
-    return fixtures, mcp_initialize
+    fixtures[FUSION_RUNS_PATH] = run_list
+    return fixtures, mcp_initialize, run_list
 
 
 def fusion_live_reload_interaction(
-    requests: HttpRequests, mcp_initialize: GatedHttpResponse
+    run_list: SequencedHttpResponse, mcp_initialize: GatedHttpResponse
 ) -> Interaction:
     """Tab lands on Fusion (the ring stop this scenario exists to prove), one
     status frame on the observer feed refetches the list, and the new run
@@ -12296,7 +12395,8 @@ def fusion_live_reload_interaction(
         _base_path: str,
     ) -> None:
         def list_loads() -> int:
-            return sum(1 for path, _ in requests if path == FUSION_RUNS_PATH)
+            # HttpRequests records POST bodies; this list is fetched by GET.
+            return run_list.served
 
         landed = tab_until(process, master_fd, output, b"fusion-alpha")
         if list_loads() != 1:
@@ -13221,14 +13321,12 @@ def run_keyboard_regression(executable: str) -> None:
         # verdict was aiming at, rather than naming a task and stopping.
         prepare_workspace=seed_goal_linked_task,
     )
-    fusion_live_requests: HttpRequests = []
-    fusion_live_fixtures, fusion_mcp_gate = fusion_live_reload_http_fixtures()
+    fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
     run_terminal_scenario(
         executable,
         description="Fusion live reload on an observer status push",
-        interact=fusion_live_reload_interaction(fusion_live_requests, fusion_mcp_gate),
+        interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
         http_fixtures=fusion_live_fixtures,
-        http_requests=fusion_live_requests,
     )
     run_terminal_scenario(
         executable,
@@ -14900,19 +14998,36 @@ def msx_size_interaction(
     os.write(master_fd, b"q")
 
 
-def run_msx_retained_regression(executable: str) -> None:
+def run_msx_retained_regression(executable: str, *, retained_tick: bool = False) -> None:
     """Exercise retained Kitty pixels through the real TUI and private HTTP."""
     number = [1]
     changed = threading.Event()
     original = msx_loaded_frame_fixture()[1]
+    pixel_responses: list[dict[str, object]] = []
 
-    def tick():
+    def tick(request_body: bytes = b""):
         number[0] += 1
         body = dict(original, number=number[0])
         if changed.is_set():
             body["rgb_base64"] = base64.b64encode(
                 bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
             ).decode("ascii")
+        if retained_tick:
+            request = json.loads(request_body)
+            assert request.get("pixel_response") == "retained", request
+            encoded = body.pop("rgb_base64")
+            reference = {
+                "revision": hashlib.sha256(base64.b64decode(encoded)).hexdigest(),
+                "width": body["width"], "height": body["height"],
+            }
+            retained = request.get("known_pixels") == reference
+            body["pixels"] = dict(reference, kind="retained" if retained else "inline")
+            if not retained:
+                body["pixels"]["rgb_base64"] = encoded
+            pixel_responses.append({
+                "number": number[0], "kind": body["pixels"]["kind"],
+                "revision": reference["revision"], "bytes": len(json.dumps(body)),
+            })
         return 200, body
 
     def interact(process, master, _slave, output, _base):
@@ -14940,11 +15055,22 @@ def run_msx_retained_regression(executable: str) -> None:
         assert b"f=24" not in steady, "unchanged pixels were retransmitted"
         assert b"\x1b[2J" not in steady, "unchanged pixels erased the display"
         assert b"a=d" not in steady, "unchanged pixels deleted the image"
+        if retained_tick:
+            assert pixel_responses[0]["kind"] == "inline", pixel_responses
+            assert sum(row["kind"] == "retained" for row in pixel_responses) >= 2, pixel_responses
+            assert all(row["bytes"] < pixel_responses[0]["bytes"]
+                       for row in pixel_responses if row["kind"] == "retained")
+        before_change = len(pixel_responses)
         start = len(output)
         changed.set()
         end = footer_after(b"i=32,p=1,C=1", start)
         replacement = bytes(output[start:end])
         assert b"f=24" in replacement, "changed pixels were not transmitted"
+        if retained_tick:
+            replacements = pixel_responses[before_change:]
+            assert any(row["kind"] == "inline"
+                       and row["revision"] != pixel_responses[0]["revision"]
+                       for row in replacements), replacements
         assert b"\x1b[2J" not in replacement, "replacement erased the display"
         start = len(output)
         os.write(master, b"-")
@@ -14965,8 +15091,11 @@ def run_msx_retained_regression(executable: str) -> None:
     run_terminal_scenario(
         executable, description="MSX retains Kitty pixels between live polls",
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": (200, original), "/api/v1/msx/tick": tick},
+        http_fixtures={"/api/v1/msx/frame": (200, original),
+                       "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
     )
+    if retained_tick:
+        print(json.dumps({"msx_tick_pixels": pixel_responses}), flush=True)
 
 
 def run_msx_size_regression(executable: str) -> None:
@@ -15295,6 +15424,9 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "msx-retained":
         run_msx_retained_regression(os.path.abspath(sys.argv[1]))
+        raise SystemExit(0)
+    if len(sys.argv) == 3 and sys.argv[2] == "msx-retained-tick":
+        run_msx_retained_regression(os.path.abspath(sys.argv[1]), retained_tick=True)
         raise SystemExit(0)
 
     if len(sys.argv) == 3 and sys.argv[2] == "msx-size":

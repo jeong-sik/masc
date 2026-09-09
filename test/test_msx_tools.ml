@@ -475,7 +475,7 @@ let test_disk_backup_failure_preserves_machine () =
 
 let test_key_vocabulary () =
   let named =
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f1"; "f5"; "a"; "M"; "7" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f1"; "f5"; "a"; "M"; "7" ]
   in
   List.iter
     (fun n ->
@@ -484,13 +484,13 @@ let test_key_vocabulary () =
   List.iter
     (fun n ->
       check bool ("key " ^ n ^ " is refused") true (Result.is_error (Msx_lane.key_of_string n)))
-    [ ""; "f6"; "shift"; "banana"; "ab" ];
+    [ ""; "f6"; "banana"; "ab" ];
   List.iter
     (fun n ->
       match Msx_lane.key_of_string n with
       | Ok k -> check string ("round trip " ^ n) n (Msx_lane.key_to_string k)
       | Error m -> fail m)
-    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "trigger_a"; "trigger_b"; "f3"; "m" ]
+    [ "up"; "down"; "left"; "right"; "space"; "esc"; "return"; "backspace"; "trigger_a"; "trigger_b"; "shift"; "ctrl"; "graph"; "f3"; "m" ]
 ;;
 
 let test_registration () =
@@ -616,12 +616,30 @@ let test_press_sequence () =
   check int "two keys still make four edges" 4 (List.length (Msx_lane.ledger ()))
 ;;
 
+let test_backspace_sequence_ledger () =
+  with_workspace @@ fun base_path ->
+  ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
+  let r = dispatch ~base_path ~agent:"editor" "masc_msx_press"
+    [ "keys", `List [ `String "1"; `String "backspace"; `String "2"; `String "return" ]
+    ; "hold_frames", `Int 2; "frames", `Int 4; "sequence", `Bool true ] in
+  check bool "editing sequence accepted" true (is_completed r);
+  let edges = Msx_lane.ledger () in
+  check (list string) "editing edges replay in order"
+    [ "1"; "1"; "backspace"; "backspace"; "2"; "2"; "return"; "return" ]
+    (List.map (fun (e : Msx_lane.entry) -> e.key_name) edges);
+  check (list bool) "each key released before next key"
+    [ true; false; true; false; true; false; true; false ]
+    (List.map (fun (e : Msx_lane.entry) -> e.down) edges);
+  check int "four frame windows" (Msx_lane.boot_frames + 16) (frame_of r)
+;;
+
 let () =
   run "msx tools"
     [ ( "lane"
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
         ; test_case "press writes the ledger" `Quick test_press_ledger
+        ; test_case "Backspace sequence ledger" `Quick test_backspace_sequence_ledger
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory

@@ -70,8 +70,8 @@ describe('goal tree approval queue authority', () => {
     expect(goalTreeApprovalQueueState.value).toBeNull()
     expect(goalTreeError.value).toBe('tree fetch failed')
   })
-  it('projects a source-unavailable bootstrap envelope without inventing a Gate failure', () => {
-    expect(hydrateGoalTreeSnapshot({ok: false, error_code: 'goal_store_unavailable',
+  it.each(['goal_store_unavailable', 'goal_task_links_unavailable'])('projects %s bootstrap without inventing a Gate failure', errorCode => {
+    expect(hydrateGoalTreeSnapshot({ok: false, error_code: errorCode,
       error: 'goals.json could not decode'})).toBe(true)
     expect(goalTreeData.value).toBeNull()
     expect(goalTreeApprovalQueueState.value).toBeNull()

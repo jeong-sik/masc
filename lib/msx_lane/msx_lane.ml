@@ -52,8 +52,12 @@ let key_of_string s : (key, string) result =
   | "space" -> Ok Msx.Space
   | "esc" | "escape" -> Ok Msx.Esc
   | "return" | "enter" -> Ok Msx.Return
+  | "backspace" -> Ok Msx.Backspace
   | "trigger_a" -> Ok Msx.Trigger_a
   | "trigger_b" -> Ok Msx.Trigger_b
+  | "shift" -> Ok Msx.Shift
+  | "ctrl" -> Ok Msx.Ctrl
+  | "graph" -> Ok Msx.Graph
   | "f1" -> Ok (Msx.Function 1)
   | "f2" -> Ok (Msx.Function 2)
   | "f3" -> Ok (Msx.Function 3)
@@ -64,8 +68,8 @@ let key_of_string s : (key, string) result =
   | k ->
     Error
       (Printf.sprintf
-         "unknown key %S: use up, down, left, right, space, esc, return, \
-          trigger_a, trigger_b, f1-f5, or one character"
+         "unknown key %S: use up, down, left, right, space, esc, return, backspace, \
+          trigger_a, trigger_b, shift, ctrl, graph, f1-f5, or one character"
          k)
 ;;
 
@@ -77,8 +81,12 @@ let key_to_string : key -> string = function
   | Msx.Space -> "space"
   | Msx.Esc -> "esc"
   | Msx.Return -> "return"
+  | Msx.Backspace -> "backspace"
   | Msx.Trigger_a -> "trigger_a"
   | Msx.Trigger_b -> "trigger_b"
+  | Msx.Shift -> "shift"
+  | Msx.Ctrl -> "ctrl"
+  | Msx.Graph -> "graph"
   | Msx.Function n -> Printf.sprintf "f%d" n
   | Msx.Char c -> String.make 1 c
 ;;
@@ -472,6 +480,15 @@ let frame_of (st : machine) =
 let frame () = locked (fun () -> Option.map frame_of !state)
 ;;
 
+let step_frame ~frames =
+  with_machine (fun st ->
+    match check_frames ~what:"frames" frames with
+    | Error _ as error -> error
+    | Ok () ->
+        advance st frames;
+        Ok (frame_of st, List.rev st.entries))
+;;
+
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
 ;;
 
@@ -559,6 +576,14 @@ let decode_checkpoint json =
 ;;
 
 let restore ~path ~ledger_dir =
+  (* A slot that was never saved is the caller naming one that does not
+     exist, which is an argument problem and refusable. Reaching the read
+     first turned it into [Unreadable], and the tool answered with a runtime
+     failure -- the caller cannot tell from that whether the machine changed.
+     [Unreadable] keeps its meaning: a file that is there and will not read. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
   let decoded =
     try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
     | Sys_error message -> Error (Unreadable message)

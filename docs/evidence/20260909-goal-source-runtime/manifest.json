@@ -1,0 +1,51 @@
+{
+  "schema": "masc.goal_source_runtime_evidence.v1",
+  "source_commit": "9174a4f2089cc629f68956cb4c6a2382c7c6895d",
+  "binary_sha256": "3b8b835879b0d59b280b364d2bce3924cd64dfebd68dd02e62c4005fe25ad83c",
+  "served_index_sha256": "63346337c2361532eacad9a753a206efe907206e75cd2f0c249aff07a99260c1",
+  "source_release_ci": 34263329211,
+  "platform": "macOS arm64",
+  "transport": "real HTTP to isolated server; no response interception",
+  "responses": [
+    {
+      "label": "invalid-planning",
+      "path": "/api/v1/dashboard/planning",
+      "status": 200,
+      "response_sha256": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+      "request_sha256": "96cf7f2afd0de932cca749239dda84460b45ffd9d667f3854ead1136cac8c920"
+    },
+    {
+      "label": "invalid-tree",
+      "path": "/api/v1/dashboard/goals",
+      "status": 200,
+      "response_sha256": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+      "request_sha256": "7fde323e2a0247b4175bf70ad60a6a47cec11e31cf76e05544403b6f7cf92c72"
+    },
+    {
+      "label": "invalid-detail",
+      "path": "/api/v1/dashboard/goals/detail?goal_id=source-probe",
+      "status": 200,
+      "response_sha256": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+      "request_sha256": "38931c44f8a9316e0a80894d08015a14de74d835275aa94c651aeb462c53ab25"
+    }
+  ],
+  "server_exit_code": 0,
+  "server_stopped": true,
+  "evidence_sha256": {
+    "invalid-planning.json": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+    "invalid-tree.json": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+    "invalid-detail.json": "d77ea0e9de191e44ca9f20adee5895450ac3420be139f68f3b04064e3eef1e10",
+    "work-dom.txt": "4a6c682300846c11a4d4520c2a55c6e777a87baa29eac787ad9cab5339f061e6",
+    "work-unavailable.png": "ec6955b6d8a20b32271c43a4497f1672d909d0559f456baf9eaae16f11957c9d",
+    "browser-http.json": "02c96386cb5c2bc41d680998d76adc444fd7b9ecbc6cb5b68871291f88d3cc0f",
+    "browser-errors.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "input-goals.json": "4a5a95cef410f7ef3685d766876ef53993e9f1279a8ac9a302d8699d7afbcd68"
+  },
+  "limitations": [
+    "No production installation or runtime-state modification.",
+    "Assets served through explicit MASC_ASSETS_DIR override; this did not exercise Installed_dashboard atomic installation.",
+    "Only Goal source-unavailable scenario and these HTTP/UI consumers are covered; newer Goal link and deletion PRs are not in this binary.",
+    "Full local receipt and server log are outside this committed bundle.",
+    "The screenshot contains an older-bundle timestamp warning despite the same source build; its unbound asset provenance path is separately under investigation."
+  ]
+}

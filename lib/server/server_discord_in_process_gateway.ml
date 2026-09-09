@@ -148,8 +148,8 @@ let discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id 
    all read as the same [discord] badge. A name reads as a place. *)
 let resolve_channel_name ~base_dir ~channel_id =
   match
-    Connector_names.recall ~base_dir ~connector:State.channel
-      ~scope:Connector_names.Channel ~id:channel_id
+    Keeper_connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Keeper_connector_names.Channel ~id:channel_id
   with
   | Some _ as known -> known
   | None -> (
@@ -169,8 +169,8 @@ let resolve_channel_name ~base_dir ~channel_id =
           match Json_util.get_string json "name" with
           | Some name when String.trim name <> "" ->
             let name = String.trim name in
-            Connector_names.remember ~base_dir ~connector:State.channel
-              ~scope:Connector_names.Channel ~id:channel_id ~name ();
+            Keeper_connector_names.remember ~base_dir ~connector:State.channel
+              ~scope:Keeper_connector_names.Channel ~id:channel_id ~name ();
             Some name
           (* A direct message has no name. Absent, not blank. *)
           | Some _ | None -> None))))
@@ -266,7 +266,7 @@ let discord_member_directory_page = function
 let remember_directory_entries ~base_dir ~scope entries =
   List.iter
     (fun (id, name) ->
-       Connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
+       Keeper_connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
          ~name ())
     entries
 
@@ -361,7 +361,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
             Log.Server.warn "Discord channel directory rejected channel=%s: %s"
               channel_id detail
           | Ok (returned_id, name) when String.equal returned_id channel_id ->
-            remember ~scope:Connector_names.Channel channels
+            remember ~scope:Keeper_connector_names.Channel channels
               [ returned_id, name ]
           | Ok (returned_id, _) ->
             Log.Server.warn
@@ -379,7 +379,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
             Log.Server.warn "Discord people directory rejected channel=%s: %s"
               channel_id detail
           | Ok entries ->
-            remember ~scope:Connector_names.Person people entries))
+            remember ~scope:Keeper_connector_names.Person people entries))
   in
   let refresh_guild guild_id =
     match Discord_rest_client.snowflake_of_string guild_id with
@@ -392,7 +392,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
        | Ok json ->
          (match discord_channel_directory_entry json with
           | Ok (returned_id, name) when String.equal returned_id guild_id ->
-            remember ~scope:Connector_names.Server servers [ returned_id, name ]
+            remember ~scope:Keeper_connector_names.Server servers [ returned_id, name ]
           | Ok (returned_id, _) ->
             errors := "server: identity mismatch" :: !errors;
             Log.Server.warn
@@ -409,7 +409,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
        | Error error -> record_rest_error ~scope:"channels" ~target:guild_id error
        | Ok json ->
          (match discord_channel_directory_entries json with
-          | Ok entries -> remember ~scope:Connector_names.Channel channels entries
+          | Ok entries -> remember ~scope:Keeper_connector_names.Channel channels entries
           | Error detail ->
             errors := "channels" :: !errors;
             Log.Server.warn "Discord directory channels rejected guild=%s: %s"
@@ -428,7 +428,7 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
              Log.Server.warn "Discord directory members rejected guild=%s: %s"
                guild_id detail
            | Ok (entries, next_after, count) ->
-             remember ~scope:Connector_names.Person people entries;
+             remember ~scope:Keeper_connector_names.Person people entries;
              if count = discord_member_page_limit then
                match next_after with
                | None ->
@@ -542,8 +542,8 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
   =
   Option.iter
     (fun name ->
-      Connector_names.remember ~base_dir ~connector:State.channel
-        ~scope:Connector_names.Person ~id:author_id ~name ())
+      Keeper_connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Keeper_connector_names.Person ~id:author_id ~name ())
     author_name;
   let surface =
     discord_attention_surface ~guild_id ~channel_id ~channel_name

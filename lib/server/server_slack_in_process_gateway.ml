@@ -142,8 +142,8 @@ let slack_delivery ~team_id ~channel_id ~channel_name ~thread_ts
    is better still. *)
 let resolve_channel_name ~base_dir ~token ~channel_id =
   match
-    Connector_names.recall ~base_dir ~connector:State.channel
-      ~scope:Connector_names.Channel ~id:channel_id
+    Keeper_connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Keeper_connector_names.Channel ~id:channel_id
   with
   | Some _ as known -> known
   | None -> (
@@ -158,8 +158,8 @@ let resolve_channel_name ~base_dir ~token ~channel_id =
         None
       | Ok { channel_name = None; _ } -> None
       | Ok { channel_name = Some name; _ } ->
-        Connector_names.remember ~base_dir ~connector:State.channel
-          ~scope:Connector_names.Channel ~id:channel_id ~name ();
+        Keeper_connector_names.remember ~base_dir ~connector:State.channel
+          ~scope:Keeper_connector_names.Channel ~id:channel_id ~name ();
         Some name))
 
 let slack_attention_surface ~team_id ~channel_id ~channel_name ~thread_ts =
@@ -477,13 +477,13 @@ let remember_resolved_names ~base_dir (ev : Gw.slack_event) =
   | Gw.Message_create ({ user_id; user_name; _ } as message) -> (
     match user_name with
     | Some name ->
-      Connector_names.remember ~base_dir ~connector:State.channel
-        ~scope:Connector_names.Person ~id:user_id ~name ();
+      Keeper_connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Keeper_connector_names.Person ~id:user_id ~name ();
       ev
     | None ->
       (match
-         Connector_names.recall ~base_dir ~connector:State.channel
-           ~scope:Connector_names.Person ~id:user_id
+         Keeper_connector_names.recall ~base_dir ~connector:State.channel
+           ~scope:Keeper_connector_names.Person ~id:user_id
        with
        | None -> ev
        | Some name -> Gw.Message_create { message with user_name = Some name }))

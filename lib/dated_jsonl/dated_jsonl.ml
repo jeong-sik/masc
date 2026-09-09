@@ -962,12 +962,44 @@ let filter_map_recent ?(offset=0) t n ~f =
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
            let need = n - !count + !skip in
+           (* [need] lines is enough only when every one of them parses. A
+              malformed row inside the window used to take a row's place and
+              shrink the answer without saying so: read_recent 2 over
+              1, 2, 3 and a trailing unparseable row returned one entry.
+              The .mli splits the two readings -- here [n] counts parsed
+              rows, and read_recent_result is the reader whose limit counts
+              physical rows including malformed ones -- so widen the window
+              and read the file again until it yields [need] parsed rows or
+              runs out of lines. A file with no malformed rows settles on
+              the first round, which is every call this had before. *)
            let parsed_newest_first =
              off_fiber (fun () ->
-               load_tail_lines_inline path ~max_lines:need
-               |> List.rev_map (fun line ->
-                 try Some (Yojson.Safe.from_string line)
-                 with Yojson.Json_error _ -> None))
+               let rec read_widening window =
+                 let lines = load_tail_lines_inline path ~max_lines:window in
+                 let parsed =
+                   List.rev_map
+                     (fun line ->
+                        try Some (Yojson.Safe.from_string line)
+                        with Yojson.Json_error _ -> None)
+                     lines
+                 in
+                 let parsed_count =
+                   List.fold_left
+                     (fun acc entry -> if Option.is_some entry then acc + 1 else acc)
+                     0
+                     parsed
+                 in
+                 (* Fewer lines than asked for means the file is exhausted and
+                    a wider window would read the same thing again. *)
+                 if parsed_count >= need
+                    || List.length lines < window
+                    (* Doubling past this wraps to a negative window, which
+                       reads nothing and never reaches the exhausted test. *)
+                    || window > max_int / 2
+                 then parsed
+                 else read_widening (window * 2)
+               in
+               read_widening need)
            in
            List.iter (fun parsed ->
              if !count >= n then raise_notrace Done;

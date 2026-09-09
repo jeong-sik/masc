@@ -61,7 +61,8 @@ on:
           test/ is named by its path from the repository root, for example
           packages/agent_core/test/test_capabilities -- the 43 suites under
           packages/ and tools/ have no other spelling here, and a bare name
-          fails with "no test/<name>.ml and no <name>.ml". A name with a
+          is reported as "no test/<name>.ml and no <name>.ml" while the names
+          that did resolve still run. A name with a
           test/<name>.py script, or one a test/ dune file declares as
           (alias runtest-<name>), runs that alias instead
           (test_tui_keyboard_input).
@@ -170,6 +171,15 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
+      # test_run_local_script builds the PATH a dashboard build would run
+      # under, from the directories holding node, pnpm, python3, git, mkdir
+      # and bash. Every one but pnpm is on the runner, so the suite failed
+      # with "required test command is missing: pnpm" before reaching a
+      # single scenario -- in the only lane that runs it. The version is the
+      # one pr-check.yml and release.yml build the SPA with.
+      - name: Make pnpm available to the suites that read a dashboard PATH
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Test
         env:
           # Public runners give four CPUs; use all four for the build
@@ -227,6 +237,18 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${TARGET_SUITES}" ]; then
+            # Four suites read a file through a Keeper's sandbox, and on this
+            # runner the read answers "image_not_found: keeper sandbox image
+            # masc-sandbox:general is not available" -- 14 assertions counted
+            # as red for an image nothing here builds. The recipe lives in the
+            # binary (Keeper_sandbox_image.dockerfile) so that `masc
+            # sandbox-image` works on a host with no checkout; --print is how
+            # it is read without a checkout's copy going stale. Debian slim
+            # plus bash, ripgrep and git, so this is a short build, and it is
+            # done only on the full lane -- the one whose verdict is main's.
+            opam exec -- dune build --root . bin/main_eio.exe
+            ./_build/default/bin/main_eio.exe sandbox-image --print \
+              | docker build -t masc-sandbox:general -
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
           fi
@@ -238,6 +260,7 @@ jobs:
           suites=()
           exes=()
           aliases=()
+          unresolved=()
           IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
           for suite in "${requested[@]}"; do
             suite="${suite// /}"
@@ -267,13 +290,27 @@ jobs:
               elif [ -f "${suite}.ml" ]; then
                 suite_path="${suite}"
               else
-                log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
-                exit 2
+                unresolved+=("${suite}")
+                continue
               fi
               suites+=("${suite_path}")
               exes+=("${suite_path}.exe")
             fi
           done
+          # A name that resolves to nothing used to end the dispatch right
+          # here, before a single suite was built, and it named only the first
+          # one it reached: a ten-suite batch with one misspelling returned no
+          # verdict for the other nine and did not say whether a second name
+          # was wrong too, so the next attempt could lose the batch again.
+          # Name every one of them, keep the run non-zero so nobody reads it
+          # as ten green suites, and let the ones that did resolve report.
+          resolution_status=0
+          if [ "${#unresolved[@]}" -ne 0 ]; then
+            for suite in ${unresolved[@]+"${unresolved[@]}"}; do
+              log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
+            done
+            resolution_status=1
+          fi
           # dune build with no target builds everything; a suite input of
           # separators only must not turn into the full build.
           if [ "${#suites[@]}" -eq 0 ] && [ "${#aliases[@]}" -eq 0 ]; then
@@ -281,7 +318,7 @@ jobs:
             exit 2
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
-          status=0
+          status="${resolution_status}"
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)

@@ -188,9 +188,7 @@ function KanbanCard({ task }: { task: Task }) {
     if (!confirmed) return
     deletingTaskId.value = task.id
     try {
-      await deleteTask(task.id)
-      showToast('태스크를 삭제했습니다', 'success')
-      await refreshExecution({ force: true })
+      await settleTaskDeletion(task.id)
     } catch {
       showToast('태스크 삭제에 실패했습니다', 'error')
     } finally {
@@ -346,7 +344,43 @@ function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
   `
 }
 
+const pendingTaskCleanups = signal<Array<{ taskId: string; errors: string[] }>>([])
+
+async function settleTaskDeletion(taskId: string) {
+  const result = await deleteTask(taskId)
+  pendingTaskCleanups.value = pendingTaskCleanups.value.filter(item => item.taskId !== taskId)
+  if (result.status === 'cleanup_failed') {
+    pendingTaskCleanups.value = [...pendingTaskCleanups.value, result]
+    showToast('태스크는 삭제됐지만 삭제 후 정리가 실패했습니다. 아래에서 재시도할 수 있습니다.', 'error')
+  } else {
+    showToast('태스크 삭제와 삭제 후 정리를 완료했습니다', 'success')
+  }
+  await refreshExecution({ force: true })
+}
+
+function TaskCleanupFailures() {
+  const [retrying, setRetrying] = useState<string | null>(null)
+  async function retry(taskId: string) {
+    setRetrying(taskId)
+    try { await settleTaskDeletion(taskId) }
+    catch (error) { showToast(error instanceof Error ? error.message : '삭제 후 정리 재시도 실패', 'error') }
+    finally { setRetrying(null) }
+  }
+  return html`${pendingTaskCleanups.value.map(item => html`
+    <section key=${item.taskId} role="alert" class="mb-3 border border-[var(--color-err-border)] p-3">
+      <p>태스크 ${item.taskId}는 삭제됐습니다. 삭제 후 정리가 남아 있습니다.</p>
+      <pre class="whitespace-pre-wrap">${item.errors.join('\n')}</pre>
+      <${ActionButton} disabled=${retrying !== null} onClick=${() => void retry(item.taskId)}>
+        ${retrying === item.taskId ? '정리 중...' : '삭제 후 정리 재시도'}
+      <//>
+    </section>`)} `
+}
+
 export function TaskBacklog() {
+  return html`<${TaskCleanupFailures} /><${TaskBacklogContent} />`
+}
+
+function TaskBacklogContent() {
   const { todo, inProgress, awaitingVerification, done } = tasksByStatus.value
   const totalTasks = todo.length + inProgress.length + awaitingVerification.length + done.length
   const query = taskSearchQuery.value

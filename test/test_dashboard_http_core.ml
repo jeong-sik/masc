@@ -2166,6 +2166,56 @@ let test_goal_source_failure_is_not_empty () =
   check int "both absent is a fresh store" 0
     (planning () |> member "goals" |> to_list |> List.length)
 
+let test_goal_link_source_failure_preserves_unrelated_planning () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Linked source"
+      ~metric:"tasks" ~target_value:"1" ()) in
+  let created = match Workspace.add_task_with_result ~goal_id:goal.id config
+      ~title:"Linked task" ~priority:3 ~description:"evidence" with
+    | Ok created -> created
+    | Error error -> fail (Workspace.add_task_error_to_string error) in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = links_path ^ ".last-good" in
+  let original = Fs_compat.load_file links_path in
+  let open Yojson.Safe.Util in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let detail () = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
+  let assert_link_visible () =
+    let node = tree () |> member "tree" |> to_list |> List.hd in
+    check int "tree preserves linked task" 1 (node |> member "tasks" |> to_list |> List.length);
+    check int "detail preserves linked task" 1
+      (detail () |> member "linked_tasks" |> to_list |> List.length)
+  in
+  assert_link_visible ();
+  let check_unavailable () =
+    List.iter (fun json ->
+      check bool "source failure is explicit" false (json |> member "ok" |> to_bool);
+      check string "link source is named" "goal_task_links_unavailable"
+        (json |> member "error_code" |> to_string);
+      check bool "no invented task collection" true (member "linked_tasks" json = `Null);
+      check bool "no fabricated tree" true (member "tree" json = `Null)) [tree (); detail ()];
+    (match Dashboard_goals.build_forest ~config ~goals:[goal]
+        ~tasks:(Workspace.get_tasks_safe config) ~pending_approvals:[] with
+     | Error _ -> () | Ok _ -> fail "forest builder accepted unavailable links");
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    check int "unrelated planning still lists its Goal" 1
+      (planning |> member "goals" |> to_list |> List.length);
+    check bool "unrelated Task remains available" true
+      (List.exists (fun (task : Masc_domain.task) -> task.id = created.task_id)
+        (Workspace.get_tasks_safe config))
+  in
+  Fs_compat.save_file links_path "{broken";
+  check_unavailable ();
+  check string "read does not repair primary" "{broken" (Fs_compat.load_file links_path);
+  check string "read does not alter recovery" original (Fs_compat.load_file mirror);
+  Sys.remove links_path;
+  check_unavailable ();
+  check bool "read does not recreate primary" false (Sys.file_exists links_path);
+  Fs_compat.save_file links_path original;
+  assert_link_visible ()
+
 let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
@@ -2190,6 +2240,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     let projection = Dashboard_goals.verification_projection ~config in
     let keeper_goal =
       Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
+      |> get_ok
       |> List.find (fun (node : Dashboard_goals.tree_node) -> node.goal.id = goal_id)
       |> Dashboard_goals.tree_node_to_json ~verification_for_goal:projection
     in
@@ -4907,6 +4958,25 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
+let test_config_post_rejects_invalid_activation_mode () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-activation" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let original = In_channel.with_open_bin toml_path In_channel.input_all in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  List.iter
+    (fun body ->
+      let raw, _ =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name body
+      in
+      expect_http_status "invalid activation mode is rejected" 400 raw;
+      check string "rejected activation preserves config bytes" original
+        (In_channel.with_open_bin toml_path In_channel.input_all))
+    [ {|{"activation_mode":true}|}
+    ; {|{"activation_mode":"unknown"}|}
+    ]
+
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-invalid-mixed" in
@@ -5477,6 +5547,8 @@ let () =
             test_goal_proof_surfaces_share_persisted_criterion_truth;
           test_case "Goal source failure is not empty" `Quick
             test_goal_source_failure_is_not_empty;
+          test_case "Goal link source error preserves unrelated planning" `Quick
+            test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick
@@ -5655,6 +5727,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config rejects invalid activation mode" `Quick
+            test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick
             test_config_post_round_trips_typed_tools_patch;
           test_case "typed Skills patch preserves all, exact and none" `Quick

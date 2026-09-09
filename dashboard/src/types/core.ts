@@ -662,6 +662,7 @@ export type KeeperApprovalLifecyclePhase =
   | 'replay_failed'
   | 'replay_indeterminate'
   | 'continuation_recorded'
+  | 'continuation_failed'
 
 export interface KeeperApprovalLifecycle {
   approvalId: string
@@ -1493,7 +1494,6 @@ export interface KeeperConditions {
   heartbeat_healthy: boolean
   turn_healthy: boolean
   context_handoff_needed: boolean
-  handoff_active: boolean
   operator_paused: boolean
   stop_requested: boolean
   drain_complete: boolean

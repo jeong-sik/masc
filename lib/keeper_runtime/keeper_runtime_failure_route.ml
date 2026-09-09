@@ -19,6 +19,10 @@ type rotate_class =
   | No_progress_truncated
   | Attempt_rejected
 
+type fence_disposition =
+  | Fenced_effect_attempted
+  | Fenced_observation_unavailable
+
 type terminal_class =
   | Deterministic_request
   | Context_overflow
@@ -31,8 +35,8 @@ type terminal_class =
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
   | Terminal_effect_operator_cancelled
-  | Provider_attempt_effect_fenced
-  | Tool_correction_lost
+  | Provider_attempt_effect_fenced of fence_disposition
+  | Tool_correction_lost of fence_disposition
   | Internal_opaque
 
 type failure_provenance =
@@ -152,16 +156,19 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
        exhaust_failure Contract_violation
-     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust_failure (Provider_attempt_effect_fenced Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure Provider_attempt_effect_fenced)
+       exhaust_failure
+         (Provider_attempt_effect_fenced Fenced_observation_unavailable))
   | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
        exhaust_failure Contract_violation
-     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust_failure (Tool_correction_lost Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure Tool_correction_lost)
+       exhaust_failure (Tool_correction_lost Fenced_observation_unavailable))
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
@@ -310,11 +317,113 @@ let terminal_class_label = function
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
   | Terminal_effect_operator_cancelled -> "terminal_effect_operator_cancelled"
-  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
-  | Tool_correction_lost -> "tool_correction_lost"
+  | Provider_attempt_effect_fenced Fenced_effect_attempted ->
+    "provider_attempt_effect_fenced"
+  | Provider_attempt_effect_fenced Fenced_observation_unavailable ->
+    "provider_attempt_effect_fenced_observation_unavailable"
+  | Tool_correction_lost Fenced_effect_attempted -> "tool_correction_lost"
+  | Tool_correction_lost Fenced_observation_unavailable ->
+    "tool_correction_lost_observation_unavailable"
   | Internal_opaque -> "internal_opaque"
 
 let route_class_label = function
   | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate
   | Exhausted_visible_alive { terminal; _ } -> terminal_class_label terminal
+
+(* Whether the provider answered the request that carried the turn's input.
+   Read by the heartbeat to settle a Gate continuation that failed on this
+   route: an answer means the model already saw the replay evidence the turn
+   carried (#32956). Every constructor is named so a new class has to say
+   which side it is on. *)
+let response_observed = function
+  | Retry_after_observed { retry_class; retry_after = _ } ->
+    (match retry_class with
+     | Rate_limited
+     (* 429: the request was refused before any generation. *)
+     | Hard_quota
+     (* 402: refused before any generation. *)
+     | Capacity_backpressure
+     (* overload / capacity pool exhausted: refused before any generation. *)
+     | Server_error
+     (* 5xx, provider unavailable, or an empty completion: nothing the model
+        said is on record. *)
+     | Network_transient
+     (* the transport failed; no answer arrived. *)
+     | Provider_timeout ->
+       (* the deadline expired before an answer. *)
+       false)
+  | Rotate_now { rotate } ->
+    (match rotate with
+     | Auth_failed
+     (* the credential was refused before any generation. *)
+     | Model_unavailable
+     (* the model or endpoint was not found: no generation. *)
+     | Resumable_cli_session
+     (* the CLI session ended without an answer; a recovery lane resumes it. *)
+     | Candidates_filtered
+     (* the candidate set emptied before any answer. *)
+     | Attempt_rejected
+     (* the candidate's own policy refused the request before the wire
+        (#34475): no generation. *)
+     | Runtime_exhausted ->
+       (* a whole-runtime exhaustion wrapper: it carries no answer. *)
+       false
+     | No_progress_empty
+     (* the provider answered with an empty body and the accept gate
+        rejected that answer. *)
+     | No_progress_thinking_only
+     (* the provider answered with thinking only; rejected by the accept
+        gate. *)
+     | No_progress_truncated ->
+       (* the provider answered and stopped at MaxTokens; rejected by the
+          accept gate. *)
+       true)
+  | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
+    (match terminal with
+     | Deterministic_request
+     (* invalid request or input capacity: refused before any generation. *)
+     | Context_overflow
+     (* the request did not fit the window: no generation. *)
+     | Protocol_error
+     (* an MCP protocol failure; whether an answer arrived is not on the
+        route. *)
+     | Config_mismatch
+     (* missing key or invalid configuration: no generation. *)
+     | Provider_integration
+     (* unparseable, provider-reported, or unknown-variant reply: no usable
+        answer is on record. *)
+     | Internal_opaque
+     (* unhandled exceptions and internal families. An accept rejection
+        without a no-progress hint also lands here, but the route cannot
+        tell it from an exception, so the evidence keeps its wake. *)
+     | Provider_attempt_effect_fenced Fenced_observation_unavailable
+     | Tool_correction_lost Fenced_observation_unavailable ->
+       (* the adapter could not say whether a tool effect was attempted,
+          and it says so before any answer: the claude-code lane marks it
+          when the process is spawned ([Keeper_claude_code_runtime]
+          on_spawned), the codex lane when the turn input could not be
+          written ([Keeper_codex_runtime] Turn_input_write_failed). The
+          request may never have reached the provider, so the evidence
+          keeps its wake. *)
+       false
+     | Contract_violation
+     (* an incomplete tool transcript or a proven pre-effect tool failure:
+        the model answered and the turn's own contract over that answer
+        failed. The two effect fences reach this class only with
+        [No_effect_observed], which the driver never produces. *)
+     | Terminal_effect_dependency_unavailable
+     | Terminal_effect_policy_rejection
+     | Terminal_effect_runtime_failure
+     | Terminal_effect_workflow_rejection
+     | Terminal_effect_operator_cancelled
+     (* a tool the model called failed terminally: the call is the answer. *)
+     | Provider_attempt_effect_fenced Fenced_effect_attempted
+     (* a dynamic tool handler was entered before the attempt was fenced
+        ([Keeper_turn_driver], masc#28885): the model answered with that
+        call, and what failed came after it. *)
+     | Tool_correction_lost Fenced_effect_attempted ->
+       (* the same fence on a turn that also recorded pre_tool_use
+          rejections: the model answered, the correction round did not
+          land. *)
+       true)

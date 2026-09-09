@@ -21,10 +21,19 @@ include module type of Workspace_task_classify
 include module type of Workspace_task_create
 include module type of Workspace_task_claim
 
-val delete_task_r : config -> task_id:string -> unit Masc_domain.masc_result
+type task_delete_outcome =
+  | Task_deleted
+  | Task_already_absent
+  | Task_delete_cleanup_failed of string list
+
+val delete_task_r : config -> task_id:string -> task_delete_outcome Masc_domain.masc_result
 (** Delete one Task under the canonical backlog lock and clear any agent
     [current_task] cache that still points at it after the backlog commit.
-    Missing Task ids are idempotent; read/write failures remain typed. *)
+    The backlog lock is held through Goal-link cleanup. An already-absent Task
+    retries copy/link/cache settlement without incrementing the backlog revision.
+    [Error] means no deletion committed in this call. [Task_delete_cleanup_failed]
+    means the Task is absent but listed settlement obligations remain retryable.
+    This is not a cross-file crash-atomic transaction. *)
 
 (** {1 Task transitions} *)
 

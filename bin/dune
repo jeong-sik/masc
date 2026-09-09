@@ -1175,6 +1175,12 @@
   masc_tui_terminal_palette
   masc_tui_theme))
 
+(library
+ (name masc_tui_msx_tick)
+ (wrapped false)
+ (modules masc_tui_msx_tick)
+ (libraries masc_tui_types yojson base64 threads))
+
 (executable
  (name masc_tui)
  (modules
@@ -1225,6 +1231,7 @@
   masc_tui_credential
   masc_tui_types
   masc_tui_msx
+  masc_tui_msx_tick
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt

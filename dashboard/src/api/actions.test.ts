@@ -14,6 +14,7 @@ vi.mock('./mcp', () => mcpMocks)
 vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn(() => Promise.resolve({ ok: true })) }))
 
 import { claimTask, deleteTask, sendBroadcast } from './actions'
+import { post } from './core'
 
 describe('claimTask', () => {
   beforeEach(() => {
@@ -35,10 +36,18 @@ describe('claimTask', () => {
   })
 })
 
-describe('deleteTask (unchanged path, regression guard)', () => {
-  it('posts to the dashboard delete route', async () => {
-    const ok = await deleteTask('task-9')
-    expect(ok).toBe(true)
+describe('deleteTask settlement', () => {
+  it('decodes completed deletion', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, task_id: 'task-9', task_deleted: true, status: 'deleted', errors: [] })
+    expect(await deleteTask('task-9')).toEqual({ status: 'deleted', taskId: 'task-9' })
+  })
+  it('retains committed deletion with failed cleanup for retry', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: false, task_id: 'task-9', task_deleted: true, status: 'cleanup_failed', errors: ['primary unreadable'] })
+    expect(await deleteTask('task-9')).toEqual({ status: 'cleanup_failed', taskId: 'task-9', errors: ['primary unreadable'] })
+  })
+  it('rejects an unbound or contradictory success receipt', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true })
+    await expect(deleteTask('task-9')).rejects.toThrow('receipt')
   })
 })
 

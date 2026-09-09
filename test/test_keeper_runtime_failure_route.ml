@@ -303,6 +303,153 @@ let test_non_provider_families_judge () =
     Alcotest.failf "mcp error should exhaust protocol, got %s"
       (KFR.route_kind_label other)
 
+(* #32956: the heartbeat settles a Gate continuation on a failed turn only
+   when the provider answered the request. Every class is named on one side
+   so a new class has to be placed. *)
+let test_response_observed_per_class () =
+  let retry retry_class =
+    KFR.Retry_after_observed { retry_class; retry_after = None }
+  in
+  let rotate rotate = KFR.Rotate_now { rotate } in
+  let terminal terminal =
+    KFR.Exhausted_visible_alive
+      { terminal; provenance = KFR.Masc_internal_error; detail = "" }
+  in
+  let check_observed expected route =
+    Alcotest.(check bool)
+      (KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route)
+      expected
+      (KFR.response_observed route)
+  in
+  List.iter
+    (check_observed false)
+    [ retry KFR.Rate_limited
+    ; retry KFR.Hard_quota
+    ; retry KFR.Capacity_backpressure
+    ; retry KFR.Server_error
+    ; retry KFR.Network_transient
+    ; retry KFR.Provider_timeout
+    ; rotate KFR.Auth_failed
+    ; rotate KFR.Model_unavailable
+    ; rotate KFR.Resumable_cli_session
+    ; rotate KFR.Candidates_filtered
+    ; rotate KFR.Attempt_rejected
+    ; rotate KFR.Runtime_exhausted
+    ; terminal KFR.Deterministic_request
+    ; terminal KFR.Context_overflow
+    ; terminal KFR.Protocol_error
+    ; terminal KFR.Config_mismatch
+    ; terminal KFR.Provider_integration
+    ; terminal KFR.Internal_opaque
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable)
+    ];
+  List.iter
+    (check_observed true)
+    [ rotate KFR.No_progress_empty
+    ; rotate KFR.No_progress_thinking_only
+    ; rotate KFR.No_progress_truncated
+    ; terminal KFR.Contract_violation
+    ; terminal KFR.Terminal_effect_dependency_unavailable
+    ; terminal KFR.Terminal_effect_policy_rejection
+    ; terminal KFR.Terminal_effect_runtime_failure
+    ; terminal KFR.Terminal_effect_workflow_rejection
+    ; terminal KFR.Terminal_effect_operator_cancelled
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_effect_attempted)
+    ]
+
+(* Through production routing: the MaxTokens accept rejection the #32956
+   turns ended on is an observed answer; a provider timeout is not. *)
+let test_response_observed_through_route_of_error () =
+  let truncated =
+    internal_err
+      (Keeper_internal_error.Accept_rejected
+         { scope = "ollama_cloud.deepseek-v4-flash-0731"
+         ; model = Some "deepseek-v4-flash-0731"
+         ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+         ; response_shape = None
+         ; stop_reason = Some Agent_core.Types.MaxTokens
+         ; reason = "response rejected by accept"
+         })
+  in
+  Alcotest.(check bool)
+    "a MaxTokens accept rejection is an observed answer"
+    true
+    (KFR.response_observed (route_of_masc_error truncated));
+  Alcotest.(check bool)
+    "a provider timeout is not"
+    false
+    (KFR.response_observed
+       (route_of_agent_core_error
+          (Agent_core.Error.Api
+             (Llm_provider.Retry.Timeout { message = "deadline"; phase = None }))))
+
+(* The two effect fences carry what the lane had observed. The codex lane
+   fences with [Observation_unavailable] when the turn input could not be
+   written ([Keeper_codex_runtime] Turn_input_write_failed) and the
+   claude-code lane sets it when the process is spawned ([on_spawned]), so a
+   spawn-only failure arrives the same way: no answer is on record. A fence
+   after a tool handler was entered is an answer. *)
+let test_response_observed_fences_follow_the_disposition () =
+  let fenced effect_disposition ~runtime_id ~diagnostic =
+    internal_err
+      (Keeper_internal_error.Provider_attempt_effect_fenced
+         { runtime_id; effect_disposition; diagnostic })
+  in
+  let lost effect_disposition ~runtime_id =
+    internal_err
+      (Keeper_internal_error.Tool_correction_lost
+         { runtime_id
+         ; effect_disposition
+         ; reject_count = 2
+         ; diagnostic = "turn died after two corrective tool rejections"
+         })
+  in
+  let observed label err =
+    Alcotest.(check bool) label true (KFR.response_observed (route_of_masc_error err))
+  in
+  let unobserved label err =
+    Alcotest.(check bool) label false (KFR.response_observed (route_of_masc_error err))
+  in
+  unobserved
+    "codex: the turn input could not be written, so no answer exists"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5"
+       ~diagnostic:"Turn_input_write_failed");
+  unobserved
+    "claude-code: the process was spawned and failed before any answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"claude_code.opus"
+       ~diagnostic:"Process_exited before a turn result");
+  unobserved
+    "a lost correction with no observation is not an answer either"
+    (lost
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5");
+  observed
+    "a fence after a tool handler was entered is an answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high"
+       ~diagnostic:"stream closed after a tool effect");
+  observed
+    "a lost correction after a tool handler was entered is an answer"
+    (lost
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high");
+  Alcotest.(check string)
+    "the unavailable observation keeps its own label"
+    "provider_attempt_effect_fenced_observation_unavailable"
+    (KFR.route_class_label
+       (route_of_masc_error
+          (fenced
+             Keeper_provider_attempt_effect_core.Observation_unavailable
+             ~runtime_id:"codex_app_server.gpt-5.5"
+             ~diagnostic:"Turn_input_write_failed")))
+
 let () =
   Alcotest.run
     "keeper_runtime_failure_route"
@@ -341,4 +488,18 @@ let () =
         ] )
     ; ( "families"
       , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )
+    ; ( "response_observed"
+      , [ Alcotest.test_case
+            "every class is placed"
+            `Quick
+            test_response_observed_per_class
+        ; Alcotest.test_case
+            "through route_of_error"
+            `Quick
+            test_response_observed_through_route_of_error
+        ; Alcotest.test_case
+            "fences follow the lane's observation"
+            `Quick
+            test_response_observed_fences_follow_the_disposition
+        ] )
     ]

@@ -28,6 +28,7 @@ if [ "${self_test_only}" = false ]; then
   repo="${MASC_TARGET_REPO:-${GITHUB_REPOSITORY}}"
 fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
+stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 
 # A guess at a runaway list rather than a budget. Twelve suites is far past
 # what a pull request normally edits; past it the list is more likely wrong
@@ -66,6 +67,25 @@ select_sources() {
   assets=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/(prompts|tools|mcp)/' || [ $? -eq 1 ]; } | head -1)
   asset_guard="test/test_managed_assets_sync_from_binary.ml"
+
+  # The same shape, one axis over: a deferred tool is offered to the model as
+  # its description's first line, and test_keeper_tool_definition_source is
+  # what says that line fits the budget it is offered in. A pull request that
+  # adds config/tools/foo.toml edits no test/*.ml, so it never ran either.
+  #
+  # Measured 2026-09-08: #34409 brought twelve descriptions under the budget,
+  # and within a day five MSX tools were added over it -- change_disk at 278
+  # bytes, press at 745. The guard was green on main the whole time because
+  # nothing ran it.
+  # The ceiling on what every turn carries is the same shape again: #34409
+  # grew the model-visible schemas by 664 bytes and the ratchet failed that
+  # night, because the pull request edited config/tools and nothing else.
+  # The file says growth "has to be argued for in the PR that causes it",
+  # which needs the PR to be told.
+  tools_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
+  tool_definition_guards="test/test_keeper_tool_definition_source.ml
+test/test_keeper_tool_schema_bytes.ml"
 
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
@@ -133,6 +153,13 @@ SOURCES
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${tools_changed}" ]; then
+    echo "this pull request changes tool definitions; adding:"
+    printf '%s\n' "${tool_definition_guards}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${tool_definition_guards}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
   if [ -n "${module_suites}" ]; then
     echo "suites named after the sources this pull request edits:"
     printf '%s\n' "${module_suites}" | sed 's/^/  /'
@@ -176,8 +203,15 @@ self_test() {
     "bin/masc_tui.ml"
   check "a doc-only change selects nothing" "" \
     "docs/x.md"
-  check "a config asset still reaches its guard" \
-    "test/test_managed_assets_sync_from_binary.ml" "config/tools/foo.toml"
+  # A tool definition reaches both: the one that says the asset embeds and
+  # syncs, and the one that says its first line fits the line it is offered in.
+  check "a tool definition reaches every guard over it" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+    "config/tools/foo.toml"
+  # Only tool definitions reach the second one; a prompt asset has no first
+  # line to fit.
+  check "a prompt asset reaches only the asset guard" \
+    "test/test_managed_assets_sync_from_binary.ml" "config/prompts/foo.md"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # Both halves together, deduplicated.
@@ -223,8 +257,32 @@ while IFS= read -r source; do
       continue
       ;;
   esac
+  # What dune would supply and this does not: the files the stanza declares
+  # as deps, and the environment its (setenv ...) action sets. The reader is
+  # the one test.yml's targeted path already uses, so a suite run here and a
+  # suite run there are given the same things. It errors rather than
+  # guessing, and an error is this step's skip -- a suite run under the
+  # wrong environment reports verdicts that look real.
+  if ! stanza_deps=$(python3 "${stanza_reader}" --dir "${dir}" --deps "${name}" 2>&1); then
+    echo "-- ${dir}/${name}: ${stanza_deps}"
+    skipped=$((skipped + 1))
+    continue
+  fi
+  if ! stanza_env=$(python3 "${stanza_reader}" --dir "${dir}" "${name}" 2>&1); then
+    echo "-- ${dir}/${name}: ${stanza_env}"
+    skipped=$((skipped + 1))
+    continue
+  fi
+  deps=()
+  while IFS= read -r target; do
+    [ -n "${target}" ] && deps+=("${target}")
+  done <<< "${stanza_deps}"
+  stanza_setenv=()
+  while IFS= read -r assignment; do
+    [ -n "${assignment}" ] && stanza_setenv+=("${assignment}")
+  done <<< "${stanza_env}"
   echo "== ${dir}/${name}"
-  if ! dune build "${dir}/${name}.exe" < /dev/null; then
+  if ! dune build "${dir}/${name}.exe" ${deps+"${deps[@]}"} < /dev/null; then
     failed="${failed}${dir}/${name} (build)\n"
     continue
   fi
@@ -241,7 +299,8 @@ while IFS= read -r source; do
     continue
   fi
   if ! ( cd "${repo_root}/_build/default/${dir}" \
-         && DUNE_SOURCEROOT="${repo_root}" \
+         && env DUNE_SOURCEROOT="${repo_root}" \
+            ${stanza_setenv+"${stanza_setenv[@]}"} \
             timeout "${per_suite_timeout}" "./${name}.exe" < /dev/null ); then
     failed="${failed}${dir}/${name} (run)\n"
     continue

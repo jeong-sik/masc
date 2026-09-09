@@ -98,6 +98,7 @@ let trusted_qualified_argument_types =
     (fun trusted name -> String_set.add name trusted)
     String_set.empty
     [ "Eio.Buf_read.t"
+    ; "Eio.Flow.source_ty"
     ; "Eio.Net.ty"
     ; "Eio.Resource.t"
     ; "Eio.Switch.t"
@@ -921,23 +922,29 @@ let () =
            | Unresolved_public_surface _ -> true)
         callbacks
     in
-    if not (String_map.is_empty !remaining_allow)
-    then (
+    let unused_allow = !remaining_allow in
+    let report_unused () =
       String_map.iter
         (fun fingerprint count ->
            prerr_endline
              (Printf.sprintf "unused callback allowance (%d): %s" count fingerprint))
-        !remaining_allow;
-      exit 1)
-    else if expect_callback
-    then (
-      if violations = []
+        unused_allow
+    in
+    if expect_callback
+    then
+      if not (String_map.is_empty unused_allow)
+      then (
+        report_unused ();
+        exit 1)
+      else if violations = []
       then (
         prerr_endline "negative fixture did not expose a callback-bearing public value";
-        exit 1))
-    else if violations <> []
+        exit 1)
+      else ()
+    else if violations <> [] || not (String_map.is_empty unused_allow)
     then (
       List.iter report violations;
+      report_unused ();
       exit 1)
   | [] -> assert false
 ;;

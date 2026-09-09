@@ -1334,10 +1334,15 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let configured_auth_environment_keys () =
+let resolved_codex_home () =
   let home = match Sys.getenv_opt "CODEX_HOME" with
     | Some path when path <> "" -> Some path
     | _ -> Option.map (fun home -> Filename.concat home ".codex") (Sys.getenv_opt "HOME") in
+  Option.map (fun path ->
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
+;;
+
+let configured_auth_environment_keys home =
   match home with
   | None -> Ok []
   | Some home ->
@@ -1370,12 +1375,17 @@ let configured_auth_environment_keys () =
 ;;
 
 let client_environment () =
-  let* configured = configured_auth_environment_keys () in
+  (* Resolve before the child changes cwd; admission and execution must read
+     the same credential declarations and CLI store. *)
+  let home = resolved_codex_home () in
+  let* configured = configured_auth_environment_keys home in
   Unix.environment ()
   |> Array.to_list
   |> List.filter (fun entry ->
     let name = env_key entry in
-    child_environment_key_allowed name || List.mem name configured)
+    name <> "CODEX_HOME" && (child_environment_key_allowed name || List.mem name configured))
+  |> fun entries ->
+    Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home
   |> Array.of_list
   |> Result.ok
 ;;

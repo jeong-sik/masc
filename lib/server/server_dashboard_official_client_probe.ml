@@ -141,8 +141,12 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
       ~model
       ~login:
         (`Assoc
-           [ "status", `String "ready"
-           ; "authenticated", `Bool true
+           [ "status", `String (match measured.subscription with
+               | Runtime_codex_app_server.Provider_managed -> "configured"
+               | _ -> "ready")
+           ; "authenticated", `Bool (match measured.subscription with
+               | Runtime_codex_app_server.Provider_managed -> false
+               | _ -> true)
            ; "evidence_source", `String "configured_executable_self_report"
            ; "identity_verified", `Bool false
            ; "auth_method", `String (Runtime_codex_app_server.authentication_to_string measured.subscription)

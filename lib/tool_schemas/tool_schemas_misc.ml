@@ -43,6 +43,8 @@ let msx_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.msx_screen
   ; Tool_schemas_misc_toml.msx_press
   ; Tool_schemas_misc_toml.msx_step
+  ; Tool_schemas_misc_toml.msx_peek
+  ; Tool_schemas_misc_toml.msx_ram_diff
   ]
 let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
 let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
@@ -141,6 +143,8 @@ type misc_operation =
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
+  | Misc_msx_peek
+  | Misc_msx_ram_diff
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -171,6 +175,8 @@ let misc_tool_name = function
   | Misc_msx_screen -> "masc_msx_screen"
   | Misc_msx_press -> "masc_msx_press"
   | Misc_msx_step -> "masc_msx_step"
+  | Misc_msx_peek -> "masc_msx_peek"
+  | Misc_msx_ram_diff -> "masc_msx_ram_diff"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -200,6 +206,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_msx_screen
   | Misc_msx_press
   | Misc_msx_step
+  | Misc_msx_peek
+  | Misc_msx_ram_diff
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

@@ -149,6 +149,38 @@ val step_frame : frames:int -> (frame * entry list, error) result
     input ledger under one machine lock. Encoding happens outside that lock. *)
 
 val capture : unit -> (observation * frame, error) result
+
+(** {b RAM introspection} — the state sensor. The screen is the expensive
+    detour a human eye needs; the game's truth is in memory, and the core
+    already holds all of it. *)
+
+type ram_change = {
+  address : int;  (** logical address of the first changed byte *)
+  length : int;  (** consecutive changed bytes *)
+  from_hex : string;  (** snapshot bytes, hex pairs *)
+  to_hex : string;  (** current bytes, hex pairs *)
+}
+
+type ram_diff = {
+  changes : ram_change list;  (** up to {!ram_diff_max_runs} runs, ascending *)
+  truncated : bool;  (** more runs existed than the cap returned *)
+  changed_bytes : int;  (** total bytes that differ, runs and beyond *)
+}
+
+val peek_max_bytes : int
+val ram_diff_max_runs : int
+
+val peek : address:int -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes at a logical address
+    (0x0000-0xFFFF) as hex pairs, and takes a full 64K snapshot of the
+    machine for the next {!ram_diff}. Read-only: writing is the cheat the
+    lane refuses (RFC-0439). *)
+
+val ram_diff : unit -> (ram_diff, error) result
+(** Changes since the last {!peek}: consecutive differing bytes as runs with
+    before/after hex. [Error Invalid_request] before any peek. The snapshot
+    survives machine swaps — a reload after a peek reads as wholesale change,
+    which it is. *)
 (** Copy observation and pixels under the same machine lock. Does not advance
     the machine. Consumers encode/persist the immutable copy outside the lock. *)
 

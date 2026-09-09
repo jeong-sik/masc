@@ -235,6 +235,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_change_disk", mutating_tool);
     ("masc_msx_press", mutating_tool);
     ("masc_msx_step", mutating_tool);
+    ("masc_msx_peek", read_state_tool);
+    ("masc_msx_ram_diff", read_state_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);

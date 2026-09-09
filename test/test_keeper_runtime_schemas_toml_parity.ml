@@ -28,6 +28,7 @@ open Alcotest
 let expected =
   [ "keeper_artifact_read"
   ; "masc_fusion"
+  ; "masc_fusion_decision"
   ; "masc_fusion_status"
   ; "masc_file_upload"
   ; "masc_file_delete"

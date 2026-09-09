@@ -11,15 +11,11 @@ let feed_all pieces =
   let state = Split.create () in
   let reasoning = Buffer.create 64
   and text = Buffer.create 64 in
-  List.iter
-    (fun chunk ->
-       let { Split.reasoning = r; text = t } = Split.feed state chunk in
-       Buffer.add_string reasoning r;
-       Buffer.add_string text t)
-    pieces;
-  let { Split.reasoning = r; text = t } = Split.flush state in
-  Buffer.add_string reasoning r;
-  Buffer.add_string text t;
+  let append = List.iter (function
+    | Split.Reasoning bytes -> Buffer.add_string reasoning bytes
+    | Split.Text bytes -> Buffer.add_string text bytes) in
+  List.iter (fun chunk -> append (Split.feed_segments state chunk)) pieces;
+  append (Split.flush_segments state);
   Buffer.contents reasoning, Buffer.contents text
 ;;
 
@@ -68,9 +64,9 @@ let test_text_before_and_between_tags () =
 
 let test_inside_reports_the_open_tag () =
   let state = Split.create () in
-  let (_ : Split.piece) = Split.feed state "<think>still going" in
+  let (_ : Split.segment list) = Split.feed_segments state "<think>still going" in
   Alcotest.(check bool) "inside an open tag" true (Split.inside state);
-  let (_ : Split.piece) = Split.feed state "</think>" in
+  let (_ : Split.segment list) = Split.feed_segments state "</think>" in
   Alcotest.(check bool) "closed again" false (Split.inside state)
 ;;
 

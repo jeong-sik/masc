@@ -1,7 +1,7 @@
 # Goal completion contract: source evidence
 
 Inspected source: `90fd79462fea89e0f72dfa6d4243578538473090`.
-This is a source audit, not runtime or browser acceptance.
+The table audits source; the separately identified older-binary probe below covers only creation/readback, not completion or browser acceptance.
 
 | Requirement | Current evidence | Remaining acceptance |
 | --- | --- | --- |
@@ -13,3 +13,7 @@ This is a source audit, not runtime or browser acceptance.
 Existing Task operator routes use `Server_auth.with_token_permission_auth` with `CanAdmin`. The helper requires enabled token authentication, resolves the stored credential, checks its role, and supplies the credential identity. It does not establish that a human rather than software possesses that credential. Caller-provided actor strings must not become confirmation authority.
 
 The constitution annotations are corrected to describe this inspected implementation while retaining the original product requirements. No product behavior changes in this audit.
+
+## Isolated creation/readback probe
+
+On 2026-09-09 at 22:10 UTC, the existing c083 candidate on loopback port 18937 accepted the PDF quality Goal with metric and target, rejected a second Goal lacking target, and returned only the accepted Goal with its original criterion revision. Raw MCP receipts and checked hashes are in `docs/evidence/2026-09-10-goal-create-readback/`. This is not an exact-main or production proof, not a feasibility judgment, and not completion verification. The accepted Goal remains executing for the actual PDF work.

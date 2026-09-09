@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -230,6 +231,52 @@ class ExistingWorkspace(unittest.TestCase):
                 self.assertFalse(continuity['configuration_preserved'])
             self.assertFalse(base.exists())
             self.assertTrue(source.exists())
+
+
+class QueuedChatOperations(unittest.TestCase):
+    """A workspace whose queue still holds work is not an unmeasured workspace.
+
+    The record directories hold what a past run finished. An operation that
+    never ran leaves them empty and waits in the keeper's own queue, which the
+    server drains on the next boot -- and a raw-trace record carries no request
+    id, so a drained leftover is counted as this run's result.
+    """
+
+    def workspace(self, states=None):
+        base = Path(tempfile.mkdtemp())
+        keeper = base / '.masc/keepers/imp'
+        keeper.mkdir(parents=True)
+        if states is not None:
+            connection = sqlite3.connect(keeper / 'chat-operations.sqlite3')
+            connection.execute(
+                'CREATE TABLE operations (operation_id TEXT PRIMARY KEY, state TEXT NOT NULL)')
+            for index, state in enumerate(states):
+                connection.execute('INSERT INTO operations VALUES (?, ?)',
+                                   (f'op-{index}', state))
+            connection.commit()
+            connection.close()
+        return base
+
+    def test_a_workspace_with_no_queue_is_accepted(self):
+        acceptance.require_unmeasured_workspace(self.workspace())
+
+    def test_a_drained_queue_is_accepted(self):
+        acceptance.require_unmeasured_workspace(
+            self.workspace(['succeeded', 'failed', 'cancelled']))
+
+    def test_outstanding_operations_are_refused(self):
+        for states in (['queued'], ['running'], ['succeeded', 'queued']):
+            with self.subTest(states=states):
+                with self.assertRaises(RuntimeError) as raised:
+                    acceptance.require_unmeasured_workspace(self.workspace(states))
+                self.assertIn('waiting to run', str(raised.exception))
+
+    def test_an_unreadable_queue_is_not_called_empty(self):
+        base = self.workspace()
+        (base / '.masc/keepers/imp/chat-operations.sqlite3').write_text('not a database')
+        with self.assertRaises(RuntimeError) as raised:
+            acceptance.require_unmeasured_workspace(base)
+        self.assertIn('cannot read the chat operation queue', str(raised.exception))
 
 
 class SiblingBrowserOracle(unittest.TestCase):

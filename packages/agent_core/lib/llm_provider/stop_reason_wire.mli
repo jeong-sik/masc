@@ -63,3 +63,9 @@ val provisional_of_string : string -> Types.stop_reason
     possibly-incomplete tool call. Total over {!Types.stop_reason}: no catch-all,
     so a new [stop_reason] constructor forces a compile error here. *)
 val reconcile : Types.stop_reason -> has_tool_blocks:bool -> Types.stop_reason
+
+(** [true] only for the typed fail-closed value produced when a provider
+    reported a tool-use finish but the assembled response carried no tool
+    block. Consumers that need to distinguish this executable-shape invariant
+    from arbitrary unknown stop reasons should use this predicate. *)
+val is_unmatched_tool_calls : Types.stop_reason -> bool

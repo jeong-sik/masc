@@ -49,5 +49,18 @@ failed curator result, not a reliability improvement claim.
 
 The current prompt explicitly separates independent store gaps from source
 validity and defines exclusions as sources unused anywhere in the proposal.
-A further run with the installed Qwen3.8 27B model is in progress; no result is
-claimed here.
+The further run with the installed Qwen3.8 27B model completed; see below.
+
+## Qwen3.8 27B observation
+
+`qwen38-27b/` completed in 386.23 seconds (1141 prompt tokens and 4529 output
+tokens reported by Ollama). Source coverage passed. Manual source comparison
+found one useful shared statement: the analyst corrected the measurement from
+12 to 21 seconds, citing both sources. The disputed PDF claim remained a conflict
+with both owners attributed; neither alternative was promoted as verified truth.
+
+This is one synthetic scenario and a model proposal, not a reliability estimate
+or a completed shared-memory pipeline. The prompts changed between runs, so the
+results are not a controlled comparison of model sizes. The long latency supports
+further background-role evaluation rather than an interactive-path assumption.
+No proposal was applied to Keeper memory.

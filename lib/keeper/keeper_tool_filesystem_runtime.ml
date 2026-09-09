@@ -1466,6 +1466,10 @@ let confined_write_is_keeper_playground
     (normalized (Keeper_sandbox.host_root_abs_of_meta ~config meta))
 ;;
 
+let before_write_authorization_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let before_edit_snapshot_key : (unit -> unit) Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
@@ -2274,6 +2278,7 @@ let handle_file_write_with_outcome
      [Keeper_tool_write_mode.of_args] for why there is no default. *)
   let mode_result = Keeper_tool_write_mode.of_args args in
   let after_gate ~confined ~target ~input continue =
+    Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_write_authorization_key);
     if confined_write_is_keeper_playground ~config ~meta confined
     then (
       Log.Keeper.info
@@ -3020,6 +3025,10 @@ let handle_file_write_with_outcome
 ;;
 
 module For_testing = struct
+  let with_before_write_authorization hook f =
+    Eio.Fiber.with_binding before_write_authorization_key hook f
+  ;;
+
   let with_before_edit_snapshot hook f =
     Eio.Fiber.with_binding before_edit_snapshot_key hook f
   ;;

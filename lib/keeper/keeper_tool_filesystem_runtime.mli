@@ -121,6 +121,9 @@ val default_owned_target :
     contract directly. *)
 
 module For_testing : sig
+  (** Inject a race after write capabilities are pinned and before authorization. *)
+  val with_before_write_authorization : (unit -> unit) -> (unit -> 'a) -> 'a
+
   (** Run a fiber-local hook immediately before persisting an applied edit snapshot. *)
   val with_before_edit_snapshot : (unit -> unit) -> (unit -> 'a) -> 'a
 

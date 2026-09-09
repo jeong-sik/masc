@@ -1068,23 +1068,24 @@ let test_symlink_component_swap_cannot_escape_allowed_root
     let outside_target = Filename.concat case_outside "target.txt" in
     Option.iter (Fs_compat.save_file target) inside_content;
     Option.iter (Fs_compat.save_file outside_target) outside_content;
-    let gate_context () =
+    let race_ran = ref false in
+    let before_authorization () =
+      race_ran := true;
       Unix.rename component moved_component;
-      Unix.symlink case_outside component;
-      { Masc.Keeper_gate.turn_id = None
-      ; snapshot = `Assoc [ "race", `String "symlink_component_swap" ]
-      }
+      Unix.symlink case_outside component
     in
     let raw =
-      handle_file_write
-        ~turn_sandbox_factory
-        ~config
-        ~meta
-        ~publication_recovery
-        ~gate_context
-        ~args:(`Assoc (args_for target))
-        ()
+      Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+        before_authorization (fun () ->
+          handle_file_write
+            ~turn_sandbox_factory
+            ~config
+            ~meta
+            ~publication_recovery
+            ~args:(`Assoc (args_for target))
+            ())
     in
+    Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
     if not (parse_ok raw)
     then Alcotest.failf "%s write did not use pinned parent: %s" label raw;
     if with_runtime
@@ -1150,28 +1151,29 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
   ensure_dir outside;
   let target = Filename.concat playground "root-swap.txt" in
   let outside_target = Filename.concat outside "root-swap.txt" in
-  let gate_context () =
+  let race_ran = ref false in
+  let before_authorization () =
+    race_ran := true;
     Unix.rename playground moved_playground;
-    Unix.symlink outside playground;
-    { Masc.Keeper_gate.turn_id = None
-    ; snapshot = `Assoc [ "race", `String "sandbox_root_swap" ]
-    }
+    Unix.symlink outside playground
   in
   let raw =
-    handle_file_write
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ~publication_recovery
-      ~gate_context
-      ~args:
-        (`Assoc
-           [ "path", `String target
-           ; "mode", `String "overwrite"
-           ; "content", `String "pinned-root-write"
-           ])
-      ()
+    Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+      before_authorization (fun () ->
+        handle_file_write
+          ~turn_sandbox_factory
+          ~config
+          ~meta
+          ~publication_recovery
+          ~args:
+            (`Assoc
+               [ "path", `String target
+               ; "mode", `String "overwrite"
+               ; "content", `String "pinned-root-write"
+               ])
+          ())
   in
+  Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
   Alcotest.(check bool) "write completed through pinned root" true (parse_ok raw);
   if with_runtime
   then
@@ -1207,23 +1209,24 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     let outside_target = Filename.concat outside (label ^ ".txt") in
     Fs_compat.save_file target initial;
     Fs_compat.save_file outside_target ("outside-" ^ label);
-    let gate_context () =
+    let race_ran = ref false in
+    let before_authorization () =
+      race_ran := true;
       Unix.rename target moved_target;
-      Unix.symlink outside_target target;
-      { Masc.Keeper_gate.turn_id = None
-      ; snapshot = `Assoc [ "race", `String "leaf_swap" ]
-      }
+      Unix.symlink outside_target target
     in
     let raw =
-      handle_file_write
-        ~turn_sandbox_factory
-        ~config
-        ~meta
-        ~publication_recovery
-        ~gate_context
-        ~args:(`Assoc (("path", `String target) :: args))
-        ()
+      Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+        before_authorization (fun () ->
+          handle_file_write
+            ~turn_sandbox_factory
+            ~config
+            ~meta
+            ~publication_recovery
+            ~args:(`Assoc (("path", `String target) :: args))
+            ())
     in
+    Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
     Alcotest.(check bool) (label ^ " success contract") expected_success (parse_ok raw);
     if expected_success
     then
@@ -1277,27 +1280,28 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
   let target = Filename.concat parent "target.txt" in
   let outside_target = Filename.concat outside "append-missing.txt" in
   Fs_compat.save_file outside_target "outside-append-missing";
-  let gate_context () =
-    Unix.symlink outside_target target;
-    { Masc.Keeper_gate.turn_id = None
-    ; snapshot = `Assoc [ "race", `String "missing_leaf_appeared" ]
-    }
+  let race_ran = ref false in
+  let before_authorization () =
+    race_ran := true;
+    Unix.symlink outside_target target
   in
   let raw =
-    handle_file_write
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ~publication_recovery
-      ~gate_context
-      ~args:
-        (`Assoc
-           [ "path", `String target
-           ; "mode", `String "append"
-           ; "content", `String "must-not-follow"
-           ])
-      ()
+    Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+      before_authorization (fun () ->
+        handle_file_write
+          ~turn_sandbox_factory
+          ~config
+          ~meta
+          ~publication_recovery
+          ~args:
+            (`Assoc
+               [ "path", `String target
+               ; "mode", `String "append"
+               ; "content", `String "must-not-follow"
+               ])
+          ())
   in
+  Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
   Alcotest.(check bool) "missing append race failed closed" false (parse_ok raw);
   Alcotest.(check bool) "missing append race surfaced an error" true
     (Option.is_some (parse_error raw));

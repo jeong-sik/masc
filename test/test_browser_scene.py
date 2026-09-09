@@ -92,8 +92,8 @@ try:
  js("document.querySelector('#messages').scrollTop=0;window.wheelTrusted=false;document.addEventListener('wheel',e=>window.wheelTrusted=e.isTrusted);")
  js(scene+guard,[args])
  call('POST','/session/'+sid+'/actions',{'actions':[{'type':'wheel','id':'masc-browser-wheel','actions':[{'type':'scroll','duration':0,'origin':'viewport','x':int(point['x']*viewport['width']),'y':int(point['y']*viewport['height']),'deltaX':0,'deltaY':160}]}]})
- call('DELETE','/session/'+sid+'/actions')
- # Match production: guard, wheel, release, page metadata, capture, metadata.
+ # Match production: guard, wheel, page metadata, capture, metadata.
+ # A wheel does not enter pressed-pointer release cleanup.
  js('return {url:location.href,title:document.title};')
  js(scene+"\nreturn browserScene({mode:'viewport'});")
  wheel_png=call('GET','/session/'+sid+'/screenshot')
@@ -120,11 +120,20 @@ try:
  check('scoped read returns fewer bytes than whole visible scene',len(json.dumps(scoped))<len(json.dumps(whole)))
  link=control(scoped,'Observed thread');act(scoped,link,action='click')
  check('scoped link retains usable observed click reference',js('return location.hash;')=='#thread')
+ refreshed=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}])
+ check('same-document link refresh preserves region scope',refreshed['scope']==scope and all('sidebar' not in n['text'] for n in refreshed['nodes']))
  region_measurement={'whole_scene_bytes':len(json.dumps(whole,ensure_ascii=False).encode()),'scoped_scene_bytes':len(json.dumps(scoped,ensure_ascii=False).encode()),'regions_bytes':len(json.dumps(regions,ensure_ascii=False).encode())}
  (a.out/'regions.json').write_text(json.dumps({'outline':regions,'scoped':scoped,'measurement':region_measurement},ensure_ascii=False,indent=2))
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
+ landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)
+ for landmark in landmarks['nodes']:
+  selected={'documentId':landmarks['documentId'],'nodeId':landmark['nodeId']}
+  read=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':selected,'maxChars':5000}])
+  check('landmark scope reads '+landmark['text'],read['scope']==selected and len(read['nodes'])==1)
  js("document.body.innerHTML='<div style=\"overflow:hidden;width:50px;height:50px\"><div style=\"position:fixed;left:400px;top:120px\"><button id=popup>Visible fixed popup</button></div></div>';")
  popup_scene=observe()
  popup=control(popup_scene,'Visible fixed popup')
@@ -143,6 +152,12 @@ try:
  check('observed same-tab href reaches destination URL',after_follow['url']==receipt['destinationUrl'])
  check('follow bypasses application click handler',not js('return window.followHandlerRan;'))
  check('SPA URL acknowledgement does not imply destination content readiness',after_follow['documentId']==follow_scene['documentId'] and any(n['text']=='Previous channel content' for n in after_follow['nodes']))
+ js("document.body.innerHTML='<div id=host></div>';const outer=document.querySelector('#host').attachShadow({mode:'open'});outer.innerHTML='<div id=inner></div>';const inner=outer.querySelector('#inner').attachShadow({mode:'open'});inner.innerHTML='<div id=pane style=\"height:180px;width:400px;overflow:auto\"><div style=\"height:1600px\">Shadow channel context</div></div>';window.shadowPane=inner.querySelector('#pane');window.scrollTo(0,0);")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=shadowPane.getBoundingClientRect();return {x:(r.x+30)/innerWidth,y:(r.y+30)/innerHeight};")
+ js(scene+interaction,[{'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':js('return location.href;'),'x':0,'y':120}])
+ positions=js('return {pane:shadowPane.scrollTop,root:scrollY};')
+ check('nested open shadow roots scroll the internal pane without moving the page',positions=={'pane':120,'root':0})
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

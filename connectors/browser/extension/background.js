@@ -96,7 +96,7 @@ function browserScene(args) {
   const view = args.view === undefined ? 'content' : args.view;
   if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
   if (view === 'regions' && root) {
-    const selector = 'main,nav,aside,section,article,[role=main],[role=navigation],[role=complementary],[role=region],[role=log]';
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
     for (const region of regions) {
       if (truncated) break;
@@ -320,7 +320,7 @@ function interactInPage(args) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
-    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    let element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
     if (!element) throw new Error('point_has_no_element');
     if (args.action === 'click_at') {
       if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
@@ -329,6 +329,13 @@ function interactInPage(args) {
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
         throw new Error('scroll_coordinates_must_be_integers');
+      // document.elementFromPoint retargets shadow descendants to their host.
+      // Find the innermost accessible hit before walking scroll ancestors.
+      while (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+        const inner = element.shadowRoot.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+        if (!inner || inner === element) break;
+        element = inner;
+      }
       // Follow actual scroll containers under the pointer. Slack's message
       // pane scrolls independently of document.body and its channel sidebar.
       const scrollAxis = (delta, axis) => {

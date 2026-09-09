@@ -4,6 +4,9 @@
  (deps fixtures/browser-webdriver-script.cjs)
  (libraries
   masc_test_deps
+  masc.keeper_chat_operations
+  masc.keeper_execution_scope
+  masc.keeper_registry
   masc.browser_lane
   masc.msx_lane
   fs_compat_test_support

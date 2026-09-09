@@ -343,7 +343,6 @@ let observe_node_result
       ?lane:context.lane
       ?tool_choice:context.tool_choice
       ?thinking_enabled:context.thinking_enabled
-      ?thinking_budget:context.thinking_budget
       ?prompt_fingerprint:context.prompt_fingerprint
       ~execution_id:result.execution_id
       ~tool_use_id:result.tool_use_id
@@ -462,7 +461,6 @@ let observe_composition_run_summary
       ?lane:(field (fun context -> context.lane))
       ?tool_choice:(field (fun context -> context.tool_choice))
       ?thinking_enabled:(field (fun context -> context.thinking_enabled))
-      ?thinking_budget:(field (fun context -> context.thinking_budget))
       ?prompt_fingerprint:(field (fun context -> context.prompt_fingerprint))
       ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
       ~planned_index:schedule.planned_index

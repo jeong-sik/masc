@@ -144,7 +144,6 @@ let checkpoint_gen =
   let* enable_thinking = option bool in
   let* preserve_thinking = option bool in
   let* response_format = response_format_gen in
-  let* thinking_budget = option (int_range 0 2048) in
   let* reasoning_effort = option (oneof_list Llm_provider.Reasoning_effort.all) in
   let* cache_system_prompt = bool in
   let* context = context_gen in
@@ -170,7 +169,6 @@ let checkpoint_gen =
     ; enable_thinking
     ; preserve_thinking
     ; response_format
-    ; thinking_budget
     ; reasoning_effort
     ; cache_system_prompt
     ; context
@@ -215,7 +213,6 @@ let make_unit_checkpoint
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Off
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context
@@ -330,7 +327,6 @@ let test_delta_json_all_replacement_ops () =
     ; top_k = Some 40
     ; min_p = Some 0.05
     ; enable_thinking = Some true
-    ; thinking_budget = Some 128
     ; reasoning_effort = Some Llm_provider.Reasoning_effort.Max
     ; disable_parallel_tool_use = true
     ; response_format = JsonSchema (`Assoc [ "type", `String "object" ])

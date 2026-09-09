@@ -825,7 +825,6 @@ describe('KeeperTurnInspector v2 drawer', () => {
           temperature: 0.7,
           top_p: enableThinking === undefined ? undefined : 0.9,
           max_tokens: enableThinking === undefined ? undefined : 8192,
-          thinking_budget: 2048,
           enable_thinking: enableThinking,
         },
       }
@@ -849,11 +848,9 @@ describe('KeeperTurnInspector v2 drawer', () => {
       if (enableThinking === undefined) {
         expect(params).toContain('top_p—')
         expect(params).toContain('max_tokens—')
-        expect(params).toContain('thinking_budget2048')
       } else {
         expect(params).toContain('top_p0.9')
         expect(params).toContain('max_tokens8,192')
-        expect(params).toContain('thinking_budget2048')
       }
       expect(params).toContain(`enable_thinking${expected}`)
       // fabricated defaults must not appear as chips

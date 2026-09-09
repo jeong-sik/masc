@@ -309,7 +309,6 @@ describe('KeeperWorkspaceRail', () => {
             has_system_prompt: true,
             enable_thinking: true,
             preserve_thinking: false,
-            thinking_budget: 32768,
             clear_thinking: false,
             resolved_reasoning_effort: 'high',
             glm_clear_thinking: false,

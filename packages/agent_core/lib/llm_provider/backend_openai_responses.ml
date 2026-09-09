@@ -450,12 +450,6 @@ let build_request_artifact
       ~envelope:Types.Openai_responses_max_output_tokens
       config
   in
-  (match config.thinking_budget with
-   | Some _ ->
-     invalid_arg
-       "Backend_openai_responses.build_request: thinking_budget is unsupported; pass \
-        reasoning_effort"
-   | None -> ());
   let request_control =
     (match Provider_config.validate_reasoning_effort_request config with
      | Ok () -> ()
@@ -467,7 +461,6 @@ let build_request_artifact
         dialect
         ~enable_thinking:config.enable_thinking
         ~preserve_thinking:config.preserve_thinking
-        ~thinking_budget:config.thinking_budget
         ~reasoning_effort:config.reasoning_effort
         ()
     with

@@ -154,7 +154,6 @@ let mk_record
   ; tool_choice = Some (Agent_core.Types.tool_choice_to_json Agent_core.Types.Any)
   ; enable_thinking = Some false
   ; preserve_thinking = None
-  ; thinking_budget = Some 2048
   ; reasoning_effort = Some "high"
   ; block_index
   ; block_kind
@@ -297,7 +296,6 @@ let test_record_to_json_all_none_optionals () =
     ; tool_choice = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; thinking_budget = None
     ; reasoning_effort = None
     ; block_index = None
     ; block_kind = None
@@ -429,7 +427,6 @@ let test_record_json_all_fields_populated () =
         Some (Agent_core.Types.tool_choice_to_json (Agent_core.Types.Tool "complex_tool"))
     ; enable_thinking = Some true
     ; preserve_thinking = Some true
-    ; thinking_budget = Some 8192
     ; reasoning_effort = Some "max"
     ; block_index = Some 3
     ; block_kind = Some "thinking"

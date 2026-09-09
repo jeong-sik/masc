@@ -135,7 +135,6 @@ let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
       { temperature = None
       ; top_p = None
       ; max_tokens = None
-      ; thinking_budget = None
       ; enable_thinking = None
       }
     ~usage:

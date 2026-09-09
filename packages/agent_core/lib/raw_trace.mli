@@ -50,7 +50,6 @@ type run_summary =
   ; tool_choice : Yojson.Safe.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; thinking_budget : int option
   ; reasoning_effort : string option
   ; thinking_block_count : int
   ; text_block_count : int
@@ -100,7 +99,6 @@ type record =
   ; tool_choice : Yojson.Safe.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
-  ; thinking_budget : int option
   ; reasoning_effort : string option
   ; block_index : int option
   ; block_kind : string option
@@ -173,7 +171,6 @@ val start_run
   -> ?tool_choice:Types.tool_choice
   -> ?enable_thinking:bool
   -> ?preserve_thinking:bool
-  -> ?thinking_budget:int
   -> ?reasoning_effort:string
   -> unit
   -> (active_run, Error.t) result

@@ -1,0 +1,122 @@
+{
+  "observed_at": "2026-09-09T09:47:42.008624+00:00",
+  "endpoint": "GET /api/v1/gate/keepers?detailed=true",
+  "raw_response_sha256": "cfcc061391d436fbf3c9cdb39ab3c23f0be8dcd248e77a12c0287aabfafd9b56",
+  "total": 16,
+  "count": 16,
+  "rows": [
+    {
+      "name": "analyst",
+      "health": "offline",
+      "phase": "offline",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "code-reviewer",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "critic",
+      "health": "offline",
+      "phase": "offline",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "edgar.a.poe",
+      "health": "offline",
+      "phase": "offline",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "geek-scout",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "gondolin-probe",
+      "health": "offline",
+      "phase": "offline",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "goo-yang-bong",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "jazz-developer",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "kidsnote-slack-context-collector",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "lane-smith",
+      "health": "healthy",
+      "phase": "running",
+      "keepalive_running": true,
+      "configuration_error": null
+    },
+    {
+      "name": "msb-probe",
+      "health": null,
+      "phase": null,
+      "keepalive_running": false,
+      "configuration_error": "keeper msb-probe rejected: sandbox_profile is required (allowed: docker, microvm, remote_ssh). Add e.g. `sandbox_profile = \"docker\"` to the keeper TOML."
+    },
+    {
+      "name": "msx-retro-mania",
+      "health": "healthy",
+      "phase": "running",
+      "keepalive_running": true,
+      "configuration_error": null
+    },
+    {
+      "name": "polisher",
+      "health": "offline",
+      "phase": "failing",
+      "keepalive_running": false,
+      "configuration_error": null
+    },
+    {
+      "name": "pr-updater",
+      "health": "stale",
+      "phase": "running",
+      "keepalive_running": true,
+      "configuration_error": null
+    },
+    {
+      "name": "rondo",
+      "health": "healthy",
+      "phase": "running",
+      "keepalive_running": true,
+      "configuration_error": null
+    },
+    {
+      "name": "sangsu",
+      "health": "offline",
+      "phase": "offline",
+      "keepalive_running": false,
+      "configuration_error": null
+    }
+  ],
+  "validation": "Read-only installed baseline. Changed TUI not built or installed; no deletions submitted."
+}

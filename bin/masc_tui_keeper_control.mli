@@ -20,6 +20,7 @@
     running, which is how a live lane gets a second fiber. *)
 type liveness =
   | Unobserved
+  | Invalid of string
   | Absent
   | Present of Masc.Tui_decode.keeper_runtime
 
@@ -39,9 +40,15 @@ type roster =
       { observed : Masc.Tui_decode.keeper_runtime list
       ; total : int
       }
+  | Roster_invalid of
+      { observed : Masc.Tui_decode.keeper_runtime list
+      ; errors : (string * string) list
+      ; complete : bool
+      }
   | Roster_complete of Masc.Tui_decode.keeper_runtime list
 
 val roster_of_reading :
+  errors:(string * string) list ->
   rows:Masc.Tui_decode.keeper_runtime list ->
   truncated:bool ->
   total:int ->
@@ -157,12 +164,12 @@ val requires_confirmation : action -> bool
 val available : reading -> action list
 (** The actions that apply to a reading, in the order the footer lists them.
 
-    An unobserved roster offers none: acting on a keeper whose live state is
-    unknown is how a running lane gets a second fiber. *)
+    Unknown or invalid live state offers confirmed deletion only. The server
+    resolves ownership and joins the lane before purging; boot remains unavailable. *)
 
 val primary : reading -> action option
 (** The action bound to the toggle key — the one an operator means by "stop"
-    or "play" for this reading. [None] when the reading admits none. *)
+    or "play" for this reading. [None] when only deletion is available or no action is available. *)
 
 (** One HTTP step of an action. *)
 type step =

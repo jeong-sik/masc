@@ -16,7 +16,6 @@ let make_checkpoint
       ?(context = Context.create_sync ())
       ?(enable_thinking = None)
       ?(preserve_thinking = None)
-      ?(thinking_budget = None)
       ?(reasoning_effort = None)
       ()
   : Checkpoint.t
@@ -40,7 +39,6 @@ let make_checkpoint
   ; enable_thinking
   ; preserve_thinking
   ; response_format = Types.Off
-  ; thinking_budget
   ; reasoning_effort
   ; cache_system_prompt = false
   ; context
@@ -333,7 +331,6 @@ let test_resume_with_config_override () =
       ~agent_name:"cp-name"
       ~enable_thinking:(Some true)
       ~preserve_thinking:(Some true)
-      ~thinking_budget:(Some 2048)
       ()
   in
   let cfg =
@@ -343,7 +340,6 @@ let test_resume_with_config_override () =
     ; max_tokens = Some 8192
     ; enable_thinking = Some false
     ; preserve_thinking = Some false
-    ; thinking_budget = Some 512
     }
   in
   let agent = Agent.resume ~net ~checkpoint:cp ~config:cfg () in
@@ -374,11 +370,7 @@ let test_resume_with_config_override () =
   Alcotest.(check (option bool))
     "preserve_thinking from config"
     (Some false)
-    (Agent.state agent).config.preserve_thinking;
-  Alcotest.(check (option int))
-    "thinking_budget from config"
-    (Some 512)
-    (Agent.state agent).config.thinking_budget
+    (Agent.state agent).config.preserve_thinking
 ;;
 
 let test_resume_empty_checkpoint () =

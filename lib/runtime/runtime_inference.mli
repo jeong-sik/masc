@@ -23,7 +23,6 @@ val resolve_temperature :
     when that runtime has no temperature override. *)
 
 type seed = {
-  thinking_budget : int option;
   thinking_enabled : bool option;
   preserve_thinking : bool option;
 }

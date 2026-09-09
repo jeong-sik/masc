@@ -582,10 +582,6 @@ let test_codex_runtime_cannot_enter_agent_core_runner () =
 let test_codex_runtime_has_no_agent_core_thinking_seed () =
   with_codex_runtime_initialized (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"codex.codex" in
-    Alcotest.(check (option int))
-      "thinking budget"
-      None
-      seed.Runtime_inference.thinking_budget;
     Alcotest.(check (option bool))
       "thinking enabled"
       None

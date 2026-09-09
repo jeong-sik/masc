@@ -397,6 +397,30 @@ class InstalledModelCatalog(unittest.TestCase):
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class CompiledRuntimeSetup(unittest.TestCase):
+    def test_multiple_models_bind_imp_and_reselection_preserves_both_connections(self):
+        import tomllib
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='runtime-multiple-cli-') as tmp:
+            base = Path(tmp)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
+                (config / name).write_bytes((fixture / name).read_bytes())
+            models = [spec(), dict(spec(), model='second-owned-model')]
+            ids = [SETUP.render(model)[0] for model in models]
+            env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ,env,clear=True):
+                SETUP.configure_many(BINARY,base,models,ids,default_id=ids[1])
+                configured = tomllib.loads((config / 'runtime.toml').read_text())
+                self.assertEqual(configured['runtime']['default'],ids[1])
+                self.assertEqual(configured['runtime']['assignments']['imp'],ids[1])
+                self.assertEqual(configured['runtime']['lanes'][ids[1]]['candidates'],[ids[1],ids[0]])
+                SETUP.configure_many(BINARY,base,[],[ids[0]])
+                inventory = SETUP.configured_inventory(BINARY,base)
+                self.assertTrue(set(ids) <= {row['id'] for row in inventory['runtimes']})
+                configured = tomllib.loads((config / 'runtime.toml').read_text())
+                self.assertEqual(configured['runtime']['assignments']['imp'],ids[0])
+
     def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'
         for choice in SETUP.CHOICES:

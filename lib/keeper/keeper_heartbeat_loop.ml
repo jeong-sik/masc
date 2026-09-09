@@ -139,13 +139,24 @@ let decide_keepalive_cycle_action = function
   | Turn_cycle_busy block -> Defer_autonomous_work block
 ;;
 
+(* What a provider retry route asks of the next sleep: how long, and whether
+   a stimulus may cut it short. A rate limit or exhausted quota is the
+   provider's state and waking sooner only re-runs the same failing call, so
+   the sleep runs to its end (#34653). Capacity backpressure also reaches
+   this route from MASC's own slot and client capacity envelopes, which clear
+   on their own, so that sleep stays interruptible (#34663 review). *)
+type provider_backoff =
+  { retry_after_hint : float
+  ; wake_policy : Keeper_keepalive_signal.wake_policy
+  }
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
   stimuli_acked : bool;
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
-  rate_limited_retry_after : float option;
+  provider_backoff : provider_backoff option;
       (** [Some retry_after] when the cycle's turn failure routed as a
           provider rate-limit/capacity retry ([Retry_after_observed] with a
           [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
@@ -171,17 +182,24 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
    turn already produced instead of re-classifying the error text. *)
 let failure_route_rate_limited_backoff_hint
     (failure : Keeper_unified_turn.turn_failure)
+  : provider_backoff option
   =
+  (* A hint of [0.0] means "rate-limited, but the provider sent no usable
+     [Retry-After]": the backoff then takes its bounded default rather than
+     the plain cadence, because the rate-limit signal is real even without a
+     duration. *)
+  let hint retry_after = Option.value ~default:0.0 retry_after in
   match failure.route with
-  | Route.Retry_after_observed
-      { retry_class = Rate_limited | Hard_quota | Capacity_backpressure
-      ; retry_after
-      } ->
-    (* [Some 0.0] means "rate-limited, but the provider sent no usable
-       [Retry-After]": the backoff then takes its bounded default rather
-       than the plain cadence, because the rate-limit signal is real even
-       without a duration. *)
-    Some (Option.value ~default:0.0 retry_after)
+  | Route.Retry_after_observed { retry_class = Rate_limited | Hard_quota; retry_after } ->
+    Some
+      { retry_after_hint = hint retry_after
+      ; wake_policy = Keeper_keepalive_signal.Serve_wakeup_after_duration
+      }
+  | Route.Retry_after_observed { retry_class = Capacity_backpressure; retry_after } ->
+    Some
+      { retry_after_hint = hint retry_after
+      ; wake_policy = Keeper_keepalive_signal.Interrupt_on_wakeup
+      }
   | Route.Retry_after_observed _ | Route.Rotate_now _ | Route.Exhausted_visible_alive _ ->
     None
 ;;
@@ -280,7 +298,7 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
     { meta
     ; cycle_status = Turn_cycle_interrupted
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     })
   else (
     record_crashed_cycle_failure
@@ -290,7 +308,7 @@ let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
     { meta
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     })
 ;;
 
@@ -552,7 +570,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   else
     match
@@ -1029,7 +1047,7 @@ let run_keepalive_unified_turn
       ; cycle_status =
           (if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
-      ; rate_limited_retry_after =
+      ; provider_backoff =
           (match !cycle_outcome_ref with
            | Some (Cycle.Failed { failure; _ }) ->
              failure_route_rate_limited_backoff_hint failure
@@ -1072,20 +1090,20 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Ok (`Busy block) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Error
       (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
   | Error error ->
     Log.Keeper.error
@@ -1095,7 +1113,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
-    ; rate_limited_retry_after = None
+    ; provider_backoff = None
     }
 ;;
 
@@ -1340,7 +1358,7 @@ let run_heartbeat_loop
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
-            ; rate_limited_retry_after = None
+            ; provider_backoff = None
             }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
@@ -1481,47 +1499,65 @@ let run_heartbeat_loop
            A rate-limited failure cycle (#26068) instead sleeps the capped
            route backoff: re-running the turn at the plain cadence keeps
            hammering the provider while the crash-accounting streak climbs.
-           The backoff never disables reactivity — [interruptible_sleep] still
-           notices a queued stimulus within [sleep_chunk_sec]. *)
+           Whether a queued stimulus may cut that backoff short is the
+           route's [wake_policy]: not for a rate limit or exhausted quota
+           (#34653), yes for capacity backpressure. *)
         let cadence_sec =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
         in
         if periodic_due then periodic_cadence :=
           Keeper_keepalive_signal.consume_periodic ~now:(cadence_now ());
-        let cycle_sleep_sec =
-          match turn_outcome.rate_limited_retry_after with
-          | Some hint ->
+        let cycle_backoff =
+          match turn_outcome.provider_backoff with
+          | Some { retry_after_hint; wake_policy } ->
             let backoff =
               rate_limited_backoff_sec
                 ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-                ~retry_after_hint:(Some hint)
+                ~retry_after_hint:(Some retry_after_hint)
                 ~cadence_sec
+            in
+            (* A stimulus cannot be served while the lane is rate-limited or
+               exhausted: every wake that cut the backoff short re-ran the
+               same failing call (183 failed turns in 41 minutes, median 30 s
+               apart against a declared 600 s, 2026-09-09, #34653). The queue
+               keeps the stimulus; the wakeup is consumed when the backoff
+               ends. *)
+            let stimulus_note =
+              match wake_policy with
+              | Keeper_keepalive_signal.Serve_wakeup_after_duration ->
+                "stimuli queued meanwhile are served when it ends"
+              | Keeper_keepalive_signal.Interrupt_on_wakeup ->
+                "a queued stimulus still wakes it"
             in
             Log.Keeper.warn
               ~keeper_name:m.name
               "%s: rate-limited failure route; backing off next cycle by %.0fs \
-               (cadence %.0fs, cap %.0fs); stimuli queued meanwhile are served \
-               when it ends"
+               (cadence %.0fs, cap %.0fs); %s"
               m.name
               backoff
               cadence_sec
-              Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec;
-            Some backoff
+              Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+              stimulus_note;
+            Some (backoff, wake_policy)
           | None -> None
         in
-        (* A stimulus cannot be served while the lane is rate-limited or
-           exhausted: every wake that cut the backoff short re-ran the same
-           failing call (183 failed turns in 41 minutes, median 30 s apart
-           against a declared 600 s, 2026-09-09, #34653). The queue keeps
-           the stimulus; the wakeup is consumed when the backoff ends. *)
         let wake_policy =
-          match cycle_sleep_sec with
-          | Some _ -> Keeper_keepalive_signal.Serve_wakeup_after_duration
+          match cycle_backoff with
+          | Some (_, wake_policy) -> wake_policy
           | None -> Keeper_keepalive_signal.Interrupt_on_wakeup
         in
+        (* The cadence handshake is a promise to react to a cadence change
+           within a chunk; a sleep that serves wakeups only at its end cannot
+           keep it, so it is not offered and a producer is told the sleeper is
+           awake rather than that its signal was taken (#34663 review). *)
+        let cadence_sleeping =
+          match wake_policy with
+          | Keeper_keepalive_signal.Interrupt_on_wakeup -> Some cadence_sleeping
+          | Keeper_keepalive_signal.Serve_wakeup_after_duration -> None
+        in
         let sleep_duration () =
-          match cycle_sleep_sec with
-          | Some backoff -> backoff
+          match cycle_backoff with
+          | Some (backoff, _) -> backoff
           | None ->
             Keeper_keepalive_signal.periodic_remaining
               ~now:(cadence_now ())
@@ -1534,7 +1570,7 @@ let run_heartbeat_loop
            then Keeper_keepalive_signal.Woken
            else
              Keeper_keepalive_signal.interruptible_sleep
-               ~cadence_sleeping
+               ?cadence_sleeping
                ~wake_policy
                ~clock:ctx.clock
                ~stop
@@ -1554,4 +1590,5 @@ module For_testing = struct
 
   let rate_limited_backoff_sec = rate_limited_backoff_sec
   let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
+  let failure_route_rate_limited_backoff_hint = failure_route_rate_limited_backoff_hint
 end

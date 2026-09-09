@@ -124,6 +124,16 @@ val decide_keepalive_cycle_action :
     [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
     must not dispatch either turn status or refresh the work-as-heartbeat
     lease. *)
+(** What a provider retry route asks of the next sleep. A rate limit or
+    exhausted quota is the provider's state, so the sleep runs to its end
+    ([Serve_wakeup_after_duration], #34653); capacity backpressure also comes
+    from MASC's own slot and client capacity envelopes, which clear on their
+    own, so that sleep stays [Interrupt_on_wakeup]. *)
+type provider_backoff =
+  { retry_after_hint : float
+  ; wake_policy : Keeper_keepalive_signal.wake_policy
+  }
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
@@ -131,13 +141,14 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
-  rate_limited_retry_after : float option;
-      (** [Some retry_after] when the cycle's turn failure routed as a
-          provider rate-limit/capacity retry ([Retry_after_observed] with a
-          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
-          carrying the route's own [Retry-After] hint when the provider sent
-          one. The loop replaces the plain cadence with a capped backoff for
-          such a cycle (#26068); [None] keeps the cadence. *)
+  provider_backoff : provider_backoff option;
+      (** [Some backoff] when the cycle's turn failure routed as a provider
+          retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
+          [Capacity_backpressure] class), carrying the route's own
+          [Retry-After] hint when the provider sent one ([0.0] when it did
+          not) and the wake policy the class implies. The loop replaces the
+          plain cadence with a capped backoff for such a cycle (#26068);
+          [None] keeps the cadence. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -300,6 +311,9 @@ module For_testing : sig
       provider's [Retry-After] hint when above the cadence, falls back to a
       bounded default, and clamps the result to [cap_sec] so a misread header
       can never park the lane. *)
+  val failure_route_rate_limited_backoff_hint :
+    Keeper_unified_turn.turn_failure -> provider_backoff option
+
   val rate_limited_backoff_sec :
     cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
 

@@ -101,8 +101,6 @@ type sleep_outcome =
                   update; the caller should dispatch the next cycle. *)
   | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
 
-(** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
-    effect within ~chunk_sec instead of waiting for the full interval. *)
 (** Whether a wakeup may end the sleep before its duration elapses.
     [Interrupt_on_wakeup] is the heartbeat default. Under
     [Serve_wakeup_after_duration] a wakeup raised during the sleep is consumed
@@ -114,6 +112,8 @@ type wake_policy =
   | Interrupt_on_wakeup
   | Serve_wakeup_after_duration
 
+(** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
+    effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
   ?cadence_sleeping:bool Atomic.t ->
   ?wake_policy:wake_policy ->

@@ -246,8 +246,9 @@ type snapshot = {
   fiber_wakeup_flag : bool;
       (** Snapshot of [registry_entry.fiber_wakeup]. [true] means a
           wake signal is queued; the next [interruptible_sleep] chunk
-          will return early. Stale [true] points at a wake source
-          that was set but never consumed. *)
+          returns early, or a rate-limit backoff sleep serves it when it
+          ends (#34653). Stale [true] points at a wake source that was set
+          but never consumed. *)
   idle_seconds : int;
       (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Observation only. *)

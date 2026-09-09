@@ -339,8 +339,10 @@ let test_backoff_sleep_serves_a_wakeup_only_after_the_duration () =
         (fun () -> duration)
     in
     let elapsed = Eio.Time.now clock -. started in
+    (* Wall-clock reads around a monotonic sleep: allow the sub-microsecond
+       rounding of the sleep deadline (#34663 review). *)
     check bool "the full duration elapsed before the wakeup was served" true
-      (elapsed >= duration);
+      (elapsed >= duration -. 0.001);
     check bool "the pending wakeup is served as Woken once the sleep ends" true
       (match outcome with
        | KKS.Woken -> true

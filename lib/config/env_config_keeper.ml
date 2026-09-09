@@ -555,8 +555,9 @@ module KeeperKeepalive = struct
       keepalive cycle. A provider rate-limit ([429]) or capacity route makes
       the next cycle wait longer than the plain cadence would, but the wait is
       capped so a misread [Retry-After] header (or a stale env override) can
-      never park a lane indefinitely: [interruptible_sleep] still wakes within
-      [sleep_chunk_sec] of any queued stimulus. Default: 900 (15 min).
+      never park a lane for longer than this. A rate-limit or quota backoff
+      sleeps to its end and serves queued stimuli then (#34653); a capacity
+      backoff still wakes within [sleep_chunk_sec]. Default: 900 (15 min).
       Range: [60.0, 3600.0].
       @category Thresholds
       @ops_class operator *)

@@ -50,6 +50,74 @@ let deferred_lane =
     ~failure:error
 ;;
 
+(* #34653 / #34663 review: a rate limit or exhausted quota parks the lane
+   until the backoff ends; capacity backpressure also arrives from MASC's own
+   slot and client capacity envelopes, which clear on their own, so that
+   backoff stays interruptible. Every other route keeps the plain cadence. *)
+let backoff_of_route route =
+  Loop.For_testing.failure_route_rate_limited_backoff_hint
+    { Turn.error
+    ; runtime_id = "lane-a"
+    ; route
+    ; source_disposition = Turn.Follow_failure_route
+    ; deferred_runtime_lane = None
+    }
+;;
+
+let policy_name = function
+  | Masc.Keeper_keepalive_signal.Interrupt_on_wakeup -> "interrupt_on_wakeup"
+  | Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration -> "serve_wakeup_after_duration"
+;;
+
+let check_backoff label route expected =
+  let show = function
+    | None -> "none"
+    | Some (b : Loop.provider_backoff) ->
+      Printf.sprintf "%.1f/%s" b.retry_after_hint (policy_name b.wake_policy)
+  in
+  check string label (show expected) (show (backoff_of_route route))
+;;
+
+let test_rate_limit_and_quota_park_until_the_backoff_ends () =
+  check_backoff "rate limited with a Retry-After"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 120.0 })
+    (Some
+       { retry_after_hint = 120.0
+       ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
+       });
+  check_backoff "hard quota without a hint"
+    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
+    (Some
+       { retry_after_hint = 0.0
+       ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
+       })
+;;
+
+let test_capacity_backpressure_stays_interruptible () =
+  check_backoff "capacity backpressure"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Capacity_backpressure; retry_after = Some 5.0 })
+    (Some
+       { retry_after_hint = 5.0
+       ; wake_policy = Masc.Keeper_keepalive_signal.Interrupt_on_wakeup
+       })
+;;
+
+let test_other_routes_keep_the_cadence () =
+  List.iter
+    (fun (label, route) -> check_backoff label route None)
+    [ ( "network transient"
+      , KFR.Retry_after_observed
+          { retry_class = KFR.Network_transient; retry_after = None } )
+    ; ( "server error"
+      , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
+    ; ( "provider timeout"
+      , KFR.Retry_after_observed
+          { retry_class = KFR.Provider_timeout; retry_after = None } )
+    ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
+    ]
+;;
+
 let assert_no_queue_action label outcome =
   match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
   | Loop.Batch_no_action -> ()
@@ -389,6 +457,20 @@ let () =
             "recorded settlement follows the batch disposition"
             `Quick
             test_recorded_settlement_follows_the_batch_disposition
+        ] )
+    ; ( "provider backoff of a failure route"
+      , [ test_case
+            "rate limit and quota park until the backoff ends"
+            `Quick
+            test_rate_limit_and_quota_park_until_the_backoff_ends
+        ; test_case
+            "capacity backpressure stays interruptible"
+            `Quick
+            test_capacity_backpressure_stays_interruptible
+        ; test_case
+            "other routes keep the cadence"
+            `Quick
+            test_other_routes_keep_the_cadence
         ] )
     ]
 ;;

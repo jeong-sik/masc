@@ -1156,6 +1156,7 @@ export function GoalTree() {
                 'all',
                 'executing',
                 'verifying',
+                'awaiting_confirmation',
                 'completed',
                 'dropped',
               ] as GoalPhaseFilter[]).map(filter => ({

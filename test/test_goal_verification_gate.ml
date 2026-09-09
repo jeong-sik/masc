@@ -584,7 +584,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
        ~start_time:0. config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
-  check string "new execution can complete" "completed" (stored_phase config goal_id);
+  check string "new execution can complete" "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
     check string "new proof owns the active verdict" "second-verifier-run" verdict.verification_run_id
@@ -661,7 +661,7 @@ let test_reopen_archive_failure_is_recoverable_without_losing_proof () =
   Unix.mkdir path 0o755;
   let refused = must_fail "archive failure" (transition ctx goal_id "reopen") in
   check string "archive failure is explicit" "internal_error" (json_state refused [ "error_code" ]);
-  check string "archive failure leaves the original phase" "completed" (stored_phase config goal_id);
+  check string "archive failure leaves the original phase" "awaiting_confirmation" (stored_phase config goal_id);
   check bool "archive failure retains the original active proof" true
     (original = ledger_record config goal_id);
   Unix.rmdir path;
@@ -707,7 +707,7 @@ let test_reopen_reset_refuses_a_recovered_verification_ledger () =
   (* Model the persisted phase write before a failed reset, so a recovered
      proven ledger would otherwise be overwritten with idle. *)
   (match Goal_store.update_goal_if_phase config ~goal_id
-     ~expected_phase:Goal_phase.Completed
+     ~expected_phase:Goal_phase.Awaiting_confirmation
      (fun goal -> { goal with phase = Goal_phase.Executing }) with
    | Ok (Goal_store.Goal_updated _) -> ()
    | _ -> fail "could not enter the reopen recovery boundary");
@@ -801,7 +801,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
          Workspace_goals.Proof_proven
          "metric observed at target")
   in
-  check string "completed via proof" "completed"
+  check string "completed via proof" "awaiting_confirmation"
     (json_state completed [ "goal"; "phase" ]);
   check string "ledger shows the proven verdict" "proof_proven"
     (json_state completed [ "verification"; "completion"; "state" ]);
@@ -906,7 +906,7 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
          Workspace_goals.Proof_proven
          "verified after re-arm")
   in
-  check string "the re-armed gate completes" "completed"
+  check string "the re-armed gate completes" "awaiting_confirmation"
     (json_state completed [ "goal"; "phase" ])
 ;;
 
@@ -967,7 +967,7 @@ let test_verifying_repeat_reconciles_a_committed_proof () =
   in
   check bool "response exposes recovery" true
     (json_bool answered [ "reconciled" ]);
-  check string "the committed proof converges to completed" "completed"
+  check string "the committed proof converges to completed" "awaiting_confirmation"
     (json_state answered [ "goal"; "phase" ]);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven proof ->

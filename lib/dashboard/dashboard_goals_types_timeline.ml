@@ -19,6 +19,7 @@ let goal_phase_color = function
   (* RFC-0387 stage 2: the proof-pending hue matches the Task domain's
      [AwaitingVerification] so the gate reads as the same shape of wait. *)
   | Goal_phase.Verifying -> "#a78bfa"
+  | Goal_phase.Awaiting_confirmation -> "#f59e0b"
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
 
@@ -276,7 +277,7 @@ let goal_event_timeline_json event =
            in the store moves to `warn` because of this. *)
         let severity =
           match Goal_phase.of_string phase with
-          | Some (Executing | Verifying | Completed | Dropped) -> "ok"
+          | Some (Executing | Verifying | Awaiting_confirmation | Completed | Dropped) -> "ok"
           | None -> "warn"
         in
         ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)

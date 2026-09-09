@@ -1,18 +1,21 @@
 type t =
   | Executing
   | Verifying
+  | Awaiting_confirmation
   | Completed
   | Dropped
 
 let to_string = function
   | Executing -> "executing"
   | Verifying -> "verifying"
+  | Awaiting_confirmation -> "awaiting_confirmation"
   | Completed -> "completed"
   | Dropped -> "dropped"
 
 let of_string = function
   | "executing" -> Some Executing
   | "verifying" -> Some Verifying
+  | "awaiting_confirmation" -> Some Awaiting_confirmation
   | "completed" -> Some Completed
   | "dropped" -> Some Dropped
   | _ -> None
@@ -38,6 +41,7 @@ let of_yojson = function
 let all =
   [ Executing
   ; Verifying
+  ; Awaiting_confirmation
   ; Completed
   ; Dropped
   ]
@@ -50,13 +54,14 @@ let all =
 let admits_self_directed_progress = function
   | Executing -> true
   | Verifying -> true
-  | Completed | Dropped -> false
+  | Awaiting_confirmation | Completed | Dropped -> false
 
 type action =
   | Request_complete
   | Drop
   | Reopen
   | Record_proof_proven
+  | Confirm_completion
   | Record_proof_refuted
 
 let action_to_string = function
@@ -64,6 +69,7 @@ let action_to_string = function
   | Drop -> "drop"
   | Reopen -> "reopen"
   | Record_proof_proven -> "record_proof_proven"
+  | Confirm_completion -> "confirm_completion"
   | Record_proof_refuted -> "record_proof_refuted"
 
 (* Every action, declaration order. SSOT for the schema/validator action enum
@@ -73,6 +79,7 @@ let all_actions =
   ; Drop
   ; Reopen
   ; Record_proof_proven
+  ; Confirm_completion
   ; Record_proof_refuted
   ]
 
@@ -81,6 +88,7 @@ let action_of_string = function
   | "drop" -> Some Drop
   | "reopen" -> Some Reopen
   | "record_proof_proven" -> Some Record_proof_proven
+  | "confirm_completion" -> Some Confirm_completion
   | "record_proof_refuted" -> Some Record_proof_refuted
   | _ -> None
 
@@ -147,21 +155,21 @@ let decide_transition ~phase ~(action : action) =
   match phase, action with
   (* Executing: the only phase that can request completion. RFC-0387 stage 2:
      the request no longer completes the goal — it enters [Verifying], and
-     only the verifier's [Record_proof_proven] reaches [Completed]. Reopen
+     the verifier's [Record_proof_proven] reaches [Awaiting_confirmation]. Reopen
      targets Executing, which is where the goal already is. *)
   | Executing, Request_complete -> Ok (Move_to Verifying)
   | Executing, Drop -> Ok (Move_to Dropped)
   | Executing, Reopen -> Ok (Already Executing)
-  | Executing, (Record_proof_proven | Record_proof_refuted) -> invalid
+  | Executing, (Confirm_completion | Record_proof_proven | Record_proof_refuted) -> invalid
   (* Verifying (RFC-0387 stage 2): the completion request is in the pipeline
      and the proof is judged out-of-band. Only the verifier's proof actions
      leave the phase; a repeated [Request_complete] is the explicit retry the
      RFC substitutes for wall-clock expiry, so it answers [Already] and the
      handler reports (and re-arms) the pending proof. *)
-  | Verifying, Record_proof_proven -> Ok (Move_to Completed)
+  | Verifying, Record_proof_proven -> Ok (Move_to Awaiting_confirmation)
   | Verifying, Record_proof_refuted -> Ok (Move_to Executing)
   | Verifying, Request_complete -> Ok (Already Verifying)
-  | Verifying, (Drop | Reopen) -> invalid
+  | Verifying, (Confirm_completion | Drop | Reopen) -> invalid
   (* Completed and Dropped are terminal: only reopening leaves them.
      [Dropped, Request_complete] stays invalid -- completion is not the phase a
      dropped goal is in, so it is a real request for a state change, not a
@@ -169,8 +177,15 @@ let decide_transition ~phase ~(action : action) =
   | Completed, Reopen -> Ok (Move_to Executing)
   | Completed, Drop -> Ok (Move_to Dropped)
   | Completed, Request_complete -> Ok (Already Completed)
+  | Completed, Confirm_completion -> Ok (Already Completed)
   | Completed, (Record_proof_proven | Record_proof_refuted) -> invalid
   | Dropped, Reopen -> Ok (Move_to Executing)
   | Dropped, Drop -> Ok (Already Dropped)
   | Dropped,
-    ( Request_complete | Record_proof_proven | Record_proof_refuted ) -> invalid
+    ( Confirm_completion | Request_complete | Record_proof_proven | Record_proof_refuted ) -> invalid
+
+  | Awaiting_confirmation, Confirm_completion -> Ok (Move_to Completed)
+  | Awaiting_confirmation, Request_complete -> Ok (Already Awaiting_confirmation)
+  | Awaiting_confirmation, Reopen -> Ok (Move_to Executing)
+  | Awaiting_confirmation, Drop -> Ok (Move_to Dropped)
+  | Awaiting_confirmation, (Record_proof_proven | Record_proof_refuted) -> invalid

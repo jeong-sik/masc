@@ -381,7 +381,7 @@ let test_goal_completion_accepts_goal_without_tasks () =
   in
   check string "completion request enters verifying" "verifying"
     (transition_phase (request_complete config goal.id));
-  check string "proof completes the goal" "completed"
+  check string "proof completes the goal" "awaiting_confirmation"
     (transition_phase (prove_complete config goal.id))
 ;;
 
@@ -405,7 +405,7 @@ let test_goal_completion_ignores_open_task_count () =
        ~description:"open");
   check string "open task does not gate the completion request" "verifying"
     (transition_phase (request_complete config goal.id));
-  check string "proof completes the goal" "completed"
+  check string "proof completes the goal" "awaiting_confirmation"
     (transition_phase (prove_complete config goal.id))
 ;;
 
@@ -426,14 +426,87 @@ let test_goal_completion_ignores_metric_text () =
   in
   check string "metric text does not gate the completion request" "verifying"
     (transition_phase (request_complete config goal.id));
-  check string "proof completes the goal" "completed"
+  check string "proof completes the goal" "awaiting_confirmation"
     (transition_phase (prove_complete config goal.id))
 ;;
+let test_confirmation_uses_token_bound_operator () =
+  with_workspace @@ fun config ->
+  Auth.save_auth_config config.base_path
+    {Types.default_auth_config with enabled = true; require_token = true};
+  let token role name = match Auth.create_token config.base_path ~agent_name:name ~role with
+    | Ok (token, _) -> token | Error error -> fail (Types.masc_error_to_string error) in
+  let worker = token Types.Worker "worker" and operator = token Types.Admin "operator" in
+  let authorize token =
+    let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list
+      ["authorization", "Bearer " ^ token; "x-agent-name", "pretend-human"])
+      `POST "/api/v1/goals/confirmation" in
+    Server_auth.authorize_token_bound_permission_request ~base_path:config.base_path
+      ~permission:Types.CanAdmin request in
+  (match authorize worker with Error _ -> () | Ok _ -> fail "Worker token became operator");
+  (match authorize operator with
+   | Ok actor -> check string "actor comes from credential, never header" "operator" actor
+   | Error error -> fail (Types.masc_error_to_string error))
+;;
+
+let test_operator_confirmation_binds_current_proof () =
+  with_workspace @@ fun config ->
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Human confirmed goal"
+    ~metric:"observed artifacts" ~target_value:"1" () with
+    | Ok value -> value | Error detail -> fail detail in
+  ignore (request_complete config goal.id);
+  check string "verifier cannot complete" "awaiting_confirmation"
+    (transition_phase (prove_complete config goal.id));
+  let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+    | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
+    | _ -> fail "missing current proof" in
+  let confirm ?(request_id=verdict.request_id) () =
+    Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
+      ~config ~operator_id:"authenticated-operator" (`Assoc ["goal_id", `String goal.id;
+        "criterion_revision", `String goal.criterion_revision; "request_id", `String request_id;
+        "verification_run_id", `String verdict.verification_run_id]) in
+  (match confirm ~request_id:"another-request" () with
+   | Error _ -> () | Ok _ -> fail "stale request accepted");
+  (* Simulate the narrow crash boundary after durable confirmation but before
+     the goal phase write, then retry the actual application operation. *)
+  (match Goal_verification.record_human_confirmation config ~goal_id:goal.id verdict
+      ~operator_id:"authenticated-operator" with
+   | Ok _ -> () | Error detail -> fail detail);
+  let first = match confirm () with Ok json -> json | Error detail -> fail detail in
+  check string "operator confirmation completes" "completed"
+    Yojson.Safe.Util.(member "goal" first |> member "phase" |> to_string);
+  let history_path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let history = Fs_compat.load_file history_path in
+  let second_operator = Workspace_goals.confirm_completion config ~goal_id:goal.id
+    ~operator_id:"another-operator" ~criterion_revision:goal.criterion_revision
+    ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id in
+  (match second_operator with
+   | Ok json -> check bool "retry never rewrites original operator attribution" true (first = json)
+   | Error detail -> fail detail);
+  (match Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
+    ~config ~operator_id:"credential-owner" (`Assoc ["actor", `String "human"] ) with
+   | Error _ -> () | Ok _ -> fail "body actor impersonation accepted");
+  let second = match confirm () with Ok json -> json | Error detail -> fail detail in
+  check bool "exact confirmation replay preserves timestamp and identity" true (first = second);
+  check string "retries emit no duplicate confirmation event" history (Fs_compat.load_file history_path);
+  (match Goal_verification.reopen_goal config ~goal_id:goal.id ~actor:"operator" ~note:None with
+   | Ok _ -> () | Error detail -> fail detail);
+  (match confirm () with Error _ -> () | Ok _ -> fail "reopen retained old confirmation authority");
+  ignore (request_complete config goal.id);
+  ignore (prove_complete config goal.id);
+  (match confirm () with Error _ -> () | Ok _ -> fail "new request accepted old confirmation binding");
+  (match Goal_store.upsert_goal config ~id:goal.id ~title:"Changed criterion"
+     ~metric:"observed artifacts" ~target_value:"2" () with
+   | Ok _ -> () | Error detail -> fail detail);
+  (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
+;;
+
 let () =
   run
     "goal_tools"
     [ ( "tool_workspace"
-      , [ test_case "upsert and list" `Quick test_goal_upsert_and_list
+      , [ test_case "confirmation requires token-bound operator" `Quick test_confirmation_uses_token_bound_operator
+        ; test_case "operator confirms exact current proof" `Quick test_operator_confirmation_binds_current_proof
+        ; test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
         ; test_case "list includes rollup" `Quick test_goal_list_includes_rollup

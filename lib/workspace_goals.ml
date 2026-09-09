@@ -370,6 +370,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
 let gate_action_requires_evidence = function
   | Goal_phase.Record_proof_proven
   | Goal_phase.Record_proof_refuted -> true
+  | Goal_phase.Confirm_completion
   | Goal_phase.Request_complete
   | Goal_phase.Drop
   | Goal_phase.Reopen -> false
@@ -558,10 +559,11 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
           Result.bind (Goal_verification.get_record_authoritative config ~goal_id)
             (function
               | Some ({ Goal_verification.completion =
-                  (Goal_verification.Proof_proven stored | Goal_verification.Proof_refuted stored); _ } as record)
+                  (Goal_verification.Proof_proven stored | Goal_verification.Proof_refuted stored
+                   | Goal_verification.Human_confirmed (stored, _)); _ } as record)
                 when stored = { verdict with recorded_at = stored.recorded_at }
                   && (match goal.phase, stored.outcome with
-                      | Goal_phase.Completed, Goal_verification.Proven
+                      | (Goal_phase.Awaiting_confirmation | Goal_phase.Completed), Goal_verification.Proven
                       | Goal_phase.Executing, Goal_verification.Refuted _ -> true
                       | _ -> false) -> Ok (goal, (record, false))
               | _ -> Error detail)
@@ -618,7 +620,7 @@ let request_current_proof config ~goal_id =
       Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
         (Goal_verification.mark_proof_pending config ~goal_id
           ~criterion:(Goal_store.criterion_of_goal goal))
-    | Goal_phase.Completed | Goal_phase.Dropped -> Error "goal is not requesting verification")
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> Error "goal is not requesting verification")
 ;;
 
 let recover_current_proof config ~goal_id =
@@ -628,7 +630,7 @@ let recover_current_proof config ~goal_id =
         Result.map (fun _record -> goal, true)
           (Goal_verification.mark_proof_pending config ~goal_id
              ~criterion:(Goal_store.criterion_of_goal goal))
-    | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
         Ok (goal, false))
   |> Result.map snd
 ;;
@@ -735,6 +737,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
               | Goal_phase.Verifying ->
                 answer_verifying_repeat
                   ~tool_name ~start_time ctx ~goal_id ~action goal
+              | Goal_phase.Awaiting_confirmation
               | Goal_phase.Executing
               | Goal_phase.Completed
               | Goal_phase.Dropped ->
@@ -804,3 +807,34 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         }
       ]
 ;;
+
+let confirm_completion config ~goal_id ~operator_id ~request_id
+    ~verification_run_id ~criterion_revision =
+  Goal_store.transact_goal config ~goal_id (fun goal ->
+    let open Result.Syntax in
+    let* record = Goal_verification.get_record_authoritative config ~goal_id in
+    let* verdict = match record with
+      | Some {Goal_verification.completion =
+          (Goal_verification.Proof_proven verdict | Goal_verification.Human_confirmed (verdict, _)); _}
+        when Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal)
+          && String.equal goal.criterion_revision criterion_revision
+          && String.equal verdict.request_id request_id
+          && String.equal verdict.verification_run_id verification_run_id -> Ok verdict
+      | _ -> Error "confirmation must name the current proven criterion, request and verifier run" in
+    let* transition = Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Confirm_completion in
+    let* record = Goal_verification.record_human_confirmation config ~goal_id verdict ~operator_id in
+    let updated = match transition with
+      | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
+      | Goal_phase.Already _ -> goal in
+    Ok (updated, (record, updated.phase <> goal.phase)))
+  |> Result.map (fun (goal, (record, changed)) ->
+    let confirming_operator = match record.Goal_verification.completion with
+      | Goal_verification.Human_confirmed (_, confirmation) -> confirmation.operator_id
+      | _ -> operator_id in
+    if changed then emit_goal_event {config; agent_name = confirming_operator} ~goal_id
+      ~event_type:"goal_phase" ~payload:(`Assoc ["phase", Goal_phase.to_yojson goal.phase;
+        "authority_kind", `String "human_operator"; "actor", `String confirming_operator;
+        "request_id", `String request_id; "verification_run_id", `String verification_run_id;
+        "criterion_revision", `String criterion_revision]);
+    `Assoc ["goal", Goal_store.goal_to_yojson goal;
+      "verification", Goal_verification.record_to_yojson_for_goal ~goal record])

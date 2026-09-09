@@ -22,6 +22,7 @@ function completion(raw: unknown): GoalProofCompletion | null {
         ? { state: 'pending', criterion: bound, requestId: raw.request_id, requestedAt: raw.requested_at }
         : null
     }
+    case 'human_confirmed':
     case 'proof_proven':
     case 'proof_refuted': {
       const verdict = raw.verdict
@@ -34,6 +35,9 @@ function completion(raw: unknown): GoalProofCompletion | null {
         || !(authority.kind === 'system_llm_agent' || authority.kind === 'human_operator')) return null
       const proof = { criterion: bound, requestId: verdict.request_id, runId: verdict.verification_run_id,
         evidence: verdict.evidence, recordedAt: verdict.recorded_at, actor: authority.actor }
+      if (raw.state === 'human_confirmed' && verdict.outcome === 'proven' && verdict.reason === null)
+        return nonblank(raw.operator_id) && nonblank(raw.confirmed_at)
+          ? { ...proof, state: 'proven', confirmation: { operatorId: raw.operator_id, confirmedAt: raw.confirmed_at } } : null
       if (raw.state === 'proof_proven' && verdict.outcome === 'proven' && verdict.reason === null)
         return { ...proof, state: 'proven' }
       if (raw.state === 'proof_refuted' && verdict.outcome === 'refuted' && nonblank(verdict.reason))

@@ -82,7 +82,7 @@ function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {
 
 export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot }: KeeperStateDiagramProps) {
   const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
-  const snapshot = externalSnapshot ?? internalSnapshot
+  const snapshot = externalSnapshot === undefined ? internalSnapshot : externalSnapshot
   const [stateDiagram, setStateDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -168,7 +168,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
     [snapshot],
   )
 
-  if (loading) {
+  if (loading || externalSnapshot === null) {
     return html`
       <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-panel" role="status">
         <${InlineSpinner} />

@@ -8636,8 +8636,8 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started -> "RUNNING · ARGUMENTS STREAMING"
-  | Keeper_chat_transcript.Awaiting_result -> "RUNNING · AWAITING RESULT"
+  | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
+  | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Failed -> "FAILED"
   | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"

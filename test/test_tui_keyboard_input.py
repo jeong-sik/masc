@@ -13973,9 +13973,9 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
             return bytes(output[start:end_of_needle(output, footer, image_end)])
 
         palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
-        image_input(b"\x0f")
+        initial_image = image_input(b"\x0f")
         if not cell_geometry:
-            wait_for_output(process, master, output, b"wheel:center", timeout=3)
+            assert b"wheel:center" in initial_image, "missing center-wheel fallback hint"
         image_input(b"j")
         assert len(actions) == 1 and len(captures) == 2
         # Global shortcuts and pasted text belong to the visible viewport.

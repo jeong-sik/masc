@@ -54,10 +54,13 @@ let cli_overrides ~home =
   let features = match Otoml.find_opt doc Otoml.get_table ["features"] with
     | None -> []
     | Some fields -> List.map (fun (name, _) ->
-      Printf.sprintf "features.\"%s\"=false" (Toml_line_editor.escape_string name)) fields in
+      Printf.sprintf "features.%s=false" name) fields in
   [ "web_search=\"disabled\""; "cli_auth_credentials_store=\"file\"" ] @ features @
-  (disabled_server_names ~home |> List.map (fun name ->
-    Printf.sprintf "mcp_servers.\"%s\".enabled=false" (Toml_line_editor.escape_string name)))
+  (* Codex CLI splits override paths on dots without TOML quoting. Put exact
+     server names inside a TOML inline table, not in the dotted override path. *)
+  [ "mcp_servers={" ^
+    String.concat "," (disabled_server_names ~home |> List.map (fun name ->
+      Printf.sprintf "\"%s\"={enabled=false}" (Toml_line_editor.escape_string name))) ^ "}" ]
 ;;
 
 let inherited_server_names ~directory =

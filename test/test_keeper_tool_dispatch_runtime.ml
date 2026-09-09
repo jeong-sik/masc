@@ -7678,12 +7678,12 @@ let test_direct_gate_current_history_resume decision () =
       let module Checkpoint = Masc.Keeper_checkpoint_store in
       let base_path = config.Workspace.base_path and keeper_name = meta.name in
       let owner = Registry.get ~base_path ~keeper_name |> require "owner" in
-      let operation_id = Masc.Keeper_chat_operation.Operation_id.of_string "original-gate-operation"
+      let operation_id = Keeper_chat_operation.Operation_id.of_string "original-gate-operation"
         |> require "operation ID" in
       let input = `Assoc ["message", `String "Finish the original research";
         "task_id", `String "research-task"; "attachments", `List [`String "original-attachment"];
         "channel", `String "original-channel"] in
-      let canonical = Masc.Keeper_chat_operation.canonical_json input |> require "canonical input" in
+      let canonical = Keeper_chat_operation.canonical_json input |> require "canonical input" in
       Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source:(`Assoc []) ~input:canonical
         |> require "submit original" |> ignore;
       let claimed = Masc.Keeper_owner.claim_next_operation owner |> require "claim original" in
@@ -7696,15 +7696,15 @@ let test_direct_gate_current_history_resume decision () =
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
         | None | Some Masc.Keeper_tool_execution.Generic_deferred
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
-      let session_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let root = Masc.Keeper_fs.session_base_dir config in
       ignore (Masc.Keeper_fs.ensure_dir root);
       let session_dir = Filename.concat root session_id in
       ignore (Masc.Keeper_fs.ensure_dir session_dir);
       let context = Agent_core.Context.create_sync () in
-      let scope = Masc.Keeper_execution_scope_id.direct_operation operation_id in
-      let frame = Masc.Keeper_repetition_snapshot.admit Masc.Keeper_repetition_snapshot.empty
-        (Masc.Keeper_repetition_snapshot.Fresh scope) |> require "original scope" in
+      let scope = Keeper_execution_scope_id.direct_operation operation_id in
+      let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh scope) |> require "original scope" in
       Masc.Keeper_repetition_scope.save context frame;
       let original = Masc.Keeper_context_runtime.checkpoint_of_context ctx_work in
       let original = {original with Agent_core.Checkpoint.session_id; context;
@@ -7726,11 +7726,11 @@ let test_direct_gate_current_history_resume decision () =
       Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
         ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
       Gate.reconcile ~config ~meta |> require "resolution wake";
-      let claimed : Masc.Keeper_chat_operation.t =
+      let claimed : Keeper_chat_operation.t =
         match Masc.Keeper_owner.claim_next_operation owner |> require "reclaim original" with
         | Some operation -> operation | None -> fail "resolved original request not ready" in
       check bool "same operation and complete original input" true
-        (Masc.Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
+        (Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
       let admission = match Gate.load ~config ~meta ~operation_id ~session_dir |> require "admit current history" with
         | Some value -> value | None -> fail "missing Gate admission" in
       let checkpoint = Gate.checkpoint admission in

@@ -812,6 +812,12 @@ streaming = true
 [models.ollama-cloud-glm-5-3-flash.capabilities]
 supports-tool-choice = false
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe,
+# 2026-08-29; same contract as the deepseek rows above). thinking-control-format
+# above is the request axis only; without this line the response axis resolves
+# to reading no field and the reasoning is discarded. Mirrors the overlay row
+# (config/agent-core-models-overlay.toml, glm-5.3-flash).
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
 supports-multimodal-inputs = true
 

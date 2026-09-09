@@ -49,8 +49,17 @@ let provider_parse_failure ?parser message =
 
 (** Parse one successful HTTP response using only the frozen wire codec and
     provider kind. This function performs no request serialization, provider
-    lookup, pricing lookup, dispatch, or retry. *)
-let parse_sync_response ~http_codec ~provider_kind body =
+    lookup, pricing lookup, dispatch, or retry.
+
+    [content_inline_reasoning] is the caller-resolved catalog contract for
+    reasoning embedded in the content channel; it reaches the
+    OpenAI-compatible and GLM chat codecs, whose sync parser can split it. *)
+let parse_sync_response
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      ~http_codec
+      ~provider_kind
+      body
+  =
   try
     match http_codec with
     | Provider_http_codec.Anthropic_messages ->
@@ -70,7 +79,11 @@ let parse_sync_response ~http_codec ~provider_kind body =
            (Http_client.HttpError
               { code = 400; body = message; retry_after_header = None }))
     | Provider_http_codec.Openai_chat ->
-      (match Backend_openai_parse.parse_openai_response_result body with
+      (match
+         Backend_openai_parse.parse_openai_response_result
+           ~content_inline_reasoning
+           body
+       with
        | Ok response -> Ok response
        | Error (Backend_openai_parse.Provider_error message) ->
          Error
@@ -81,7 +94,7 @@ let parse_sync_response ~http_codec ~provider_kind body =
     | Provider_http_codec.Gemini_generate_content ->
       Ok (Backend_gemini.parse_response (Yojson.Safe.from_string body))
     | Provider_http_codec.Glm_chat ->
-      (match Backend_glm.parse_response_result body with
+      (match Backend_glm.parse_response_result ~content_inline_reasoning body with
        | Ok response -> Ok response
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason)
@@ -382,7 +395,21 @@ let complete_http
             let code = response.status in
             let body = response.body in
             if code >= 200 && code < 300
-            then parse_sync_response ~http_codec ~provider_kind:config.kind body
+            then (
+              (* Same resolution as the streaming path: whether this model
+                 embeds reasoning in its content channel is catalog data,
+                 resolved through the provider-qualified lookup so a capability
+                 declared only on a provider row is visible here too. *)
+              let content_inline_reasoning =
+                match Provider_config.capabilities_for_config_model config with
+                | Some caps -> caps.Capabilities.content_inline_reasoning
+                | None -> Capabilities.No_content_inline_reasoning
+              in
+              parse_sync_response
+                ~content_inline_reasoning
+                ~http_codec
+                ~provider_kind:config.kind
+                body)
             else (
               (* Log request body diagnostics on error responses to help debug
              Ollama "closing '}' symbol" and similar body-rejection errors. *)

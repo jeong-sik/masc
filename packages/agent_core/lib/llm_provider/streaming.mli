@@ -128,10 +128,10 @@ val create_openai_stream_state
   -> ?inline_reasoning:bool
   -> unit
   -> openai_stream_state
-(** [inline_reasoning] is the model's [template_parser] declaration: its content
-    channel also carries reasoning wrapped in tags, which is separated out
-    rather than drawn as reply text. Defaults to [false], and a model that does
-    not declare it keeps every byte of its content channel. *)
+(** [inline_reasoning] says the model's content channel also carries reasoning
+    wrapped in tags (template-parser dialect or declared think-tags), which is
+    separated out rather than drawn as reply text. Defaults to [false], and a
+    model that does not declare it keeps every byte of its content channel. *)
 
 val openai_chunk_to_events
   :  openai_stream_state

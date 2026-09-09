@@ -576,6 +576,11 @@ max_context_tokens = 163840
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# R1-era deepseek reasoning reaches /v1 clients as <think>...</think> inside
+# message.content; this row declares no typed reasoning field to read instead.
+# The split is inert when no tag appears, so a clean content channel keeps
+# every byte.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -588,6 +593,8 @@ max_context_tokens = 163840
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# Same inline <think> contract as the deepseek-v3.1:671b row above.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -772,6 +779,12 @@ max_context_tokens = 202752
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# GLM over ollama.com's /v1 wire does not split reasoning into a typed field:
+# it arrives as <think>...</think> inside message.content (the confirmed
+# non-streaming leak on glm/ollama-cloud runtimes). Without this flag the
+# tagged reasoning reaches the visible Text answer. The split is inert when
+# no tag appears, so a clean content channel keeps every byte.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -784,6 +797,9 @@ max_context_tokens = 202752
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# Same inline <think> contract as the glm-4.7 row above; the prefix also
+# covers the glm-5.x family (e.g. the glm-5.3-flash runtime binding).
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -796,6 +812,8 @@ max_context_tokens = 202752
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# Same inline <think> contract as the glm-4.7 row above.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -809,6 +827,8 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# Same inline <think> contract as the glm-4.7 row above.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1103,6 +1123,12 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+# 2026-08-05 live probe of this alias (agent-core-models-overlay.toml comment):
+# the response carries reasoning in the typed "reasoning" field (message keys
+# ['content','reasoning','role']), not "reasoning_content". Declare what the
+# wire actually sends; the sibling ":397b" row's "delta:reasoning_content" is
+# the unresolved mismatch its comment records.
+reasoning_streaming_format = "delta:reasoning"
 # Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
 # json_object returned bare JSON; json_schema returned fenced, unconstrained JSON.
 supports_response_format_json = true
@@ -1164,6 +1190,8 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "ollama_think"
+# Bare-fallback twin: same inline <think> contract as the provider-scoped row.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1176,6 +1204,8 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "ollama_think"
+# Bare-fallback twin: same inline <think> contract as the provider-scoped row.
+content_inline_reasoning = "think_tags"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -2074,6 +2104,10 @@ supports_parallel_tool_calls = true
 supports_reasoning = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+# Chat-template serving without a reasoning parser embeds reasoning as
+# <think>...</think> inside content; this row declares no typed reasoning
+# field, so the tagged channel must be split out of the visible answer.
+content_inline_reasoning = "think_tags"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
@@ -2091,6 +2125,8 @@ supports_parallel_tool_calls = true
 supports_reasoning = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+# Same inline <think> contract as the qwen3 row above.
+content_inline_reasoning = "think_tags"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true

@@ -714,7 +714,19 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                       | Error reason, Ok _ | Ok _, Error reason | Error reason, Error _ ->
                         Error reason)
                    | Some (Reasoning_dialect.Delta_field field) ->
-                     Ok (non_blank_delta_field field, None)
+                     (* The declared field wins. When it is absent or blank, a
+                        server spelling reasoning under the other documented
+                        name (a catalog row declares [reasoning_content] while
+                        the wire sends [reasoning]) must not lose the delta. *)
+                     let reasoning =
+                       match non_blank_delta_field field with
+                       | Some _ as reasoning -> reasoning
+                       | None ->
+                         (match non_blank_delta_field "reasoning_content" with
+                          | Some _ as reasoning -> reasoning
+                          | None -> non_blank_delta_field "reasoning")
+                     in
+                     Ok (reasoning, None)
                    | Some
                        ( Reasoning_dialect.No_streaming_reasoning
                        | Reasoning_dialect.Template_parser ) -> Ok (None, None)
@@ -805,10 +817,11 @@ type openai_stream_state =
   ; mutable thinking_state : thinking_state
   ; mutable gemini_message_model : Model_id.t option
   ; inline_reasoning : Inline_reasoning_split.state option
-    (** Present only for a model that declares [template_parser]: its content
-        channel also carries reasoning wrapped in tags, and drawing that as
-        speech is what put a wall of thinking where the reply belonged. A
-        model that does not declare it keeps every byte of its content. *)
+    (** Present only for a model whose content channel can also carry
+        reasoning wrapped in tags (template-parser dialect or declared
+        think-tags): drawing that as speech is what put a wall of thinking
+        where the reply belonged. A model that does not declare it keeps
+        every byte of its content. *)
   ; provider : string
   ; model : string
   }
@@ -3275,27 +3288,44 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
   let events = ref [] in
   let emit evt = events := evt :: !events in
   let telemetry_event = ref None in
+  let emit_thinking_delta text =
+    (match state.thinking_state with
+     | Not_thinking -> state.thinking_state <- Thinking_started (Unix.gettimeofday ())
+     | Thinking_started _ | Thinking_done -> ());
+    if not state.thinking_block_started
+    then (
+      state.thinking_block_index <- state.next_block_index;
+      emit
+        (ContentBlockStart
+           { index = state.next_block_index
+           ; content_type = "thinking"
+           ; tool_id = None
+           ; tool_name = None
+           });
+      state.thinking_block_started <- true;
+      state.next_block_index <- state.next_block_index + 1);
+    emit
+      (ContentBlockDelta
+         { index = state.thinking_block_index; delta = ThinkingDelta text })
+  in
+  let emit_text_delta text =
+    if not state.text_block_started
+    then (
+      state.text_block_index <- state.next_block_index;
+      emit
+        (ContentBlockStart
+           { index = state.next_block_index
+           ; content_type = "text"
+           ; tool_id = None
+           ; tool_name = None
+           });
+      state.text_block_started <- true;
+      state.next_block_index <- state.next_block_index + 1);
+    emit (ContentBlockDelta { index = state.text_block_index; delta = TextDelta text })
+  in
   (* Thinking content delta *)
   (match chunk.oll_delta_thinking with
-   | Some text when text <> "" ->
-     (match state.thinking_state with
-      | Not_thinking -> state.thinking_state <- Thinking_started (Unix.gettimeofday ())
-      | Thinking_started _ | Thinking_done -> ());
-     if not state.thinking_block_started
-     then (
-       state.thinking_block_index <- state.next_block_index;
-       emit
-         (ContentBlockStart
-            { index = state.next_block_index
-            ; content_type = "thinking"
-            ; tool_id = None
-            ; tool_name = None
-            });
-       state.thinking_block_started <- true;
-       state.next_block_index <- state.next_block_index + 1);
-     emit
-       (ContentBlockDelta
-          { index = state.thinking_block_index; delta = ThinkingDelta text })
+   | Some text when text <> "" -> emit_thinking_delta text
    | Some empty_thinking ->
      let (_ : string) = empty_thinking in
      (match state.thinking_state with
@@ -3317,22 +3347,19 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
              (Telemetry_event.Thinking_complete
                 { provider = state.provider; model = state.model; thinking_duration_ms })
       | Not_thinking | Thinking_done -> ()));
-  (* Text content delta *)
+  (* Text content delta. A template-parser model puts reasoning in this
+     channel wrapped in tags; split it the way the OpenAI-compatible
+     projection does so the reply block carries the reply and nothing else. *)
   (match chunk.oll_delta_content with
    | Some text when text <> "" ->
-     if not state.text_block_started
-     then (
-       state.text_block_index <- state.next_block_index;
-       emit
-         (ContentBlockStart
-            { index = state.next_block_index
-            ; content_type = "text"
-            ; tool_id = None
-            ; tool_name = None
-            });
-       state.text_block_started <- true;
-       state.next_block_index <- state.next_block_index + 1);
-     emit (ContentBlockDelta { index = state.text_block_index; delta = TextDelta text })
+     (match state.inline_reasoning with
+      | None -> emit_text_delta text
+      | Some split ->
+        let { Inline_reasoning_split.reasoning; text } =
+          Inline_reasoning_split.feed split text
+        in
+        if reasoning <> "" then emit_thinking_delta reasoning;
+        if text <> "" then emit_text_delta text)
    | Some empty_text ->
      let (_ : string) = empty_text in
      ()
@@ -3376,6 +3403,19 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
   (* Terminal chunk: emit MessageDelta with stop_reason + usage. *)
   if chunk.oll_is_done
   then (
+    (* Bytes the inline-reasoning splitter was holding back belong to this
+       message; an unterminated tag means the stream was cut mid-thought.
+       Paths that never see a done chunk (provider error, truncated stream)
+       drop the held bytes instead — finalize fails closed on the missing
+       terminal [stop_reason], so nothing half-parsed reaches a surface. *)
+    (match state.inline_reasoning with
+     | None -> ()
+     | Some split ->
+       let { Inline_reasoning_split.reasoning; text } =
+         Inline_reasoning_split.flush split
+       in
+       if reasoning <> "" then emit_thinking_delta reasoning;
+       if text <> "" then emit_text_delta text);
     let stop_reason =
       match chunk.oll_done_reason with
       (* Non-streaming parsing can reject before returning content. Streaming
@@ -3692,6 +3732,87 @@ let%test "ollama_chunk_to_events: thinking delta emits thinking block first" =
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in
     false
+;;
+
+let%test "ollama_chunk_to_events: inline think tags split across chunks stay out of the \
+          reply"
+  =
+  (* An ollama-served template model that ignores think:false renders
+     <think>...</think> inside [message.content]; a declared template model
+     splits it here, tags fragmented across chunk boundaries included. *)
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let feed content =
+    let line =
+      Printf.sprintf
+        {|{"model":"qwen3:8b","message":{"role":"assistant","content":"%s"},"done":false}|}
+        content
+    in
+    match parse_ollama_ndjson_chunk line with
+    | Ollama_chunk chunk -> fst (ollama_chunk_to_events state chunk)
+    | Ollama_provider_error _ | Ollama_parse_failed _ -> []
+  in
+  (* Bound in order: [@] does not fix the order its arguments are evaluated in,
+     and a stream fed backwards proves nothing. *)
+  let first = feed "<thi" in
+  let second = feed "nk>mid</th" in
+  let third = feed "ink>answer" in
+  let events = first @ second @ third in
+  List.filter_map test_thinking_text events = [ "mid" ]
+  && List.filter_map test_reply_text events = [ "answer" ]
+;;
+
+let%test "ollama_chunk_to_events: a cut thought is released as reasoning at done" =
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let feed line =
+    match parse_ollama_ndjson_chunk line with
+    | Ollama_chunk chunk -> fst (ollama_chunk_to_events state chunk)
+    | Ollama_provider_error _ | Ollama_parse_failed _ -> []
+  in
+  let opened =
+    feed
+      {|{"model":"qwen3:8b","message":{"role":"assistant","content":"<think>cut off"},"done":false}|}
+  in
+  let terminal =
+    feed
+      {|{"model":"qwen3:8b","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}|}
+  in
+  let events = opened @ terminal in
+  List.filter_map test_thinking_text events = [ "cut off" ]
+  && List.filter_map test_reply_text events = []
+;;
+
+let%test "ollama_chunk_to_events: text resuming after a think block stays well-formed"
+  =
+  (* text -> <think> -> text: the resumed text rides the already-open text
+     block (no second start for an index that already carries payload — the
+     accumulator rejects start-after-payload), and the thinking segment gets
+     its own block. Cross-index delta order is tolerated: the accumulator
+     keys blocks by index and the chat bridge projects per lane. *)
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let feed content =
+    let line =
+      Printf.sprintf
+        {|{"model":"qwen3:8b","message":{"role":"assistant","content":"%s"},"done":false}|}
+        content
+    in
+    match parse_ollama_ndjson_chunk line with
+    | Ollama_chunk chunk -> fst (ollama_chunk_to_events state chunk)
+    | Ollama_provider_error _ | Ollama_parse_failed _ -> []
+  in
+  let first = feed "answer " in
+  let second = feed "<think>more</think>" in
+  let third = feed " tail" in
+  let events = first @ second @ third in
+  let starts =
+    List.filter_map
+      (function
+        | ContentBlockStart { index; content_type; _ } -> Some (index, content_type)
+        | _ -> None)
+      events
+  in
+  List.filter_map test_thinking_text events = [ "more" ]
+  && List.filter_map test_reply_text events = [ "answer "; " tail" ]
+  && starts = [ 0, "text"; 1, "thinking" ]
 ;;
 
 (* parse_sse_event regression: the previous implementation returned [None]

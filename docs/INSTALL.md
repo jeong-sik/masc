@@ -156,15 +156,44 @@ does not change existing Keeper configuration in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The published **0.34.0 binary** creates no default Keeper and installs the
-`browser-lanes` skill. A `main` source build after the freeze seeds one `imp`
-with autoboot off. The release installer takes its configuration from the
-binary, so updating the installer alone does not change the 0.34.0 roster.
-The instructions are a starting point; edit them directly. Model weights,
+The **0.35.0 binary** installs one `imp` with autoboot off and the
+`browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
+started by hand once a model and an execution environment are ready. The
+installer takes its configuration from the binary; the earlier 0.34.0 binary
+shipped an empty roster. The instructions are a starting point; edit them directly. Model weights,
 model CLIs, API keys, Docker, Apple Container, SSH servers,
 browsers/extensions, Slack/Discord accounts, and autostart services are not
 installed. Detecting which execution environments are available does not
 stand in for installing or authenticating them.
+
+## Choosing a model connection
+
+Besides the existing API and Ollama settings, the terminal wizard offers
+**llama.cpp, vLLM, Claude Code, Codex, Antigravity** and a generic
+**OpenAI-compatible endpoint**. An option stays on the list even when the
+tool is not installed, and a local server may point at an endpoint on
+another machine.
+
+Only the connection you pick is added. Enter the model id and context size
+that match your actual server or CLI setting. Turn on tool calling and
+streaming only where you have confirmed them: a model name is not evidence
+of image, reasoning, or tool support. An HTTP model also gets a capability
+overlay that applies to that provider alone. For an API key you give the
+environment variable name, not the value.
+
+The setting is written only after it passes the same binary's runtime check
+in a temporary workspace. If that check fails, or the original changes
+underneath, the existing setting is kept. When a connection for the same
+setup already exists, pick that provider or edit the TOML rather than
+creating a duplicate.
+
+**A validated setting, an installed CLI, a reachable HTTP endpoint, an
+authenticated account, and a model that actually answers are five different
+states.** This wizard installs no model server, model weights, or provider
+CLI, and authenticates no account. Antigravity additionally needs the path
+to the OAuth file its CLI wrote, and a request timeout. `Configure later`
+defers the model connection, and the default Keeper does not start on its
+own. To run this again in an existing workspace, use `--wizard`.
 
 ## First run and what you can do
 
@@ -383,6 +412,9 @@ Keeper's system prompt.
 controlling, and verifying a browser. It does not install a browser, an
 extension, or authentication. An existing skill package is not overwritten,
 so on upgrade compare your changes with the new guidance and merge them in.
+The Gecko scene features need the native host together with browser
+extension 0.3.0 or later. Update an existing browser extension separately.
+
 Choosing `--team classic` adds the following four Keeper TOMLs.
 
 | Keeper | Role in its own instructions |

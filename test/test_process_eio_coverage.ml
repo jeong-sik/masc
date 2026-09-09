@@ -264,6 +264,19 @@ let test_run_argv_with_status_fallback_enforces_timeout () =
 
 (* A socket owned by the grandchild proves descriptor release even when
    Linux init has not reaped its zombie yet. A PID existence probe cannot. *)
+let wait_fixture_readable fd =
+  let deadline = Monotonic_deadline.after ~seconds:5. in
+  let rec wait () =
+    try
+      let ready, _, _ = Unix.select [ fd ] [] []
+          (Monotonic_deadline.remaining_seconds deadline) in
+      ready <> []
+    with
+    | Unix.Unix_error (Unix.EINTR, _, _) ->
+      if Monotonic_deadline.passed deadline then false else wait ()
+  in
+  wait ()
+
 let with_fallback_descendant mode run =
   Process_eio.reset_for_testing ();
   let root = Filename.temp_file "fallback-group-" "" in
@@ -301,15 +314,15 @@ while True: time.sleep(60)
       Unix.bind listener (Unix.ADDR_UNIX socket_path);
       Unix.listen listener 1;
       let outcome = run started [ "python3"; "-c"; script; socket_path; started; mode ] in
-      let ready, _, _ = Unix.select [ listener ] [] [] 5. in
-      check bool "grandchild reached its witness socket" true (ready <> []);
+      check bool "grandchild reached its witness socket" true
+        (wait_fixture_readable listener);
       let witness, _ = Unix.accept listener in
       Fun.protect ~finally:(fun () -> Unix.close witness) (fun () ->
         let bytes = Bytes.create 32 in
         let received = Buffer.create 5 in
         let rec drain () =
-          let ready, _, _ = Unix.select [ witness ] [] [] 5. in
-          check bool "owned grandchild releases its socket" true (ready <> []);
+          check bool "owned grandchild releases its socket" true
+            (wait_fixture_readable witness);
           match Unix.read witness bytes 0 (Bytes.length bytes) with
           | 0 -> ()
           | n -> Buffer.add_subbytes received bytes 0 n; drain ()
@@ -319,6 +332,10 @@ while True: time.sleep(60)
           (Buffer.contents received));
       outcome)
 
+let rec wait_fixture_child flags pid =
+  try Unix.waitpid flags pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> wait_fixture_child flags pid
+
 let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
   let sibling = Unix.create_process "/bin/sleep" [| "sleep"; "60" |]
       Unix.stdin Unix.stdout Unix.stderr in
@@ -327,7 +344,7 @@ let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
     ~finally:(fun () ->
       if not !sibling_reaped then (
         Unix.kill sibling Sys.sigkill;
-        ignore (Unix.waitpid [] sibling)))
+        ignore (wait_fixture_child [] sibling)))
     (fun () ->
       let status, stdout, _ = with_fallback_descendant "normal" (fun _ argv ->
         (* The fixture ceiling makes the broken EOF-first runner return a
@@ -335,7 +352,7 @@ let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
         Process_eio.run_argv_with_status_split ~timeout_sec:5. argv) in
       check bool "leader status preserved" true (status = Unix.WEXITED 7);
       check string "buffered leader output preserved" "leader-output\n" stdout;
-      let reaped, _ = Unix.waitpid [ Unix.WNOHANG ] sibling in
+      let reaped, _ = wait_fixture_child [ Unix.WNOHANG ] sibling in
       sibling_reaped := reaped <> 0;
       check int "unrelated sibling is still running" 0 reaped)
 
@@ -344,6 +361,33 @@ let test_fallback_timeout_cleans_descendant_with_closed_stdio () =
     Process_eio.run_argv_with_status_split ~timeout_sec:1. argv) in
   check bool "explicit timeout preserved" true
     (Process_eio.exit_reason_of_status status = Process_eio.Timed_out)
+
+(* A leader which exited without descendants is still waitable when cleanup
+   signals its group. Darwin reports EPERM for this zombie-only group. *)
+let test_fallback_owner_preserves_completed_exit_status () =
+  let owner = Unix_foreground_process.create () in
+  let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+    Fun.protect ~finally:(fun () -> Unix_foreground_process.close owner) (fun () ->
+      Unix_foreground_process.spawn owner "/bin/sh" [ "/bin/sh"; "-c"; "exit 7" ]
+        (Unix.environment ()) dev_null dev_null dev_null;
+      let deadline = Monotonic_deadline.after ~seconds:5. in
+      let rec await_exit () =
+        match Unix_foreground_process.poll owner with
+        | Some status -> status
+        | None ->
+          if Monotonic_deadline.passed deadline then fail "child did not exit";
+          (* SIGCHLD is the event we are waiting for, so an interrupted
+             pause should immediately return to observing the owner. *)
+          (try ignore (Unix.select [] [] [] 0.01) with
+           | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+          await_exit ()
+      in
+      check bool "normal nonzero status is preserved" true
+        (await_exit () = Unix.WEXITED 7);
+      check bool "repeated poll retains status" true
+        (Unix_foreground_process.poll owner = Some (Unix.WEXITED 7));
+      Unix_foreground_process.close owner))
 
 exception Fallback_owner_fixture_failure
 
@@ -361,7 +405,8 @@ let test_fallback_owner_exception_cleanup () =
           while not (Sys.file_exists started) do
             if Monotonic_deadline.passed deadline then
               fail "grandchild did not start";
-            ignore (Unix.select [] [] [] 0.01)
+            (try ignore (Unix.select [] [] [] 0.01) with
+             | Unix.Unix_error (Unix.EINTR, _, _) -> ())
           done;
           raise Fallback_owner_fixture_failure)
       with
@@ -1290,6 +1335,8 @@ let () =
             test_fallback_normal_exit_cleans_descendant_and_preserves_sibling;
           test_case "fallback-timeout-cleans-closed-stdio-descendant" `Quick
             test_fallback_timeout_cleans_descendant_with_closed_stdio;
+          test_case "fallback-owner-preserves-completed-exit-status" `Quick
+            test_fallback_owner_preserves_completed_exit_status;
           test_case "fallback-owner-exception-cleanup" `Quick
             test_fallback_owner_exception_cleanup;
           test_case "argv-with-status-fallback-observes-timeout" `Quick

@@ -49,18 +49,12 @@ done
 
 mkdir -p "$(dirname "$OUTFILE")"
 
-# The report is the only thing that belongs beside the binaries. Everything
-# below is scratch the run produces on the way there -- a server log, four
-# captured HTTP exchanges, the dev token the probe minted -- and it used to be
-# written next to $OUTFILE. release.yml uploads dist/* wholesale, so all of it
-# became public release assets: v0.33.0 carried 21 of them and v0.34.0 carried
-# 28, including dashboard-dev-token.json with a 64-character admin token in
-# plain text. Scratch goes in the temp directory that already exists for it.
+# Publish only the report. Keep probe responses, logs and credentials in temporary
+# storage so they cannot become distribution assets.
 
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
 # Everything the run writes except the report itself, kept off $OUTFILE's
-# directory so a new capture cannot land beside the binaries by default --
-# which is how these became release assets in the first place.
+# directory so a new capture cannot land beside the binaries by default.
 scratch_dir="$tmp/scratch"
 mkdir -p "$scratch_dir"
 base_path="$tmp/base"
@@ -443,6 +437,40 @@ project_snapshot_keys = sorted(project_snapshot.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+
+# The matrix is rendered here from the bundle this script already loaded, not
+# read back out of the scratch directory. The receipt is the only thing that
+# outlives the run -- every capture beside it is removed on exit -- so a row
+# that lives in a deleted file is a row the reader cannot check.
+def markdown_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def lifecycle_matrix(bundle):
+    scenarios = bundle.get("scenarios", [])
+    if not scenarios:
+        return "No scenario rows were recorded in the lifecycle bundle."
+    rows = [
+        "| ID | Scenario | Status | Authority transition | User outcome |",
+        "|---|---|---|---|---|",
+    ]
+    for row in scenarios:
+        rows.append(
+            "| "
+            + " | ".join(
+                markdown_cell(row.get(field, "<missing>"))
+                for field in (
+                    "id",
+                    "name",
+                    "status",
+                    "authority_transition",
+                    "user_outcome",
+                )
+            )
+            + " |"
+        )
+    return "\n".join(rows)
+
 md = f"""# Release Evidence Bundle
 
 - Generated at: `{generated_at}`
@@ -490,9 +518,16 @@ md = f"""# Release Evidence Bundle
 - Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
 - Verification: source SHA, scenario results, log digests, and correlation bundle were verified before this receipt was rendered.
 
-## Raw Captures
+### Verified lifecycle matrix
 
-Raw HTTP captures, authentication material, server logs, and lifecycle bundle files remain in private temporary storage and are removed on exit. They are not release attachments. The verified lifecycle receipt above is retained in this report.
+{lifecycle_matrix(lifecycle)}
+
+## Capture Retention
+
+Raw HTTP captures, authentication material, server logs, and lifecycle bundle
+files remain in private temporary storage and are removed on exit. They are
+not release attachments. The verified lifecycle matrix above is rendered into
+this report and is the only capture it retains.
 
 ## Re-run
 

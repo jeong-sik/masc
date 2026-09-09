@@ -428,7 +428,15 @@ let read_with_hooks
       let scope =
         Eio_resource_scope.run_resource_only (fun sw ->
            Option.iter
-             (Eio.Switch.on_release sw)
+             (fun settle ->
+               Eio.Switch.on_release sw (fun () ->
+                 match settle () with
+                 | () -> ()
+                 | exception exn ->
+                     (* Switch release-handler failures otherwise enter
+                        [Switch.fail] without their original backtrace. *)
+                     let bt = Printexc.get_raw_backtrace () in
+                     Eio.Switch.fail ~bt sw exn))
              hooks.on_settle_resources;
            match
              try Ok (Eio.Path.open_dir ~sw parent) with

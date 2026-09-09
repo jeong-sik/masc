@@ -19,10 +19,19 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Install GNU timeout on macOS
+      - name: Install macOS build dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install coreutils
+          brew install coreutils openssl@3 gmp zstd libpq
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps

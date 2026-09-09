@@ -141,12 +141,35 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-공개된 **0.34.0 바이너리**는 기본 Keeper를 만들지 않고 `browser-lanes` skill을 설치합니다.
-동결 이후의 `main` 소스 빌드는 autoboot이 꺼진 `imp` 하나를 seed합니다.
-릴리스 설치기는 설정을 바이너리에서 가져오므로, 설치기만 갱신해도 0.34.0의 명단은
-바뀌지 않습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+**0.35.0 바이너리**는 autoboot이 꺼진 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+`imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
+설치기는 설정을 바이너리에서 가져옵니다. 이전 0.34.0 바이너리의 기본 명단은
+비어 있습니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
+
+## 모델 연결 선택
+
+터미널 마법사는 기존 API/Ollama 설정 외에도 **llama.cpp, vLLM, Claude Code,
+Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 보여줍니다.
+설치돼 있지 않아도 선택지가 사라지지 않고, 로컬 서버는 다른 컴퓨터의 endpoint를
+가리킬 수도 있습니다.
+
+고른 연결만 추가합니다. 모델 ID와 context 크기는 실제 서버·CLI 설정에 맞게 적습니다.
+도구 호출과 streaming은 직접 확인한 것만 켭니다. 모델 이름만 보고 이미지·reasoning·
+도구 지원을 짐작하지 않습니다. HTTP 모델은 그 provider에만 적용되는 capability
+overlay를 같이 만듭니다. API 키는 값이 아니라 환경변수 이름을 적습니다.
+
+설정은 임시 workspace에서 같은 바이너리의 runtime 검사를 통과한 뒤에야 반영됩니다.
+검사가 실패하거나 원본이 그 사이에 바뀌면 기존 설정을 그대로 둡니다. 같은 setup의
+연결이 이미 있으면 새로 만들지 말고 그 공급자를 고르거나 TOML을 고쳐 쓰세요.
+
+**설정 검증, CLI 설치, HTTP 접속, 인증, 모델이 실제로 답하는 것은 서로 다른
+다섯 가지 상태입니다.** 이 마법사는 모델 서버·모델 가중치·공급자 CLI를 설치하지
+않고 계정도 인증하지 않습니다. Antigravity는 CLI가 만든 OAuth 파일 경로와 요청
+timeout까지 적어야 합니다. `Configure later`로 모델 연결을 미룰 수 있고, 기본
+Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설정하려면 `--wizard`를
+쓰세요.
 
 ## 처음 실행하고 할 수 있는 일
 
@@ -330,6 +353,9 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 `browser-lanes`는 브라우저 연결·탐색·조작·검증 절차를 담습니다.
 브라우저나 확장, 인증을 설치하지는 않습니다. 기존 스킬 패키지는 덮어쓰지 않으므로
 업그레이드할 때 사용자 변경과 새 안내를 비교해 반영하세요.
+Gecko scene 기능은 native host와 브라우저 확장 0.3.0 이상이 함께 있어야 합니다.
+쓰던 브라우저 확장은 따로 갱신하세요.
+
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 
 | Keeper | 개별 지침의 역할 |

@@ -11,6 +11,12 @@ permissions:
   actions: write
   issues: write
 
+# Supersede older candidates on this branch as one unit. Child workflows use
+# separate run-scoped groups so they cannot cancel their caller or other lanes.
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compile:
     uses: ./.github/workflows/ci.yml

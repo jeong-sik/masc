@@ -328,7 +328,7 @@ probe_local_reachable() {
 }
 
 # One word describing whether this entry is ready to use right now:
-#   reachable / not running  -- a local server, probed over HTTP
+#   reachable / authentication required / unreachable -- local HTTP endpoint
 #   installed / not installed -- a subscription CLI, checked with command -v
 #   cloud                     -- a remote provider, gated by its API key
 #   local                     -- a local server with no healthcheck path to probe
@@ -359,10 +359,19 @@ provider_availability_label() {
       if endpoint_is_local "${PROVIDER_ENDPOINTS[$idx]}"; then
         if [ -z "${PROVIDER_PING_PATHS[$idx]}" ]; then
           echo "local"
-        elif probe_local_reachable "$idx"; then
-          echo "reachable"
         else
-          echo "not running"
+          local status
+          if status=$(curl -sS --max-time "$MASC_INSTALL_LOCAL_PROBE_TIMEOUT_S" \
+            -o /dev/null -w '%{http_code}' \
+            "${PROVIDER_ENDPOINTS[$idx]%/}${PROVIDER_PING_PATHS[$idx]}" 2>/dev/null); then
+            case "$status" in
+              2??) echo "reachable" ;;
+              401|403) echo "authentication required" ;;
+              *) echo "responding, HTTP $status" ;;
+            esac
+          else
+            echo "unreachable"
+          fi
         fi
       else
         echo "cloud"
@@ -648,9 +657,119 @@ ping_provider() {
   return 0
 }
 
+prompt_runtime_source() {
+  local answer
+  printf '\nChoose a model connection (availability is checked separately):\n' >&2
+  printf '  1) Configured API providers / Ollama\n  2) llama.cpp server\n  3) vLLM server\n  4) Claude Code\n  5) Codex\n  6) Antigravity\n  7) Other OpenAI-compatible endpoint\n  8) Configure later\n' >&2
+  while true; do
+    printf '? Model connection [1]: ' >&2
+    IFS= read -r answer || return 1
+    case "$answer" in
+      ''|1) echo configured; return ;;
+      2) echo llama_cpp; return ;;
+      3) echo vllm; return ;;
+      4) echo claude_code; return ;;
+      5) echo codex; return ;;
+      6) echo antigravity; return ;;
+      7) echo openai_compatible; return ;;
+      8) echo later; return ;;
+      *) warn "choose a number from 1 to 8" ;;
+    esac
+  done
+}
+
+runtime_setup_input() {
+  local label="$1" answer
+  printf '? %s: ' "$label" >&2
+  IFS= read -r answer || return 1
+  printf '%s' "$answer"
+}
+
+runtime_setup_integer() {
+  local answer
+  while true; do
+    answer=$(runtime_setup_input "$1") || return 1
+    case "$answer" in
+      ''|*[!0-9]*|0) warn "enter a positive whole number" ;;
+      *) printf '%s' "$answer"; return 0 ;;
+    esac
+  done
+}
+
+runtime_setup_yes_no() {
+  local answer
+  while true; do
+    answer=$(runtime_setup_input "$1") || return 1
+    case "$answer" in
+      y|Y|yes|YES) printf y; return 0 ;;
+      ''|n|N|no|NO) printf n; return 0 ;;
+      *) warn "answer y or n" ;;
+    esac
+  done
+}
+
+configure_runtime_source() {
+  local base_path="$1" source="$2" endpoint="" key_env="" credential="" timeout=""
+  local model context tools streaming helper spec receipt
+  printf '\nConfigure %s. This connects to your server or CLI; it does not install model weights or authenticate an account.\n' "$source" >&2
+  case "$source" in
+    llama_cpp|vllm|openai_compatible)
+      endpoint=$(runtime_setup_input 'Server API base URL, including /v1') || die "runtime setup cancelled"
+      key_env=$(runtime_setup_input 'API key environment variable name (blank for none; do not enter a key)') || die "runtime setup cancelled"
+      ;;
+    antigravity)
+      credential=$(runtime_setup_input 'OAuth credential file path created by Antigravity') || die "runtime setup cancelled"
+      timeout=$(runtime_setup_input 'Antigravity request timeout in seconds') || die "runtime setup cancelled"
+      ;;
+  esac
+  model=$(runtime_setup_input 'Model ID from your server or CLI') || die "runtime setup cancelled"
+  context=$(runtime_setup_integer 'Configured model context window in tokens') || die "runtime setup cancelled"
+  tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
+  streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would configure $source with model $model in $base_path/.masc/config"
+    return 0
+  fi
+  helper=$(mktemp); spec=$(mktemp); receipt=$(mktemp)
+  PARTIAL_FILES+=("$helper" "$spec" "$receipt")
+  fetch_bundle_asset install-runtime-setup.py "$helper"
+  python3 - "$spec" "$source" "$endpoint" "$key_env" "$credential" "$timeout" "$model" "$context" "$tools" "$streaming" <<'PYRUNTIME'
+import json, sys
+path, choice, endpoint, key_env, credential, timeout, model, context, tools, streaming = sys.argv[1:]
+def yes(value):
+    if value.lower() in ('y', 'yes'): return True
+    if value.lower() in ('', 'n', 'no'): return False
+    raise ValueError('answer y or n for tool calling and streaming')
+try:
+    spec = dict(choice=choice, model=model, max_context=int(context), tools=yes(tools), streaming=yes(streaming))
+    if choice in ('llama_cpp', 'vllm', 'openai_compatible'):
+        spec.update(endpoint=endpoint, api_key_env=key_env)
+    elif choice == 'antigravity':
+        spec.update(credential_file=credential, timeout_s=float(timeout))
+    with open(path, 'w') as target: json.dump(spec, target)
+except ValueError as error:
+    sys.exit('runtime setup: ' + str(error))
+PYRUNTIME
+  python3 "$helper" --binary "$DEST" --base-path "$base_path" --spec "$spec" > "$receipt" \
+    || die "runtime configuration rejected; existing configuration was preserved"
+  log "saved $source connection; installation, authentication and a model response are separate checks"
+}
+
 run_wizard() {
   local base_path="$1"
-  local provider_idx key
+  local provider_idx key source
+  if [ -z "$WIZARD_PROVIDER" ] && is_tty; then
+    source=$(prompt_runtime_source) || die "model connection selection cancelled"
+    case "$source" in
+      configured) ;;
+      later) log "model setup deferred; configure a model before starting a Keeper"; return 0 ;;
+      *)
+        configure_runtime_source "$base_path" "$source"
+        [ "$DRY_RUN" -eq 0 ] || return 0
+        WIZARD_PROVIDER="setup_$source"
+        ;;
+    esac
+  fi
   load_provider_catalog "$base_path"
   compute_provider_availability
   report_provider_availability
@@ -689,7 +808,7 @@ run_wizard() {
     && endpoint_is_local "${PROVIDER_ENDPOINTS[$provider_idx]}" \
     && [ -n "${PROVIDER_PING_PATHS[$provider_idx]}" ] \
     && ! probe_local_reachable "$provider_idx"; then
-    warn "$(provider_name "$provider_idx") is not running at ${PROVIDER_ENDPOINTS[$provider_idx]}; start it before using masc"
+    warn "$(provider_name "$provider_idx") is not ready at ${PROVIDER_ENDPOINTS[$provider_idx]}; check its server and authentication before using masc"
   fi
 
   key=$(wizard_env_key "$provider_idx")

@@ -6,6 +6,7 @@ import os
 import platform
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -50,25 +51,25 @@ def main():
             "RUN apk add --no-cache git ripgrep file coreutils\n")
         run(["docker", "build", "--quiet", "--tag", image, str(fixture)])
         config = root / "shim.conf"
-        config.write_text("remote_root=/workspace\npath=/usr/local/bin:/usr/bin:/bin\nenv_allowlist=\n")
+        config.write_text(f"remote_root={work}\npath=/usr/local/bin:/usr/bin:/bin\nenv_allowlist=\n")
         (work / "sentinel.txt").write_text("keep\n")
         (work / "probe.magic").write_text("0 string hello sample\n")
         helper = work / "fsmonitor"
         helper.write_text("#!/bin/sh\nprintf 'MASC_FSMONITOR_PROBE\\n' >&2\n"
-                          "printf changed > /workspace/sentinel.txt\n"
+                          f"printf changed > {shlex.quote(str(work / 'sentinel.txt'))}\n"
                           "printf '2\\n/\\n'\n")
         helper.chmod(0o755)
         run(["git", "-c", "init.templateDir=", "init", "-q", str(work)])
         run(["git", "-C", str(work), "add", "sentinel.txt"])
-        run(["git", "-C", str(work), "config", "core.fsmonitor", "/workspace/fsmonitor"])
+        run(["git", "-C", str(work), "config", "core.fsmonitor", str(work / "fsmonitor")])
         before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in work.iterdir() if p.is_file()}
         common = ["docker", "run", "-d", "--read-only", "--cap-drop=ALL",
                   "--security-opt", "no-new-privileges", "--network", "none",
                   "--user", f"{os.getuid()}:{os.getgid()}", "--tmpfs", "/tmp:rw,nosuid,nodev",
-                  "--volume", f"{work}:/workspace:rw",
+                  "--volume", f"{work}:{work}:rw",
                   "--volume", f"{config}:/etc/masc-exec-shim.conf:ro",
-                  "--workdir", "/workspace"]
+                  "--workdir", str(work)]
         started = []
         try:
             run(common + ["--name", name, "--volume",
@@ -93,7 +94,7 @@ def main():
             run(common + ["--name", missing, image, "tail", "-f", "/dev/null"])
             started.append(missing)
             receipts = root / "receipts.json"
-            result = run([str(driver), str(base), name, missing, str(receipts)])
+            result = run([str(driver), str(base), name, missing, str(receipts), str(work)])
             print(result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
             after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()

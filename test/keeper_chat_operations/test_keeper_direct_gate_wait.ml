@@ -1,0 +1,89 @@
+open Alcotest
+module Store = Keeper_chat_operation_store
+module Operation = Keeper_chat_operation
+module Semantic = Keeper_semantic_execution
+let ok = function Ok value -> value | Error error -> fail (Store.error_to_string error)
+let require = function Ok value -> value | Error _ -> fail "invalid fixture"
+let rejected = function Error _ -> () | Ok _ -> fail "invalid transition accepted"
+let id value = Operation.Operation_id.of_string value |> require
+let original = id "original-gate-operation"
+let other = id "independent-operation"
+let input = Operation.canonical_json (`Assoc ["message", `String "complete original task";
+  "attachments", `List [`String "original-evidence"]; "channel", `String "original-channel";
+  "task", `String "original-task"]) |> require
+let source = `Assoc ["kind", `String "dashboard"]
+let checkpoint bytes = Keeper_checkpoint_ref.create
+    ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
+    ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require
+let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
+    ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "original tool input" |> to_hex)) |> require
+let waiting = Semantic.gate_wait ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
+let rec remove path = match Unix.lstat path with
+  | {Unix.st_kind=Unix.S_DIR; _} -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
+  | _ -> Unix.unlink path
+let with_path f =
+  let root = Filename.temp_dir "gate-wait-" "" in
+  Fun.protect ~finally:(fun () -> Store.For_testing.clear_commit_fault (); remove root)
+    (fun () -> f (Filename.concat root Store.database_file))
+let with_store path f =
+  let store = Store.open_or_create ~path |> ok in
+  Fun.protect ~finally:(fun () -> Store.close store |> ok) (fun () -> f store)
+let claim store = Store.claim_next store ~now:2. |> ok
+let admit store =
+  Store.submit store ~now:1. ~operation_id:original ~source ~input |> ok |> ignore;
+  match claim store with Some value -> value | None -> fail "original input not claimed"
+let suspend store operation = Store.defer_direct_gate store ~now:3. ~operation_id:original
+    ~execution_digest:operation.Operation.execution_digest ~waiting |> ok
+let get store = match Store.get store original |> ok with Some value -> value | None -> fail "original operation lost"
+
+let test_wait_restart_resolution decision () = with_path (fun path ->
+  with_store path (fun store ->
+    let operation = admit store in
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+    suspend store operation |> ignore;
+    check bool "unresolved wait is not claimable" false (Store.has_claimable_queued store |> ok);
+    check bool "no repeated waiting child" true (claim store = None);
+    Store.submit store ~now:4. ~operation_id:other ~source ~input:(`String "independent work") |> ok |> ignore;
+    let independent = match claim store with Some value -> value | None -> fail "independent work was blocked" in
+    check bool "later independent input claims" true (Operation.Operation_id.equal other independent.operation_id);
+    Store.succeed_running store ~now:5. ~operation_id:other ~outcome_ref:"independent-result" |> ok |> ignore);
+  with_store path (fun store ->
+    Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
+    check bool "complete original input survives owner restart" true ((get store).input = Some input);
+    let wrong = Semantic.gate_obligation ~approval_id:"unrelated-approval" ~tool_name:obligation.tool_name
+      ~input_hash:obligation.input_hash |> require in
+    rejected (Store.resolve_direct_gate store ~now:7. ~operation_id:original
+      ~resolution:{Semantic.obligation=wrong; decision});
+    check bool "unrelated resolution cannot schedule original request" true (claim store = None);
+    let resolution = {Semantic.obligation; decision} in
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+    Store.resolve_direct_gate store ~now:8. ~operation_id:original ~resolution |> ok |> ignore;
+    let operation = match claim store with Some value -> value | None -> fail "exact resolution did not requeue original input" in
+    check bool "same original request resumes" true (Operation.Operation_id.equal original operation.operation_id);
+    let changed = Semantic.gate_wait ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
+    rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:changed ~resolution);
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+    Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting ~resolution |> ok;
+    rejected (Store.succeed_running store ~now:10. ~operation_id:original ~outcome_ref:"premature-success");
+    Store.discharge_direct_gate store ~now:11. ~operation_id:original ~obligation |> ok;
+    Store.succeed_running store ~now:12. ~operation_id:original ~outcome_ref:"actual-original-result" |> ok |> ignore))
+
+let test_runtime_failure_retains_gate_obligations () = with_path (fun path -> with_store path (fun store ->
+  let operation = admit store in
+  suspend store operation |> ignore;
+  let resolution = {Semantic.obligation; decision=Semantic.Gate_approved} in
+  Store.resolve_direct_gate store ~now:4. ~operation_id:original ~resolution |> ok |> ignore;
+  let operation = match claim store with Some value -> value | None -> fail "resolved original missing" in
+  Store.resume_direct_gate store ~now:5. ~operation_id:original ~waiting ~resolution |> ok;
+  let continuation = Semantic.runtime_retry ~checkpoint:(checkpoint "replay and failed provider")
+      ~assignment_id:"frozen" ~failed_runtime_id:"first" ~next_runtime_id:"alternate" ~later_runtime_ids:[] |> require in
+  Store.defer_direct_runtime_retry store ~now:6. ~operation_id:original
+    ~execution_digest:operation.execution_digest ~continuation |> ok |> ignore;
+  check bool "runtime fallback retains exact Gate effect identity" true
+    ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation]);
+  check bool "runtime fallback retains original request" true ((get store).input = Some input)))
+
+let () = run "direct Gate waiting" ["journal", [
+  test_case "approval resumes same request after independent work and restart" `Quick (test_wait_restart_resolution Semantic.Gate_approved);
+  test_case "denial remains explicit and cannot imply task success" `Quick (test_wait_restart_resolution (Semantic.Gate_denied "operator declined"));
+  test_case "runtime fallback retains Gate effect references" `Quick test_runtime_failure_retains_gate_obligations]]

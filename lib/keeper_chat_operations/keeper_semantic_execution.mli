@@ -32,6 +32,18 @@ val runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> assignment_id:string -
   failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list ->
   (runtime_retry, string) result
 val equal_runtime_retry : runtime_retry -> runtime_retry -> bool
+type gate_obligation = private
+  { approval_id : string; tool_name : string; input_hash : string }
+val gate_obligation : approval_id:string -> tool_name:string -> input_hash:string ->
+  (gate_obligation, string) result
+type gate_wait = private
+  { checkpoint : Keeper_checkpoint_ref.t; obligations : gate_obligation list }
+val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> obligations:gate_obligation list ->
+  (gate_wait, string) result
+type gate_decision = Gate_approved | Gate_denied of string
+type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
+type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
+val equal_gate_wait : gate_wait -> gate_wait -> bool
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -39,12 +51,14 @@ type recovery_origin =
   | Checkpointed of Keeper_checkpoint_ref.t
   | Interrupted_execution
   | Runtime_retry of runtime_retry
+  | Gate_wait of gate_wait_state
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
   | Ready
   | Running
   | Resuming_runtime_retry of runtime_retry
+  | Resuming_gate of gate_wait * gate_resolution
   | Recovering of recovery
   | Suspended of Keeper_checkpoint_ref.t
   | Settled of terminal
@@ -54,6 +68,7 @@ type t = private
   ; revision : int64
   ; input : Yojson.Safe.t option
   ; input_sha256 : string
+  ; gate_obligations : gate_obligation list
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Keeper_repetition_snapshot.t
@@ -76,6 +91,10 @@ type action =
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Suspend_gate of gate_wait
+  | Resolve_gate of gate_resolution
+  | Resume_gate of gate_wait * gate_resolution
+  | Discharge_gate of gate_obligation
   | Settle of terminal
 
 val error_to_string : error -> string

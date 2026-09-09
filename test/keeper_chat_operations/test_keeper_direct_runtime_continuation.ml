@@ -138,7 +138,7 @@ let test_resume_uncertain_commit_is_read_back () = with_path (fun path -> with_o
   Store.resume_direct_runtime_retry store ~now:13. ~operation_id ~observed:retry |> ok;
   check bool "resumed phase independently confirmed" true (match (execution store).phase with
       | Semantic.Resuming_runtime_retry observed -> Semantic.equal_runtime_retry retry observed
-      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Suspended _
+      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_gate _ | Semantic.Suspended _
       | Semantic.Recovering _ | Semantic.Settled _ -> false);
   check bool "input retained while execution is active" true ((current store).input = Some input)))
 

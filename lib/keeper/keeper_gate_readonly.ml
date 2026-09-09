@@ -342,6 +342,9 @@ let rec literal_of_arg = function
   | Ir.Lit (_, { Ir.glob = true; _ }) -> None
   | Ir.Lit (text, _) -> Some text
   | Ir.Var _ -> None
+  (* PR-A: a substitution is never a literal. Task B classifies its child
+     stages; until then the [None] here routes the stage to the judge. *)
+  | Ir.Subst _ -> None
   | Ir.Concat parts ->
     let rec join acc = function
       | [] -> Some (String.concat "" (List.rev acc))
@@ -430,7 +433,10 @@ let env_assignments_inert (env : (string * Ir.arg) list) : bool =
       match value with
       | Ir.Lit (v, _) -> env_assignment_inert name v
       | Ir.Concat _ -> false
-      | Ir.Var _ -> false)
+      | Ir.Var _ -> false
+      (* PR-A: an unevaluated substitution is not inert; Task B classifies
+         the child stages it carries. *)
+      | Ir.Subst _ -> false)
     env
 ;;
 

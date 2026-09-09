@@ -675,6 +675,7 @@ let shell_arg_string = function
   | Masc_exec.Shell_ir.Lit (s, _) -> s
   | Masc_exec.Shell_ir.Var (name, _) -> "$" ^ name
   | Masc_exec.Shell_ir.Concat _ -> "<concat>"
+  | Masc_exec.Shell_ir.Subst _ -> "<subst>"
 ;;
 
 let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
@@ -824,7 +825,10 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
       List.filter_map
         (function
           | Masc_exec.Shell_ir.Lit (value, _) -> Some value
-          | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None)
+          | Masc_exec.Shell_ir.Concat _
+          | Masc_exec.Shell_ir.Var _
+          | Masc_exec.Shell_ir.Subst _ ->
+            None)
         simple.args
     in
     Alcotest.(check (list string))

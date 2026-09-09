@@ -299,6 +299,17 @@ let unsupported_expansion_result () =
   ; output_files = None
   }
 
+(* PR-A of RFC shell-ir-typed-command-substitution: the parser reads [$( )]
+   into [Shell_ir.Subst], and the gate refuses a Subst-bearing IR as a typed
+   [Too_complex]; these guards are the defensive lower layer for a caller
+   that skipped the gate.  PR-B replaces them with evaluation. *)
+let unsupported_substitution_result () =
+  { status = Unix.WEXITED 2
+  ; stdout = ""
+  ; stderr = "command substitution is parsed but this dispatcher does not execute it yet"
+  ; output_files = None
+  }
+
 let rec resolve_arg = function
   | Shell_ir.Lit (s, _) -> s
   | Concat parts ->
@@ -306,6 +317,7 @@ let rec resolve_arg = function
       List.iter (fun a -> Buffer.add_string buf (resolve_arg a)) parts;
       Buffer.contents buf
   | Var _ -> invalid_arg "Exec_dispatch.resolve_arg: unresolved target environment"
+  | Subst _ -> invalid_arg "Exec_dispatch.resolve_arg: unevaluated substitution"
 
 let resolve_env env_bindings =
   List.map
@@ -360,6 +372,8 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
     (s : Shell_ir.simple) =
   if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
     unsupported_expansion_result ()
+  else if Shell_ir.has_command_substitution (Shell_ir.Simple s) then
+    unsupported_substitution_result ()
   else
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
@@ -618,6 +632,8 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     ?on_output_chunk stages =
   if List.exists Shell_ir.has_variable_expansion stages then
     unsupported_expansion_result ()
+  else if List.exists Shell_ir.has_command_substitution stages then
+    unsupported_substitution_result ()
   else
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
@@ -836,6 +852,8 @@ and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail (
 
 and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
+  else if Shell_ir.has_command_substitution ir then
+    unsupported_substitution_result ()
   else
   match ir with
   | Shell_ir.Simple s ->

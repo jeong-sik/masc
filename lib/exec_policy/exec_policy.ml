@@ -88,6 +88,12 @@ let meta_has_unquoted_glob (meta : Masc_exec.Shell_ir.arg_meta) =
 let rec shell_ir_arg_has_unquoted_glob = function
   | Masc_exec.Shell_ir.Lit (_, meta)
   | Masc_exec.Shell_ir.Var (_, meta) -> meta_has_unquoted_glob meta
+  | Masc_exec.Shell_ir.Subst _ ->
+    (* The substituted text becomes one literal argv element; this IR has
+       no re-split or glob stage after substitution, so there is nothing to
+       check (RFC shell-ir-typed-command-substitution §2.3 item 3 — the
+       same argument as param-expansion RFC §6). *)
+    false
   | Masc_exec.Shell_ir.Concat parts ->
     List.exists shell_ir_arg_has_unquoted_glob parts
 ;;

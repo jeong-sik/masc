@@ -335,6 +335,33 @@ let make_stage bin args =
   }
 ;;
 
+let test_subst_bearing_ir_is_too_complex_pr_a () =
+  (* PR-A: $( ) parses into Shell_ir.Subst, but execution is not open yet —
+     the gate answers a typed refusal until PR-B teaches dispatch to
+     evaluate the substitution.  Task B flips this test to Allow. *)
+  let stage =
+    { (make_stage "echo" []) with
+      Masc_exec.Shell_ir.args =
+        [ Masc_exec.Shell_ir.Subst
+            (Masc_exec.Shell_ir.Simple (make_stage "date" [])) ]
+    }
+  in
+  match
+    Gate.gate_typed
+      ~ir:(Masc_exec.Shell_ir.Simple stage)
+      ~syntax_policy
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Too_complex { reason } ->
+    Alcotest.(check string)
+      "subst reason tag"
+      "cmd_subst"
+      (Gate.too_complex_reason_tag reason)
+  | other ->
+    Alcotest.failf "expected Too_complex, got %s" (Gate.verdict_tag other)
+;;
+
 let test_lower_typed_three_stage_matches_raw () =
   (* Plan G2.2 composition contract: typed [a;b;c] and raw "a | b | c"
      must produce the same [Pipeline [Simple a; Simple b; Simple c]]
@@ -558,6 +585,10 @@ let () =
             "too_complex reason tags stable"
             `Quick
             test_too_complex_reason_tags_are_stable
+        ; Alcotest.test_case
+            "subst-bearing IR is Too_complex cmd_subst (PR-A)"
+            `Quick
+            test_subst_bearing_ir_is_too_complex_pr_a
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case

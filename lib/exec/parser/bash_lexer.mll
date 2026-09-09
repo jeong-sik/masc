@@ -1,7 +1,8 @@
 (* Bash subset lexer.
 
    Current token set covers literal argv words, quote-preserving
-   words, pipelines, fd-to-fd redirects, and file redirect operators.
+   words, command substitutions ([$( )], read into [Shell_ir.Subst]),
+   pipelines, fd-to-fd redirects, and file redirect operators.
    Unsupported shell forms still fail closed through Parsed.Too_complex
    or Parse_error.  See RFC v5 (docs/rfc/RFC-0005). *)
 
@@ -37,6 +38,22 @@
   ;;
   let get_tokens () = !token_count
   ;;
+
+  (* The recursive parse of a $( ) body.  A direct call to
+     [Bash.parse_string] would close a module cycle (bash.ml drives this
+     lexer) and add an unclassified caller to the shell-ir-consumption
+     audit; the entry point installs this hook instead.  The hook shares
+     this process's token budget — it must not reset the counter (RFC
+     shell-ir-typed-command-substitution §2.4: source size is the only
+     bound on nesting). *)
+  let subst_parse_hook : (string -> Shell_ir.t Parsed.t) ref =
+    ref (fun _ -> raise (Failure "subst_parse_hook unset"))
+  ;;
+
+  (* Carries an inner refusal out of [subst_piece] unchanged: the same
+     rules, the same reasons (RFC shell-ir-typed-command-substitution §2.2).
+     Never [Parsed _] — that arm returns the child IR directly. *)
+  exception Subst_inner_refusal of Shell_ir.t Parsed.t
   let meta_of_string w =
     let has_star = String.contains w '*' in
     let has_qmark = String.contains w '?' in
@@ -111,8 +128,8 @@ let sq_body = [^ '\'' '\n']*
 (* Double-quote string.  A body made only of these chars closes in one
    WORD (the common [rg "pattern"] shape); a body holding [$] or a
    backtick is read piece by piece in [dq_pieces], where [$NAME] and
-   [${NAME}] become quoted [Var]s and command substitution keeps its
-   named refusal.  Backslash stays rejected except for [\|], a common
+   [${NAME}] become quoted [Var]s and [$( )] becomes a [Subst] piece.
+   Backslash stays rejected except for [\|], a common
    regex literal in rg/grep patterns that is still literal under bash
    double quotes; embedded newlines stay out of the subset. *)
 let dq_char = [^ '"' '\n' '\\' '$' '`'] | "\\|"
@@ -160,7 +177,7 @@ rule token = parse
      none of them is not given the name of a neighbouring character; it
      reaches the catch-all at the bottom and becomes a parse error. *)
   | "$(("           { excluded `Arith_expansion }
-  | "$("            { excluded `Cmd_subst }
+  | "$("            { word_tail (subst_piece lexbuf) [] lexbuf }
   (* Simple parameter expansion — [$NAME] and [${NAME}] open a word
      whose adjacent pieces [word_tail] collects into one token.  Both
      forms come before the bare ['\$'] exclusion so a name that does
@@ -240,9 +257,15 @@ rule token = parse
    word-forming rule above; anything else — whitespace, an operator,
    eof, an excluded construct's first char — matches the empty pattern,
    which closes the word without consuming, and [token] reads on from
-   the boundary.  An excluded construct glued to a word ([foo$(bar)])
-   therefore still reaches its own rule and is refused by name. *)
+   the boundary.  [$( )] is word-forming like a quote: [foo$(bar)] is one
+   word whose pieces include the [Subst], as bash reads it.  An excluded
+   construct glued to a word ([foo`bar`]) still reaches its own rule and
+   is refused by name. *)
 and word_tail first rev_rest = parse
+  | "$((" { excluded `Arith_expansion }
+  | "$(" {
+      word_tail first (subst_piece lexbuf :: rev_rest) lexbuf
+    }
   | '$' (param_name as name) {
       incr_tokens ();
       word_tail first (Shell_ir.Var (name, meta_of_string name) :: rev_rest) lexbuf
@@ -281,15 +304,16 @@ and word_tail first rev_rest = parse
 
 (* Inside a double-quoted body, read pieces instead of requiring one
    closed literal: chunks stay Lit, [$NAME] and [${NAME}] become Var —
-   quoted, so the expansion is one argv element and never re-split.
-   What bash would run inside the quotes stays refused by name
-   ([$(], backtick), and a dollar that opens neither a name nor a
-   brace form keeps the Param_expansion refusal.  The closing quote
-   hands the collected pieces back to [word_tail]: a word may continue
-   after it, as in a quoted dir followed by /sub.  [first_opt] is
-   [None] only while the quote opened the word and no piece has been
-   read yet; an empty pair of quotes that closes in that state is
-   bash's empty argument, one empty Lit. *)
+   quoted, so the expansion is one argv element and never re-split — and
+   [$( )] becomes a [Subst] piece, one argv element quoted or not (RFC
+   shell-ir-typed-command-substitution §2.3 item 3).  What bash would run
+   differently in there stays refused by name ([$((], backtick), and a
+   dollar that opens neither a name nor a brace form keeps the
+   Param_expansion refusal.  The closing quote hands the collected pieces
+   back to [word_tail]: a word may continue after it, as in a quoted dir
+   followed by /sub.  [first_opt] is [None] only while the quote opened the
+   word and no piece has been read yet; an empty pair of quotes that closes
+   in that state is bash's empty argument, one empty Lit. *)
 and dq_pieces first_opt rev_rest = parse
   | dq_char+ as s {
       incr_tokens ();
@@ -319,7 +343,12 @@ and dq_pieces first_opt rev_rest = parse
        | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
     }
   | "$((" { excluded `Arith_expansion }
-  | "$("  { excluded `Cmd_subst }
+  | "$(" {
+      let piece = subst_piece lexbuf in
+      (match first_opt with
+       | None -> dq_pieces (Some piece) rev_rest lexbuf
+       | Some first -> dq_pieces (Some first) (piece :: rev_rest) lexbuf)
+    }
   | '`'   { excluded `Cmd_subst }
   | '$'   { excluded `Param_expansion }
   | '"' {
@@ -334,6 +363,108 @@ and dq_pieces first_opt rev_rest = parse
     }
   | eof  { raise (Failure "unterminated double quote") }
   | _ as c { raise (Failure (Printf.sprintf "unexpected char %c in double quotes" c)) }
+
+(* One [$( )] piece: balanced-scan the body, re-parse it through the hook
+   (which shares the token budget and never resets it), and hand the child
+   IR up as a [Subst].  An inner refusal rides out unchanged — the same
+   rules, the same reasons (RFC shell-ir-typed-command-substitution §2.2).
+   The re-parse target is the source the user wrote, never execution
+   output. *)
+and subst_piece = parse
+  | "" {
+      incr_tokens ();
+      let body = subst_body 1 (Buffer.create 256) lexbuf in
+      match !subst_parse_hook body with
+      | Parsed.Parsed ir -> Shell_ir.Subst ir
+      | refusal -> raise (Subst_inner_refusal refusal)
+    }
+
+(* Balanced scan from just after a [$(] to the paren that closes it,
+   quote-aware.  [depth] counts unclosed parens, the opening [$(]
+   included; the closing [)] of the outermost substitution is consumed but
+   not copied, so [subst_piece]'s caller sees exactly the body.  A nested
+   [$(] counts like any [(] — the [$] is inert for balance — so [$(( )]
+   stays balanced without a rule of its own and the inner parse refuses it
+   as [`Arith_expansion].  Quoted regions and backticks are copied verbatim
+   by the sub-rules so a [)] inside one cannot miscount.
+
+   Known limitation (plan risk 4): plain paren counting mis-cuts a [case]
+   item's [)], as in [$(case x in a) f;; esac)].  The mis-cut is
+   fail-closed — the remainder reaches [;;] (Parse_error) or [)]
+   ([`Subshell]) — and the corpus shapes are simple commands; a
+   [case]-in-substitution is new scope, not silent wrong output. *)
+and subst_body depth buf = parse
+  | "$(" { Buffer.add_string buf "$("; subst_body (depth + 1) buf lexbuf }
+  | '(' { Buffer.add_char buf '('; subst_body (depth + 1) buf lexbuf }
+  | ')' {
+      if depth = 1
+      then ()  (* the closer of the opening [$(]: consumed, not copied *)
+      else (Buffer.add_char buf ')'; subst_body (depth - 1) buf lexbuf)
+    }
+  | '\'' { Buffer.add_char buf '\''; subst_sq buf lexbuf; subst_body depth buf lexbuf }
+  | '"' { Buffer.add_char buf '"'; subst_dq buf lexbuf; subst_body depth buf lexbuf }
+  | '`' { Buffer.add_char buf '`'; subst_backtick buf lexbuf; subst_body depth buf lexbuf }
+  | '\\' '\n' {
+      Lexing.new_line lexbuf;
+      Buffer.add_string buf "\\\n";
+      subst_body depth buf lexbuf
+    }
+  | '\\' (_ as c) {
+      Buffer.add_char buf '\\';
+      Buffer.add_char buf c;
+      subst_body depth buf lexbuf
+    }
+  | '\n' { Lexing.new_line lexbuf; Buffer.add_char buf '\n'; subst_body depth buf lexbuf }
+  | eof { raise (Failure "unterminated $( )") }
+  | _ as c { Buffer.add_char buf c; subst_body depth buf lexbuf }
+
+(* Single-quoted region inside a substitution body: literal, no escapes —
+   bash has no way to embed a quote in one, so the first ['] closes it. *)
+and subst_sq buf = parse
+  | '\'' { Buffer.add_char buf '\'' }
+  | '\n' { Lexing.new_line lexbuf; Buffer.add_char buf '\n'; subst_sq buf lexbuf }
+  | eof { raise (Failure "unterminated single quote inside $( )") }
+  | _ as c { Buffer.add_char buf c; subst_sq buf lexbuf }
+
+(* Double-quoted region inside a substitution body.  A nested [$(] must
+   still count toward the balance — its body may itself hold quotes — so
+   it is scanned by [subst_body] and its closing [)] re-added here. *)
+and subst_dq buf = parse
+  | '"' { Buffer.add_char buf '"' }
+  | "$(" {
+      Buffer.add_string buf "$(";
+      subst_body 1 buf lexbuf;
+      Buffer.add_char buf ')';
+      subst_dq buf lexbuf
+    }
+  | '`' { Buffer.add_char buf '`'; subst_backtick buf lexbuf; subst_dq buf lexbuf }
+  | '\\' '\n' {
+      Lexing.new_line lexbuf;
+      Buffer.add_string buf "\\\n";
+      subst_dq buf lexbuf
+    }
+  | '\\' (_ as c) {
+      Buffer.add_char buf '\\';
+      Buffer.add_char buf c;
+      subst_dq buf lexbuf
+    }
+  | '\n' { Lexing.new_line lexbuf; Buffer.add_char buf '\n'; subst_dq buf lexbuf }
+  | eof { raise (Failure "unterminated double quote inside $( )") }
+  | _ as c { Buffer.add_char buf c; subst_dq buf lexbuf }
+
+(* Backtick region inside a substitution body: copied verbatim to its
+   closing backtick; the inner parse then refuses it by name
+   ([`Cmd_subst]). *)
+and subst_backtick buf = parse
+  | '`' { Buffer.add_char buf '`' }
+  | '\\' (_ as c) {
+      Buffer.add_char buf '\\';
+      Buffer.add_char buf c;
+      subst_backtick buf lexbuf
+    }
+  | '\n' { Lexing.new_line lexbuf; Buffer.add_char buf '\n'; subst_backtick buf lexbuf }
+  | eof { raise (Failure "unterminated backtick inside $( )") }
+  | _ as c { Buffer.add_char buf c; subst_backtick buf lexbuf }
 
 (* Body lines of the heredoc opened in [token], collected literally.
    The terminator line is matched without its newline, so the line end

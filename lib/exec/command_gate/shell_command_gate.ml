@@ -61,8 +61,19 @@ let host_sandbox : sandbox_context = { target = ST.host () }
    nothing else. Flattening to a list of stages loses that -- [a && b] would
    be counted as two pipeline stages. *)
 let rec with_sandbox ~(sandbox : sandbox_context) (ir : SI.t) : SI.t =
+  let rec arg_rewritten = function
+    | SI.Subst child -> SI.Subst (with_sandbox ~sandbox child)
+    | SI.Concat parts -> SI.Concat (List.map arg_rewritten parts)
+    | (SI.Lit _ | SI.Var _) as leaf -> leaf
+  in
   match ir with
-  | SI.Simple s -> SI.Simple { s with SI.sandbox = sandbox.target }
+  | SI.Simple s ->
+    SI.Simple
+      { s with
+        SI.sandbox = sandbox.target
+      ; args = List.map arg_rewritten s.SI.args
+      ; env = List.map (fun (k, v) -> k, arg_rewritten v) s.SI.env
+      }
   | SI.Pipeline stages -> SI.Pipeline (List.map (with_sandbox ~sandbox) stages)
   | SI.Sequence { head; tail } ->
     SI.Sequence
@@ -73,7 +84,15 @@ let rec with_sandbox ~(sandbox : sandbox_context) (ir : SI.t) : SI.t =
 
 let rec simples_of (ir : SI.t) : SI.simple list =
   match ir with
-  | SI.Simple s -> [ s ]
+  | SI.Simple s ->
+    (* A substitution's children are commands too: a caller reading [stages]
+       must see what [$(git status)] runs, not only the stage holding it.
+       The stage itself lists first, its substitution children after. *)
+    s
+    :: List.concat_map
+         (fun arg ->
+           List.concat_map simples_of (SI.subst_children_of_arg arg))
+         (s.SI.args @ List.map snd s.SI.env)
   | SI.Pipeline stages -> List.concat_map simples_of stages
   | SI.Sequence { head; tail } ->
     simples_of head @ List.concat_map (fun (_connector, part) -> simples_of part) tail
@@ -224,6 +243,13 @@ let log_verdict ~source = function
 let rec structural_refusal (ir : SI.t) =
   if SI.has_variable_expansion ir then
     Some (`Too_complex (Unsupported_construct `Param_expansion))
+  else if SI.has_command_substitution ir then
+    (* PR-A of RFC shell-ir-typed-command-substitution: the parser reads
+       [$( )] into [Subst], and execution is still closed — the refusal is
+       typed, not a crash.  Reusing the [cmd_subst] tag keeps the census
+       vocabulary stable while execution is closed; PR-B removes this and
+       traverses the children instead. *)
+    Some (`Too_complex (Unsupported_construct `Cmd_subst))
   else
   match ir with
   | SI.Simple _ -> None

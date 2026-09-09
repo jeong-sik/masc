@@ -36,6 +36,10 @@ type gate_obligation = private
   { approval_id : string; tool_name : string; input_hash : string }
 val gate_obligation : approval_id:string -> tool_name:string -> input_hash:string ->
   (gate_obligation, string) result
+type runtime_suffix = private { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
+type gate_binding = private { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option }
+val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list -> (runtime_suffix, string) result
+val gate_binding : approval_ids:string list -> obligations:gate_obligation list -> runtime_suffix:runtime_suffix option -> (gate_binding, string) result
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
@@ -57,6 +61,7 @@ type recovery_origin =
   | Interrupted_execution
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
+  | Gate_binding of gate_binding
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -96,7 +101,7 @@ type action =
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
-  | Suspend_gate_reconciliation of gate_obligation list * string
+  | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution

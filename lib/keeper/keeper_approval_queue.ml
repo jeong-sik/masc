@@ -4593,6 +4593,15 @@ module For_testing = struct
   let with_pending_store_lock = with_pending_store_lock
   let get_pending_entry_unchecked = find_pending_entry_unchecked
 
+  let with_unavailable_workspace ~base_path f =
+    let previous = with_pending_store_lock (fun () ->
+      let previous = Atomic.get unavailable_stores in
+      Atomic.set unavailable_stores (SMap.add base_path
+        {path=base_path; reason="injected unavailable Gate authority"} previous);
+      previous) in
+    Fun.protect ~finally:(fun () -> with_pending_store_lock (fun () ->
+      Atomic.set unavailable_stores previous)) f
+
   let reset_runtime_state () =
     with_pending_store_lock (fun () ->
       Atomic.set pending SMap.empty;

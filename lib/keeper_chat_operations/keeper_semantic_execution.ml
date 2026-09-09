@@ -57,6 +57,17 @@ let gate_obligation ~approval_id ~tool_name ~input_hash =
   if String.trim approval_id = "" || String.trim tool_name = "" then Error "Gate identity is blank"
   else if not (canonical_sha input_hash) then Error "Gate input hash is invalid"
   else Ok {approval_id; tool_name; input_hash}
+type runtime_suffix = { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
+type gate_binding = { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option }
+let runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
+  if List.exists (fun value -> String.trim value = "") (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
+  then Error "runtime suffix identities are blank" else Ok {assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids}
+let gate_binding ~approval_ids ~obligations ~runtime_suffix =
+  if approval_ids = [] || List.exists (fun id -> String.trim id = "") approval_ids
+     || List.sort_uniq String.compare approval_ids <> List.sort String.compare approval_ids
+     || not (List.for_all (fun (row : gate_obligation) -> List.mem row.approval_id approval_ids) obligations)
+  then Error "invalid unresolved Gate identities"
+  else Ok {approval_ids; obligations; runtime_suffix}
 type session_scope = Session_scope of string list
 let session_scope components =
   if List.exists (fun component -> component = "" || component = "." || component = ".."
@@ -93,6 +104,7 @@ type recovery_origin =
   | Interrupted_execution
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
+  | Gate_binding of gate_binding
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -128,7 +140,7 @@ type action =
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
-  | Suspend_gate_reconciliation of gate_obligation list * string
+  | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -229,7 +241,7 @@ let apply ~now action current =
                (match recovery.origin with
                 | Unconfirmed_sources -> recheck Preparing
                 | Confirmed_undispatched -> recheck Ready
-                | Checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ -> reject ())
+                | Checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
           let resume expected =
@@ -241,7 +253,7 @@ let apply ~now action current =
            | Recovering recovery ->
                (match recovery.origin with
                 | Checkpointed expected -> resume expected
-                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ -> reject ())
+                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Settled _ -> reject ())
       | Record_observation observation ->
           (match current.phase with
@@ -265,14 +277,14 @@ let apply ~now action current =
            | Recovering {origin = Runtime_retry expected; _} ->
              if equal_runtime_retry expected observed then unchanged (Resuming_runtime_retry expected) else reject ()
            | Recovering {origin = (Checkpointed _ | Unconfirmed_sources
-               | Confirmed_undispatched | Interrupted_execution | Gate_wait _); _}
+               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
-      | Suspend_gate_reconciliation (obligations, diagnostic) ->
+      | Suspend_gate_reconciliation (binding, diagnostic) ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
-             if obligations <> [] && String.trim diagnostic <> ""
-                && List.for_all (fun prior -> List.mem prior obligations) current.gate_obligations
-             then unchanged (Recovering {origin=Interrupted_execution; diagnostic})
+             if String.trim diagnostic <> ""
+                && List.for_all (fun prior -> List.mem prior binding.obligations) current.gate_obligations
+             then unchanged (Recovering {origin=Gate_binding binding; diagnostic})
              else reject ()
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_gate waiting ->
@@ -283,7 +295,7 @@ let apply ~now action current =
              else reject ()
            | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
              unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="Gate admission requires reconciliation"})
-           | Recovering {origin=(Gate_wait _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Gate_wait _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Suspended _ | Settled _ -> reject ())
       | Resolve_gate resolution ->
@@ -296,7 +308,7 @@ let apply ~now action current =
                | Some current when current <> resolution -> reject ()
                | Some _ | None -> unchanged (Recovering {origin=Gate_wait {state with resolution=Some resolution};
                    diagnostic="durable Gate resolution is ready for the original operation"}))
-           | Recovering {origin=(Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_gate (waiting, resolution) ->
@@ -304,7 +316,7 @@ let apply ~now action current =
            | Recovering {origin=Gate_wait state; _} ->
              if equal_gate_wait waiting state.waiting && state.resolution = Some resolution
              then unchanged (Resuming_gate (waiting, resolution)) else reject ()
-           | Recovering {origin=(Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Discharge_gate obligation ->
@@ -330,7 +342,7 @@ let apply ~now action current =
                  | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> unchanged (Settled terminal)
                  | Settled _ -> reject ())) in
     let gate_obligations = match action with
-      | Suspend_gate_reconciliation (obligations, _) -> obligations
+      | Suspend_gate_reconciliation (binding, _) -> binding.obligations
       | Suspend_gate waiting -> waiting.obligations
       | Discharge_gate obligation -> List.filter (fun current -> current <> obligation) current.gate_obligations
       | Settle _ -> []
@@ -369,6 +381,14 @@ let runtime_retry_json (retry : runtime_retry) =
              ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids) ]
 let gate_obligation_json value = `Assoc ["approval_id", `String value.approval_id;
   "tool_name", `String value.tool_name; "input_hash", `String value.input_hash]
+let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
+  "assignment_id", `String suffix.assignment_id; "failed_runtime_id", `String suffix.failed_runtime_id;
+  "next_runtime_id", `String suffix.next_runtime_id;
+  "later_runtime_ids", `List (List.map (fun id -> `String id) suffix.later_runtime_ids)]
+let gate_binding_json binding = `Assoc [
+  "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
+  "obligations", `List (List.map gate_obligation_json binding.obligations);
+  "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix]
 let gate_wait_json value = `Assoc (["checkpoint", checkpoint_json value.checkpoint;
   "session_scope", `List (List.map (fun value -> `String value) (session_scope_components value.session_scope));
   "obligations", `List (List.map gate_obligation_json value.obligations)] @
@@ -377,6 +397,7 @@ let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json valu
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
     | Gate_denied detail -> `Assoc ["kind", `String "denied"; "detail", `String detail])]
 let recovery_origin_json = function
+  | Gate_binding binding -> `Assoc ["kind", `String "gate_binding"; "binding", gate_binding_json binding]
   | Unconfirmed_sources -> `Assoc ["kind", `String "unconfirmed_sources"]
   | Confirmed_undispatched -> `Assoc ["kind", `String "confirmed_undispatched"]
   | Interrupted_execution -> `Assoc ["kind", `String "interrupted_execution"]
@@ -474,6 +495,8 @@ let gate_obligation_of_json json =
 let runtime_retry_of_json json =
       let* fields = exact ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
           "next_runtime_id"; "later_runtime_ids"] json in
+      let* kind = string "kind" fields in
+      let* () = if kind = "runtime_retry" then Ok () else Error "invalid frozen runtime retry kind" in
       let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
       let* assignment_id = string "assignment_id" fields in
       let* failed_runtime_id = string "failed_runtime_id" fields in
@@ -515,6 +538,25 @@ let gate_resolution_of_json json =
       else Error "invalid Gate decision"
     | _ -> Error "invalid Gate decision" in
   Ok {obligation; decision}
+let runtime_suffix_of_json json =
+  let* fields = exact ["assignment_id";"failed_runtime_id";"next_runtime_id";"later_runtime_ids"] json in
+  let* assignment_id = string "assignment_id" fields in
+  let* failed_runtime_id = string "failed_runtime_id" fields in
+  let* next_runtime_id = string "next_runtime_id" fields in
+  let* later_runtime_ids = match field "later_runtime_ids" fields with
+    | `List rows -> decode_list (function `String value -> Ok value | _ -> Error "runtime id must be a string") rows
+    | _ -> Error "runtime suffix must be a list" in
+  runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
+let gate_binding_of_json json =
+  let* fields = exact ["approval_ids";"obligations";"runtime_suffix"] json in
+  let* approval_ids = match field "approval_ids" fields with
+    | `List rows -> decode_list (function `String value -> Ok value | _ -> Error "approval id must be a string") rows
+    | _ -> Error "approval ids must be a list" in
+  let* obligations = match field "obligations" fields with
+    | `List rows -> decode_list gate_obligation_of_json rows | _ -> Error "obligations must be a list" in
+  let* runtime_suffix = match field "runtime_suffix" fields with
+    | `Null -> Ok None | json -> runtime_suffix_of_json json |> Result.map Option.some in
+  gate_binding ~approval_ids ~obligations ~runtime_suffix
 let recovery_origin_of_json json =
   let* kind = kind_of_json json in
   match kind with
@@ -531,6 +573,9 @@ let recovery_origin_of_json json =
         | json -> gate_resolution_of_json json |> Result.map Option.some in
       if Option.fold ~none:true ~some:(fun r -> List.mem r.obligation waiting.obligations) resolution
       then Ok (Gate_wait {waiting; resolution}) else Error "Gate resolution is not an obligation"
+  | "gate_binding" ->
+      let* fields = exact ["kind";"binding"] json in
+      gate_binding_of_json (field "binding" fields) |> Result.map (fun binding -> Gate_binding binding)
   | "runtime_retry" ->
       runtime_retry_of_json json
       |> Result.map (fun retry -> Runtime_retry retry)
@@ -557,7 +602,7 @@ let phase_of_json json =
       let* origin = recovery_origin_of_json (field "origin" fields) in
       (match origin with
        | Runtime_retry retry -> Ok (Resuming_runtime_retry retry)
-       | Checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ ->
+       | Checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ ->
          Error "resuming runtime requires its frozen continuation")
   | "recovering" ->
       let* fields = exact ["kind";"origin";"detail"] json in
@@ -607,6 +652,8 @@ let of_json json =
       | _ -> Error "execution frame must contain only its admitted scope" in
     let* phase = phase_of_json (field "phase" fields) in
     let* () = match phase with
+      | Recovering {origin=Gate_binding binding; _} ->
+        if gate_obligations = binding.obligations then Ok () else Error "Gate binding lost prior obligations"
       | Recovering {origin=Gate_wait state; _} ->
         if gate_obligations = state.waiting.obligations then Ok ()
         else Error "Gate wait lost its owned obligations"
@@ -643,7 +690,7 @@ let of_json json =
           (match recovery.origin with
            | Unconfirmed_sources | Confirmed_undispatched -> revision >= 1L && observations = []
            | Checkpointed _ | Interrupted_execution -> revision >= 2L
-           | Runtime_retry _ | Gate_wait _ -> revision >= 3L)
+           | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> revision >= 3L)
       | Settled _ -> revision >= 1L in
     let* () = if coherent then Ok ()
       else Error "execution phase, revision and initial frame are incoherent" in

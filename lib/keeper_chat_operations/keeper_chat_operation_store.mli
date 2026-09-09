@@ -178,4 +178,6 @@ val discharge_direct_gate : t -> now:float -> operation_id:Operation.Operation_i
 val direct_gate_waits : t -> ((Operation.Operation_id.t * Semantic.gate_wait_state) list, error) result
 
 val defer_direct_gate_reconciliation : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
-  obligations:Semantic.gate_obligation list -> diagnostic:string -> (Operation.t, error) result
+  binding:Semantic.gate_binding -> diagnostic:string -> (Operation.t, error) result
+
+val direct_gate_binding : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_binding option, error) result

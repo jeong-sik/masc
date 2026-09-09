@@ -241,4 +241,7 @@ val discharge_direct_gate : base_path:string -> keeper_name:string -> operation_
   obligation:Keeper_semantic_execution.gate_obligation -> (unit, command_error) result
 
 val defer_direct_gate_reconciliation : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
-  obligations:Keeper_semantic_execution.gate_obligation list -> diagnostic:string -> (Keeper_chat_operation.t, command_error) result
+  binding:Keeper_semantic_execution.gate_binding -> diagnostic:string -> (Keeper_chat_operation.t, command_error) result
+
+val direct_gate_binding : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_binding option, command_error) result

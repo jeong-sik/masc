@@ -95,7 +95,9 @@ let test_unconfirmed_checkpoint_survives_restart () = with_path (fun path ->
     let operation = admit store in
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
-      ~execution_digest:operation.execution_digest ~obligations:[obligation]
+      ~execution_digest:operation.execution_digest
+      ~binding:(Semantic.gate_binding ~approval_ids:[obligation.approval_id] ~obligations:[obligation]
+        ~runtime_suffix:None |> require)
       ~diagnostic:"retained checkpoint could not be installed" |> ok |> ignore;
     check bool "checkpoint-less request is nonclaimable" true (claim store = None));
   with_store path (fun store ->
@@ -142,7 +144,24 @@ let test_fresh_gate_and_runtime_retry_restart () = with_path (fun path ->
     check bool "Gate effect identity survives runtime admission" true
       ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation])))
 
+let test_unbound_gate_and_runtime_survive_restart () = with_path (fun path ->
+  let runtime_suffix = Semantic.runtime_suffix ~assignment_id:"frozen-original" ~failed_runtime_id:"first"
+    ~next_runtime_id:"next" ~later_runtime_ids:["last"] |> require in
+  let binding = Semantic.gate_binding ~approval_ids:["producer-created-approval"] ~obligations:[]
+    ~runtime_suffix:(Some runtime_suffix) |> require in
+  with_store path (fun store ->
+    let operation = admit store in
+    Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~binding ~diagnostic:"Gate authority unavailable" |> ok |> ignore);
+  with_store path (fun store ->
+    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    check bool "unbound Gate and frozen suffix survive restart" true
+      ((Store.direct_gate_binding store ~operation_id:original |> ok) = Some binding);
+    check bool "original task attachments and channel retained" true ((get store).input=Some input);
+    check bool "no model claim without binding authority" true (claim store = None)))
+
 let () = run "direct Gate waiting" ["journal", [
+  test_case "unbound Gate identity and runtime suffix survive restart" `Quick test_unbound_gate_and_runtime_survive_restart;
   test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
   test_case "fresh Gate and frozen runtime retry survive restart together" `Quick test_fresh_gate_and_runtime_retry_restart;
   test_case "unconfirmed checkpoint preserves input and effects across restart" `Quick test_unconfirmed_checkpoint_survives_restart;

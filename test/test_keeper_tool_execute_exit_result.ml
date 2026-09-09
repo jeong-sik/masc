@@ -56,7 +56,16 @@ let cleanup_dir path =
   in
   rm path
 
-let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
+(* Remote_ssh stood here after Local was removed, and a Remote_ssh keeper with
+   no declared remote_endpoint is refused before its command runs:
+
+     {"error":"remote_ssh_endpoint_missing: keeper background-holds has no
+       remote_endpoint", "requested_sandbox":"remote_ssh"}
+
+   These cases need a command to actually run, so the profile comes from the
+   shared fixture helper -- the one place that answers what a test runs
+   under, and which the runner can point elsewhere with MASC_TEST_SANDBOX. *)
+let make_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ ("name", `String name)
@@ -65,7 +74,7 @@ let make_local_meta ~name : Keeper_meta_contract.keeper_meta =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
+    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
   | Error e -> Alcotest.fail e
 
 let rec mkdir_p path =
@@ -74,13 +83,6 @@ let rec mkdir_p path =
     mkdir_p (Filename.dirname path);
     Unix.mkdir path 0o755
   end
-
-let playground_dir ~base ~name =
-  let dir =
-    List.fold_left Filename.concat base [ ".masc"; "playground"; name ]
-  in
-  mkdir_p dir;
-  dir
 
 (* The live workspace runs the Gate in always_allow mode (mode.json); the
    test mirrors that so tool_execute is authorized instead of deferred. *)
@@ -92,17 +94,30 @@ let install_always_allow_gate ~base =
     {|{"mode":"always_allow","updated_by":"test","updated_at":"2026-08-18T00:00:00Z"}|};
   close_out oc
 
-let run_execute ~config ~meta ~argv ~cwd =
+(* No cwd. The keeper has two roots -- the host directory the profile keeps
+   its playground in, and the path the keeper itself sees -- and naming the
+   host one here is refused as outside the sandbox:
+
+     {"error":"Requested cwd is outside the Keeper sandbox.",
+      "code":"cwd_outside_sandbox",
+      "playground_root":"/home/keeper/playground/background-holds"}
+
+   Omitting it leaves the runtime to stand in the keeper's own playground
+   root, which is where a caller that names no directory runs and what the
+   Execute probe in test_keeper_tool_dispatch_runtime relies on. Neither case
+   here needs a particular directory.
+
+   The factory is what lets the command run at all: guest dispatch with none
+   answers "typed Shell IR guest dispatch requires a turn sandbox factory (no
+   factory provided)" before anything executes. The shared helper wires the
+   one the production turn bundle wires. *)
+let run_execute ~config ~meta ~argv =
   Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
     ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-    ~turn_sandbox_factory:None
+    ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
     ~config
     ~meta
-    ~args:
-      (`Assoc
-        [ "argv", `List (List.map (fun a -> `String a) argv)
-        ; "cwd", `String cwd
-        ])
+    ~args:(`Assoc [ "argv", `List (List.map (fun a -> `String a) argv) ])
     ()
 
 let payload_of (execution : Keeper_tool_execution.t) =
@@ -121,8 +136,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"costume-advice" in
-      let cwd = playground_dir ~base ~name:"costume-advice" in
+      let meta = make_meta ~name:"costume-advice" in
       (* [;] used to be the construct this test reached for; RFC-0391 put it
          in Shell_ir.connector, so a substitution stands in. What is being
          checked is unchanged: a costume the subset cannot say still runs, and
@@ -132,7 +146,6 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           ~config
           ~meta
           ~argv:[ "sh"; "-c"; "echo $(echo two)" ]
-          ~cwd
       in
       (match execution.disposition with
        | Tool_result.Completed () -> ()
@@ -178,8 +191,9 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           "escaped_shell was not one entry: %s"
           (Yojson.Safe.to_string other)
       | None ->
-        Alcotest.fail
-          "escaped_shell is absent from the payload the model reads")
+        Alcotest.failf
+          "escaped_shell is absent from the payload the model reads: %s"
+          (Yojson.Safe.to_string payload))
 ;;
 
 (* RFC spawn-a-process-that-outlives-the-call §1.0. The advice for [&] says
@@ -199,17 +213,20 @@ let test_a_backgrounded_child_still_holds_the_call () =
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_local_meta ~name:"background-holds" in
-      let cwd = playground_dir ~base ~name:"background-holds" in
+      let meta = make_meta ~name:"background-holds" in
       let execution =
-        run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ] ~cwd
+        run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ]
       in
+      let payload = payload_of execution in
       let elapsed =
-        match payload_of execution with
+        match payload with
         | `Assoc fields ->
           (match List.assoc_opt "execution_time_ms" fields with
            | Some (`Int ms) -> ms
-           | _ -> Alcotest.fail "the payload has no execution_time_ms")
+           | _ ->
+             Alcotest.failf
+               "the payload has no execution_time_ms: %s"
+               (Yojson.Safe.to_string payload))
         | _ -> Alcotest.fail "payload was not an object"
       in
       if elapsed < 1000

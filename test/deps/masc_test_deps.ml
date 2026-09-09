@@ -463,3 +463,21 @@ let fixture_sandbox_profile () =
                ", "
                Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
 ;;
+
+(* The factory a fixture's guest command is dispatched through.
+
+   Typed Shell IR guest dispatch refuses to run without one:
+
+     {"error":"typed Shell IR guest dispatch requires a turn sandbox factory
+       (no factory provided)"}
+
+   Every profile a fixture can name is a guest profile, so a suite whose case
+   must actually run its command wires the same factory the production turn
+   bundle wires. The factory creates its runtime lazily: a case that never
+   dispatches a guest command starts no container. Cleanup is idempotent and
+   registered with at_exit. *)
+let fixture_turn_sandbox_factory ~config ~meta =
+  let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
+  at_exit (fun () -> Masc.Keeper_sandbox_factory.cleanup factory);
+  Some factory
+;;

@@ -113,6 +113,34 @@ module Response = struct
   let html_content_type = "text/html; charset=utf-8"
   let json_content_type = "application/json; charset=utf-8"
 
+  (* [#28400] Dashboard cache timeouts travel in-band: a value that is
+     structurally a normal payload but semantically an error envelope. Only
+     the producing layer (Dashboard_cache, masc.dashboard) can distinguish
+     the envelope from real data, and masc.dashboard depends on this module,
+     so the recognizer is injected here at library init instead of a direct
+     reference (which would be a dependency cycle).
+
+     [register_timeout_envelope_recognizer] installs the recognizer once at
+     dashboard library init; [json_value] consults it for every JSON value
+     response and reclassifies a detected envelope as 504 Gateway_timeout,
+     honoring the error contract the dashboard client already tests
+     (504 + {"error":"computation_timeout", ...}).
+
+     A recognizer that was never registered means this build links no
+     dashboard producer, and the check is a no-op. *)
+  let timeout_envelope_recognizer : (Yojson.Safe.t -> bool) option ref =
+    ref None
+
+  let register_timeout_envelope_recognizer (recognizer : Yojson.Safe.t -> bool) =
+    timeout_envelope_recognizer := Some recognizer
+
+  let timeout_envelope_status_override ?status json =
+    match (status, !timeout_envelope_recognizer) with
+    | (None | Some `OK), Some recognizes when recognizes json ->
+      `Gateway_timeout
+    | (Some status, _) -> status
+    | (None, _) -> `OK
+
   let rev_prepend_headers headers acc =
     List.fold_left (fun acc header -> header :: acc) acc headers
 
@@ -331,17 +359,15 @@ module Response = struct
           final_body
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
-    json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
+    let status = timeout_envelope_status_override ?status value in
+    json ~status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
 
   let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
-    let request =
-      match request with
-      | Some request -> request
-      | None -> Httpun.Reqd.request reqd
-    in
+    let status = timeout_envelope_status_override ?status value in
+    let request = match request with Some request -> request | None -> Httpun.Reqd.request reqd in
     let response, body =
       Executor_pool_ref.submit_or_inline (fun () ->
-        prepare_json ?status ?compress ?extra_headers ~request
+        prepare_json ~status ?compress ?extra_headers ~request
           (Yojson.Safe.to_string value))
     in
     safe_respond_with_string reqd response body

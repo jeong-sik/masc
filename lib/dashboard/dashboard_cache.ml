@@ -271,6 +271,17 @@ let is_timeout_envelope = function
      | _ -> false)
   | _ -> false
 
+(* [#28400] Teach the shared HTTP responder layer to recognize this module's
+   timeout envelope, so every route that hands a cached get_or_compute value
+   straight to [Http_server_eio.Response.json_value] answers 504 + the
+   envelope instead of echoing it as HTTP 200 data. Registered at library
+   init (this library links before any server route that serves these
+   payloads); the responder keeps the no-recognizer no-op path for builds
+   that do not link the dashboard producer. *)
+let () =
+  Http_server_eio.Response.register_timeout_envelope_recognizer
+    is_timeout_envelope
+
 let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
   let timeout_kind =
     match timeout_kind with

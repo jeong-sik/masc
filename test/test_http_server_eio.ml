@@ -1224,6 +1224,58 @@ let test_late_response_ignores_unrelated_failures () =
     cases
 ;;
 
+(* [#28400] Timeout envelopes must travel out-of-band: a JSON value that the
+   registered dashboard recognizer identifies as a timeout envelope is
+   reclassified to 504 Gateway_timeout at the shared responder boundary,
+   instead of reaching the client as HTTP 200 data. *)
+let test_timeout_envelope_status_override () =
+  let envelope =
+    `Assoc
+      [ ("error", `String "computation_timeout")
+      ; ("message", `String "Dashboard Gate timed out after 30s")
+      ; ("key", `String "test-key")
+      ]
+  in
+  let data = `Assoc [ ("items", `List []) ] in
+  (* Save/restore the recognizer around the check so the test cannot leak
+     registration state into other suites. *)
+  let saved = !Response.timeout_envelope_recognizer in
+  (try
+     (* Unregistered: every value stays on its caller-supplied status. *)
+     Response.register_timeout_envelope_recognizer (fun _ -> false);
+     Alcotest.(check string)
+       "unregistered + envelope-like value keeps default"
+       "200"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override envelope));
+     (* Registered: envelope values are reclassified, data values are not. *)
+     Response.register_timeout_envelope_recognizer Dashboard_cache.is_timeout_envelope;
+     Alcotest.(check string)
+       "registered recognizer reclassifies an envelope to 504"
+       "504"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override envelope));
+     Alcotest.(check string)
+       "registered recognizer keeps ordinary data at 200"
+       "200"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override data));
+     (* An explicit non-OK status always wins over reclassification: error
+        paths must not be silently rewritten. *)
+     Alcotest.(check string)
+       "explicit error status wins over the envelope override"
+       "400"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override ~status:`Bad_request envelope));
+     Alcotest.(check string)
+       "explicit OK status still reclassifies an envelope"
+       "504"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override ~status:`OK envelope))
+   with exn -> Response.timeout_envelope_recognizer := saved; raise exn);
+  Response.timeout_envelope_recognizer := saved
+;;
+
 let late_response_tests =
   [ ( "invalid state failure -> Some msg"
     , `Quick
@@ -1235,6 +1287,12 @@ let late_response_tests =
     , `Quick
     , test_late_response_does_not_classify_cancellation )
   ; "unrelated exceptions -> None", `Quick, test_late_response_ignores_unrelated_failures
+  ]
+
+let timeout_envelope_tests =
+  [ ( "unregistered recognizer leaves responses untouched"
+    , `Quick
+    , test_timeout_envelope_status_override )
   ]
 ;;
 
@@ -1250,5 +1308,6 @@ let () =
     ; "request", request_tests
     ; "response", response_tests
     ; "late_response", late_response_tests
+    ; "timeout_envelope", timeout_envelope_tests
     ]
 ;;

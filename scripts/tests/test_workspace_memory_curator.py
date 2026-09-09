@@ -28,7 +28,7 @@ class CuratorScenario(unittest.TestCase):
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 assert request['model'] == 'local-test'
-                assert request['stream'] is False
+                assert request['stream'] is True
                 assert request['format']['required'] == ['shared_claims', 'conflicts', 'excluded']
                 self.send_response(http_status)
                 self.end_headers()
@@ -118,6 +118,42 @@ class CuratorScenario(unittest.TestCase):
                 self.assertIsNone(artifact)
                 self.assertEqual(json.loads(self.captures['chat.response.raw'])[field], 'remote')
                 self.assertEqual(json.loads(self.captures['chat.http.json'])['status'], 200)
+
+    def test_streamed_text_is_joined_only_after_terminal_event(self):
+        proposal = {'shared_claims': [], 'conflicts': [],
+                    'excluded': [{'source_id': f's{index}', 'reason': '검토 필요'} for index in range(1, 5)]}
+        content = json.dumps(proposal, ensure_ascii=False)
+        split = len(content) // 2
+        events = [
+            {'done': False, 'message': {'thinking': 'consider sources'}},
+            {'done': False, 'message': {'content': content[:split]}},
+            {'done': True, 'message': {'content': content[split:]}, 'eval_count': 42},
+        ]
+        raw = b''.join(json.dumps(event, ensure_ascii=False).encode() + b'\n' for event in events)
+        result, receipt, artifact, _ = self.run_curator({}, raw_response=raw)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(artifact['proposal'], proposal)
+        self.assertEqual(self.captures['chat.response.raw'], raw)
+        self.assertEqual(receipt['eval_count'], 42)
+        progress = json.loads(self.captures['progress.json'])
+        self.assertEqual(progress['phase'], 'proposed')
+        for key, value in {'chunks': 3, 'content_characters': len(content),
+                           'thinking_characters': len('consider sources')}.items():
+            self.assertEqual(progress[key], value)
+            self.assertEqual(receipt[key], value)
+
+    def test_stream_eof_cannot_turn_partial_output_into_a_proposal(self):
+        raw = json.dumps({'done': False, 'message': {'content': '{}'}}).encode() + b'\n'
+        result, receipt, artifact, _ = self.run_curator({}, raw_response=raw)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('without a terminal event', receipt['error'])
+        self.assertIsNone(artifact)
+        self.assertEqual(self.captures['chat.response.raw'], raw)
+        progress = json.loads(self.captures['progress.json'])
+        self.assertEqual(progress['phase'], 'failed')
+        for key, value in {'chunks': 1, 'content_characters': 2, 'thinking_characters': 0}.items():
+            self.assertEqual(progress[key], value)
+            self.assertEqual(receipt[key], value)
 
     def test_failed_http_and_malformed_json_keep_original_response_bytes(self):
         for status in (200, 503):

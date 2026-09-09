@@ -1,0 +1,135 @@
+{
+  "sources": [
+    {
+      "source_id": "s1",
+      "keeper_id": "writer",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "174ce5bd27343f1cc36140dcb78bcabeb09c9ae42d2a9b90c4178ff3a2bf0e2d",
+      "snapshot_id": "snapshot1",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Dataset D has 10 samples; no underlying file has been supplied.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s2",
+      "keeper_id": "reviewer",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "20490e9d083dddde8594fea912cf55e866e4c0376116c5a1099f141dde874642",
+      "snapshot_id": "snapshot2",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Dataset D has 15 samples; no underlying file has been supplied.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s3",
+      "keeper_id": "analyst",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "c9349e3c0dec9118c26f7258da6604f9bec2954e82a8540975d3d8e1d3eecd18",
+      "snapshot_id": "snapshot3",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Measurement N was 43 milliseconds.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s4",
+      "keeper_id": "analyst",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "c9349e3c0dec9118c26f7258da6604f9bec2954e82a8540975d3d8e1d3eecd18",
+      "snapshot_id": "snapshot3",
+      "fact_index": 1,
+      "fact": {
+        "claim": "Correction from original log: measurement N was 37 milliseconds, not 43.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    }
+  ],
+  "gaps": [
+    {
+      "keeper_id": "writer",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "reviewer",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "analyst",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "snapshot_id": "snapshot1",
+      "keeper_id": "writer",
+      "store": "ordinary",
+      "snapshot_sha256": "174ce5bd27343f1cc36140dcb78bcabeb09c9ae42d2a9b90c4178ff3a2bf0e2d",
+      "metadata": {
+        "revision": 1,
+        "updated_at": 1
+      }
+    },
+    {
+      "snapshot_id": "snapshot2",
+      "keeper_id": "reviewer",
+      "store": "ordinary",
+      "snapshot_sha256": "20490e9d083dddde8594fea912cf55e866e4c0376116c5a1099f141dde874642",
+      "metadata": {
+        "revision": 1,
+        "updated_at": 1
+      }
+    },
+    {
+      "snapshot_id": "snapshot3",
+      "keeper_id": "analyst",
+      "store": "ordinary",
+      "snapshot_sha256": "c9349e3c0dec9118c26f7258da6604f9bec2954e82a8540975d3d8e1d3eecd18",
+      "metadata": {
+        "revision": 1,
+        "updated_at": 1
+      }
+    }
+  ]
+}

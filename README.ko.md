@@ -70,8 +70,8 @@ masc setup --base-path "$HOME/masc-workspace"
 ```
 
 기본 이미지를 준비하고 작업 공간 서버와 `imp`를 시작한 뒤 TUI를 엽니다.
-대화 응답, Board 글·Task 생성, 샌드박스 디렉터리 조회, web_fetch로
-https://example.com 읽기를 확인하세요. [첫 대화 절차](docs/INSTALL.ko.md)를 따르세요.
+대화 응답, Board 글·Task 생성, 샌드박스 디렉터리 조회를 확인하세요.
+“WebFetch로 지금 https://example.com 을 가져와서 HTTP 상태와 페이지 제목을 알려줘.”라고 요청하세요. [첫 대화 절차](docs/INSTALL.ko.md)를 따르세요.
 바이너리 제공 여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
 
 ### 공개 바이너리

@@ -10,7 +10,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample)
  (public_name masc)
  (package masc)
  (libraries

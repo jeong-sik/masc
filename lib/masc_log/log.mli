@@ -57,6 +57,25 @@ val format_utc_date_of : float -> string
     for unit tests; production code calls [Ring.date_string] which
     delegates here. *)
 
+(** {1 [key=value] message text}
+
+    Fields whose value is [None] are left out of the rendered line. A field the
+    producer did not measure is not written as [-] or [n/a]: its absence is the
+    fact. [false] and [0] are values and are rendered. *)
+module Kv : sig
+  type field = string * string option
+
+  val str : string -> string -> field
+  val int : string -> int -> field
+  val bool : string -> bool -> field
+  val opt : string -> string option -> field
+  val opt_map : string -> ('a -> string) -> 'a option -> field
+
+  val render : field list -> string
+  (** [key=value] pairs joined by one space, in the given order, with every
+      [None] value omitted. An all-absent list renders as the empty string. *)
+end
+
 val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log a preformatted structured message with optional JSON details. *)
 

@@ -35,6 +35,23 @@ To add a component, add a `module X = Make(struct let name = "x" end)` line to
 `lib/masc_log/log.mli`. The module identifier must be `Capitalized`; the `name`
 string carries the exact component.
 
+## Absent fields
+
+`Log.Kv.render` builds a `key=value` message and leaves out every field whose
+value is `None`. A field the producer did not measure is not written as `-` or
+`n/a`; its absence is the fact. `false` and `0` are values and are rendered.
+Use it for any line that carries optional fields:
+
+```ocaml
+Log.Keeper.info ~keeper_name "%s"
+  (Log.Kv.render
+     [ Log.Kv.int "turn" turn
+     ; Log.Kv.opt_map "cache_n" string_of_int cache_n  (* omitted when None *)
+     ])
+```
+
+Only the message text is shaped; the ring entry's typed fields are untouched.
+
 ## Forbidden in `lib/` and `bin/` (the gate fails on these)
 
 | Pattern | Why it is non-canonical | Migrate to |

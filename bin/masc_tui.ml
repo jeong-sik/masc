@@ -9320,8 +9320,11 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
         match perform step with
         | Error transport -> Error transport
         | Ok (status, body) -> (
-            match Keeper_control.classify_response ~status ~body with
-            | Keeper_control.Accepted _ as outcome ->
+            let outcome = match step with
+              | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
+              | Keeper_control.Lifecycle _ | Keeper_control.Directive _ -> Keeper_control.classify_response ~status ~body in
+            match outcome with
+            | (Keeper_control.Accepted _ | Keeper_control.Purge_accepted _) as outcome ->
                 walk ~recovery_available (Some outcome) rest
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
@@ -9339,6 +9342,10 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
 let apply_keeper_action_result state ~base_path keeper_name action result =
   state.keeper_action_inflight <- None;
   (match result with
+   | Ok (Keeper_control.Purge_accepted { operation_id }) ->
+       add_event state "system"
+         (Printf.sprintf "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed"
+            keeper_name operation_id)
    | Ok (Keeper_control.Accepted { already_live = true }) ->
        add_event state "system"
          (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"

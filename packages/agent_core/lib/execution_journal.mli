@@ -339,7 +339,6 @@ val read_page
   -> (page, error) result
 
 val snapshot : t -> snapshot
-val snapshot_cursor : snapshot -> cursor
 val find_node : t -> Execution_event.Node_id.t -> node_view option
 val find_run : t -> Execution_event.Run_id.t -> run_view option
 

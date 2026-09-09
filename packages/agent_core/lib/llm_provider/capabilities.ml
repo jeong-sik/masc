@@ -793,8 +793,6 @@ let%test "unknown base label resolves to None, not a permissive default" =
 (** Merge Discovery ctx_size into capabilities. *)
 let with_context_size caps ~ctx_size = { caps with max_context_tokens = Some ctx_size }
 
-let with_tool_support caps ~supports_tools = { caps with supports_tools }
-
 (* ── Capability manifest integration ───────────────────── *)
 
 (** Apply a capability manifest entry on top of a base capabilities record.

@@ -34,7 +34,6 @@ type completion_contract_result =
   | Completion_response_observed
   | Completion_tool_execution_observed
 val completion_contract_result_to_string : completion_contract_result -> string
-val completion_contract_result_of_string : string -> completion_contract_result option
 type runtime_rotation_attempt = {
   from_runtime : string;
   to_runtime : string;

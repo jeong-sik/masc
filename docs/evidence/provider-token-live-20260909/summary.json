@@ -1,0 +1,17 @@
+{
+  "sample_sha256": "03060737772c099a3978a527a4f29cb25c5c23876ce80afc3bfa253e6b381bf2",
+  "exit_status": 1,
+  "glm": {
+    "completed_turns": 4,
+    "reported_input_tokens": 434,
+    "reported_output_tokens": 247,
+    "reported_cache_read_input_tokens": 128,
+    "answer_review": "All four visible answers preserve Lantern and violet-to-amber update; human-readable source review, no automatic semantic scoring."
+  },
+  "kimi": {
+    "completed_turns": 0,
+    "reported_usage": null,
+    "failure": "Invalid request (attempt_rejected): model \"kimi-for-coding\" is reasoning-capable but its capability record declares thinking_control_format=No_thinking_control: enable_thinking=false cannot be encoded and would be silently dropped, letting the model think freely and corrupt JSON-mode output. Declare a thinking_control_format for this model in Capabilities.for_model_id (models.toml), or route to a model that supports disabling thinking (resolved thinking_control_format=none from the model capability row)."
+  },
+  "scope": "4-turn tool-free continuity smoke, not 10-turn acceptance or before-after optimization proof; normalized usage may zero-fill unreported fields."
+}

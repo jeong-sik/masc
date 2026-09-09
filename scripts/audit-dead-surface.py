@@ -779,7 +779,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 #       stop_reason_wire.is_unmatched_tool_calls -- an inline test is their
 #       only caller. Dropping the val turns the release build red, so they
 #       need the test rewritten first (#34884).
-DEAD_EXPORT_BASELINE = 33
+#    1  keeper_approval_queue.observe_waiting_request -- read-only typed
+#       observation of an authoritative Gate request, published ahead of its
+#       consumer: the dependent direct-Gate dispatch unit consumes it next
+#       (#34962 evidence: docs/evidence/2026-09-10-direct-gate-wait).
+DEAD_EXPORT_BASELINE = 34
 
 
 def run_ratchet(count: int) -> int:

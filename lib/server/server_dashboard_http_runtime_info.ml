@@ -1729,7 +1729,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "api_name", `String rt.model.api_name
           ; "tools_support", `Bool rt.model.tools_support
           ; "max_context", Json_util.int_opt_to_json rt.model.max_context
-          ; "thinking_support", `Bool rt.model.thinking_support
+          ; "thinking_support", Json_util.bool_opt_to_json rt.model.thinking_support
           ; "preserve_thinking", Json_util.bool_opt_to_json rt.model.preserve_thinking
           ; "streaming", `Bool rt.model.streaming
           ; "temperature", Json_util.float_opt_to_json rt.model.temperature
@@ -1921,7 +1921,8 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int (Runtime.max_context_of_runtime rt)
     ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
-    ; "thinking_support", `Bool (rt.model.thinking_support && not is_official_client_runtime)
+    ; "thinking_support", Json_util.bool_opt_to_json
+        (if is_official_client_runtime then Some false else rt.model.thinking_support)
     ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)
       (* Per-model sampling temperature override ([models.<id>].temperature).
          [`Null] when unset (the runtime keeps the fleet fallback). Read-only

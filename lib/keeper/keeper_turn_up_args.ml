@@ -17,6 +17,7 @@ type parsed_args = {
   max_context_override_opt : int option;
   max_context_override_present : bool;
   sandbox_profile_opt : string option;
+  sandbox_image_patch : string option option;
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
@@ -31,6 +32,13 @@ type parsed_args = {
   declarative_manifest_snapshot : declarative_manifest_snapshot;
   instructions_opt : string option;
 }
+
+let parse_sandbox_image_patch args =
+  match Json_util.assoc_member_opt "sandbox_image" args with
+  | None -> Ok None
+  | Some `Null -> Ok (Some None)
+  | Some (`String image) when String.trim image <> "" -> Ok (Some (Some image))
+  | Some _ -> Error "sandbox_image must be a nonblank string or null"
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with
@@ -222,6 +230,7 @@ let known_turn_up_args =
   ; "mention_targets"
   ; "max_context_override"
   ; "sandbox_profile"
+  ; "sandbox_image"
   ; "microvm_backend"
   ; "remote_endpoint"
   ; "network_mode"
@@ -317,6 +326,9 @@ let parse
     match activation_mode_result with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok activation_mode_opt ->
+    match parse_sandbox_image_patch args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok sandbox_image_patch ->
     let max_context_override_res = parse_max_context_override args in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
@@ -339,6 +351,9 @@ let parse
       | None -> profile_defaults
       | Some microvm_backend -> { profile_defaults with microvm_backend }
     in
+    let profile_defaults = match sandbox_image_patch with
+      | None -> profile_defaults
+      | Some sandbox_image -> { profile_defaults with sandbox_image } in
     let effective_profile =
       match sandbox_profile_opt with
       | Some raw -> sandbox_profile_of_string raw
@@ -504,6 +519,7 @@ let parse
       max_context_override_opt;
       max_context_override_present;
       sandbox_profile_opt;
+      sandbox_image_patch;
       microvm_backend_patch;
       remote_endpoint_opt;
       remote_endpoint_present;

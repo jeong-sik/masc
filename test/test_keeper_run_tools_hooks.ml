@@ -557,7 +557,8 @@ let test_disposition_survives_for_every_call () =
     ~operation:"network_read"
     ~input:(`Assoc [ "index", `Int 1 ])
     (Tool_result.Failed
-       { Tool_result.class_ = Tool_result.Dependency_unavailable
+       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Dependency_unavailable
        ; message = "upstream refused"
        ; data = `Null
        ; metadata = None

@@ -2204,10 +2204,8 @@ let enqueue_dispatch_start mailbox request was_replay =
    one of them gone there is nothing left to disagree. *)
 let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
-(* RFC tui-server-lifecycle: the one masc server this TUI started, if any.
-   Held at module scope because the switch cleanup in [run_with_eio_context]
-   is registered before [main] builds the per-session [state], so the
-   cleanup and the key handler need a shared handle neither owns. *)
+(* Track the background server started by this TUI for readiness and child
+   reaping. Closing the UI does not stop the workspace server. *)
 let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
   ref None
 
@@ -2241,13 +2239,17 @@ let find_executable_in_path name =
                let candidate = Filename.concat dir name in
                if Sys.file_exists candidate then Some candidate else None)
 
-(* Opt-in start of a masc server from inside the TUI. [note] surfaces one
-   line to the operator; [on_ready] fires once /health answers so the caller
-   can trigger a reconnect. Never starts a second server while one is owned;
-   the health wait runs in a forked fiber so the render loop stays live. *)
+(* Start a background server on demand and report readiness without blocking
+   rendering. The handle prevents duplicate starts while the child is alive. *)
 let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
+  (match !tui_owned_server with
+   | Some server when not (Masc_tui_server_lifecycle.is_running server) ->
+     tui_owned_server := None
+   | Some _ | None -> ());
   match !tui_owned_server with
-  | Some _ -> note "masc server is already starting"
+  | Some server ->
+      note (Printf.sprintf "masc background server is already running (PID %d)"
+              (Masc_tui_server_lifecycle.owned_pgid server))
   | None -> (
       match
         Masc_tui_server_lifecycle.discover_server_binary
@@ -2282,14 +2284,23 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                         | Some clock -> Eio.Time.sleep clock 0.5
                         | None -> ()
                       in
-                      match
+                      let outcome =
                         Masc_tui_server_lifecycle.wait_healthy ~health_ok
                           ~child_alive:(fun () ->
                             Masc_tui_server_lifecycle.is_running owned)
                           ~attempts:60 ~sleep
-                      with
+                      in
+                      (* A new start may replace an exited child while this
+                         waiter sleeps. Only its own handle may publish the
+                         result or clear startup ownership. *)
+                      if Option.fold ~none:false
+                           ~some:(fun current -> current == owned)
+                           !tui_owned_server
+                      then match outcome with
                       | Masc_tui_server_lifecycle.Ready ->
-                          note "masc server is up";
+                          note (Printf.sprintf
+                                  "masc background server is up (PID %d); it stays running when the TUI closes"
+                                  (Masc_tui_server_lifecycle.owned_pgid owned));
                           on_ready ()
                       | Masc_tui_server_lifecycle.Server_exited ->
                           tui_owned_server := None;
@@ -20803,13 +20814,7 @@ let run_with_eio_context f =
         Eio.Switch.run (fun sw ->
             Eio_guard.enable ();
             Eio.Switch.on_release sw Eio_guard.disable;
-            (* RFC tui-server-lifecycle: stop only a server this TUI started;
-               a server we merely connected to is not ours to kill. *)
-            Eio.Switch.on_release sw (fun () ->
-                match !tui_owned_server with
-                | Some owned ->
-                    Masc_tui_server_lifecycle.stop owned ~grace_sec:2.0
-                | None -> ());
+            (* The workspace server owns its lifetime independently of this UI. *)
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             (* Without this, Process_eio falls back to a Unix path that waits on
                Unix.select. Eio is cooperative, so that blocks the whole domain

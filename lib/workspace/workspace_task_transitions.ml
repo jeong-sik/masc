@@ -979,6 +979,24 @@ let commit_verdict_r
                  ~task_id
                  ~status:new_status
                  ~module_name:"commit_verdict_r");
+           let reconcile_terminal () =
+              run_post_commit "terminal_reconciliation" (fun () ->
+                match
+                  (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+                    config
+                    ~agent_name:producer
+                    ~task_id
+                with
+                | Workspace_hooks.Task_terminal_delivered -> ()
+                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+                  Log.TaskState.error
+                    "task verdict terminal reconciliation degraded task_id=%s \
+                     producer=%s kind=%s detail=%s"
+                    task_id
+                    producer
+                    kind
+                    detail)
+           in
            (* Completion hooks key off the RESULT, and the completer is the
               producer — never the authority, which is not an agent and owns no
               task. *)
@@ -1020,22 +1038,7 @@ let commit_verdict_r
                      | `Assoc fields ->
                        `Assoc (fields @ [ "authority", `String authority_actor ])
                      | other -> other));
-              run_post_commit "terminal_reconciliation" (fun () ->
-                match
-                  (Atomic.get Workspace_hooks.task_terminal_committed_fn)
-                    config
-                    ~agent_name:assignee
-                    ~task_id
-                with
-                | Workspace_hooks.Task_terminal_delivered -> ()
-                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
-                  Log.TaskState.error
-                    "task verdict terminal reconciliation degraded task_id=%s \
-                     producer=%s kind=%s detail=%s"
-                    task_id
-                    assignee
-                    kind
-                    detail);
+              reconcile_terminal ();
               run_post_commit "done_hooks" (fun () ->
                 Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
               (* Completion metrics must fire on this path too. They used to be
@@ -1056,11 +1059,11 @@ let commit_verdict_r
                   ~collaborators:[]
                   ~handoff_from:None
                   ~handoff_to:None)
+            | Masc_domain.Cancelled _ -> reconcile_terminal ()
             | Masc_domain.Todo
             | Masc_domain.Claimed _
             | Masc_domain.InProgress _
-            | Masc_domain.AwaitingVerification _
-            | Masc_domain.Cancelled _ -> ());
+            | Masc_domain.AwaitingVerification _ -> ());
            let event_kind =
              match verdict with
              | Masc_domain.Verdict_approved -> Event_kind.Task.Approved

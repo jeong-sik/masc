@@ -1404,11 +1404,12 @@ let () =
     | `String value -> value
     | _ -> ""
   in
+  (* Counts only, matching the durable summary: it states no status and no
+     operator_action_required, so the surface below is the only place either is
+     decided. *)
   let queue ~count ~oldest_age =
     `Assoc
-      [ "status", `String "ok"
-      ; "operator_action_required", `Bool false
-      ; "counts_complete", `Bool true
+      [ "counts_complete", `Bool true
       ; "read_error_count", `Int 0
       ; "transition_outbox_count", `Int 0
       ; "runnable_backlog_count", `Int count
@@ -1421,6 +1422,7 @@ let () =
   in
   let old_source =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:false
       (queue ~count:2 ~oldest_age:(`Float 6000.0))
   in
   check
@@ -1442,6 +1444,7 @@ let () =
     (member "backlog_clean" old_source = `Bool false);
   let fresh_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:false
       (queue ~count:1 ~oldest_age:(`Float 5.0))
   in
   check
@@ -1451,16 +1454,13 @@ let () =
     match queue ~count:0 ~oldest_age:`Null with
     | `Assoc fields ->
       `Assoc
-        (("status", `String "degraded")
-         :: ("operator_action_required", `Bool true)
-         :: ("recoverable_backlog_count", `Int 2)
-         :: List.remove_assoc "status"
-              (List.remove_assoc "operator_action_required"
-                 (List.remove_assoc "recoverable_backlog_count" fields)))
+        (("recoverable_backlog_count", `Int 2)
+         :: List.remove_assoc "recoverable_backlog_count" fields)
     | _ -> assert false
   in
   let recoverable =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:false
       recoverable
   in
   check
@@ -1490,6 +1490,7 @@ let () =
   in
   let projection_pending =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:false
       projection_pending
   in
   check
@@ -1497,6 +1498,7 @@ let () =
     (member "backlog_clean" projection_pending = `Bool false);
   let immediate_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:false
       (queue ~count:1 ~oldest_age:(`Float 0.0))
   in
   check
@@ -1507,9 +1509,9 @@ let () =
     (member "operator_action_required" immediate_backlog = `Bool false);
   let unavailable =
     Health_fleet.keeper_event_queue_health_dimensions
+      ~source_unavailable:true
       (`Assoc
-         [ "status", `String "unavailable"
-         ; "counts_complete", `Bool false
+         [ "counts_complete", `Bool false
          ; "runnable_backlog_count", `Int 0
          ])
   in

@@ -51,7 +51,7 @@ let test_discover_not_found_carries_command () =
 let test_server_argv () =
   Alcotest.(check (list string))
     "argv has no shell interpolation"
-    [ "/bin/masc"; "--base-path"; "/ws"; "--host"; "127.0.0.1"; "--port"; "8935" ]
+    [ "/bin/masc"; "start"; "--base-path"; "/ws"; "--host"; "127.0.0.1"; "--port"; "8935" ]
     (L.server_argv ~masc_bin:"/bin/masc" ~base_path:"/ws" ~host:"127.0.0.1"
        ~port:8935)
 
@@ -158,7 +158,17 @@ let test_start_stop_reaped () =
       Alcotest.(check bool)
         "owned server comes up after start" true (await_alive 40);
       L.stop owned ~grace_sec:0.3;
-      (try ignore (Unix.waitpid [] pgid) with Unix.Unix_error _ -> ());
+      let rec await_exit tries =
+        if not (L.is_running owned) then true
+        else if tries <= 0 then false
+        else (
+          Unix.sleepf 0.05;
+          await_exit (tries - 1))
+      in
+      Alcotest.(check bool)
+        "lifecycle observes and reaps the exited child" true (await_exit 40);
+      Alcotest.(check bool)
+        "reaped startup handle stays exited" false (L.is_running owned);
       Alcotest.(check bool)
         "owned server is gone after stop and reap" false
         (Process_eio_detached.is_pgid_alive ~pgid);

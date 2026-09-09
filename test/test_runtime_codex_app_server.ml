@@ -233,7 +233,8 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
+let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = [])
+    ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
@@ -244,6 +245,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; native
+      ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
@@ -269,6 +271,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ~dynamic_tools
       ?thread_mode
       ~history
+      ~developer_context
       ?on_thread_ready
       ?on_turn_started
       ?on_stream_event
@@ -470,6 +473,47 @@ let test_context_error_records_prior_tool_effect () =
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
+let test_developer_context_preserves_authority_and_history () =
+  List.iter (fun (thread_mode, expected_roles) ->
+    let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
+      with_fixture ~capture_path
+        [ init_result; account_chatgpt; thread_result
+        ; {|{"id":4,"result":{}}|}
+        ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+        ; item_completed; turn_completed ]
+        (fun path ->
+          match run_fixture ~thread_mode
+            ~developer_instructions:"stable policy"
+            ~developer_context:["current fact"]
+            ~history:[{ Runtime_codex_app_server.role = User; text = "prior history" }]
+            ~prompt:"current question" path with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok _ ->
+              let requests = Masc_test_deps.read_file capture_path
+                |> String.split_on_char '\n'
+                |> List.filter (fun line -> String.trim line <> "")
+                |> List.map Yojson.Safe.from_string in
+              let open Yojson.Safe.Util in
+              let request method_ = List.find (fun j -> member "method" j = `String method_) requests
+                |> member "params" in
+              let thread_method = match thread_mode with
+                | Runtime_codex_app_server.Start -> "thread/start"
+                | Resume _ -> "thread/resume" in
+              check string "stable policy remains separate" "stable policy"
+                (request thread_method |> member "developerInstructions" |> to_string);
+              let items = request "thread/inject_items" |> member "items" |> to_list in
+              check (list string) "context retains developer authority; resume omits history"
+                expected_roles (List.map (fun j -> member "role" j |> to_string) items);
+              let last = List.hd (List.rev items) in
+              check string "context bytes unchanged" "current fact"
+                (last |> member "content" |> to_list |> List.hd |> member "text" |> to_string);
+              check string "user prompt unchanged" "current question"
+                (request "turn/start" |> member "input" |> to_list |> List.hd |> member "text" |> to_string))))
+    [ Runtime_codex_app_server.Start, ["user"; "developer"]
+    ; Resume { thread_id = "thread-1" }, ["developer"] ]
 ;;
 
 let test_history_is_injected_before_turn () =
@@ -4030,6 +4074,54 @@ let test_live_dynamic_tool_subscription () =
       check string "live tool response" "MASC_TOOL_OK" result.text
 ;;
 
+(* This experiment reports provider usage, not an assumed cache benefit.
+   Both arms must preserve the latest developer fact for ten resumed turns.
+   Existing live-test opt-in applies; no production setting enables this path. *)
+let test_live_developer_context_comparison () =
+  if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    Eio_main.run (fun env ->
+      let observed_model = ref None in
+      let stable = "Follow the latest developer-provided current marker. Return only that marker. Do not use tools." in
+      List.iter (fun arm ->
+        let thread_mode = ref Runtime_codex_app_server.Start in
+        for index = 1 to 10 do
+          let marker = Printf.sprintf "CONTEXT_%02d" index in
+          let context = "The current marker is " ^ marker ^ "." in
+          let developer_instructions, developer_context = match arm with
+            | `Rewrite -> Some (stable ^ "\n" ^ context), []
+            | `Append -> Some stable, [context] in
+          let config = { (Runtime_codex_app_server.default_config ()) with
+              developer_instructions } in
+          match Runtime_codex_app_server.run_turn
+              ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
+              ~cwd:Eio.Path.(Eio.Stdenv.fs env / Filename.get_temp_dir_name ())
+              ~thread_mode:!thread_mode ~developer_context config
+              ~prompt:"Return the current marker." ~images:[] with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok result ->
+              check string "latest developer fact survives resume" marker (String.trim result.text);
+              (match !observed_model with
+               | None -> observed_model := Some result.model
+               | Some model -> check string "same model across comparison" model result.model);
+              let usage = match result.usage with
+                | None -> `Null
+                | Some usage -> `Assoc
+                    [ "input_tokens", `Int usage.input_tokens
+                    ; "cache_read_tokens", `Int usage.cached_input_tokens
+                    ; "output_tokens", `Int usage.output_tokens
+                    ; "reasoning_output_tokens", `Int usage.reasoning_output_tokens ] in
+              print_endline (Yojson.Safe.to_string (`Assoc
+                [ "experiment", `String "developer-context-placement"
+                ; "arm", `String (match arm with `Rewrite -> "rewrite" | `Append -> "append")
+                ; "turn", `Int index; "model", `String result.model
+                ; "thread_id", `String result.thread_id; "turn_id", `String result.turn_id
+                ; "usage", usage ]));
+              thread_mode := Runtime_codex_app_server.Resume { thread_id = result.thread_id }
+        done) [`Rewrite; `Append])
+;;
+
 let test_live_history_injection_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
@@ -4446,6 +4538,8 @@ let () =
             "context error records prior tool effect"
             `Quick
             test_context_error_records_prior_tool_effect
+        ; test_case "developer context preserves authority and history" `Quick
+            test_developer_context_preserves_authority_and_history
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
         ; test_case
             "thread resume skips history injection"
@@ -4563,6 +4657,10 @@ let () =
             "official Codex dynamic tool"
             `Slow
             test_live_dynamic_tool_subscription
+        ; test_case
+            "developer context placement comparison (10 turns per arm)"
+            `Slow
+            test_live_developer_context_comparison
         ; test_case
             "official Codex history injection"
             `Slow

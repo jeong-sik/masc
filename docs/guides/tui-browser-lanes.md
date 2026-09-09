@@ -133,3 +133,7 @@ skills; users need not name a skill for an ordinary UI request. Newly built MASC
 installs seed missing packages through the existing builtin-skill installer.
 
 스크린샷에서 마우스 휠은 포인터 아래의 스크롤 영역을 움직인다. 따라서 메시지 목록과 사이드바가 따로 스크롤되는 페이지에서도 해당 영역을 선택할 수 있다. `j/k`와 위·아래 키는 화면 중앙의 영역을 움직인다. 자동화 Lane은 브라우저의 네이티브 wheel 입력을 사용하고, Live Lane은 포인터 아래 DOM의 스크롤 가능한 조상을 찾는다. 스크롤 뒤 같은 탭을 다시 캡처한다.
+
+`v`는 현재 페이지의 `main`, `navigation`, `region`, `article` 같은 의미 영역을 목록으로 읽는다. `n/p`로 영역을 고르고 Enter를 누르면 그 영역의 내용만 읽으며 `r`도 같은 영역을 새로 읽는다. 다시 `v`를 누르면 페이지 영역 목록으로 돌아간다. 영역이 교체되거나 페이지가 재로드되면 기존 참조는 거절된다. 영역 읽기를 지원하지 않는 커넥터가 전체 페이지를 반환해도 성공으로 처리하지 않는다.
+
+Keeper도 `BrowserRead mode=regions`에서 받은 `documentId/nodeId`를 `scope`로 전달해 `mode=scene`을 호출한다. 이 동선은 CSS 경로를 추측하지 않고 실제 관측한 영역을 선택한다. 지역별 viewport/DOM 내용이며 채널 전체 이력 수집을 뜻하지 않는다.

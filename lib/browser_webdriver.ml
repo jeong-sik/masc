@@ -281,11 +281,12 @@ let execute_unlocked t = function
       let* _ = call t session `POST "/url" (Some (`Assoc ["url", `String url])) in
       page_summary t session)
   | Browser_lane.Page_act action -> fst (execute_action t action)
-  | Browser_lane.Page_scene {tab_id=id;max_chars} ->
+  | Browser_lane.Page_scene {tab_id=id;max_chars;view;scope} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
-      let* data = script t session Browser_scene_script.read
-        [`Assoc ["mode",`String "read";"maxChars",`Int max_chars]] in
+      let args = match Browser_lane.scene_args ~tab_id:id ~max_chars ~view ~scope with
+        | `Assoc fields -> `Assoc (("mode",`String "read")::fields) | json -> json in
+      let* data = script t session Browser_scene_script.read [args] in
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int id) :: fields))
       | _ -> Error (Protocol "malformed semantic scene"))

@@ -135,7 +135,35 @@ let test_keeper_discovers_clients_without_dispatch () =
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
 
+let test_scoped_scene_acknowledgement () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let ignores_scope = ref false in
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_scene {tab_id;view;scope;_} ->
+          let scope_json = match scope with None -> `Null | Some target ->
+            `Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id] in
+          answer (`Assoc ["tabId",`Int tab_id;"schema",`String "masc.browser.scene.v1";
+            "documentId",`String "fixture";"url",`String "https://example.org";"title",`String "Page";
+            "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+            "nodes",`List [];"truncated",`Bool false;
+            "view",`String (if !ignores_scope then "content" else match view with Regions -> "regions" | Content -> "content");
+            "scope",(if !ignores_scope then `Null else scope_json)])
+        | _ -> fail "scoped scene dispatched an unrelated tool"));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+      let scope : Browser_lane.node_ref = {document_id="fixture";node_id="region"} in
+      let read () = Masc.Browser_scene.read ~scope (request (Some 7)) ~max_chars:1000 in
+      check bool "exact scoped scene accepted" true (Result.is_ok (read ()));
+      ignores_scope := true;
+      check bool "connector ignoring scope must fail rather than return whole page" true (Result.is_error (read ()));
+      check bool "connector ignoring region view must fail" true
+        (Result.is_error (Masc.Browser_scene.read ~view:Browser_lane.Regions (request (Some 7)) ~max_chars:1000));
+      check bool "duplicate scope fields rejected" true (Result.is_error (Masc.Browser_scene.scope_of_json
+        (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"]))))
+
 let () = run "browser surface" ["behavior",[
+  test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;
   test_case "invalid input is refused" `Quick test_strict_input;

@@ -2849,6 +2849,8 @@ module Browser_lane_view = struct
     content : Masc.Browser_scene.t; elapsed_ms : float }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
     | Scene_read of int
+    | Scene_regions of int
+    | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
@@ -2893,7 +2895,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -3050,10 +3052,15 @@ module Browser_lane_view = struct
 
   let accept_scene ~generation (result : (scene, string) result) t =
     match t.load with
-    | Loading (current, (Scene_read tab_id | Scene_click {tab_id;_})) when current = generation ->
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+        let expected_view, expected_scope = match operation with
+          | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_focus {target;_} -> Browser_lane.Content, Some target
+          | _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
-                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id ->
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
              {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
          | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
          | Error detail -> {t with scene = None; load = Failed detail})
@@ -3154,7 +3161,7 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
         | (candidate : Masc.Browser_scene.node) :: rest ->
             if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
       let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O"
+        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
         | Control {disabled=true;_} -> "disabled"
         | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
       let prefix = match index 0 (Browser_lane_view.scene_targets view) with

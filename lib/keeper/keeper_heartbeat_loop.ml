@@ -188,7 +188,10 @@ let failure_route_rate_limited_backoff_hint
      [Retry-After]": the backoff then takes its bounded default rather than
      the plain cadence, because the rate-limit signal is real even without a
      duration. *)
-  let hint retry_after = Option.value ~default:0.0 retry_after in
+  let hint = function
+    | Some seconds -> seconds
+    | None -> 0.0
+  in
   match failure.route with
   | Route.Retry_after_observed { retry_class = Rate_limited | Hard_quota; retry_after } ->
     Some

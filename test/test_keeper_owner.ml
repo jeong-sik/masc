@@ -1204,7 +1204,7 @@ let test_runtime_deferred_child_keeps_same_operation_and_drains () =
       ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
-    let operation = match owner_ok (claim ()) with
+    let operation : Chat_operation.t = match owner_ok (claim ()) with
       | Some operation -> operation | None -> fail "same-operation continuation disappeared" in
     check (option json) "original input survives each claim" (Some input) operation.input;
     check json "original channel survives each claim" source operation.source;

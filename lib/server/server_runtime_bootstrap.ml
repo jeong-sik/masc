@@ -232,24 +232,25 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
            (Env_config_core.Config_error
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S is missing in %s; add \
-                  [runtime.exact_output_lanes.%s] with a non-empty slots array \
-                  of AGENT_CORE target refs, or reset the preserved runtime.toml and \
+                  [runtime.exact_output_lanes.%s] with non-empty slots (AGENT_CORE \
+                  target refs) or cli_slots (runtime ids), or reset the preserved runtime.toml and \
                   restart so MASC can reseed it; existing runtime configs are \
                   never migrated automatically"
                  lane_id
                  config_path
                  lane_id))
-       | Some { slot_ids = []; _ } ->
+       | Some { slot_ids = []; cli_slot_ids = []; _ } ->
          raise
            (Env_config_core.Config_error
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S has no slots in %s; \
-                  configure at least one AGENT_CORE target ref or reset the preserved \
-                  runtime.toml and restart so MASC can reseed it; existing \
+                  configure at least one AGENT_CORE target ref in slots or CLI runtime \
+                  id in cli_slots, or reset the preserved runtime.toml and restart so MASC can reseed it; existing \
                   runtime configs are never migrated automatically"
                  lane_id
                  config_path))
-       | Some { slot_ids = _ :: _; _ } -> ())
+       | Some { slot_ids = _ :: _; _ }
+       | Some { cli_slot_ids = _ :: _; _ } -> ())
     mandatory_exact_output_lane_ids
 ;;
 
@@ -371,8 +372,9 @@ let warn_rejected_exact_output_bindings resolver_snapshot =
 
 let warn_optional_exact_output_lane registry ~lane_id ~feature =
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots = _ :: _; _ } -> ()
-  | Ok { selected_slots = []; _ }
+  | Ok { selected_slots = _ :: _; _ }
+  | Ok { cli_slots = _ :: _; _ } -> ()
+  | Ok { selected_slots = []; cli_slots = [] }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"

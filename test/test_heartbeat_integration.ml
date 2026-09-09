@@ -3024,6 +3024,19 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       in
       Eio.Switch.run @@ fun sw ->
       install_owner_inventory_exn ~sw config;
+      (match Dashboard_purge.existing_operation config "plain-agent" with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "plain Agent acquired a Keeper deletion operation"
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
+      let orphan_id = Shutdown_types.Operation_id.generate () in
+      ignore (Masc.Keeper_shutdown_intake_fence.restore_shutdown
+        ~base_path:config.base_path ~keeper_name:"orphan-shutdown" ~operation_id:orphan_id);
+      (match Dashboard_purge.existing_operation config "orphan-shutdown" with
+       | Error (Dashboard_purge.Keeper_operation_unreadable { operation_id; _ }) ->
+         check bool "owner absence preserves the exact outstanding reservation"
+           true (Shutdown_types.Operation_id.equal orphan_id operation_id)
+       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+       | Ok _ -> fail "missing shutdown receipt fell through to plain Agent deletion");
       (match Dashboard_purge.resolve config "plain-agent" with
        | Ok None -> ()
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
@@ -3040,9 +3053,9 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok (Some _) -> fail "long-name Keeper unexpectedly had a purge operation"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       (match Dashboard_purge.resolve config long_name with
-       | Ok (Some target) ->
+       | Ok (Some (Dashboard_purge.Runtime_keeper target)) ->
          check string "resolved long Keeper name" long_name target.keeper_name
-       | Ok None -> fail "long-name Keeper fell through to plain-agent purge"
+       | Ok (Some (Dashboard_purge.Configuration_only _)) | Ok None -> fail "long-name Keeper fell through to plain-agent purge"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       (match
          Dashboard_purge.resolve
@@ -3062,15 +3075,13 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       in
       let target =
         match Dashboard_purge.resolve config persisted.name with
-        | Ok (Some target) -> target
-        | Ok None -> fail "persisted Keeper fell through to plain-agent purge"
+        | Ok (Some (Dashboard_purge.Runtime_keeper target)) -> target
+        | Ok (Some (Dashboard_purge.Configuration_only _)) | Ok None -> fail "persisted Keeper fell through to plain-agent purge"
         | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
       in
       check string "resolved exact Keeper name" persisted.name target.keeper_name;
-      (* A Keeper that can still execute a turn is refused here, not raced.
-         The dashboard hides the control in the same states, but a caller
-         reaching the endpoint directly bypassed that entirely — which is how a
-         live campaign Keeper was purged mid-run on 2026-08-20. *)
+      (* Resolver admits the exact owner; durable shutdown, not this lookup,
+         fences and joins an active lane before artifact cleanup. *)
       let executing_entry =
         R.register_offline ~base_path:config.base_path persisted.name persisted
       in
@@ -3083,23 +3094,10 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Error _ -> fail "could not stage an executing lane for purge admission"
        | Ok () ->
          (match Dashboard_purge.resolve config persisted.name with
-          | Error (Dashboard_purge.Keeper_lane_executing { keeper_name; phase }) ->
-            check string "refused the executing Keeper" persisted.name keeper_name;
-            check
-              string
-              "reported the phase that refused it"
-              "running"
-              (String.lowercase_ascii phase)
-          | Error other ->
-            fail
-              ("executing lane produced the wrong refusal: "
-               ^ Dashboard_purge.resolve_error_to_string other)
-          | Ok _ -> fail "an executing Keeper must not be admitted for purge"));
-      (* The chat lane never changes phase: run_keeper_invocation_turn_admitted
-         calls mark_turn_started, which writes current_turn_observation and
-         leaves phase alone. A phase-only guard reads a Paused Keeper answering
-         a chat message as purgeable, so the refusal has to see the live turn
-         too. *)
+          | Ok (Some (Dashboard_purge.Runtime_keeper target)) -> check string "active owner is resolved" persisted.name target.keeper_name
+          | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+          | Ok (Some (Dashboard_purge.Configuration_only _)) | Ok None -> fail "active Keeper must not fall through to plain agent"));
+      (* Chat turns also use the same exact-owner shutdown procedure. *)
       (match
          R.put_entry
            ~base_path:config.base_path
@@ -3113,16 +3111,9 @@ let test_dashboard_purge_resolution_is_fail_closed () =
            ~wake:Masc.Keeper_registry_types.Chat_request
            persisted.name;
          (match Dashboard_purge.resolve config persisted.name with
-          | Error
-              (Dashboard_purge.Keeper_lane_executing
-                { keeper_name; live_turn_id = Some _; _ }) ->
-            check string "refused the Keeper mid chat turn" persisted.name keeper_name
-          | Error other ->
-            fail
-              ("a chat turn in flight produced the wrong refusal: "
-               ^ Dashboard_purge.resolve_error_to_string other)
-          | Ok _ ->
-            fail "a Keeper running a chat turn must not be admitted for purge"));
+          | Ok (Some (Dashboard_purge.Runtime_keeper target)) -> check string "chat owner is resolved" persisted.name target.keeper_name
+          | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
+          | Ok (Some (Dashboard_purge.Configuration_only _)) | Ok None -> fail "chat Keeper must not fall through to plain agent"));
       (* Drop the staged lane so the assertions below still describe a Keeper
          that only has persisted metadata. *)
       ignore (R.unregister_exact executing_entry);
@@ -3195,15 +3186,57 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       in
       write_file configured_path "[keeper]\nautoboot = false\n";
       match Dashboard_purge.resolve config configured_name with
-      | Error
-          (Dashboard_purge.Keeper_metadata_required
-            { configuration_path; _ }) ->
-        check string
-          "configuration-only Keeper path stays explicit"
-          configured_path
-          configuration_path
+      | Ok (Some (Dashboard_purge.Configuration_only { keeper_name; _ })) ->
+        check string "configuration-only target is explicit" configured_name keeper_name
       | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
-      | Ok _ -> fail "configuration-only Keeper fell through to agent purge")
+      | Ok _ -> fail "configuration-only Keeper was not classified correctly")
+;;
+
+let test_configuration_removal_retries_exact_revision_without_runtime () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  let base_dir = temp_dir "keeper-configuration-removal" in
+  Fun.protect ~finally:(fun () -> R.For_testing.clear (); cleanup_dir base_dir) (fun () ->
+    let config = Masc.Workspace.default_config base_dir in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    Eio.Switch.run @@ fun sw ->
+    install_owner_inventory_exn ~sw config;
+    let module Removal = Masc.Keeper_configuration_removal in
+    let keeper_name = "declared-only" in
+    let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base_dir)
+      (keeper_name ^ ".toml") in
+    let source = "[keeper]\nautoboot = false\n" in
+    write_file path source;
+    let calls = ref 0 in
+    let failed = match Removal.submit ~config ~keeper_name ~actor:"operator"
+      ~cleanup:(fun _ -> incr calls; Error "artifact unavailable") with
+      | Ok receipt -> receipt | Error error -> fail (Removal.error_to_string error) in
+    (match failed.state with Cleanup_required "artifact unavailable" -> ()
+      | _ -> fail "partial configuration cleanup was not recorded");
+    check bool "no runtime metadata was fabricated" false
+      (Sys.file_exists (Keeper_types_profile.keeper_meta_path config keeper_name));
+    let reloaded = Masc.Workspace.default_config base_dir in
+    (match Removal.list ~config:reloaded with
+     | Ok {receipts=[receipt]; errors=[]} ->
+       check bool "receipt survives a fresh read" true
+         (Shutdown_types.Operation_id.equal receipt.operation_id failed.operation_id)
+     | _ -> fail "configuration deletion receipt did not survive reload");
+    write_file path "[keeper]\nautoboot = true\n";
+    let retry () = Removal.retry ~config:reloaded ~keeper_name ~operation_id:failed.operation_id
+      ~cleanup:(fun _ -> incr calls; Ok ()) in
+    (match retry () with Error (Removal.Conflict _) -> ()
+      | _ -> fail "old deletion erased replacement configuration");
+    check int "stale revision did not run cleanup" 1 !calls;
+    write_file path source;
+    (match retry () with Ok {state=Removed; _} -> ()
+      | Ok _ -> fail "configuration deletion stayed incomplete"
+      | Error error -> fail (Removal.error_to_string error));
+    check bool "manifest is removed" false (Sys.file_exists path);
+    write_file path "[keeper]\nautoboot = true\n";
+    ignore (retry ());
+    check bool "completed receipt cannot remove a new manifest" true (Sys.file_exists path);
+    check int "completed receipt does not replay cleanup" 2 !calls)
 ;;
 
 let test_keeper_shutdown_prepare_joins_idle_lane () =
@@ -4087,9 +4120,15 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let sidecar_paths =
         [ Keeper_types_support.keeper_decision_log_path config meta.name
         ; Keeper_types_support.keeper_feedback_log_path config meta.name
+        ; Keeper_types_support.keeper_decision_log_path config meta.name ^ ".1"
+        ; Keeper_types_support.keeper_feedback_log_path config meta.name ^ ".2"
+        ; Filename.concat (Keeper_fs.keeper_dir config)
+            (Masc.Keeper_runtime_root_entry.keeper_basename ~keeper_name:meta.name Tla_trace_log)
         ]
       in
       List.iter (fun path -> write_file path "fixture") sidecar_paths;
+      let unrelated_log = Keeper_types_support.keeper_decision_log_path config (meta.name ^ "-other") in
+      write_file unrelated_log "other Keeper evidence";
       let runtime_dir = Filename.concat (Keeper_fs.keeper_dir config) meta.name in
       write_file (Filename.concat runtime_dir "runtime.json") "{}";
       let session_dir =
@@ -4269,6 +4308,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         removed_paths;
       check bool "unrelated agent artifact preserved" true
         (Sys.file_exists unrelated_path);
+      check bool "other Keeper log is preserved" true (Sys.file_exists unrelated_log);
       check bool "unrelated playground preserved" true
         (Sys.file_exists unrelated_playground_path);
       check bool
@@ -5185,6 +5225,8 @@ let () =
         test_unsupported_shutdown_schema_retains_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
+      test_case "configuration removal survives failure and protects replacement" `Quick
+        test_configuration_removal_retries_exact_revision_without_runtime;
       test_case "Librarian rejection unregisters with lifecycle authority" `Quick
         test_librarian_rejection_unregisters_with_lifecycle_authority;
       test_case "shutdown prepare joins idle lane" `Quick

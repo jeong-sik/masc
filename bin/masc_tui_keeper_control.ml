@@ -25,6 +25,7 @@ let response_detail ~status body =
 
 type liveness =
   | Unobserved
+  | Invalid of string
   | Absent
   | Present of Decode.keeper_runtime
 
@@ -40,14 +41,22 @@ type roster =
       { observed : Decode.keeper_runtime list
       ; total : int
       }
+  | Roster_invalid of
+      { observed : Decode.keeper_runtime list
+      ; errors : (string * string) list
+      ; complete : bool
+      }
   | Roster_complete of Decode.keeper_runtime list
 
-let roster_of_reading ~rows ~truncated ~total =
+let roster_of_reading ~errors ~rows ~truncated ~total =
   (* [count] short of [total] is the same fact as truncation: rows that belong
      here are missing. The route drops a keeper whose metadata it cannot read,
      and that keeper's fiber is still running. *)
   let observed_count = List.length rows in
-  if truncated || observed_count < total then
+  if errors <> [] then
+    Roster_invalid { observed = rows; errors;
+      complete = not truncated && observed_count + List.length errors >= total }
+  else if truncated || observed_count < total then
     Roster_partial { observed = rows; total = max total observed_count }
   else Roster_complete rows
 
@@ -80,6 +89,12 @@ let find_row rows name =
 
 let liveness_of_roster roster name =
   match roster with
+  | Roster_invalid { observed; errors; complete } -> (
+      match List.assoc_opt name errors with
+      | Some detail -> Invalid detail
+      | None -> (match find_row observed name with
+          | Some row -> Present row
+          | None -> if complete then Absent else Unobserved))
   | Roster_unobserved -> Unobserved
   | Roster_partial { observed; total = _ } -> (
       match find_row observed name with
@@ -103,20 +118,19 @@ let liveness_of_roster roster name =
    about the reading, not a state the keeper is in. *)
 let health reading =
   match reading.liveness with
-  | Unobserved | Absent -> None
+  | Unobserved | Invalid _ | Absent -> None
   | Present runtime -> Some runtime.Decode.kr_health
 
 let next_action reading =
   match reading.liveness with
-  | Unobserved | Absent -> None
+  | Unobserved | Invalid _ | Absent -> None
   | Present runtime -> runtime.Decode.kr_next_action
 
-(* Three outcomes, not two. A roster that was never read and a roster that
-   answered without this keeper are different facts: the first says nothing
-   about the keeper, the second says no fiber is running it. Spelling both
-   "unread" would fold a reading into the absence of one. *)
+(* Failed configuration, unread status and observed absence are distinct
+   readings; none supplies an invented heartbeat state. *)
 let health_label reading =
   match reading.liveness with
+  | Invalid _ -> "config error"
   | Unobserved -> "unread"
   | Absent -> "absent"
   | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
@@ -196,10 +210,11 @@ let action_gerund = function
    there is no route that answers "what would a purge take". *)
 let purge_artifacts =
   [ "metrics store"
-  ; "decision log"
-  ; "feedback log"
+  ; "decision, feedback and state-transition logs including rotations"
   ; "runtime directory"
   ; "Memory OS snapshots and journal"
+  ; "sandbox workspaces"
+  ; "runtime assignment and Keeper egress configuration"
   ; "TOML configuration"
   ; "chat history"
   ; "agent files and auth tokens"
@@ -209,26 +224,20 @@ let requires_confirmation = function
   | Shutdown | Delete -> true
   | Pause | Resume | Boot | Wakeup -> false
 
-(* Delete is offered only where the roster said no fiber is running the keeper.
-   [Unobserved] offers nothing for the same reason every other action does not:
-   a roster that failed to load says nothing about whether a fiber is alive, and
-   the server's purge would have to stop one it was not asked to stop.
-
-   The purge route accepts a live keeper and shuts it down as part of the
-   operation. Not offering it here keeps the two steps the operator's to
-   sequence -- s then d -- so a single keypress never ends a running turn. *)
+(* Confirmed deletion uses the server's durable shutdown operation, which
+   stops and joins the exact lane before removing its artifacts. *)
 let available reading =
   match reading.liveness with
-  | Unobserved -> []
+  | Unobserved | Invalid _ -> [ Delete ]
   | Absent -> [ Boot; Delete ]
   | Present runtime ->
       if not runtime.Decode.kr_keepalive_running then [ Boot; Delete ]
-      else if reading.paused then [ Resume; Wakeup; Shutdown ]
-      else [ Pause; Wakeup; Shutdown ]
+      else if reading.paused then [ Resume; Wakeup; Shutdown; Delete ]
+      else [ Pause; Wakeup; Shutdown; Delete ]
 
 let primary reading =
   match available reading with
-  | [] -> None
+  | [] | [ Delete ] -> None
   | first :: _ -> Some first
 
 type step =
@@ -250,6 +259,7 @@ let recovers_from_conflict = function
 
 type outcome =
   | Accepted of { already_live : bool }
+  | Purge_accepted of { operation_id : string }
   | Paused_owner_conflict of string
   | Rejected of { status : int; detail : string }
 
@@ -267,6 +277,24 @@ let classify_response ~status ~body =
     Accepted { already_live = already_live_of_body body }
   else if status = 409 then Paused_owner_conflict (response_detail ~status body)
   else Rejected { status; detail = response_detail ~status body }
+
+let classify_purge_response ~keeper_name ~status ~body =
+  if status < 200 || status >= 300 then
+    Rejected { status; detail = response_detail ~status body }
+  else
+    let invalid () = Rejected { status; detail = "invalid Keeper purge acceptance: target or operation identity missing" } in
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      (match List.assoc_opt "ok" fields, List.assoc_opt "accepted" fields,
+         List.assoc_opt "target_kind" fields, List.assoc_opt "keeper_name" fields,
+         List.assoc_opt "operation_id" fields with
+       | Some (`Bool true), Some (`Bool true), Some (`String "keeper"),
+         Some (`String name), Some (`String operation_id)
+         when String.equal name (String.trim keeper_name) && String.trim operation_id <> "" ->
+           Purge_accepted { operation_id }
+       | _ -> invalid ())
+    | _ -> invalid ()
+    | exception Yojson.Json_error _ -> invalid ()
 
 type pending = {
   pending_keeper : string;
@@ -310,3 +338,85 @@ let directive_body ~operator_operation_id action =
 
 let mint_operation_id ~keeper ~serial =
   Printf.sprintf "masc-tui-resume-%s-%d" keeper serial
+
+
+type deletion_operation =
+  | Runtime_shutdown of Masc.Keeper_shutdown_types.t
+  | Configuration_removal of Masc.Keeper_configuration_removal.receipt
+
+type deletion_row = {
+  operation : deletion_operation;
+  completed : bool;
+  can_retry : bool;
+}
+
+type deletion_inventory = { operations : deletion_row list; errors : string list }
+
+let decode_deletion_inventory json =
+  let open Yojson.Safe.Util in
+  let ( let* ) = Result.bind in
+  let rec decode_rows acc = function
+    | [] -> Ok (List.rev acc)
+    | row :: rest ->
+      let* operation = Masc.Keeper_shutdown_store.of_json (member "operation" row)
+        |> Result.map_error Masc.Keeper_shutdown_store.error_to_string in
+      (match member "completed" row, member "can_retry" row with
+       | `Bool completed, `Bool can_retry ->
+         let open Masc.Keeper_shutdown_types in
+         let expected = match operation.cleanup_intent.reason, operation.phase with
+           | Dashboard_keeper_purge _, Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } ->
+             Some (true, false)
+           | Dashboard_keeper_purge _, Finalized { completion =
+               (Completion_pending Dashboard_keeper_purged
+               | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
+             Some (false, true)
+           | Dashboard_keeper_purge _, _ -> Some (false, false)
+           | _ -> None in
+         if expected = Some (completed, can_retry)
+         then decode_rows ({ operation = Runtime_shutdown operation; completed; can_retry } :: acc) rest
+         else Error "deletion projection contradicts its durable operation"
+       | _ -> Error "deletion row is missing completed/can_retry")
+  in
+  let rec decode_errors acc = function
+    | [] -> Ok (List.rev acc)
+    | row :: rest ->
+      (match member "keeper_name" row, member "operation_id" row, member "error" row with
+       | `String keeper, `String operation, `String detail ->
+         decode_errors ((keeper ^ " / " ^ operation ^ ": " ^ detail) :: acc) rest
+       | _ -> Error "invalid deletion inventory error")
+  in
+  try
+    let rec decode_config acc = function
+      | [] -> Ok (List.rev acc)
+      | json :: rest ->
+        let* receipt = Masc.Keeper_configuration_removal.of_json json
+          |> Result.map_error Masc.Keeper_configuration_removal.error_to_string in
+        let completed = receipt.state = Masc.Keeper_configuration_removal.Removed in
+        decode_config ({ operation = Configuration_removal receipt; completed; can_retry = not completed } :: acc) rest in
+    let rec strings acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> strings (value :: acc) rest
+      | _ -> Error "invalid configuration deletion inventory error" in
+    match member "operations" json, member "errors" json,
+          member "configuration_removals" json, member "configuration_errors" json with
+    | `List rows, `List errors, `List config_rows, `List config_errors ->
+      let* operations = decode_rows [] rows in
+      let* errors = decode_errors [] errors in
+      let* configurations = decode_config [] config_rows in
+      let* configuration_errors = strings [] config_errors in
+      Ok { operations = operations @ configurations; errors = errors @ configuration_errors }
+    | _ -> Error "invalid deletion inventory"
+  with Yojson.Safe.Util.Type_error (detail, _) -> Error detail
+
+
+let deletion_keeper_name row = match row.operation with
+  | Runtime_shutdown operation -> operation.keeper_name
+  | Configuration_removal receipt -> receipt.keeper_name
+
+let deletion_operation_id row = match row.operation with
+  | Runtime_shutdown operation -> operation.operation_id
+  | Configuration_removal receipt -> receipt.operation_id
+
+let deletion_json row = match row.operation with
+  | Runtime_shutdown operation -> Masc.Keeper_shutdown_store.to_json operation
+  | Configuration_removal receipt -> Masc.Keeper_configuration_removal.to_json receipt

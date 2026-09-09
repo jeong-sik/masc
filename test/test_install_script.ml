@@ -1067,7 +1067,7 @@ let test_wizard_reports_model_source_availability () =
       assert_contains
         "a down local server is reported as not running"
         output
-        "Local llama.cpp: not running";
+        "Local llama.cpp: unreachable";
       assert_contains
         "a cloud provider is labeled cloud, not probed"
         output
@@ -1090,7 +1090,7 @@ let test_wizard_warns_when_selected_local_server_is_down () =
       assert_contains
         "the down local server is called out before finishing"
         output
-        "Local llama.cpp is not running at http://127.0.0.1:1/v1";
+        "Local llama.cpp is not ready at http://127.0.0.1:1/v1; check its server and authentication before using masc";
       assert_contains
         "the default runtime is still set to the chosen server"
         output

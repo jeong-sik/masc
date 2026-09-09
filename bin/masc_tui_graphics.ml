@@ -180,3 +180,10 @@ let tmux_wrapped payload =
     String.concat "\x1b\x1b" (String.split_on_char '\x1b' payload)
   in
   "\x1bPtmux;" ^ escaped ^ "\x1b\\"
+
+type image_region = { top : int; left : int; width_cells : float; height_cells : float }
+let image_point region ~row ~column =
+  let x = (float_of_int (column - region.left) +. 0.5) /. region.width_cells in
+  let y = (float_of_int (row - region.top) +. 0.5) /. region.height_cells in
+  if Float.is_finite x && Float.is_finite y && x >= 0. && x < 1. && y >= 0. && y < 1.
+  then Some (x,y) else None

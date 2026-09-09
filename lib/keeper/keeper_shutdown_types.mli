@@ -31,13 +31,13 @@ type completion_action =
 
 type dashboard_purge_artifact =
   | Keeper_metrics_store_artifact
-  | Keeper_decision_log_artifact
-  | Keeper_feedback_log_artifact
+  | Keeper_root_logs_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_playground_bundles_artifact
+  | Keeper_runtime_configuration_artifact
   | Keeper_configuration_artifact
   | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
@@ -45,6 +45,7 @@ type dashboard_purge_artifact =
 type completion_receipt =
   | Completion_not_requested
   | Completion_pending of completion_action
+  | Completion_delivery_failed of { action : completion_action; detail : string }
   | Completion_delivered of completion_action
 
 type cleanup_intent =

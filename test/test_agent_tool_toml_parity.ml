@@ -9,9 +9,9 @@
 open Alcotest
 
 let expected =
-  [ "masc_agent_fitness"
+  [ "masc_agent_card"
+  ; "masc_agent_fitness"
   ; "masc_get_metrics"
-  ; "masc_agent_card"
   ]
 ;;
 

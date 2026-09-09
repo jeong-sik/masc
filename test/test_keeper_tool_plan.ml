@@ -883,6 +883,7 @@ let test_composable_output_registry_is_closed () =
     ; "masc_board_stats"
     ; "masc_get_metrics"
     ; "masc_goal_list"
+    ; "masc_msx_screen"
     ; "masc_run_list"
     ]
     json_names
@@ -1431,7 +1432,6 @@ let recipe_checkpoint () : Agent_core.Checkpoint.t =
   ; enable_thinking = None
   ; preserve_thinking = None
   ; response_format = Agent_core.Types.Off
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()

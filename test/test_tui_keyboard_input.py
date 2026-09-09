@@ -11475,14 +11475,19 @@ def runtime_surface_interaction(
                         f"{lane_detail_plain!r}"
                     )
 
-            lane_list = send_and_wait(
+            send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"\x1b[D",
-                b"1/2 runtime-a",
+                b"CANDIDATE",
             )
-            if b"MASC Config / Runtime detail" in CSI_RE.sub(b"", lane_list):
+            # Candidate identity also appears in the detail. Wait for the
+            # list-only column header, then inspect the replayed screen.
+            lane_screen = screen_text(bytes(output))
+            if b"1/2 runtime-a" not in lane_screen:
+                raise AssertionError("Runtime list lost the selected lane candidate")
+            if b"MASC Config / Runtime detail" in lane_screen:
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
             all_list = send_and_wait(
@@ -13842,17 +13847,28 @@ def run_browser_scene_regression(executable: str) -> None:
     def scene(body):
         request = json.loads(body)
         scenes.append(request)
-        assert request == target, "scene read lost client/tab ownership"
+        assert {k:request[k] for k in target} == target, "scene read lost client/tab ownership"
         changed = bool(actions)
+        view = request.get("view")
+        scope = request.get("scope")
+        assert view in ("content","regions")
+        region = dict(node("channel-region","region","Channel messages"),role="main")
+        if view == "regions":
+            nodes = [region]
+        elif scope:
+            assert scope == {"documentId":"document-after","nodeId":"channel-region"}
+            nodes = [node("message","text","SCOPED CHANNEL CONTENT")]
+        else:
+            nodes = [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
+                node("first-control", "control", "First action"),
+                node("second-control", "control", "Second action"),
+                node("image", "raster", "Scene illustration")]
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
-            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1",
+            "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1", "view":view, "scope":scope,
             "documentId": "document-after" if changed else "document-before",
             "url": url, "title": "scene", "truncated": False,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
-            "nodes": [node("body", "text", "SCENE CLICK VERIFIED" if changed else "SCENE BEFORE CLICK"),
-                node("first-control", "control", "First action"),
-                node("second-control", "control", "Second action"),
-                node("image", "raster", "Scene illustration")]}}
+            "nodes": nodes}}
 
     def click(body):
         request = json.loads(body)
@@ -13871,15 +13887,25 @@ def run_browser_scene_regression(executable: str) -> None:
         palette_go(process, master, output, b"go Browser Lane", b"scene reader ready")
         frame = send_and_wait(process, master, output, b"s", b"SCENE BEFORE CLICK")
         visible = screen_text(frame)
-        for text in (b"[>1 button/link] First action", b"[2 button/link] Second action",
-                     "[image · Ctrl-O] Scene illustration".encode()):
+        # Source-context selection includes text and raster observations,
+        # not only clickable controls. Preserve their document order.
+        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+                     b"[3 button/link] Second action",
+                     "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"
-        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
-        send_and_wait(process, master, output, b"p", b"[>1 button/link] First action")
-        send_and_wait(process, master, output, b"n", b"[>2 button/link] Second action")
+        send_and_wait(process, master, output, b"n", b"[>2 button/link] First action")
+        send_and_wait(process, master, output, b"n", b"[>3 button/link] Second action")
+        send_and_wait(process, master, output, b"p", b"[>2 button/link] First action")
+        send_and_wait(process, master, output, b"n", b"[>3 button/link] Second action")
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
+        send_and_wait(process, master, output, b"v", b"Channel messages")
+        assert scenes[-1]["view"] == "regions" and len(actions)==1
+        send_and_wait(process, master, output, b"\r", b"SCOPED CHANNEL CONTENT")
+        focused = scenes[-1]
+        send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
+        assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
 
@@ -13887,7 +13913,7 @@ def run_browser_scene_regression(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
-def run_browser_viewport_regression(executable: str) -> None:
+def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = True) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     captures, actions = [], []
@@ -13913,12 +13939,14 @@ def run_browser_viewport_regression(executable: str) -> None:
         assert request == target, "viewport capture lost its explicit target"
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "title": "owned", "url": url + "changed" if changed[0] else url,
-            "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+            "mimeType": "image/png", "data": png[0], "viewport": {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}, "elapsed_ms": 13.0}}
 
     def scroll(body):
         request = json.loads(body)
         actions.append(request)
-        assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=120)
+        expected_point = {"x":0.5,"y":0.5} if len(actions)==1 or not cell_geometry else {"x":9.5/60,"y":6.5/30}
+        assert request == dict(target, expectedUrl=url, action="scroll_at", x=0, y=120,
+            point=expected_point,viewport={"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0})
         if len(actions) == 2:
             blocked.set()
             if not release.wait(timeout=10):
@@ -13940,12 +13968,16 @@ def run_browser_viewport_regression(executable: str) -> None:
             os.write(master, data)
             wait_for_output(process, master, output, b"a=T", start=start, timeout=3)
             image_end = end_of_needle(output, b"a=T", start)
-            footer = b"Esc: back"
+            # Include the wheel hint before checking pane/center fallback.
+            # Esc: back is only the beginning of the footer.
+            footer = b"j/k:center"
             wait_for_output(process, master, output, footer, start=image_end, timeout=3)
             return bytes(output[start:end_of_needle(output, footer, image_end)])
 
         palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
-        image_input(b"\x0f")
+        initial_image = image_input(b"\x0f")
+        if not cell_geometry:
+            assert b"wheel:center" in initial_image, "missing center-wheel fallback hint"
         image_input(b"j")
         assert len(actions) == 1 and len(captures) == 2
         # Global shortcuts and pasted text belong to the visible viewport.
@@ -13984,13 +14016,85 @@ def run_browser_viewport_regression(executable: str) -> None:
     try:
         run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
             interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
-            preload_input=GRAPHICS_SUPPORTED_REPLY)
+            preload_input=(b"\x1b[6;20;10t" if cell_geometry else b"")+GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
 
 
+def run_browser_pointer_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    actions, captures, png = [], [], [""]
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    url = "https://example.org/"
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":url,"text":"pointer fixture","chars":15,"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        captures.append(request)
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "tabId":2,"title":"owned","url":url,"mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+
+    def act(body):
+        request = json.loads(body)
+        assert request["lane"] == "automation" and request["tabId"] == 2
+        assert "clientId" not in request and request["expectedUrl"] == url
+        assert request["viewport"] == viewport
+        actions.append(request)
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        palette_go(process, master, output, b"go Browser Lane", b"pointer fixture")
+        send_and_wait(process, master, output, b"a", b"pointer fixture")
+        def image_input(data):
+            read_available(master, output)
+            start = len(output)
+            os.write(master, data)
+            wait_for_output(process, master, output, b"Esc: back", start=start, timeout=3)
+            return bytes(output[start:])
+        image = image_input(b"\x0f")
+        assert b"f=100,a=T,r=25," in image, "fullscreen screenshot must use all 30 physical terminal rows"
+        # Caption clicks are consumed without dispatch; no double action on press.
+        os.write(master, b"\x1b[<0;2;1M\x1b[<0;2;1m")
+        wait_for_terminal_input_consumed(slave)
+        assert not actions
+        image_input(b"\x1b[<0;2;5M\x1b[<0;2;5m")
+        assert len(actions)==1 and actions[0]["action"]=="click_at"
+        # 30x100 terminal, 10x20 cells, square PNG: 25 rows x 50 columns,
+        # after the three caption rows. Mouse reports target cell centers.
+        assert actions[0]["point"] == {"x":0.03,"y":0.06}, actions[0]
+        image_input(b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        assert len(actions)==2 and actions[1]["action"]=="drag"
+        assert actions[1]["from"] == {"x":0.03,"y":0.06}, actions[1]["from"]
+        assert actions[1]["to"] == {"x":0.09,"y":0.18}, actions[1]["to"]
+        assert len(captures)==3
+        send_and_wait(process, master, output, b"\x1b", b"pointer fixture")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        os.write(master,b"q")
+
+    run_terminal_scenario(executable, description="Browser screenshot mouse click and drag routing",
+        interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,
+        preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
+    run_browser_viewport_regression(executable, cell_geometry=False)
     fixtures = overview_event_http_fixtures()
     client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []
@@ -14023,7 +14127,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
             return 404, {"ok": False, "error": "selected Firefox tab closed"}
         return 200, {"ok": True, "data": {
             "source": request["lane"], "clientId": request.get("clientId"), "tabId": request["tabId"], "title": "selected Firefox tab",
-            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "elapsed_ms": 13.0}}
+            "url": "https://example.org/", "mimeType": "image/png", "data": png[0], "viewport": {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}, "elapsed_ms": 13.0}}
 
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True, "data": {"clients": [{"clientId": client_id, "browser": "firefox"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
@@ -14916,7 +15020,7 @@ def msx_spectator_interaction(
     # waiting for every mosaic row to have been written. Waiting on the title
     # instead read rows that were still going out, and a half-written row is
     # narrower than the picture.
-    wait_for_output(process, master_fd, output, b"esc: back",
+    wait_for_output(process, master_fd, output, b"Esc: back",
                     start=watched_from, timeout=5.0)
     watching = bytes(output)[watched_from:]
     if b"spectating the server" not in watching:
@@ -14976,22 +15080,22 @@ def msx_size_interaction(
                     timeout=5.0)
     watched_from = len(output)
     os.write(master_fd, b"\r")
-    wait_for_output(process, master_fd, output, b"size 100%", start=watched_from,
+    wait_for_output(process, master_fd, output, b"+/-: 100%", start=watched_from,
                     timeout=5.0)
 
     down_from = len(output)
     os.write(master_fd, b"-")
-    wait_for_output(process, master_fd, output, b"size 87%", start=down_from,
+    wait_for_output(process, master_fd, output, b"+/-: 87%", start=down_from,
                     timeout=5.0)
 
     down_again = len(output)
     os.write(master_fd, b"-")
-    wait_for_output(process, master_fd, output, b"size 75%", start=down_again,
+    wait_for_output(process, master_fd, output, b"+/-: 75%", start=down_again,
                     timeout=5.0)
 
     up_from = len(output)
     os.write(master_fd, b"+")
-    wait_for_output(process, master_fd, output, b"size 87%", start=up_from,
+    wait_for_output(process, master_fd, output, b"+/-: 87%", start=up_from,
                     timeout=5.0)
 
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
@@ -15364,7 +15468,7 @@ def run_held_back_override_regression(executable: str) -> None:
         else:
             raise AssertionError("[p] never reached the prompts pane")
 
-        screen = CSI_RE.sub(b"", bytes(output))
+        screen = screen_text(bytes(output))
         if "적용 안 된 오버라이드 1개".encode() not in screen:
             raise AssertionError(
                 "the header does not count the held-back override, so a reader "
@@ -15372,6 +15476,10 @@ def run_held_back_override_regression(executable: str) -> None:
             )
         if "\u2298".encode() not in screen:
             raise AssertionError("the held-back row carries no mark of its own")
+        if b"Unknown template variables: facts_json" not in screen:
+            raise AssertionError("the rejected variable is not visible beside recovery guidance")
+        if b"You are a keeper." not in screen:
+            raise AssertionError("override notices hid the effective template body")
         if "다시 저장하면".encode() not in screen:
             raise AssertionError(
                 "the screen says the override is not applied and does not say "

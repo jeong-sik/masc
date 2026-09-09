@@ -59,7 +59,8 @@ let test_capture_identity () =
         | Browser_lane.Page_capture {tab_id=7} ->
           answer (`Assoc ["tabId", `Int !actual_id; "url", `String "https://example.org";
             "title", `String "Fixture"; "mimeType", `String "image/png";
-            "data", `String !payload])
+            "data", `String !payload; "viewport", `Assoc ["documentId",`String "fixture";
+              "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]])
         | _ -> fail "capture used an implicit or different target"));
       Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
       check bool "explicit capture succeeds" true
@@ -134,7 +135,81 @@ let test_keeper_discovers_clients_without_dispatch () =
       List.iter (fun info -> check bool "no dispatch before explicit selection" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None)) clients))
 
+let test_scoped_scene_acknowledgement () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let ignores_scope = ref false in
+      let observed_document = ref "fixture" in
+      let observed_url = ref "https://example.org" in
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_scene {tab_id;view;scope;_} ->
+          let scope_json = match scope with None -> `Null | Some target ->
+            `Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id] in
+          answer (`Assoc ["tabId",`Int tab_id;"schema",`String "masc.browser.scene.v1";
+            "documentId",`String !observed_document;"url",`String !observed_url;"title",`String "Page";
+            "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+            "nodes",`List [];"truncated",`Bool false;
+            "view",`String (if !ignores_scope then "content" else match view with Regions -> "regions" | Content -> "content");
+            "scope",(if !ignores_scope then `Null else scope_json)])
+        | _ -> fail "scoped scene dispatched an unrelated tool"));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
+      let scope : Browser_lane.node_ref = {document_id="fixture";node_id="region"} in
+      let read () = Masc.Browser_scene.read ~scope (request (Some 7)) ~max_chars:1000 in
+      check bool "exact scoped scene accepted" true (Result.is_ok (read ()));
+      check bool "delayed navigation cannot return old URL as destination" true
+        (Result.is_error (Masc.Browser_scene.read ~expected_url:"https://example.org/destination"
+          (request (Some 7)) ~max_chars:1000));
+      check bool "matching SPA URL is observable without new document or content readiness claim" true
+        (Result.is_ok (Masc.Browser_scene.read ~expected_url:"https://example.org"
+          (request (Some 7)) ~max_chars:1000));
+      let guarded_tool url = Masc.Tool_misc_browser_lane.handle_read
+        ~tool_name:"BrowserRead" ~start_time:0.
+        (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
+          "expectedUrl",`String url]) in
+      check bool "tool surface accepts matching destination guard" true
+        (match guarded_tool "https://example.org" with Tool_result.Completed _ -> true | _ -> false);
+      check bool "tool surface rejects old URL" true
+        (match guarded_tool "https://example.org/destination" with Tool_result.Failed _ -> true | _ -> false);
+      observed_url := "https://example.org/canonical";
+      check bool "redirect does not bypass original URL guard" true
+        (match guarded_tool "https://example.org" with Tool_result.Failed _ -> true | _ -> false);
+      let observed = Masc.Browser_scene.read ~view:Browser_lane.Regions (request (Some 7)) ~max_chars:1000 in
+      let actual_url = match observed with
+        | Ok json -> Yojson.Safe.Util.(json |> member "url" |> to_string)
+        | Error error -> fail error in
+      check string "unguarded observation exposes final redirect URL" "https://example.org/canonical" actual_url;
+      check bool "verified observed URL can be pinned without another follow" true
+        (match guarded_tool actual_url with Tool_result.Completed _ -> true | _ -> false);
+      let source : Masc.Browser_scene.navigation_source = {url= !observed_url;document_id= !observed_document} in
+      let same_url_read ?(pin=true) () = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"BrowserRead" ~start_time:0.
+        (`Assoc (["lane",`String "automation";"tabId",`Int 7;"mode",`String "regions";
+          "navigationSource",`Assoc ["url",`String source.url;
+            "documentId",`String source.document_id]] @
+          (if pin then ["expectedUrl",`String !observed_url] else []))) in
+      check bool "same URL old document is not navigation progress" true
+        (match same_url_read () with Tool_result.Failed _ -> true | _ -> false);
+      check bool "redirect inspection retains old-document rejection without URL pin" true
+        (match same_url_read ~pin:false () with Tool_result.Failed _ -> true | _ -> false);
+      observed_url := "https://example.org/spa-next";
+      check bool "redirect destination can be inspected while preserving source guard" true
+        (match same_url_read ~pin:false () with Tool_result.Completed _ -> true | _ -> false);
+      check bool "SPA changed URL permits same document observation" true
+        (match same_url_read () with Tool_result.Completed _ -> true | _ -> false);
+      observed_url := source.url;
+      observed_document := "reloaded-document";
+      check bool "same URL newly loaded document is observable" true
+        (match same_url_read () with Tool_result.Completed _ -> true | _ -> false);
+      observed_document := "fixture";
+      ignores_scope := true;
+      check bool "connector ignoring scope must fail rather than return whole page" true (Result.is_error (read ()));
+      check bool "connector ignoring region view must fail" true
+        (Result.is_error (Masc.Browser_scene.read ~view:Browser_lane.Regions (request (Some 7)) ~max_chars:1000));
+      check bool "duplicate scope fields rejected" true (Result.is_error (Masc.Browser_scene.scope_of_json
+        (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"])))))
+
 let () = run "browser surface" ["behavior",[
+  test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;
   test_case "invalid input is refused" `Quick test_strict_input;

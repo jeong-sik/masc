@@ -4,9 +4,8 @@ open Llm_provider
 (* ── Helpers ────────────────────────────────────────── *)
 
 let gemini_config
-      ?(model_id = "gemini-2.5-flash")
+      ?(model_id = "gemini-3.7-flash")
       ?enable_thinking
-      ?thinking_budget
       ?reasoning_effort
       ?(tools = [])
       ?(response_format = Types.Off)
@@ -23,7 +22,6 @@ let gemini_config
     ~max_tokens:4096
     ~temperature:0.7
     ?enable_thinking
-    ?thinking_budget
     ?reasoning_effort
     ~response_format
     ?system_prompt:(if system = "" then None else Some system)
@@ -183,30 +181,17 @@ let test_system_from_messages () =
   check int "one content (no system)" 1 (List.length contents)
 ;;
 
-let test_thinking_config () =
-  let config = gemini_config ~enable_thinking:true ~thinking_budget:8000 () in
-  let messages = [ Types.user_msg "Think about this." ] in
-  let body = Backend_gemini.build_request ~config ~messages () in
-  let json = parse_body body in
-  let gen = json |> member "generationConfig" in
-  let tc = gen |> member "thinkingConfig" in
-  check bool "has thinkingConfig" true (tc <> `Null);
-  check int "thinkingBudget" 8000 (tc |> member "thinkingBudget" |> to_int);
-  check bool "includeThoughts" true (tc |> member "includeThoughts" |> to_bool)
-;;
-
-let test_thinking_disabled_requires_exact_numeric_wire () =
+let test_thinking_disabled_has_no_representation () =
   let config = gemini_config ~enable_thinking:false () in
   let messages = [ Types.user_msg "Keep it short." ] in
   match Backend_gemini.build_request ~config ~messages () with
-  | _ -> fail "expected exact numeric-wire rejection"
+  | _ -> fail "expected a thinkingLevel rejection"
   | exception Invalid_argument message ->
     check
       string
       "rejection"
-      "Backend_gemini.build_request: enable_thinking=false has no exact Gemini boolean \
-       wire; pass an explicit thinking_budget only when the selected model supports that \
-       numeric value"
+      "Backend_gemini.build_request: enable_thinking=false has no exact Gemini \
+       thinkingLevel representation"
       message
 ;;
 
@@ -223,8 +208,44 @@ let test_gemini3_uses_thinking_level () =
   in
   let tc = parse_body body |> member "generationConfig" |> member "thinkingConfig" in
   check string "thinkingLevel" "low" (tc |> member "thinkingLevel" |> to_string);
-  check bool "thinkingBudget absent" true (tc |> member "thinkingBudget" = `Null);
   check bool "includeThoughts true" true (tc |> member "includeThoughts" |> to_bool)
+;;
+
+let test_native_effort_requires_reasoning_support () =
+  List.iter (fun supports_reasoning ->
+    let manifest = `Assoc
+      [ "schema_version", `Int 1
+      ; "models", `List [ `Assoc
+          [ "id_prefix", `String "native-effort-fixture"
+          ; "supports_reasoning", `Bool supports_reasoning
+          ; "supports_reasoning_budget", `Bool false
+          ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
+    let capabilities = match Capability_manifest.of_json manifest with
+      | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
+      | Ok _ -> fail "expected one capability declaration"
+      | Error detail -> fail detail in
+    let config = Provider_config.make
+      ~kind:Gemini ~model_id:"native-effort-fixture"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~api_key:"test-key" ~request_path:""
+      ~model_capabilities_override:capabilities
+      ~reasoning_effort:Reasoning_effort.High () in
+    let messages = [ Types.user_msg "Think." ] in
+    if supports_reasoning then (
+      let body = Backend_gemini.build_request ~config ~messages () |> parse_body in
+      check string "native vocabulary survives without an OpenAI thinking format"
+        "high" (body |> member "generationConfig" |> member "thinkingConfig"
+                |> member "thinkingLevel" |> to_string))
+    else (
+      (match Provider_config.validate_reasoning_effort_request_typed config with
+       | Error (Provider_config.Undeclared_reasoning_effort_capability
+           { provider_kind = Gemini; effort = Reasoning_effort.High; _ }) -> ()
+       | Error _ -> fail "unexpected rejection for disabled reasoning"
+       | Ok () -> fail "disabled model gained reasoning effort authority");
+      match Backend_gemini.build_request ~config ~messages () with
+      | _ -> fail "disabled native model emitted a thinking request"
+      | exception Invalid_argument _ -> ()))
+    [ true; false ]
 ;;
 
 let test_gemini3_disable_is_rejected () =
@@ -494,11 +515,11 @@ let test_parse_text_response () =
       "promptTokenCount": 10,
       "candidatesTokenCount": 5
     },
-    "modelVersion": "gemini-2.5-flash"
+    "modelVersion": "gemini-3.7-flash"
   }|}
   in
   let resp = Backend_gemini.parse_response json in
-  check string "model" "gemini-2.5-flash" resp.model;
+  check string "model" "gemini-3.7-flash" resp.model;
   (match resp.stop_reason with
    | Types.EndTurn -> ()
    | _ -> fail "expected EndTurn");
@@ -604,7 +625,7 @@ let function_call_with_thought_signature_json () =
       "finishReason": "STOP"
     }],
     "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 8},
-    "modelVersion": "gemini-2.5-flash"
+    "modelVersion": "gemini-3.7-flash"
   }|}
 ;;
 
@@ -1472,6 +1493,7 @@ let test_gemini_stream_function_call_preserves_thought_signature () =
        ; ContentBlockDelta
            { index = delta_idx; delta = InputJsonSnapshot {|{"q":"test"}|} }
        ; MessageDelta { stop_reason = Some StopToolUse; _ }
+       ; MessageStop
        ] ->
        check int "redacted index" 0 redacted_idx;
        check int "tool index" 1 tool_idx;
@@ -1549,6 +1571,7 @@ let test_gemini_stream_textual_parts_preserve_thought_signatures () =
        ; ContentBlockStart { index = 3; content_type = "thinking"; _ }
        ; ContentBlockDelta { index = 3; delta = ThinkingDelta "plan" }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier
          ~target:"text"
@@ -1601,6 +1624,7 @@ let test_gemini_stream_signed_inline_image () =
                  { media_type = "image/png"; source_type = Base64; data = "iVBORw0KGgo=" }
            }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier ~target:"image" ~signature:"sig-stream-image" carrier
      | _ -> fail "expected signed image carrier and media delta");
@@ -1730,12 +1754,13 @@ let () =
             test_unsupported_explicit_seed_is_rejected
         ; test_case "system instruction from config" `Quick test_system_instruction
         ; test_case "system from messages" `Quick test_system_from_messages
-        ; test_case "thinking config" `Quick test_thinking_config
         ; test_case
             "thinking disabled requires exact numeric wire"
             `Quick
-            test_thinking_disabled_requires_exact_numeric_wire
+            test_thinking_disabled_has_no_representation
         ; test_case "gemini 3 uses thinkingLevel" `Quick test_gemini3_uses_thinking_level
+        ; test_case "native effort requires reasoning support" `Quick
+            test_native_effort_requires_reasoning_support
         ; test_case "gemini 3 disable is rejected" `Quick test_gemini3_disable_is_rejected
         ; test_case "tools" `Quick test_tools
         ; test_case

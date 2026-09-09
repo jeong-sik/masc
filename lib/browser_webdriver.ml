@@ -1,6 +1,7 @@
 type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
-type session = { uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
+type pointer_state = Released | Release_required
+type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
 type t = { start_downloads : Browser_downloads.start; binary : string option; request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -59,6 +60,12 @@ let close_unlocked ?request t = match t.session with
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
   | Some session ->
+    let* () = match session.pointer_state with
+      | Released -> Ok ()
+      | Release_required ->
+        let* _ = call t session `DELETE "/actions" None in
+        session.pointer_state <- Released;
+        Ok () in
     let* downloads = Result.map_error (fun detail -> Protocol detail) session.downloads in
     let* () = Result.map_error (fun detail -> Protocol detail) (downloads.check ()) in
     Ok session
@@ -220,7 +227,7 @@ let execute_unlocked t = function
 
        let* result = t.request ~method_:`POST ~path:"/session" ~body:(Some caps) in
        let* id = string_field "sessionId" result in
-       let owned = { id; handles = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
+       let owned = { pointer_state = Released; id; handles = []; uploads = Browser_lane.Upload_lease.create_owner (); download_contexts = []; downloads = Error "BiDi setup incomplete; close this session before retrying" } in
        t.session <- Some owned;
        Eio.Switch.run (fun setup_sw ->
          let committed = ref false in
@@ -274,11 +281,12 @@ let execute_unlocked t = function
       let* _ = call t session `POST "/url" (Some (`Assoc ["url", `String url])) in
       page_summary t session)
   | Browser_lane.Page_act action -> fst (execute_action t action)
-  | Browser_lane.Page_scene {tab_id=id;max_chars} ->
+  | Browser_lane.Page_scene {tab_id=id;max_chars;view;scope} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
-      let* data = script t session Browser_scene_script.read
-        [`Assoc ["mode",`String "read";"maxChars",`Int max_chars]] in
+      let args = match Browser_lane.scene_args ~tab_id:id ~max_chars ~view ~scope with
+        | `Assoc fields -> `Assoc (("mode",`String "read")::fields) | json -> json in
+      let* data = script t session Browser_scene_script.read [args] in
       match data with
       | `Assoc fields -> Ok (`Assoc (("tabId",`Int id) :: fields))
       | _ -> Error (Protocol "malformed semantic scene"))
@@ -317,8 +325,61 @@ let execute_unlocked t = function
   | Browser_lane.Page_interact { tab_id; expected_url; action } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
-      let* result = script t session (Browser_scene_script.runtime ^ Browser_interaction.script)
-        [Browser_lane.interaction_args ~tab_id ~expected_url action] in
+      let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+      let* result = match action with
+        | Browser_lane.Click_at {point;viewport}
+        | Browser_lane.Scroll_at {point;viewport;_}
+        | Browser_lane.Drag {from=point;viewport;_} ->
+          let* before = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_guard_script) [args] in
+          let move (point : Browser_lane.Pointer.point) = `Assoc [
+            "type",`String "pointerMove"; "duration",`Int 0; "origin",`String "viewport";
+            "x",`Int (int_of_float (point.x *. viewport.width));
+            "y",`Int (int_of_float (point.y *. viewport.height))] in
+          let button kind = `Assoc ["type",`String kind; "button",`Int 0] in
+          let moves = match action with
+            | Browser_lane.Drag {to_;_} -> [move to_]
+            | _ -> [] in
+          let pointer_actions = `Assoc ["actions",`List [`Assoc [
+            "type",`String "pointer"; "id",`String "masc-browser-pointer";
+            "parameters",`Assoc ["pointerType",`String "mouse"];
+            "actions",`List ([move point;button "pointerDown"] @ moves @ [button "pointerUp"])]]] in
+          let actions = match action with
+            | Browser_lane.Scroll_at {x;y;_} -> `Assoc ["actions",`List [`Assoc [
+                "type",`String "wheel";"id",`String "masc-browser-wheel";
+                "actions",`List [`Assoc ["type",`String "scroll";"duration",`Int 0;
+                  "origin",`String "viewport";
+                  "x",`Int (int_of_float (point.x *. viewport.width));
+                  "y",`Int (int_of_float (point.y *. viewport.height));
+                  "deltaX",`Int x;"deltaY",`Int y]]]]]
+            | _ -> pointer_actions in
+          (* Release even if transport cancellation interrupts a pressed gesture.
+             The enclosing session lock remains held throughout cleanup. *)
+          let applied, released = match action with
+            | Browser_lane.Scroll_at _ ->
+                (* Wheel actions do not press buttons. Session acquisition
+                   already recovers any older pending pointer release. *)
+                call t session `POST "/actions" (Some actions), Ok ()
+            | _ ->
+            let released = ref None in
+            let applied = Eio.Switch.run (fun sw ->
+              Eio.Switch.on_release sw (fun () ->
+                let result = call t session `DELETE "/actions" None in
+                (match result with Ok _ -> session.pointer_state <- Released | Error _ -> ());
+                released := Some result);
+              session.pointer_state <- Release_required;
+              call t session `POST "/actions" (Some actions)) in
+            applied, (match !released with Some result -> Result.map (fun _ -> ()) result
+              | None -> Error (Protocol "pointer cleanup did not run")) in
+          let* _ = applied in
+          let* _ = released in
+          let* after = script t session "return {url:location.href,title:document.title,scrollX,scrollY};" [] in
+          let* url_before = string_field "url" before in
+          (match after with
+           | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
+               ("action",`String (match action with Browser_lane.Click_at _ -> "click_at" | Browser_lane.Scroll_at _ -> "scroll_at" | _ -> "drag")) :: fields))
+           | _ -> Error (Protocol "invalid pointer receipt"))
+        | _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
+      in
       match result with
       | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
       | _ -> Error (Protocol "invalid interaction response"))
@@ -327,14 +388,16 @@ let execute_unlocked t = function
     with_tab t session (Some tab_id) (fun () ->
       let* before = page_summary t session in
       let* url = string_field "url" before in
+      let* viewport = script t session (Browser_scene_script.runtime ^ "\nreturn browserScene({mode:'viewport'});") [] in
       let* image = call t session `GET "/screenshot" None in
       let* after = page_summary t session in
       let* after_url = string_field "url" after in
-      if not (String.equal url after_url) then Error (Protocol "tab navigated during capture")
+      let* after_viewport = script t session (Browser_scene_script.runtime ^ "\nreturn browserScene({mode:'viewport'});") [] in
+      if not (String.equal url after_url) || viewport <> after_viewport then Error (Protocol "viewport changed during capture")
       else match image, field "title" after with
       | `String data, Some (`String title) ->
         Ok (`Assoc ["tabId", `Int tab_id; "title", `String title; "url", `String url;
-          "mimeType", `String "image/png"; "data", `String data])
+          "mimeType", `String "image/png"; "data", `String data; "viewport",viewport])
       | _ -> Error (Protocol "invalid screenshot response"))
   | Browser_lane.Tabs_list ->
     let* session = session t in
@@ -385,5 +448,14 @@ let execute t verb =
        | Error error, Started -> Browser_lane.Refused (error_message error))
     | _ ->
       match execute_unlocked t verb with
+      | Ok (`Assoc fields as data) ->
+          (match verb, List.assoc_opt "interactionFailure" fields with
+           | Browser_lane.Page_interact _, Some (`Assoc failure) ->
+               let message = match List.assoc_opt "message" failure with
+                 | Some (`String message) -> message | _ -> "invalid interaction failure" in
+               (match List.assoc_opt "effectStarted" failure with
+                | Some (`Bool false) -> Browser_lane.Rejected_before_effect message
+                | _ -> Browser_lane.Refused message)
+           | _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))

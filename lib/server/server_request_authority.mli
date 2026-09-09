@@ -85,6 +85,10 @@ val port_or_default : authority -> int
 
 val scheme : authority -> scheme
 val scheme_to_string : scheme -> string
+val listener_is_loopback : authority -> bool
+(** Whether the actual configured listener is loopback-only. This provenance
+    is captured before wildcard addresses are projected to local wire hosts. *)
+
 val trust_class : authority -> trust_class
 val rendered : authority -> string
 

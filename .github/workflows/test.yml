@@ -236,34 +236,34 @@ jobs:
         # to find config/ and prompts/ from inside _build.
         run: |
           set -euo pipefail
+          # Four suites read a file through a Keeper's sandbox, and on this
+          # runner the read answers "image_not_found: keeper sandbox image
+          # masc-sandbox:general is not available" -- 14 assertions counted
+          # as red for an image nothing here builds. The recipe lives in the
+          # binary (Keeper_sandbox_image.dockerfile) so that `masc
+          # sandbox-image` works on a host with no checkout; --print is how
+          # it is read without a checkout's copy going stale. Debian slim
+          # plus bash, ripgrep and git, so this is a short build, and it is
+          # shared by full and targeted lanes.
+          opam exec -- dune build --root . bin/main_eio.exe
+          ./_build/default/bin/main_eio.exe sandbox-image --print \
+            | docker build -t masc-sandbox:general -
+          # Building the image is half of what a sandboxed suite needs. A
+          # fixture whose keeper runs a command starts a persistent
+          # container through the turn sandbox factory, and
+          # Keeper_sandbox_runtime_setup refuses that under a test
+          # executable unless the run says it wants the real daemon: the
+          # guard exists so a developer's daemon does not collect
+          # containers named for temp workspaces. This runner is thrown
+          # away with its daemon, and a fixture that started a container
+          # removes it in its own teardown
+          # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
+          # so, once, here -- not in every stanza that dispatches. Without
+          # it every Docker
+          # case that used to skip on "image not found" fails on the
+          # guard instead (dispatch_runtime, execute_exit_result).
+          export MASC_TEST_ALLOW_REAL_DOCKER=1
           if [ -z "${TARGET_SUITES}" ]; then
-            # Four suites read a file through a Keeper's sandbox, and on this
-            # runner the read answers "image_not_found: keeper sandbox image
-            # masc-sandbox:general is not available" -- 14 assertions counted
-            # as red for an image nothing here builds. The recipe lives in the
-            # binary (Keeper_sandbox_image.dockerfile) so that `masc
-            # sandbox-image` works on a host with no checkout; --print is how
-            # it is read without a checkout's copy going stale. Debian slim
-            # plus bash, ripgrep and git, so this is a short build, and it is
-            # done only on the full lane -- the one whose verdict is main's.
-            opam exec -- dune build --root . bin/main_eio.exe
-            ./_build/default/bin/main_eio.exe sandbox-image --print \
-              | docker build -t masc-sandbox:general -
-            # Building the image is half of what a sandboxed suite needs. A
-            # fixture whose keeper runs a command starts a persistent
-            # container through the turn sandbox factory, and
-            # Keeper_sandbox_runtime_setup refuses that under a test
-            # executable unless the run says it wants the real daemon: the
-            # guard exists so a developer's daemon does not collect
-            # containers named for temp workspaces. This runner is thrown
-            # away with its daemon, and a fixture that started a container
-            # removes it in its own teardown
-            # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
-            # so, once, here -- not in every stanza that dispatches. Without
-            # it every Docker
-            # case that used to skip on "image not found" fails on the
-            # guard instead (dispatch_runtime, execute_exit_result).
-            export MASC_TEST_ALLOW_REAL_DOCKER=1
             scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
             exit 0
           fi
@@ -419,20 +419,6 @@ jobs:
           done
           exit "${status}"
 
-      # The ocamlfind suites: run-standalone-suites.py compiles every suite
-      # it can reach without dune and runs it, which is the check that a
-      # suite's declared dependencies are the ones it really needs. It ran on
-      # every pull request until 2026-09-08, where it was 327 s of a 625 s
-      # check job and, being continue-on-error, gated nothing; here it runs
-      # once a day on main instead. continue-on-error stays for the reason
-      # the pull-request lane recorded: test_tool_name_prefix_boundary is
-      # red on purpose until #33778 is decided.
-      - name: Run the suites that need no build
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 15
-        run: python3 scripts/run-standalone-suites.py --all-matching '*'
-
       # The step output carries the heartbeat and the last 120 lines of the
       # runner log; every per-suite verdict lives only in the file. The
       # first root @runtest run on 2026-09-05 named its two hung suites and
@@ -447,6 +433,20 @@ jobs:
           path: ${{ runner.temp }}/ci-run-tests.log
           if-no-files-found: warn
           retention-days: 14
+
+      # The ocamlfind suites: run-standalone-suites.py compiles every suite
+      # it can reach without dune and runs it, which is the check that a
+      # suite's declared dependencies are the ones it really needs. It ran on
+      # every pull request until 2026-09-08, where it was 327 s of a 625 s
+      # check job and, being continue-on-error, gated nothing; here it runs
+      # once a day on main instead. continue-on-error stays for the reason
+      # the pull-request lane recorded: test_tool_name_prefix_boundary is
+      # red on purpose until #33778 is decided.
+      - name: Run the suites that need no build
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python3 scripts/run-standalone-suites.py --all-matching '*'
 
       # The lane's whole point is that a test-only regression surfaces
       # within ~24h. Without this step it surfaced only to whoever opened

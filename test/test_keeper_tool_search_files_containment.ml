@@ -360,9 +360,9 @@ let test_relative_cwd_is_not_rewritten () =
       true
       (String_util.contains_substring error "path_outside_sandbox")
 
-let test_container_cwd_is_not_rewritten () =
+let test_execute_own_container_cwd_preserves_containment () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~base:_ ~config ~meta ~playground ->
+  @@ fun ~base ~config ~meta ~playground ->
   let host_worktree =
     Filename.concat playground "repos/masc/.worktrees/task-186"
   in
@@ -380,19 +380,31 @@ let test_container_cwd_is_not_rewritten () =
        "read cwd remains exact"
        true
        (String_util.contains_substring error "path_outside_sandbox"));
-  match
-    Keeper_tool_execute_path.resolve_tool_execute_cwd
-      ~config
-      ~meta
-      ~write_enabled:true
-      ~args
-  with
-  | Ok cwd -> Alcotest.fail ("container cwd was unexpectedly rewritten: " ^ cwd)
-  | Error error ->
-    Alcotest.(check bool)
-      "write cwd remains exact"
-      true
-      (String_util.contains_substring error "path_outside_sandbox")
+  (* Execute accepts the exact cwd a previous guest call returned. Read
+     retains its literal path contract, asserted above. *)
+  List.iter
+    (fun write_enabled ->
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd
+        ~config ~meta ~write_enabled ~args with
+      | Ok cwd ->
+        Alcotest.(check string) "own guest cwd maps to the admitted host directory"
+          (normalize_realpath host_worktree) (normalize_realpath cwd)
+      | Error error -> Alcotest.fail ("own guest cwd rejected: " ^ error))
+    [false; true];
+  let outside = Filename.concat base "outside-playground" in
+  ensure_dir outside;
+  Unix.symlink outside (Filename.concat host_worktree "escape");
+  let args = `Assoc ["cwd", `String (Filename.concat container_worktree "escape")] in
+  List.iter
+    (fun write_enabled ->
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+        ~config ~meta ~write_enabled ~args with
+      | Ok cwd -> Alcotest.fail ("own guest alias followed an escaping symlink: " ^ cwd)
+      | Error error ->
+        Alcotest.(check string) "guest alias still enforces the canonical boundary"
+          "cwd_outside_sandbox"
+          (Keeper_tool_execute_path.execute_cwd_resolution_error_code error))
+    [false; true]
 
 let test_readonly_execute_omitted_cwd_does_not_create_playground () =
   with_eio_fs @@ fun () ->
@@ -453,11 +465,21 @@ let test_docker_other_container_root_stays_blocked () =
       "repos/masc"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
-  match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
+  (match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside allowed roots" true
-      (String_util.contains_substring e "path_outside_sandbox")
+      (String_util.contains_substring e "path_outside_sandbox"));
+  List.iter
+    (fun write_enabled ->
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+        ~config ~meta ~write_enabled ~args with
+      | Ok cwd -> Alcotest.fail ("foreign guest cwd was admitted: " ^ cwd)
+      | Error error ->
+        Alcotest.(check string) "foreign guest root remains outside the sandbox"
+          "cwd_outside_sandbox"
+          (Keeper_tool_execute_path.execute_cwd_resolution_error_code error))
+    [false; true]
 
 (* A remote_ssh keeper's tree is on the endpoint, so its omitted cwd resolves
    to the root in host form without the host being asked whether that
@@ -578,8 +600,8 @@ let () =
             `Quick test_docker_relative_repos_path_resolves_inside_playground;
           Alcotest.test_case "relative cwd is not rewritten"
             `Quick test_relative_cwd_is_not_rewritten;
-          Alcotest.test_case "container cwd is not rewritten"
-            `Quick test_container_cwd_is_not_rewritten;
+          Alcotest.test_case "Execute own container cwd preserves containment"
+            `Quick test_execute_own_container_cwd_preserves_containment;
           Alcotest.test_case
             "read-only omitted cwd does not create playground"
             `Quick test_readonly_execute_omitted_cwd_does_not_create_playground;

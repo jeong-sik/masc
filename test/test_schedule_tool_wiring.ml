@@ -360,7 +360,7 @@ let test_update_requires_id_and_active_row () =
 (* The checkpoint encoder rejects an object that binds the same key twice,
    and it runs after the tool has already succeeded: a duplicate key in a
    schedule result failed the whole turn at
-   [Checkpoint v10 message[_].content[_].json], which is how one keeper
+   [Checkpoint v11 message[_].content[_].json], which is how one keeper
    lost 12 consecutive turns on 2026-08-29 ("recurrence" was emitted by
    [schedule_request_to_yojson] and appended a second time by
    [schedule_request_json]). This asserts the same rule the encoder applies,

@@ -2,10 +2,13 @@
 """Measure a real default imp in an isolated home, using an authenticated Codex CLI.
 
 Requires an installed release prefix and an already authenticated Codex auth.json.
-Copies only that credential into a private disposable CLI home, never into evidence.
-No fixture model, approval bypass, or existing workspace configuration is used.
+Fresh mode copies that credential into a disposable CLI home, never into evidence.
+Existing mode reuses an explicitly supplied workspace and authenticated home without
+reconfiguring their runtime or imp. No fixture model or approval bypass is used.
 """
 import argparse
+from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -71,9 +74,9 @@ def directory_execution(traces):
     # Join the actual dispatched input to its completion, never infer a listing
     # from a successful exit or an assistant's description. The final form is
     # also present in the recorded macOS baseline.
-    def lists_working_directory(script):
+    def directory_commands(script):
         if not isinstance(script, str):
-            return False
+            return []
         try:
             lexer = shlex.shlex(script, posix=True, punctuation_chars=';&|\n')
             lexer.whitespace = ' \t\r'
@@ -83,28 +86,54 @@ def directory_execution(traces):
                 if token in (';', '&&', '\n'):
                     commands.append([])
                 elif token in ('&', '|', '||'):
-                    return False
+                    return []
                 else:
                     commands[-1].append(token)
         except ValueError:
-            return False
-        has_pwd = any(command == ['pwd'] for command in commands)
-        has_listing = any(command and command[0] == 'ls'
-                          and all(argument.startswith('-') or argument == '.' for argument in command[1:])
-                          for command in commands)
-        return has_pwd and has_listing
+            return []
+        return commands
+
+    def command_roles(commands):
+        def listing(command):
+            return (command and command[0] == 'ls'
+                    and all(arg.startswith('-') or arg == '.' for arg in command[1:]))
+        if not commands or any(command and command != ['pwd'] and not listing(command)
+                               for command in commands):
+            return False, False
+        return any(command == ['pwd'] for command in commands), any(listing(c) for c in commands)
+
     def identity(event):
         return tuple(event.get(key) for key in ('worker_run_id', 'session_id', 'tool_use_id'))
     starts = {identity(event): event for event in traces
               if event.get('record_type') == 'tool_execution_started'
               and event.get('tool_name') == 'Execute'
               and event.get('tool_use_id')}
+    observations = {}
     for event in traces:
         if (event.get('record_type') != 'tool_execution_finished'
                 or event.get('tool_name') != 'Execute' or event.get('tool_error') is not False):
             continue
         started = starts.get(identity(event))
-        if not started or not lists_working_directory(started.get('tool_input', {}).get('script')):
+        if not started or not all(identity(event)):
+            continue
+        tool_input = started.get('tool_input')
+        if not isinstance(tool_input, dict):
+            continue
+        script = tool_input.get('script')
+        if script is None:
+            # Execute can encode the same shell program as an exact argv
+            # wrapper. Never search arbitrary argv for text resembling ls.
+            argv = tool_input.get('argv')
+            if (isinstance(argv, list) and len(argv) == 3
+                    and argv[0] in ('sh', 'bash', '/bin/sh', '/bin/bash')
+                    and argv[1] in ('-c', '-lc')):
+                script = argv[2]
+        commands = directory_commands(script) if script is not None else [tool_input.get('argv')]
+        if any(not isinstance(c, list) or not all(isinstance(arg, str) for arg in c)
+               for c in commands):
+            continue
+        has_pwd, has_listing = command_roles(commands)
+        if not (has_pwd or has_listing):
             continue
         try:
             result = json.loads(event.get('tool_result', ''))
@@ -121,9 +150,76 @@ def directory_execution(traces):
         lines = result.get('output', '').splitlines()
         directories = {line.split()[-1] for line in lines
                        if line.startswith('d') and len(line.split()) >= 9}
-        if '/home/keeper/playground/imp' in lines and {'.', '..'}.issubset(directories):
-            return dict(input=started, completion=event)
+        proof = dict(input=started, completion=event)
+        scope = (event['worker_run_id'], event['session_id'], result['cwd'])
+        observed = observations.setdefault(scope, {})
+        if has_pwd and '/home/keeper/playground/imp' in lines:
+            observed['pwd'] = proof
+        if has_listing and {'.', '..'}.issubset(directories):
+            observed['listing'] = proof
+        if 'pwd' in observed and 'listing' in observed:
+            return proof if observed['pwd'] == observed['listing'] else observed
     raise RuntimeError('no matched Execute input/output proves the current path and directory listing in the Docker sandbox')
+
+
+PRESERVED_CONFIGURATION = ('runtime.toml', 'agent-core-models-overlay.toml', 'keepers/imp.toml')
+
+
+def configuration_hashes(base):
+    base = base.resolve()
+    config = base / '.masc/config'
+    hashes = {}
+    for name in PRESERVED_CONFIGURATION:
+        path = config / name
+        if (not path.is_file() or path.is_symlink()
+                or not path.resolve().is_relative_to(base)
+                or path.stat().st_uid != os.getuid()):
+            raise RuntimeError('existing workspace requires an owned configuration file: ' + name)
+        hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
+@contextmanager
+def acceptance_workspace(args, output):
+    existing_base = getattr(args, 'existing_base', None)
+    existing_home = getattr(args, 'existing_home', None)
+    if bool(existing_base) != bool(existing_home):
+        raise RuntimeError('--existing-base and --existing-home must be supplied together')
+    if existing_base:
+        base, home = Path(existing_base).resolve(), Path(existing_home).resolve()
+        if any(not path.is_dir() or path.stat().st_uid != os.getuid() for path in (base, home)):
+            raise RuntimeError('existing workspace and home must be owned directories')
+        auth = home / '.codex/auth.json'
+        if (not auth.is_file() or auth.is_symlink()
+                or not auth.resolve().is_relative_to(home)
+                or auth.stat().st_uid != os.getuid()):
+            raise RuntimeError('existing home requires its already copied Codex authentication')
+        before = configuration_hashes(base)
+        continuity = dict(existing_workspace=True, configuration_preserved=False,
+                          workspace_base_path_sha256=hashlib.sha256(str(base).encode()).hexdigest())
+        (output / 'configuration-continuity.json').write_text(json.dumps(
+            dict(continuity, sha256_before=before, sha256_after=None), indent=2))
+        try:
+            yield base, home, continuity
+        finally:
+            after = configuration_hashes(base)
+            continuity['configuration_preserved'] = before == after
+            (output / 'configuration-continuity.json').write_text(json.dumps(
+                dict(continuity, sha256_before=before, sha256_after=after), indent=2))
+            if before != after:
+                raise RuntimeError('acceptance changed the supplied runtime or imp configuration')
+    else:
+        if not args.codex_auth:
+            raise RuntimeError('--codex-auth is required for fresh workspace acceptance')
+        with tempfile.TemporaryDirectory(prefix='masc-imp-', dir=args.work_parent) as directory:
+            base = Path(directory).resolve()
+            home = base / 'home'
+            auth = home / '.codex/auth.json'
+            auth.parent.mkdir(parents=True, mode=0o700)
+            shutil.copyfile(args.codex_auth, auth)
+            auth.chmod(0o600)
+            yield base, home, dict(existing_workspace=False, configuration_preserved=False,
+                workspace_base_path_sha256=hashlib.sha256(str(base).encode()).hexdigest())
 
 
 def measure(args):
@@ -132,13 +228,8 @@ def measure(args):
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise RuntimeError('evidence output must be a new or empty directory: ' + str(output))
     output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='masc-imp-', dir=args.work_parent) as directory:
-        base = Path(directory).resolve()
-        home = base / 'home'
+    with acceptance_workspace(args, output) as (base, home, continuity):
         auth = home / '.codex/auth.json'
-        auth.parent.mkdir(parents=True, mode=0o700)
-        shutil.copyfile(args.codex_auth, auth)
-        auth.chmod(0o600)
         env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG')}
         env.update(HOME=str(home), CODEX_HOME=str(auth.parent))
         def run(*argv):
@@ -146,12 +237,13 @@ def measure(args):
             if result.returncode:
                 raise RuntimeError(result.stderr + result.stdout)
             return result.stdout
-        run(binary, 'init', '--base-path', str(base))
-        config_spec = dict(choice='codex', model=args.model, max_context=args.context, tools=True, streaming=True)
-        spec_path = base / 'runtime-spec.json'
-        spec_path.write_text(json.dumps(config_spec))
-        run('python3', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', binary,
-            '--base-path', str(base), '--spec', str(spec_path))
+        if not continuity['existing_workspace']:
+            run(binary, 'init', '--base-path', str(base))
+            config_spec = dict(choice='codex', model=args.model, max_context=args.context, tools=True, streaming=True)
+            spec_path = base / 'runtime-spec.json'
+            spec_path.write_text(json.dumps(config_spec))
+            run('python3', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', binary,
+                '--base-path', str(base), '--spec', str(spec_path))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -168,6 +260,9 @@ def measure(args):
                     try:
                         health = request(url + '/health?full=1')
                         if health.get('startup', {}).get('state_ready') is True:
+                            observed_base = health.get('paths', {}).get('effective_base_path')
+                            if not isinstance(observed_base, str) or not observed_base or Path(observed_base).resolve() != base:
+                                raise RuntimeError('ready server workspace identity does not match supplied base')
                             break
                     except OSError:
                         pass
@@ -184,7 +279,7 @@ def measure(args):
                     'Hello imp. Please introduce yourself briefly.',
                     'Create a Board post titled Imp first conversation and a Task titled Imp onboarding check. Leave the task open.',
                     'Show the current path and a detailed directory listing, including hidden entries, inside your default sandbox.',
-                    'Fetch https://example.com and tell me what it says.',
+                    'Use WebFetch to retrieve https://example.com now and report the HTTP status and title.',
                 ]
                 for index, prompt in enumerate(prompts):
                     path = output / f'chat-{index}.sse'
@@ -250,12 +345,11 @@ def measure(args):
                     run('node', str(ROOT / 'scripts/imp-onboarding-browser.cjs'), url,
                         str(base / '.masc/auth/local-admin.token'), str(output),
                         args.playwright_module, args.browser_executable)
-                (output / 'receipt.json').write_text(json.dumps(dict(
+                receipt = dict(
                     source=run(binary, 'build-commit').strip(), model=args.model,
                     platform=run('uname', '-sm').strip(), fixture_model=False,
                     approval_overrides=False, keeper='imp', completed_chats=len(prompts),
-                    successful_tools=sorted(required)), indent=2))
-                print('Acceptance evidence:', output, flush=True)
+                    successful_tools=sorted(required))
             finally:
                 # SSE streams already live in output. Copy raw records even if
                 # curl times out, a verdict fails, or browser verification fails.
@@ -268,12 +362,16 @@ def measure(args):
                         server.wait()
                 finally:
                     snapshot_evidence(base, output)
+    (output / 'receipt.json').write_text(json.dumps(dict(receipt, **continuity), indent=2))
+    print('Acceptance evidence:', output, flush=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
-    parser.add_argument('--codex-auth', required=True)
+    parser.add_argument('--codex-auth')
+    parser.add_argument('--existing-base')
+    parser.add_argument('--existing-home')
     parser.add_argument('--model', required=True)
     parser.add_argument('--context', required=True, type=int)
     parser.add_argument('--work-parent', default=str(Path.home()))
@@ -283,4 +381,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if bool(args.playwright_module) != bool(args.browser_executable):
         parser.error("--playwright-module and --browser-executable must be supplied together")
+    if bool(args.existing_base) != bool(args.existing_home):
+        parser.error('--existing-base and --existing-home must be supplied together')
+    if not args.existing_base and not args.codex_auth:
+        parser.error('--codex-auth is required without --existing-base')
     measure(args)

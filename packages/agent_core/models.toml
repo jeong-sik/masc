@@ -186,18 +186,6 @@ cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
 [[models]]
-id_prefix = "opus-4-5"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
 id_prefix = "sonnet-4-6"
 base = "anthropic"
 anthropic_thinking_control = "adaptive_preferred"
@@ -210,43 +198,9 @@ cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
 [[models]]
-id_prefix = "sonnet-4"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "haiku-4-5"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 200000
-max_output_tokens = 8192
-input_per_million = 0.8
-output_per_million = 4.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-# Fallbacks for Cli Tool / CC
-[[models]]
-id_prefix = "claude-3-7-sonnet"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
 id_prefix = "claude_code"
 base = "anthropic"
-anthropic_thinking_control = "manual_budget"
+anthropic_thinking_control = "adaptive_default"
 max_context_tokens = 1000000
 max_output_tokens = 64000
 input_per_million = 3.0
@@ -257,7 +211,7 @@ cache_read_multiplier = 0.1
 [[models]]
 id_prefix = "cc:"
 base = "anthropic"
-anthropic_thinking_control = "manual_budget"
+anthropic_thinking_control = "adaptive_default"
 max_context_tokens = 1000000
 max_output_tokens = 64000
 input_per_million = 3.0
@@ -1702,13 +1656,6 @@ supports_native_streaming = true
 
 # Gemini Models
 [[models]]
-id_prefix = "gemini-2.5"
-base = "gemini"
-max_context_tokens = 1000000
-supports_reasoning_budget = true
-accepted_reasoning_efforts = []
-
-[[models]]
 # gemini-3.8-flash-{high,...}, served through the Antigravity Google
 # subscription; masc runs the -high slot. Without this row it prefix-matches
 # the generic "gemini-3" row, which declares no thinking contract at all, so
@@ -2483,16 +2430,6 @@ id_prefix = "gemini-3.1-flash-tts-preview"
 provider_name = "gemini-speech"
 task = "speech"
 
-[[models]]
-id_prefix = "gemini-2.5-flash-preview-tts"
-provider_name = "gemini-speech"
-task = "speech"
-
-[[models]]
-id_prefix = "gemini-2.5-pro-preview-tts"
-provider_name = "gemini-speech"
-task = "speech"
-
 [[providers]]
 id = "nous"
 kind = "openai_compat"
@@ -3155,29 +3092,6 @@ cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
 [[models]]
-id_prefix = "claude-opus-4-5"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-accepted_reasoning_efforts = ["low", "medium", "high"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-opus-4"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
 id_prefix = "claude-sonnet-4-6"
 base = "anthropic"
 anthropic_thinking_control = "adaptive_preferred"
@@ -3186,39 +3100,6 @@ max_context_tokens = 1000000
 max_output_tokens = 64000
 input_per_million = 3.0
 output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-sonnet-4"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-haiku-4-5"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 200000
-max_output_tokens = 8192
-input_per_million = 0.8
-output_per_million = 4.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-haiku-4"
-base = "anthropic"
-anthropic_thinking_control = "manual_budget"
-max_context_tokens = 200000
-max_output_tokens = 8192
-input_per_million = 0.8
-output_per_million = 4.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 

@@ -2254,6 +2254,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
           ~meta
           ~publication_recovery
           ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name
           ~input
           ()
@@ -2317,8 +2318,33 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         json_string_field ~default:"" "output" execute_json |> String.trim
       in
       check string "Execute ran in requested cwd"
-        (Unix.realpath playground)
-        (Unix.realpath observed_cwd))
+        (Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+        observed_cwd;
+      let execute_at cwd =
+        run "Execute"
+          (`Assoc [ "argv", `List [ `String "pwd" ]; "cwd", `String cwd ])
+      in
+      let roundtrip = execute_at observed_cwd |> check_success_result "Execute cwd roundtrip" in
+      check string "the returned cwd can be used verbatim on the next call"
+        observed_cwd
+        (json_string_field ~default:"" "output" roundtrip |> String.trim);
+      mkdir_p (Filename.concat playground "nested");
+      let nested = Filename.concat observed_cwd "nested" in
+      let nested_result = execute_at nested |> check_success_result "Execute nested visible cwd" in
+      check string "a directory below the returned cwd stays in the sandbox" nested
+        (json_string_field ~default:"" "output" nested_result |> String.trim);
+      let outside = Filename.concat config.base_path "outside-cwd" in
+      mkdir_p outside;
+      Unix.symlink outside (Filename.concat playground "escape-link");
+      List.iter
+        (fun cwd ->
+          let rejected = execute_at cwd in
+          check string "visible cwd projection does not widen the sandbox"
+            "cwd_outside_sandbox"
+            (json_string_field ~default:"" "code" (parse_json rejected.raw_output)))
+        [ Filename.concat (Filename.dirname observed_cwd) "outside-fixture-owner"
+        ; Filename.concat observed_cwd "escape-link"
+        ])
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
@@ -3649,6 +3675,7 @@ let test_manual_gate_defers_tool_execute_before_process () =
           ~meta
           ~publication_recovery
           ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name:"tool_execute"
           ~input:
             (`Assoc
@@ -3715,6 +3742,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
       let raw =
         KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name:"tool_execute" ~input ()
       in
       let json = Yojson.Safe.from_string raw in
@@ -5300,7 +5328,7 @@ value = { surface = "dashboard", content = "must not be reached" }
 let write_then_unchanged_board_composition ~revision =
   Printf.sprintf
     {|[[compositions]]
-name = "write-then-durable-wait"
+name = "write-then-conditional-read"
 execution = "inline"
 
 [[compositions.nodes]]
@@ -5308,10 +5336,10 @@ id = "write"
 tool = "keeper_memory_write"
 [compositions.nodes.input]
 kind = "literal"
-value = { title = "composition before wait", content = "must execute exactly once before yielding" }
+value = { title = "composition before read", content = "write completes before conditional read" }
 
 [[compositions.nodes]]
-id = "wait"
+id = "read"
 tool = "masc_board_list"
 after = ["write"]
 [compositions.nodes.input]
@@ -5876,7 +5904,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             in
             Fs_compat.mkdir_p (Filename.dirname blob_root);
             Fs_compat.save_file blob_root "artifact persistence is blocked";
-            let marker = Filename.concat config.base_path "execute-invocations" in
+            let marker = playground_file ~config ~meta "execute-invocations" in
             let oversized =
               String.make
                 (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
@@ -5917,15 +5945,9 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               execute.call
                 ~call_id:"direct-execute-post-effect-failure"
                 (`Assoc
-                   [ ( "argv"
-                     , `List
-                         [ `String "/bin/sh"
-                         ; `String "-c"
-                         ; `String "printf x >> \"$1\"; printf %s \"$2\""
-                         ; `String "keeper-execute-test"
-                         ; `String marker
-                         ; `String oversized
-                         ] )
+                   [ "script", `String
+                       ("printf x >> execute-invocations; printf %s "
+                        ^ Filename.quote oversized)
                    ])
             in
             check bool "artifact persistence failure is visible" false result.success;
@@ -6664,8 +6686,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
               fail "official-client provider loop remained open after unknown effect"))
 ;;
 
-let test_terminal_composition_post_effect_defer_closes_without_resume () =
-  with_exec_fixture "composition-generic-defer-terminal-boundary"
+let test_write_then_unchanged_read_completes () =
+  with_exec_fixture "composition-conditional-read-completion"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -6700,7 +6722,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
        in
        let skill_catalog =
          skill_catalog_of_composition
-           ~name:"write-then-durable-wait"
+           ~name:"write-then-conditional-read"
            (write_then_unchanged_board_composition ~revision)
        in
        let bundle =
@@ -6719,10 +6741,10 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
               match
                 find_tool_by_name
                   bundle.tools
-                  "keeper_compose_write-then-durable-wait"
+                  "keeper_compose_write-then-conditional-read"
               with
               | Some tool -> tool
-              | None -> fail "ordinary generic-deferred composition was not materialized"
+              | None -> fail "conditional-read composition was not materialized"
             in
             (match Agent_core.Tool.completion composition_tool with
              | Agent_core.Tool_contract.Continue_after_success -> ()
@@ -6756,47 +6778,26 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
                    (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
                       String.equal
                         tool.name
-                        "keeper_compose_write-then-durable-wait")
+                        "keeper_compose_write-then-conditional-read")
               |> function
               | Some tool -> tool
-              | None -> fail "generic-deferred composition was not projected"
+              | None -> fail "conditional-read composition was not projected"
             in
-            let result = tool.call ~call_id:"generic-deferred-composition" (`Assoc []) in
-            check bool "generic-deferred composition is incomplete" false result.success;
-            (match bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
-               check string
-                 "prior write prevents false resumability"
-                 "proven_post_effect"
-                 (Tool_result.failure_effect_disposition_to_string
-                    failure.effect_disposition)
-             | _ -> fail "post-effect defer did not terminalize the composition");
-            let deferred_payload = parse_json result.content in
-            check string
-              "nested deferred node retains producer-owned kind"
-              "generic_deferred"
+            let result = tool.call ~call_id:"conditional-read-composition" (`Assoc []) in
+            check bool "conditional-read composition completes" true result.success;
+            let read_action =
+              Yojson.Safe.Util.(parse_json result.content |> member "actions" |> to_list)
+              |> List.find (fun action ->
+                   Yojson.Safe.Util.(action |> member "node_id" |> to_string) = "read")
+            in
+            check string "read reused the exact conditional revision" "unchanged"
               Yojson.Safe.Util.
-                (member "cause" deferred_payload
-                 |> member "node"
-                 |> member "deferred_kind"
-                 |> to_string);
-            match result.abort_turn with
-            | Some
-                (Masc.Keeper_official_client_host.Terminal_tool_boundary
-                  { tool_name
-                  ; outcome =
-                      Masc.Keeper_official_client_host.Terminal_failed
-                        { effect_disposition = Tool_result.Proven_post_effect; _ }
-                  }) ->
-              check string
-                "official-client post-effect defer terminal tool"
-                "keeper_compose_write-then-durable-wait"
-                tool_name
-            | Some
-                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
-            | None ->
-              fail "official-client provider loop remained retryable after post-effect defer"))
+                (read_action |> member "result" |> member "data" |> member "kind" |> to_string);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | _ -> fail "completed conditional read changed terminal effect state");
+            check bool "unchanged read does not abort the provider turn" true
+              (Option.is_none result.abort_turn)))
 ;;
 
 let test_async_composition_binds_params_into_durable_status () =
@@ -7210,6 +7211,16 @@ let composable_output_probes =
       ~needs_sandbox:true
       "keeper_spawn"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+  ; { tool_name = "masc_msx_screen"
+    ; needs_sandbox = false
+    ; prepare = (fun ~config ~meta:_ ->
+        (match Msx_lane.load
+           ~ledger_dir:(Filename.concat config.Masc.Workspace.base_path "msx-probe")
+           ~roms_dir:"" ~cart_path:None ~disk_path:None with
+         | Ok _ -> ()
+         | Error error -> fail (Msx_lane.error_to_string error));
+        `Assoc [])
+    }
   ; probe "keeper_time_now" (`Assoc [])
   ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
@@ -7411,6 +7422,8 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()))
+       @@ fun () ->
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)
        ignore (Workspace.init config ~agent_name:None);
@@ -7655,8 +7668,8 @@ let () =
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
-      test_case "post-effect deferred composition closes without resume" `Quick
-        test_terminal_composition_post_effect_defer_closes_without_resume;
+      test_case "write then unchanged read completes" `Quick
+        test_write_then_unchanged_read_completes;
       test_case "async composition binds params into durable status" `Quick
         test_async_composition_binds_params_into_durable_status;
       test_case "async composition status preserves artifact manifest" `Quick

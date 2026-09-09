@@ -34,7 +34,6 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
       { temperature = Some 0.2
       ; top_p = None
       ; max_tokens = None
-      ; thinking_budget = None
       ; enable_thinking = Some true
       }
   ; usage =

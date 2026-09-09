@@ -2273,6 +2273,8 @@
 
 (include stanzas/test_dashboard_feature_health.inc)
 
+(include stanzas/test_dashboard_gate_cli_lane.inc)
+
 (include stanzas/test_dashboard_gate_metrics.inc)
 
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
@@ -3653,6 +3655,11 @@
  (name test_tui_board_read_layout)
  (modules test_tui_board_read_layout)
  (libraries alcotest masc_tui_board_read_layout masc_tui_types masc_tui_board_detail))
+
+(test
+ (name test_tui_browser_lane_layout)
+ (modules test_tui_browser_lane_layout)
+ (libraries alcotest masc masc_tui_browser_lane_layout))
 
 (test
  (name test_tui_board_read_scroll)
@@ -5064,7 +5071,7 @@
 (test
  (name test_browser_lane)
  (modules test_browser_lane)
- (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat))
+ (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_native_host.inc)
 
@@ -5131,12 +5138,12 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc_tui_types))
+ (libraries masc.browser_lane masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
  (modules test_tui_browser_lane_text)
- (libraries yojson masc masc_tui_types masc_tui_message_layout))
+ (libraries yojson masc masc.browser_lane masc_tui_types masc_tui_message_layout))
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
@@ -5171,6 +5178,11 @@
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc_tui_types masc_tui_graphics masc_tui_msx
    masc_tui_ansi))
+
+(test
+ (name test_tui_interactive)
+ (modules test_tui_interactive)
+ (libraries alcotest masc_tui_types masc_tui_interactive))
 
 (test
  (name test_tui_runtime_config_view)
@@ -5438,11 +5450,7 @@
  (libraries masc_test_deps exec_ssh_protocol eio eio_main)
  (deps test_docker_observe_transport.py)
  (action
-  (run python3 %{dep:test_docker_observe_transport.py} %{test})))
-
-(rule
- (alias runtest-test_docker_observe_transport)
- (deps test_docker_observe_transport.py)
- (action
   (run python3 %{dep:test_docker_observe_transport.py}
    %{exe:test_docker_observe_transport.exe})))
+
+(include stanzas/test_browser_composition.inc)

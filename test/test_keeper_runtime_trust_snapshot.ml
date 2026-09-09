@@ -89,6 +89,32 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
+(* Receipt disposition is tested with a live keeper. Without an entry the
+   status bridge correctly reports keepalive_stopped even for a Pass receipt. *)
+let snapshot_with_running_keeper ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  (* Observe both phases immediately; the public snapshot has a short-lived
+     cache keyed to turn and approval state, not registry transitions. *)
+  let snapshot () = K.For_testing.snapshot_json_inner_with_pending_reader
+    ~read_pending:Masc.Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config ~meta in
+  let stopped = snapshot () in
+  Alcotest.(check bool) "a stopped keeper still requires attention" true
+    Yojson.Safe.Util.(stopped |> member "needs_attention" |> to_bool);
+  Alcotest.(check string) "stopped attention has its own cause" "keepalive_stopped"
+    Yojson.Safe.Util.(stopped |> member "attention_reason" |> to_string);
+  let entry =
+    Masc.Keeper_registry.For_testing.register
+      ~base_path:config.base_path meta.name meta
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      Alcotest.(check bool) "fixture keeper is Running" true
+        (Masc.Keeper_registry.is_running ~base_path:config.base_path meta.name);
+      snapshot ())
+;;
+
 let test_trust_blocker_uses_structured_state () =
   let module Core = Masc.Keeper_runtime_trust_snapshot_core in
   let decide blocker =
@@ -113,6 +139,55 @@ let test_trust_blocker_uses_structured_state () =
   Alcotest.(check string) "unknown class is visible without prose classification"
     "unknown_runtime_blocker" unknown.disposition_reason;
   Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention
+;;
+
+let test_active_blocker_overrides_success_until_cleared () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  let config = Masc.Workspace.default_config base_dir in
+  let initial = make_meta "runtime-trust-receipt-scope" in
+  let meta =
+    { initial with runtime =
+        { initial.runtime with usage =
+            { initial.runtime.usage with total_turns = 7; last_turn_ts = 1000.5 } } }
+  in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:base_dir meta.name meta in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc.Keeper_registry.unregister_exact entry);
+      remove_tree base_dir)
+    (fun () ->
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name
+        (Some (Masc.Keeper_registry.Exception "scope fixture failure"));
+      let store = Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let observe receipt_trace turn =
+        Dated_jsonl.append store
+          (`Assoc
+            [ "trace_id", `String receipt_trace; "turn_count", `Int turn
+            ; "ended_at", `String "1970-01-01T00:16:40Z"
+            ; "operator_disposition", `String "pass"
+            ; "operator_disposition_reason", `String "healthy"
+            ; "terminal_reason_code", `String "success" ]);
+        K.For_testing.snapshot_json_inner_with_pending_reader
+          ~read_pending:(fun ~base_path:_ -> Ok []) ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      List.iter (fun (label, receipt_trace, turn, expected) ->
+        let snapshot = observe receipt_trace turn in
+        Alcotest.(check string) (label ^ " disposition") expected
+          (snapshot |> member "disposition" |> to_string);
+        Alcotest.(check string) (label ^ " history retained") receipt_trace
+          (snapshot |> member "latest_receipt" |> member "trace_id" |> to_string))
+        [ "previous turn in same second", trace_id, 6, "Alert"
+        ; "different trace with same turn", "previous-trace", 7, "Alert"
+        ; "same turn before later failure", trace_id, 7, "Alert" ];
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name None;
+      let recovered = observe trace_id 7 in
+      Alcotest.(check string) "registry recovery restores receipt disposition" "Pass"
+        (recovered |> member "disposition" |> to_string))
 ;;
 
 let test_active_model_missing_attempt_is_unknown () =
@@ -315,7 +390,7 @@ let test_observation_not_dispatched_receipt_remains_non_blocking () =
              ; "terminal_reason_code", `String "success"
              ; "completion_contract_result", `String "not_dispatched"
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
@@ -523,7 +598,7 @@ let test_no_visible_output_no_work_receipt_does_not_mark_attention () =
              ; "current_task_id", `Null
              ; "goal_ids", `List []
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
@@ -573,7 +648,7 @@ let test_no_visible_output_active_receipt_does_not_mark_attention () =
              ; "current_task_id", `String "task-1844"
              ; "goal_ids", `List [ `String "goal-pm-flow" ]
              ]);
-       let snapshot = K.snapshot_json ~config ~meta in
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
          "display disposition"
@@ -951,7 +1026,9 @@ let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
     [ ( "status_runtime_provenance"
-      , [ Alcotest.test_case "trust follows structured blocker state" `Quick
+      , [ Alcotest.test_case "active blocker survives historical success" `Quick
+            test_active_blocker_overrides_success_until_cleared
+        ; Alcotest.test_case "trust follows structured blocker state" `Quick
             test_trust_blocker_uses_structured_state
         ; Alcotest.test_case
             "missing runtime attempt does not fabricate active_model"

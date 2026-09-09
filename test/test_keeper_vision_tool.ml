@@ -217,7 +217,7 @@ let test_message_of_request () =
    no runtime cache loaded in this unit context it is Error; the value is what
    matters (never raises). *)
 let test_first_vision_runtime_id_total () =
-  match Vt.first_vision_runtime_id () with
+  match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
   | Ok _ | Error _ -> ()
 
 let test_provider_for_vision_preserves_configured_max_tokens () =
@@ -260,8 +260,7 @@ let test_provider_for_vision_leaves_thinking_uncontrolled () =
   let configured = Vt.provider_for_vision base in
   assert (configured.enable_thinking = None);
   assert (configured.preserve_thinking = Some false);
-  assert (configured.clear_thinking = Some true);
-  assert (configured.thinking_budget = None)
+  assert (configured.clear_thinking = Some true)
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
@@ -593,7 +592,7 @@ max-request-body-bytes = 65536
 
 let test_provider_for_vision_uses_runtime_temperature () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
-    match Vt.first_vision_runtime_id () with
+    match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
     | Error msg -> failwith ("expected configured vision runtime: " ^ msg)
     | Ok runtime_id ->
       (match Runtime.get_runtime_by_id runtime_id with
@@ -661,12 +660,12 @@ let test_temp_runtime_toml_restores_runtime_cache () =
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
     assert (Runtime.get_runtime_ids () = before));
-  assert (Vt.vision_runtime_ids () = [])
+  assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [])
 
 let test_image_capable_vision_runtime_is_admitted_without_schema_capability () =
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
-    assert (Vt.vision_runtime_ids () = [ "local.vision" ]);
-    (match Vt.first_vision_runtime_id () with
+    assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [ "local.vision" ]);
+    (match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
      | Ok "local.vision" -> ()
      | Ok runtime_id -> failwith ("unexpected vision runtime admitted: " ^ runtime_id)
      | Error msg -> failwith ("image-capable runtime was rejected: " ^ msg)))
@@ -890,6 +889,73 @@ let test_candidate_policy_error_tries_next_runtime () =
         "vision_candidate provider_response"
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* RFC-0440 §3: a candidate whose account answered a hard quota rejection moves
+   behind the live ones; a success on that account clears the observation. *)
+let test_vision_candidates_follow_quota_window () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let now = Unix.gettimeofday () in
+      let scope id =
+        match Runtime.get_runtime_by_id id with
+        | Some rt -> Runtime.quota_scope_of_runtime rt
+        | None -> failwith ("missing runtime " ^ id)
+      in
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
+      Runtime_quota_window.note_observed_exhausted ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]);
+      Runtime_quota_window.note_succeeded ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ])))
+
+(* RFC-0440 §3: a 402 from the read walk is recorded on that account, the walk
+   moves on at once, and the answering account is recorded as live. *)
+let test_vision_402_marks_the_account_exhausted_and_moves_on () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      Runtime_quota_window.reset_for_testing ();
+      Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+        let meta = make_meta "vision-402-failover" in
+        let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+        let scope id =
+          match Runtime.get_runtime_by_id id with
+          | Some rt -> Runtime.quota_scope_of_runtime rt
+          | None -> failwith ("missing runtime " ^ id)
+        in
+        let calls = ref 0 in
+        let models = ref [] in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+          incr calls;
+          models := config.Llm_provider.Provider_config.model_id :: !models;
+          if !calls = 1 then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 402
+                 ; body = "{\"error\":{\"message\":\"Insufficient Balance\"}}"
+                 ; retry_after_header = None
+                 })
+          else Ok (ok_response "second account answered")
+        in
+        let raw =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.handle
+                ~complete
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env)
+                ~meta
+                ~args:(artifact_args handle)
+                ()))
+        in
+        let json = json_of_output raw in
+        assert (!calls = 2);
+        assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+        assert (String.equal (assoc_string "text" json) "second account answered");
+        let now = Unix.gettimeofday () in
+        assert (Runtime_quota_window.is_exhausted ~scope:(scope "p1.vision-a") ~now);
+        assert (not (Runtime_quota_window.is_exhausted ~scope:(scope "p2.vision-b") ~now));
+        assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]))))
 
 (* When every candidate answers 400 the walk still ends as a policy rejection
    carrying the last verdict, so a keeper learns the field, not "no runtime". *)
@@ -1952,6 +2018,24 @@ let test_browser_screenshot_reaches_vision_reader () =
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let viewport = `Assoc ["documentId", `String "captured-document";
+        "width", `Float 800.; "height", `Float 600.;
+        "scrollX", `Float 0.; "scrollY", `Float 120.] in
+      let verify_pointer_receipt source data =
+        let field key = Yojson.Safe.Util.member key data in
+        assert (assoc_string "source" data = source);
+        assert (field "viewport" = viewport);
+        let route = match field "clientId" with `String _ as id -> ["clientId", id] | _ -> [] in
+        let request = Masc.Browser_interaction.parse (`Assoc (route @ [
+          "lane", field "source"; "tabId", field "tabId";
+          "expectedUrl", field "url"; "viewport", field "viewport";
+          "action", `String "click_at";
+          "point", `Assoc ["x", `Float 0.5; "y", `Float 0.25]])) in
+        match request with
+        | Ok {action = Browser_lane.Click_at {viewport = observed; _}; _} ->
+          assert (observed.document_id = "captured-document");
+          assert (observed.scroll_y = 120.)
+        | _ -> failwith "persisted screenshot cannot address its observed viewport" in
       let seen_image = ref false in
       let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
         seen_image := List.exists (fun (message : Agent_core.Types.message) ->
@@ -1966,7 +2050,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             | Browser_lane.Page_capture {tab_id=73} -> Browser_lane.Answered
                 (`Assoc ["ok",`Bool true;"data",`Assoc [
                   "tabId",`Int 73;"url",`String "https://example.org/form";
-                  "title",`String "Form";"mimeType",`String "image/png";"data",`String encoded]])
+                  "title",`String "Form";"mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]])
             | _ -> failwith "unexpected screenshot command"));
           Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_executor None);
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
@@ -1974,6 +2058,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (result.disposition = Tool_result.Completed ());
           let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
           assert (not (String_util.contains_substring result.raw_output encoded));
+          verify_pointer_receipt "automation" data;
           let handle = assoc_string "artifact" data in
           let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
@@ -2001,7 +2086,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Ok (Some command) -> command | _ -> failwith "selected live client received no command" in
             let data = if mode = "screenshot" then `Assoc ["tabId",`Int 73;
               "url",`String "https://example.org/form";"title",`String "Form";
-              "mimeType",`String "image/png";"data",`String encoded]
+              "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
               else `Assoc ["tabId",`Int 73;"elements",`List []] in
             assert (Browser_lane.deliver_result ~client_id:first.client_id ~id:command.id
               ~payload:(`Assoc ["ok",`Bool true;"data",data]) = Ok ());
@@ -2009,7 +2094,8 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Ok result -> result | Error exn -> raise exn in
             assert (result.disposition = Tool_result.Completed ());
             let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
-            assert (assoc_string "clientId" data = client_id)) ["elements";"screenshot"]))))
+            assert (assoc_string "clientId" data = client_id);
+            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.
@@ -2035,6 +2121,19 @@ let test_browser_screenshot_rejects_invalid_client () =
     | Error ("invalid_client_id" | "invalid screenshot clientId") -> ()
     | _ -> failwith "malformed routing identity must fail before pixel persistence")
     [`String "not-a-client"; `Int 73]
+
+let test_browser_screenshot_rejects_invalid_observation () =
+  with_temp_base (fun _ ->
+    let pixels = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    List.iter (fun metadata ->
+      let result = Masc.Browser_screenshot.persist ~keeper_name:"invalid-observation"
+        (`Assoc (metadata @ ["tabId", `Int 73; "url", `String "https://example.org";
+          "title", `String "Page"; "data", `String pixels])) in
+      assert (Result.is_error result))
+      [["source", `String "unknown"];
+       ["viewport", `Null];
+       ["viewport", `Assoc ["documentId", `String "doc"; "width", `Int 0;
+          "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0]]])
 
 let test_artifact_failures_are_classified () =
   with_temp_base (fun _ ->
@@ -2062,6 +2161,7 @@ let test_artifact_failures_are_classified () =
 let () =
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
+  test_browser_screenshot_rejects_invalid_observation ();
   test_browser_screenshot_requires_keeper_owner ();
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();
@@ -2123,4 +2223,6 @@ let () =
   test_evicted_history_has_no_image_modality ();
   test_delegates_media_follows_lane_capability ();
   test_delegates_media_matches_antigravity_transport ();
+  test_vision_candidates_follow_quota_window ();
+  test_vision_402_marks_the_account_exhausted_and_moves_on ();
   print_endline "test_keeper_vision_tool: all assertions passed"

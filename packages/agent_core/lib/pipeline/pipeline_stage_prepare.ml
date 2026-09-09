@@ -187,10 +187,6 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
         (match turn_params.temperature with
          | Some _ as t -> t
          | None -> base_config.temperature)
-    ; thinking_budget =
-        (match turn_params.thinking_budget with
-         | Some _ as t -> t
-         | None -> base_config.thinking_budget)
     ; reasoning_effort =
         (match turn_params.reasoning_effort with
          | Some _ as effort -> effort

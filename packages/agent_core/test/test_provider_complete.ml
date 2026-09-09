@@ -956,7 +956,7 @@ let test_gemini_with_json_schema () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~api_key:"test-key"
       ~response_format:(JsonSchema schema)
@@ -992,7 +992,6 @@ let test_kimi_direct_with_tools_and_thinking () =
       ~model_id:"kimi-for-coding"
       ~base_url:"https://api.kimi.com/coding"
       ~enable_thinking:true
-      ~thinking_budget:4096
       ()
   in
   let tool =
@@ -1291,10 +1290,9 @@ let accept_rejected_reason label = function
 (* The declared toggle wire under test is chat_template_kwargs, the one
    OpenAI-compatible format that still carries a boolean enable_thinking. *)
 let enable_thinking_field body =
-  body
-  |> Yojson.Safe.from_string
-  |> Yojson.Safe.Util.member "chat_template_kwargs"
-  |> Yojson.Safe.Util.member "enable_thinking"
+  match body |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "chat_template_kwargs" with
+  | `Null -> `Null
+  | kwargs -> Yojson.Safe.Util.member "enable_thinking" kwargs
 ;;
 
 let test_unknown_openai_compat_enable_rejected_sync_and_stream () =

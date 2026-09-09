@@ -115,7 +115,6 @@ let sample_record () : Turn_record.t =
       { temperature = Some 0.3
       ; top_p = Some 0.9
       ; max_tokens = Some 8192
-      ; thinking_budget = Some 1500
       ; enable_thinking = Some true
       }
   ; usage =
@@ -330,8 +329,6 @@ let test_codec_roundtrip () =
       decoded.sampling.top_p;
     check (option int) "max_tokens" record.sampling.max_tokens
       decoded.sampling.max_tokens;
-    check (option int) "thinking_budget" record.sampling.thinking_budget
-      decoded.sampling.thinking_budget;
     check (option bool) "enable_thinking" record.sampling.enable_thinking
       decoded.sampling.enable_thinking;
     check (option int) "input_tokens" record.usage.input_tokens
@@ -356,7 +353,6 @@ let test_codec_optional_fields_absent () =
         { temperature = None
         ; top_p = None
         ; max_tokens = None
-        ; thinking_budget = None
         ; enable_thinking = None
         }
     ; usage =

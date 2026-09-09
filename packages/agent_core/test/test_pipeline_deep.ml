@@ -185,10 +185,6 @@ let test_resolve_params_no_hook () =
   in
   Alcotest.(check bool) "default temperature" true (Option.is_none params.temperature);
   Alcotest.(check bool)
-    "default thinking_budget"
-    true
-    (Option.is_none params.thinking_budget);
-  Alcotest.(check bool)
     "default extra_context"
     true
     (Option.is_none params.extra_system_context)
@@ -217,10 +213,6 @@ let test_resolve_params_continue () =
   in
   Alcotest.(check bool) "default temperature" true (Option.is_none params.temperature);
   Alcotest.(check bool)
-    "default thinking_budget"
-    true
-    (Option.is_none params.thinking_budget);
-  Alcotest.(check bool)
     "default extra_context"
     true
     (Option.is_none params.extra_system_context)
@@ -230,7 +222,6 @@ let test_resolve_params_continue () =
 let test_resolve_params_adjust () =
   let adjusted : Hooks.turn_params =
     { temperature = Some 0.7
-    ; thinking_budget = Some 1000
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
@@ -264,10 +255,6 @@ let test_resolve_params_adjust () =
     "adjusted temperature"
     (Some 0.7)
     params.temperature;
-  Alcotest.(check (option int))
-    "adjusted thinking_budget"
-    (Some 1000)
-    params.thinking_budget;
   Alcotest.(check (option string))
     "adjusted context"
     (Some "Debug mode")

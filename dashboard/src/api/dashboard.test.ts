@@ -530,7 +530,6 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolCalls('keeper-alpha')
     const entry = result.entries[0]
     expect(entry?.thinking_enabled).toBe(true)
-    expect(entry?.thinking_budget).toBeUndefined()
     expect(entry?.tool_choice).toBeUndefined()
     expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
     expect(entry?.runtime_contract).toMatchObject({
@@ -4391,7 +4390,6 @@ describe('fetchRuntimeProviders', () => {
               has_system_prompt: false,
               enable_thinking: true,
               preserve_thinking: null,
-              thinking_budget: 32768,
               clear_thinking: false,
               resolved_reasoning_effort: 'high',
               glm_clear_thinking: false,
@@ -4490,7 +4488,6 @@ describe('fetchRuntimeProviders', () => {
                 max_context: 128000,
                 thinking_support: true,
                 preserve_thinking: true,
-                max_thinking_budget: 32768,
                 streaming: true,
                 temperature: 0.65,
                 top_p: 0.91,
@@ -4646,7 +4643,6 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.request_config?.provider_kind).toBe('openai_compat')
     expect(result.providers[0]?.request_config?.request_path).toBe('/chat/completions')
     expect(result.providers[0]?.request_config?.max_tokens).toBe(65536)
-    expect(result.providers[0]?.request_config?.thinking_budget).toBe(32768)
     expect(result.providers[0]?.request_config?.resolved_reasoning_effort).toBe('high')
     expect(result.providers[0]?.request_config?.tool_choice?.kind).toBe('required')
     expect(result.providers[0]?.request_config?.response_format?.kind).toBe('json_schema')

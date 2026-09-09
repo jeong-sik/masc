@@ -421,7 +421,6 @@ let openai_compat_request_control_artifact
       dialect
       ~enable_thinking:config.enable_thinking
       ~preserve_thinking:config.preserve_thinking
-      ~thinking_budget:config.thinking_budget
       ~reasoning_effort:config.reasoning_effort
       ()
   in
@@ -475,8 +474,7 @@ let thinking_control_request_rejection
         (match anthropic_thinking_control with
          | Some Capabilities.Anthropic_always_adaptive -> true
          | Some
-             ( Capabilities.Anthropic_manual_budget
-             | Capabilities.Anthropic_adaptive_default
+             ( Capabilities.Anthropic_adaptive_default
              | Capabilities.Anthropic_adaptive_preferred
              | Capabilities.Anthropic_adaptive_only ) -> false
          | None ->

@@ -117,10 +117,6 @@ type config =
         279. *)
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
-  ; thinking_budget : int option
-    (** Token budget for extended thinking, forwarded to AGENT_CORE
-        [Builder.with_thinking_budget]. Only meaningful when
-        [enable_thinking = Some true]. *)
   ; top_p : float option
     (** Nucleus sampling probability forwarded to AGENT_CORE [Builder.with_top_p].
         [None] leaves the provider/model default intact. *)
@@ -180,7 +176,6 @@ let default_config
   ; max_tool_rounds = None
   ; context_injector = None
   ; context = None
-  ; thinking_budget = None
   ; top_p = provider_cfg.top_p
   ; top_k = provider_cfg.top_k
   ; min_p = provider_cfg.min_p
@@ -231,8 +226,6 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
         config.preserve_thinking
         provider.preserve_thinking
   ; response_format = provider.response_format
-  ; thinking_budget =
-      configured_or_inherited config.thinking_budget provider.thinking_budget
   ; reasoning_effort = provider.reasoning_effort
   ; tool_choice = provider.tool_choice
   ; disable_parallel_tool_use = provider.disable_parallel_tool_use
@@ -360,11 +353,6 @@ let builder
     | None -> builder
   in
   let builder =
-    match config.thinking_budget with
-    | Some budget -> Agent_core.Builder.with_thinking_budget budget builder
-    | None -> builder
-  in
-  let builder =
     match config.top_p with
     | Some top_p -> Agent_core.Builder.with_top_p top_p builder
     | None -> builder
@@ -426,7 +414,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; reasoning_effort = agent_config.reasoning_effort
     ; enable_thinking = agent_config.enable_thinking
     ; preserve_thinking = agent_config.preserve_thinking
-    ; thinking_budget = agent_config.thinking_budget
     ; cache_system_prompt = agent_config.cache_system_prompt
     ; response_format = agent_config.response_format
     }

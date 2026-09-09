@@ -61,8 +61,9 @@ let loopback_authority authority =
   | Explicit_trusted_host -> false
   | Configured_bind ->
     (* One answer to "is this loopback" (#27576). *)
-    Masc_network_defaults.is_loopback_host
-      (Server_request_authority.host authority)
+    Server_request_authority.listener_is_loopback authority
+    && Masc_network_defaults.is_loopback_host
+         (Server_request_authority.host authority)
 ;;
 
 let challenge_for_authority authority =

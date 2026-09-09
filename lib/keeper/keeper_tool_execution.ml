@@ -61,12 +61,12 @@ let success_data ?metadata data =
   }
 ;;
 
-let deferred_data ?metadata data =
+let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
-  ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+  ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some Generic_deferred
   ; terminal_effect_receipt = None
@@ -74,12 +74,12 @@ let deferred_data ?metadata data =
   }
 ;;
 
-let deferred_external_effect_data ?metadata data =
+let deferred_external_effect_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
-  ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+  ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some External_effect_deferred
   ; terminal_effect_receipt = None
@@ -183,7 +183,7 @@ let of_tool_result
     { raw_output
     ; data
     ; metadata
-    ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+    ; failure_effect_disposition
     ; disposition = Tool_result.Deferred ()
     ; deferred_kind = Some Generic_deferred
     ; terminal_effect_receipt = None

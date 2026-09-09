@@ -2593,31 +2593,34 @@ let normalized_assignment = function
     else Ok (Assignment_present runtime_id)
 ;;
 
-let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
+let commit_keeper_assignment_using ?egress_allow ~commit_text transaction ~runtime_id =
   let* requested = normalized_assignment runtime_id in
   match transaction with
   | Missing_runtime_config _ ->
-    (match requested with
-     | Assignment_missing -> Ok (Assignment_unchanged Runtime_config_missing)
-     | Assignment_present _ -> Error runtime_config_path_missing_message)
+    (match requested, egress_allow with
+     | Assignment_missing, None -> Ok (Assignment_unchanged Runtime_config_missing)
+     | Assignment_present _, _ | Assignment_missing, Some _ -> Error runtime_config_path_missing_message)
   | Present_runtime_config transaction ->
   let current_assignment =
     match transaction.revision with
     | Runtime_config_present { assignment; _ } -> assignment
     | Runtime_config_missing -> Assignment_missing
   in
-  if requested = current_assignment
+  let assigned_source =
+    if requested = current_assignment then transaction.source_text
+    else match requested with
+      | Assignment_missing -> remove_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name
+      | Assignment_present runtime_id -> update_runtime_assignment_text transaction.source_text
+          ~keeper_name:transaction.keeper_name ~runtime_id
+  in
+  let next = match egress_allow with
+    | None -> assigned_source
+    | Some allow -> update_egress_allow_text assigned_source ~keeper_name:transaction.keeper_name ~allow
+  in
+  if String.equal next transaction.source_text
   then Ok (Assignment_unchanged transaction.revision)
   else
-    let next =
-      match requested with
-      | Assignment_missing ->
-        remove_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name
-      | Assignment_present runtime_id ->
-        update_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name ~runtime_id
-    in
     let* receipt = commit_text ~path:transaction.path next in
     Ok
       (Assignment_committed
@@ -2630,60 +2633,29 @@ let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
          })
 ;;
 
-let commit_keeper_assignment transaction ~runtime_id =
-  commit_keeper_assignment_using
+let commit_keeper_assignment ?egress_allow transaction ~runtime_id =
+  commit_keeper_assignment_using ?egress_allow
     ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
     transaction ~runtime_id
 ;;
 
-(* The keeper's egress allowlist, written inside the same transaction as its
-   runtime assignment: one lock, one file, one set of source bytes. A second
-   transaction would let another admitted writer land between a keeper being
-   put in the policy lane and being told what it may reach, and the gap
-   between those two is a keeper that reaches nothing while its config says
-   otherwise.
-
-   Unlike an assignment, there is no "unchanged" fast path keyed off the
-   revision: the transaction's revision carries the assignment, not the
-   allowlist, so the comparison is on the text this write would produce. *)
-let commit_keeper_egress_allow_using ~commit_text transaction ~allow =
+let commit_keeper_removal transaction =
   match transaction with
-  | Missing_runtime_config _ ->
-    (match allow with
-     | None -> Ok (Assignment_unchanged Runtime_config_missing)
-     | Some _ -> Error runtime_config_path_missing_message)
+  | Missing_runtime_config _ -> Ok (Assignment_unchanged Runtime_config_missing)
   | Present_runtime_config transaction ->
     let next =
-      match allow with
-      | None ->
-        remove_egress_allow_text transaction.source_text
-          ~keeper_name:transaction.keeper_name
-      | Some allow ->
-        update_egress_allow_text transaction.source_text
-          ~keeper_name:transaction.keeper_name ~allow
+      remove_runtime_assignment_text transaction.source_text
+        ~keeper_name:transaction.keeper_name
+      |> fun source -> remove_egress_allow_text source ~keeper_name:transaction.keeper_name
     in
     if String.equal next transaction.source_text
     then Ok (Assignment_unchanged transaction.revision)
     else
-      let* receipt = commit_text ~path:transaction.path next in
-      Ok
-        (Assignment_committed
-           { receipt
-           ; revision =
-               Runtime_config_present
-                 { source_revision = receipt.observation.source_revision
-                 ; assignment =
-                     (match transaction.revision with
-                      | Runtime_config_present { assignment; _ } -> assignment
-                      | Runtime_config_missing -> Assignment_missing)
-                 }
-           })
-;;
-
-let commit_keeper_egress_allow transaction ~allow =
-  commit_keeper_egress_allow_using
-    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
-    transaction ~allow
+      let* receipt = commit_runtime_config_text ~path:transaction.path next in
+      Ok (Assignment_committed { receipt;
+        revision = Runtime_config_present {
+          source_revision = receipt.observation.source_revision;
+          assignment = Assignment_missing } })
 ;;
 
 let restore_keeper_assignment_transaction_using ~commit_text transaction =

@@ -1,17 +1,12 @@
-// MASC v2 — Registry 등록 해제 confirm (design: registry.jsx RegDeregister).
-// The design's "drain 후 등록 해제" maps to real control-plane calls:
-// shutdownKeeper (drain — 정상 종료) followed by purgeKeeper (레지스트리 제거).
-// Purge answers 202 with an operation id and deletes asynchronously, so the
-// row is marked purge-pending and the operator gets the operation id in a
-// toast — same contract as keeper-action-panel's purge flow.
+// Confirm one durable purge operation; the server owns lane shutdown and cleanup.
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 
 import type { Keeper } from '../../types'
-import { purgeKeeper, shutdownKeeper } from '../../api/keeper-lifecycle'
-import { markKeeperPurgePending } from '../../store'
+import { purgeKeeper, KEEPER_PURGE_ARTIFACTS } from '../../api/keeper-lifecycle'
+import { markKeeperPurgePending, refreshKeeperDeletions } from '../../store'
 import { KEEPER_STATUS_LABEL_KO, type KeeperOperationalState } from '../../lib/keeper-operational-state'
 import { showToast } from '../common/toast'
 import { KeeperBadge } from '../keeper-badge'
@@ -22,14 +17,14 @@ export interface RegistryDeregisterProps {
   readonly onClose: () => void
 }
 
-/** 실행 중(running/stuck)이면 drain 없는 purge는 소유 태스크를 잃는다. */
-export function deregisterNeedsDrain(state: KeeperOperationalState): boolean {
+/** 실행 중인 키퍼의 종료도 같은 삭제 작업에 포함된다. */
+export function deregisterStopsRunningKeeper(state: KeeperOperationalState): boolean {
   return state.kind === 'running' || state.kind === 'stuck'
 }
 
 export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregisterProps) {
   const busy = useSignal(false)
-  const running = deregisterNeedsDrain(state)
+  const running = deregisterStopsRunningKeeper(state)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -46,17 +41,10 @@ export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregiste
     if (busy.value) return
     busy.value = true
     try {
-      if (running) {
-        const drained = await shutdownKeeper(keeper.name)
-        if (!drained.ok) {
-          showToast(drained.error ?? `${keeper.name} drain 실패`, 'error')
-          return
-        }
-      }
       const result = await purgeKeeper(keeper.name)
-      // The server deletes asynchronously; the roster row stays until a
-      // refresh stops returning this keeper, so mark it pending first.
+      // The durable inventory remains visible after the Keeper row is removed.
       markKeeperPurgePending(keeper.name)
+      void refreshKeeperDeletions()
       showToast(`${keeper.name} 등록 해제 요청됨 (operation ${result.operation_id})`, 'success')
       onClose()
     } catch (err) {
@@ -95,18 +83,18 @@ export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregiste
                 <div class="reg-confirm-warn">
                   <span class="cw-ico">⚠</span>
                   <span class="cw-txt">
-                    이 keeper는 <b>실행 중</b>입니다. 소유 태스크를 잃지 않으려면
-                    등록 해제 전에 먼저 <b>drain</b>(정상 종료)해야 합니다.
+                    이 키퍼는 <b>실행 중</b>입니다. 삭제 작업이 레인 종료와
+                    소유 Task 정리를 확인한 뒤 파일을 제거합니다.
                   </span>
                 </div>
               `
             : html`
                 <div class="reg-confirm-msg">
-                  레지스트리에서 <b>${keeper.name}</b>를 제거합니다. worktree와
-                  매니페스트 참조가 해제됩니다. 같은 파일을 참조하는 다른 keeper는
-                  영향받지 않습니다.
+                  <b>${keeper.name}</b> 키퍼를 영구 제거합니다.
                 </div>
               `}
+          <p>설정과 기록도 함께 삭제하며 되돌릴 수 없습니다.</p>
+          <ul>${KEEPER_PURGE_ARTIFACTS.map(item => html`<li key=${item}>${item}</li>`)}</ul>
         </div>
         <div class="reg-dlg-foot">
           <span class="rf-spacer"></span>
@@ -119,7 +107,7 @@ export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregiste
                   data-testid="registry-deregister-drain"
                   onClick=${remove}
                 >
-                  ${busy.value ? 'Draining…' : 'drain 후 등록 해제'}
+                  ${busy.value ? '삭제 요청 중…' : '종료 후 영구 제거'}
                 </button>
               `
             : html`
@@ -129,7 +117,7 @@ export function RegistryDeregister({ keeper, state, onClose }: RegistryDeregiste
                   data-testid="registry-deregister-submit"
                   onClick=${remove}
                 >
-                  등록 해제
+                  영구 제거
                 </button>
               `}
         </div>

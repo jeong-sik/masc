@@ -139,7 +139,6 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
       { temperature = None
       ; top_p = None
       ; max_tokens = None
-      ; thinking_budget = None
       ; enable_thinking = None
       }
     ~usage:

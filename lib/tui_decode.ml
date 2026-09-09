@@ -1481,6 +1481,11 @@ let sgr_left_press (parameters : string) (final : char) : (int * int) option =
         | _, _ -> None)
     | _ -> None
 
+(** Browser screenshots use release coordinates to distinguish a click from a drag.
+    Other surfaces continue to consume only presses. *)
+let sgr_left_release parameters final =
+  if final = 'm' then sgr_left_press parameters 'M' else None
+
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
     three raw bytes) into the same key an SGR report produces.
 
@@ -5328,15 +5333,26 @@ let decode_keeper_runtime json =
    otherwise present a short list as the whole fleet. *)
 let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
-  let* rows = decode_list "keepers" decode_keeper_runtime items in
+  let decode_row json =
+    match member "effective_meta_error" json with
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
+    | error ->
+        let* name = required_string_field json "name" in
+        let* detail = required_string_field error "message" in
+        Ok (Error (name, detail))
+  in
+  let* readings = decode_list "keepers" decode_row items in
+  let rows, errors = List.partition_map
+      (function Ok row -> Either.Left row | Error error -> Either.Right error)
+      readings in
   let* truncated =
     match member "truncated" json with
     | `Bool value -> Ok value
     | `Null -> Ok false
     | bad -> field_type_error "truncated" "a bool or null" bad
   in
-  let* total = int_field_or json "total" ~default:(List.length rows) in
-  Ok (rows, truncated, total)
+  let* total = int_field_or json "total" ~default:(List.length readings) in
+  Ok (rows, errors, truncated, total)
 
 let keeper_lane_phase_of_string raw =
   match keeper_phase_of_string raw with

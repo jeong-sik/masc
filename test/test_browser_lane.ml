@@ -48,9 +48,23 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
   check bool "old identity never selects new single client" true
     (Lane.resolve_target ~lane_name:"live" ~client_id:(Some old.client_id) = Error "client_not_connected");
   check bool "captured target also stays disconnected" true
-    (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Refused "client_not_connected");
+    (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Rejected_before_effect "client_not_connected");
   check bool "retired native identity cannot re-register" true
     (Lane.take_command ~client_info:old ~window_sec:0.001 = Error "client_disconnected"))
+let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
+  let info = connect Lane.Firefox in
+  let pinned = target info.client_id in
+  let client = match pinned with Lane.Live_client client -> client | Lane.Automation -> fail "expected live target" in
+  (* Expire the captured target between resolution and issue, without sleeps
+     or a clock-dependent scheduling race. No command has been dispatched. *)
+  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  let answer = Lane.issue_for ~target:pinned
+    ~verb:(Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
+  check bool "expiry after target resolution is proven pre-effect" true
+    (answer = Lane.Rejected_before_effect "client_not_connected");
+  check int "no waiter was installed" 0 (Hashtbl.length client.waiters);
+  check bool "no command was enqueued" true (Eio.Stream.take_nonblocking client.commands = None))
 let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "unconsumed action times out" true
@@ -79,7 +93,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
     (Lane.resolve_target ~lane_name:"other" ~client_id:None = Error "unknown_lane");
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
   List.iter (fun verb -> match Lane.issue_for ~target:(target client.client_id) ~verb ~timeout_sec:0.1 with
-    | Lane.Refused _ -> () | _ -> fail "live session/navigation must be refused")
+    | Lane.Rejected_before_effect _ -> () | _ -> fail "live session/navigation must be rejected before effect")
     [Lane.Page_goto {url="https://example.org";tab_id=None}; Lane.Session_open {headless=None}];
   Lane.install_automation_executor None;
   check bool "automation still needs its native executor" true
@@ -87,6 +101,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
 let () = run "browser client routing" ["ownership", [
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;
+  test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy]]

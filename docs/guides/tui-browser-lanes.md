@@ -20,7 +20,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
-| `Ctrl-O` | Preview a PNG screenshot of the selected tab; any key returns |
+| `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
@@ -36,18 +36,30 @@ The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
 The URL editor controls the isolated automation session. Keepers can separately
 use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
-the TUI reader itself does not send those interaction commands.
+the TUI scene supports observed-element clicks, and the screenshot view supports
+mouse clicks and scrolling. Text entry into the page remains a Keeper tool action.
 
 Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
 the tab-list and page-read phases; automation startup and navigation allow 65.
 Requests run in switch-owned Eio daemon fibers and return through the TUI mailbox.
 
 `Ctrl-O` captures the explicitly selected tab through the authenticated screenshot
-endpoint. The preview keeps the source, tab, text position, and URL draft; any new
-input cancels a pending preview. A closed tab produces a visible failure rather
+endpoint. The preview keeps the source, tab, text position, and URL draft. A closed tab produces a visible failure rather
 than capturing a different active tab. Use `r` to rediscover available tabs.
 The image is not staged or sent to a Keeper. PNG preview uses the terminal's
 existing image support; unsupported terminals receive an explanation in Browser.
+
+In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
+`j`/`k` scroll the actual page, and `r` refreshes the screenshot. The automation
+lane also supports pressing the left button, moving, and releasing to drag with
+trusted browser pointer actions. Live drag reports that automation is required.
+Each completed action captures the resulting page again in the same Lane.
+
+Mouse coordinates require the terminal's measured cell size. If that measurement
+is unavailable, the footer explains that click/drag is unavailable; scrolling
+and refresh remain usable. Inputs retain the captured document identity, viewport
+size, scroll position and URL. A changed observation requires a fresh screenshot
+before another pointer action can execute.
 
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 
@@ -97,8 +109,14 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Scene support requires the updated coordinator/native host and extension 0.3.0
-in the selected browser profile. Source changes and script-level Gecko evidence
+Scene support requires the updated coordinator/native host and extension 0.5.0
+in the selected browser profile: 0.5.0 is the first version whose injected
+script sends the `view` and `scope` a scene read is answered against, and a
+0.4.0 build fails every scene read with `scene missing view`. 0.5.0 also carries
+live `scroll_at`. After upgrading, reload the extension in `about:debugging`
+and confirm its version there. The
+Browser Lane client list reports the browser version, not the extension version.
+Source changes and script-level Gecko evidence
 alone do not establish that an installed TUI has been updated.
 
 
@@ -119,3 +137,23 @@ The builtin browser-design, frontend-implement and frontend-verify packages cove
 visual intent, verified source editing and browser evidence. They are discoverable
 skills; users need not name a skill for an ordinary UI request. Newly built MASC
 installs seed missing packages through the existing builtin-skill installer.
+
+In screenshot view, the mouse wheel scrolls the area under the pointer, allowing
+message lists and sidebars to scroll independently. `j/k` and the up/down keys
+scroll the area at the center of the viewport. When terminal cell geometry is
+unavailable, the wheel also uses the center and the footer shows `wheel:center`.
+The automation lane sends native browser wheel input; the live lane finds the
+scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
+same tab again.
+
+`v` lists the page's observed semantic regions -- `main`, `navigation`,
+`region`, `article`. `n`/`p` selects a region; Enter reads only that region's
+content, and `r` re-reads the same region. Pressing `v` again returns to the
+region list. A stale reference is rejected once the region is replaced or the
+page reloads. A connector that does not support region reading and returns
+the whole page instead is not treated as success.
+
+Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
+observed from `BrowserRead mode=regions` as `scope`. This path selects an
+actually observed region rather than guessing a CSS path. It returns
+per-region viewport/DOM content, not a channel-wide history collection.

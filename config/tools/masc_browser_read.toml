@@ -27,9 +27,9 @@ default = "live"
 [[params]]
 name = "mode"
 type = "string"
-enum = ["text", "elements", "scene", "screenshot", "frames", "dialog", "downloads"]
+enum = ["text", "elements", "scene", "regions", "screenshot", "frames", "dialog", "downloads"]
 default = "text"
-description = "scene returns viewport text, control/raster geometry and documentId/nodeId references for BrowserInteract; requires tabId. sourceContext is a page-provided dev-source hint (relative file, line/column, template or element precision, SHA-256); verify the chosen checkout and digest before editing. Unmapped pages have null context. Geometry is not paint-order or occlusion proof. downloads lists authoritative pending/completed/canceled/interrupted files (automation, explicit tabId); frames lists iframe selectors; dialog reads the pending prompt (automation, explicit tabId). text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
+description = "regions lists visible semantic landmarks with short documentId/nodeId references and labels; use scope to read only a chosen subtree. scene returns viewport text, control/raster geometry and documentId/nodeId references for BrowserInteract; requires tabId. sourceContext is a page-provided dev-source hint (relative file, line/column, template or element precision, SHA-256); verify the chosen checkout and digest before editing. Unmapped pages have null context. Geometry is not paint-order or occlusion proof. downloads lists authoritative pending/completed/canceled/interrupted files (automation, explicit tabId); frames lists iframe selectors; dialog reads the pending prompt (automation, explicit tabId). text reads the page; elements lists controls; screenshot requires tabId and returns a stored PNG artifact for keeper_analyze_image (viewport only)."
 
 [[params]]
 name = "framePath"
@@ -41,3 +41,40 @@ description = "Automation only: outer-to-inner iframe/frame selectors observed w
 name = "clientId"
 type = "string"
 description = "Live native connection UUID returned by BrowserTabs/Read or the browser clients endpoint. Required when multiple live browsers are connected. A stale ID never selects another browser. Omit for automation."
+
+[[params]]
+name = "scope"
+type = "object"
+additional_properties = false
+description = "For scene/regions only: read the observed region subtree instead of the whole page. Copy documentId and nodeId from mode=regions. A reloaded document or detached node fails."
+
+[[params.params]]
+name = "documentId"
+type = "string"
+required = true
+
+[[params.params]]
+name = "nodeId"
+type = "string"
+required = true
+
+[[params]]
+name = "expectedUrl"
+type = "string"
+description = "For scene/regions: reject an observation whose URL differs from this destination. A matching URL is not application-content readiness; verify the observed channel title and content."
+
+[[params]]
+name = "navigationSource"
+type = "object"
+additional_properties = false
+description = "Copy from follow_link receipt. An observation at the source URL requires a new document identity. Preserve on read-only retries, including redirect inspection without expectedUrl."
+
+[[params.params]]
+name = "url"
+type = "string"
+required = true
+
+[[params.params]]
+name = "documentId"
+type = "string"
+required = true

@@ -1048,9 +1048,10 @@ type keeper_runtime = {
     the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, truncated, total)]. A row whose [status] or lifecycle [phase] is
+    [(rows, configuration_errors, truncated, total)]. Explicit metadata errors
+    are retained per keeper without discarding readable rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph. *)
 
@@ -2790,3 +2791,6 @@ type async_request_observation =
 
 val decode_async_request_observation :
   Yojson.Safe.t -> (async_request_observation, string) result
+
+val sgr_left_release : string -> char -> (int * int) option
+(** Plain SGR left release position for screenshot click/drag gestures. *)

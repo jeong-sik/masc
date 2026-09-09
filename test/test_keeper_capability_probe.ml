@@ -305,8 +305,7 @@ let bool_opts = [ Some true; Some false; None ]
 
 let test_declared_thinking_off_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_budget = None
-    ; thinking_enabled = Some false
+    { Runtime_inference.thinking_enabled = Some false
     ; preserve_thinking = None
     }
   in
@@ -317,8 +316,7 @@ let test_declared_thinking_off_reaches_the_config () =
 
 let test_declared_thinking_on_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_budget = None
-    ; thinking_enabled = Some true
+    { Runtime_inference.thinking_enabled = Some true
     ; preserve_thinking = Some true
     }
   in
@@ -329,8 +327,7 @@ let test_declared_thinking_on_reaches_the_config () =
 
 let test_undeclared_seed_leaves_the_binding_alone () =
   let seed =
-    { Runtime_inference.thinking_budget = None
-    ; thinking_enabled = None
+    { Runtime_inference.thinking_enabled = None
     ; preserve_thinking = None
     }
   in

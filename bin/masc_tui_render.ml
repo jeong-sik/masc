@@ -8,6 +8,7 @@ module Frame_presenter = Masc_tui_frame_presenter
 module Ask_projection = Masc_tui_ask_projection
 module Ask_layout = Masc_tui_ask_layout
 module Board_read_layout = Masc_tui_board_read_layout
+module Browser_lane_layout = Masc_tui_browser_lane_layout
 module Board_detail = Masc_tui_board_detail
 module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
@@ -1389,7 +1390,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
-    state.palette_open || state.context_inspector_open || state.help_open
+    state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
   if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
@@ -3848,6 +3849,33 @@ let render_board_list (state : state) =
    currently read document is retained; input and live status are never cached. *)
 let board_read_layout = Board_read_layout.create ()
 
+(* One slot for the browser scene on screen. Module state rather than a field
+   on [state], like [board_read_layout]: a wrapped row is a derived reading,
+   not authority, and the input layer would otherwise invalidate it at every
+   scroll. *)
+let browser_lane_layout = Browser_lane_layout.create ()
+
+let browser_lane_rows ~cols (view : Browser_lane_view.t) =
+  (* The same three branches browser_lane_page_lines takes, so the key holds
+     every input that decides a row. *)
+  let content =
+    match view.Browser_lane_view.scene with
+    | Some scene -> Browser_lane_layout.Scene scene.content.Masc.Browser_scene.nodes
+    | None ->
+      (match view.Browser_lane_view.reading with
+       | Some { page = Some page; _ } -> Browser_lane_layout.Page page.text
+       | Some _ | None -> Browser_lane_layout.Empty)
+  in
+  let source =
+    { Browser_lane_layout.content
+    ; scene_cursor = view.Browser_lane_view.scene_cursor
+    ; columns = cols
+    }
+  in
+  Browser_lane_layout.get browser_lane_layout ~source ~render:(fun () ->
+    browser_lane_page_lines ~cols view)
+;;
+
 (** Render the Board surface (read view). *)
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
@@ -5753,7 +5781,7 @@ let keeper_message_identity ~max_cells state keeper_name =
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
-        | Keeper_control.Absent | Keeper_control.Unobserved -> None
+        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
       in
       let status_color =
         keeper_action_color (Keeper_control.next_action reading)
@@ -6231,13 +6259,22 @@ let render_keeper_list (state : state) =
 
   (* The roster's own failure. The rows below still come from disk so they stay
      on screen; this says the live half of every one of them is missing, which
-     is why the lifecycle keys stop offering anything. *)
+     does not prevent confirmed deletion through the authoritative server. *)
   (match state.keeper_roster_error with
    | Some err ->
        box_line buf cols
          ((Theme.warn ()) ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
   (match state.keeper_roster with
+   | Keeper_control.Roster_invalid { errors; _ } ->
+       box_line buf cols
+         (Printf.sprintf "%s  configuration errors: %d; select a keeper for details%s"
+            (Theme.warn ()) (List.length errors) Ansi.reset);
+       (match selected_reading with
+        | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
+            box_line buf cols ((Theme.warn ()) ^ "  "
+              ^ Terminal_text.single_line (name ^ ": " ^ detail) ^ Ansi.reset)
+        | Some _ | None -> ())
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
@@ -6291,7 +6328,7 @@ let render_keeper_list (state : state) =
           let runtime =
             match reading.Keeper_control.liveness with
             | Keeper_control.Present row -> Some row
-            | Keeper_control.Absent | Keeper_control.Unobserved -> None
+            | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
           in
           let turn =
             List.find_map
@@ -13790,7 +13827,7 @@ let render_changes (state : state) =
 let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let room = max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6)) in
-  max 0 (List.length (browser_lane_page_lines ~cols view) - room)
+  max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
 
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
@@ -13811,7 +13848,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene")
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -13819,10 +13856,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
+        | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
-        | Loading (_, Viewport_scroll _) -> "Scrolling selected browser viewport…", Theme.info ()
+        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
+        | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
@@ -13903,15 +13943,19 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | None -> "  Source unavailable"
             | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
       c.push_divider ();
-      let lines = browser_lane_page_lines ~cols view in
+      let lines = browser_lane_rows ~cols view in
+      let total = Browser_lane_layout.count lines in
       let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
-      let max_scroll = max 0 (List.length lines - room) in
+      let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
-      lines |> List.filteri (fun index _ -> index >= scroll && index < scroll + room)
-      |> List.iter (fun line -> c.push_styled ~style:Ansi.reset ("  " ^ line));
+      (* Read the window out of the retained array. [List.filteri] walked every
+         row of a 50,000-character page to reach the ones on screen. *)
+      for index = scroll to min (scroll + room - 1) (total - 1) do
+        c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
+      done;
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane"
-           (if lines = [] then 0 else scroll + 1) (List.length lines)))
+           (if total = 0 then 0 else scroll + 1) total))
 
 let render_connectors (state : state) =
   match browser_lane_on_screen state with
@@ -16448,7 +16492,13 @@ let render_prompt_registry (state : state) =
       Some ((Theme.bad ()), Terminal_text.single_line detail)
   in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let combined_height = max 2 (rows - 9 - error_rows) in
+  let notice_rows = match selected with
+    | None -> 0
+    | Some row ->
+        (if Option.is_some (held_back_for row.Tui_decode.pr_key) then 3 else 0)
+        + (if row.pr_override_default_moved then 1 else 0)
+  in
+  let combined_height = max 2 (rows - 9 - error_rows - notice_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
@@ -16537,9 +16587,9 @@ let render_prompt_registry (state : state) =
             (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
                (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
           box_line_styled buf cols ~style:(Theme.recede ())
-            (Printf.sprintf
-               "  지금 계약으로는 렌더링할 수 없습니다: %s \xc2\xb7 그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"
-               (Terminal_text.single_line entry.Tui_decode.hbo_reason)));
+            ("  " ^ Terminal_text.single_line entry.Tui_decode.hbo_reason);
+          box_line_styled buf cols ~style:(Theme.recede ())
+            "  그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다");
        (* The override applies. This line says only that the shipped text it
           replaced has changed since it was written, so the reader knows to
           compare the two once rather than discovering a new default months
@@ -18987,6 +19037,68 @@ let render_link_preview_modal (state : state) =
         ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
 ;;
 
+let keeper_deletions_lines (state : state) ~cols =
+  let lines = match state.keeper_deletions with
+    | None -> ["삭제 기록을 불러오는 중입니다."]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Ok inventory) ->
+      let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
+      let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
+      errors @ (match selected with
+        | None -> ["저장된 키퍼 삭제 기록이 없습니다."]
+        | Some row ->
+          let status = match row.Keeper_control.operation with
+            | Keeper_control.Configuration_removal receipt ->
+              let label = match receipt.state with
+                | Masc.Keeper_configuration_removal.Prepared -> "설정 삭제 접수"
+                | Cleanup_required detail -> "설정 정리 실패: " ^ detail
+                | Artifacts_removed -> "설정 파일 제거 대기"
+                | Removed -> "설정 삭제 및 정리 완료" in
+              Option.fold ~none:label ~some:(fun error -> label ^ ": " ^ error) receipt.last_error
+            | Runtime_shutdown operation ->
+              let open Masc.Keeper_shutdown_types in
+              match operation.phase with
+              | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
+                "파일·설정 정리 실패: " ^ detail
+              | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
+              | Blocked failure -> "종료 작업 중단: " ^ failure.detail
+              | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
+              | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
+          [Printf.sprintf "%d / %d · %s · %s"
+             (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
+             (Keeper_control.deletion_keeper_name row) status;
+           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
+           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+          @ String.split_on_char '\n'
+              (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
+  in
+  List.concat_map (fun line ->
+    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+      (Terminal_text.single_line line)) lines
+
+let keeper_deletions_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
+
+let render_keeper_deletions (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  framed_top buf cols;
+  framed_line buf cols (screen_title " 키퍼 삭제 기록"
+    ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""));
+  framed_divider buf cols;
+  let lines = keeper_deletions_lines state ~cols in
+  let height = framed_content_height ~rows in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.keeper_deletions_scroll in
+  lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + height)
+    |> List.iter (framed_line buf cols);
+  framed_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기");
+  finish_surface state ~surface_key:"keeper-deletions" ~rows:terminal_rows ~cols buf
+
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -19240,6 +19352,9 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.context_inspector_open then
     let frame, clamped = render_context_inspector state in
+    (frame, clamped, None)
+  else if state.keeper_deletions_open then
+    let frame, clamped = render_keeper_deletions state in
     (frame, clamped, None)
   else if state.help_open then
     let frame, clamped = render_help state in

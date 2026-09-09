@@ -11,7 +11,6 @@ type turn_context =
   ; lane : string option
   ; tool_choice : string option
   ; thinking_enabled : bool option
-  ; thinking_budget : int option
   ; prompt_fingerprint : string option
   ; trace_id : string option
   ; session_id : string option
@@ -31,7 +30,6 @@ let empty_turn_context =
   ; lane = None
   ; tool_choice = None
   ; thinking_enabled = None
-  ; thinking_budget = None
   ; prompt_fingerprint = None
   ; trace_id = None
   ; session_id = None
@@ -57,7 +55,6 @@ let set_turn_context
       ?lane
       ?tool_choice
       ?thinking_enabled
-      ?thinking_budget
       ?prompt_fingerprint
       ?trace_id
       ?session_id
@@ -77,7 +74,6 @@ let set_turn_context
      ; lane
      ; tool_choice
      ; thinking_enabled
-     ; thinking_budget
      ; prompt_fingerprint
      ; trace_id
      ; session_id
@@ -99,7 +95,6 @@ let get_turn_context ~cell () =
   ( ctx.lane
   , ctx.tool_choice
   , ctx.thinking_enabled
-  , ctx.thinking_budget
   , ctx.prompt_fingerprint
   , ctx.trace_id
   , ctx.session_id

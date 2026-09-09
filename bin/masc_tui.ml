@@ -621,6 +621,7 @@ type input_event =
           the operator was writing. Reading it is what keeps that from
           happening, whether or not anyone is waiting for it. *)
   | Mouse_left_press of int * int
+  | Mouse_left_release of int * int
       (** [(row, column)] of an unmodified left-button press, 1-based as the
           terminal reported it. Only surfaces that map frame rows to their own
           rows consume one; everywhere else it is inert, like a wheel notch on
@@ -732,7 +733,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                        match Masc.Tui_decode.sgr_left_press params final with
                        | Some (row, column) ->
                            Some (Mouse_left_press (row, column))
-                       | None -> key "unknown-esc"))
+                       | None -> (match Masc.Tui_decode.sgr_left_release params final with
+                           | Some (row,column) -> Some (Mouse_left_release (row,column))
+                           | None -> key "unknown-esc")))
                (* A bare [CSI M] is the legacy X10 mouse report: three raw
                   bytes follow and belong to the report, not to the typist.
                   Terminals that ignore the SGR half of the [?1006;1000h]
@@ -1714,6 +1717,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
+  | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
@@ -2200,10 +2204,8 @@ let enqueue_dispatch_start mailbox request was_replay =
    one of them gone there is nothing left to disagree. *)
 let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
-(* RFC tui-server-lifecycle: the one masc server this TUI started, if any.
-   Held at module scope because the switch cleanup in [run_with_eio_context]
-   is registered before [main] builds the per-session [state], so the
-   cleanup and the key handler need a shared handle neither owns. *)
+(* Track the background server started by this TUI for readiness and child
+   reaping. Closing the UI does not stop the workspace server. *)
 let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
   ref None
 
@@ -2237,13 +2239,17 @@ let find_executable_in_path name =
                let candidate = Filename.concat dir name in
                if Sys.file_exists candidate then Some candidate else None)
 
-(* Opt-in start of a masc server from inside the TUI. [note] surfaces one
-   line to the operator; [on_ready] fires once /health answers so the caller
-   can trigger a reconnect. Never starts a second server while one is owned;
-   the health wait runs in a forked fiber so the render loop stays live. *)
+(* Start a background server on demand and report readiness without blocking
+   rendering. The handle prevents duplicate starts while the child is alive. *)
 let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
+  (match !tui_owned_server with
+   | Some server when not (Masc_tui_server_lifecycle.is_running server) ->
+     tui_owned_server := None
+   | Some _ | None -> ());
   match !tui_owned_server with
-  | Some _ -> note "masc server is already starting"
+  | Some server ->
+      note (Printf.sprintf "masc background server is already running (PID %d)"
+              (Masc_tui_server_lifecycle.owned_pgid server))
   | None -> (
       match
         Masc_tui_server_lifecycle.discover_server_binary
@@ -2278,14 +2284,23 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                         | Some clock -> Eio.Time.sleep clock 0.5
                         | None -> ()
                       in
-                      match
+                      let outcome =
                         Masc_tui_server_lifecycle.wait_healthy ~health_ok
                           ~child_alive:(fun () ->
                             Masc_tui_server_lifecycle.is_running owned)
                           ~attempts:60 ~sleep
-                      with
+                      in
+                      (* A new start may replace an exited child while this
+                         waiter sleeps. Only its own handle may publish the
+                         result or clear startup ownership. *)
+                      if Option.fold ~none:false
+                           ~some:(fun current -> current == owned)
+                           !tui_owned_server
+                      then match outcome with
                       | Masc_tui_server_lifecycle.Ready ->
-                          note "masc server is up";
+                          note (Printf.sprintf
+                                  "masc background server is up (PID %d); it stays running when the TUI closes"
+                                  (Masc_tui_server_lifecycle.owned_pgid owned));
                           on_ready ()
                       | Masc_tui_server_lifecycle.Server_exited ->
                           tui_owned_server := None;
@@ -3161,6 +3176,46 @@ let launch_verification_evidence_load state ~mailbox task_id =
 (* The MCP resource inventory, and one resource's text. Each operation
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
+let launch_keeper_deletions state ~mailbox ?retry () =
+  if not state.keeper_deletions_loading then (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    let generation = state.keeper_deletions_generation in
+    let host, port = server_peer_host, state.port in
+    let run () =
+      let result =
+        try
+          let ( let* ) = Result.bind in
+          let* () = match retry with
+            | None -> Ok ()
+            | Some (row : Keeper_control.deletion_row) ->
+              let keeper_name = Keeper_control.deletion_keeper_name row in
+              let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
+              let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
+                "operation_id", `String operation_id]) in
+              let path = match row.operation with
+                | Keeper_control.Runtime_shutdown _ -> "/api/v1/dashboard/keepers/deletions/retry"
+                | Configuration_removal _ -> "/api/v1/dashboard/keepers/configuration-deletions/retry" in
+              let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
+                ~host ~port ~path ~body in
+              (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
+               | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
+               | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
+               | _ -> Error "deletion retry response did not identify the requested operation")
+          in
+          let* json = Masc_tui_http.get_json ~host ~port
+            ~path:"/api/v1/dashboard/keepers/deletions" in
+          Keeper_control.decode_deletion_inventory json
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_deletions_loaded (generation, result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> enqueue_async mailbox (Keeper_deletions_loaded
+        (generation, Error "Eio switch is unavailable")))
+
 let launch_resources_list state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -4122,7 +4177,7 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4136,7 +4191,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ ->
+        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4159,22 +4214,27 @@ let launch_browser_lane state ~mailbox operation =
         | Read -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Scene_read tab_id -> Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id))
-        | Scene_click {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
+        | Scene_regions tab_id -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scope:target ~host ~port ~view ~tab_id ()))
+        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id)))
+              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
           }
-        | Viewport_scroll {tab_id; expected_url; y} -> Browser_lane_screenshot_ready {
+        | Viewport_pointer {tab_id;expected_url;action} -> Browser_lane_screenshot_ready {
             generation; image_generation;
-            result = call (fun () ->
-              Result.bind
-                (Masc_tui_http.scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y)
-                (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
+            result = call (fun () -> Result.bind
+              (Masc_tui_http.act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action)
+              (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
@@ -6585,6 +6645,8 @@ let paste_clipboard_image state =
 let terminal_draws_images = ref None
 let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 let image_cell_pixels = ref None
+let browser_image_region : Masc_tui_graphics.image_region option ref = ref None
+let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -6824,6 +6886,8 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
   else begin
   state.browser_viewport <- None;
+  browser_image_region := None;
+  browser_pointer_press := None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6832,7 +6896,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         (Printf.sprintf "the terminal draws %s and this is %s"
            Masc_tui_graphics.payload_media_type media)
   | Ok _ ->
-      let rows, columns = get_terminal_size () in
+      let rows, columns = Masc_tui_ansi.get_terminal_size () in
       (* Header rows -- the title, then one row per caption line (description,
          site, URL). The image starts below the header and the footer sits on
          the last row, so the picture never overlaps the text. With no caption
@@ -6847,6 +6911,22 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         ; rows = max 1 (rows - header_rows - 2)
         }
       in
+      (* Use the same aspect-preserving placement as the terminal. With no
+         measured cell size the image still renders, but coordinates are unknown. *)
+      let image_pixels = Masc.Keeper_image_dimensions.image_dimensions data in
+      (match !image_cell_pixels, image_pixels with
+       | Some (cw,ch), Some (iw,ih) when cw > 0 && ch > 0 && iw > 0 && ih > 0 ->
+           let cw = float_of_int cw and ch = float_of_int ch in
+           let iw = float_of_int iw and ih = float_of_int ih in
+           let height_cells = match !active_graphics_protocol with
+             | Masc_tui_graphics.ITerm2_protocol ->
+                 min (float_of_int box.rows) (float_of_int box.columns *. cw *. ih /. iw /. ch)
+             | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
+                 float_of_int (Masc_tui_graphics.fit_rows ~cell_pixels:!image_cell_pixels
+                   ~image_pixels ~columns:box.columns ~rows:box.rows) in
+           browser_image_region := Some {top=header_rows+1;left=1;height_cells;
+             width_cells=height_cells *. ch *. iw /. ih /. cw}
+       | _ -> ());
       let img_escape =
         match !active_graphics_protocol with
         | Masc_tui_graphics.ITerm2_protocol ->
@@ -7203,6 +7283,8 @@ let open_named_image state ~mailbox =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  browser_pointer_press := None;
+  browser_image_region := None;
   state.browser_viewport <- None;
   match state.image_open with
   | false -> ()
@@ -7219,10 +7301,19 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     state.browser_lane <- Option.map
       (fun (view : Browser_lane_view.t) -> { view with load = Failed detail }) state.browser_lane
   in
+  let pointer_hint = match !image_cell_pixels with
+    | Some (width, height) when width > 0 && height > 0 ->
+        (match shot.source with
+         | Browser_lane_view.Live -> "click: link   drag: requires automation"
+         | Browser_lane_view.Automation -> "click: link   drag: move")
+    | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+  let wheel_hint = match !image_cell_pixels with
+    | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
+    | _ -> "wheel:center" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:"  wheel / ↑↓ / j k: scroll page   r: refresh   Esc: back" bytes;
+    ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -9290,8 +9381,11 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
         match perform step with
         | Error transport -> Error transport
         | Ok (status, body) -> (
-            match Keeper_control.classify_response ~status ~body with
-            | Keeper_control.Accepted _ as outcome ->
+            let outcome = match step with
+              | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
+              | Keeper_control.Lifecycle _ | Keeper_control.Directive _ -> Keeper_control.classify_response ~status ~body in
+            match outcome with
+            | (Keeper_control.Accepted _ | Keeper_control.Purge_accepted _) as outcome ->
                 walk ~recovery_available (Some outcome) rest
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
@@ -9309,6 +9403,10 @@ let run_keeper_action_steps ~host ~port ~keeper_name ~operator_operation_id
 let apply_keeper_action_result state ~base_path keeper_name action result =
   state.keeper_action_inflight <- None;
   (match result with
+   | Ok (Keeper_control.Purge_accepted { operation_id }) ->
+       add_event state "system"
+         (Printf.sprintf "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed"
+            keeper_name operation_id)
    | Ok (Keeper_control.Accepted { already_live = true }) ->
        add_event state "system"
          (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"
@@ -9937,6 +10035,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
           (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
              (Keeper_control.action_label action)
              (match reading.Keeper_control.liveness with
+              | Keeper_control.Invalid detail -> detail
               | Keeper_control.Unobserved ->
                   "the live roster has not been read"
               | Keeper_control.Absent | Keeper_control.Present _ ->
@@ -9964,7 +10063,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
                before its own purge. *)
             if action = Keeper_control.Delete then
               add_event state "system"
-                ("Delete removes: "
+                ("Delete stops the Keeper and waits for lane shutdown before removing: "
                  ^ String.concat ", " Keeper_control.purge_artifacts)
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
@@ -10774,6 +10873,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       apply_board_post_load state request result
   | Board_post_refresh_failed (request, err) ->
       apply_board_post_load state request (Error err)
+  | Keeper_deletions_loaded (generation, result) ->
+      if generation = state.keeper_deletions_generation then (
+        state.keeper_deletions_loading <- false;
+        let selected = match state.keeper_deletions with
+          | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+          | _ -> None in
+        state.keeper_deletions <- Some result;
+        match result with
+        | Error _ -> ()
+        | Ok inventory ->
+          let same_operation row = match selected with
+            | None -> false
+            | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+                (Keeper_control.deletion_operation_id row) (Keeper_control.deletion_operation_id previous) in
+          let rec find i = function
+            | [] -> None | row :: rest -> if same_operation row then Some i else find (i + 1) rest in
+          state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+            | Some i -> i | None -> 0))
   | Keeper_action_done (keeper_name, action, result) ->
       apply_keeper_action_result state ~base_path keeper_name action result;
       (* The roster is the half of the row this refresh cannot read from disk,
@@ -12804,7 +12921,7 @@ let terminal_title_runtime state keeper_name =
       (fun keeper ->
         match (keeper_reading state keeper).Keeper_control.liveness with
         | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-        | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
 ;;
 
 let terminal_title_snapshot state =
@@ -14672,13 +14789,43 @@ and is loaded on demand through keeper_skill.
            in
            (* Viewport keys and wheel notches move by 120 CSS pixels. Inputs during an in-flight request are consumed,
               never queued or replayed after a possible browser side effect. *)
-           let scroll y = launch_browser_lane state ~mailbox:async_messages
-             (Browser_lane_view.Viewport_scroll {tab_id=shot.tab_id; expected_url=shot.url; y}) in
+           let scroll_at point y = launch_browser_lane state ~mailbox:async_messages
+             (Browser_lane_view.Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;
+               action=Browser_lane.Scroll_at {point;viewport=shot.viewport;x=0;y}}) in
+           let wheel row column y = match !browser_image_region with
+             | Some region -> (match Masc_tui_graphics.image_point region ~row ~column with
+                 | Some (x,y_point) -> scroll_at {x;y=y_point} y
+                 | None -> ())
+             | None -> scroll_at {x=0.5;y=0.5} y in
            (match event with
+            | Mouse_left_press (row,column) ->
+                browser_pointer_press := None;
+                (match state.browser_lane, !browser_image_region with
+                 | Some view, Some region when not (Browser_lane_view.busy view) ->
+                     (match Masc_tui_graphics.image_point region ~row ~column with
+                      | Some (x,y) -> browser_pointer_press := Some (row,column,{x;y})
+                      | None -> ())
+                 | _ -> ())
+            | Mouse_left_release (row,column) ->
+                let pressed = !browser_pointer_press in
+                browser_pointer_press := None;
+                (match pressed, !browser_image_region with
+                 | Some (start_row,start_column,from), Some region ->
+                     (match Masc_tui_graphics.image_point region ~row ~column with
+                      | Some (x,y) ->
+                          let action = if row=start_row && column=start_column then
+                            Browser_lane.Click_at {point=from;viewport=shot.viewport}
+                          else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport} in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;action})
+                      | None -> ())
+                 | _ -> ())
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
-            | Key ("j" | "down") | Mouse_wheel (Masc.Tui_decode.Wheel_down, _, _) -> scroll 120
-            | Key ("k" | "up") | Mouse_wheel (Masc.Tui_decode.Wheel_up, _, _) -> scroll (-120)
+            | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
+            | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
+            | Mouse_wheel (Masc.Tui_decode.Wheel_down,row,column) -> wheel row column 120
+            | Mouse_wheel (Masc.Tui_decode.Wheel_up,row,column) -> wheel row column (-120)
             | _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in
@@ -14815,7 +14962,7 @@ and is loaded on demand through keeper_skill.
               | Pane_row _ -> None
               | Pane_miss -> Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
-          | Some (Mouse_left_press _) | None -> None
+          | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
       in
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
@@ -14837,6 +14984,7 @@ and is loaded on demand through keeper_skill.
           composer's and mean nothing in a field a single row high. A copied
           secret carries the newline that ended it, and a field is not a
           place for one. *)
+       | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
              Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
@@ -14959,7 +15107,7 @@ and is loaded on demand through keeper_skill.
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))
          when (not dismissed_image) && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -14978,7 +15126,7 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press (row, _column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -14995,7 +15143,7 @@ and is loaded on demand through keeper_skill.
               && state.lanes_mode = Lanes_overview
               && (not dismissed_image)
               && (not compact_viewport)
-              && (not state.help_open)
+              && ((not state.help_open && not state.keeper_deletions_open))
               && (not state.agenda_open)
               && (not state.palette_open)
               && (not state.context_inspector_open)
@@ -15007,7 +15155,7 @@ and is loaded on demand through keeper_skill.
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
-       | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
+       | Some (Mouse_left_press _) | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       (let now_ns = Mtime_clock.elapsed_ns () in
@@ -15055,7 +15203,12 @@ and is loaded on demand through keeper_skill.
            if cancelled [ "y"; "Y"; "n"; "N" ] then
              state.pending_approval_action <- None
        | Keepers _ ->
-           if cancelled [ "s"; "S" ] then state.keeper_action_pending <- None
+           (match state.keeper_action_pending with
+            | None -> ()
+            | Some pending ->
+              let confirm = Keeper_control.action_key pending.pending_action in
+              if cancelled [confirm; String.uppercase_ascii confirm]
+              then state.keeper_action_pending <- None)
        | Board -> if cancelled [ "v"; "V" ] then state.board_vote_armed <- None
        | Planning ->
            if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
@@ -15086,7 +15239,7 @@ and is loaded on demand through keeper_skill.
          appeared. The chat surface is excluded — it draws its own composer. *)
       let composer_claimed =
         (not compact_viewport)
-        && (not state.help_open)
+        && ((not state.help_open && not state.keeper_deletions_open))
         && (not state.agenda_open)
         && (not state.context_inspector_open)
         && (not state.palette_open)
@@ -15240,7 +15393,7 @@ and is loaded on demand through keeper_skill.
        | Some _ when compact_viewport -> ()
        | Some k
          when String.equal k toggle_browser_lane_key
-              && not state.palette_open && not state.help_open
+              && not state.palette_open && (not state.help_open && not state.keeper_deletions_open)
               && not state.agenda_open && not state.answering_open
               && not state.context_inspector_open
               && not state.patch_modal_open && not state.link_modal_open
@@ -15570,6 +15723,30 @@ and is loaded on demand through keeper_skill.
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
+       | Some k when state.keeper_deletions_open ->
+           (match k with
+            | "esc" | "D" -> state.keeper_deletions_open <- false
+            | "r" -> launch_keeper_deletions state ~mailbox:async_messages ()
+            | "j" | "down" | "k" | "up" ->
+              let count = match state.keeper_deletions with
+                | Some (Ok inventory) -> List.length inventory.operations | _ -> 0 in
+              let delta = if k = "j" || k = "down" then 1 else -1 in
+              state.keeper_deletions_cursor <- max 0 (min (count - 1) (state.keeper_deletions_cursor + delta));
+              state.keeper_deletions_scroll <- 0
+            | "J" | "K" | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
+              let count, height = Masc_tui_render.keeper_deletions_viewport state in
+              let delta = match k with "J" | "wheel-down" -> 1 | "K" | "wheel-up" -> -1
+                | "pagedown" -> height | _ -> -height in
+              state.keeper_deletions_scroll <- Masc_tui_scroll.normalize ~count ~height
+                (state.keeper_deletions_scroll + delta)
+            | "t" ->
+              (match state.keeper_deletions with
+               | Some (Ok inventory) ->
+                 (match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+                  | Some row when row.can_retry -> launch_keeper_deletions state ~mailbox:async_messages ~retry:row ()
+                  | _ -> ())
+               | _ -> ())
+            | _ -> ())
        | Some k when state.help_open && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
@@ -16314,7 +16491,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -16343,6 +16520,10 @@ and is loaded on demand through keeper_skill.
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
+                 | "v" when not (busy view) ->
+                     (match view.selected_tab with Some tab_id ->
+                       launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id)
+                      | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
@@ -16350,7 +16531,12 @@ and is loaded on demand through keeper_skill.
                       | None, None -> ())
                  | "r" ->
                      (match view.scene, view.selected_tab with
-                      | Some _, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | Some scene, Some tab_id ->
+                          let operation = match scene.content.scope, scene.content.view with
+                            | Some target, _ -> Scene_focus {tab_id;target}
+                            | None, Browser_lane.Regions -> Scene_regions tab_id
+                            | None, Browser_lane.Content -> Scene_read tab_id in
+                          launch_browser_lane state ~mailbox:async_messages operation
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
@@ -16363,9 +16549,12 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
+                      | Some scene, Some ({kind=Region _;_} as node) ->
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                       | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
-                            node_id=node.node_id;expected_url=scene.content.url})
+                            node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
@@ -19550,11 +19739,13 @@ and is loaded on demand through keeper_skill.
                        open_repository_change_diff state
                          ~mailbox:async_messages ~scope change)
                | _ -> ()))
-       (* Delete is the one keeper action with no inverse, so it is dispatched
-          here rather than through the toggle key: [Keeper_control.available]
-          offers it only where the roster shows no fiber, and
-          [gate_transition] holds the first press as an arm. *)
-       | Some "x"
+       | Some "D" when (match state.view with
+           | Keepers (Keeper_list | Keeper_detail) -> true | _ -> false) ->
+           state.keeper_deletions_open <- true;
+           state.keeper_deletions_scroll <- 0;
+           launch_keeper_deletions state ~mailbox:async_messages ()
+       (* Confirmed deletion owns shutdown and cleanup as one operation. *)
+       | Some "x" | Some "X"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true
                | _ -> false) ->
@@ -20646,13 +20837,7 @@ let run_with_eio_context f =
         Eio.Switch.run (fun sw ->
             Eio_guard.enable ();
             Eio.Switch.on_release sw Eio_guard.disable;
-            (* RFC tui-server-lifecycle: stop only a server this TUI started;
-               a server we merely connected to is not ours to kill. *)
-            Eio.Switch.on_release sw (fun () ->
-                match !tui_owned_server with
-                | Some owned ->
-                    Masc_tui_server_lifecycle.stop owned ~grace_sec:2.0
-                | None -> ());
+            (* The workspace server owns its lifetime independently of this UI. *)
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             (* Without this, Process_eio falls back to a Unix path that waits on
                Unix.select. Eio is cooperative, so that blocks the whole domain

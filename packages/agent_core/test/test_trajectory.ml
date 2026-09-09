@@ -39,7 +39,6 @@ let make_record
   ; tool_choice = None
   ; enable_thinking = None
   ; preserve_thinking = None
-  ; thinking_budget = None
   ; reasoning_effort = None
   ; block_index = None
   ; block_kind

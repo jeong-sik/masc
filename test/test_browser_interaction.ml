@@ -55,7 +55,31 @@ let test_source_context () =
     ["../secret";"/etc/passwd";"dashboard/../../secret";"C:\\secret";"dashboard//x";"dashboard/./x"];
   (match Source.of_json (`Assoc (("line",`Int 4)::fields)) with
    | Source.Invalid _ -> () | _ -> fail "duplicate source field accepted")
+let test_pointer_actions () =
+  let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
+    "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
+  let point = `Assoc ["x",`Float 0.25;"y",`Float 0.5] in
+  let base = ["expectedUrl",`String "https://example.org";"viewport",viewport] in
+  List.iter (fun (name,geometry) ->
+    let input = fields name @ base @ geometry in
+    let request = parsed input in
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id
+      ~expected_url:request.expected_url request.action in
+    ignore (match Interaction.parse wire with Ok _ -> () | Error e -> fail e);
+    check bool "pointer action requires its observed URL" true
+      (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
+    ["click_at",["point",point];"drag",["from",point;"to",point];
+     "scroll_at",["point",point;"x",`Int 0;"y",`Int 120]];
+  List.iter (fun bad ->
+    check bool "invalid screenshot coordinates rejected before dispatch" true
+      (Result.is_error (Interaction.parse (`Assoc
+        (fields "click_at" @ base @ ["point",bad])))))
+    [`Assoc ["x",`Float 1.;"y",`Float 0.];
+     `Assoc ["x",`Float (-0.1);"y",`Float 0.];
+     `Assoc ["x",`Float nan;"y",`Float 0.];
+     `Assoc ["x",`Int 0;"y",`Int 0;"x",`Int 0]]
 let () = run "browser interaction" ["typed boundary", [
+  test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;

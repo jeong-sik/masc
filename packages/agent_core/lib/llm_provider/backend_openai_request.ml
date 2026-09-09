@@ -428,7 +428,6 @@ let build_request_assoc_artifact
           dialect
           ~enable_thinking:config.enable_thinking
           ~preserve_thinking:config.preserve_thinking
-          ~thinking_budget:config.thinking_budget
           ~reasoning_effort:config.reasoning_effort
           ?clear_thinking_object
           ()

@@ -4,13 +4,21 @@ exception Setup_error of string
 
 let fail message = raise (Setup_error message)
 
+(* Waiting belongs to the PID already spawned. EINTR only interrupts the
+   syscall: it must not rerun the command or turn a successful build into a
+   setup failure. Both direct setup children and image-builder callbacks use
+   this same wait boundary. Other wait errors remain visible to the caller. *)
+let rec wait_for_child pid =
+  try snd (Unix.waitpid [] pid) with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child pid
+
 let run_process argv =
   match argv with
   | [] -> invalid_arg "setup process needs argv"
   | program :: _ ->
     let pid = Unix.create_process program (Array.of_list argv)
         Unix.stdin Unix.stdout Unix.stderr in
-    match snd (Unix.waitpid [] pid) with
+    match wait_for_child pid with
     | Unix.WEXITED code -> code
     | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 1
 

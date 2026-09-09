@@ -677,6 +677,7 @@ let check_gemini_refusal label expected_reason payload =
     (match events with
      | [ MessageStart { model = "gem"; _ }
        ; MessageDelta { stop_reason = Some Refusal; _ }
+       ; MessageStop
        ] -> ()
      | _ -> failf "%s: expected a typed refusal" label)
   | S.Gemini_parse_failed { reason; _ } ->

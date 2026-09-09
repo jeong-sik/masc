@@ -130,7 +130,6 @@ type config = Runtime_agent_context.config = {
   max_tool_rounds : int option;
   context_injector : Agent_core.Hooks.context_injector option;
   context : Agent_core.Context.t option;
-  thinking_budget : int option;
   top_p : float option;
   top_k : int option;
   min_p : float option;

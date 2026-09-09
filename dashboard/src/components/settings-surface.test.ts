@@ -1116,7 +1116,6 @@ describe('SettingsSurface', () => {
             has_system_prompt: true,
             enable_thinking: true,
             preserve_thinking: true,
-            thinking_budget: 8192,
             clear_thinking: false,
             resolved_reasoning_effort: 'high',
             glm_clear_thinking: false,
@@ -1209,7 +1208,6 @@ describe('SettingsSurface', () => {
               max_context: 131072,
               thinking_support: true,
               preserve_thinking: true,
-              max_thinking_budget: 8192,
               streaming: true,
               temperature: 0.65,
               capabilities: {
@@ -1327,7 +1325,6 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('transport:http')
       expect(cards[0]?.textContent).toContain('headers:1')
       expect(cards[0]?.textContent).toContain('temp:0.65')
-      expect(cards[0]?.textContent).toContain('budget:8192')
       expect(cards[0]?.textContent).toContain(
         'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )

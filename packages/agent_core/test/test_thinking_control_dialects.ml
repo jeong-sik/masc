@@ -78,14 +78,13 @@ let check_member_absent name json =
   check bool (name ^ " absent") true (member_is_absent name json)
 ;;
 
-let openai_compat_config ?enable_thinking ?preserve_thinking ?thinking_budget model_id =
+let openai_compat_config ?enable_thinking ?preserve_thinking model_id =
   PC.make
     ~kind:OpenAI_compat
     ~model_id
     ~base_url:"https://provider.example/v1"
     ?enable_thinking
     ?preserve_thinking
-    ?thinking_budget
     ()
 ;;
 
@@ -113,7 +112,6 @@ let declared_catalog_openai_compat_config
       ?provider_id
       ?enable_thinking
       ?preserve_thinking
-      ?thinking_budget
       ?temperature
       ?top_p
       ?tool_choice
@@ -128,7 +126,6 @@ let declared_catalog_openai_compat_config
     ~model_capabilities_override:(catalog_capabilities ?provider_id model_id)
     ?enable_thinking
     ?preserve_thinking
-    ?thinking_budget
     ?temperature
     ?top_p
     ?tool_choice
@@ -151,7 +148,6 @@ let declared_qwen_openai_compat_capabilities =
 let declared_qwen_openai_compat_config
       ?enable_thinking
       ?preserve_thinking
-      ?thinking_budget
       model_id
   =
   PC.make
@@ -161,14 +157,12 @@ let declared_qwen_openai_compat_config
     ~model_capabilities_override:declared_qwen_openai_compat_capabilities
     ?enable_thinking
     ?preserve_thinking
-    ?thinking_budget
     ()
 ;;
 
 let kimi_config
       ?enable_thinking
       ?preserve_thinking
-      ?thinking_budget
       ?temperature
       ?top_p
       model_id
@@ -179,7 +173,6 @@ let kimi_config
     ~base_url:"https://api.moonshot.ai/v1"
     ?enable_thinking
     ?preserve_thinking
-    ?thinking_budget
     ?temperature
     ?top_p
     ()
@@ -209,7 +202,6 @@ let ollama_cloud_config ?system_prompt ?enable_thinking model_id =
 
 let anthropic_config
       ?enable_thinking
-      ?thinking_budget
       ?reasoning_effort
       ?response_format
       model_id
@@ -220,7 +212,6 @@ let anthropic_config
     ~base_url:"https://api.anthropic.com"
     ~max_tokens:16_000
     ?enable_thinking
-    ?thinking_budget
     ?reasoning_effort
     ?response_format
     ()
@@ -1378,17 +1369,6 @@ let test_anthropic_reasoning_dialect_preserves_thinking () =
     (RD.normalize_effort_value dialect RE.Max)
 ;;
 
-let test_anthropic_manual_model_uses_budget_tokens () =
-  let config =
-    anthropic_config ~enable_thinking:true ~thinking_budget:4096 "claude-opus-4-5"
-  in
-  let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
-  let thinking = json |> member "thinking" in
-  check string "thinking type" "enabled" (thinking |> member "type" |> to_string);
-  check int "budget tokens" 4096 (thinking |> member "budget_tokens" |> to_int);
-  check_member_absent "output_config" json
-;;
-
 let test_anthropic_opus48_uses_adaptive_effort () =
   let config =
     anthropic_config ~enable_thinking:true ~reasoning_effort:RE.Medium "claude-opus-4-8"
@@ -1459,7 +1439,7 @@ let test_gemini_reasoning_dialect_uses_thinking_config () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ()
   in
@@ -1637,10 +1617,6 @@ let () =
               "anthropic reasoning dialect preserves thinking"
               `Quick
               test_anthropic_reasoning_dialect_preserves_thinking
-          ; test_case
-              "anthropic manual model uses budget_tokens"
-              `Quick
-              test_anthropic_manual_model_uses_budget_tokens
           ; test_case
               "anthropic opus 4.8 uses adaptive effort"
               `Quick

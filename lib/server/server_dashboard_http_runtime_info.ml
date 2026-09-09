@@ -1629,7 +1629,6 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "has_system_prompt", `Bool (Option.is_some cfg.system_prompt)
     ; "enable_thinking", Json_util.bool_opt_to_json cfg.enable_thinking
     ; "preserve_thinking", Json_util.bool_opt_to_json cfg.preserve_thinking
-    ; "thinking_budget", Json_util.int_opt_to_json cfg.thinking_budget
     ; "clear_thinking", Json_util.bool_opt_to_json cfg.clear_thinking
     ; ( "resolved_reasoning_effort"
       , Json_util.string_opt_to_json
@@ -1739,7 +1738,6 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "max_context", Json_util.int_opt_to_json rt.model.max_context
           ; "thinking_support", `Bool rt.model.thinking_support
           ; "preserve_thinking", Json_util.bool_opt_to_json rt.model.preserve_thinking
-          ; "max_thinking_budget", Json_util.int_opt_to_json rt.model.max_thinking_budget
           ; "streaming", `Bool rt.model.streaming
           ; "temperature", Json_util.float_opt_to_json rt.model.temperature
           ; "top_p", Json_util.float_opt_to_json rt.model.top_p

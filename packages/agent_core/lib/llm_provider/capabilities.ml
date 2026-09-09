@@ -109,14 +109,12 @@ type structured_output_support = Capability_vocab.structured_output_support =
 [@@deriving show, eq]
 
 type anthropic_thinking_control =
-  | Anthropic_manual_budget
   | Anthropic_adaptive_default
   | Anthropic_adaptive_preferred
   | Anthropic_adaptive_only
   | Anthropic_always_adaptive
 
 let anthropic_thinking_control_of_vocab_value = function
-  | Capability_vocab.Manual_budget -> Anthropic_manual_budget
   | Capability_vocab.Adaptive_default -> Anthropic_adaptive_default
   | Capability_vocab.Adaptive_preferred -> Anthropic_adaptive_preferred
   | Capability_vocab.Adaptive_only -> Anthropic_adaptive_only
@@ -1223,11 +1221,11 @@ let apply_declarative_capability_overrides overrides =
        | None -> base.reasoning_replay_override)
     }
   in
-  if
-    (not capabilities.supports_reasoning)
-    || capabilities.thinking_control_format = No_thinking_control
-  then { capabilities with accepted_reasoning_efforts = None }
-  else capabilities
+  (* Native adapters own their wire format, so [No_thinking_control] does not
+     erase an enabled model's effort vocabulary. An explicit lack of reasoning
+     support still invalidates it before native request validation. *)
+  if capabilities.supports_reasoning then capabilities
+  else { capabilities with accepted_reasoning_efforts = None }
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
@@ -1426,16 +1424,26 @@ let for_model_id model_id =
      | None -> for_model_id_catalog model_id)
 ;;
 
-let for_provider_model_id_catalog ~wire ~(provider_label : string) ~(model_id : string) =
+(* The provider-scoped row, and nothing else. Split from the provider-wide
+   base below so a caller can put the model's own row between them. *)
+let for_provider_model_id_row ~wire ~(provider_label : string) ~(model_id : string) =
   match Model_catalog.global () with
   | None -> None
   | Some catalog ->
-    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
-     | Some entry -> Some (apply_catalog_entry ~catalog ~wire entry)
-     | None ->
-       Option.bind
-         (provider_base_label ~catalog ~wire provider_label)
-         capabilities_for_provider_label)
+    Option.map
+      (apply_catalog_entry ~catalog ~wire)
+      (Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id)
+;;
+
+(* The provider's own [capabilities_base] -- what every model of that provider
+   gets when no row names it. *)
+let for_provider_label_base ~wire ~(provider_label : string) =
+  match Model_catalog.global () with
+  | None -> None
+  | Some catalog ->
+    Option.bind
+      (provider_base_label ~catalog ~wire provider_label)
+      capabilities_for_provider_label
 ;;
 
 (* [wire] is the caller's resolved provider kind, passed when it knows one. It
@@ -1449,9 +1457,25 @@ let for_provider_model_id
       ~(provider_label : string)
       ~(model_id : string)
   =
-  match for_provider_model_id_catalog ~wire ~provider_label ~model_id with
+  match for_provider_model_id_row ~wire ~provider_label ~model_id with
   | Some _ as caps -> caps
-  | None -> if allow_bare_fallback then for_model_id model_id else None
+  | None ->
+    (* The model's own bare row before the provider-wide base. Every
+       [[providers]] entry declares a [capabilities_base], so the base always
+       answered and [for_model_id] was unreachable: 44 of the catalog's 125
+       bare rows -- glm 21, gemini 11, kimi 7, ollama 5 -- could not be read
+       by an anonymous config of their own wire, because those four wire-kind
+       labels also name a [[providers]] entry. `anthropic` and `openai_compat`
+       name none, which is why only glm (#34126) and gemini (#34301) were ever
+       seen. A row that names the model is more specific than the provider's
+       base for every model it has.
+
+       Gated on [allow_bare_fallback], so this reorders nothing for a config
+       that declared a [provider_id]: a bare row must not answer for a scoped
+       provider whose base deliberately differs. *)
+    (match (if allow_bare_fallback then for_model_id model_id else None) with
+     | Some _ as caps -> caps
+     | None -> for_provider_label_base ~wire ~provider_label)
 ;;
 
 (* The token is the single source of truth carried by the entry's

@@ -1456,8 +1456,8 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           match Tui_decode.decode_keeper_runtime_list json with
           | Error detail ->
               Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, truncated, total) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~rows ~truncated ~total)))
+          | Ok (rows, errors, truncated, total) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
 
 (* The two detail-pane tab reads. Lines are built here so the renderer draws
    what one place formatted; a decode that only feeds a read-only pane keeps

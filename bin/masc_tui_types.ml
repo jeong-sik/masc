@@ -2843,15 +2843,17 @@ module Browser_lane_view = struct
   }
   type screenshot = {
     source : source; client_id : string option; tab_id : int; title : string; url : string;
-    data : string; elapsed_ms : float;
+    data : string; elapsed_ms : float; viewport : Browser_lane.Pointer.viewport;
   }
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
     | Scene_read of int
-    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string }
+    | Scene_regions of int
+    | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
+    | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
-    | Viewport_scroll of { tab_id : int; expected_url : string; y : int }
+    | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
@@ -2893,7 +2895,7 @@ module Browser_lane_view = struct
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
     | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _)), _ -> Operating
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -3031,9 +3033,10 @@ module Browser_lane_view = struct
       let* url = get string "url" value in
       let* mime = get string "mimeType" value in
       let* data = get string "data" value in
+      let* viewport = get Browser_lane.Pointer.viewport_of_json "viewport" value in
       let* elapsed_ms = get milliseconds "elapsed_ms" value in
       if mime <> "image/png" || data = "" then Error "browser screenshot must contain PNG data"
-      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms }
+      else Ok { source; client_id; tab_id; title; url; data; elapsed_ms; viewport }
 
   let decode_scene json =
     let* ok = get boolean "ok" json in
@@ -3049,22 +3052,34 @@ module Browser_lane_view = struct
 
   let accept_scene ~generation (result : (scene, string) result) t =
     match t.load with
-    | Loading (current, (Scene_read tab_id | Scene_click {tab_id;_})) when current = generation ->
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+        let expected_view, expected_scope = match operation with
+          | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_focus {target;_} -> Browser_lane.Content, Some target
+          | Scene_click {scope;_} -> Browser_lane.Content, scope
+          | _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
-                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id ->
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
              {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
          | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
          | Error detail -> {t with scene = None; load = Failed detail})
     | _ -> t
 
+  (* Deduplicate through a table rather than [List.mem] over what has been
+     seen. A scene carries up to 200 nodes (browser_scene_script.ml's
+     nodeLimit), and the membership walk made this quadratic in a function
+     the page projection then called once per node. *)
   let scene_targets t = match t.scene with
     | None -> []
     | Some scene ->
-        let _, nodes = List.fold_left (fun (seen, nodes) (node : Masc.Browser_scene.node) ->
-          if List.mem node.node_id seen then seen, nodes
-          else node.node_id :: seen, node :: nodes) ([], []) scene.content.nodes in
-        List.rev nodes
+        let seen = Hashtbl.create 64 in
+        List.filter
+          (fun (node : Masc.Browser_scene.node) ->
+             if Hashtbl.mem seen node.node_id then false
+             else (Hashtbl.add seen node.node_id (); true))
+          scene.content.nodes
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
@@ -3086,17 +3101,17 @@ module Browser_lane_view = struct
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 
-  let viewport_request ~tab_id ~expected_url ~y t =
-    `Assoc (["lane", `String (source_name t.source); "tabId", `Int tab_id;
-       "action", `String "scroll"; "expectedUrl", `String expected_url;
-       "x", `Int 0; "y", `Int y]
-      @ (match client_id t with None -> [] | Some id -> ["clientId", `String id]))
+  let viewport_request ~tab_id ~expected_url ~action t =
+    let fields = match Browser_lane.interaction_args ~tab_id ~expected_url:(Some expected_url) action with
+      | `Assoc fields -> fields | _ -> [] in
+    `Assoc (("lane",`String (source_name t.source)) :: fields @
+      (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
   (* Settle the browser operation even when a later key cancelled opening the
      image. The caller separately checks image intent before drawing. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_scroll {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -3104,7 +3119,7 @@ module Browser_lane_view = struct
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
-                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_scroll {expected_url;_})) -> screenshot.url = expected_url
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
                                   | _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
@@ -3147,16 +3162,23 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
     |> List.concat_map (fun line -> if line = "" then [""] else
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
   match view.scene with
-  | Some scene -> List.concat_map (fun (node : Masc.Browser_scene.node) ->
-      let rec index i = function
-        | [] -> None
-        | (candidate : Masc.Browser_scene.node) :: rest ->
-            if candidate.node_id = node.node_id then Some i else index (i + 1) rest in
+  | Some scene ->
+    (* The target index came from re-scanning [scene_targets] for every node,
+       and [scene_targets] rebuilt its whole list on each of those scans. The
+       index is what the dedup already knows, so it is read once into a table
+       keyed by node id. *)
+    let target_index = Hashtbl.create 64 in
+    List.iteri
+      (fun i (node : Masc.Browser_scene.node) ->
+         if not (Hashtbl.mem target_index node.node_id)
+         then Hashtbl.add target_index node.node_id i)
+      (Browser_lane_view.scene_targets view);
+    List.concat_map (fun (node : Masc.Browser_scene.node) ->
       let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O"
+        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
         | Control {disabled=true;_} -> "disabled"
         | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
-      let prefix = match index 0 (Browser_lane_view.scene_targets view) with
+      let prefix = match Hashtbl.find_opt target_index node.node_id with
         | None -> ""
         | Some i -> Printf.sprintf "[%s%d %s] "
             (if i = view.scene_cursor then ">" else "") (i + 1) label in
@@ -3218,6 +3240,12 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  mutable keeper_deletions_open: bool;
+  mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_generation: int;
+  mutable keeper_deletions_cursor: int;
+  mutable keeper_deletions_scroll: int;
+  mutable keeper_deletions: (Masc_tui_keeper_control.deletion_inventory, string) result option;
   (* The [;] agenda overlay: the strip above the composer says whether there
      is anything, and this says what. Modal like the help sheet, and like it
      the scroll survives only while it is open. *)
@@ -4365,7 +4393,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_identity
     && not compact_viewport
   in
-  if
+  if state.keeper_deletions_open then None
+  else if
     state.view = Config
     && state.config_pane = Config_presets
     && Option.is_some state.preset_save_draft
@@ -4889,6 +4918,12 @@ let create_state
   task_flow = None;
   task_focus = Left_pane;
   help_open = false;
+  keeper_deletions_open = false;
+  keeper_deletions_loading = false;
+  keeper_deletions_generation = 0;
+  keeper_deletions_cursor = 0;
+  keeper_deletions_scroll = 0;
+  keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;

@@ -78,7 +78,8 @@ val delete_terminal :
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   (terminal_delete_outcome, error) result
-(** Reclaim one settled operation record that no consumer still reads:
+(** Dashboard purge receipts are retained for the deletion inventory.
+    Reclaim other settled operation records that no consumer still reads:
     [Superseded _], or [Finalized] whose completion receipt is not pending.
     A record whose phase still requires an admission fence —
     [Completion_pending] included — is kept and reported as

@@ -49,6 +49,8 @@ let string_of_param_type = Types.param_type_to_string
 
 (* ── Type checking ───────────────────────────────────────── *)
 
+(* Check if a JSON value matches the expected param_type.
+   @since 0.120.0 *)
 let matches_type (expected : Types.param_type) (value : Yojson.Safe.t) : bool =
   match expected, value with
   | Types.String, `String _ -> true

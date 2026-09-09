@@ -99,7 +99,6 @@ val admit : now_unix_s:int -> input_tokens:int -> t -> (unit, admission_error) r
 val source_kind_of_string : string -> source_kind option
 val source_kind_to_string : source_kind -> string
 val confidence_of_string : string -> confidence option
-val confidence_to_string : confidence -> string
 
 (** Stable projection used by immutable catalog and ready-plan fingerprints.
     This deliberately includes the full evidence identity, not only the

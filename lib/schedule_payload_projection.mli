@@ -35,7 +35,6 @@ type support_summary =
   ; unknown_request_count : int
   }
 
-val supported_payload_kinds : string list
 val support_status_to_string : support_status -> string
 val creation_rejection_message : creation_rejection -> string
 val dispatch_rejection_message : dispatch_rejection -> string

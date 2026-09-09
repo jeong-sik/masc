@@ -80,14 +80,6 @@ type librarian_drain_error =
 
 val librarian_drain_error_to_string : librarian_drain_error -> string
 
-(** Seconds a graceful drain may wait for the Librarian owner lane to exit
-    before reporting [Librarian_drain_timed_out]. The cap keeps
-    [finish_lifecycle] from blocking forever inside [Eio.Cancel.protect],
-    where an outer cancellation cannot interrupt the join. When no global
-    Eio clock is available (pre-bootstrap or non-Eio callers) the join stays
-    unbounded, matching the previous behaviour. *)
-val librarian_drain_timeout_sec : float
-
 type librarian_abort_outcome =
   | Librarian_abort_idle
   | Librarian_abort_requested

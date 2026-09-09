@@ -27,13 +27,6 @@ val capture : Mcp.managed -> info
 val capture_all : Mcp.managed list -> info list
 val to_server_spec : info -> Mcp.server_spec
 
-val reconnect_all
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> info list
-  -> Mcp.managed list * (info * Error.t) list
-
 (** {2 JSON serialization} *)
 
 val info_to_json : info -> Yojson.Safe.t

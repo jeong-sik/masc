@@ -294,7 +294,9 @@ let carried_entry_answers ~entry_since_ts ~entry_oldest_row_ts ~since_ts ~since 
   && String.equal (iso_date_of_unix entry_since_ts) since
 ;;
 
-let reset_file_change_cache_for_testing () =
+(* Drop every carried tally. Tests that write rows and read them back in one
+   process need the next read to start from an empty window. *)
+let reset_file_change_cache () =
   Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
 ;;
 
@@ -306,7 +308,7 @@ let init ?cluster_name ~base_path () =
   let dir = Filename.concat masc_root "tool_calls" in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   (* A carried tally names rows in the store being replaced. *)
-  reset_file_change_cache_for_testing ();
+  reset_file_change_cache ();
   try
     let retention_days = retention_days () in
     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
@@ -337,7 +339,7 @@ let init ?cluster_name ~base_path () =
 
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
-  reset_file_change_cache_for_testing ();
+  reset_file_change_cache ();
   Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;

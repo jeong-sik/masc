@@ -179,6 +179,7 @@ let all_surface_golden_names =
   ; "keeper_lane_status"
   ; "keeper_library_read"
   ; "keeper_library_search"
+  ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"

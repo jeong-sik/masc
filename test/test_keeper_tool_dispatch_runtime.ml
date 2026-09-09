@@ -7623,6 +7623,52 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
       | Masc.Keeper_gate.Unavailable reason -> fail (Masc.Keeper_gate.unavailable_reason_to_string reason))
 ;;
 
+let test_workspace_memory_read_dispatch () =
+  with_exec_fixture "keeper-workspace-memory-read"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let invoke input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name:"keeper_workspace_memory_read" ~input () in
+      let empty = invoke (`Assoc []) |> check_success_result "empty workspace" in
+      check int "missing store is empty" 0
+        Yojson.Safe.Util.(member "proposals" empty |> to_list |> List.length);
+      let snapshot owner text = `Assoc [
+        "snapshot_id", `String owner; "keeper_id", `String owner;
+        "store", `String "ordinary"; "snapshot_sha256", `String (String.make 64 'a');
+        "metadata", `Assoc ["revision", `Int 2;
+          "change", `Assoc ["removed", `List [`String text]]]] in
+      let source owner = `Assoc ["source_id", `String owner;
+        "snapshot_id", `String owner; "evidence_path", `List [`String "change"]] in
+      let payload = `Assoc ["status", `String "model_proposed";
+        "context_sha256", `String (String.make 64 'b');
+        "snapshots", `List [snapshot "writer" "PDF completed"; snapshot "reviewer" "PDF incomplete"];
+        "sources", `List [source "writer"; source "reviewer"];
+        "gaps", `List [];
+        "proposal", `Assoc ["shared_claims", `List []; "excluded", `List [];
+          "conflicts", `List [`Assoc ["description", `String "Owners disagree on PDF completion";
+            "source_ids", `List [`String "writer"; `String "reviewer"]]]]] in
+      let id, stored = match Masc.Workspace_memory_proposal.submit ~base_path:config.base_path payload with
+        | Ok value -> value
+        | Error _ -> fail "could not save shared memory fixture" in
+      let listed = invoke (`Assoc []) |> check_success_result "list proposal" in
+      let row = Yojson.Safe.Util.(member "proposals" listed |> to_list |> List.hd) in
+      check string "discover saved ID" id Yojson.Safe.Util.(member "id" row |> to_string);
+      let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read proposal" in
+      let actual = Yojson.Safe.Util.(member "result" fetched |> member "proposal") in
+      check bool "dispatcher preserves complete conflicting evidence" true
+        (Yojson.Safe.equal (Masc.Workspace_memory_proposal.to_json stored) actual);
+      let missing = invoke (`Assoc ["id", `String (String.make 64 'c')])
+        |> check_success_result "missing proposal" in
+      check bool "missing is explicit" false Yojson.Safe.Util.(member "found" missing |> to_bool);
+      let invalid = invoke (`Assoc ["id", `String "../private"]) in
+      check string "invalid ID is failure" "failure" (outcome_label invalid.disposition);
+      let path = Filename.concat config.base_path
+        (Masc.Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+      let channel = open_out_bin path in output_string channel "broken"; close_out channel;
+      let corrupt = invoke (`Assoc ["id", `String id]) in
+      check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -7657,6 +7703,8 @@ let () =
         test_real_publication_release_failure_preserves_effect_truth;
       test_case "directory publication preserves cleanup failure truth" `Quick
         test_real_directory_release_failure_preserves_effect_truth;
+      test_case "workspace memory read dispatch preserves shared attribution" `Quick
+        test_workspace_memory_read_dispatch;
       test_case "model-visible local tools dispatch to runtime handlers" `Quick
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick

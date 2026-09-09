@@ -493,6 +493,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_file_list", keeper_shard_read);
     ("masc_file_upload", keeper_shard_write);
     ("masc_file_delete", keeper_shard_write);
+    ("keeper_workspace_memory_read", keeper_shard_read);
     ("keeper_memory_search", keeper_shard_read);
     ("keeper_memory_retract", keeper_shard_write);
     ("keeper_memory_write", keeper_shard_write);

@@ -328,6 +328,7 @@ let descriptions_owned_elsewhere =
   ; "masc_library_list"
   ; "keeper_context_status"
   ; "keeper_ide_annotate"
+  ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
   ; "keeper_memory_write"
   ; "keeper_person_note_set"

@@ -104,20 +104,41 @@ let effort_for_config (config : Provider_config.t) =
   Option.map Reasoning_effort.to_string config.reasoning_effort
 ;;
 
-let thinking_config_for_config mode (config : Provider_config.t) =
-  match config.enable_thinking, mode with
-  | Some true, Capabilities.Anthropic_always_adaptive -> None
-  | ( Some true
-    , ( Capabilities.Anthropic_adaptive_default
-      | Capabilities.Anthropic_adaptive_only
-      | Capabilities.Anthropic_adaptive_preferred ) ) ->
-    Some (`Assoc [ "type", `String "adaptive" ])
-  | Some false, Capabilities.Anthropic_adaptive_default ->
-    Some (`Assoc [ "type", `String "disabled" ])
-  | Some false, _ | None, _ -> None
+(* Two providers share this codec and they do not share a thinking wire.
+   Anthropic's is the adaptive policy the catalog declares per entry. Kimi's is
+   an on/off flag: [kimi_capabilities] declares [No_thinking_control], so there
+   is no effort or adaptive knob to name, and sending Claude's
+   {"type":"adaptive"} to api.kimi.com is a shape nobody checked against Kimi's
+   own contract. Keeping them apart in the type is what stops the next change
+   to one from silently rewriting the other's wire. *)
+type thinking_wire =
+  | Anthropic_control of Capabilities.anthropic_thinking_control
+  | Kimi_flag
+
+let thinking_config_for_config wire (config : Provider_config.t) =
+  match wire with
+  | Kimi_flag ->
+    (match config.enable_thinking with
+     | Some true -> Some (`Assoc [ "type", `String "enabled" ])
+     | Some false -> Some (`Assoc [ "type", `String "disabled" ])
+     | None -> None)
+  | Anthropic_control mode ->
+    (match config.enable_thinking, mode with
+     | Some true, Capabilities.Anthropic_always_adaptive -> None
+     | ( Some true
+       , ( Capabilities.Anthropic_adaptive_default
+         | Capabilities.Anthropic_adaptive_only
+         | Capabilities.Anthropic_adaptive_preferred ) ) ->
+       Some (`Assoc [ "type", `String "adaptive" ])
+     | Some false, Capabilities.Anthropic_adaptive_default ->
+       Some (`Assoc [ "type", `String "disabled" ])
+     | Some false, _ | None, _ -> None)
 ;;
 
-let validate_thinking_controls mode (config : Provider_config.t) =
+let validate_thinking_controls wire (config : Provider_config.t) =
+  match wire with
+  | Kimi_flag -> Provider_config.validate_reasoning_effort_request config
+  | Anthropic_control mode ->
   match mode, config.enable_thinking, config.reasoning_effort with
   | _, Some false, Some effort ->
     Error
@@ -319,17 +340,18 @@ let build_request_payload
    | Count_tokens, _ | Completion _, None -> ());
   let thinking_mode =
     match config.kind with
-    | Provider_config.Kimi -> Capabilities.Anthropic_adaptive_default
+    | Provider_config.Kimi -> Kimi_flag
     | Provider_config.Anthropic ->
-      (match anthropic_thinking_control with
-       | Some mode -> mode
-       | None when Option.is_some config.enable_thinking ->
-         invalid_arg
-           (Printf.sprintf
-              "Backend_anthropic.build_request: model %S has no catalog-declared \
-               Anthropic thinking-control policy"
-              config.model_id)
-       | None -> Capabilities.Anthropic_adaptive_default)
+      Anthropic_control
+        (match anthropic_thinking_control with
+         | Some mode -> mode
+         | None when Option.is_some config.enable_thinking ->
+           invalid_arg
+             (Printf.sprintf
+                "Backend_anthropic.build_request: model %S has no catalog-declared \
+                 Anthropic thinking-control policy"
+                config.model_id)
+         | None -> Capabilities.Anthropic_adaptive_default)
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
@@ -596,7 +618,7 @@ let validate_nonexact_thinking_controls (config : Provider_config.t) =
   match config.kind with
   | Provider_config.Anthropic ->
     (match nonexact_anthropic_thinking_control config with
-     | Some mode -> validate_thinking_controls mode config
+     | Some mode -> validate_thinking_controls (Anthropic_control mode) config
      | None when Option.is_some config.enable_thinking ->
        Error
          (Printf.sprintf
@@ -604,8 +626,7 @@ let validate_nonexact_thinking_controls (config : Provider_config.t) =
              explicit enable_thinking value cannot be encoded safely"
             config.model_id)
      | None -> Ok ())
-  | Provider_config.Kimi ->
-    validate_thinking_controls Capabilities.Anthropic_adaptive_default config
+  | Provider_config.Kimi -> validate_thinking_controls Kimi_flag config
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini

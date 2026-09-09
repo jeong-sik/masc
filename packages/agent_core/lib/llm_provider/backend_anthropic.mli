@@ -40,18 +40,26 @@ type request_artifact
 val request_payload : request_artifact -> string
 val request_output_token_receipt : request_artifact -> Types.output_token_receipt
 
-(** Provider-correct Claude thinking request field for a model family.
-    Shared by the Anthropic request builders so manual-budget and adaptive
-    thinking use the same dispatch. *)
+(** Which thinking wire a request is built for. Two providers share this codec
+    and do not share a thinking contract: Anthropic carries the adaptive policy
+    its catalog entry declares, and Kimi carries an on/off flag because
+    [Capabilities.kimi_capabilities] declares [No_thinking_control]. Naming them
+    apart is what stops a change to one from rewriting the other's wire. *)
+type thinking_wire =
+  | Anthropic_control of Capabilities.anthropic_thinking_control
+  | Kimi_flag
+
+(** The thinking request field for a model family, on the wire that family
+    actually accepts. *)
 val thinking_config_for_config
-  :  Capabilities.anthropic_thinking_control
+  :  thinking_wire
   -> Provider_config.t
   -> Yojson.Safe.t option
 
-(** Validate that categorical effort and numeric budget target the selected
-    Anthropic thinking wire exactly. *)
+(** Validate that a categorical effort targets the selected thinking wire
+    exactly. *)
 val validate_thinking_controls
-  :  Capabilities.anthropic_thinking_control
+  :  thinking_wire
   -> Provider_config.t
   -> (unit, string) result
 

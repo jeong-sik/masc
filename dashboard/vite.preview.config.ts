@@ -7,5 +7,6 @@ export default defineConfig(async env => mergeConfig(
   { build: { rollupOptions: { input: {
     dashboard: 'index.html',
     editSnapshots: 'dev-fixtures/chat-edit-snapshots.html',
+    ideHeartbeat: 'dev-fixtures/ide-heartbeat.html',
   } } } },
 ))

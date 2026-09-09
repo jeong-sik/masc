@@ -392,6 +392,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_status
+                 | Keeper_tool_descriptor.Tool_masc_fusion_decision
                  | Keeper_tool_descriptor.Tool_masc_file_dispatch
                  | Keeper_tool_descriptor.Tool_masc_library_dispatch
                  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch

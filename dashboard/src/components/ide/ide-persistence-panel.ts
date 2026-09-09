@@ -8,7 +8,7 @@ import {
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import type { Keeper } from '../../types'
-import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
+import { relativeTime } from '../../lib/format-time'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import {
   openIdeContextRouteLink,
@@ -54,30 +54,6 @@ export function lifecycleStateFromKeeperPhase(phase: string | null | undefined):
       return 'idle'
     default:
       return 'active'
-  }
-}
-
-export function persistenceStateFromKeeperPhase(
-  phase: string | null | undefined,
-  hasFetchError = false,
-): PersistenceState {
-  if (hasFetchError) return 'offline'
-  switch (normalizePhase(phase)) {
-    case 'failing':
-    case 'crashed':
-      return 'conflict'
-    case 'handoffing':
-    case 'handingoff':
-    case 'draining':
-    case 'restarting':
-      return 'syncing'
-    case '':
-    case 'offline':
-    case 'stopped':
-    case 'dead':
-      return 'offline'
-    default:
-      return 'saved'
   }
 }
 
@@ -208,8 +184,7 @@ export function IdePersistencePanel({
 
   const phase = diagram?.current_phase ?? keeper?.phase ?? null
   const lifecycleState = lifecycleStateFromKeeperPhase(phase)
-  const persistenceState = persistenceStateFromKeeperPhase(phase, error !== null)
-  const lastSaved = keeper?.last_heartbeat ?? keeper?.updated_at ?? keeper?.created_at ?? null
+  const lastHeartbeat = keeper?.last_heartbeat ?? null
 
   return html`
     <section
@@ -256,7 +231,9 @@ export function IdePersistencePanel({
           </span>
         ` : null}
         <span style=${{ marginLeft: 'auto' }}>
-          <${PersistenceStatus} status=${persistenceState} lastSaved=${lastSaved} />
+          <span aria-label="최근 하트비트" title=${lastHeartbeat ?? undefined}>
+            하트비트 ${relativeTime(lastHeartbeat)}
+          </span>
         </span>
       </header>
 

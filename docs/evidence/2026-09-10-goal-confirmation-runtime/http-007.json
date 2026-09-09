@@ -1,0 +1,19 @@
+{
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "tools/call",
+    "params": {
+      "name": "masc_goal_upsert",
+      "arguments": {
+        "title": "Synthetic marker inspection",
+        "metric": "marker count in fixture/evidence.txt",
+        "target_value": "1"
+      }
+    }
+  },
+  "authenticated": true,
+  "status": 200,
+  "raw": "retry: 3000\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"_meta\":{\"io.modelcontextprotocol/serverInfo\":{\"name\":\"masc\",\"title\":\"MASC MCP Server\",\"version\":\"0.35.2\"},\"com.github.yousleepwhen.masc/call\":{\"envelope\":{\"kind\":\"tool_call\",\"summary\":\"{\\\"status\\\":\\\"ok\\\",\\\"action\\\":\\\"created\\\",\\\"goal_id\\\":\\\"goal-1788995514248-d795c8d8\\\",\\\"goal\\\":{\\\"id\\\":\\\"goal-1788995514248-d795c8d8\\\",\\\"criterion_revision\\\":\\\"5e84069cad450f6d84192d55985c5e55\\\",\\\"title\\\":\\\"Synthetic marker inspection\\\",\\\"metric\\\":\\\"marker count in fixture/evidence.txt\\\",\\\"target_value\\\":\\\"1\\\",\\\"due_date\\\":null,\\\"priority\\\":3,\\\"phase\\\":\\\"executing\\\",\\\"last_review_note\\\":null,\\\"last_review_at\\\":null,\\\"created_at\\\":\\\"2026-09-09T23:11:54Z\\\",\\\"updated_at\\\":\\\"2026-09-09T23:11:54Z\\\"},\\\"task_goal_id_example\\\":\\\"masc_add_task({title: \\\\\\\"Implement Synthetic marker inspection\\\\\\\", goal_id: \\\\\\\"goal-1788995514248-d795c8d8\\\\\\\"})\\\",\\\"task_link_field\\\":\\\"goal_id\\\",\\\"task_link_mode\\\":\\\"structured_goal_id\\\",\\\"linked_task_title_example\\\":\\\"[child] Synthetic marker inspection\\\"}\",\"status\":\"ok\",\"tool\":\"masc_goal_upsert\"},\"trace_id\":\"7\",\"agent_id\":\"admin\",\"tool\":\"masc_goal_upsert\",\"duration_ms\":4,\"attempts\":1,\"timestamp\":\"2026-09-09T23:11:54Z\"}},\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"ok\\\",\\\"action\\\":\\\"created\\\",\\\"goal_id\\\":\\\"goal-1788995514248-d795c8d8\\\",\\\"goal\\\":{\\\"id\\\":\\\"goal-1788995514248-d795c8d8\\\",\\\"criterion_revision\\\":\\\"5e84069cad450f6d84192d55985c5e55\\\",\\\"title\\\":\\\"Synthetic marker inspection\\\",\\\"metric\\\":\\\"marker count in fixture/evidence.txt\\\",\\\"target_value\\\":\\\"1\\\",\\\"due_date\\\":null,\\\"priority\\\":3,\\\"phase\\\":\\\"executing\\\",\\\"last_review_note\\\":null,\\\"last_review_at\\\":null,\\\"created_at\\\":\\\"2026-09-09T23:11:54Z\\\",\\\"updated_at\\\":\\\"2026-09-09T23:11:54Z\\\"},\\\"task_goal_id_example\\\":\\\"masc_add_task({title: \\\\\\\"Implement Synthetic marker inspection\\\\\\\", goal_id: \\\\\\\"goal-1788995514248-d795c8d8\\\\\\\"})\\\",\\\"task_link_field\\\":\\\"goal_id\\\",\\\"task_link_mode\\\":\\\"structured_goal_id\\\",\\\"linked_task_title_example\\\":\\\"[child] Synthetic marker inspection\\\"}\"}],\"isError\":false,\"structuredContent\":{\"status\":\"ok\",\"action\":\"created\",\"goal_id\":\"goal-1788995514248-d795c8d8\",\"goal\":{\"id\":\"goal-1788995514248-d795c8d8\",\"criterion_revision\":\"5e84069cad450f6d84192d55985c5e55\",\"title\":\"Synthetic marker inspection\",\"metric\":\"marker count in fixture/evidence.txt\",\"target_value\":\"1\",\"due_date\":null,\"priority\":3,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-09-09T23:11:54Z\",\"updated_at\":\"2026-09-09T23:11:54Z\"},\"task_goal_id_example\":\"masc_add_task({title: \\\"Implement Synthetic marker inspection\\\", goal_id: \\\"goal-1788995514248-d795c8d8\\\"})\",\"task_link_field\":\"goal_id\",\"task_link_mode\":\"structured_goal_id\",\"linked_task_title_example\":\"[child] Synthetic marker inspection\"}}}\n\n"
+}

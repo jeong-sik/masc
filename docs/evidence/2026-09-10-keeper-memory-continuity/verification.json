@@ -1,0 +1,41 @@
+{
+  "candidate_commit": "17b9c982af4ab85d120a4afbca6b59de1fc500eb",
+  "runtime_ids": [
+    "kimi_coding.kimi-for-coding"
+  ],
+  "turn_count": 12,
+  "elapsed_seconds": 327.67720890045166,
+  "literal_recall_checks": {
+    "name": true,
+    "home": true,
+    "time": true,
+    "umbrella": true,
+    "season": true
+  },
+  "prior_response_mentions": {
+    "루메린": [
+      1,
+      2
+    ],
+    "은빛정류장": [
+      1
+    ],
+    "04:17": [
+      1
+    ],
+    "노란": [
+      4,
+      10,
+      11
+    ],
+    "가을": [
+      7
+    ]
+  },
+  "limitations": [
+    "operator-initiated single-runtime conversation",
+    "no failover, compaction, restart, or 1h/2h/4h/24h proof",
+    "turn 2 repeated the name despite instruction not to",
+    "literal recall is not a broad creative-quality evaluation"
+  ]
+}

@@ -435,6 +435,7 @@ let explicit_metadata : (string * metadata) list =
         broadcast_tool );
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
+    ("masc_fusion_decision", broadcast_tool);
     ("masc_library_list", read_state_tool);
     ("masc_library_read", read_state_tool);
     ("masc_library_add", broadcast_tool);

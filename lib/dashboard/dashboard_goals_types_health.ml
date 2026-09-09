@@ -28,6 +28,7 @@ let keeper_name_of_assignee metas assignee =
 let goal_fsm_state_kind = function
   | Goal_phase.Executing -> "executing"
   | Goal_phase.Verifying -> "verifying"
+  | Goal_phase.Awaiting_confirmation -> "awaiting_confirmation"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
 

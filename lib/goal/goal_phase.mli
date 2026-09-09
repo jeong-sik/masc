@@ -1,13 +1,13 @@
 (** Goal_phase — state machine SSOT for goal lifecycle.
 
-    Encodes the six phases a goal can be in, the operator/system
+    Encodes the five phases a goal can be in, the operator/system
     actions that drive transitions, and the deterministic decision
     function {!decide_transition}. Used by the goal subsystem to keep
     transition logic out of caller code.
 
     RFC-0387 stage 2: [Verifying] sits between [Executing] and
     [Completed] — [Request_complete] enters it, and only the verifier's
-    [Record_proof_proven] leaves it for [Completed]. *)
+    [Record_proof_proven] leaves it for [Awaiting_confirmation]. *)
 
 (** Goal lifecycle phases. *)
 type t =
@@ -15,6 +15,7 @@ type t =
   | Verifying
       (** Completion requested; the proof verdict is pending out-of-band
           (RFC-0387 B3). *)
+  | Awaiting_confirmation
   | Completed
   | Dropped
 
@@ -47,7 +48,8 @@ type action =
   | Reopen
   | Record_proof_proven
       (** Verifier commit: the completion proof held. [Verifying ->
-          Completed]. Requires non-blank evidence at the tool boundary. *)
+          Awaiting_confirmation]. Requires non-blank evidence at the tool boundary. *)
+  | Confirm_completion
   | Record_proof_refuted
       (** Verifier commit: the completion proof failed. [Verifying ->
           Executing]; the refutation reason stays in the ledger and

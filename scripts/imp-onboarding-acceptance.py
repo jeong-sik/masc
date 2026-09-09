@@ -104,7 +104,20 @@ def directory_execution(traces):
                 or event.get('tool_name') != 'Execute' or event.get('tool_error') is not False):
             continue
         started = starts.get(identity(event))
-        if not started or not lists_working_directory(started.get('tool_input', {}).get('script')):
+        if not started:
+            continue
+        tool_input = started.get('tool_input')
+        if not isinstance(tool_input, dict):
+            continue
+        script = tool_input.get('script')
+        if script is None:
+            # Execute can encode the same shell program as an exact argv
+            # wrapper. Never search arbitrary argv for text resembling ls.
+            argv = tool_input.get('argv')
+            if (isinstance(argv, list) and len(argv) == 3
+                    and argv[:2] == ['sh', '-lc']):
+                script = argv[2]
+        if not lists_working_directory(script):
             continue
         try:
             result = json.loads(event.get('tool_result', ''))
@@ -184,7 +197,7 @@ def measure(args):
                     'Hello imp. Please introduce yourself briefly.',
                     'Create a Board post titled Imp first conversation and a Task titled Imp onboarding check. Leave the task open.',
                     'Show the current path and a detailed directory listing, including hidden entries, inside your default sandbox.',
-                    'Fetch https://example.com and tell me what it says.',
+                    'Use WebFetch to retrieve https://example.com now and report the HTTP status and title.',
                 ]
                 for index, prompt in enumerate(prompts):
                     path = output / f'chat-{index}.sse'

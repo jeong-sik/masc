@@ -1678,6 +1678,24 @@ let runtime_probe_cmd =
   let info = Cmd.info "runtime-probe" ~doc in
   Cmd.v info Term.(const runtime_probe_cmd_exit $ base_path $ runtime_probe_id)
 
+let runtime_token_sample_cmd =
+  let runtime_ids =
+    Arg.(non_empty & opt_all string [] & info [ "runtime" ] ~docv:"RUNTIME_ID"
+           ~doc:"Exact runtime ID to sample. Repeat to compare runtimes.")
+  in
+  let scenario_path =
+    Arg.(required & opt (some file) None & info [ "scenario" ] ~docv:"JSON"
+           ~doc:"JSON with system_prompt and a nonempty prompts array. Makes live model calls.")
+  in
+  let run base_path scenario_path runtime_ids =
+    Masc_cli_runtime_sample.run
+      ~config_path:(runtime_config_path_for_base_path base_path)
+      ~scenario_path ~runtime_ids
+  in
+  Cmd.v (Cmd.info "runtime-token-sample"
+           ~doc:"Record configured Agent Core conversation usage as JSONL.")
+    Term.(const run $ base_path $ scenario_path $ runtime_ids)
+
 let schedule_prune_cmd_exit base_path =
   let config = Workspace_utils.default_config base_path in
   match Schedule_service.prune config with
@@ -2544,6 +2562,7 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
+    ; runtime_token_sample_cmd
     ; runtime_model_list_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd

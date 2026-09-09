@@ -60,10 +60,13 @@ source_id를 추측하지 않는다. 해당 행이 없으면 사이트 스킬이
 포함하지 않으면 빠진 범위를 남긴다. 피드 주소를 추측하거나 로그인 세션·쿠키를 별도
 수집기로 옮기지 않는다. 특정 브라우저 화면 검증을 피드 읽기로 완료 처리하지 않는다.
 
-현재 BrowserRead에는 DOM subtree·role locator·RSS·Readability 전용 인자가 없다.
-`scene`도 접근성 트리 전체가 아니다. 의미 구조는 현재 관측에 실제로 드러난 만큼
-활용하며, 범위 추출을 실행하지 않았으면 추출했다고 하지 않는다. WebDriver는 제어
-통로다. 드라이버를 바꾸거나 composition으로 묶는 것만으로 추출 품질이 개선되지는 않는다.
+BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된 영역의
+`documentId`·`nodeId`를 `scope`로 전달하면 그 요소 아래의 화면에 보이는 내용을 읽는다.
+관측한 참조로 범위를 지정하며, 임의의 CSS selector나 role locator로 subtree를 지정하는
+인자는 없다. RSS·Readability 전용 추출 인자도 없다. `scene`은 접근성 트리 전체나
+영역의 전체 메시지 기록이 아니므로, 반환된 범위·잘림과 실제로 읽은 화면을 확인한다.
+WebDriver는 제어 통로다. 드라이버를 바꾸거나 composition으로 묶는 것만으로 추출
+품질이 개선되지는 않는다.
 
 ## 관측하고 조작하기
 
@@ -121,3 +124,17 @@ elements는 긴 selector를 포함하므로 작은 maxChars로도 큰 artifact�
 MASC에서는 `keeper_skill`에 이 스킬의 동일한 `identity`와 해당 상대 `file`을
 전달해 참조를 읽는다. 다른 Skill 호스트에서는 호스트가 제공하는 리소스 읽기를 쓴다.
 도구의 현재 스키마와 사용자의 작업 범위가 예시보다 우선한다.
+
+## 관측한 영역과 짧은 composition
+
+현재 스키마가 지원하면 BrowserRead의 `regions`로 의미 영역 목록을 읽고,
+반환된 documentId/nodeId를 `scope`로 전달해 `scene`을 읽는다. 인자를 무시한
+전체 페이지 응답을 영역 읽기의 성공으로 받아들이지 않는다. 같은 영역을
+새로 읽을 때도 scope를 유지하고, reload/detach 거절은 새 관측으로 해소한다.
+
+사이트 instruction이 실제 이동 대상을 고른 뒤 Available 목록의
+`browser-live-click-regions` composition을 필요할 때 읽는다. 이 Skill은 live
+브라우저의 관측된 링크를 한 번 클릭하고 그 탭의 새 영역 목록을 반환한다.
+실패한 클릭을 재시도하지 않으며 새 영역 선택은 모델 판단으로 남긴다.
+composition은 모델 왕복을 줄이는 도구이고, 스크롤된 전체 이력이나 요청 채널
+도착을 자체 증명하지 않는다. 결과 URL·영역 이름·본문을 확인한다.

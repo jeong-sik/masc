@@ -7804,6 +7804,8 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";
+      Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
+        ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry";
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"

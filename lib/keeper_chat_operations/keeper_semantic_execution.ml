@@ -321,7 +321,10 @@ let apply ~now action current =
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Discharge_gate obligation ->
           (match current.phase with
-           | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
+           | Resuming_gate (waiting, selected) ->
+             if selected.obligation = obligation && List.mem obligation waiting.obligations
+             then unchanged current.phase else reject ()
+           | Running | Resuming_runtime_retry _ ->
              if List.mem obligation current.gate_obligations then unchanged current.phase else reject ()
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Require_reconciliation diagnostic ->

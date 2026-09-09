@@ -37,3 +37,24 @@ and remains unverified.
 provides line comparison and asynchronous callback execution. The implementation preserves whitespace and final-newline differences. Fetch/verification precedes diff
 computation so neither transport corruption nor unsupported text becomes a
 plausible-looking change preview.
+
+## CI browser scenario
+
+The preview-only Vite configuration includes `dev-fixtures/chat-edit-snapshots.html`.
+Release builds keep their existing entry. After downloading the CI preview:
+
+```sh
+node scripts/verify-chat-edit-preview.mjs PREVIEW_DIR PR_HEAD EVIDENCE_DIR
+```
+
+The harness checks all manifest hashes, serves only local fixture assets and
+artifact responses, and exercises the actual browser worker. It checks CRLF and
+final-newline changes, full originals, visible persistence failure, corruption
+rejection, focus, and mobile overflow; it writes desktop/mobile screenshots and
+a receipt. These are synthetic HTTP records, not a deployed autonomous edit.
+The harness is implemented; screenshots have not yet been produced.
+
+Backend targeted CI run 34380660903 exposed a missing artifact-reference carrier
+at the ordinary tool hook. #34924 commit c797dd4e6c repairs that path; targeted
+rerun 34382313926 was dispatched. Five filesystem race cases also failed in the
+first run and remain unresolved; their baseline behavior has not been measured.

@@ -27,15 +27,16 @@ const before = artifact('\tlet answer = 20\r\nunchanged\r\n')
 const after = artifact('\tlet answer = 21\r\nunchanged')
 const bad = artifact('corrupt target')
 const artifacts = new Map([before, after, bad].map(value => [value.sha256, value]))
+function ref({ sha256, bytes, mime }) { return { _blob: { sha256, bytes, mime, preview: '' } } }
 function receipt(path, edit_snapshots) {
   return { ts: 1, keeper: 'preview-writer', tool: 'Edit', success: true, duration_ms: 3,
     input: {}, route_evidence: { descriptor_id: 'agent.edit_file' },
     output: JSON.stringify({ ok: true, mode: 'patch', path, occurrences: 1, edit_snapshots }) }
 }
 const fixtures = [
-  receipt('essay.ml', { status: 'stored', before: { _blob: before }, after: { _blob: after } }),
+  receipt('essay.ml', { status: 'stored', before: ref(before), after: ref(after) }),
   receipt('unavailable.ml', { status: 'unavailable', detail: 'scenario: storage unavailable' }),
-  receipt('corrupt.ml', { status: 'stored', before: { _blob: before }, after: { _blob: bad } }),
+  receipt('corrupt.ml', { status: 'stored', before: ref(before), after: ref(bad) }),
 ]
 const requests = []
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2' }
@@ -69,8 +70,12 @@ try {
   await normal.getByRole('button').click()
   const diff = normal.getByLabel('편집 원본의 Unified diff')
   await diff.waitFor()
-  assert.ok((await diff.textContent()).includes('-\tlet answer = 20\r\n+\tlet answer = 21\r\n'))
-  assert.ok((await diff.textContent()).includes('\\ No newline at end of file'))
+  assert.equal(await diff.textContent(),
+    '===================================================================\n'
+    + '--- before\n+++ after\n@@ -1,2 +1,2 @@\n'
+    + '-\tlet answer = 20\r\n-unchanged\r\n'
+    + '+\tlet answer = 21\r\n+unchanged\n'
+    + '\\ No newline at end of file\n')
   assert.equal(await normal.getByLabel('편집 전 전체 원본').textContent(), before.content)
   assert.equal(await normal.getByLabel('편집 후 전체 원본').textContent(), after.content)
   await diff.focus()

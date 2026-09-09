@@ -75,10 +75,12 @@ let parse_runtime_entry json =
     | Some (`Int (0o644 | 0o755 as n)) -> Ok n | _ -> Error Invalid_receipt in
   let allowed = path = "runtime-provenance.json"
     || List.exists (fun prefix -> String.starts_with ~prefix path) ["lib/"; "python/"; "licenses/"] in
-  if safe_path path && allowed && hex 64 sha256 then Ok {path; sha256; size; mode}
+  if safe_path path && allowed && hex 64 sha256
+     && (path <> "python/bin/python3" || mode = 0o755) then Ok {path; sha256; size; mode}
   else Error Invalid_receipt
 let parse_runtime binary_asset = function
-  | `Null -> Ok []
+  | `Null when List.mem binary_asset ["masc-linux-x64"; "masc-linux-arm64"] -> Ok []
+  | `Null -> Error Invalid_receipt
   | json ->
     let* f = fields ["asset"; "sha256"; "files"] json in
     let* asset = string "asset" f in

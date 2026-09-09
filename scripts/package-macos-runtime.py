@@ -158,6 +158,7 @@ def package(dist, stage, platform, commit, lock_path):
             dest = stage / 'lib' / name
             dest.parent.mkdir(exist_ok=True)
             shutil.copy2(source, dest)
+            dest.chmod(0o644)
             queue.append(dest)
     for name, source in sources.items():
         notices = [p for p in source.parent.parent.iterdir()
@@ -168,6 +169,7 @@ def package(dist, stage, platform, commit, lock_path):
             dest = stage / 'licenses' / name / notice.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(notice, dest)
+            dest.chmod(0o644)
     targets = [stage / name for name in NAMES if macho(stage / name)] + list((stage / 'lib').iterdir())
     for binary in targets:
         signature = subprocess.run(['codesign', '-dv', str(binary)], capture_output=True, text=True)

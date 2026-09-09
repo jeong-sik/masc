@@ -1075,8 +1075,10 @@ let line_contains ~(needle : string) (haystack : string) : bool =
       scan 0)
 ;;
 
-let self_hosted_example_marker = "Self-hosted OpenAI-compatible servers"
-let official_client_example_marker = "Official Claude Code subscription runtime example"
+(* Anchor examples at their actual commented declarations, not editorial
+   headings. Materialized runtime IDs and capabilities below remain the gate. *)
+let self_hosted_example_marker = "[providers.llama_server]"
+let official_client_example_marker = "[providers.claude_code]"
 
 let uncomment_example_region ~(marker : string) (content : string) : string =
   let rec walk acc inside = function
@@ -1084,7 +1086,7 @@ let uncomment_example_region ~(marker : string) (content : string) : string =
     | line :: rest ->
       let inside =
         inside
-        || (String.length line > 0 && line.[0] = '#' && line_contains ~needle:marker line)
+        || (String.equal (String.trim line) ("# " ^ marker))
       in
       if not inside
       then walk (line :: acc) false rest
@@ -1130,9 +1132,9 @@ let with_uncommented_seed ~marker f =
   let content = seed_runtime_toml () in
   if not
        (List.exists
-          (fun line -> String.length line > 0 && line.[0] = '#' && line_contains ~needle:marker line)
+          (fun line -> String.equal (String.trim line) ("# " ^ marker))
           (String.split_on_char '\n' content))
-  then failf "example heading moved; update this gate: %s" marker;
+  then failf "commented provider declaration is missing: %s" marker;
   let path = Filename.temp_file "seed_example_" ".toml" in
   Fun.protect
     ~finally:(fun () ->

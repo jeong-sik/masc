@@ -48,9 +48,7 @@ let warn_parallel_disable_unsupported ~model_id =
 ;;
 
 (* Gemini publishes one thinking wire: [thinkingLevel], a name from the
-   model's declared effort vocabulary. The [thinkingBudget] integer wire is
-   gone -- no catalog row asks for it, and the only one that ever did was
-   [gemini-2.5], a retired model kept alive by test fixtures. *)
+   model's declared effort vocabulary. *)
 let accepted_efforts_for_config (config : Provider_config.t) =
   let caps =
     match Provider_config.capabilities_for_config_model config with

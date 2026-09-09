@@ -418,7 +418,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
 
-      <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3" aria-label="프리셋 원문" data-prompt-preset-content>
+      <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3" aria-label="프리셋 원문" data-prompt-preset-content data-active-preset=${activePreset}>
         <div class="flex flex-wrap items-center justify-between gap-2">
           <label class="text-sm">프리셋
             <select aria-label="원문을 볼 프리셋" class="ml-2 rounded-md border border-border bg-[var(--color-bg-surface)] p-1"

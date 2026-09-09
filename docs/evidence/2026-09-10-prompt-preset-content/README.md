@@ -47,3 +47,24 @@ No runtime update was confirmed or applied by these requests. The user then
 specified worktree-only work; implementation and validation continue in this
 branch. The runtime observation is evidence of a configuration mismatch, not
 proof of new Keeper behavior.
+
+## CI-built browser acceptance
+
+PR checks now build the Dashboard and upload `dashboard-preview-<head>-<attempt>`.
+The archive includes `preview-provenance.json` with the actual checkout commit
+(the PR merge commit), PR head, run identity and per-file SHA-256 hashes.
+After downloading that artifact into a worktree, run:
+
+```sh
+node scripts/verify-prompt-preset-preview.mjs \
+  /path/to/downloaded-preview EXPECTED_PR_HEAD \
+  http://127.0.0.1:8935 /path/to/evidence
+```
+
+The browser loads CI assets while using live GET responses. All non-GET/HEAD
+requests and WebSocket connections are blocked; service workers are disabled. The script verifies every asset hash before navigation,
+compares every effective prompt body in the full preset, switches to System
+rules, checks keyboard focus and mobile overflow, and writes desktop/mobile
+screenshots plus a receipt. This is frontend verification over a live backend,
+not a production deployment claim. The script has not yet run against a built
+artifact at this commit; syntax validation alone does not prove acceptance.

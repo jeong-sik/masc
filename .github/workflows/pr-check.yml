@@ -292,3 +292,37 @@ jobs:
         # NO continue-on-error: main is green here once #33548 lands, and a
         # type error is deterministic. Do not merge this before that one.
         run: pnpm typecheck
+
+      - name: Build browser preview
+        working-directory: dashboard
+        run: pnpm build
+
+      - name: Record browser preview provenance
+        env:
+          PR_HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root = Path('assets/dashboard')
+          files = sorted(path for path in root.rglob('*') if path.is_file())
+          if not (root / 'index.html').is_file():
+              raise SystemExit('Dashboard build did not produce index.html')
+          manifest = {
+              'checkout_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'pr_head_commit': os.environ['PR_HEAD_COMMIT'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'files': {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in files},
+          }
+          (root / 'preview-provenance.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+
+      - name: Upload browser preview
+        uses: actions/upload-artifact@v7
+        with:
+          name: dashboard-preview-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: assets/dashboard/
+          include-hidden-files: true
+          if-no-files-found: error

@@ -97,7 +97,9 @@ readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # retains DOS save-file writes, disk swapping and machine snapshots.
 # 27706b9 adds Backspace matrix input and replay support (ocaml-msx #25).
 # a754105 adds joystick-1 directions, SHIFT/CTRL/GRAPH modifiers (ocaml-msx #22, #23).
-readonly OCAML_MSX_SHA="a754105fde711dd351afaca90d03f3d750bc4f87"
+# 3133d7c adds disk HLE boot for Rune Master II (NMS8250 slot layout, page-0
+# vectors, BDOS _DIRIN), the VDP FH/IE1 gate and the Select key (ocaml-msx #26).
+readonly OCAML_MSX_SHA="3133d7c5bff436abf2e7c36ce2b7fa61333f7146"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

@@ -195,8 +195,8 @@ val make_err
   -> class_:tool_failure_class
   -> start_time:float
   -> ?data:Yojson.Safe.t
-  -> ?effect_disposition:failure_effect_disposition
   -> ?metadata:Yojson.Safe.t
+  -> ?effect_disposition:failure_effect_disposition
   -> string
   -> result
 

@@ -1179,7 +1179,10 @@ let test_ollama_event_edge_branches () =
       (ollama_chunk ~is_done:true ~done_reason:"future" ~tool_calls:[ tc_none ] ())
   in
   (match done_unknown_tool_events with
+   (* The terminal chunk closes every block this state opened, so the tool
+      block's stop sits between its start and the message end. *)
    | [ ContentBlockStart _
+     ; ContentBlockStop _
      ; MessageDelta { stop_reason = Some (Unknown "future"); _ }
      ; MessageStop
      ] ->

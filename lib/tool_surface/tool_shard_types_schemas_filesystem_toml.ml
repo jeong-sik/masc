@@ -9,8 +9,9 @@
     These are not the model's Read / Edit / Write. Those are separate tools
     with separate schemas, and their declarations carried these names until the
     files were renamed to what they publish -- which is what freed the names
-    here. [test_filesystem_shard_toml_parity] pins all four against what the
-    list published before the move. *)
+    here. [test_filesystem_shard_toml_parity] keeps the publication order;
+    the descriptions and schemas it also pinned were copies of these
+    values. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in

@@ -10,7 +10,8 @@
     owns; in TOML that is a literal, because nothing there reads an OCaml
     value. The owner stays the owner and [test_enum_mirror_sync] compares the
     advertised array against it, which is what RFC §2.2 asks for.
-    [test_base_tool_toml_parity] pins the published base surface. *)
+    [test_base_tool_toml_parity] keeps the publication order; the
+    descriptions and schemas it also pinned were copies of these values. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in

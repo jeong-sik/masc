@@ -1,99 +1,44 @@
-(** Byte-identity pins for the base tool toml parity declarations moving to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2).
+(** The publication order of [Tool_shard_types.base_tools].
 
-    The expected values were read off [Tool_shard_types.base_tools] before any file moved, so this
-    suite passing *before* the TOML replaces a literal is what proves the file
-    says the same thing. Written against the published list rather than a loader
-    module, so it holds across the whole migration: what a Keeper receives must
-    not move whether a declaration lives in OCaml or TOML.
+    Everything else this suite held was a copy. The declarations live in
+    [config/tools/*.toml], [Tool_shard_types.base_tools] is those files decoded, and the expected
+    descriptions and schemas were literals read off that same list before the
+    move -- one producer compared against a hand-written snapshot of itself.
+    Those cases are gone.
 
-    keeper_memory_search advertises the source vocabulary that
-    [Keeper_tool_memory_runtime] owns. In TOML that becomes a literal --
-    nothing there reads an OCaml value -- and [test_enum_mirror_sync] already
-    compares the advertised array against the owner, so a value added on one
-    side without editing the file fails there.
-
-    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
-    not part of a JSON object's meaning, and TOML cannot place a sub-table
-    before its parent's scalar keys. *)
+    Order is not in the TOML. It is the order of the OCaml list above, and
+    #34379 is the open question about what changed it, so it stays. *)
 
 open Alcotest
 
-let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (key, value) -> key, sorted value)
-       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | `List items -> `List (List.map sorted items)
-  | other -> other
-;;
-
-(* name, description, input_schema (keys sorted) *)
 let expected =
-    [ {|keeper_time_now|}, {|Read the server clock once: now_iso (ISO8601) and now_unix (float). The current time already reaches you in every request's system context as a [Temporal] time=... line. Reading the clock again does not bring a later time closer; a later time is reached by ending the turn with a masc_schedule_create wake.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
-    ; {|keeper_context_status|}, {|Check your own persisted checkpoint and session state. Returns: name (your keeper name), checkpoint_bytes, message_count, generation, memory fact counts, sandbox health, and your workspace root plus backend/profile metadata. Context-window occupancy is not currently observed and is not returned. sandbox paths are tool-ready and can be passed directly as path or cwd to keeper tools without prefix. Use when checking checkpoint/session continuity or resolving a path without string-interpolating your own keeper name.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
-    ; {|keeper_lane_status|}, {|Read how your execution lane stands, from what the server already knows: the lane (microvm_remote, remote_ssh, or docker), its endpoint, what the endpoint's shim answered to the last probe (protocol major, capabilities), how the last Execute that reached the wire ended (payload_finished with its status, or lane_failed with a class and the detail you saw), and, when the lane itself failed, the operator action that fixes it. Nothing here changes state, and a server restart empties it. Call it once when Execute fails with a lane error, before retrying or posting: it says whether the failure is your payload's or the lane's.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
-    ; {|keeper_memory_search|}, {|Search your durable Memory OS facts or conversation history. Memory OS fact results preserve snapshot order and include exact memory_id, category, and observed or derived basis. Use returned memory_id values as premise_ids when writing a derived conclusion only when store='current_memory_snapshot'; source-bound results name their different store explicitly. Default searches the durable fact store. Use source='history' for raw user messages, source='all' for both.|}, {|{"additionalProperties":false,"properties":{"limit":{"description":"max results (1-10, default 5). Must be a bare integer (e.g. 5); a quoted value is rejected.","type":"integer"},"query":{"description":"keyword to search for","type":"string"},"source":{"description":"Search scope: memory (default, durable facts), history (raw messages), or all","enum":["memory","history","all"],"type":"string"}},"required":["query"],"type":"object"}|}
-    ; {|keeper_memory_retract|}, {|Retract one exact ordinary-current Memory OS fact.
-
-Use the memory_id returned by memory write or search and state the concrete reason. The same atomic commit removes every derived fact that no longer has a complete support path and records both the direct reason and the support invalidations for inspection. This is a terminal-contract tool: when it succeeds, the turn ends. The runtime rejects any batch that places it alongside another tool call — call it alone in its own turn, never batched with reads, writes, or shell execution.|}, {|{"additionalProperties":false,"properties":{"memory_id":{"description":"Exact sha256 Memory OS identity to retract.","type":"string"},"reason":{"description":"Concrete non-empty reason this fact is no longer current.","type":"string"}},"required":["memory_id","reason"],"type":"object"}|}
-    ; {|keeper_memory_write|}, {|Record a durable claim that later turns read back. Your context resets between turns, so a conclusion you leave only in this turn's reasoning is gone. Task sequencing and operating constraints belong to their typed domain stores, not memory prose. The runtime records explicit typed provenance and returns validation or persistence failures directly. When source_path is set, the claim is recalled only while the exact source bytes still match. To record a conclusion rather than an observation, provide both rule_id and premise_ids; the conclusion remains current only while one complete support set remains current. When the claim was read from a Board post, pass board_post_id (and board_comment_id for a comment) so the record names its source; a Board reference cannot be combined with source_path or with a derivation. This is a terminal-contract tool: when it succeeds, the turn ends. The runtime rejects any batch that places it alongside another tool call — call it alone in its own turn, never batched with reads, writes, or shell execution.|}, {|{"additionalProperties":false,"properties":{"board_comment_id":{"description":"The comment under board_post_id the claim was read from. Requires board_post_id.","type":"string"},"board_post_id":{"description":"The Board post the claim was read from (the post_id the Board tools return). Only for observations, not for derivations or source_path claims.","type":"string"},"content":{"description":"Body. Required, must be non-empty. For decisions, lead with the decision then **Why** and **How to apply** lines.","type":"string"},"premise_ids":{"description":"Exact memory_id values supporting a derived conclusion. Must be paired with rule_id.","items":{"type":"string"},"minItems":1,"type":"array","uniqueItems":true},"rule_id":{"description":"Opaque rule identity for a derived conclusion. Must be paired with premise_ids.","type":"string"},"source_path":{"description":"Optional keeper-visible regular file that makes this claim source-bound.","type":"string"},"title":{"description":"Optional hook; may be empty.","type":"string"}},"required":["content"],"type":"object"}|}
-    ; {|keeper_tools_list|}, {|List the complete Tool and Skill capability inventory frozen for this Keeper turn, including operator-only and unavailable entries with their typed availability. This is capability introspection, not connector content lookup. Use keeper_capability_search to retrieve lexically relevant candidates.|}, {|{"additionalProperties":false,"properties":{},"type":"object"}|}
-    ; {|keeper_capability_search|}, {|Search the complete Tool and Skill capability inventory frozen for this Keeper turn. SQLite FTS5 ranks lexical candidates with BM25. Results retain exact typed capability identity and availability but never invoke a candidate.|}, {|{"additionalProperties":false,"properties":{"query":{"description":"FTS5 query over exact capability name, description, and invocation name. No substring, regex, stop-word, threshold, top-N, or intent-expansion heuristic is added.","type":"string"}},"required":["query"],"type":"object"}|}
-    ]
+  [ "keeper_time_now"
+  ; "keeper_context_status"
+  ; "keeper_lane_status"
+  ; "keeper_memory_search"
+  ; "keeper_memory_retract"
+  ; "keeper_memory_write"
+  ; "keeper_tools_list"
+  ; "keeper_capability_search"
+  ]
 ;;
 
 let published = Tool_shard_types.base_tools
 
-let find name =
-  match
-    List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
-  with
-  | Some schema -> schema
-  | None -> failwith (name ^ " is absent from Tool_shard_types.base_tools")
-;;
-
-let test_descriptions_are_byte_identical () =
-  List.iter
-    (fun (name, description, _) ->
-       check string (name ^ " description") description (find name).description)
-    expected
-;;
-
-let test_input_schemas_match_with_keys_sorted () =
-  List.iter
-    (fun (name, _, schema) ->
-       check
-         string
-         (name ^ " input_schema")
-         schema
-         (Yojson.Safe.to_string (sorted (find name).input_schema)))
-    expected
-;;
-
-(* The order is what a model reads the tool list in, so a reordering is a
-   change to the surface even when every schema still matches. *)
 let test_the_published_order_is_unchanged () =
   check
     (list string)
     "Tool_shard_types.base_tools in order"
-    (List.map (fun (name, _, _) -> name) expected)
+    expected
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;
 
 let () =
   run
     "base_tool_toml_parity"
-    [ ( "byte_identity"
-      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
-        ; test_case
-            "input schemas, keys sorted"
-            `Quick
-            test_input_schemas_match_with_keys_sorted
-        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+    [ ( "order"
+      , [ test_case "the published order is unchanged" `Quick
+            test_the_published_order_is_unchanged
         ] )
     ]
 ;;

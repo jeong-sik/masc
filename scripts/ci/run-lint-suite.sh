@@ -362,6 +362,10 @@ blocking_pr_lints() {
   run_lint "TOML syntax" bash scripts/check-toml-syntax.sh
   run_lint "YAML syntax" python3 scripts/ci/check-yaml-syntax.py
   run_lint "Sandbox dune version" bash scripts/check-sandbox-dune-version.sh
+  # Same drift, second toolchain: masc.opam moved to ocaml 5.5.1 in #34143 and
+  # the image's switch stayed on 5.5.0, which no workflow builds, so the image
+  # was unbuildable for a day before anyone ran the build by hand.
+  run_lint "Sandbox OCaml version" bash scripts/check-sandbox-ocaml-version.sh
   run_lint "Checkpoint legacy purge" \
     bash scripts/check-checkpoint-installation-legacy-purge.sh
   run_lint "Dashboard nav-event parity" \

@@ -161,21 +161,20 @@ type batch_disposition =
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
 (** The queue action a turn's [cycle_outcome] implies. A completed turn ACKs
-    only when a surface-post receipt addresses the route, or a memory-write
-    receipt proves completion without a direct surface reply. A mismatched
-    surface route, absent terminal receipt, or inapplicable continuation route
-    ACKs already-projected attention-only sources but preserves Connector
-    attention; none is evidence of model intent. Every typed checkpoint
-    (durable stimulus arrived, loop guard, Gate-deferred tool call, queued
-    chat operation) ACKs attention-only sources after preserving the
-    continuation, because each one is produced after a model round ran with
-    the admitted batch projected (the agent-core checkpoint carries it; an
-    official-client vendor session carries it unless that session restarts
-    before the resume); Connector_attention stays pending until an
-    exact reply/ignore settlement exists, and a HITL resolution stays pending
-    until its continuation receipt is recorded. Every failed, cancelled,
-    input-required, or skipped outcome leaves the whole batch pending.
-    Provider/runtime failure is not authority to discard input. *)
+    its whole admitted batch, Connector attention included, whatever its
+    continuation route: the turn projected every row and chose its actions
+    with them in view, and whether it answered is the reaction ledger's
+    turn_finished disposition, not a reason to deliver the same rows again
+    (#34655). Every typed checkpoint (durable stimulus arrived, loop guard,
+    Gate-deferred tool call, queued chat operation) ACKs attention-only
+    sources after preserving the continuation, because each one is produced
+    after a model round ran with the admitted batch projected (the agent-core
+    checkpoint carries it; an official-client vendor session carries it
+    unless that session restarts before the resume); Connector_attention
+    stays pending until the resumed turn completes, and a HITL resolution
+    stays pending until its continuation receipt is recorded. Every failed,
+    cancelled, input-required, or skipped outcome leaves the whole batch
+    pending. Provider/runtime failure is not authority to discard input. *)
 
 type continuation_settlement =
   | Continuation_settled_recorded

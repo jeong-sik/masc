@@ -350,16 +350,19 @@ let batch_disposition_of_cycle_outcome
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* No exact direct-reply/ignore settlement exists, so connector
-          attention stays pending instead of gaining an evidence-free
-          Ignored label (#32114 kept this narrow claim honest). The rest of
-          the admitted batch is still consumed: the completed turn projected
-          those rows and chose its actions with them in view. The
-          attention-only disposition preserves Connector attention while
-          advancing the rest. Refusing both replayed the same board rows into
-          every later turn — one post re-promoted 297 times and a 10-15s wake
-          churn (#32277). *)
-       Batch_ack_attention_only)
+       (* A completed turn projected every admitted row and chose its actions
+          with them in view; that is what the queue delivered and what the
+          ack records. Connector attention used to be held back here until an
+          exact reply/ignore receipt existed (#32114), which turned "the
+          keeper read this and did not answer" into a wake reason: the same
+          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
+          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
+          minutes on 2026-09-09, #34655), the same way refusing the board ack
+          replayed one post 297 times (#32277). Whether the keeper answered is
+          not the queue's question: the reaction ledger's turn_finished row
+          carries the turn's disposition, and the external-attention store
+          keeps the message itself. Neither needs the pending entry. *)
+       Batch_ack_completed)
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason =
@@ -389,7 +392,7 @@ let batch_disposition_of_cycle_outcome
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
        so an unconsumed grant is retained. Connector attention remains
-       pending until it has an exact reply/ignore settlement. *)
+       pending until the resumed turn completes. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
@@ -491,9 +494,9 @@ let pending_stimulus_remains ~ctx ~keeper_name =
    climbs like a clock (#26068). [rate_limited_backoff_sec] derives the
    backoff from the route's own [Retry-After] hint when present, else from
    the cadence, and always clamps to the configured cap so a misread hint
-   (or an out-of-range env override) cannot park the lane: the sleep is
-   still [interruptible_sleep], so a queued stimulus wakes it within
-   [sleep_chunk_sec]. *)
+   (or an out-of-range env override) cannot park the lane for longer than
+   the cap. A queued stimulus does not cut it short: the sleep runs under
+   [Serve_wakeup_after_duration] (#34653). *)
 let rate_limited_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
   let cap_sec = Float.max 0.0 cap_sec in
   let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
@@ -1497,14 +1500,24 @@ let run_heartbeat_loop
             Log.Keeper.warn
               ~keeper_name:m.name
               "%s: rate-limited failure route; backing off next cycle by %.0fs \
-               (cadence %.0fs, cap %.0fs); queued stimuli still wake within \
-               the sleep chunk"
+               (cadence %.0fs, cap %.0fs); stimuli queued meanwhile are served \
+               when it ends"
               m.name
               backoff
               cadence_sec
               Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec;
             Some backoff
           | None -> None
+        in
+        (* A stimulus cannot be served while the lane is rate-limited or
+           exhausted: every wake that cut the backoff short re-ran the same
+           failing call (183 failed turns in 41 minutes, median 30 s apart
+           against a declared 600 s, 2026-09-09, #34653). The queue keeps
+           the stimulus; the wakeup is consumed when the backoff ends. *)
+        let wake_policy =
+          match cycle_sleep_sec with
+          | Some _ -> Keeper_keepalive_signal.Serve_wakeup_after_duration
+          | None -> Keeper_keepalive_signal.Interrupt_on_wakeup
         in
         let sleep_duration () =
           match cycle_sleep_sec with
@@ -1522,6 +1535,7 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~wake_policy
                ~clock:ctx.clock
                ~stop
                ~wakeup

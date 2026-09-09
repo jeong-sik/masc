@@ -12,8 +12,14 @@ Both group outputs and the final output must account for their complete source
 set through citations or explicit exclusion. A failed group or incomplete final
 coverage produces a failed run without a final proposal or publication. Coverage
 is structural; it does not prove semantic correctness of the model's summaries.
-The synthesis sees group proposals and attribution, not the complete raw corpus,
-and its instructions explicitly preserve that limitation.
+Synthesis starts with group proposals and attribution. It can return a typed
+`read_sources` action naming original IDs; the next request includes those exact
+original sources and referenced snapshot metadata. This lets it reconsider
+excluded claims and inspect retractions without resending the full corpus. It
+returns `final` only when ready to produce the complete proposal. Every lookup
+and subsequent request/response is saved under `synthesis/`; no numeric lookup
+cap or automatic retry is introduced. Stored evidence is not independent fact
+verification.
 
 ```sh
 uv run scripts/curate-workspace-memory.py \
@@ -28,7 +34,8 @@ instructions. `groups/keeper-<digest>/` records requests, raw streamed responses
 results, progress and model receipts. `synthesis/` records the final pass. Group
 folder names derive from Keeper identity hashes instead of filesystem paths
 supplied by a Keeper. The top-level token/count measurements describe the final
-synthesis; each group's own measurements remain in its model receipt.
+synthesis completion request; each group and synthesis request retains its own
+measurements in its model receipt.
 
 An explicit resume can reuse completed groups while preserving the old run:
 
@@ -40,7 +47,11 @@ uv run scripts/curate-workspace-memory.py \
   --output /path/to/resumed-run
 ```
 
-Resume checks exact captured bytes and the model/plan binding, then validates
+Every run holds a POSIX OS file lock throughout capture, inference and optional
+publication. Resume must first acquire the previous run's lock nonblockingly. An
+active owner is refused without inference; a persisted `running` status or elapsed
+age never proves that work stopped. The lock is released by the OS on process
+exit. Resume checks exact captured bytes and the model/plan binding, then validates
 completed requests, result/response hashes and source coverage before copying
 known evidence files into the new run. Failed or interrupted groups run again;
 completed groups are not inferred again. Synthesis is performed after all groups
@@ -55,11 +66,12 @@ not gate the task. No context-size default or output/time budget is introduced.
 An oversized individual Keeper group or synthesis still requires the provider to
 handle or reject it; grouping does not prove that every possible request fits.
 
-Validation: 18 CLI scenarios passed, including the existing source/publication
+Validation: 20 CLI scenarios passed, including the existing source/publication
 scenarios and local HTTP workspace-pass scenarios for cross-Keeper synthesis, original ID
 preservation, metadata-only evidence ownership, gaps-only Keeper handling,
-partial failures, resumable completed groups, binding mismatch and tampered
-checkpoint rejection. Real full-corpus inference, semantic correctness and
+original-evidence lookup before emitting a cross-Keeper conflict, partial
+failures, resumable completed groups, binding mismatch, tampered checkpoint
+rejection, unknown source lookup refusal and a concurrent live-owner lock test. Real full-corpus inference, semantic correctness and
 publication from this mode remain unmeasured in this change. No private workspace
 memory contents are included here and no local build was run.
 

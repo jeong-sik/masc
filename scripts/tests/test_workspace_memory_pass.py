@@ -17,7 +17,8 @@ CONTEXT = ROOT / 'docs/evidence/2026-09-10-workspace-memory-curator/input.json'
 @contextmanager
 def scenario():
     calls = []
-    controls = {'failure': None, 'model_digest': 'fixture-digest', 'ps_status': 200}
+    controls = {'failure': None, 'model_digest': 'fixture-digest', 'ps_status': 200,
+        'block_stage': None, 'entered': threading.Event(), 'release': threading.Event()}
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -40,16 +41,35 @@ def scenario():
             value = json.loads(payload['messages'][1]['content'])
             stage = 'synthesis' if 'keeper_proposals' in value else value['snapshots'][0]['keeper_id']
             calls.append({'stage': stage, 'payload': payload, 'input': value})
+            if controls['block_stage'] == stage:
+                controls['entered'].set()
+                controls['release'].wait()
             if controls['failure'] == stage:
                 self.send_response(503)
                 self.end_headers()
                 self.wfile.write(b'fixture stage failure')
                 return
             if stage == 'synthesis':
-                result = {'shared_claims': [{'claim': 'Analyst corrected M to 21 seconds.', 'source_ids': [row['source_id'] for row in value['source_index'] if row['keeper_id'] == 'analyst']}],
-                    'conflicts': [{'description': 'Writer and reviewer disagree about PDF bytes.', 'source_ids': [row['source_id'] for row in value['source_index'] if row['keeper_id'] in ('writer', 'reviewer')]}], 'excluded': []}
-                if controls['failure'] == 'coverage':
-                    result['conflicts'] = []
+                last_message = json.loads(payload['messages'][-1]['content'])
+                if last_message.get('kind') != 'source_evidence':
+                    ids = [row['source_id'] for row in value['source_index'] if row['keeper_id'] in ('writer', 'reviewer')]
+                    result = {'action': 'read_sources', 'source_ids': ids if controls['failure'] != 'unknown_source' else ['unknown']}
+                else:
+                    claims = [row['fact']['claim'] for row in last_message['sources'] if 'fact' in row]
+                    assert 'Report R was generated as PDF.' in claims
+                    assert 'Report R contains plain Markdown bytes; PDF generation failed.' in claims
+                    result = {'action': 'final', 'proposal': {
+                        'shared_claims': [{'claim': 'Analyst corrected M to 21 seconds.',
+                            'source_ids': [row['source_id'] for row in value['source_index'] if row['keeper_id'] == 'analyst']}],
+                        'conflicts': [{'description': 'Writer and reviewer disagree about PDF bytes.',
+                            'source_ids': [row['source_id'] for row in value['source_index'] if row['keeper_id'] in ('writer', 'reviewer')]}], 'excluded': []}}
+                    if controls['failure'] == 'coverage':
+                        result['proposal']['conflicts'] = []
+            elif stage == 'writer':
+                # The group hides the assertion in an exclusion, forcing synthesis
+                # to retrieve the original bytes before it can report a conflict.
+                result = {'shared_claims': [], 'conflicts': [], 'excluded': [
+                    {'source_id': row['source_id'], 'reason': 'Not relevant to this group summary'} for row in value['sources']]}
             else:
                 result = {'shared_claims': [{'claim': 'Keeper observation: ' + stage,
                     'source_ids': [source['source_id'] for source in value['sources']]}], 'conflicts': [], 'excluded': []}
@@ -63,17 +83,20 @@ def scenario():
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
-        def run(name, resume=None, context=CONTEXT):
+        def run(name, resume=None, context=CONTEXT, background=False):
             output = root / name
             argv = [sys.executable, str(SCRIPT), '--context', str(context), '--workspace-pass',
                 '--endpoint', f'http://127.0.0.1:{server.server_port}', '--model', 'local-test', '--output', str(output)]
             if resume is not None:
                 argv += ['--resume-from', str(resume)]
+            if background:
+                return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True), output
             result = subprocess.run(argv, capture_output=True, text=True)
             return result, output, json.loads((output / 'receipt.json').read_text())
         try:
             yield run, calls, controls, root
         finally:
+            controls['release'].set()
             server.shutdown()
             server.server_close()
             thread.join()
@@ -85,8 +108,8 @@ class WorkspacePass(unittest.TestCase):
             controls['ps_status'] = 404  # Observation unavailability must not gate curation.
             result, output, receipt = run('complete')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis'])
-            self.assertEqual([[source['source_id'] for source in row['input']['sources']] for row in calls[:-1]],
+            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis', 'synthesis'])
+            self.assertEqual([[source['source_id'] for source in row['input']['sources']] for row in calls[:3]],
                 [['s1'], ['s2'], ['s3', 's4']])
             self.assertTrue(all(row['payload']['truncate'] is False and row['payload']['shift'] is False for row in calls))
             synthesis = calls[-1]['input']
@@ -99,9 +122,16 @@ class WorkspacePass(unittest.TestCase):
             self.assertEqual(artifact['proposal']['conflicts'][0]['source_ids'], ['s1', 's2'])
             self.assertEqual(receipt['source_count'], 4)
             self.assertEqual(receipt['semantic_verification'], 'not_performed')
-            self.assertEqual(receipt['measurement_scope'], 'final_synthesis')
+            self.assertEqual(receipt['measurement_scope'], 'final_synthesis_completion_request')
             self.assertEqual(receipt['workspace_pass']['resumed_group_ids'], [])
-            self.assertEqual(json.loads((output / 'synthesis/ps-before.http.json').read_text())['status'], 404)
+            lookup = json.loads(calls[-1]['payload']['messages'][-1]['content'])
+            self.assertEqual(lookup['kind'], 'source_evidence')
+            self.assertEqual(lookup['sources'], [row for row in original['sources'] if row['source_id'] in ('s1', 's2')])
+            self.assertEqual(lookup['snapshots'], [row for row in original['snapshots'] if row['keeper_id'] in ('writer', 'reviewer')])
+            self.assertEqual(synthesis['keeper_proposals'][0]['proposal']['shared_claims'], [])
+            first_step = json.loads((output / 'synthesis/receipt.json').read_text())['steps'][0]['id']
+            self.assertEqual(json.loads((output / 'synthesis' / first_step / 'ps-before.http.json').read_text())['status'], 404)
+            self.assertEqual(json.loads((output / 'synthesis' / first_step / 'evidence-lookup.json').read_text()), lookup)
 
     def test_groups_metadata_evidence_by_snapshot_owner_and_preserves_gaps_only_keeper(self):
         with scenario() as (run, calls, _, root):
@@ -114,7 +144,7 @@ class WorkspacePass(unittest.TestCase):
             path.write_text(json.dumps(context))
             result, output, receipt = run('metadata', context=path)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis'])
+            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis', 'synthesis'])
             metadata_source = calls[0]['input']['sources'][1]
             self.assertEqual(metadata_source['source_id'], 's2')
             self.assertEqual(metadata_source['evidence_path'], ['change'])
@@ -141,7 +171,7 @@ class WorkspacePass(unittest.TestCase):
             controls['failure'] = None
             result, output, receipt = run('resumed', resume=previous)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'reviewer', 'analyst', 'synthesis'])
+            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'reviewer', 'analyst', 'synthesis', 'synthesis'])
             self.assertEqual(receipt['workspace_pass']['resumed_group_ids'], [first])
             self.assertEqual((output / 'groups' / first / 'chat.response.raw').read_bytes(), original_response)
             self.assertEqual((previous / 'groups' / first / 'chat.response.raw').read_bytes(), original_response)
@@ -158,7 +188,7 @@ class WorkspacePass(unittest.TestCase):
             controls['failure'] = None
             result, output, receipt = run('retry-synthesis', resume=previous)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis', 'synthesis'])
+            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis', 'synthesis', 'synthesis', 'synthesis'])
             self.assertEqual(len(receipt['workspace_pass']['resumed_group_ids']), 3)
             self.assertTrue((output / 'proposal.json').exists())
 
@@ -180,6 +210,34 @@ class WorkspacePass(unittest.TestCase):
             self.assertEqual(len(calls), count)
             self.assertFalse((output / 'proposal.json').exists())
 
+    def test_unknown_evidence_lookup_does_not_create_final_proposal(self):
+        with scenario() as (run, calls, controls, _):
+            controls['failure'] = 'unknown_source'
+            result, output, receipt = run('unknown-source')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('unknown original source IDs', receipt['error'])
+            self.assertEqual([row['stage'] for row in calls], ['writer', 'reviewer', 'analyst', 'synthesis'])
+            self.assertFalse((output / 'proposal.json').exists())
+
+    def test_resume_cannot_duplicate_a_live_owned_run(self):
+        with scenario() as (run, calls, controls, _):
+            controls['block_stage'] = 'writer'
+            process, previous = run('live-owner', background=True)
+            try:
+                self.assertTrue(controls['entered'].wait(10), 'fixture inference did not start')
+                self.assertIsNone(process.poll())
+                result, output, receipt = run('blocked-resume', resume=previous)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('currently owned', receipt['error'])
+                self.assertEqual([row['stage'] for row in calls], ['writer'])
+                self.assertIsNone(process.poll())
+                self.assertFalse((output / 'proposal.json').exists())
+            finally:
+                controls['release'].set()
+                stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, stderr)
+            self.assertEqual(json.loads(stdout)['status'], 'proposed')
+
     def test_resume_rejects_tampered_completed_group(self):
         with scenario() as (run, calls, _, _):
             result, previous, _ = run('complete')
@@ -187,12 +245,12 @@ class WorkspacePass(unittest.TestCase):
             first = json.loads((previous / 'plan.json').read_text())['groups'][0]['id']
             saved = previous / 'groups' / first / 'result.json'
             changed = json.loads(saved.read_text())
-            changed['shared_claims'][0]['claim'] = 'Tampered summary'
+            changed['excluded'][0]['reason'] = 'Tampered exclusion'
             saved.write_text(json.dumps(changed))
             result, output, receipt = run('tampered', resume=previous)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('evidence does not match', receipt['error'])
-            self.assertEqual(len(calls), 4)
+            self.assertEqual(len(calls), 5)
             self.assertFalse((output / 'proposal.json').exists())
 
 

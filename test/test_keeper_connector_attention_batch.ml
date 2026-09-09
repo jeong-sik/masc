@@ -991,6 +991,42 @@ let test_batch_spanning_conversations_routes_nowhere () =
   none "proactive tick" Keeper_registry.Proactive_tick
 ;;
 
+(* Intake admits every ready non-connector payload into a connector batch, so
+   a batch may mix kinds. Kinds that carry the same conversation are one
+   continuation; a member without a channel is not part of any conversation
+   and takes the route away from the whole batch. *)
+let test_batch_of_mixed_kinds_in_one_conversation_routes_there () =
+  let wake =
+    Keeper_registry.Woken
+      [ Q.Ask_answered
+          { ask_id = "ask-1"; channel = wake_channel ~channel_id:"C-mixed" ~message_id:"m0" }
+      ; wake_payload ~channel_id:"C-mixed" ~message_id:"m1"
+      ]
+  in
+  match Keeper_unified_turn.continuation_channel_of_wake wake with
+  | None -> fail "mixed kinds in one conversation must continue on it"
+  | Some channel ->
+    check bool "the last member's route" true
+      (Keeper_continuation_channel.same_route channel
+         (wake_channel ~channel_id:"C-mixed" ~message_id:"m1"));
+    check bool "the conversation the answered ask shares" true
+      (Keeper_continuation_channel.same_conversation channel
+         (wake_channel ~channel_id:"C-mixed" ~message_id:"m0"))
+;;
+
+let test_batch_with_a_channel_less_member_routes_nowhere () =
+  match
+    Keeper_unified_turn.continuation_channel_of_wake
+      (Keeper_registry.Woken
+         [ wake_payload ~channel_id:"C-batch" ~message_id:"m1"
+         ; Q.Bootstrap
+         ; wake_payload ~channel_id:"C-batch" ~message_id:"m2"
+         ])
+  with
+  | None -> ()
+  | Some _ -> fail "a channel-less member must take the route from the batch"
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -1048,6 +1084,14 @@ let () =
             "a batch spanning conversations routes nowhere"
             `Quick
             test_batch_spanning_conversations_routes_nowhere
+        ; test_case
+            "mixed kinds in one conversation continue on it"
+            `Quick
+            test_batch_of_mixed_kinds_in_one_conversation_routes_there
+        ; test_case
+            "a channel-less member takes the route from the batch"
+            `Quick
+            test_batch_with_a_channel_less_member_routes_nowhere
         ] )
     ]
 ;;

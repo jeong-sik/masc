@@ -309,14 +309,22 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 
-(* RFC-0377 admits a whole conversation backlog as one wake, so a batch is
-   every pending payload of one connector conversation. A batch used to route
-   as "not a continuation wake", so a reply to a batched conversation could
-   never be [Continuation_route_addressed], and under the rule #34662 removed
-   its rows could never settle (#34662 review). The newest member names the
-   conversation; [Keeper_surface_post.matches_continuation_route] compares
-   the conversation, not the message. Members that are not the same
-   conversation are not one continuation and route nowhere. *)
+(* RFC-0377 admits a whole conversation backlog as one wake: intake batches
+   one connector conversation's pending rows together with every other ready
+   payload (at most one HITL resolution), so a batch is not connector rows
+   only. A batch used to route as "not a continuation wake", so a reply to a
+   batched conversation could never be [Continuation_route_addressed], and
+   under the rule #34662 removed its rows could never settle (#34662 review).
+   The batch continues on one channel only when every member has a routable
+   channel and all of them are the same conversation; one channel-less member
+   ([Board_signal], [Bootstrap], ...) routes the batch nowhere. The chosen
+   member is the last in the wake's order, which is intake's selection order
+   over the queue's urgency-stable order rather than arrival order. The
+   members agree on the conversation, so the choice decides only the
+   per-message stamps a reply inherits: Discord's [reply_to_message_id],
+   which no sender reads, and Slack's [thread_ts], which
+   [Keeper_surface_post] threads under and
+   [Keeper_surface_post.matches_continuation_route] compares. *)
 let continuation_channel_of_wake = function
   | Keeper_registry.Woken (_ :: _ as payloads) ->
     let routable payload =

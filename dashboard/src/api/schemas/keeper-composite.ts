@@ -290,7 +290,6 @@ export const KeeperCompositeSnapshotSchema = object({
   last_skip: optional(nullable(KeeperLastSkipSchema)),
   turn_attempt: optional(nullable(KeeperTurnAttemptSchema)),
   board_cursor: optional(KeeperBoardCursorSchema),
-  board_wakeups: optional(number()),
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),

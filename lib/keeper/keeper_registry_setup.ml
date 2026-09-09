@@ -500,7 +500,6 @@ let register_with_state_result
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
-    ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
     ; tool_usage = StringMap.empty
@@ -781,7 +780,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
-    ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
     ; tool_usage = StringMap.empty

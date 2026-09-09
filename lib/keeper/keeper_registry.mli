@@ -393,14 +393,6 @@ module For_testing : sig
   (** Recent crash entries (up to 5) for a keeper. *)
   val crash_log_of : base_path:string -> string -> (float * string) list
 
-  (** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
-      key under which the wake is deduped — RFC-0239 R4 passes a content
-      fingerprint rather than the raw post_id, so identical re-posts with fresh
-      post_ids collapse. Records timestamp if allowed. Returns true for
-      unregistered keepers. *)
-  val board_wakeup_allowed :
-    base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
-
 end
 
 type wakeup_intent =

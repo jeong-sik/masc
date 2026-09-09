@@ -377,7 +377,6 @@ type registry_entry = {
   current_turn_switch : Eio.Switch.t option Atomic.t;
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)
-  board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;
   tool_usage : Keeper_types.tool_call_entry StringMap.t;

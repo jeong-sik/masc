@@ -1099,6 +1099,7 @@ export function GoalTree() {
       all: allNodes.length,
       executing: 0,
       verifying: 0,
+      awaiting_confirmation: 0,
       completed: 0,
       dropped: 0,
     }

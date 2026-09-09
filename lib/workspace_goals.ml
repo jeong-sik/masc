@@ -830,7 +830,7 @@ let confirm_completion config ~goal_id ~operator_id ~request_id
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in
     Ok (updated, (record, updated.phase <> goal.phase, confirming_operator)))
-  |> Result.map (fun (goal, (record, changed, confirming_operator)) ->
+  |> Result.map (fun ((goal : Goal_store.goal), (record, changed, confirming_operator)) ->
     if changed then emit_goal_event {config; agent_name = confirming_operator} ~goal_id
       ~event_type:"goal_phase" ~payload:(`Assoc ["phase", Goal_phase.to_yojson goal.phase;
         "authority_kind", `String "human_operator"; "actor", `String confirming_operator;

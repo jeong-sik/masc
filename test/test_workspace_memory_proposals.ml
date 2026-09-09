@@ -57,7 +57,7 @@ let test_corruption () =
   ignore (Api.get ~base_path ~id:(Some hash) |> expect `Not_found);
   let saved = Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `OK in
   let id = get_id saved in
-  let path = Filename.concat base_path (Masc.Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+  let path = Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
   let ch = open_out_bin path in output_string ch "{broken"; close_out ch;
   ignore (Api.get ~base_path ~id:(Some id) |> expect `Service_unavailable);
   ignore (Api.get ~base_path ~id:None |> expect `Service_unavailable);

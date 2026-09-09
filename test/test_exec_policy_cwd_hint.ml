@@ -301,6 +301,44 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
     | Ok () -> Alcotest.fail "micro_vm target must reject path outside workdir")
 ;;
 
+let test_subst_child_redirect_is_jailed () =
+  with_temp_tree (fun workdir ->
+    (* The jail descends into a substitution's child stages: their cwd and
+       redirects are exactly what it exists to validate. *)
+    let parent_of child =
+      match shell_ir ~workdir [] with
+      | Masc_exec.Shell_ir.Simple s ->
+        Masc_exec.Shell_ir.Simple
+          { s with Masc_exec.Shell_ir.args = [ Masc_exec.Shell_ir.Subst child ] }
+      | _ -> Alcotest.fail "shell_ir helper builds a Simple"
+    in
+    let child_with raw =
+      let target = Masc_exec.Path_scope.classify ~raw ~cwd:workdir in
+      let redirect =
+        Masc_exec.Redirect_scope.File
+          { fd = 1
+          ; target = Masc_exec.Redirect_scope.In_command_namespace target
+          ; mode = Masc_exec.Redirect_scope.Write
+          }
+      in
+      shell_ir ~redirects:[ redirect ] ~workdir []
+    in
+    Alcotest.(check bool)
+      "subst child redirect inside workdir passes"
+      true
+      (Result.is_ok
+         (Exec_policy.validate_shell_ir_paths
+            ~workdir
+            (parent_of (child_with "out.txt"))));
+    Alcotest.(check bool)
+      "subst child redirect outside workdir is rejected"
+      true
+      (Result.is_error
+         (Exec_policy.validate_shell_ir_paths
+            ~workdir
+            (parent_of (child_with "/etc/passwd")))))
+;;
+
 let () =
   Alcotest.run
     "exec_policy_cwd_hint"
@@ -334,6 +372,10 @@ let () =
             "outside workdir is rejected even when requires_existing_dir is false"
             `Quick
             test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false
+        ; Alcotest.test_case
+            "subst child redirect is jailed"
+            `Quick
+            test_subst_child_redirect_is_jailed
         ; Alcotest.test_case
             "execute_shell_ir validate_paths respects sandbox target"
             `Quick

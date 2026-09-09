@@ -60,6 +60,11 @@ let host_sandbox : sandbox_context = { target = ST.host () }
    which rule applies: the pipe rule belongs to a [Pipeline] node and to
    nothing else. Flattening to a list of stages loses that -- [a && b] would
    be counted as two pipeline stages. *)
+(* Unlike [Shell_ir.with_sandbox], this rewrite has no [Delegated] carve-out:
+   it overwrites every stage's target unconditionally.  That divergence is
+   harmless because the rewritten copy feeds only the gate's own read-only
+   analyses (stage_bins, syntax and refusal checks); execution runs the
+   caller's original IR, where a [Delegated] stage keeps its own target. *)
 let rec with_sandbox ~(sandbox : sandbox_context) (ir : SI.t) : SI.t =
   let rec arg_rewritten = function
     | SI.Subst child -> SI.Subst (with_sandbox ~sandbox child)
@@ -329,6 +334,11 @@ let lower_typed_pipeline ~stages ~sandbox () : verdict =
   verdict
 ;;
 
+(* [stage_bins] includes the stages a [Shell_ir.Subst] child carries (see
+   [simples_of]), so a single command with a substitution counts more than
+   one stage: [echo $(date)] has [stage_count] 2, [is_pipeline] true and
+   [last_stage_bin] (Some "date").  These accessors feed diagnostics only;
+   no allow/deny decision reads them. *)
 let stage_count context = List.length context.stage_bins
 
 let last_stage_bin context =

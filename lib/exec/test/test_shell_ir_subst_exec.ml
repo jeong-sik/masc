@@ -99,12 +99,12 @@ let test_nested () =
   assert (result.stdout = "deep\n")
 
 let test_substitution_timeout_budget () =
-  (* The child rides the parent's remaining budget; when sleep outruns it,
-     the substitution is empty and the parent runs on — the child's timeout
-     status is not the parent's (RFC §2.3.2). *)
+  (* The child rides the parent's budget; when sleep outruns it, nothing is
+     left for the parent, which answers its own timeout rather than
+     spawning (the budget is debited across children and parent alike). *)
   let result = dispatch ~timeout_sec:0.2 "echo $(sleep 5)" in
-  assert (result.Exec_dispatch.status = Unix.WEXITED 0);
-  assert (result.stdout = "\n");
+  assert (result.Exec_dispatch.status = Process_eio.timed_out_status);
+  assert (result.stdout = "");
   assert (contains_sub result.stderr "timeout")
 
 let test_substitution_inherits_delegated_target () =

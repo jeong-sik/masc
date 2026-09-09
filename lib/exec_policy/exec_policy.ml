@@ -308,12 +308,22 @@ let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
           Masc_exec.Path_scope.raw cwd
           |> validate_path_value ~requires_existing_dir
       in
-      let validate_simple (simple : Masc_exec.Shell_ir.simple) =
+      let rec validate_simple (simple : Masc_exec.Shell_ir.simple) =
         match validate_cwd simple.cwd with
         | Error _ as err -> err
-        | Ok () -> validate_redirects simple.redirects
-      in
-      let rec validate_parsed_shell_ir = function
+        | Ok () ->
+          (match validate_redirects simple.redirects with
+           | Error _ as err -> err
+           | Ok () ->
+             (* A substitution's child stages carry their own cwd and
+                redirects — exactly what the jail exists to validate, since
+                [Exec_dispatch.eval_substitutions] dispatches them. *)
+             validate_each
+               (List.concat_map
+                  Masc_exec.Shell_ir.subst_children_of_arg
+                  (simple.Masc_exec.Shell_ir.args
+                   @ List.map snd simple.Masc_exec.Shell_ir.env)))
+      and validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
         | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
         | Masc_exec.Shell_ir.Sequence { head; tail } ->

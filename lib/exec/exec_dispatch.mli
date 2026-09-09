@@ -45,7 +45,13 @@ val dispatch :
 (** General dispatch over any [Shell_ir.t] variant.  [Simple] routes
     to [dispatch_simple]; [Pipeline] routes to internal pipeline
     logic.  Callers are responsible for structural and path validation at
-    their boundary; this module only executes the supplied typed IR. *)
+    their boundary; this module only executes the supplied typed IR.
+
+    Ordering contract: the validated path (gate, then
+    [Exec_policy.validate_shell_ir_paths]) runs before any dispatch, so no
+    substitution is evaluated before validation.  A caller that bypasses
+    validation and calls {!dispatch} directly runs the child effects of a
+    [Shell_ir.Subst] before any check could refuse them. *)
 
 val dispatch_pipeline :
   ?base_host_env:string array ->

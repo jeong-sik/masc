@@ -463,9 +463,26 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
   else
   let started = Unix.gettimeofday () in
   let s, subst_stderr = eval_substitutions ?base_host_env ?timeout_sec ~started s in
+  (* The parent runs in what remains of its budget after its substitutions
+     (RFC shell-ir-typed-command-substitution §2.3: a child runs inside what
+     remains of the parent's timeout, and the parent spends only what the
+     children left). *)
+  let timeout_sec = remaining_timeout ~started timeout_sec in
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
+    match timeout_sec with
+    | Some remaining
+      when (not (Float.is_finite remaining)) || remaining <= 0.0 ->
+      (* The children consumed the budget; [Process_eio] rejects a
+         nonpositive timeout, so the parent answers its own timeout rather
+         than spawning. *)
+      { output_files = None
+      ; status = Process_eio.timed_out_status
+      ; stdout = ""
+      ; stderr = "timeout budget exhausted by command substitutions"
+      }
+    | _ -> (
     match redirect_plan_of_redirects ~cwd s.redirects with
     | Error message -> unsupported_redirect_result message
     | Ok (redirect_plan, attachments) when attaches_a_file attachments -> (
@@ -634,7 +651,7 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
              apply_redirect_plan redirect_plan { status; stdout; stderr; output_files }
          | Sandbox_target.Transport_failed { reason = _; stdout; stderr; output_files } ->
              apply_redirect_plan redirect_plan
-               { status = Unix.WEXITED 1; stdout; stderr; output_files }))
+               { status = Unix.WEXITED 1; stdout; stderr; output_files })))
   in
   emit_unseen_captured_output on_output_chunk emitted
     { result with stderr = subst_stderr ^ result.stderr }
@@ -643,12 +660,18 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
    itself, so pipelines, sequences and nested substitutions inside one use
    the same semantics as any other IR, and the child inherits the parent's
    dispatch target through [Shell_ir.with_sandbox] (RFC
-   shell-ir-typed-command-substitution §2.3 item 1).  The path jail needs no
-   new case here: [validate_shell_ir_paths] runs at the gate on cwd and
-   redirect targets, which are literal even in a Subst-bearing stage, and a
-   substitution produces argv text — never a path the gate had not seen
-   (plan risk 1).  Child output is captured, never streamed to the parent's
-   [on_output_chunk]; child stderr joins the parent's stderr. *)
+   shell-ir-typed-command-substitution §2.3 item 1).  The path jail covers
+   the child: [validate_shell_ir_paths] runs at the gate on cwd and redirect
+   targets and descends into these child stages, which carry literal
+   cwd/redirects of their own; a substitution produces argv text — never a
+   path the gate had not seen (plan risk 1).  Child output is captured,
+   never streamed to the parent's [on_output_chunk]; child stderr joins the
+   parent's stderr.  Nesting depth is bounded only by the shared ~50k-token
+   parse budget (roughly 100KB of source), and the recursion
+   [eval_substitutions] -> [dispatch] -> [dispatch_simple] is not
+   tail-recursive, so a maximally nested source can raise [Stack_overflow]
+   rather than fail closed.  A depth counter is new scope and deliberately
+   not wired here. *)
 and eval_substitutions ?base_host_env ?timeout_sec ~started
     (s : Shell_ir.simple) : Shell_ir.simple * string =
   let child_stderr = Buffer.create 256 in

@@ -34,7 +34,7 @@ let test_writes_runtime_toml () =
 (* The seed is filtered because the repo's own keeper examples autoboot into
    a sandbox the host may not have. Since #34310 a fresh workspace still gets a
    roster: exactly the manifests [keepers-default/] holds, landing under
-   [keepers/], and none of them may autoboot. The expected names come from the
+   [keepers/], and every one of them waits for an operator to start it. The expected names come from the
    embedded listing through the same mapping the seeder uses, so a manifest
    added to the default set is covered without editing this case. *)
 let test_writes_the_default_roster_with_autoboot_off () =
@@ -55,8 +55,12 @@ let test_writes_the_default_roster_with_autoboot_off () =
        match Keeper_toml_loader.parse_toml (read_file (Filename.concat keepers name)) with
        | Error detail -> fail (name ^ " did not parse: " ^ detail)
        | Ok doc ->
-         check (option bool) (name ^ " waits to be started") (Some false)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled"))
+         (* #34392 retired [autoboot_enabled] and [proactive_enabled] for
+            [activation_mode], so the bool read answered [None] for every
+            manifest and this case could no longer be won. "Waits to be
+            started" is [manual]. *)
+         check (option string) (name ^ " waits to be started") (Some "manual")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
     expected
 
 let test_writes_no_dune_file () =

@@ -1152,8 +1152,7 @@ def keeper_runtime_http_fixtures(
                     "paused": False,
                     "phase": "running",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": True,
+                    "activation_mode": "autonomous",
                     "runtime_id": alpha_runtime_id,
                 },
                 {
@@ -1165,8 +1164,7 @@ def keeper_runtime_http_fixtures(
                     "paused": True,
                     "phase": "paused",
                     "keepalive_running": True,
-                    "autoboot_enabled": True,
-                    "proactive_enabled": False,
+                    "activation_mode": "on_demand",
                     "runtime_id": beta_runtime_id,
                 },
             ],
@@ -10516,7 +10514,7 @@ def changes_keeper_and_arrow_detail_interaction(
         raise AssertionError(
             f"the diff drew no footer: {second_diff_plain[-800:]!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     # An open diff scrolls to its end and stops there. The keypress steps
     # without a bound -- the rows are the drawing's -- so the frame reports
     # what it could use and the loop stores that. Without the report the
@@ -10550,7 +10548,7 @@ def changes_keeper_and_arrow_detail_interaction(
     send_and_wait(
         process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
     )
-    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(
         process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
     )
@@ -10566,7 +10564,7 @@ def changes_keeper_and_arrow_detail_interaction(
     detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"-1 +1")
     if b"MASC Change" not in CSI_RE.sub(b"", detail):
         raise AssertionError(f"Right did not open the selected diff: {detail!r}")
-    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
         raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
     # v opens the row's file on the Code surface, read through the keeper's
@@ -10637,7 +10635,7 @@ def enter_outside_changes_interaction(
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
-    if "Turn" not in back_plain:
+    if "TURN" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
             f"Acting armed a view it does not own: {back_plain!r}"
@@ -10939,7 +10937,7 @@ def code_lane_interaction(
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
             )
-    if "Esc:code" not in history_plain:
+    if "Left / Esc:back" not in history_plain:
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
@@ -10974,12 +10972,15 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
-    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
+    if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
+            or "▸ y" not in choices_plain
+            or re.search(r"│\s+x\s+│", choices_plain) is None):
         raise AssertionError(
             f"the candidate list missed the second name: {choices!r}"
         )
-    # Enter alone runs the highlighted candidate (def y): the answer names
+    # Enter alone runs the highlighted candidate (y): the answer names
     # the location and the cursor jumps to it.
     picked = send_and_wait(
         process, master_fd, output, b"\r", b"y: lib/a.ml:1"
@@ -11649,6 +11650,13 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             ],
         },
     )
+    fixtures[SCHEDULES_PATH + "?schedule_id=schedule-proof-701"] = (
+        200,
+        {"status": "found", "schedule_id": "schedule-proof-701",
+         "wakes": [{"status": "succeeded", "started_at_iso": "2026-08-25T09:30:00Z",
+                    "finished_at_iso": "2026-08-25T09:30:01Z", "error": None}],
+         "wake_retention_per_schedule": 32},
+    )
     return fixtures
 
 
@@ -11706,26 +11714,46 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
         )
         evidence = send_and_wait(
-            process, master_fd, output, b"\x1b[6~", b"matched_pending"
+            process, master_fd, output, b"\x1b[6~", b"WAKES (1 retained"
         )
         evidence_plain = CSI_RE.sub(b"", evidence)
         for needle in (
-            b"LAST WAKE",
+            b"WAKES (1 retained, ceiling 32 per schedule)",
             b"DELIVERY EVIDENCE",
             b"pending=2",
             b"matched_consumed_ack",
+        ):
+            if needle not in evidence_plain:
+                raise AssertionError(
+                    f"Schedule wake/delivery page omitted {needle!r}: {evidence_plain!r}"
+                )
+        # Delivery identity and the work-result boundary follow the queue
+        # summary. Read their page rather than treating one viewport as all
+        # retained evidence; the operator can reach both with PgDn.
+        result_page = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"Keeper Calls or Activity"
+        )
+        result_plain = CSI_RE.sub(b"", result_page)
+        for needle in (
+            b"Keeper evidence",
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
             b"2026-08-25T09:30:20",
-            b"no schedule-to-tool/result join",
-            b"Keeper Calls or Acting",
+            b"Turn finished",
+            b"WORK RESULT",
+            b"bounded by its start and finish rows",
+            b"Keeper Calls or Activity",
         ):
-            if needle not in evidence_plain:
+            if needle not in result_plain:
                 raise AssertionError(
-                    f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
+                    f"Schedule turn/result page omitted {needle!r}: {result_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
+        returned = send_and_wait(process, master_fd, output, b"\x1b[D", b"j/k:move")
+        returned_plain = CSI_RE.sub(b"", returned)
+        for needle in (b"schedule-proof-701", b"status:running", b"queue:matched_pending/2 pending"):
+            if needle not in returned_plain:
+                raise AssertionError(f"Left did not restore the selected Schedule row: {returned_plain!r}")
         # The harness is 100 columns wide. Padding the id to a reserved width
         # used to push the instruction tail past the box border, so require
         # the words an operator needs to press the key a second time.
@@ -11994,14 +12022,19 @@ def fusion_list_detail_interaction(
     ) -> None:
         # The surface title, not the task id: this scenario seeds the goal the
         # verdict judges, and that goal lists the same task on Planning, so
-        # tabbing on the id stops one surface early.
-        # The surface title, not the task id: this scenario seeds the goal the
-        # verdict judges, and that goal lists the same task on Planning, so
         # tabbing on the id stops one surface early. Reading the whole stream
-        # for the headers then let a Harness frame drawn while tabbing past
-        # answer for the one on screen, which is how the assertions below
-        # passed against a list nobody was looking at.
-        tab_until(process, master_fd, output, b"MASC Harness")
+        # for the headers then let a frame drawn while tabbing past answer for
+        # the one on screen, which is how the assertions below passed against
+        # a list nobody was looking at.
+        #
+        # The verdicts are a Planning tab, not a top-level surface. They were
+        # one, called Harness, and Masc_tui_types.surface_ring no longer
+        # carries that name -- so tabbing for it spent every press without the
+        # screen ever existing. Planning opens on Goals and [v] walks its three
+        # stops.
+        tab_until(process, master_fd, output, b"MASC Planning")
+        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Review")
+        send_and_wait(process, master_fd, output, b"v", b"\xe2\x96\xb8Task Verdicts")
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
@@ -12013,11 +12046,14 @@ def fusion_list_detail_interaction(
                 output,
                 rows=30,
                 columns=120,
-                needle=b"Evaluator",
+                needle=b"EVALUATOR",
                 controls=(FULL_REDRAW,),
             ),
         )
-        for needle in (b"Gate", b"Verdict", b"Evaluator"):
+        # The column row is upper case. Spelled in title case, "Verdict" was
+        # still found -- in the tab label "Task Verdicts" one row above -- so
+        # only two of these three ever said anything about the list.
+        for needle in (b"GATE", b"VERDICT", b"EVALUATOR"):
             if needle not in harness_plain:
                 raise AssertionError(
                     f"Harness list omitted {needle!r}: {harness_plain!r}"
@@ -12035,7 +12071,7 @@ def fusion_list_detail_interaction(
             b"masc://overview/tasks/task-linked-501",
         )
         verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"HARNESS VERDICT"
+            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
         )
         verdict_plain = CSI_RE.sub(b"", verdict)
         # The verdict names a task; the task names its goals; a goal declares
@@ -12067,7 +12103,12 @@ def fusion_list_detail_interaction(
             raise AssertionError(
                 f"the verdict says nothing about what it aims at: {verdict_plain!r}"
             )
-        send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
+        # Back on the list, whose tab label carries the count. The word came
+        # off when the count was split into page and ledger: it reads "(1)"
+        # here and "(8 of 4197)" against a server with a backlog.
+        send_and_wait(
+            process, master_fd, output, b"\x1b[D", b"\xe2\x96\xb8Task Verdicts (1)"
+        )
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -12128,11 +12169,16 @@ def fusion_list_detail_interaction(
             b"K:calling Keeper  B:Board evidence  Enter:open  "
             b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
-        footer_frame = resize_and_wait(
+        resize_and_wait(
             process, master_fd, output, rows=30, columns=200,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
         )
-        if footer not in CSI_RE.sub(b"", footer_frame):
+        # The footer is one row and the resize repaints the list before it, so
+        # the frame that carries the title does not carry the hints. Wait for
+        # the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        footer_frame = bytes(output)
+        if footer not in screen_text(footer_frame):
             raise AssertionError(
                 f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
             )
@@ -12187,10 +12233,14 @@ def fusion_list_detail_interaction(
             output,
             b"masc://fusion/fusion-target-501",
         )
-        panel = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\x1b[6~", b"panel-failure-second-501"
         )
-        panel_plain = CSI_RE.sub(b"", panel)
+        # The page lands over several frames -- the responses, then the judge
+        # section under them -- so the frame the first row arrives in does not
+        # hold the rest. Wait for the frames to stop and read the screen.
+        drain_until_quiet(process, master_fd, output)
+        panel_plain = screen_text(bytes(output))
         for needle in (
             b"panel-answer-first-501",
             b"panel-failure-second-501",
@@ -12201,16 +12251,23 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )
-        if (
-            b"3  JUDGE" not in panel_plain
-            or b"judge-proof-501" not in panel_plain
-            or b"Judge topology: judge-of-judges" not in panel_plain
-            or b"First 1 [synthesized] ollama_cloud.minimax-m3" not in panel_plain
-            or b"First 2 [failed] ollama_cloud.deepseek-v4-pro" not in panel_plain
+        for needle in (
+            b"3  JUDGE",
+            b"judge-proof-501",
+            # The topology was a sentence ("Judge topology: judge-of-judges")
+            # and is now the row that draws it: the lens counts, then the
+            # shape they add up to.
+            "first ×2".encode(),
+            "meta ×1".encode(),
+            b"judge-of-judges",
+            b"First 1 [synthesized] ollama_cloud.minimax-m3",
+            b"First 2 [failed] ollama_cloud.deepseek-v4-pro",
         ):
-            raise AssertionError(
-                f"Fusion detail lost its judge section or lenses: {panel_plain!r}"
-            )
+            if needle not in panel_plain:
+                raise AssertionError(
+                    f"Fusion detail lost its judge section or lenses "
+                    f"({needle!r}): {panel_plain!r}"
+                )
         # The lens cards grew the detail past one page: the flow now ends on
         # the page after the panel one.
         tail = send_and_wait(

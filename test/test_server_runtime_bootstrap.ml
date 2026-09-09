@@ -1931,7 +1931,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2005,7 +2005,7 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2128,7 +2128,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in
@@ -2196,7 +2196,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             ()
         in
         Workspace.write_backlog config
-          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+          { Types.tasks = [ task ]; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
           { running = 0; failing = 0; recovering = 0 }
@@ -2262,6 +2262,7 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
         Workspace.write_backlog config
           {
             Types.tasks = [];
+            pending_completion_rejections = [];
             last_updated = "2026-08-03T00:00:00Z";
             version = 1;
           };
@@ -2315,7 +2316,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
     write_config_root_keeper_toml
       ~autoboot_enabled:false
       config_root
-      "canonical-meta-disabled";
+      "canonical-meta-manual";
     write_config_root_keeper_toml config_root "canonical-meta-paused";
     with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -2334,20 +2335,20 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
             ~trace_id:"trace-canonical-meta-missing"
             ()
         in
-        let cached_disabled =
+        let cached_manual =
           make_keeper_meta
-            ~name:"canonical-meta-disabled"
-            ~trace_id:"trace-canonical-meta-disabled"
+            ~name:"canonical-meta-manual"
+            ~trace_id:"trace-canonical-meta-manual"
             ()
         in
         let paused =
           make_keeper_meta
-            ~paused:true
+            ~paused:false
             ~name:"canonical-meta-paused"
             ~trace_id:"trace-canonical-meta-paused"
             ()
         in
-        let cached_owners = [ cached_missing; cached_disabled; paused ] in
+        let cached_owners = [ cached_missing; cached_manual; paused ] in
         List.iter
           (fun (meta : Keeper_meta_contract.keeper_meta) ->
             Keeper_registry.For_testing.unregister
@@ -2374,8 +2375,8 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
           (fun () ->
             write_keeper_meta_exn
               config
-              { cached_disabled with activation_mode = Masc.Keeper_activation_mode.Manual };
-            write_keeper_meta_exn config paused;
+              { cached_manual with activation_mode = Masc.Keeper_activation_mode.Manual };
+            write_keeper_meta_exn config { paused with paused = true };
             with_owner_inventory config (fun () ->
             let missing_meta_path =
               Keeper_types_profile.keeper_meta_path config cached_missing.name
@@ -2390,7 +2391,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
               0
               (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
             Alcotest.(check int)
-              "durable missing/disabled owners are not executable"
+              "offline owners are not executable even when recoverable"
               0
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check (list string))
@@ -2421,13 +2422,13 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
                |> member "owner_lifecycle"
                |> to_string);
             Alcotest.(check string)
-              "durable disabled meta overrides cached enabled registry meta"
-              "retained_disabled"
-              (owner cached_disabled.name
+              "manual owner remains recoverable for requested work"
+              "recoverable"
+              (owner cached_manual.name
                |> member "owner_lifecycle"
                |> to_string);
             Alcotest.(check string)
-              "paused durable owner remains a distinct retained variant"
+              "durable pause overrides the unpaused registry cache"
               "paused_dead"
               (owner paused.name |> member "owner_lifecycle" |> to_string)))))
 ;;

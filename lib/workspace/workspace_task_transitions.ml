@@ -423,6 +423,23 @@ let transition_task_outcome_r
               ~new_status
               ~handoff_context
           in
+          let backlog_update =
+            match action with
+            | Masc_domain.Claim | Masc_domain.Start -> backlog_update
+            | Masc_domain.Release | Masc_domain.Done_action
+            | Masc_domain.Cancel | Masc_domain.Submit_for_verification ->
+              let backlog = backlog_update.backlog in
+              { backlog_update with
+                backlog =
+                  { backlog with
+                    pending_completion_rejections =
+                      List.filter
+                        (fun (pending : Masc_domain.pending_completion_rejection) ->
+                          not (String.equal pending.task_id task_id))
+                        backlog.pending_completion_rejections
+                  }
+              }
+          in
           (* RFC-0221 §3.1: [write_backlog] is the atomic commit point for the
              task outcome. A transition into [AwaitingVerification] writes the
              verification record before this commit (content the verifier
@@ -905,8 +922,23 @@ let commit_verdict_r
                  ; updated_by = Some authority_actor
                  }
            in
+           let pending_completion_rejections =
+             List.filter
+               (fun (pending : Masc_domain.pending_completion_rejection) ->
+                 not (String.equal pending.task_id task_id))
+               backlog.pending_completion_rejections
+           in
+           let pending_completion_rejections =
+             match verdict with
+             | Masc_domain.Verdict_approved -> pending_completion_rejections
+             | Masc_domain.Verdict_rejected { reason } ->
+               { Masc_domain.task_id; verification_id; producer; reason; authority
+               ; committed_at = now
+               } :: pending_completion_rejections
+           in
            let new_backlog =
              { backlog with
+               pending_completion_rejections;
                tasks =
                  List.map
                    (fun (t : task) ->
@@ -1126,4 +1158,15 @@ let commit_verdict_r
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
   |> Workspace_task_verification.flatten_lock_result
+  |> fun result ->
+  (match result, verdict with
+   | Ok _, Masc_domain.Verdict_rejected _ ->
+     (try (Atomic.get Workspace_hooks.rejection_delivery_requested_fn) config with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.TaskState.error
+          "rejection delivery signal failed; durable obligation remains task_id=%s detail=%s"
+          task_id (Printexc.to_string exn))
+   | Ok _, Masc_domain.Verdict_approved | Error _, _ -> ());
+  result
 ;;

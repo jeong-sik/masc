@@ -939,7 +939,7 @@ function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
     runId: 'fr-1',
     keeper: 'sangsu',
     preset: 'default',
-    topology: null,
+    topology: 'simple',
     startedAt: 1_700_000_000,
     status: 'running',
     ...partial,

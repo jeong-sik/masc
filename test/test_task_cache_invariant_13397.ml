@@ -103,7 +103,7 @@ let make_task ~id ~status =
 (** Write a minimal backlog with one task. *)
 let seed_backlog config task =
   let backlog : T.backlog =
-    { tasks = [ task ]; last_updated = now; version = 1 }
+    { tasks = [ task ]; pending_completion_rejections = []; last_updated = now; version = 1 }
   in
   Workspace_backlog.write_backlog config backlog
 

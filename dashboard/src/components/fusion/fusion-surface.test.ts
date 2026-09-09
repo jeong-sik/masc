@@ -15,6 +15,7 @@ import {
   fusionRuns,
   fusionRunObservation,
   fusionRunsLoading,
+  fusionRunsError,
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
@@ -90,6 +91,7 @@ describe('FusionSurface', () => {
     fusionRuns.value = []
     fusionRunObservation.value = null
     fusionRunsLoading.value = false
+    fusionRunsError.value = null
     vi.mocked(refreshFusionBoard).mockClear()
     vi.mocked(refreshFusionRuns).mockClear()
   })
@@ -103,9 +105,44 @@ describe('FusionSurface', () => {
     fusionRuns.value = []
     fusionRunObservation.value = null
     fusionRunsLoading.value = false
+    fusionRunsError.value = null
     route.value = { tab: 'overview', params: {}, postId: null }
     window.location.hash = '#overview'
     vi.restoreAllMocks()
+  })
+
+  it('keeps the last observed runs on malformed source and recovers on the next valid response', async () => {
+    const realStore = await vi.importActual<typeof import('../../store')>('../../store')
+    const baseRow = { run_id: 'source-continuity-run', keeper: 'analyst', preset: 'trio',
+      topology: 'simple', started_at: 100, status: 'running' }
+    const response = (rows: unknown[]) => ({ generated_at: '2026-09-09T00:00:00Z',
+      count: rows.length, runs: rows, replay: { status: 'not_replayed' }, historical_evidence: [] })
+    let payload: unknown = response([baseRow])
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    render(html`<${FusionSurface} />`, container)
+    await act(async () => { await realStore.refreshFusionRuns() })
+    await waitFor(() => expect(container.textContent).toContain('source-continuity-run'))
+    expect(fusionRuns.value[0]?.status).toBe('running')
+
+    for (const malformed of [null, { ...response([]), runs: {} }, response([{ ...baseRow, status: 'unknown' }]), response([{ ...baseRow, run_id: undefined }])]) {
+      payload = malformed
+      await act(async () => { await realStore.refreshFusionRuns() })
+      await waitFor(() => expect(container.textContent).toContain('레지스트리 읽기 실패'))
+      expect(container.textContent).toContain('표시된 기록은 이전 읽기입니다')
+      expect(container.textContent).toContain('source-continuity-run')
+      expect(container.textContent).not.toContain('심의 런이 없습니다')
+      expect(fusionRuns.value[0]?.status).toBe('running')
+      expect(fusionRunsError.value).toContain('Fusion')
+    }
+
+    payload = response([{ ...baseRow, status: 'failed', error: 'provider disconnected', failure_code: 'provider_error' }])
+    await act(async () => { await realStore.refreshFusionRuns() })
+    await waitFor(() => expect(container.textContent).not.toContain('레지스트리 읽기 실패'))
+    expect(fusionRunsError.value).toBeNull()
+    expect(fusionRuns.value[0]).toMatchObject({ status: 'failed', error: 'provider disconnected' })
+    expect(container.textContent).toContain('failed')
+    expect(fetch).toHaveBeenCalled()
   })
 
   it('shows surviving Board originals when replay yielded zero runs and reads by exact post ID', async () => {
@@ -849,7 +886,7 @@ describe('FusionSurface', () => {
         runId: 'fus-running',
         keeper: 'sangsu',
         preset: 'balanced',
-        topology: null,
+        topology: 'simple',
         startedAt: 1_780_000_000,
         status: 'running',
       },
@@ -877,7 +914,7 @@ describe('FusionSurface', () => {
       runId: 'fus-running',
       keeper: 'sangsu',
       preset: 'balanced',
-      topology: null,
+      topology: 'simple',
       startedAt: 1_790_000_000,
       status: 'running',
     }]
@@ -907,7 +944,7 @@ describe('FusionSurface', () => {
       runId: `registry-${index}`,
       keeper: 'sangsu',
       preset: 'balanced',
-      topology: null,
+      topology: 'simple',
       startedAt: 1_900_000_000 - index,
       status: 'running' as const,
     }))
@@ -938,7 +975,7 @@ describe('FusionSurface', () => {
         runId: 'fus-1',
         keeper: 'sangsu',
         preset: 'balanced',
-        topology: null,
+        topology: 'simple',
         startedAt: 1_780_000_000,
         status: 'running',
       },
@@ -1309,7 +1346,7 @@ describe('FusionSurface', () => {
         runId: 'fus-registry-start',
         keeper: 'sangsu',
         preset: 'balanced',
-        topology: null,
+        topology: 'simple',
         startedAt: Date.parse('2026-06-19T12:00:00Z') / 1000,
         status: 'completed',
       },
@@ -1362,7 +1399,7 @@ describe('FusionSurface', () => {
         runId: 'fus-old-running',
         keeper: 'sangsu',
         preset: 'balanced',
-        topology: null,
+        topology: 'simple',
         startedAt: Date.parse('2026-06-19T01:00:00Z') / 1000,
         status: 'running',
       },

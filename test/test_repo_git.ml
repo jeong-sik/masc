@@ -186,13 +186,22 @@ let test_get_origin_url_times_out_on_stalled_config () =
           let started_at = Unix.gettimeofday () in
           match Repo_git.get_origin_url ~local_path:tmp () with
           | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
-          | Error (Repo_git.Origin_lookup_timed_out _) ->
+          | Error (Repo_git.Origin_lookup_timed_out error) ->
               (* The constructor is the classification. Repo_git reads it off
                  Process_eio.exit_reason_of_status and puts the exit status,
                  not a duration, in the detail -- #28651 took the number out
                  of here precisely so the two modules would stop agreeing by
-                 coincidence. What is left to measure is the timing. *)
+                 coincidence. What is left to check is which call was cut and
+                 how long it took. *)
               let elapsed = Unix.gettimeofday () -. started_at in
+              Alcotest.(check bool)
+                "the detail names the call that timed out"
+                true
+                (String_util.contains_substring error "git remote get-url origin");
+              (* Not the timeout's own number typed again. The budget belongs
+                 to Repo_git, so the bound reads it there; the upper bound is
+                 the stalled git's own sleep, which returning before proves
+                 the budget cut it. *)
               Alcotest.(check bool)
                 "waited for the inspection budget"
                 true

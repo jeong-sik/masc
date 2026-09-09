@@ -1,6 +1,7 @@
 open Alcotest
 
 module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
 module Workspace = Masc.Workspace
 
@@ -32,6 +33,22 @@ let tool_string_field tool field =
       | Some (`String value) -> value
       | _ -> fail ("missing string field: " ^ field))
   | _ -> fail "tool must be object"
+
+(* Catalog facts used to sit beside [name] and [inputSchema]. They live under
+   the vendor key in [_meta] now, because [Tool] declares no index signature
+   and a strict client may reject unknown siblings there
+   (mcp_server_eio_tool_profile.ml:215-221). *)
+let tool_catalog_string_field tool field =
+  let open Yojson.Safe.Util in
+  match
+    tool |> member "_meta" |> member Mcp_server.tool_catalog_meta_key |> member field
+  with
+  | `String value -> value
+  | _ ->
+    failf
+      "missing catalog string field %s in %s"
+      field
+      (Yojson.Safe.to_string (tool |> member "_meta"))
 
 let find_tool_exn tools name =
   List.find
@@ -84,7 +101,7 @@ let test_public_tools_expose_only_truthful_statuses () =
       let tools = tools_list_response ~clock ~sw state |> response_tools in
       List.iter
         (fun tool ->
-          let status = tool_string_field tool "implementationStatus" in
+          let status = tool_catalog_string_field tool "implementationStatus" in
           check bool ("truthful public status: " ^ tool_string_field tool "name")
             true
             (String.equal status "real" || String.equal status "adapter"))
@@ -132,7 +149,7 @@ let test_selected_tools_report_contract_status () =
       in
       let canonical = find_tool_exn tools "masc_transition" in
       check string "transition real" "real"
-        (tool_string_field canonical "implementationStatus"))
+        (tool_catalog_string_field canonical "implementationStatus"))
 
 let () =
   run "tool contract truth"

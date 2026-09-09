@@ -302,20 +302,25 @@ let validate_content_block block =
   let open Llm_provider.Types in
   let* json = durable_content_to_yojson block in
   let* () = validate_json ~context:"canonical content snapshot" json in
-  let* decoded = durable_content_of_yojson json in
-  if block = decoded
-  then (
-    match block with
-    | ToolUse { id = _; name; _ } -> validate_non_blank "tool-use name" name
-    | ToolResult { tool_use_id = _; _ } -> Ok ()
-    | Text _
-    | Thinking _
-    | ReasoningDetails _
-    | RedactedThinking _
-    | Image _
-    | Document _
-    | Audio _ -> Ok ())
-  else Error "canonical content snapshot is not losslessly durable"
+  (* Losslessness is a property of the durable form, and
+     [durable_content_of_yojson] already requires the block it decodes to
+     re-encode to exactly [json]. Comparing the two records instead also
+     compared ToolResult's [json], which the decoder stopped filling in
+     #33389 because it is a parse of [content] that is never serialized --
+     so every tool result carrying a parsed body was refused as
+     non-durable. Decode for the canonical check, then read the constructor
+     off the block. *)
+  let* (_ : content_block) = durable_content_of_yojson json in
+  match block with
+  | ToolUse { id = _; name; _ } -> validate_non_blank "tool-use name" name
+  | ToolResult { tool_use_id = _; _ } -> Ok ()
+  | Text _
+  | Thinking _
+  | ReasoningDetails _
+  | RedactedThinking _
+  | Image _
+  | Document _
+  | Audio _ -> Ok ()
 ;;
 
 let validate_node_update update =

@@ -69,7 +69,7 @@ describe('Fusion exact evidence through the rendered surface', () => {
     fusionRuns.value = [registryRun]
     fusionRunsLoading.value = false
     api.board.mockResolvedValue({ posts: [] }) // The recent window never has old-post.
-    api.runs.mockResolvedValue({ runs: [registryRun], count: 1, generatedAt: null })
+    api.runs.mockResolvedValue({ runs: [registryRun], count: 1, generatedAt: '2026-09-09T00:00:00Z', replay: { status: 'not_replayed' }, historicalEvidence: [] })
   })
   afterEach(() => {
     render(null, container)

@@ -191,6 +191,13 @@ type checkpoint_load_error =
   | Not_found
   | Store_error of string
   | Parse_error of string
+  (** A canonical this binary recognises as an earlier [checkpoint_version].
+      Apart from [Parse_error] because the two need opposite answers: a
+      superseded canonical is replaceable, a corrupt one is not. A canonical
+      from a *later* version stays [Parse_error] -- it means an older binary is
+      reading a newer workspace, and overwriting it would destroy history the
+      newer binary can still read. *)
+  | Superseded_version of { expected : int; got : int }
   | Io_error of string
   (** Catch-all for agent-core errors outside the Io / Serialization families
       (Api / Agent / Mcp / Config / Orchestration / Internal).
@@ -227,6 +234,8 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
       Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
+  | Serialization (VersionMismatch r) when r.got < r.expected ->
+      Superseded_version { expected = r.expected; got = r.got }
   | Serialization (VersionMismatch r) ->
       Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
   | Serialization (UnknownVariant r) ->
@@ -488,6 +497,9 @@ type save_agent_core_error =
 
 let checkpoint_load_error_to_string = function
   | Not_found -> "checkpoint not found"
+  | Superseded_version { expected; got } ->
+    Printf.sprintf
+      "checkpoint version %d is superseded by %d" got expected
   | Store_error detail
   | Parse_error detail
   | Io_error detail
@@ -1198,7 +1210,24 @@ let save_agent_core_classified_typed
     with_session_lock_typed ~session_dir (fun session_dir ->
       let session_id = Keeper_id.Trace_id.to_string trace_id in
       let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
-      match known_watermark ~canonical_path with
+      match
+        (* A canonical this binary supersedes carries no watermark to respect.
+           The load already refused it and started the keeper fresh, so nothing
+           in memory descends from it, and the write below replaces it -- under
+           the same durable session lock as every other write here. Reporting
+           it as unreadable instead made every save fail the same way forever,
+           because nothing ever replaced the file: a keeper whose workspace
+           predates the version bump could not checkpoint again until someone
+           deleted it by hand. *)
+        match known_watermark ~canonical_path with
+        | Error (Superseded_version { expected; got }) ->
+          Log.Keeper.warn
+            "AGENT_CORE checkpoint %s is version %d, superseded by %d; this \
+             turn's checkpoint replaces it"
+            canonical_path got expected;
+          Ok None
+        | answer -> answer
+      with
       | Error error -> Error (Existing_checkpoint_unreadable error)
       | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
         Error

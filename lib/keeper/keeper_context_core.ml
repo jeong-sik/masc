@@ -139,6 +139,19 @@ let load_context_from_checkpoint ~trace_id ~base_dir =
       ~session_id:trace_id
   in
   (match agent_core_result with
+   | Error (Superseded_version { expected; got }) ->
+       (* Not an error the operator has to act on: the version cut is
+          deliberate, the keeper starts fresh here, and the next save replaces
+          the file. It is counted and named so a fleet-wide cut is visible as
+          one, rather than as a wave of parse failures. *)
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_superseded))]
+         ();
+       Log.Keeper.warn
+         "keeper:%s AGENT_CORE checkpoint is version %d, superseded by %d; \
+          starting fresh and replacing it on the next save"
+         trace_id got expected
    | Error (Parse_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)

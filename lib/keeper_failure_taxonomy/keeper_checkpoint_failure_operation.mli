@@ -6,6 +6,10 @@
 
 type t =
   | Agent_core_parse (** Parse failure on AGENT_CORE checkpoint payload. *)
+  | Agent_core_superseded
+      (** The canonical is an earlier [checkpoint_version]. Apart from a parse
+          failure: the keeper starts fresh and the next save replaces the file,
+          so this counts a version cut rather than a broken payload. *)
   | Agent_core_store (** AGENT_CORE checkpoint store write failure. *)
   | Agent_core_io (** Generic AGENT_CORE checkpoint I/O failure. *)
   | Agent_core_failure (** Agent-core checkpoint error. *)

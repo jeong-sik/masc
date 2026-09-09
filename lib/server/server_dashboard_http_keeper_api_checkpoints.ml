@@ -44,6 +44,14 @@ let checkpoint_load_error_fields
   let status, kind, detail =
     match error with
     | Not_found -> "missing", "not_found", `Null
+    (* The keeper starts fresh and the next save replaces the file, so the
+       dashboard reads this as an absent checkpoint rather than an outage the
+       operator has to clear. The version pair is carried so a fleet-wide cut
+       is legible as one. *)
+    | Superseded_version { expected; got } ->
+      ( "missing"
+      , "superseded_version"
+      , `Assoc [ "expected", `Int expected; "found", `Int got ] )
     | Store_error detail -> "unavailable", "store_error", `String detail
     | Parse_error detail -> "unavailable", "parse_error", `String detail
     | Io_error detail -> "unavailable", "io_error", `String detail
@@ -67,6 +75,12 @@ let current_checkpoint_error_json
   =
   match error with
   | Not_found -> `Null
+  | Superseded_version { expected; got } ->
+    `Assoc
+      [ "kind", `String "superseded_version"
+      ; "expected", `Int expected
+      ; "found", `Int got
+      ]
   | Store_error detail ->
     `Assoc [ "kind", `String "store_error"; "detail", `String detail ]
   | Parse_error detail ->
@@ -125,7 +139,8 @@ let inventory_json (config : Workspace.config) (name : string)
       | Error error ->
         let status =
           match error with
-          | Keeper_checkpoint_store.Not_found -> "missing"
+          | Keeper_checkpoint_store.Not_found
+          | Superseded_version _ -> "missing"
           | Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _ ->
             "unavailable"
         in
@@ -234,6 +249,8 @@ let purge_error_to_string = function
 
 let checkpoint_load_error_to_string = function
   | Keeper_checkpoint_store.Not_found -> "not found"
+  | Superseded_version { expected; got } ->
+    Printf.sprintf "version %d superseded by %d" got expected
   | Store_error detail -> "store error: " ^ detail
   | Parse_error detail -> "parse error: " ^ detail
   | Io_error detail -> "io error: " ^ detail

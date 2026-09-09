@@ -194,9 +194,15 @@ let with_exec_fixture
   else
   let dir = temp_dir name in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      if bind_eio_context then Time_compat.clear_clock ();
+      cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
+      (* Eio_context.with_test_env scopes its own registry only. Browser_lane's
+         asynchronous response loop sleeps through Time_compat, which needs the
+         same live clock until this fixture's switch has fully shut down. *)
+      if bind_eio_context then Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run @@ fun sw ->
       if process

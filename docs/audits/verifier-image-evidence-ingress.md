@@ -53,3 +53,18 @@ filed exact bytes, oversized image refusal, and unchanged text-prefix behavior.
 
 Local determinism lint and whitespace checks passed. Behavioral tests require
 CI; no local build was run.
+
+## Aggregate submission repair
+
+The follow-up removes the separate 50-KiB aggregate Keeper submission gate and
+its size-only pre-read. Artifact references reach the existing snapshot boundary;
+complete image bodies still obey the per-item 200000-byte capture boundary,
+and the configured provider's actual request admission remains authoritative.
+No replacement aggregate budget or note conversion is added.
+
+The task outcome scenario submits three valid 165948-byte RGB PNGs (497844 bytes
+total), preserving all three as binary artifact snapshots in AwaitingVerification.
+The fixture is deterministic SHAKE-256 RGB noise, 240 by 230 pixels, encoded as
+PNG with filter 0, zlib IDAT and CRC32 chunks. It is a byte-delivery fixture,
+not evidence of document readability. Production reviewer routing is a separate
+isolated runtime proof.

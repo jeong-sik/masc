@@ -1,0 +1,7 @@
+# Twelve-turn live recall observation
+
+An existing isolated CI binary17b9 served a new on-demand Keeper, memory-continuity-proof. Twelve sequential operator-initiated requests completed without replacing an admitted operation. The final answer recalled all five declared facts, including the changed umbrella color. The original home and time appeared only in the first response before the final recall, with ten intervening turns. Runtime manifest observations identify the runtime; exact operation IDs, inputs, outputs and timestamps are retained.
+
+The name reappeared in turn2 despite an instruction not to repeat it. Umbrella color reappeared near the end. Therefore these facts do not all demonstrate the same recall distance. The scenario lasted327.68seconds. No compaction, failover, restart, autonomous initiative, or hour-scale continuity was tested. Successful operations alone were not used as recall proof: the actual final response was read and matched to the original and corrected facts. The poetry was read, but no general quality claim is made.
+
+The recorder kept accepted operation IDs and did not restart the Keeper on observation delay. The first three admissions were made interactively and copied into its evidence directory before it continued; raw local receipts are retained in /tmp/masc-memory-continuity-evidence. Only this scenario's non-sensitive conversation and selected runtime metadata are committed.

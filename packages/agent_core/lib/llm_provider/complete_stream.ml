@@ -126,31 +126,11 @@ let%test "OpenAI-compatible parser falls back to sibling reasoning fields" =
      = Some "declared"
 ;;
 
-(* Whether the inline-reasoning splitter runs on the content channel: the
-   resolved provider-qualified capability may declare think-tags, and a
-   template-parser dialect's reasoning channel IS the content channel. *)
-let inline_reasoning_enabled ~content_inline_reasoning ~streaming_reasoning =
-  match
-    ( (content_inline_reasoning : Capabilities.content_inline_reasoning)
-    , (streaming_reasoning : Reasoning_dialect.streaming_reasoning) )
-  with
-  | Capabilities.Think_tags, _ | _, Reasoning_dialect.Template_parser -> true
-  | Capabilities.No_content_inline_reasoning, _ -> false
-;;
-
-let%test "inline reasoning split activates for template-parser dialects and declared \
-          think-tags"
-  =
-  inline_reasoning_enabled
-    ~content_inline_reasoning:Capabilities.No_content_inline_reasoning
-    ~streaming_reasoning:Reasoning_dialect.Template_parser
-  && inline_reasoning_enabled
-       ~content_inline_reasoning:Capabilities.Think_tags
-       ~streaming_reasoning:Reasoning_dialect.Delta_reasoning_details
-  && not
-       (inline_reasoning_enabled
-          ~content_inline_reasoning:Capabilities.No_content_inline_reasoning
-          ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content"))
+(* Native reasoning dialect and inline content framing are independent axes.
+   Only the explicit content contract authorizes parsing reply bytes as tags. *)
+let inline_reasoning_enabled = function
+  | Capabilities.Think_tags -> true
+  | Capabilities.No_content_inline_reasoning -> false
 ;;
 
 (* Per-provider clean-stream regression guards for the phantom-completion check
@@ -629,9 +609,7 @@ let complete_stream_http
                 | Some s -> s
                 | None ->
                   let inline_reasoning =
-                    inline_reasoning_enabled
-                      ~content_inline_reasoning
-                      ~streaming_reasoning
+                    inline_reasoning_enabled content_inline_reasoning
                   in
                   let s =
                     Streaming.create_openai_stream_state

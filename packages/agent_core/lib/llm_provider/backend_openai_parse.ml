@@ -353,21 +353,18 @@ let parse_openai_response_result_json_raw
        splitter the streaming path uses; [flush] releases an unterminated
        open tag as reasoning, so a reasoning-only turn stays typed [Thinking]
        and never lands in visible [Text]. *)
-    let inline_thinking_blocks, text_content =
+    let inline_content_blocks =
       match content_inline_reasoning with
       | Capabilities.Think_tags ->
         let splitter = Inline_reasoning_split.create () in
-        let piece = Inline_reasoning_split.feed splitter text_content in
-        let flushed = Inline_reasoning_split.flush splitter in
-        let text = piece.text ^ flushed.text in
-        let reasoning = piece.reasoning ^ flushed.reasoning in
-        let inline_thinking_blocks =
-          if Api_common.string_is_blank reasoning
-          then []
-          else [ Thinking { signature = None; content = reasoning } ]
-        in
-        inline_thinking_blocks, text
-      | Capabilities.No_content_inline_reasoning -> [], text_content
+        let head = Inline_reasoning_split.feed_segments splitter text_content in
+        let tail = Inline_reasoning_split.flush_segments splitter in
+        let pieces = head @ tail in
+        List.map (function
+          | Inline_reasoning_split.Text text -> Text text
+          | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces
+      | Capabilities.No_content_inline_reasoning ->
+        if Api_common.string_is_blank text_content then [] else [ Text text_content ]
     in
     let stop_reason =
       (* SSOT: Stop_reason_wire owns the wire finish-reason -> stop_reason table
@@ -382,19 +379,7 @@ let parse_openai_response_result_json_raw
       ; model = Cli_common_json.member_str "model" json
       ; stop_reason
       ; content =
-          (let text_blocks =
-             if Api_common.string_is_blank text_content then [] else [ Text text_content ]
-           in
-           (* Reasoning stays typed as [Thinking] end-to-end -- it is never
-              promoted into a [Text] block. Promotion erased the type distinction
-              between reasoning and answer, so on the next turn the request
-              serializer re-fed the reasoning as the assistant's answer content
-              and the model re-reasoned over it: the #2236 CoT re-injection loop.
-              Surfacing reasoning-only replies for display is a read-side
-              projection concern (see [Api_common.text_blocks_to_string] and the
-              runtime text extractors), not a parse-time mutation that also
-              pollutes replay. *)
-           thinking_blocks @ inline_thinking_blocks @ text_blocks @ tool_blocks)
+          thinking_blocks @ inline_content_blocks @ tool_blocks
       ; usage = usage_of_openai_json json
       ; telemetry = telemetry_of_openai_json json
       }

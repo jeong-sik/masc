@@ -316,7 +316,7 @@ let parse_ollama_tool_calls = function
     Error "malformed_ollama_tool_calls:not_list"
 ;;
 
-let parse_ollama_response json_str =
+let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning) json_str =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string json_str in
   match json |> member "error" with
@@ -430,7 +430,17 @@ let parse_ollama_response json_str =
       ; stop_reason
       ; content =
           thinking_blocks
-          @ (if Api_common.string_is_blank text_content then [] else [ Text text_content ])
+          @ (match content_inline_reasoning with
+             | Capabilities.No_content_inline_reasoning ->
+                 if Api_common.string_is_blank text_content then [] else [ Text text_content ]
+             | Capabilities.Think_tags ->
+                 let split = Inline_reasoning_split.create () in
+                 let head = Inline_reasoning_split.feed_segments split text_content in
+                 let tail = Inline_reasoning_split.flush_segments split in
+                 let pieces = head @ tail in
+                 List.map (function
+                   | Inline_reasoning_split.Text text -> Text text
+                   | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces)
           @ tool_blocks
       ; usage
       ; telemetry
@@ -935,4 +945,23 @@ let%test "parse_ollama_response extracts thinking block from message" =
      | [ Types.Thinking { content = thinking }; Types.Text "The answer is 42." ] ->
        String.length thinking > 0
      | _ -> false)
+;;
+
+let%test "Ollama sync keeps ordered inline channels only under declared framing" =
+  let wire = {|{"model":"fixture","done_reason":"stop","message":{"content":"A<think>B</think>C"}}|} in
+  match parse_ollama_response ~content_inline_reasoning:Capabilities.Think_tags wire,
+        parse_ollama_response wire with
+  | Ok split, Ok plain ->
+      split.content = [Text "A"; Thinking {content="B";signature=None}; Text "C"]
+      && plain.content = [Text "A<think>B</think>C"]
+  | _ -> false
+;;
+
+let%test "Ollama sync flush retains unfinished reasoning as reasoning" =
+  let wire = {|{"model":"fixture","done_reason":"stop","message":{"content":"<think>private</thi"}}|} in
+  match parse_ollama_response ~content_inline_reasoning:Capabilities.Think_tags wire with
+  | Ok response ->
+      List.for_all (function Thinking _ -> true | _ -> false) response.content
+      && String.concat "" (List.filter_map (function Thinking {content;_} -> Some content | _ -> None) response.content) = "private</thi"
+  | _ -> false
 ;;

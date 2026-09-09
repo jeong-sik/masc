@@ -1692,8 +1692,9 @@ let runtime_probe_cmd_exit base_path runtime_id =
                with
                | Ok sub ->
                    Printf.printf
-                     "authenticated auth_method=%s subscription_type=%s\n"
-                     sub.auth_method sub.subscription_type;
+                     "configured authentication=%s api_provider=%s\n"
+                     (Runtime_claude_code.authentication_to_string sub.authentication)
+                     (Runtime_claude_code.api_provider_to_string sub.api_provider);
                    0
                | Error e ->
                    print_string "not-authenticated\n";
@@ -1720,8 +1721,8 @@ let runtime_probe_cmd_exit base_path runtime_id =
                    config
                with
                | Ok result ->
-                   Printf.printf "authenticated subscription_type=%s\n"
-                     result.subscription.plan_type;
+                   Printf.printf "configured authentication=%s\n"
+                     (Runtime_codex_app_server.authentication_to_string result.subscription);
                    0
                | Error e ->
                    print_string "not-authenticated\n";

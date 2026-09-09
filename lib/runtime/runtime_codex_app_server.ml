@@ -1,13 +1,18 @@
 (** Native Codex app-server single-turn execution.
 
-    The official CLI keeps ownership of ChatGPT credentials. We deliberately
-    remove API-key fallback variables from the child environment and then gate
-    on [account/read = chatgpt] before starting a thread. *)
+    The official CLI owns credential selection and provider routing. MASC
+    preserves supported authentication inputs and parses the reported auth mode
+    before starting a thread; configured provider auth is verified by the turn. *)
 
 type subscription =
-  { plan_type : string
-  ; email : string option
-  }
+  | Chatgpt of { plan_type : string; email : string option }
+  | Api_key
+  | Provider_managed
+  | Amazon_bedrock
+
+let authentication_to_string = function
+  | Chatgpt _ -> "chatgpt" | Api_key -> "api_key"
+  | Provider_managed -> "provider_managed" | Amazon_bedrock -> "amazon_bedrock"
 
 type probe_result =
   { subscription : subscription
@@ -244,7 +249,7 @@ let error_to_string = function
     let code = Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code in
     Printf.sprintf "Codex app-server RPC %s failed%s: %s" method_ code message
   | Subscription_required detail ->
-    "Codex ChatGPT subscription login required: " ^ detail
+    "Codex authentication required: " ^ detail
   | Unsupported_server_request method_ ->
     "Codex app-server requested unsupported host action: " ^ method_
   | Context_window_exceeded { message; tool_effect_attempted } ->
@@ -564,24 +569,23 @@ let parse_initialize result =
 let parse_subscription result =
   let stage = "account/read" in
   let* fields = assoc_at stage result in
-  (* [requiresOpenaiAuth] is in the response and is not read: the decision
-     below is account.type = "chatgpt". Requiring it to be a bool made the
-     subscription probe depend on a field this tree ignores (#28010). *)
-  let* account = required_member stage "account" fields in
-  match account with
-  | `Null -> Error (Subscription_required "the official CLI has no active account")
-  | `Assoc account_fields ->
-    let* account_type = required_string stage "type" account_fields in
-    if account_type <> "chatgpt"
-    then
-      Error
-        (Subscription_required
-           (Printf.sprintf "account/read reported account type %S" account_type))
-    else
-      let* plan_type = required_string stage "planType" account_fields in
-      let* email = optional_string stage "email" account_fields in
-      Ok { plan_type; email }
-  | _ -> protocol_error stage "account must be an object or null"
+  match List.assoc_opt "requiresOpenaiAuth" fields with
+  | Some (`Bool false) -> Ok Provider_managed
+  | _ ->
+    let* account = required_member stage "account" fields in
+    match account with
+    | `Null -> Error (Subscription_required "the official CLI has no active account")
+    | `Assoc account_fields ->
+      let* account_type = required_string stage "type" account_fields in
+      (match account_type with
+       | "apiKey" -> Ok Api_key
+       | "amazonBedrock" -> Ok Amazon_bedrock
+       | "chatgpt" ->
+         let* plan_type = required_string stage "planType" account_fields in
+         let* email = optional_string stage "email" account_fields in
+         Ok (Chatgpt { plan_type; email })
+       | _ -> protocol_error stage "unsupported account type reported by Codex")
+    | _ -> protocol_error stage "account must be an object or null"
 ;;
 
 let probe_protocol io =
@@ -1322,15 +1326,58 @@ let child_environment_key_allowed = function
   | "LC_ALL"
   | "LC_CTYPE"
   | "TERM"
-  | "NO_COLOR" -> true
+  | "NO_COLOR"
+  | "OPENAI_API_KEY" | "OPENAI_BASE_URL" | "CODEX_API_KEY" | "CODEX_ACCESS_TOKEN"
+  | "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN"
+  | "AWS_REGION" | "AWS_DEFAULT_REGION" | "AWS_PROFILE"
+  | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE" | "AWS_BEARER_TOKEN_BEDROCK" -> true
   | _ -> false
 ;;
 
-let subscription_only_environment () =
+let configured_auth_environment_keys () =
+  let home = match Sys.getenv_opt "CODEX_HOME" with
+    | Some path when path <> "" -> Some path
+    | _ -> Option.map (fun home -> Filename.concat home ".codex") (Sys.getenv_opt "HOME") in
+  match home with
+  | None -> Ok []
+  | Some home ->
+    let path = Filename.concat home "config.toml" in
+    if not (Sys.file_exists path) then Ok [] else
+    try
+      let toml = Otoml.Parser.from_file path in
+      let table = function
+        | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> fields
+        | _ -> raise (Invalid_argument "table") in
+      let env_name = function
+        | Otoml.TomlString name when String.length name > 0 ->
+          let initial = function 'a'..'z' | 'A'..'Z' | '_' -> true | _ -> false in
+          if initial name.[0] && String.for_all (function 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' -> true | _ -> false) name
+          then name else raise (Invalid_argument "environment name")
+        | _ -> raise (Invalid_argument "environment name") in
+      let providers = match Otoml.find_opt toml Fun.id [ "model_providers" ] with
+        | None -> [] | Some value -> table value in
+      let names = List.concat_map (fun (_, value) ->
+        let fields = table value in
+        let key = match List.assoc_opt "env_key" fields with
+          | None -> [] | Some value -> [ env_name value ] in
+        let headers = match List.assoc_opt "env_http_headers" fields with
+          | None -> [] | Some value -> List.map (fun (_, value) -> env_name value) (table value) in
+        key @ headers) providers in
+      Ok (List.sort_uniq String.compare names)
+    with
+    | Otoml.Parse_error _ | Otoml.Type_error _ | Sys_error _ | Invalid_argument _ ->
+      Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
+;;
+
+let client_environment () =
+  let* configured = configured_auth_environment_keys () in
   Unix.environment ()
   |> Array.to_list
-  |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
+  |> List.filter (fun entry ->
+    let name = env_key entry in
+    child_environment_key_allowed name || List.mem name configured)
   |> Array.of_list
+  |> Result.ok
 ;;
 
 let drain_stderr flow tail =
@@ -1399,6 +1446,7 @@ let client_argv (config : config) =
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
+  let* environment = client_environment () in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -1406,7 +1454,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     let stderr_tail = ref "" in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
-        ~env:(subscription_only_environment ())
+        ~env:environment
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         (client_argv config)
     in

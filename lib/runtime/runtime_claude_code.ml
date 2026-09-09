@@ -1,8 +1,20 @@
+type authentication = Claude_ai | Api_key | OAuth_token | Third_party
+
+type api_provider = First_party | Bedrock | Vertex | Foundry | Mantle
+
 type subscription =
-  { auth_method : string
-  ; subscription_type : string
-  ; api_provider : string
+  { authentication : authentication
+  ; subscription_type : string option
+  ; api_provider : api_provider
   }
+
+let authentication_to_string = function
+  | Claude_ai -> "claude.ai" | Api_key -> "api_key"
+  | OAuth_token -> "oauth_token" | Third_party -> "third_party"
+
+let api_provider_to_string = function
+  | First_party -> "firstParty" | Bedrock -> "bedrock" | Vertex -> "vertex"
+  | Foundry -> "foundry" | Mantle -> "mantle"
 
 type config =
   { cli_path : string
@@ -220,7 +232,7 @@ let error_to_string = function
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Claude Code protocol error during %s: %s" stage detail
   | Subscription_required detail ->
-    "Claude Code subscription login required: " ^ detail
+    "Claude Code authentication required: " ^ detail
   | Unsupported_control_request subtype ->
     "Claude Code requested unsupported control action: " ^ subtype
   | Turn_transport_interrupted { stage; tool_effect_attempted; detail } ->
@@ -258,7 +270,7 @@ let error_to_string = function
       Option.fold ~none:"unknown" ~some:string_of_int api_error_status
     in
     Printf.sprintf
-      "Claude Code subscription quota blocked (rate_limit=%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
+      "Claude Code quota blocked (rate_limit=%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
       status
       api_status
       tool_effect_attempted
@@ -320,7 +332,7 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
-let subscription_only_environment () =
+let client_environment () =
   let inherited_names =
     [ "HOME"
     ; "USER"
@@ -336,6 +348,24 @@ let subscription_only_environment () =
     ; "LC_CTYPE"
     ; "TERM"
     ; "NO_COLOR"
+    ; "CLAUDE_CONFIG_DIR"
+    ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
+    ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
+    ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
+    ; "ANTHROPIC_DEFAULT_HAIKU_MODEL"; "ANTHROPIC_SMALL_FAST_MODEL"
+    ; "CLAUDE_CODE_OAUTH_TOKEN"
+    ; "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"
+    ; "CLAUDE_CODE_USE_FOUNDRY"; "CLAUDE_CODE_USE_MANTLE"
+    ; "ANTHROPIC_BEDROCK_BASE_URL"; "ANTHROPIC_VERTEX_BASE_URL"
+    ; "ANTHROPIC_VERTEX_PROJECT_ID"; "CLOUD_ML_REGION"
+    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
+    ; "CLAUDE_CODE_SKIP_FOUNDRY_AUTH"
+    ; "AWS_ACCESS_KEY_ID"; "AWS_SECRET_ACCESS_KEY"; "AWS_SESSION_TOKEN"
+    ; "AWS_REGION"; "AWS_DEFAULT_REGION"; "AWS_PROFILE"
+    ; "AWS_CONFIG_FILE"; "AWS_SHARED_CREDENTIALS_FILE"; "AWS_BEARER_TOKEN_BEDROCK"
+    ; "GOOGLE_APPLICATION_CREDENTIALS"; "GOOGLE_CLOUD_PROJECT"
+    ; "ANTHROPIC_FOUNDRY_API_KEY"; "ANTHROPIC_FOUNDRY_RESOURCE"
+    ; "ANTHROPIC_FOUNDRY_BASE_URL"; "AZURE_TENANT_ID"; "AZURE_CLIENT_ID"; "AZURE_CLIENT_SECRET"
     ]
   in
   inherited_names
@@ -350,23 +380,21 @@ let parse_subscription json =
   let stage = "auth status" in
   let* fields = assoc_at stage json in
   let* logged_in = required_bool stage "loggedIn" fields in
-  if not logged_in
-  then Error (Subscription_required "claude auth status reported loggedIn=false")
+  if not logged_in then
+    Error (Subscription_required "No supported CLI credential is available with the configured settings isolation. Export the CLI credential/routing variables or sign in with the CLI; settings-only apiKeyHelper credentials require an explicitly admitted settings source.")
   else
-    let* auth_method = required_string stage "authMethod" fields in
-    let* subscription_type = required_string stage "subscriptionType" fields in
-    let* api_provider = required_string stage "apiProvider" fields in
-    if auth_method <> "claude.ai"
-    then
-      Error
-        (Subscription_required
-           (Printf.sprintf "authMethod must be claude.ai, got %S" auth_method))
-    else if api_provider <> "firstParty"
-    then
-      Error
-        (Subscription_required
-           (Printf.sprintf "apiProvider must be firstParty, got %S" api_provider))
-    else Ok { auth_method; subscription_type; api_provider }
+    let* method_name = required_string stage "authMethod" fields in
+    let* authentication = match method_name with
+      | "claude.ai" -> Ok Claude_ai | "api_key" -> Ok Api_key
+      | "oauth_token" -> Ok OAuth_token | "third_party" -> Ok Third_party
+      | _ -> protocol_error stage "unsupported authentication method reported by Claude Code" in
+    let* provider_name = required_string stage "apiProvider" fields in
+    let* api_provider = match provider_name with
+      | "firstParty" -> Ok First_party | "bedrock" -> Ok Bedrock
+      | "vertex" -> Ok Vertex | "foundry" -> Ok Foundry | "mantle" -> Ok Mantle
+      | _ -> protocol_error stage "unsupported API provider reported by Claude Code" in
+    let* subscription_type = optional_string stage "subscriptionType" fields in
+    Ok { authentication; subscription_type; api_provider }
 ;;
 
 let read_subscription ~mgr ~cwd config =
@@ -374,9 +402,12 @@ let read_subscription ~mgr ~cwd config =
     Eio.Process.parse_out
       mgr
       Eio.Buf_read.take_all
+      ~is_success:(fun code -> code = 0 || code = 1)
       ~cwd
-      ~env:(subscription_only_environment ())
-      [ config.cli_path; "auth"; "status"; "--json" ]
+      ~env:(client_environment ())
+      [ config.cli_path
+      ; Runtime_native_tools.claude_setting_sources_arg config.setting_sources
+      ; "auth"; "status"; "--json" ]
     |> String.trim
     |> parse_json ~stage:"auth status"
     |> fun result -> Result.bind result parse_subscription
@@ -1457,7 +1488,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~sw
           mgr
           ~cwd
-          ~env:(subscription_only_environment ())
+          ~env:(client_environment ())
           ~stdin:stdin_r
           ~stdout:stdout_w
           ~stderr:stderr_w
@@ -1678,8 +1709,8 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
       | Resume { session_id } -> session_id
     in
     Log.Runtime_agent.info
-      "Claude Code subscription turn starting (subscription_type=%s)"
-      subscription.subscription_type;
+      "Claude Code turn starting (authentication=%s)"
+      (authentication_to_string subscription.authentication);
     try
       run_spawned
         ?on_spawned
@@ -1712,7 +1743,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
   (match result with
    | Ok turn ->
      Log.Runtime_agent.info
-       "Claude Code subscription turn completed (session_id=%s turn_id=%s model=%s)"
+       "Claude Code turn completed (session_id=%s turn_id=%s model=%s)"
        turn.session_id
        turn.turn_id
        turn.model
@@ -1723,7 +1754,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
      (* A terminal tool that failed is a host stop the keeper settles as
         [Terminal_effect_failed]; it stays a warning. *)
      Log.Runtime_agent.warn
-       "Claude Code subscription turn failed (kind=%s): %s"
+       "Claude Code turn failed (kind=%s): %s"
        (error_kind failed)
        (error_to_string failed)
    | Error
@@ -1741,11 +1772,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         after a repeated tool call, and the keeper settles it as a completed
         or yielded turn. Fifty of these read as failures on 2026-09-02. *)
      Log.Runtime_agent.info
-       "Claude Code subscription turn stopped by host: %s"
+       "Claude Code turn stopped by host: %s"
        (error_to_string stop)
    | Error error ->
      Log.Runtime_agent.warn
-       "Claude Code subscription turn failed (kind=%s)"
+       "Claude Code turn failed (kind=%s)"
        (error_kind error));
   result
 ;;

@@ -52,7 +52,7 @@ let anthropic_config () =
         (Llm_provider.Provider_config.make
            ~kind:Anthropic
            ~provider_id:"anthropic"
-           ~model_id:"claude-sonnet-4-6"
+           ~model_id:"claude-sonnet-5"
            ~base_url:"https://api.anthropic.com"
            ~api_key
            ())

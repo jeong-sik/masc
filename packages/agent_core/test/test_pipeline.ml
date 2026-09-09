@@ -332,7 +332,7 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let effective_model = "claude-sonnet-4-6" in
+  let effective_model = "claude-sonnet-5" in
   let captured_model = ref None in
   let response : Types.api_response =
     { id = "effective-provider-config"

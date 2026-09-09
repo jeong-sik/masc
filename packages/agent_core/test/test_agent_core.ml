@@ -209,7 +209,7 @@ let test_build_safe_valid () =
   Eio_main.run
   @@ fun env ->
   let result =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "test"
     |> Builder.with_max_tokens 1024
     |> Builder.build_safe

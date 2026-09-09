@@ -66,7 +66,7 @@ let test_builder_with_skill_registry () =
     reg
     (skill_exn ~name:"translate" ~description:"Translate text" "Translate input");
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_name "polyglot"
     |> Builder.with_description "A multilingual assistant"
     |> Builder.with_skill_registry reg
@@ -102,7 +102,7 @@ let test_card_json_export () =
       (fun _input -> Ok { Types.content = "results"; _meta = None })
   in
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_name "researcher"
     |> Builder.with_tools [ tool ]
     |> Builder.with_enable_thinking true
@@ -141,7 +141,7 @@ let test_builder_with_elicitation () =
     Hooks.Answer (`String (Printf.sprintf "user chose: %s" req.question))
   in
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_name "interactive"
     |> Builder.with_elicitation cb
     |> build_exn
@@ -189,7 +189,7 @@ let test_description_accessor () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_name "helper"
     |> Builder.with_description "A helpful assistant"
     |> build_exn
@@ -199,7 +199,7 @@ let test_description_accessor () =
     (Some "A helpful assistant")
     (Agent.description agent);
   let agent2 =
-    Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
+    Builder.create ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_name "minimal"
     |> build_exn
   in

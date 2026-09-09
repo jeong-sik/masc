@@ -5,7 +5,7 @@ open Agent_core
 let make_checkpoint
       ?(session_id = "sess-original")
       ?(agent_name = "test-agent")
-      ?(model = "claude-sonnet-4-6")
+      ?(model = "claude-sonnet-5")
       ?(system_prompt = Some "You are helpful.")
       ?(messages = [])
       ?(usage = Types.empty_usage)
@@ -230,9 +230,9 @@ let test_resume_restores_turn_count () =
 let test_resume_restores_model () =
   with_net
   @@ fun net ->
-  let cp = make_checkpoint ~model:"claude-opus-4-6" () in
+  let cp = make_checkpoint ~model:"claude-opus-5" () in
   let agent = Agent.resume ~net ~checkpoint:cp () in
-  Alcotest.(check string) "model" "claude-opus-4-6" (Agent.state agent).config.model
+  Alcotest.(check string) "model" "claude-opus-5" (Agent.state agent).config.model
 ;;
 
 let test_resume_restores_agent_name () =

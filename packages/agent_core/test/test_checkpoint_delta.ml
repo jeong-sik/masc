@@ -127,7 +127,7 @@ let checkpoint_gen =
   let* session_id = small_string_gen in
   let* agent_name = small_string_gen in
   let* model =
-    oneof [ return "claude-sonnet-4-6"; return "claude-opus-4-6"; small_string_gen ]
+    oneof [ return "claude-sonnet-5"; return "claude-opus-5"; small_string_gen ]
   in
   let* system_prompt = option small_string_gen in
   let* messages = list_size (int_range 0 5) message_gen in
@@ -197,7 +197,7 @@ let make_unit_checkpoint
   { Checkpoint.version = Checkpoint.checkpoint_version
   ; session_id
   ; agent_name
-  ; model = "claude-sonnet-4-6"
+  ; model = "claude-sonnet-5"
   ; system_prompt = Some "Be careful."
   ; messages
   ; usage = Types.empty_usage

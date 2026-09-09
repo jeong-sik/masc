@@ -927,7 +927,7 @@ let test_validate_anthropic_thinking_rejects_forced_tool_choice () =
   let cfg ?(enable_thinking = true) tool_choice =
     Provider_config.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ~enable_thinking
       ~tool_choice

@@ -15,6 +15,25 @@ max_context_tokens = 1000000
 max_output_tokens = 128000
 input_per_million = 10.0
 output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Fable 5.1 reads cached tokens at 0.025x the base input price, not the 0.1x
+# every other Claude model uses (pricing table footnote, checked 2026-09-09).
+# Lookup takes the longest matching prefix, so this row -- not "claude-fable-5"
+# -- answers for the 5.1 ids; without it a cache read bills at four times the
+# real rate. Everything else matches the 5 row.
+[[models]]
+id_prefix = "claude-fable-5-1"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.025
 
 # 2026-09-06 RFC-0430 Phase 1: the same two direct models served over
 # DeepSeek's Anthropic-compatible surface. Probed live 2026-09-06: x-api-key
@@ -138,26 +157,8 @@ max_context_tokens = 1000000
 max_output_tokens = 128000
 input_per_million = 5.0
 output_per_million = 25.0
-
-[[models]]
-id_prefix = "claude-opus-4-8"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_only"
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 5.0
-output_per_million = 25.0
-
-[[models]]
-id_prefix = "claude-opus-4-7"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_only"
-accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 5.0
-output_per_million = 25.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
 
 [[models]]
 id_prefix = "claude-sonnet-5"
@@ -166,30 +167,12 @@ anthropic_thinking_control = "adaptive_default"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
 max_output_tokens = 128000
-input_per_million = 3.0
-output_per_million = 15.0
-
-[[models]]
-id_prefix = "opus-4-6"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_preferred"
-accepted_reasoning_efforts = ["low", "medium", "high", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "sonnet-4-6"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_preferred"
-accepted_reasoning_efforts = ["low", "medium", "high", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
+# $2/$10 was announced as introductory pricing through 2026-08-31; the
+# scheduled rise to $3/$15 was cancelled and $2/$10 is now the standard rate
+# (pricing page note, checked 2026-09-09). This row carried the cancelled
+# $3/$15 -- Sonnet 4.6's rate.
+input_per_million = 2.0
+output_per_million = 10.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
@@ -2861,30 +2844,6 @@ input_per_million = 0.0
 output_per_million = 0.0
 
 # Extra Aliased and Specific Model Rules
-[[models]]
-id_prefix = "claude-opus-4-6"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_preferred"
-accepted_reasoning_efforts = ["low", "medium", "high", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 128000
-input_per_million = 15.0
-output_per_million = 75.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
-[[models]]
-id_prefix = "claude-sonnet-4-6"
-base = "anthropic"
-anthropic_thinking_control = "adaptive_preferred"
-accepted_reasoning_efforts = ["low", "medium", "high", "max"]
-max_context_tokens = 1000000
-max_output_tokens = 64000
-input_per_million = 3.0
-output_per_million = 15.0
-cache_write_multiplier = 1.25
-cache_read_multiplier = 0.1
-
 [[models]]
 id_prefix = "gpt-5.3-codex-spark"
 base = "openai_chat_extended"

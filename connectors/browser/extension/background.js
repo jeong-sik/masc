@@ -128,9 +128,14 @@ let port = null;
 let reconnectTimer = null;
 
 function connect() {
-  port = browser.runtime.connectNative(HOST_NAME);
-  port.onMessage.addListener(onHostMessage);
-  port.onDisconnect.addListener(() => {
+  if (port) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  const connection = browser.runtime.connectNative(HOST_NAME);
+  port = connection;
+  connection.onMessage.addListener(msg => onHostMessage(msg, connection));
+  connection.onDisconnect.addListener(() => {
+    if (port !== connection) return;
     port = null;
     // The host is launched by the browser per connection; a quiet retry keeps
     // the lane alive across host restarts without spamming launches.
@@ -330,7 +335,7 @@ async function pageInteract(args) {
   return {tabId: args.tabId, ...result};
 }
 
-async function onHostMessage(msg) {
+async function onHostMessage(msg, connection = port) {
   const reply = { id: msg?.id, ok: false };
   try {
     switch (msg?.verb) {
@@ -376,7 +381,7 @@ async function onHostMessage(msg) {
       reply.ok = false;
       reply.error = "browser_reply_exceeds_8_mib";
     }
-    port?.postMessage(reply);
+    connection?.postMessage(reply);
   } catch {
     // Port died mid-answer; the reconnect path owns the next attempt.
   }

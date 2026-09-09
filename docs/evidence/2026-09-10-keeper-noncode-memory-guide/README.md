@@ -31,3 +31,23 @@ with no queued/running chat operation. Its turn-2872 receipt says
 `fail_open_next_runtime`. Source tracing is needed to determine whether the
 failed direct request is retained for subsequent work; no restart or duplicate
 request has been issued merely because this one failed.
+
+## Source diagnosis
+
+At inspected source `47796f6884251e792294f368314ec8746ef12f2d`, the direct
+`Keeper_agent_run.run_turn` call in `lib/keeper/keeper_turn.ml` does not supply
+`on_runtime_retry_deferred`. `keeper_turn_driver.ml` defaults the callback to
+a no-op, although the checkpoint-deferral branch emits the remaining runtime
+candidates through it. The direct error branch restarts keepalive and returns
+a failed result. `lib/keeper_chat_operations/keeper_chat_operation_reducer.ml`
+clears the queued input on `Fail_running` and provides no Failed-to-Queued
+transition. Transcript retention therefore does not establish pending-request
+replay. Same-turn fallback remains possible when admitted by the driver; this
+finding concerns the deferred branch.
+
+An independent reviewer traced these paths. Direct comparison against the
+observed deployed commit `3dd470d9f9bd9e818ecfe7387aba334604872ca4` found no
+difference in those three source files. This binds the source diagnosis to the
+reported binary source identity but does not identify every internal event of
+this failed operation. The measured receipt remains the evidence that only one
+attempt ran and no fallback was applied. A separate repair is in progress.

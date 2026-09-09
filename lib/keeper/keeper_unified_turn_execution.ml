@@ -152,6 +152,26 @@ let run (ctx : ctx)
       failure before any stage may fall back, while every typed stage blocks a
       same-run fallback. *)
    let checkpoint_stage_observed = Atomic.make false in
+   (* The tool rows of a continuation turn, collected from the same stream
+      the chat lane persists from and appended once the turn settles. Only a
+      turn that continues an approval replay collects: it is the one turn
+      with a delivery identity to append under. One collector for the whole
+      turn: the run's attempt boundaries reach it through the observation
+      hook, so a failed candidate's rows are quarantined the way the chat
+      lane quarantines them (#33127). The run's third stream callback,
+      on_tool_result_ready, is deliberately not handed over: it would make
+      tool-log write failures fatal for the turn (Keeper_run_tools_setup's
+      commit-required rule), which is the chat lane's policy. *)
+   let tool_projection =
+     match hitl_resolution with
+     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ } ->
+       Some (Keeper_loop_tool_projection.create ())
+     (* A rejection carries no replay to continue: whatever tools this turn
+        runs are not that approval's, so they are not delivered under its
+        identity. *)
+     | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ } | None ->
+       None
+   in
    let deferred_runtime_lane_ref = ref None in
   let do_run
         ~(execution : runtime_execution)
@@ -242,6 +262,12 @@ let run (ctx : ctx)
                  ~is_retry
                  ?shared_context
                  ?event_bus
+                 ?on_event:
+                   (Option.map Keeper_loop_tool_projection.on_event tool_projection)
+                 ?on_tool_stream_observation:
+                   (Option.map
+                      Keeper_loop_tool_projection.on_tool_stream_observation
+                      tool_projection)
                  ?trace_link:(trace_link ())
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
@@ -465,6 +491,67 @@ let run (ctx : ctx)
       }
       turn_state
   in
+  (* A continuation turn follows an approval replay, so its tool rows are
+     delivered under that approval's identity, beside the lifecycle rows the
+     queue already wrote for it. Any other autonomous turn has no delivery
+     identity of its own yet and stays unprojected, as before. The identity
+     is per approval, not per turn: should a second tool-executing turn ever
+     continue the same approval, its rows read as already present and are
+     said so, not dropped silently. *)
+  (match tool_projection, hitl_resolution with
+   | None, None | None, Some _ | Some _, None -> ()
+   | Some projection, Some resolution ->
+     let approval_id = resolution.Keeper_event_queue.approval_id in
+     let turn_ref =
+       Ids.Turn_ref.make
+         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         ~absolute_turn:keeper_turn_id
+     in
+     let persisted =
+       Keeper_loop_tool_projection.persist_continuation
+         projection
+         ~base_dir:config.base_path
+         ~keeper_name:meta.name
+         ~approval_id
+         ~turn_ref
+         ~turn_failed:(Result.is_error result)
+     in
+     (* A quarantined row is missing from the projection below; the chat
+        lane's live bridge would have reported the conflict as it happened,
+        and this lane has no bridge, so it is said here, one line per row. *)
+     List.iter
+       (fun (kind, (occurrence : Keeper_chat_events.tool_stream_occurrence), detail) ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "%s: continuation turn tool row quarantined under approval %s (%s at \
+             stream_scope=%d block_index=%d): %s"
+            meta.name
+            approval_id
+            (Keeper_chat_events.stream_protocol_error_kind_to_string kind)
+            occurrence.stream_scope
+            occurrence.block_index
+            detail)
+       persisted.Keeper_loop_tool_projection.quarantined;
+     (match persisted.Keeper_loop_tool_projection.outcome with
+      | Keeper_loop_tool_projection.Nothing_to_project -> ()
+      | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Appended _) ->
+        Keeper_chat_broadcast.chat_appended
+          ~keeper_name:meta.name
+          ~source:"continuation_tool_calls"
+          ()
+      | Keeper_loop_tool_projection.Projected (Keeper_chat_store.Already_present _) ->
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "%s: continuation turn tool rows were already present under approval %s; \
+           a later turn under the same approval is not projected"
+          meta.name
+          approval_id
+      | Keeper_loop_tool_projection.Projection_dropped reason ->
+        Log.Keeper.warn
+          ~keeper_name:meta.name
+          "%s: continuation turn tool rows were not projected: %s"
+          meta.name
+          (Keeper_loop_tool_projection.drop_reason_to_string reason)));
   result, turn_state
 )
 

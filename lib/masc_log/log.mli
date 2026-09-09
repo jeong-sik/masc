@@ -197,65 +197,36 @@ module Make (_ : sig val name : string end) : LOGGER
 module Workspace : LOGGER
 module Mcp : LOGGER
 module Auth : LOGGER
-module Retry : LOGGER
 module Backend : LOGGER
 module Session : LOGGER
-module Cancel : LOGGER
 module Sub : LOGGER
-module Spawn : LOGGER
 module Pulse : LOGGER
-module ModelClient : LOGGER
 module Orchestrator : LOGGER
 module BoardLog : LOGGER
 module MsxLog : LOGGER
 module Metrics : LOGGER
 module Dashboard : LOGGER
-module Trpg : LOGGER
-module Feed : LOGGER
 module Telemetry : LOGGER
-module Noosphere : LOGGER
-module CmdPlane : LOGGER
 module Gate : LOGGER
-module Social : LOGGER
 module Transport : LOGGER
-module Gc : LOGGER
-module Reputation : LOGGER
 module Keeper : LOGGER
 module Runtime : LOGGER
 (** RFC-0058 Phase 8.1.5: runtime-domain namespace for catalog,
     routing, and partial-parse events. Separated from {!Keeper} so
     alerting/dashboard filters can target runtime subsystem without
     keeper-domain false positives. *)
-module Memory : LOGGER
 module Mention : LOGGER
 module Misc : LOGGER
 module Identity : LOGGER
-module Institution : LOGGER
 module Pages : LOGGER
 module Config : LOGGER
 module Task : LOGGER
 module Http : LOGGER
-module Langfuse : LOGGER
 module Server : LOGGER
-module Dispatch : LOGGER
-module BoardPg : LOGGER
-module MemoryPg : LOGGER
-module MemoryJsonl : LOGGER
-module AutoResponder : LOGGER
-module Env : LOGGER
-module Level2 : LOGGER
 module TaskState : LOGGER
-module Inline : LOGGER
-module Protocol : LOGGER
-module AlwaysOn : LOGGER
 module KeeperExec : LOGGER
 module LocalWorker : LOGGER
-module Worker : LOGGER
-module Sse : LOGGER
-module Planner : LOGGER
-module Compact : LOGGER
 module Harness : LOGGER
-module Discovery : LOGGER
 
 (** {2 Logging-consistency migration modules}
 
@@ -265,11 +236,7 @@ module Discovery : LOGGER
     replaces former raw-stderr / [Logs.*] sites that carried no context and are
     named after their domain. See [docs/LOGGING.md]. *)
 module Otel : LOGGER
-module Agent_health : LOGGER
-module Relay : LOGGER
 module Runtime_verify : LOGGER
-module Checkpoint : LOGGER
-module Jsonl_atomic : LOGGER
 module Mcp_transport : LOGGER
 module Startup : LOGGER
 module Model_inference_metrics : LOGGER

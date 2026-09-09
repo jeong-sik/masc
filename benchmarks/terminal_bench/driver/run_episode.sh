@@ -24,7 +24,12 @@ KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux cont
 Complete the task by running shell commands (your tool calls execute in this container as root). \
 Work directly; do not ask questions. When the task is verifiably done, finish."
 
-mcp_init
+server_ready=0
+for _ in $(seq 1 30); do
+  if mcp_init 2>/dev/null; then server_ready=1; break; fi
+  sleep 2
+done
+[[ "$server_ready" -eq 1 ]] || { echo "MASC server unreachable" >&2; exit 1; }
 
 lead_msg="$(cat "$INSTRUCTION_FILE")"
 if [[ "${KEEPER_COUNT}" -gt 1 ]]; then
@@ -49,7 +54,20 @@ start_epoch="$(date +%s)"
 printf '%s' "$lead_msg" > "$BENCH/episode-message.txt"
 submit="$(mcp_call 200 masc_keeper_msg \
   "$(jq -cn --arg name bench-1 --rawfile m "$BENCH/episode-message.txt" \
-    '{name:$name, message:$m}')" 60)"
+    '{name:$name, message:$m}')" 60)" || {
+  sleep 5
+  submit="$(mcp_call 200 masc_keeper_msg \
+    "$(jq -cn --arg name bench-1 --rawfile m "$BENCH/episode-message.txt" \
+      '{name:$name, message:$m}')" 60)" || {
+    jq -n \
+      --argjson duration_ms $(( ($(date +%s) - start_epoch) * 1000 )) \
+      '{state:"Error", duration_ms:$duration_ms, tool_calls:0,
+        duplicate_tool_calls:0, final:{}}' \
+      > "$RESULT_JSON"
+    cat "$RESULT_JSON"
+    exit 1
+  }
+}
 op_id="$(printf '%s' "$submit" | jq -r '.operation_id // empty')"
 [[ -n "$op_id" ]] || { echo "keeper_msg returned no operation_id: $submit" >&2; exit 1; }
 

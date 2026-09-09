@@ -16,8 +16,12 @@ export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
 # config dir must be writable (server writes runtime state overlays); if the
 # mount is read-only, fall back to a writable copy.
 if ! ( touch "$MASC_CONFIG_DIR/.write-test" 2>/dev/null ); then
-  cp -r "$MASC_CONFIG_DIR" "$BENCH/config-rw"
-  export MASC_CONFIG_DIR="$BENCH/config-rw"
+  if [[ -d "$BENCH/config-rw" ]]; then
+    export MASC_CONFIG_DIR="$BENCH/config-rw"
+  else
+    cp -r "$MASC_CONFIG_DIR" "$BENCH/config-rw"
+    export MASC_CONFIG_DIR="$BENCH/config-rw"
+  fi
 else
   rm -f "$MASC_CONFIG_DIR/.write-test"
 fi
@@ -49,7 +53,7 @@ if [[ ! -s "$BENCH/token" ]]; then
   "$BENCH/bin/masc" login \
     --base-path "$MASC_BASE_PATH" --host 127.0.0.1 --port 8935 \
     --agent bench --role admin --client-env MCP_TOKEN --no-expiry --json \
-    | jq -r '.bearer_token' > "$BENCH/token"
+    | jq -r '.bearer_token // empty' > "$BENCH/token"
   chmod 600 "$BENCH/token"
   [[ -s "$BENCH/token" ]] || { echo "login did not yield bearer_token" >&2; exit 1; }
 fi

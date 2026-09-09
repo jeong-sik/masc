@@ -550,7 +550,11 @@ let test_profile_rejects_unknown_key () =
        check bool "generic unknown-key error" true
          (String_util.contains_substring detail "unknown keeper TOML keys");
        check bool "names unknown key" true
-         (String_util.contains_substring detail "keeper.typo_field"))
+         (String_util.contains_substring detail "keeper.typo_field");
+       check bool "lists the accepted keys" true
+         (String_util.contains_substring detail "accepted [keeper] keys: ");
+       check bool "accepted keys include activation_mode" true
+         (String_util.contains_substring detail "activation_mode"))
 
 (* Two RFCs put a key in [keeper.tools] within days of each other, and the
    second one's loader accepted the whole [keeper.tools.] prefix so its own

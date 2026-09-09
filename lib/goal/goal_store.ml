@@ -342,6 +342,12 @@ let decode_state_result config json =
   | Ok state -> Ok state
   | Error detail -> Error (undecodable_load_error config detail)
 
+let undecodable_read_error config detail =
+  Printf.sprintf
+    "goal_store: store did not decode (%s); reset or repair %s"
+    detail
+    (goals_path config)
+
 let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
@@ -556,7 +562,7 @@ let list_goals config ?phase () =
 
 let list_goals_result config ?phase () =
   match load_primary_state config with
-  | Undecodable detail -> Error detail
+  | Undecodable detail -> Error (undecodable_read_error config detail)
   | Loaded state ->
       Ok (state.goals
           |> List.filter (fun goal -> match phase with

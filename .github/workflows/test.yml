@@ -61,7 +61,8 @@ on:
           test/ is named by its path from the repository root, for example
           packages/agent_core/test/test_capabilities -- the 43 suites under
           packages/ and tools/ have no other spelling here, and a bare name
-          fails with "no test/<name>.ml and no <name>.ml". A name with a
+          is reported as "no test/<name>.ml and no <name>.ml" while the names
+          that did resolve still run. A name with a
           test/<name>.py script, or one a test/ dune file declares as
           (alias runtest-<name>), runs that alias instead
           (test_tui_keyboard_input).
@@ -247,6 +248,7 @@ jobs:
           suites=()
           exes=()
           aliases=()
+          unresolved=()
           IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
           for suite in "${requested[@]}"; do
             suite="${suite// /}"
@@ -276,13 +278,27 @@ jobs:
               elif [ -f "${suite}.ml" ]; then
                 suite_path="${suite}"
               else
-                log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
-                exit 2
+                unresolved+=("${suite}")
+                continue
               fi
               suites+=("${suite_path}")
               exes+=("${suite_path}.exe")
             fi
           done
+          # A name that resolves to nothing used to end the dispatch right
+          # here, before a single suite was built, and it named only the first
+          # one it reached: a ten-suite batch with one misspelling returned no
+          # verdict for the other nine and did not say whether a second name
+          # was wrong too, so the next attempt could lose the batch again.
+          # Name every one of them, keep the run non-zero so nobody reads it
+          # as ten green suites, and let the ones that did resolve report.
+          resolution_status=0
+          if [ "${#unresolved[@]}" -ne 0 ]; then
+            for suite in ${unresolved[@]+"${unresolved[@]}"}; do
+              log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
+            done
+            resolution_status=1
+          fi
           # dune build with no target builds everything; a suite input of
           # separators only must not turn into the full build.
           if [ "${#suites[@]}" -eq 0 ] && [ "${#aliases[@]}" -eq 0 ]; then
@@ -290,7 +306,7 @@ jobs:
             exit 2
           fi
           log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
-          status=0
+          status="${resolution_status}"
           for suite in ${aliases[@]+"${aliases[@]}"}; do
             log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
             started=$(date +%s)

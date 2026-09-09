@@ -104,7 +104,6 @@ type thinking_control_format_codec_error =
       ; invalidity : thinking_control_token_invalidity
       }
 
-val structured_output_support_to_string : structured_output_support -> string
 val anthropic_thinking_control_values : string list
 val anthropic_thinking_control_of_string : string -> anthropic_thinking_control option
 val canonical_label_of_thinking_control_format : thinking_control_format -> string

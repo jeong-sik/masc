@@ -99,7 +99,6 @@ let rejection_outcome dispatch = function
 ;;
 
 let operation_id_to_string (Measurement_operation_id value) = value
-let receipt_operation_id (receipt : receipt_snapshot) = receipt.operation_id
 let receipt_request_body_sha256 (receipt : receipt_snapshot) = receipt.request_body_sha256
 
 let snapshot_of_state (receipt : measurement_receipt) = function
@@ -138,7 +137,6 @@ let receipt_snapshot (receipt : measurement_receipt) =
 ;;
 
 let receipt_phase (receipt : receipt_snapshot) = receipt.phase
-let receipt_dispatch_fact (receipt : receipt_snapshot) = receipt.dispatch
 let receipt_outcome (receipt : receipt_snapshot) = receipt.outcome
 
 let state_rank = function

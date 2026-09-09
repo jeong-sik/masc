@@ -46,10 +46,6 @@ let sandbox_root_projection ~(root : string) (path : string) =
     if normalized = "" then None else Some (candidate, normalized))
 ;;
 
-let normalize_sandbox_root_for_check ~root path =
-  sandbox_root_projection ~root path |> Option.map snd
-;;
-
 let valid_child_name = Fs_compat.is_capability_leaf
 
 type absolute_path_components =
@@ -824,14 +820,4 @@ let resolve_keeper_read_path
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   Exec_core.process_status_to_json st
-;;
-
-let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
-  Keeper_context_runtime.messages_of_context ctx_work
-  |> List.filter_map (fun (m : Agent_core.Types.message) ->
-    if m.role = Agent_core.Types.User
-    then (
-      let c = String.trim (Agent_core.Types.text_of_message m) in
-      if c = "" then None else Some c)
-    else None)
 ;;

@@ -11,12 +11,6 @@ val input_required_of_request
   -> Hooks.elicitation_request
   -> Error.input_required
 
-val runtime_input_request_of_input_required
-  :  Error.input_required
-  -> Runtime.input_request
-
-val runtime_response_to_hooks : Runtime.input_response -> Hooks.elicitation_response
-
 val message_of_response
   :  ?metadata:Types.metadata
   -> question:string

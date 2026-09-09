@@ -99,12 +99,6 @@ type structured_output_support =
   | Json_object_only
   | Native_json_schema
 
-let structured_output_support_to_string = function
-  | No_structured_output -> "none"
-  | Json_object_only -> "json_object_only"
-  | Native_json_schema -> "native_json_schema"
-;;
-
 type reasoning_streaming_format =
   | Default_reasoning_streaming
   | No_reasoning_streaming

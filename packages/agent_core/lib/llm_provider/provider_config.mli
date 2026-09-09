@@ -314,7 +314,6 @@ type reasoning_effort = Reasoning_effort.t =
   | XHigh
   | Max
 
-val all_reasoning_efforts : reasoning_effort list
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 

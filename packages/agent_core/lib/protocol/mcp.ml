@@ -408,20 +408,6 @@ let reconnect ~sw ~mgr (m : managed) =
             { detail = Printf.sprintf "Cannot reconnect HTTP MCP server '%s'" m.name }))
 ;;
 
-(** Connect to multiple MCP servers, returning all that succeed.
-    Failed servers are reported in the second element of the pair
-    but do not prevent other servers from connecting. *)
-let connect_all_best_effort ~sw ~mgr specs =
-  let rec loop ok_acc err_acc = function
-    | [] -> List.rev ok_acc, List.rev err_acc
-    | spec :: rest ->
-      (match connect_and_load ~sw ~mgr spec with
-       | Error e -> loop ok_acc ((spec.name, e) :: err_acc) rest
-       | Ok m -> loop (m :: ok_acc) err_acc rest)
-  in
-  loop [] [] specs
-;;
-
 [@@@coverage off]
 (* === Inline tests === *)
 

@@ -536,10 +536,6 @@ type output_token_envelope =
 
 val output_token_envelope_to_yojson : output_token_envelope -> Yojson.Safe.t
 
-val output_token_envelope_of_yojson
-  :  Yojson.Safe.t
-  -> (output_token_envelope, string) result
-
 type output_token_policy =
   | Omitted
   | Explicit
@@ -562,10 +558,6 @@ type output_token_ceiling_source =
 [@@deriving show, eq]
 
 val output_token_ceiling_source_to_yojson : output_token_ceiling_source -> Yojson.Safe.t
-
-val output_token_ceiling_source_of_yojson
-  :  Yojson.Safe.t
-  -> (output_token_ceiling_source, string) result
 
 type output_token_ceiling = private
   { value : int
@@ -613,8 +605,6 @@ val output_token_receipt_of_yojson
   -> (output_token_receipt, string) result
 
 val equal_output_token_receipt : output_token_receipt -> output_token_receipt -> bool
-val pp_output_token_receipt : Format.formatter -> output_token_receipt -> unit
-val show_output_token_receipt : output_token_receipt -> string
 
 (** Default/zero inference telemetry value owned by the telemetry type module.
     Callers should record-update this value instead of duplicating every field. *)
@@ -912,7 +902,6 @@ val text_of_response : api_response -> string
     reasoning or execution payloads. *)
 val visible_text_of_content : content_block list -> string
 
-val visible_text_of_message : message -> string
 val visible_text_of_response : api_response -> string
 
 (** {1 Usage Helpers}

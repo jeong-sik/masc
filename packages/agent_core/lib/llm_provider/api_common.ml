@@ -183,23 +183,6 @@ let admit_document_blocks ~wire_form ~model_id ~supports_document_input blocks =
   loop blocks
 ;;
 
-let admit_document_messages ~wire_form ~model_id ~supports_document_input messages =
-  let rec loop = function
-    | [] -> Ok ()
-    | (message : Types.message) :: rest ->
-      (match
-         admit_document_blocks
-           ~wire_form
-           ~model_id
-           ~supports_document_input
-           message.content
-       with
-       | Error _ as error -> error
-       | Ok () -> loop rest)
-  in
-  loop messages
-;;
-
 (* agent-core boundary — degrade, not reject.
    [admit_document_*] answers "may this document reach the wire"; when it may
    not, the earlier design raised [Invalid_argument], which

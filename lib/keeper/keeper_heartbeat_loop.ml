@@ -157,13 +157,13 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
   provider_backoff : provider_backoff option;
-      (** [Some retry_after] when the cycle's turn failure routed as a
-          provider rate-limit/capacity retry ([Retry_after_observed] with a
-          [Rate_limited] / [Hard_quota] / [Capacity_backpressure] class) —
-          carrying the route's own [Retry-After] hint when the provider sent
-          one. The inter-cycle sleep replaces the plain cadence with a
-          capped backoff for such a cycle (#26068); [None] keeps the
-          cadence. *)
+      (** [Some backoff] when the cycle's turn failure routed as a provider
+          retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
+          [Capacity_backpressure] class), carrying the route's own
+          [Retry-After] hint when the provider sent one ([0.0] when it did
+          not) and the wake policy the class implies. The inter-cycle sleep
+          replaces the plain cadence with a capped backoff for such a cycle
+          (#26068); [None] keeps the cadence. *)
 }
 
 let consume_deferred_runtime_lane_hint hint_ref expected =
@@ -1550,15 +1550,13 @@ let run_heartbeat_loop
           | Some (_, wake_policy) -> wake_policy
           | None -> Keeper_keepalive_signal.Interrupt_on_wakeup
         in
-        (* The cadence handshake is a promise to react to a cadence change
-           within a chunk; a sleep that serves wakeups only at its end cannot
-           keep it, so it is not offered and a producer is told the sleeper is
-           awake rather than that its signal was taken (#34663 review). *)
-        let cadence_sleeping =
-          match wake_policy with
-          | Keeper_keepalive_signal.Interrupt_on_wakeup -> Some cadence_sleeping
-          | Keeper_keepalive_signal.Serve_wakeup_after_duration -> None
-        in
+        (* The cadence handshake stays offered while parked: it is also how
+           [Keeper_status_runtime.keeper_metric_producer_active] knows a
+           failing lane is in its legitimate sleep, and withholding it (#34670)
+           marked the keeper's metric source stale once a park outlived the
+           freshness SLO. A cadence change taken during a park is honoured
+           when the park ends; the producer is told its signal was taken,
+           which is true, only later than the outcome vocabulary can say. *)
         let sleep_duration () =
           match cycle_backoff with
           | Some (backoff, _) -> backoff
@@ -1574,7 +1572,7 @@ let run_heartbeat_loop
            then Keeper_keepalive_signal.Woken
            else
              Keeper_keepalive_signal.interruptible_sleep
-               ?cadence_sleeping
+               ~cadence_sleeping
                ~wake_policy
                ~clock:ctx.clock
                ~stop

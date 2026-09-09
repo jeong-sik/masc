@@ -2926,19 +2926,6 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
    asserts the capability fingerprint that is unique to the longer branch.
    If the two branches were swapped the assertion would fail. Provider-scoped
    rows are exact identities and therefore do not participate in this test. *)
-(* Every [[providers]] entry declares a [capabilities_base], and until
-   2026-09-09 that base was consulted before the model's own bare row. It
-   therefore always answered, and the bare row -- the only lookup that applies
-   prefix matching -- was unreachable for any label naming a provider entry.
-   44 of the catalog's 125 bare rows sat behind that: glm 21, gemini 11,
-   kimi 7, ollama 5. Only `gemini`, `glm`, `kimi` and `ollama` are both a
-   wire-kind label and a [[providers]] id, which is why glm (#34126) and
-   gemini (#34301) were the two that got noticed.
-
-   The discriminator is a field the row sets and the provider base does not:
-   [accepted_reasoning_efforts]. The base leaves it [None] -- which is exactly
-   what made Backend_gemini refuse its own models with "no declared
-   thinking-control contract" -- so [Some _] here means the row was read. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows

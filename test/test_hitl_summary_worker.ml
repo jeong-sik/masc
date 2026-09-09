@@ -1858,11 +1858,14 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
               match
                 Eio.Switch.run
                 @@ fun worker_sw ->
-                Eio_context.set_switch worker_sw;
+                (* Keep the fixture's server root context alive for the
+                   successor drain. Only the injected worker belongs to this
+                   failing supervision scope; reinstalling the global context
+                   also forks its dispatch daemon into that scope. *)
                 match
                   Gate.For_testing.spawn_auto_judge_entry_with_worker
                     ~spawn_worker:
-                      (fun ~sw ~entry ~on_summary ~on_finish () ->
+                      (fun ~sw:_ ~entry ~on_summary ~on_finish () ->
                          Worker.For_testing.spawn_with_queue_ops
                            ~queue_ops:
                              (exact_queue_ops
@@ -1872,7 +1875,7 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
                                     expected_backtrace
                                     payload)
                                 ())
-                           ~sw
+                           ~sw:worker_sw
                            ~entry
                            ~on_summary
                            ~on_finish

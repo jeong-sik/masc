@@ -68,10 +68,25 @@ let make_ctx () =
 let with_ws name fn =
   let dir = temp_dir name in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      Masc.Eval_calibration.For_testing.reset_store ();
+      Time_compat.clear_clock ();
+      cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
+      (* Resubmission can contend with the authority's final workspace-lock
+         release. The production lock retry needs the same Eio clock that
+         server startup installs; never replace it with a blocking sleep. *)
+      Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
+      (* The production calibration store is process-wide. Each case owns a
+         different workspace, so bind its store explicitly and reset it only
+         after the case's switch has stopped all completion-authority fibers. *)
+      Masc.Eval_calibration.For_testing.set_store
+        ~base_dir:(Filename.concat dir "data/verdicts");
+      check int "new workspace has no verdicts from earlier cases" 0
+        Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
+                          |> member "total_verdicts" |> to_int);
       Eio.Switch.run @@ fun sw ->
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta () in

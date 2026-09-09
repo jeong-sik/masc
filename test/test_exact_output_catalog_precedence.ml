@@ -1,5 +1,30 @@
 include Test_exact_output_catalog_precedence_fixture
 
+let with_saved_model_catalog f =
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+      | None -> Llm_provider.Model_catalog.clear_global ())
+    f
+;;
+
+let test_offline_runtime_save_converges_by_write_stage () =
+  with_saved_model_catalog @@ fun () ->
+  with_temp_dir "exact-output-offline-capabilities" @@ fun root ->
+  (* Offline means no published exact registry, not an uncatalogued model.
+     Install the capability row for the synthetic runtime used by the save
+     fixture, leaving its registry and durability assertions unchanged. *)
+  let catalog_path = Filename.concat root "models.toml" in
+  write_file catalog_path replacement_catalog;
+  (match Llm_provider.Model_catalog.load_file catalog_path with
+   | Error detail -> Alcotest.failf "offline capability fixture failed: %s" detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  Test_exact_output_catalog_precedence_fixture
+    .test_offline_runtime_save_converges_by_write_stage ()
+;;
+
 let require_lane_slots label ~lane_id ~expected registry =
   match Registry.resolve_lane registry ~lane_id with
   | Error error ->
@@ -787,6 +812,7 @@ let test_published_registry_value_is_generation_stable () =
 ;;
 
 let test_repo_seed_board_attention_lane_admits () =
+  with_saved_model_catalog @@ fun () ->
   with_temp_dir "exact-output-repo-seed-admission" @@ fun root ->
   let config_root = Filename.concat root "config" in
   mkdir_p config_root;
@@ -803,6 +829,15 @@ let test_repo_seed_board_attention_lane_admits () =
        (Filename.concat source_config "agent-core-models-overlay.toml"));
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
+  (* This case represents a fresh process. Earlier bootstrap cases install
+     explicit global replacements, which unsetting the environment does not
+     clear. Follow production startup: embedded catalog, deployment overlay,
+     then runtime loading; the seed relies on overlay context declarations. *)
+  Llm_provider.Model_catalog.clear_global ();
+  ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
+  ignore
+    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+       ~config_root ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);

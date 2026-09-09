@@ -1,13 +1,11 @@
-; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the fixtures run the typed dispatch on a
-; keeper meta whose sandbox_profile resolves to Local (incidental — the suite
-; measures exit-status-as-result semantics, not sandbox isolation), and
-; dispatch now rejects Local fail-closed without the hatch.
+; The two cases run a real command under the profile
+; Masc_test_deps.fixture_sandbox_profile picks, through the turn sandbox
+; factory the suites share. That starts a persistent container, which the
+; test isolation guard refuses unless the lane says it wants the real daemon
+; (MASC_TEST_ALLOW_REAL_DOCKER=1, set by the full CI lane next to the image
+; it builds). Elsewhere the suite fails with that guard's message; it does
+; not skip.
 (test
  (name test_keeper_tool_execute_exit_result)
  (modules test_keeper_tool_execute_exit_result)
- (action
-  (setenv
-   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
-   true
-   (run %{test})))
  (libraries masc masc_test_deps alcotest yojson unix))

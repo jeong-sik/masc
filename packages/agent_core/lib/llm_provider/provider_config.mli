@@ -135,24 +135,6 @@ type t =
       must explicitly provide {"-1"}. Honored only by the Ollama backend;
       ignored by other kinds.
       @since 0.171.0 *)
-    (** Number of model attempts the subprocess CLI is configured to
-      cycle through internally before yielding a final response.
-      [None] = Agent Core has no opinion (the default for non-CLI providers
-      and CLI providers that do not expose rotation visibility).
-
-      Some vendor CLIs cycle through multiple candidate models and return only
-      the final attempt's outcome. Without this hint a single CLI call appears
-      as one provider attempt to the downstream observer even though the vendor
-      may perform multiple internal attempts with its own delay policy.
-      Consumers can render that declared rotation in traces without hard-coding
-      a vendor-specific count.
-
-      Agent Core does not enforce or schedule the rotation; it remains
-      the CLI binary's responsibility. This field is purely
-      declarative metadata for observing one [Complete.complete] call.
-
-      Honored only as an advisory hint; ignored for non-CLI kinds.
-      @since 0.182.0 *)
   ; num_ctx : int option
     (** Ollama [num_ctx] option. Per-request context window allocation
       in tokens. Drives KV cache RAM allocation. [None] leaves the

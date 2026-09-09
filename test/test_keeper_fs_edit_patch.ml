@@ -475,6 +475,20 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
        | [ row ] ->
          Alcotest.(check int) "both snapshots survive into durable artifact references"
            2 (Json.member "artifact_refs" row |> Json.to_list |> List.length);
+         let producer_refs =
+           Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
+           |> List.map (fun reference ->
+             Tool_output.with_preview reference ""
+             |> Tool_output.normalized_artifact_ref_to_json)
+           |> List.sort_uniq Stdlib.compare
+         in
+         Alcotest.(check string) "durable references belong to this exact producer result"
+           (Yojson.Safe.to_string (`List producer_refs))
+           (Json.member "artifact_refs" row |> Yojson.Safe.to_string);
+         Alcotest.(check int) "committed invocation releases its snapshot references"
+           0
+           (Masc.Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ()
+            |> List.length);
          let expected =
            Keeper_file_change_evidence.edited
              [ Keeper_file_change_evidence.edit_occurrence

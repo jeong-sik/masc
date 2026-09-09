@@ -56,6 +56,7 @@ val consume_disposition :
 val set_file_change_evidence :
   invocation:Agent_core.Tool_contract.Invocation.t ->
   evidence:Keeper_file_change_evidence.t ->
+  artifact_refs:Tool_output.artifact_ref list ->
   unit
 (** Preserve producer-owned file line evidence for the exact physical
     invocation until the post-tool hook constructs its tool-call row. *)
@@ -72,6 +73,10 @@ val peek_file_change_evidence :
   Keeper_file_change_evidence.t option
 (** Return file change evidence without clearing it. The post-tool hook uses
     this to build a synchronous row and consumes it only after commit. *)
+
+val peek_file_change_artifact_refs :
+  invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
+(** Producer-owned snapshot references, retained with line evidence until row commit. *)
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
@@ -210,6 +215,7 @@ val log_call :
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?artifact_refs:Tool_output.artifact_ref list ->
   ?composition_tool:string ->
   ?skill_reference:Skill_reference.t ->
   ?composition_run_id:string ->

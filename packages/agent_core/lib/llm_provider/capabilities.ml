@@ -1815,7 +1815,7 @@ let test_catalog_entries =
     ; modality_priority = Some "visual_first"
     ; supports_seed = Some true
     }
-  ; { (test_catalog_entry "claude-opus-4") with
+  ; { (test_catalog_entry "claude-opus-5") with
       base_label = Some "anthropic"
     ; max_context_tokens = Some 1_000_000
     ; max_output_tokens = Some 128_000
@@ -2144,7 +2144,7 @@ let%test
             && c.max_output_tokens = Some 128_000 )
       ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
       ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
-      ; ("claude-opus-4-6-20260101", fun c -> c.max_output_tokens = Some 128_000)
+      ; ("claude-opus-5-20260101", fun c -> c.max_output_tokens = Some 128_000)
       ; ("gpt-4.1-mini", fun c -> c.max_output_tokens = Some 32_000)
         (* Agent Core contract: the real provider model ids ([deepseek-v4-flash],
          [deepseek-v4-pro]) must resolve to the DeepSeek capability route.

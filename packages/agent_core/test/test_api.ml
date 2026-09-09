@@ -221,7 +221,7 @@ let test_parse_response_complete () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_test",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "end_turn",
     "content": [
       {"type": "text", "text": "Hello there."},
@@ -232,7 +232,7 @@ let test_parse_response_complete () =
   in
   let resp = Llm_provider.Backend_anthropic.parse_response json in
   check string "id" "msg_test" resp.id;
-  check string "model" "claude-sonnet-4-6-20250514" resp.model;
+  check string "model" "claude-sonnet-5-20260101" resp.model;
   check int "content count" 2 (List.length resp.content);
   (match resp.stop_reason with
    | Types.EndTurn -> ()
@@ -247,7 +247,7 @@ let test_parse_response_tool_use () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_tu",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "tool_use",
     "content": [
       {"type": "tool_use", "id": "tu_1", "name": "calc", "input": {"x": 1}}
@@ -271,7 +271,7 @@ let test_parse_response_unknown_stop () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_unk",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "new_future_reason",
     "content": [],
     "usage": null
@@ -574,7 +574,7 @@ let test_parse_response_with_cache_tokens () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_cache",
-    "model": "claude-sonnet-4-6-20250514",
+    "model": "claude-sonnet-5-20260101",
     "stop_reason": "end_turn",
     "content": [{"type": "text", "text": "cached"}],
     "usage": {
@@ -603,12 +603,12 @@ let test_parse_response_with_cache_tokens () =
 
 let test_parse_sse_message_start () =
   let data =
-    {|{"message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}|}
+    {|{"message":{"id":"msg_1","model":"claude-sonnet-5","usage":{"input_tokens":10}}}|}
   in
   match Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
   | Some (Types.MessageStart { id; model; usage }) ->
     check string "id" "msg_1" id;
-    check string "model" "claude-sonnet-4-6" model;
+    check string "model" "claude-sonnet-5" model;
     (match usage with
      | Some u -> check int "input" 10 u.Types.input_tokens
      | None -> fail "expected usage")
@@ -617,7 +617,7 @@ let test_parse_sse_message_start () =
 
 let test_parse_sse_message_start_cache_tokens () =
   let data =
-    {|{"message":{"id":"msg_2","model":"claude-sonnet-4-6","usage":{"input_tokens":50,"cache_creation_input_tokens":1000,"cache_read_input_tokens":800}}}|}
+    {|{"message":{"id":"msg_2","model":"claude-sonnet-5","usage":{"input_tokens":50,"cache_creation_input_tokens":1000,"cache_read_input_tokens":800}}}|}
   in
   match Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
   | Some (Types.MessageStart { usage = Some u; _ }) ->

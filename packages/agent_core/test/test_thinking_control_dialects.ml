@@ -1338,7 +1338,7 @@ let test_anthropic_reasoning_dialect_preserves_thinking () =
   let config =
     PC.make
       ~kind:Anthropic
-      ~model_id:"claude-sonnet-4-6"
+      ~model_id:"claude-sonnet-5"
       ~base_url:"https://api.anthropic.com"
       ()
   in
@@ -1365,9 +1365,9 @@ let test_anthropic_reasoning_dialect_preserves_thinking () =
     (RD.normalize_effort_value dialect RE.Max)
 ;;
 
-let test_anthropic_opus48_uses_adaptive_effort () =
+let test_anthropic_opus5_uses_adaptive_effort () =
   let config =
-    anthropic_config ~enable_thinking:true ~reasoning_effort:RE.Medium "claude-opus-4-8"
+    anthropic_config ~enable_thinking:true ~reasoning_effort:RE.Medium "claude-opus-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
   let thinking = json |> member "thinking" in
@@ -1385,7 +1385,7 @@ let test_anthropic_agent_llm_alias_uses_adaptive_effort () =
     anthropic_config
       ~enable_thinking:true
       ~reasoning_effort:RE.Medium
-      "claude-sonnet-4-6-20250514"
+      "claude-sonnet-5-20260101"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
   let thinking = json |> member "thinking" in
@@ -1398,8 +1398,8 @@ let test_anthropic_agent_llm_alias_uses_adaptive_effort () =
     (json |> member "output_config" |> member "effort" |> to_string)
 ;;
 
-let test_anthropic_sonnet46_defaults_to_adaptive () =
-  let config = anthropic_config ~enable_thinking:true "claude-sonnet-4-6" in
+let test_anthropic_sonnet5_defaults_to_adaptive () =
+  let config = anthropic_config ~enable_thinking:true "claude-sonnet-5" in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
   let thinking = json |> member "thinking" in
   check string "thinking type" "adaptive" (thinking |> member "type" |> to_string);
@@ -1419,7 +1419,7 @@ let test_anthropic_output_config_merges_format_and_effort () =
       ~enable_thinking:true
       ~reasoning_effort:RE.Max
       ~response_format:(JsonSchema schema)
-      "claude-opus-4-8"
+      "claude-opus-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
   let output_config = json |> member "output_config" in
@@ -1614,17 +1614,17 @@ let () =
               `Quick
               test_anthropic_reasoning_dialect_preserves_thinking
           ; test_case
-              "anthropic opus 4.8 uses adaptive effort"
+              "anthropic opus 5 uses adaptive effort"
               `Quick
-              test_anthropic_opus48_uses_adaptive_effort
+              test_anthropic_opus5_uses_adaptive_effort
           ; test_case
               "anthropic claude alias uses adaptive effort"
               `Quick
               test_anthropic_agent_llm_alias_uses_adaptive_effort
           ; test_case
-              "anthropic sonnet 4.6 defaults to adaptive"
+              "anthropic sonnet 5 defaults to adaptive"
               `Quick
-              test_anthropic_sonnet46_defaults_to_adaptive
+              test_anthropic_sonnet5_defaults_to_adaptive
           ; test_case
               "anthropic output_config merges format and effort"
               `Quick

@@ -541,33 +541,14 @@ val receipt_target_identity : receipt -> target_identity
 (** Immutable generation-receipt fact captured from one atomic state read. *)
 type generation_receipt_snapshot
 
-val generation_receipt_snapshot : receipt -> generation_receipt_snapshot
 val generation_receipt_snapshot_phase : generation_receipt_snapshot -> effect_phase
 val generation_receipt_snapshot_dispatch_count : generation_receipt_snapshot -> int
-val generation_receipt_snapshot_http_status : generation_receipt_snapshot -> int option
-
-val generation_receipt_snapshot_provider_trace
-  :  generation_receipt_snapshot
-  -> provider_trace option
-
 val generation_receipt_snapshot_call_id : generation_receipt_snapshot -> call_id
 val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -> string
 
 val generation_receipt_snapshot_request_body_sha256
   :  generation_receipt_snapshot
   -> string
-
-val generation_receipt_snapshot_catalog_generation
-  :  generation_receipt_snapshot
-  -> catalog_generation
-
-val generation_receipt_snapshot_catalog_evidence
-  :  generation_receipt_snapshot
-  -> catalog_evidence
-
-val generation_receipt_snapshot_target_identity
-  :  generation_receipt_snapshot
-  -> target_identity
 
 (** One immutable outer-flow binding. The opaque candidate identity and one-shot
     execution receipt travel together; consumers do not rebuild that join from
@@ -744,14 +725,6 @@ val validated_flow_evidence_sha256 : validated_flow_evidence_snapshot -> string
 
 val validated_flow_evidence_accepted_domain_sha256
   :  validated_flow_evidence_snapshot
-  -> string
-
-val validated_flow_evidence_source_error_to_string
-  :  validated_flow_evidence_source_error
-  -> string
-
-val validated_flow_evidence_invariant_error_to_string
-  :  validated_flow_evidence_invariant_error
   -> string
 
 val validated_flow_evidence_decode_error_to_string

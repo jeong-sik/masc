@@ -448,5 +448,14 @@ let execute t verb =
        | Error error, Started -> Browser_lane.Refused (error_message error))
     | _ ->
       match execute_unlocked t verb with
+      | Ok (`Assoc fields as data) ->
+          (match verb, List.assoc_opt "interactionFailure" fields with
+           | Browser_lane.Page_interact _, Some (`Assoc failure) ->
+               let message = match List.assoc_opt "message" failure with
+                 | Some (`String message) -> message | _ -> "invalid interaction failure" in
+               (match List.assoc_opt "effectStarted" failure with
+                | Some (`Bool false) -> Browser_lane.Rejected_before_effect message
+                | _ -> Browser_lane.Refused message)
+           | _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))

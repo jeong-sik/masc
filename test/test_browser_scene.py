@@ -26,7 +26,10 @@ def call(method,path,body=None):
  if isinstance(value,dict) and 'error' in value:raise RuntimeError(value['error']+': '+value.get('message',''))
  return value
 
-def js(script,args=[]):return call('POST','/session/'+sid+'/execute/sync',{'script':script,'args':args})
+def js(script,args=[]):
+ value=call('POST','/session/'+sid+'/execute/sync',{'script':script,'args':args})
+ if isinstance(value,dict) and 'interactionFailure' in value:raise RuntimeError(value['interactionFailure']['message'])
+ return value
 def observe():return js(scene+'\nreturn browserScene(arguments[0]);',[{'mode':'read','maxChars':50000}])
 def control(s,label):return next(n for n in s['nodes'] if n['kind']=='control' and n['text']==label)
 def act(s,n,**kw):return js(scene+interaction,[{'documentId':s['documentId'],'nodeId':n['nodeId'],'expectedUrl':s['url'],**kw}])

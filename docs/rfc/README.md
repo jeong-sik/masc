@@ -280,6 +280,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0437 | 원장은 그대로 두고 읽는 길만 색인으로 — 게이트 없이 | Draft | - |
 | 0438 | 재화에는 주어가 있다 — 저장소를 찾는 것으로는 못 살리는 세계가 아홉이다 | Draft | - |
 | 0439 | MSX 머신은 서버에 산다 — 사람과 keeper 가 같은 기계에 키를 넣는 길 | Draft | - |
+| 0440 | 이미지 턴의 reroute 는 살아 있는 후보를 걷는다 — lane 과 media_failover 를 한 집합으로, 402·429 후보는 ... | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

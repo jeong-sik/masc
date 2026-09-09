@@ -317,8 +317,7 @@ let execute_with_tool_use_id
   =
   let node_effect_disposition (result : node_result) =
     match result.result with
-    | Tool_result.Deferred _ -> Tool_result.Proven_pre_effect
-    | Tool_result.Failed _ ->
+    | Tool_result.Deferred _ | Tool_result.Failed _ ->
       Option.value
         ~default:Tool_result.Effect_outcome_unknown
         result.failure_effect_disposition

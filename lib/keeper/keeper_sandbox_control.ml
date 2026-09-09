@@ -127,8 +127,7 @@ let start_managed_container
                  ])
         | None ->
             let image =
-              Env_config_sandbox.Runtime.image_declared_or_default
-                meta.sandbox_image
+              (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
             in
             if String.trim image = "" then
               Error "keeper sandbox docker image is not configured"
@@ -894,11 +893,30 @@ let live_status_json ?(include_preflight = true)
          | Remote_ssh -> "remote_ssh_container_listing_failed")
     | None -> why_no_container meta ~preflight containers
   in
+  let configured_image =
+    Env_config_sandbox.Runtime.resolve_image meta.sandbox_image
+  in
   `Assoc
     [
       ("keeper", `String meta.name);
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
+      (* Which image, and which of the three named it. A Keeper that declares
+         none gets the general image, which carries no language toolchain;
+         until this row existed the only way to learn that had been for the
+         Keeper to run and report its tools missing. Remote_ssh runs on a host
+         rather than from an image, so it has neither field. *)
+      ("configured_image",
+        (match meta.sandbox_profile with
+         | Docker | Micro_vm -> `String configured_image.Env_config_sandbox.Runtime.tag
+         | Remote_ssh -> `Null));
+      ("configured_image_source",
+        (match meta.sandbox_profile with
+         | Docker | Micro_vm ->
+           `String
+             (Env_config_sandbox.Runtime.image_source_to_string
+                configured_image.Env_config_sandbox.Runtime.source)
+         | Remote_ssh -> `Null));
       ("effective_mode", `String (container_mode meta containers));
       ( "managed_container_kind"
       , match meta.sandbox_profile with

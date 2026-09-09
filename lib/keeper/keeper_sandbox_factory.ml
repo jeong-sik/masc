@@ -42,7 +42,7 @@ let normalize p =
   |> strip_trailing_slashes
 
 let runtime_image (meta : Keeper_meta_contract.keeper_meta) =
-  Env_config_sandbox.Runtime.image_declared_or_default meta.sandbox_image
+  (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
 
 let in_playground_of_cwd (t : t) ~meta ~cwd =
   let host_root =

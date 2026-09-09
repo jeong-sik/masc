@@ -185,6 +185,57 @@ def resolve(key: str, value: str) -> tuple[str, str | None]:
     return value, None
 
 
+def directory_env_vars(suite_dir: str = DEFAULT_SUITE_DIR) -> list[tuple[str, str]]:
+    """The directory-wide `(env (_ (env-vars ...)))` block.
+
+    Dune applies it to every action under that directory; running a suite's
+    executable directly does not. test/dune declares five: an empty
+    MASC_BASE_PATH and two empty API keys, so a suite cannot reach the
+    operator's workspace or the network, and the two sandbox flags that keep a
+    suite off Docker. Without them the targeted runner judged
+    test_heartbeat_integration against the runner's own Docker and reported
+    `docker_preflight_failed: masc-sandbox:general is not available locally`
+    as a suite failure, which is the wrong-environment verdict this reader
+    exists to stop.
+    """
+    path = os.path.join(REPO_ROOT, suite_dir, "dune")
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        forms = parse(tokenize(handle.read()))
+    return directory_env_pairs(forms, suite_dir)
+
+
+def directory_env_pairs(forms: list, suite_dir: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for form in forms:
+        if not (isinstance(form, list) and form and form[0] == "env"):
+            continue
+        for selector in form[1:]:
+            if not (isinstance(selector, list) and selector):
+                continue
+            if selector[0] != "_":
+                # A profile-scoped block would apply to some runs and not
+                # others, and this runner has no profile to match on. Guessing
+                # either way hands a suite an environment nobody chose.
+                raise StanzaError(
+                    f"{suite_dir}/dune scopes an env block to profile "
+                    f"{selector[0]!r}; extend this reader rather than running a "
+                    "suite under a partial environment"
+                )
+            for entry in selector[1:]:
+                if not (isinstance(entry, list) and entry and entry[0] == "env-vars"):
+                    continue
+                for var in entry[1:]:
+                    if not (isinstance(var, list) and len(var) == 2):
+                        raise StanzaError(
+                            f"{suite_dir}/dune has an env-vars entry this cannot "
+                            f"read: {var!r}"
+                        )
+                    pairs.append((var[0], var[1]))
+    return pairs
+
+
 def stanza_dir(suite_dir: str) -> str:
     return os.path.join(REPO_ROOT, suite_dir, "stanzas")
 
@@ -384,6 +435,38 @@ def self_test() -> int:
         ],
     )
     check("plain values need nothing built", deps, [])
+
+    directory = """
+(env
+ (_
+  (env-vars
+   ; a comment between entries
+   (MASC_BASE_PATH "")
+   (MASC_KEEPER_DOCKER_PLAYGROUND false))))
+(test (name test_alpha))
+"""
+    check(
+        "the directory block is read, empty values included",
+        directory_env_pairs(parse(tokenize(directory)), "test"),
+        [("MASC_BASE_PATH", ""), ("MASC_KEEPER_DOCKER_PLAYGROUND", "false")],
+    )
+    profiled = "(env (dev (env-vars (MASC_BASE_PATH \"\"))))"
+    try:
+        directory_env_pairs(parse(tokenize(profiled)), "test")
+        check("a profile-scoped env block is refused", "read", "refused")
+    except StanzaError:
+        check("a profile-scoped env block is refused", "refused", "refused")
+    check(
+        "test/dune's own block still carries the sandbox flags",
+        [key for key, _ in directory_env_vars("test")],
+        [
+            "MASC_BASE_PATH",
+            "GRAPHQL_API_KEY",
+            "ZAI_API_KEY",
+            "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED",
+            "MASC_KEEPER_DOCKER_PLAYGROUND",
+        ],
+    )
 
     sibling = "(test (name test_spawn) (deps sibling.exe ../config/runtime.toml))"
     env, deps = suite_env("test_spawn", sibling)
@@ -603,12 +686,18 @@ def check_all() -> int:
             continue
         if env:
             with_env += 1
+    try:
+        directory = directory_env_vars(DEFAULT_SUITE_DIR)
+    except StanzaError as exc:
+        print(f"{DEFAULT_SUITE_DIR}/dune: {exc}", file=sys.stderr)
+        return 1
     if broken:
         print(f"stanza env: {broken} stanza(s) this cannot read", file=sys.stderr)
         return 1
     print(
         f"stanza env: read all {len(names)} stanza files and {len(inline)} suites "
-        f"declared in test/dune and its includes; {with_env} declare an environment"
+        f"declared in test/dune and its includes; {with_env} declare an environment, "
+        f"and the directory block adds {len(directory)} variable(s) to every one"
     )
     return 0
 
@@ -643,7 +732,16 @@ def main(argv: list[str]) -> int:
         # directory rather than with test/.
         lines = [os.path.normpath(os.path.join(suite_dir, dep)) for dep in deps]
     else:
-        lines = [f"{k}={v}" for k, v in env]
+        # The suite's own (setenv ...) wins over the directory block, the way
+        # dune's action-level environment wins over its (env ...) stanza.
+        try:
+            directory = directory_env_vars(suite_dir)
+        except StanzaError as exc:
+            print(f"{suite}: {exc}", file=sys.stderr)
+            return 1
+        overridden = {key for key, _ in env}
+        lines = [f"{k}={v}" for k, v in directory if k not in overridden]
+        lines += [f"{k}={v}" for k, v in env]
     for line in lines:
         print(line)
     return 0

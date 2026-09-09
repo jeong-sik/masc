@@ -1,0 +1,25 @@
+{
+  "schema": "browser-skill-followup-evidence/v1",
+  "status": "saved_and_published",
+  "reference": {
+    "identity": {
+      "source_id": "project-masc",
+      "package_id": "browser-lanes",
+      "name": "browser-lanes"
+    },
+    "content_revision": "f7d4e40f7e0fecdf587986e37b192abbda35a8efa3441677400341f2fc0c4dcc"
+  },
+  "snapshot_revision": "384981858e36932254d49a3dad4567f3caa8f6839da563dd4414a7c290d2a153",
+  "source_sha256": "b2ff1efd441565c477e3feff2c19523465e003dafab12ae7270d33a6b3367c86",
+  "source_bytes": 9684,
+  "published_source_bytes_equal": true,
+  "native_preview_diagnostics": [],
+  "review": "Addressed independent review: a successful write followed by failed observation also requires recovery without whole-composition replay.",
+  "scope": "Instruction Skill update only; no new DOM extraction or executable composition capability, active Keeper adoption or efficiency improvement claimed.",
+  "references": [
+    "https://playwright.dev/docs/locators",
+    "https://github.com/mozilla/readability",
+    "https://html.spec.whatwg.org/multipage/links.html#rel-alternate",
+    "https://www.w3.org/TR/webdriver-bidi/"
+  ]
+}

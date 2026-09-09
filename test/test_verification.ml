@@ -33,8 +33,18 @@ let active_verifications_dir base_path =
 let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in
   Fun.protect
-    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace dir)
-    (fun () -> f dir)
+    ~finally:(fun () ->
+      (* [f] has unwound its switches and stopped completion-authority fibers
+         before the process-wide store is detached and its workspace removed. *)
+      Masc.Eval_calibration.For_testing.reset_store ();
+      Masc_test_deps.cleanup_test_workspace dir)
+    (fun () ->
+      Masc.Eval_calibration.For_testing.set_store
+        ~base_dir:(Filename.concat dir "data/verdicts");
+      Alcotest.(check int) "new workspace has no earlier verdicts" 0
+        Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
+                          |> member "total_verdicts" |> to_int);
+      f dir)
 
 let with_eio_temp_dir f =
   Eio_main.run @@ fun env ->

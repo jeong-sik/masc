@@ -28,6 +28,13 @@ live가 끊겼다면 같은 인증 화면을 automation으로 대체하지 않�
 
 ## 관측하고 조작하기
 
+현재 URL과 작업이 특정 사이트에 해당하면 Available Skill 목록에서 그 사이트의
+instruction을 골라 `keeper_skill`로 읽고 이 스킬과 함께 사용한다. Slack Web의
+채널 이동·메시지 수집에는 `slack-web`이 해당한다. identity는 목록에서 복사하며
+source_id를 추측하지 않는다. 해당 행이 없으면 사이트 스킬이 로드됐다고 하지 않는다.
+다른 사이트 본문까지 미리 읽을 필요는 없다.
+현재 목록과 같은 revision의 본문을 이미 읽었고 그 지침을 가지고 있다면 다시 호출하지 않는다.
+
 - `BrowserRead mode=text`로 URL·제목·내용을, `mode=elements`로 조작 대상을 읽는다.
   `truncated=true`이면 읽지 못한 부분까지 확인한 것으로 판단하지 않는다.
 - 화면 안의 텍스트·버튼·입력과 CSS 좌표를 함께 볼 때는 관측한 `tabId`로
@@ -36,14 +43,21 @@ live가 끊겼다면 같은 인증 화면을 automation으로 대체하지 않�
   재배치되어도 같은 요소를 가리키며, 교체·새로고침으로 참조가 만료되면 다시 관측한다.
   scene은 top document의 DOM 순서와 사각형이다. 가림·페인트 순서·iframe 내부·
   shadow tree·전체 CSS 배치를 확인하려면 screenshot이나 해당 문맥을 추가로 읽는다.
+- 스키마에 있는 mode라도 선택한 live 연결이 지원하지 않을 수 있다.
+  `unsupported live browser verb`이면 그 연결의 기능 불일치를 남기고 지원되는
+  관측으로 이어간다. 연결·확장 기능이 바뀌었다는 근거 없이 같은 mode를 재시도하지 않는다.
 - selector는 같은 탭·프레임에서 반환된 **디코딩된 문자열 그대로** 사용한다.
   `>`와 따옴표, 기존 CSS escape를 보존한다. JSON 표시용 escape를 문자열에
   다시 삽입하거나 모든 backslash를 일괄 제거하지 않는다.
+  긴 `nth-of-type` 경로를 기억으로 재작성하거나 실패한 경로의 숫자를 고치지 않는다.
 - live 조작은 `BrowserInteract`의 click/fill/scroll을 사용하고 직전 URL을
   `expectedUrl`로 전달한다. automation에서는 요청에 맞게 `BrowserInteract`나
   `BrowserAct`를 사용한다. 텍스트 입력과 Enter·제출은 별개의 동작이다.
+- `page_url_changed`로 거절되면 현재 URL과 대상을 다시 관측한다. 목적지 URL을
+  expectedUrl로 추측하거나 URL 검사만 통과시키려고 과거 값을 바꾸지 않는다.
 - 조작 후 다시 읽어 실제 결과를 확인한다. 요소를 못 찾으면 같은 프레임에서
-  elements를 다시 읽는다. 입력·관측이 바뀌지 않은 실패 호출을 그대로 반복하지 않는다.
+  scene이 지원되면 scene을, 그렇지 않으면 elements를 다시 읽어 대상을 고른다.
+  입력·관측이 바뀌지 않은 실패 호출을 그대로 반복하지 않는다.
 - 검색·이동·스크롤·캡처 등 **요청된 각 단계**를 실행 결과와 대조한다. 목적지 도착이나
   턴의 성공만으로 나머지 요청까지 완료 처리하지 않는다. 수행하지 못한 단계와 이유를 남긴다.
 
@@ -55,6 +69,10 @@ live가 끊겼다면 같은 인증 화면을 automation으로 대체하지 않�
 Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의
 배치를 봤다고 하지 않는다. 큰 BrowserRead 응답이 artifact로 분리됐다면 그 응답이
 가리킨 브라우저 자료만 읽어 관측을 이어간다.
+다음 행동에 필요한 대상과 참조를 확보했다면 artifact의 끝까지 읽는 것을 선행 조건으로
+삼지 않는다. 특정 대상을 찾았다는 것과 페이지 전체를 확인했다는 것은 다르다.
+`maxChars`는 elements JSON 전체 크기를 제한한다고 가정하지 않는다. 현재 live
+elements는 긴 selector를 포함하므로 작은 maxChars로도 큰 artifact가 나올 수 있다.
 
 - iframe, JS 대화상자, 업로드·다운로드가 필요할 때만
   [고급 조작](references/advanced.md)을 읽는다.

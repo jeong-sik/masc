@@ -498,7 +498,7 @@ let test_rendered_image_reaches_verifier_http_request () =
           check string "immutable snapshot body" png (Fs_compat.load_file body_path);
           check string "producer file changed independently" "changed after submission"
             (Fs_compat.load_file source);
-          let module Store = Masc.Workspace_verification_store in
+          let module Store = Workspace_verification_store in
           Fs_compat.save_file source
             (png ^ String.make Store.verification_evidence_max_bytes 'x');
           let oversized = Store.snapshot_submitted_evidence_json

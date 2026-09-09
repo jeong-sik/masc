@@ -625,7 +625,7 @@ remote_endpoint = "fixture"
       Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
   | Ok content ->
     Alcotest.(check string) "remote content" "remote-file-content" content;
-    let module Store = Masc.Workspace_verification_store in
+    let module Store = Workspace_verification_store in
     let png = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC" in
     let endpoint_file = Filename.concat base "endpoint-render.bin" in
     write_file endpoint_file png;

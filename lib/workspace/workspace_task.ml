@@ -13,50 +13,99 @@ type task_delete_outcome =
   | Task_already_absent
   | Task_delete_cleanup_failed of string list
 
-(** The primary backlog commit decides whether deletion happened. Settlement
-    keeps backlog -> links order and survives cancellation after that commit.
-    Failures after commit are returned, not folded into successful deletion. *)
-let delete_task_r config ~task_id : task_delete_outcome Masc_domain.masc_result =
+type deletion_observation =
+  { receipts : task_deletion_receipt list
+  ; copies : Workspace_backlog.copy_consistency
+  }
+
+type deletion_retry_error =
+  | Unknown_deletion of string
+  | Task_identity_reused of string
+  | Deletion_storage_error of Masc_domain.masc_error
+
+let deletion_receipts_r config =
   with_file_lock_r config (backlog_lock_path config) (fun () ->
-    let open Result.Syntax in
-    let* backlog = read_backlog_r config |> Result.map_error (fun message ->
-      Masc_domain.System (Masc_domain.System_error.IoError message)) in
-    let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
-    let pending_completion_rejections, removed_rejections =
-      List.partition
-        (fun (pending : pending_completion_rejection) ->
-          not (String.equal pending.task_id task_id))
-        backlog.pending_completion_rejections
-    in
-    let settle f = match Eio_guard.execution_context () with
-      | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
-      | Eio_guard.Non_eio -> f () in
-    settle (fun () ->
-      let* commit_errors = match task, removed_rejections with
-        | None, [] -> Ok (match repair_backlog_copies_result config backlog with
-            | Ok () -> [] | Error message -> [message])
-        | Some _, _ | None, _ :: _ ->
-          let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
-          (* Removing a Task also retires its undelivered repair requests in
-             the same authoritative commit. Recovery must not wake a producer
-             to repair a Task that no longer exists. *)
-          (match write_backlog_result config {backlog with tasks; pending_completion_rejections} with
-           | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
-           | Ok receipt -> Ok (List.filter_map Fun.id
-               [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error])) in
-      let cleanup_errors = match Workspace_goal_index.prune_links_for_task_result config ~task_id with
-        | Ok () -> [] | Error message -> [message] in
-      let cache_errors =
-        match Task_cache_invariant.clear_stale_agent_task_for_task_result config
-          ~cause:Task_cache_invariant.After_commit ~task_id
-          ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
-          ~module_name:"workspace_task.delete_task_r" with
-        | Ok () -> []
-        | Error errors -> errors in
-      match commit_errors @ cleanup_errors @ cache_errors with
-      | [] -> Ok (match task with Some _ -> Task_deleted | None -> Task_already_absent)
-      | errors -> Ok (Task_delete_cleanup_failed errors)))
+    read_backlog_r config |> Result.map (fun backlog ->
+      {receipts=backlog.task_deletion_receipts; copies=observe_copy_consistency config backlog}))
+  |> function
+  | Ok result -> result
+  | Error error -> Error (Masc_domain.masc_error_to_string error)
+;;
+
+let receipt_errors receipt = List.filter_map Fun.id
+  [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error]
+
+(* The Task and durable cleanup identity are committed together. Receipts are
+   retained after domain cleanup; copy consistency is a separate observation,
+   including failures after the acknowledgement's primary commit. *)
+let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt) task =
+  let open Result.Syntax in
+  let task_id = receipt.deleted_task_id in
+  let pending_completion_rejections = List.filter
+    (fun (pending : pending_completion_rejection) -> not (String.equal pending.task_id task_id))
+    backlog.pending_completion_rejections in
+  let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
+  let receipts = if List.exists (fun old -> String.equal old.deletion_id receipt.deletion_id) backlog.task_deletion_receipts
+    then backlog.task_deletion_receipts else receipt :: backlog.task_deletion_receipts in
+  let pending = {backlog with tasks; pending_completion_rejections; task_deletion_receipts=receipts} in
+  let protect f = match Eio_guard.execution_context () with
+    | Eio_guard.Eio_fiber -> Eio.Cancel.protect f | Eio_guard.Non_eio -> f () in
+  protect (fun () ->
+    let* first_errors =
+      if pending = backlog then Ok (match repair_backlog_copies_result config backlog with Ok () -> [] | Error e -> [e])
+      else match write_backlog_result config pending with
+        | Ok receipt -> Ok (receipt_errors receipt)
+        | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message)) in
+    let domain_errors =
+      (match Workspace_goal_index.prune_links_for_task_result config ~task_id with Ok () -> [] | Error e -> [e])
+      @ (match Task_cache_invariant.clear_stale_agent_task_for_task_result config
+           ~cause:Task_cache_invariant.After_commit ~task_id
+           ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
+           ~module_name:"workspace_task.delete_task_r" with Ok () -> [] | Error errors -> errors) in
+    let settled = {receipt with phase=(match domain_errors with
+      | [] -> Cleanup_verified | errors -> Cleanup_required errors)} in
+    let acknowledgement_errors = match read_backlog_r config with
+      | Error message -> [message]
+      | Ok current ->
+        let receipts = List.map (fun old -> if String.equal old.deletion_id receipt.deletion_id then settled else old) current.task_deletion_receipts in
+        if receipts = current.task_deletion_receipts then []
+        else match write_backlog_result config {current with task_deletion_receipts=receipts} with
+          | Error message -> [message] | Ok receipt -> receipt_errors receipt in
+    match first_errors @ domain_errors @ acknowledgement_errors with
+    | [] -> Ok (match task with Some _ -> Task_deleted | None -> Task_already_absent)
+    | errors -> Ok (Task_delete_cleanup_failed errors))
+;;
+
+let delete_task_r config ~task_id =
+  with_file_lock_r config (backlog_lock_path config) (fun () ->
+    match read_backlog_r config with
+    | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
+    | Ok backlog ->
+      let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
+      let existing = match task with
+        | Some _ -> None
+        | None -> List.find_opt (fun receipt -> String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+      let receipt = match existing with
+        | Some receipt -> receipt
+        | None -> {deletion_id=Random_id.prefixed ~prefix:"delete-" ~bytes:16;
+          deleted_task_id=task_id; requested_at=now_iso (); phase=Cleanup_required []} in
+      settle_task_deletion_locked config backlog receipt task)
   |> Workspace_task_verification.flatten_lock_result
+;;
+
+let retry_task_deletion_r config ~deletion_id =
+  match with_file_lock_r config (backlog_lock_path config) (fun () ->
+    match read_backlog_r config with
+    | Error message -> Error (Deletion_storage_error (Masc_domain.System (Masc_domain.System_error.IoError message)))
+    | Ok backlog ->
+      match List.find_opt (fun receipt -> String.equal receipt.deletion_id deletion_id) backlog.task_deletion_receipts with
+      | None -> Error (Unknown_deletion deletion_id)
+      | Some receipt ->
+        if List.exists (fun (task : task) -> String.equal task.id receipt.deleted_task_id) backlog.tasks
+        then Error (Task_identity_reused receipt.deleted_task_id)
+        else settle_task_deletion_locked config backlog receipt None |> Result.map_error (fun error -> Deletion_storage_error error)) with
+  | Ok result -> result
+  | Error error -> Error (Deletion_storage_error error)
 ;;
 
 (** Release task back to backlog - transition wrapper *)

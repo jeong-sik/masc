@@ -74,7 +74,7 @@ let seed_task ?handoff_context config ~task_id ~created_by ~status =
   in
   Workspace_backlog.write_backlog
     config
-    { tasks = [ task ]; pending_completion_rejections = []; last_updated = now; version = 1 }
+    { tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = now; version = 1 }
 ;;
 
 let cancelled ~by ~reason =

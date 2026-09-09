@@ -68,3 +68,9 @@ val write_backlog_result :
     snapshot without incrementing its revision. Caller holds the backlog lock. *)
 val repair_backlog_copies_result :
   Workspace_utils_backend_setup.config -> Masc_domain.backlog -> (unit, string) result
+
+type copy_consistency = Copies_consistent | Copies_unavailable of string list
+(** Compare recovery and configured local mirrors once against a primary snapshot.
+    Caller holds the backlog lock so the observation cannot mix commit revisions. *)
+val observe_copy_consistency :
+  Workspace_utils_backend_setup.config -> Masc_domain.backlog -> copy_consistency

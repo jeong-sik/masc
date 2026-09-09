@@ -417,7 +417,7 @@ let test_backlog_roundtrip () =
         skills = [];
         contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
     ];
-    pending_completion_rejections = [];
+    task_deletion_receipts = []; pending_completion_rejections = [];
     last_updated = "2024-01-02T00:00:00Z";
     version = 5;
   } in

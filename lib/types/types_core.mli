@@ -369,6 +369,19 @@ type pending_completion_rejection =
   }
 [@@deriving show]
 
+type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
+[@@deriving show]
+
+type task_deletion_receipt =
+  { deletion_id : string
+  ; deleted_task_id : string
+  ; requested_at : string
+  ; phase : task_deletion_phase
+  }
+[@@deriving show]
+
+val task_deletion_receipt_to_yojson : task_deletion_receipt -> Yojson.Safe.t
+
 (** Task backlog snapshot. [version] is the monotonic commit revision —
     stamped +1 per commit by [Workspace_backlog.write_backlog_result] (the
     single commit point; callers never hand-bump). It is the
@@ -381,6 +394,7 @@ type pending_completion_rejection =
 type backlog =
   { tasks : task list
   ; pending_completion_rejections : pending_completion_rejection list
+  ; task_deletion_receipts : task_deletion_receipt list
   ; last_updated : string
   ; version : int
   }

@@ -35,6 +35,24 @@ val delete_task_r : config -> task_id:string -> task_delete_outcome Masc_domain.
     means the Task is absent but listed settlement obligations remain retryable.
     This is not a cross-file crash-atomic transaction. *)
 
+type deletion_observation =
+  { receipts : Masc_domain.task_deletion_receipt list
+  ; copies : Workspace_backlog.copy_consistency
+  }
+
+type deletion_retry_error =
+  | Unknown_deletion of string
+  | Task_identity_reused of string
+  | Deletion_storage_error of Masc_domain.masc_error
+
+(** One primary snapshot and one copy-consistency observation, shared by every
+    retained receipt. Cleanup_verified alone does not prove copy settlement. *)
+val deletion_receipts_r : config -> (deletion_observation, string) result
+
+(** Retry an exact durable deletion identity without deleting a live Task. *)
+val retry_task_deletion_r : config -> deletion_id:string ->
+  (task_delete_outcome, deletion_retry_error) result
+
 (** {1 Task transitions} *)
 
 (** Typed transition result. [noop = true] marks the idempotent case

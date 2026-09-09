@@ -111,7 +111,7 @@ let ensure_workspace_bootstrap config =
       (workspace_state_to_yojson (default_workspace_state config));
   if not (path_exists_root config root_backlog_path) then
     write_json_root config root_backlog_path
-      (backlog_to_yojson { tasks = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 });
+      (backlog_to_yojson { tasks = []; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 });
 
   let scoped_agents = agents_dir config in
   let scoped_tasks = tasks_dir config in
@@ -124,4 +124,4 @@ let ensure_workspace_bootstrap config =
   else reconcile_message_seq config scoped_state;
   if not (path_exists config scoped_backlog) then
     write_json config scoped_backlog
-      (backlog_to_yojson { tasks = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 })
+      (backlog_to_yojson { tasks = []; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 })

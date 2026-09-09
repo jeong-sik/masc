@@ -168,7 +168,7 @@ let test_download_setup_cancellation () =
 let test_selected_binary () =
   Eio_main.run (fun _ ->
     let requests = ref [] in
-    let request ~method_ ~path ~body:_ =
+    let request ~method_ ~path ~body =
       match method_, path with
       | `POST, "/session" ->
         requests := body :: !requests;
@@ -289,7 +289,9 @@ let test_pointer_release_recovery () =
     let wheel = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll_at {point;viewport;x=0;y=120}} in
     check bool "successful wheel is not overridden by failing release endpoint" true
-      (match Driver.execute driver wheel with Lane.Answered _ -> true | _ -> false);
+      (match Driver.execute driver wheel with
+       | Lane.Answered (`Assoc fields) -> List.assoc_opt "ok" fields = Some (`Bool true)
+       | _ -> false);
     check int "wheel dispatch occurs once" 1 !wheels;
     check int "wheel requires no pointer cleanup" 0 !releases;
     ignore (Driver.execute driver click);
@@ -300,7 +302,9 @@ let test_pointer_release_recovery () =
     check int "recovery retries release, not the gesture" 2 !releases;
     release_fails := false;
     check bool "wheel recovers older pointer release before dispatch" true
-      (match Driver.execute driver wheel with Lane.Answered _ -> true | _ -> false);
+      (match Driver.execute driver wheel with
+       | Lane.Answered (`Assoc fields) -> List.assoc_opt "ok" fields = Some (`Bool true)
+       | _ -> false);
     check int "successful recovery permits one new wheel" 2 !wheels;
     check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)

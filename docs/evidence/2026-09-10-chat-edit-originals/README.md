@@ -69,3 +69,18 @@ Backend targeted CI run 34380660903 exposed a missing artifact-reference carrier
 at the ordinary tool hook. #34924 commit c797dd4e6c repairs that path; targeted
 rerun 34382313926 was dispatched. Five filesystem race cases also failed in the
 first run and remain unresolved; their baseline behavior has not been measured.
+
+## Full transcript browser follow-up
+
+At 2026-09-09T17:31:46.273Z the full `ChatTranscript` flat tool-card path passed
+all three browser scenarios. Receipts used distinct execution IDs and reused the
+same provider ID. Source 832795b620852748fb5cc997f11d2d9677592d18, CI run
+34382910298, artifact 10116630108, checkout
+47709ba292401fbc508800559ade418be1a38854. One real worker ran with no page errors.
+The mobile screenshot was visually inspected; no document horizontal overflow.
+
+[Desktop](full-chat-browser/desktop.png), [mobile](full-chat-browser/mobile.png),
+[receipt](full-chat-browser/receipt.json). These remain synthetic HTTP inputs,
+not deployed autonomous edits. Grouped autonomous turn presentation still needs
+its own browser scenario. The focused ChatTranscript suite passed 165 tests,
+including a reused provider ID with a different execution that must not join.

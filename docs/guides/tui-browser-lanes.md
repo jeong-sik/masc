@@ -143,6 +143,14 @@ The automation lane sends native browser wheel input; the live lane finds the
 scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
 same tab again.
 
-`v`는 현재 페이지의 `main`, `navigation`, `region`, `article` 같은 의미 영역을 목록으로 읽는다. `n/p`로 영역을 고르고 Enter를 누르면 그 영역의 내용만 읽으며 `r`도 같은 영역을 새로 읽는다. 다시 `v`를 누르면 페이지 영역 목록으로 돌아간다. 영역이 교체되거나 페이지가 재로드되면 기존 참조는 거절된다. 영역 읽기를 지원하지 않는 커넥터가 전체 페이지를 반환해도 성공으로 처리하지 않는다.
+`v` lists the page's observed semantic regions -- `main`, `navigation`,
+`region`, `article`. `n`/`p` selects a region; Enter reads only that region's
+content, and `r` re-reads the same region. Pressing `v` again returns to the
+region list. A stale reference is rejected once the region is replaced or the
+page reloads. A connector that does not support region reading and returns
+the whole page instead is not treated as success.
 
-Keeper도 `BrowserRead mode=regions`에서 받은 `documentId/nodeId`를 `scope`로 전달해 `mode=scene`을 호출한다. 이 동선은 CSS 경로를 추측하지 않고 실제 관측한 영역을 선택한다. 지역별 viewport/DOM 내용이며 채널 전체 이력 수집을 뜻하지 않는다.
+Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
+observed from `BrowserRead mode=regions` as `scope`. This path selects an
+actually observed region rather than guessing a CSS path. It returns
+per-region viewport/DOM content, not a channel-wide history collection.

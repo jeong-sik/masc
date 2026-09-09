@@ -81,7 +81,6 @@ type task =
   | Video_generation
 
 type anthropic_thinking_control =
-  | Manual_budget
   | Adaptive_default
   | Adaptive_preferred
   | Adaptive_only

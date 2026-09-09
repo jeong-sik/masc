@@ -47,14 +47,11 @@ type entry =
   ; supports_document_input : bool option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
-  ; supports_caching : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
   ; ignored_sampling_parameters : Capability_vocab.sampling_parameter list option
-  ; supports_computer_use : bool option
-  ; supports_code_execution : bool option
   ; thinking_control_format : Capability_vocab.thinking_control_format option
     (** Canonical thinking-wire format the model uses (none / thinking_object /
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /
@@ -316,14 +313,11 @@ let known_entry_keys =
   ; "supports_document_input"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
-  ; "supports_caching"
   ; "supports_prompt_caching"
   ; "supports_top_k"
   ; "supports_min_p"
   ; "supports_seed"
   ; "ignored_sampling_parameters"
-  ; "supports_computer_use"
-  ; "supports_code_execution"
   ; "thinking_control_format"
   ; "thinking_control_token"
   ; "anthropic_thinking_control"
@@ -492,13 +486,10 @@ let parse_entry json =
   let* supports_document_input = member_bool "supports_document_input" json in
   let* supports_native_streaming = member_bool "supports_native_streaming" json in
   let* supports_system_prompt = member_bool "supports_system_prompt" json in
-  let* supports_caching = member_bool "supports_caching" json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" json in
   let* supports_top_k = member_bool "supports_top_k" json in
   let* supports_min_p = member_bool "supports_min_p" json in
   let* supports_seed = member_bool "supports_seed" json in
-  let* supports_computer_use = member_bool "supports_computer_use" json in
-  let* supports_code_execution = member_bool "supports_code_execution" json in
   Ok
     { id_prefix
     ; base_label
@@ -524,14 +515,11 @@ let parse_entry json =
     ; supports_document_input
     ; supports_native_streaming
     ; supports_system_prompt
-    ; supports_caching
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p
     ; supports_seed
     ; ignored_sampling_parameters
-    ; supports_computer_use
-    ; supports_code_execution
     ; thinking_control_format
     ; anthropic_thinking_control
     ; preserve_thinking_control_format

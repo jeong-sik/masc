@@ -268,7 +268,6 @@ let merge_exact_model_entry
       prefer_overlay overlay.supports_native_streaming base.supports_native_streaming
   ; supports_system_prompt =
       prefer_overlay overlay.supports_system_prompt base.supports_system_prompt
-  ; supports_caching = prefer_overlay overlay.supports_caching base.supports_caching
   ; supports_prompt_caching =
       prefer_overlay overlay.supports_prompt_caching base.supports_prompt_caching
   ; supports_top_k = prefer_overlay overlay.supports_top_k base.supports_top_k
@@ -276,10 +275,6 @@ let merge_exact_model_entry
   ; supports_seed = prefer_overlay overlay.supports_seed base.supports_seed
   ; ignored_sampling_parameters =
       prefer_overlay overlay.ignored_sampling_parameters base.ignored_sampling_parameters
-  ; supports_computer_use =
-      prefer_overlay overlay.supports_computer_use base.supports_computer_use
-  ; supports_code_execution =
-      prefer_overlay overlay.supports_code_execution base.supports_code_execution
   ; thinking_control_format =
       prefer_overlay overlay.thinking_control_format base.thinking_control_format
   ; anthropic_thinking_control =

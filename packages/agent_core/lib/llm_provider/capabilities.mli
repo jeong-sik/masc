@@ -160,16 +160,13 @@ type capabilities =
   ; (* Protocol *)
     supports_native_streaming : bool
   ; supports_system_prompt : bool
-  ; supports_caching : bool
   ; supports_prompt_caching : bool
-  ; prompt_cache_alignment : int option
   ; (* Sampling parameters *)
     supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool
     (** Deterministic seed for reproducible sampling.
       @since 0.185.0 *)
-  ; supports_seed_with_images : bool
     (** Whether seed determinism is maintained when image inputs are present.
       Local providers (Ollama) achieve near-perfect reproducibility; cloud
       providers (Openai, Gemini) do not guarantee it.
@@ -177,9 +174,6 @@ type capabilities =
   ; ignored_sampling_parameters : sampling_parameter list
     (** Request sampling parameters that must not be serialized for this
         provider/model even when a caller supplied them. *)
-  ; (* Advanced modalities *)
-    supports_computer_use : bool
-  ; supports_code_execution : bool
   ; (* Usage reporting *)
     emits_usage_tokens : bool
     (** Whether the provider's standard response carries usage tokens

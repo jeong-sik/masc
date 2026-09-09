@@ -877,16 +877,11 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_response_format_json = b "supports-response-format-json" in
   let* supports_structured_output = b "supports-structured-output" in
   let* supports_system_prompt = b "supports-system-prompt" in
-  let* supports_caching = b "supports-caching" in
   let* supports_prompt_caching = b "supports-prompt-caching" in
-  let* prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment" in
   let* supports_top_k = b "supports-top-k" in
   let* supports_min_p = b "supports-min-p" in
   let* supports_seed = b "supports-seed" in
-  let* supports_seed_with_images = b "supports-seed-with-images" in
   let* emits_usage_tokens = b_default_true "emits-usage-tokens" in
-  let* supports_computer_use = b "supports-computer-use" in
-  let* supports_code_execution = b "supports-code-execution" in
   Ok
     { Runtime_schema.max_output_tokens
     ; supports_tool_choice
@@ -907,16 +902,11 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; supports_response_format_json
     ; supports_structured_output
     ; supports_system_prompt
-    ; supports_caching
     ; supports_prompt_caching
-    ; prompt_cache_alignment
     ; supports_top_k
     ; supports_min_p
     ; supports_seed
-    ; supports_seed_with_images
     ; emits_usage_tokens
-    ; supports_computer_use
-    ; supports_code_execution
     }
 ;;
 

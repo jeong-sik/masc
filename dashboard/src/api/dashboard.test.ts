@@ -4357,16 +4357,11 @@ describe('fetchRuntimeProviders', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_system_prompt: true,
-            supports_caching: true,
             supports_prompt_caching: true,
-            prompt_cache_alignment: 1024,
             supports_top_k: true,
             supports_min_p: true,
             supports_seed: true,
-            supports_seed_with_images: true,
             emits_usage_tokens: true,
-            supports_computer_use: false,
-            supports_code_execution: true,
             supports_audio_input: true,
             supports_video_input: false,
             parameter_policy: {
@@ -4448,16 +4443,11 @@ describe('fetchRuntimeProviders', () => {
               task: null,
               supports_native_streaming: true,
               supports_system_prompt: true,
-              supports_caching: true,
               supports_prompt_caching: true,
-              prompt_cache_alignment: 1024,
               supports_top_k: true,
               supports_min_p: true,
               supports_seed: true,
-              supports_seed_with_images: false,
               ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
-              supports_computer_use: false,
-              supports_code_execution: false,
               emits_usage_tokens: true,
               supported_models: null,
             },
@@ -4508,16 +4498,11 @@ describe('fetchRuntimeProviders', () => {
                   supports_response_format_json: true,
                   supports_structured_output: true,
                   supports_system_prompt: true,
-                  supports_caching: true,
                   supports_prompt_caching: true,
-                  prompt_cache_alignment: 1024,
                   supports_top_k: true,
                   supports_min_p: true,
                   supports_seed: true,
-                  supports_seed_with_images: true,
                   emits_usage_tokens: true,
-                  supports_computer_use: false,
-                  supports_code_execution: true,
                 },
               },
               binding: {
@@ -4625,13 +4610,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.effective_capabilities?.supports_native_streaming).toBe(true)
     expect(result.providers[0]?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.supports_prompt_caching).toBe(true)
-    expect(result.providers[0]?.prompt_cache_alignment).toBe(1024)
     expect(result.providers[0]?.supports_top_k).toBe(true)
     expect(result.providers[0]?.supports_min_p).toBe(true)
     expect(result.providers[0]?.supports_seed).toBe(true)
-    expect(result.providers[0]?.supports_seed_with_images).toBe(true)
     expect(result.providers[0]?.emits_usage_tokens).toBe(true)
-    expect(result.providers[0]?.supports_code_execution).toBe(true)
     expect(result.providers[0]?.supports_audio_input).toBe(true)
     expect(result.providers[0]?.supports_video_input).toBe(false)
     expect(result.providers[0]?.parameter_policy?.reasoning_toggle_wire).toBe('chat_template_kwargs')
@@ -4666,8 +4648,6 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_parallel_tool_calls).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
-    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_seed_with_images).toBe(true)
-    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_code_execution).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.top_p).toBe(0.91)
     expect(result.providers[0]?.declared_spec?.model?.top_k).toBe(42)
     expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)

@@ -273,14 +273,8 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
     flagText(caps.supports_parallel_tool_calls, 'parallel'),
     flagText(caps.supports_extended_thinking, 'extended-thinking'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
-    flagText(caps.supports_caching, 'cache'),
-    caps.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
-      : flagText(caps.supports_prompt_caching, 'prompt-cache'),
-    flagText(caps.supports_seed_with_images, 'seed+images'),
+    flagText(caps.supports_prompt_caching, 'prompt-cache'),
     flagText(caps.emits_usage_tokens, 'usage'),
-    flagText(caps.supports_computer_use, 'computer-use'),
-    flagText(caps.supports_code_execution, 'code-exec'),
   ])
 }
 
@@ -339,13 +333,7 @@ function runtimeEffectiveControlText(provider: DashboardRuntimeProviderSnapshot)
   return textList([
     flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
-    flagText(caps.supports_caching, 'cache'),
-    caps.supports_prompt_caching
-      ? `prompt-cache${typeof caps.prompt_cache_alignment === 'number' ? `@${caps.prompt_cache_alignment}` : ''}`
-      : flagText(caps.supports_prompt_caching, 'prompt-cache'),
-    flagText(caps.supports_seed_with_images, 'seed+images'),
-    flagText(caps.supports_computer_use, 'computer-use'),
-    flagText(caps.supports_code_execution, 'code-exec'),
+    flagText(caps.supports_prompt_caching, 'prompt-cache'),
     flagText(caps.emits_usage_tokens, 'usage'),
   ])
 }

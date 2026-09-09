@@ -66,9 +66,6 @@ infer them from model names.
 | `thinking_control_format` / `preserve_thinking_control_format` | exists in code | keep separate | Enable/depth wire shape and historical reasoning replay wire shape are independent axes. |
 | `supports_structured_output` | exists in code | keep, tighten semantics | Use only for provider-native schema-constrained output APIs. Do not use it for JSON mode or "prompt with schema text + app-side validator" patterns. |
 | `supports_response_format_json` | exists in code | keep, separate from schema guarantee | JSON mode means "return valid JSON" only. It is not a subset of native schema support and still requires caller-side shape validation. |
-| `supports_caching` | missing | add | Prompt caching: Anthropic (90% savings), OpenAI, Gemini, DeepSeek. |
-| `supports_computer_use` | missing | add | Claude, GPT-5.4 native. New tool category. |
-| `supports_code_execution` | missing | add | Gemini built-in, OpenAI code_interpreter. Server-side sandbox. |
 | `supports_native_streaming` | exists | keep | |
 | `supports_multimodal_inputs` | exists | **split into 3** | See Multimodal Taxonomy below. |
 | `supports_image_input` | missing | add | Most models except DeepSeek, Cohere. |
@@ -214,10 +211,8 @@ runtime distinction.
 - Keep `supports_structured_output` and `supports_response_format_json` as distinct contracts
 - Wire native schema request paths only where the official provider API exposes them
 - Keep JSON mode + caller-side validation for providers whose current official docs stop at `json_object`
-- Add `supports_caching`
 
 ### Phase 3: New modalities
-- Add `supports_computer_use`, `supports_code_execution`
 - Split multimodal → `supports_image_input` (keep union)
 
 ### Phase 4: Protocol evolution

@@ -81,10 +81,7 @@ let test_default_new_fields_false () =
   check bool "no structured output" false c.supports_structured_output;
   check bool "no image input" false c.supports_image_input;
   check bool "no audio input" false c.supports_audio_input;
-  check bool "no video input" false c.supports_video_input;
-  check bool "no caching" false c.supports_caching;
-  check bool "no computer use" false c.supports_computer_use;
-  check bool "no code execution" false c.supports_code_execution
+  check bool "no video input" false c.supports_video_input
 ;;
 
 (* ── Preset capabilities ─────────────────────────────── *)
@@ -95,8 +92,6 @@ let test_anthropic_capabilities () =
   check bool "has parallel tools" true c.supports_parallel_tool_calls;
   check bool "has extended thinking" true c.supports_extended_thinking;
   check bool "has image" true c.supports_image_input;
-  check bool "has caching" true c.supports_caching;
-  check bool "has computer use" true c.supports_computer_use;
   check bool "has structured output" true c.supports_structured_output;
   check bool "no audio" false c.supports_audio_input;
   (* Anthropic Messages API accepts top_k per its documented body
@@ -199,8 +194,7 @@ let test_lookup_claude_opus () =
   match Capabilities.for_model_id "claude-opus-4-6" with
   | Some c ->
     check (option int) "context 1M" (Some 1_000_000) c.max_context_tokens;
-    check (option int) "output 128K" (Some 128_000) c.max_output_tokens;
-    check bool "computer use" true c.supports_computer_use
+    check (option int) "output 128K" (Some 128_000) c.max_output_tokens
   | None -> fail "should match claude-opus"
 ;;
 
@@ -218,7 +212,6 @@ let test_lookup_gpt5 () =
     check (option int) "context 1.05M" (Some 1_050_000) c.max_context_tokens;
     check (option int) "output 128K" (Some 128_000) c.max_output_tokens;
     check bool "structured output" true c.supports_structured_output;
-    check bool "computer use" true c.supports_computer_use;
     check
       (option (list string))
       "gpt-5.4 accepted reasoning efforts"
@@ -240,7 +233,6 @@ let test_lookup_gemini () =
   | Some c ->
     check bool "audio" true c.supports_audio_input;
     check bool "video" true c.supports_video_input;
-    check bool "code execution" false c.supports_code_execution;
     check bool "structured output" true c.supports_structured_output
   | None -> fail "should match gemini"
 ;;
@@ -327,7 +319,6 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
      | Reasoning_dialect.Template_parser ->
        fail "native latest Kimi should not use template parser streaming");
     check_preserve_order "native Kimi latest" native;
-    check bool "native Kimi code execution" true native.supports_code_execution;
     (match Capabilities.for_model_id "kimi-k2" with
      | Some bare_native ->
        check
@@ -372,12 +363,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
          true
          (bare_native.preserve_thinking_control_format
           = Capabilities.Always_preserved_thinking);
-       check_preserve_order "bare native Kimi" bare_native;
-       check
-         bool
-         "bare native Kimi code execution"
-         true
-         bare_native.supports_code_execution
+       check_preserve_order "bare native Kimi" bare_native
      | None -> fail "should match native bare Kimi route");
     (match Capabilities.for_model_id "kimi-k2.6" with
      | Some k26 ->
@@ -638,8 +624,7 @@ let test_lookup_deepseek_v4_flash () =
     check_thinking_control
       "uses thinking object"
       Capabilities.Thinking_object
-      c.thinking_control_format;
-    check bool "caching" true c.supports_caching
+      c.thinking_control_format
   | None -> fail "should match deepseek-v4-flash"
 ;;
 
@@ -662,8 +647,7 @@ let test_lookup_deepseek_v4_pro () =
     check_thinking_control
       "uses thinking object"
       Capabilities.Thinking_object
-      c.thinking_control_format;
-    check bool "caching" true c.supports_caching
+      c.thinking_control_format
   | None -> fail "should match deepseek-v4-pro"
 ;;
 
@@ -1777,7 +1761,6 @@ let test_explicit_manifest_lookup_precedes_catalog_fallback () =
       ~base:"openai_chat"
       ~extra_fields:
         [ "max_context_tokens", "999999"
-        ; "supports_computer_use", "false"
         ; "supports_tools", "true"
         ]
       "claude-opus-4"
@@ -1785,7 +1768,6 @@ let test_explicit_manifest_lookup_precedes_catalog_fallback () =
   match Capabilities.for_model_id_with_manifest m "claude-opus-4-6" with
   | Some c ->
     check (option int) "manifest overrides ctx" (Some 999999) c.max_context_tokens;
-    check bool "manifest overrides computer_use" false c.supports_computer_use;
     check bool "manifest keeps tools" true c.supports_tools
   | None -> fail "expected Some from manifest"
 ;;
@@ -1796,8 +1778,7 @@ let test_explicit_manifest_lookup_falls_back_to_catalog () =
   let m = make_manifest "totally-other-model" in
   match Capabilities.for_model_id_with_manifest m "claude-opus-4-6" with
   | Some c ->
-    check (option int) "fallback ctx 1M" (Some 1_000_000) c.max_context_tokens;
-    check bool "fallback computer_use" true c.supports_computer_use
+    check (option int) "fallback ctx 1M" (Some 1_000_000) c.max_context_tokens
   | None -> fail "should fall through to model catalog"
 ;;
 
@@ -1836,7 +1817,6 @@ let test_manifest_base_label_anthropic () =
   match Capabilities.for_model_id_with_manifest m "my-claude-custom" with
   | Some c ->
     check (option int) "custom ctx 512K" (Some 512000) c.max_context_tokens;
-    check bool "anthropic base: caching" true c.supports_caching;
     check bool "anthropic base: extended thinking" true c.supports_extended_thinking
   | None -> fail "expected Some"
 ;;
@@ -1944,7 +1924,6 @@ let test_global_catalog_precedes_global_manifest () =
       ~extra_fields:
         [ "max_context_tokens", "999999"
         ; "supports_tools", "false"
-        ; "supports_computer_use", "true"
         ; "thinking_control_format", {|"thinking_object"|}
         ]
       "s9-precedence-model"
@@ -1956,7 +1935,6 @@ id_prefix = "s9-precedence-model"
 base = "openai_chat"
 max_context_tokens = 123456
 supports_tools = true
-supports_computer_use = false
 thinking_control_format = "chat_template_kwargs"
 |}
     (fun path ->
@@ -1972,7 +1950,6 @@ thinking_control_format = "chat_template_kwargs"
               | Some c ->
                 check (option int) "catalog ctx wins" (Some 123456) c.max_context_tokens;
                 check bool "catalog tools wins" true c.supports_tools;
-                check bool "catalog computer_use wins" false c.supports_computer_use;
                 check_thinking_control
                   "catalog thinking format wins"
                   Capabilities.Chat_template_kwargs
@@ -2064,8 +2041,7 @@ let test_apply_manifest_entry_all_none_uses_base () =
   let caps = Capabilities.apply_manifest_entry entry in
   let base = Capabilities.anthropic_capabilities in
   check bool "tools matches base" base.supports_tools caps.supports_tools;
-  check (option int) "ctx matches base" base.max_context_tokens caps.max_context_tokens;
-  check bool "caching matches base" base.supports_caching caps.supports_caching
+  check (option int) "ctx matches base" base.max_context_tokens caps.max_context_tokens
 ;;
 
 let check_manifest_rejects_typed_field ~field ~value ~expected_type =
@@ -2738,13 +2714,10 @@ let test_manifest_and_catalog_common_override_parity () =
             "supports_video_input": true,
             "supports_native_streaming": true,
             "supports_system_prompt": false,
-            "supports_caching": true,
             "supports_prompt_caching": true,
             "supports_top_k": true,
             "supports_min_p": true,
             "supports_seed": true,
-            "supports_computer_use": true,
-            "supports_code_execution": true,
             "thinking_control_format": "chat_template_kwargs",
             "preserve_thinking_control_format": "chat_template_kwargs_preserve_thinking",
             "reasoning_output_format": "split_reasoning_fields",
@@ -2781,13 +2754,10 @@ supports_audio_input = true
 supports_video_input = true
 supports_native_streaming = true
 supports_system_prompt = false
-supports_caching = true
 supports_prompt_caching = true
 supports_top_k = true
 supports_min_p = true
 supports_seed = true
-supports_computer_use = true
-supports_code_execution = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 reasoning_output_format = "split_reasoning_fields"

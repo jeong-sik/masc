@@ -190,13 +190,10 @@ supports-audio-input = true
 supports-video-input = true
 supports-system-prompt = true
 supports-prompt-caching = true
-prompt-cache-alignment = 1024
 supports-top-k = true
 supports-min-p = true
 supports-seed = true
-supports-seed-with-images = true
 emits-usage-tokens = true
-supports-code-execution = true
 
 [runpod_mtp.qwen]
 is-default = true
@@ -250,8 +247,6 @@ supports-response-format-json = true
 supports-structured-output = true
 supports-system-prompt = true
 supports-seed = true
-supports-seed-with-images = true
-supports-code-execution = true
 
 [runpod_mtp.qwen]
 is-default = true
@@ -669,10 +664,6 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       "top-level prompt caching"
       true
       (gpt |> J.member "supports_prompt_caching" |> J.to_bool);
-    Alcotest.(check int)
-      "top-level prompt cache alignment"
-      1024
-      (gpt |> J.member "prompt_cache_alignment" |> J.to_int);
     Alcotest.(check bool)
       "top-level top_k"
       true
@@ -686,17 +677,9 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
       true
       (gpt |> J.member "supports_seed" |> J.to_bool);
     Alcotest.(check bool)
-      "top-level seed with images"
-      true
-      (gpt |> J.member "supports_seed_with_images" |> J.to_bool);
-    Alcotest.(check bool)
       "top-level usage tokens"
       true
       (gpt |> J.member "emits_usage_tokens" |> J.to_bool);
-    Alcotest.(check bool)
-      "top-level code execution"
-      true
-      (gpt |> J.member "supports_code_execution" |> J.to_bool);
     Alcotest.(check bool)
       "declared audio input"
       true
@@ -712,15 +695,7 @@ let test_runtime_inventory_surfaces_declared_model_capabilities () =
     Alcotest.(check bool)
       "declared system prompt"
       true
-      (caps |> J.member "supports_system_prompt" |> J.to_bool);
-    Alcotest.(check bool)
-      "declared seed with images"
-      true
-      (caps |> J.member "supports_seed_with_images" |> J.to_bool);
-    Alcotest.(check bool)
-      "declared code execution"
-      true
-      (caps |> J.member "supports_code_execution" |> J.to_bool))
+      (caps |> J.member "supports_system_prompt" |> J.to_bool))
 ;;
 
 let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
@@ -1607,14 +1582,11 @@ task = "transcription"
 supports_audio_input = true
 supports_video_input = true
 supports_system_prompt = true
-supports_caching = true
 supports_prompt_caching = true
 supports_top_k = true
 supports_min_p = true
 supports_seed = true
 ignored_sampling_parameters = ["temperature", "top_p", "presence_penalty", "frequency_penalty"]
-supports_computer_use = true
-supports_code_execution = true
 
 [[models]]
 id_prefix = "reasoning-small-out"
@@ -1799,10 +1771,6 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
       true
       (caps |> J.member "supports_system_prompt" |> J.to_bool);
     Alcotest.(check bool)
-      "caching"
-      true
-      (caps |> J.member "supports_caching" |> J.to_bool);
-    Alcotest.(check bool)
       "top_k"
       true
       (caps |> J.member "supports_top_k" |> J.to_bool);
@@ -1813,14 +1781,6 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
        |> J.member "ignored_sampling_parameters"
        |> J.to_list
        |> List.map J.to_string);
-    Alcotest.(check bool)
-      "computer use"
-      true
-      (caps |> J.member "supports_computer_use" |> J.to_bool);
-    Alcotest.(check bool)
-      "code execution"
-      true
-      (caps |> J.member "supports_code_execution" |> J.to_bool);
     Alcotest.(check string)
       "effective modality priority"
       "visual-first"

@@ -90,11 +90,6 @@ let validate_typed_entry (entry : entry) =
     validate_positive_capability "max_output_tokens" entry.capabilities.max_output_tokens
   in
   let* () =
-    validate_positive_capability
-      "prompt_cache_alignment"
-      entry.capabilities.prompt_cache_alignment
-  in
-  let* () =
     match entry.capabilities.supported_models with
     | None -> Ok ()
     | Some models ->
@@ -631,7 +626,6 @@ let parse_capabilities provider_json =
   let* supported_models = member_string_list "supported_models" cap_json in
   let* max_context_tokens = member_positive_int "max_context_tokens" cap_json in
   let* max_output_tokens = member_positive_int "max_output_tokens" cap_json in
-  let* prompt_cache_alignment = member_positive_int "prompt_cache_alignment" cap_json in
   let* supports_tools = member_bool "supports_tools" cap_json in
   let* supports_tool_choice = member_bool "supports_tool_choice" cap_json in
   let* supports_required_tool_choice =
@@ -654,14 +648,10 @@ let parse_capabilities provider_json =
   let* supports_document_input = member_bool "supports_document_input" cap_json in
   let* supports_native_streaming = member_bool "supports_native_streaming" cap_json in
   let* supports_system_prompt = member_bool "supports_system_prompt" cap_json in
-  let* supports_caching = member_bool "supports_caching" cap_json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" cap_json in
   let* supports_top_k = member_bool "supports_top_k" cap_json in
   let* supports_min_p = member_bool "supports_min_p" cap_json in
   let* supports_seed = member_bool "supports_seed" cap_json in
-  let* supports_seed_with_images = member_bool "supports_seed_with_images" cap_json in
-  let* supports_computer_use = member_bool "supports_computer_use" cap_json in
-  let* supports_code_execution = member_bool "supports_code_execution" cap_json in
   let* emits_usage_tokens = member_bool "emits_usage_tokens" cap_json in
   let caps =
     base
@@ -738,14 +728,8 @@ let parse_capabilities provider_json =
     override supports_system_prompt caps (fun caps value ->
       { caps with Capabilities.supports_system_prompt = value })
     |> fun caps ->
-    override supports_caching caps (fun caps value ->
-      { caps with Capabilities.supports_caching = value })
-    |> fun caps ->
     override supports_prompt_caching caps (fun caps value ->
       { caps with Capabilities.supports_prompt_caching = value })
-    |> fun caps ->
-    override prompt_cache_alignment caps (fun caps value ->
-      { caps with Capabilities.prompt_cache_alignment = Some value })
     |> fun caps ->
     override supports_top_k caps (fun caps value ->
       { caps with Capabilities.supports_top_k = value })
@@ -756,19 +740,10 @@ let parse_capabilities provider_json =
     override supports_seed caps (fun caps value ->
       { caps with Capabilities.supports_seed = value })
     |> fun caps ->
-    override supports_seed_with_images caps (fun caps value ->
-      { caps with Capabilities.supports_seed_with_images = value })
-    |> fun caps ->
     (match ignored_sampling_parameters with
      | Some ignored_sampling_parameters ->
        { caps with Capabilities.ignored_sampling_parameters }
      | None -> caps)
-    |> fun caps ->
-    override supports_computer_use caps (fun caps value ->
-      { caps with Capabilities.supports_computer_use = value })
-    |> fun caps ->
-    override supports_code_execution caps (fun caps value ->
-      { caps with Capabilities.supports_code_execution = value })
     |> fun caps ->
     override emits_usage_tokens caps (fun caps value ->
       { caps with Capabilities.emits_usage_tokens = value })

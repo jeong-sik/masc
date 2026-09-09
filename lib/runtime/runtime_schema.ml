@@ -140,16 +140,11 @@ type model_capabilities =
   ; supports_response_format_json : bool
   ; supports_structured_output : bool
   ; supports_system_prompt : bool
-  ; supports_caching : bool
   ; supports_prompt_caching : bool
-  ; prompt_cache_alignment : int option
   ; supports_top_k : bool
   ; supports_min_p : bool
   ; supports_seed : bool
-  ; supports_seed_with_images : bool
   ; emits_usage_tokens : bool
-  ; supports_computer_use : bool
-  ; supports_code_execution : bool
   }
 [@@deriving show, eq]
 
@@ -170,17 +165,12 @@ let model_capabilities_default =
   ; supports_response_format_json = false
   ; supports_structured_output = false
   ; supports_system_prompt = false
-  ; supports_caching = false
   ; supports_prompt_caching = false
-  ; prompt_cache_alignment = None
   ; supports_top_k = false
   ; supports_min_p = false
   ; supports_seed = false
-  ; supports_seed_with_images = false
   ; (* stricter default: most providers report usage; CLI wrappers opt out *)
     emits_usage_tokens = true
-  ; supports_computer_use = false
-  ; supports_code_execution = false
   }
 ;;
 

@@ -171,14 +171,11 @@ let[@warning "-32"] test_catalog_entry
   ; supported_models = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
-  ; supports_caching = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None
   ; supports_seed = None
   ; ignored_sampling_parameters = None
-  ; supports_computer_use = None
-  ; supports_code_execution = None
   ; thinking_control_format = None
   ; anthropic_thinking_control = None
   ; preserve_thinking_control_format = None

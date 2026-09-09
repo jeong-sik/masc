@@ -1694,16 +1694,11 @@ let runtime_declared_model_capabilities_json
       ; "supports_response_format_json", `Bool caps.supports_response_format_json
       ; "supports_structured_output", `Bool caps.supports_structured_output
       ; "supports_system_prompt", `Bool caps.supports_system_prompt
-      ; "supports_caching", `Bool caps.supports_caching
       ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-      ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
       ; "supports_top_k", `Bool caps.supports_top_k
       ; "supports_min_p", `Bool caps.supports_min_p
       ; "supports_seed", `Bool caps.supports_seed
-      ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
-      ; "supports_computer_use", `Bool caps.supports_computer_use
-      ; "supports_code_execution", `Bool caps.supports_code_execution
       ]
 ;;
 
@@ -1828,19 +1823,14 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "task", task_json caps.task
       ; "supports_native_streaming", `Bool caps.supports_native_streaming
       ; "supports_system_prompt", `Bool caps.supports_system_prompt
-      ; "supports_caching", `Bool caps.supports_caching
       ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-      ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
       ; "supports_top_k", `Bool caps.supports_top_k
       ; "supports_min_p", `Bool caps.supports_min_p
       ; "supports_seed", `Bool caps.supports_seed
-      ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
       ; ( "ignored_sampling_parameters"
         , caps.ignored_sampling_parameters
           |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
           |> Json_util.json_string_list )
-      ; "supports_computer_use", `Bool caps.supports_computer_use
-      ; "supports_code_execution", `Bool caps.supports_code_execution
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
       ; "supported_models", supported_models
       ])
@@ -1964,16 +1954,11 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "supports_response_format_json", `Bool caps.supports_response_format_json
     ; "supports_structured_output", `Bool caps.supports_structured_output
     ; "supports_system_prompt", `Bool caps.supports_system_prompt
-    ; "supports_caching", `Bool caps.supports_caching
     ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
-    ; "prompt_cache_alignment", Json_util.int_opt_to_json caps.prompt_cache_alignment
     ; "supports_top_k", `Bool caps.supports_top_k
     ; "supports_min_p", `Bool caps.supports_min_p
     ; "supports_seed", `Bool caps.supports_seed
-    ; "supports_seed_with_images", `Bool caps.supports_seed_with_images
     ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
-    ; "supports_computer_use", `Bool caps.supports_computer_use
-    ; "supports_code_execution", `Bool caps.supports_code_execution
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt

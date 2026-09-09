@@ -118,16 +118,11 @@ let test_full_entry_parses_auth_and_capabilities () =
               "supports_video_input": true,
               "supports_native_streaming": true,
               "supports_system_prompt": false,
-              "supports_caching": true,
               "supports_prompt_caching": true,
-              "prompt_cache_alignment": 128,
               "supports_top_k": true,
               "supports_min_p": true,
               "supports_seed": true,
-              "supports_seed_with_images": true,
               "ignored_sampling_parameters": ["temperature", "top_p"],
-              "supports_computer_use": true,
-              "supports_code_execution": true,
               "emits_usage_tokens": true,
               "thinking_control_format": "chat_template_kwargs",
               "accepted_reasoning_efforts": ["low", "high"],
@@ -163,20 +158,15 @@ let test_full_entry_parses_auth_and_capabilities () =
   check bool "video" true caps.supports_video_input;
   check bool "native streaming" true caps.supports_native_streaming;
   check bool "system prompt override" false caps.supports_system_prompt;
-  check bool "caching" true caps.supports_caching;
   check bool "prompt caching" true caps.supports_prompt_caching;
-  check (option int) "cache alignment" (Some 128) caps.prompt_cache_alignment;
   check bool "top k" true caps.supports_top_k;
   check bool "min p" true caps.supports_min_p;
   check bool "seed" true caps.supports_seed;
-  check bool "seed images" true caps.supports_seed_with_images;
   check
     (list string)
     "ignored sampling"
     [ "temperature"; "top_p" ]
     (List.map Capabilities.sampling_parameter_to_string caps.ignored_sampling_parameters);
-  check bool "computer use" true caps.supports_computer_use;
-  check bool "code execution" true caps.supports_code_execution;
   check bool "usage tokens" true caps.emits_usage_tokens;
   check
     (option (list string))
@@ -396,11 +386,6 @@ let test_values_fail_closed_without_coercion () =
     (`Intlit "9223372036854775807999")
     "capability integer overflow"
     "out of range";
-  reject_capability
-    "prompt_cache_alignment"
-    (`Int 0)
-    "capability zero integer"
-    "positive integer";
   reject_entry "aliases" (`List [ `String "" ]) "empty alias item" "must not be empty";
   reject_entry
     "aliases"
@@ -551,7 +536,6 @@ let test_auth_and_thinking_canonical_matrix () =
             "capabilities_base": "openai_chat",
             "max_context": 128000,
             "capabilities": {
-              "prompt_cache_alignment": 128
             }
           }
         ]
@@ -612,11 +596,6 @@ let test_auth_and_thinking_canonical_matrix () =
      = Capabilities.Chat_template_token "<|think|>");
   let base = require_lookup catalog "base-entry" in
   check bool "capabilities_base supports tools" true base.capabilities.supports_tools;
-  check
-    (option int)
-    "prompt alignment"
-    (Some 128)
-    base.capabilities.prompt_cache_alignment;
   check int "catalog size" 8 (Provider_catalog.entries catalog |> List.length)
 ;;
 
@@ -748,7 +727,6 @@ let test_typed_entries_accept_a_complete_valid_contract () =
     { Capabilities.default_capabilities with
       max_context_tokens = Some 32_000
     ; max_output_tokens = Some 4_096
-    ; prompt_cache_alignment = Some 128
     ; supported_models = Some [ "typed-model"; "typed-fast" ]
     }
   in
@@ -855,13 +833,6 @@ let test_typed_entries_fail_closed () =
     ~needle:"capability \"max_output_tokens\" must be positive"
     "typed negative capability max output"
     (valid_typed_entry ~capabilities:invalid_max_output_capability ());
-  let invalid_cache_alignment =
-    { Capabilities.default_capabilities with prompt_cache_alignment = Some 0 }
-  in
-  reject
-    ~needle:"capability \"prompt_cache_alignment\" must be positive"
-    "typed zero prompt cache alignment"
-    (valid_typed_entry ~capabilities:invalid_cache_alignment ());
   let empty_supported_model =
     { Capabilities.default_capabilities with supported_models = Some [ "" ] }
   in

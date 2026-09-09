@@ -1893,6 +1893,20 @@ def keeper_runtime_phase_and_identity_interaction(
         start=0,
         timeout=3.0,
     )
+    # Delete is offered for every keeper state, and for one whose configuration
+    # failed to read it is the only offer -- `primary` withholds it from the
+    # toggle on purpose. The footer named no key for it, so the single action
+    # that worked was the one the screen never mentioned. The needle carries the
+    # reset that follows the key, which is what separates an offered hint from
+    # the dim `\x1b[2mx delete` an unavailable one would draw.
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"x\x1b[0m delete",
+        start=0,
+        timeout=3.0,
+    )
     os.write(master_fd, b"q")
 
 

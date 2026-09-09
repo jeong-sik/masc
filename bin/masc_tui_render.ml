@@ -6043,6 +6043,12 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ " start server"
              | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
+            (* Delete is the only action a keeper whose configuration failed to
+               read still offers, and [primary] deliberately withholds it from
+               the toggle. Without its own hint the footer showed that keeper a
+               dimmed "p pause" and nothing else, so the one key that worked was
+               the one key nothing named. *)
+          ; hint Keeper_control.Delete "delete"
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ " settings"
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ " new"
           ; (if state.view = Keepers Keeper_detail then

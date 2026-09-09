@@ -5338,6 +5338,24 @@ let decode_keeper_runtime_list json =
     | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
     | error ->
         let* name = required_string_field json "name" in
+        (* The row and the nested error name the same keeper on the wire:
+           [Keeper_tool_surface_ops.keeper_list_effective_meta_error_json]
+           writes the row's own name into [keeper], and the canonical validator
+           in dashboard/src/api/schemas/gate-keepers.ts rejects a roster where
+           the two disagree. Reading only the row name would hang a mismatched
+           pairing on the wrong keeper -- the TUI would label that keeper
+           misconfigured and offer its confirmed deletion -- so the pairing is
+           parsed here rather than assumed. *)
+        let* subject = required_string_field error "keeper" in
+        let* () =
+          if String.equal subject name then Ok ()
+          else
+            Error
+              (Printf.sprintf
+                 "field 'effective_meta_error.keeper' must name the row's \
+                  keeper (row '%s', error names '%s')"
+                 name subject)
+        in
         let* detail = required_string_field error "message" in
         Ok (Error (name, detail))
   in

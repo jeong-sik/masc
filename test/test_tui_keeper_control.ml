@@ -823,7 +823,7 @@ let test_purge_response_binds_exact_operation () =
 let test_configuration_error_isolated_and_deletable () =
   let json = Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"total":2,"truncated":false,"keepers":[%s,{"name":"probe","effective_meta_error":{"message":"sandbox_profile is required"}}]}|}
+         {|{"total":2,"truncated":false,"keepers":[%s,{"name":"probe","effective_meta_error":{"keeper":"probe","message":"sandbox_profile is required"}}]}|}
          (gate_row "analyst")) in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.fail detail
@@ -841,6 +841,35 @@ let test_configuration_error_isolated_and_deletable () =
         (Control.health_label broken);
       Alcotest.(check (list (pair string string))) "exact error retained"
         [ "probe", "sandbox_profile is required" ] errors
+
+(* The nested error names the keeper it describes. A response whose row name and
+   error identity disagree describes two keepers at once, and taking the row
+   name would mark the wrong one misconfigured and offer its deletion. *)
+let test_configuration_error_identity_must_match_the_row () =
+  let roster keeper_field =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"total":2,"truncated":false,"keepers":[%s,{"name":"probe","effective_meta_error":{%s"message":"sandbox_profile is required"}}]}|}
+         (gate_row "analyst") keeper_field)
+  in
+  let names_field detail affix =
+    let n = String.length affix in
+    let rec scan i =
+      i + n <= String.length detail
+      && (String.equal (String.sub detail i n) affix || scan (i + 1))
+    in
+    scan 0
+  in
+  (match Decode.decode_keeper_runtime_list (roster {|"keeper":"analyst",|}) with
+   | Ok _ -> Alcotest.fail "a mismatched error identity was accepted"
+   | Error detail ->
+       Alcotest.(check bool) "the rejection names the field" true
+         (names_field detail "effective_meta_error.keeper"));
+  (match Decode.decode_keeper_runtime_list (roster "") with
+   | Ok _ -> Alcotest.fail "an error without its keeper identity was accepted"
+   | Error detail ->
+       Alcotest.(check bool) "the rejection names the missing field" true
+         (names_field detail "'keeper'"))
 
 let () =
   Alcotest.run "tui-keeper-control"
@@ -861,6 +890,8 @@ let () =
             test_roster_decode_rejects_unknown_action
         ; Alcotest.test_case "configuration error isolated and deletable" `Quick
             test_configuration_error_isolated_and_deletable
+        ; Alcotest.test_case "a mismatched error identity is rejected" `Quick
+            test_configuration_error_identity_must_match_the_row
         ; Alcotest.test_case "unobserved roster offers confirmed delete" `Quick
             test_unobserved_offers_confirmed_delete
         ; Alcotest.test_case "absent keeper offers boot" `Quick

@@ -1,0 +1,88 @@
+{
+  "ok": true,
+  "status": "valid",
+  "preview": {
+    "profile": {
+      "reference": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "browser-live-click-regions",
+          "name": "browser-live-click-regions"
+        },
+        "content_revision": "5a5f484dea72d740159ca7e252c053f7812b589567af89d99454e583b49a9aaf"
+      },
+      "kind": "composition",
+      "activation_tool": "keeper_compose_browser-live-click-regions",
+      "execution": "inline",
+      "capabilities": {
+        "as_skill": true,
+        "as_tool": true,
+        "batch": true,
+        "parallel": false,
+        "async": false,
+        "tool_scope": "registered_tools_only"
+      },
+      "context": {
+        "body_bytes": 3509,
+        "eager_body_bytes": 0,
+        "discovery_bytes": 673,
+        "tool_schema_bytes": 673
+      },
+      "plan": {
+        "node_count": 2,
+        "batch_count": 2,
+        "parallel_batch_count": 0,
+        "max_parallelism": 1,
+        "statically_read_only": false
+      },
+      "declaration": {
+        "start_line": 19,
+        "end_line": 129
+      },
+      "flow": {
+        "nodes": [
+          {
+            "id": "click",
+            "tool_name": "BrowserInteract",
+            "dependencies": [],
+            "batch_index": 0,
+            "batch_size": 1,
+            "execution_mode": "serial",
+            "statically_read_only": false
+          },
+          {
+            "id": "regions",
+            "tool_name": "BrowserRead",
+            "dependencies": [
+              {
+                "node_id": "click",
+                "kind": "data_and_order"
+              }
+            ],
+            "batch_index": 1,
+            "batch_size": 1,
+            "execution_mode": "concurrent",
+            "statically_read_only": true
+          }
+        ],
+        "batches": [
+          {
+            "index": 0,
+            "execution_mode": "serial",
+            "node_ids": [
+              "click"
+            ]
+          },
+          {
+            "index": 1,
+            "execution_mode": "concurrent",
+            "node_ids": [
+              "regions"
+            ]
+          }
+        ]
+      }
+    },
+    "diagnostics": []
+  }
+}

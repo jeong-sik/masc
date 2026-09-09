@@ -20,4 +20,8 @@ and reopens PDF, PNG, JPEG, animated GIF, SVG, PPTX, WAV, MP3 and MP4. PDF text
 extraction checks Korean text; rendered pages and hash receipts are uploaded
 for visual review. This is a synthetic environment capability scenario, not
 a claim that a Keeper chose formats autonomously or that production uses the
-new image. CI result and downloaded visual inspection are pending.
+new image. The creative-artifact step of CI run 34403318997 passed at source b4e2330c83.
+All 14 downloaded file hashes match its receipt. The PDF, slide and SVG raster
+renders were visually inspected and their Korean glyphs are readable.
+Artifacts and source/run binding are in `2026-09-10-sandbox-creative-tools/`.
+The overall test job and production image rollout are separate checks.

@@ -11,3 +11,9 @@ Final observed revision: PDF SHA-256 `74a24bed2977316e1ca028e91163ed890c303d02c1
 `task-verdict-rejected.json` is the actual system LLM Task verdict for submission `vrf-d14835a4b1f16ae763aef3f80d91e4ff`. It refers to the submitted PDF SHA prefix `163518c8`, not the independently reviewed v4 file `74a24bed`; the rejection and later visual review are separate observations.
 
 `rejection-delivery.txt` records the actual first-verdict commit and automatic delivery/consumption of the rejection stimulus for the same Task and verification ID. This proves that notification path, not autonomous recovery completion: subsequent operator corrections also influenced the work, and the second submission still required further verification.
+
+## Second submission: actual rejection and aggregate limit
+
+The actual server rejected verification `vrf-29d7aa6e465b7e1b5acd86f7305120f0` at 2026-09-09 23:38:41 UTC and returned task-001 to in_progress. The verifier accepted the three-page and synthetic-disclosure criteria, but could not visually inspect the PNGs. Its other metadata objections are recorded as verifier claims, not independently established facts.
+
+`second-rejection-and-submission-limit.txt` preserves the selected actual server lines, including the earlier keeper_task_done rejection: 497793 artifact bytes exceeded 51200. Source `keeper_tool_task_runtime.ml` defines that aggregate submission limit as `50 * 1024`; it is separate from the 200000-byte artifact reader cap. The earlier conversational inference that Keeper invented the smaller limit was incorrect. Fixing image ingestion alone does not resolve this submission blocker. Automatic rejection delivery is recorded; successful recovery and completion remain unproven.

@@ -7,7 +7,7 @@ let walk_dirs dirs =
   let rec collect acc = function
     | [] -> acc
     | dir :: rest ->
-      let entries = try Sys.readdir dir with Sys_error _ -> [||] in
+      let entries = Sys.readdir dir in
       let next, files =
         Array.fold_left
           (fun (sub, files) name ->
@@ -22,7 +22,21 @@ let walk_dirs dirs =
       in
       collect (List.rev_append files acc) (List.rev_append next rest)
   in
-  collect [] dirs
+  (* [dirs] are repo-relative. Dune runs this binary from
+     [_build/default/test], where they do not exist: the swallowed
+     [Sys_error] answered [[||]], every "count must be 0" assertion below
+     compared 0 to 0, and the guard passed after reading no files.
+     [Ast_grep.source_root] is the root the same library already resolves
+     its own reads against (#34385). *)
+  let root = Ast_grep.source_root () in
+  match collect [] (List.map (Filename.concat root) dirs) with
+  | [] ->
+    failwith
+      (Printf.sprintf
+         "no .ml sources under %s in %s -- the guard would compare 0 to 0"
+         (String.concat ", " dirs)
+         root)
+  | files -> files
 ;;
 
 let count_external_callers ~callee =

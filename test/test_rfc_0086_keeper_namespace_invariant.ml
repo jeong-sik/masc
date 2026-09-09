@@ -20,7 +20,7 @@ let keeper_prefix = "keeper_"
 let keeper_root () = Masc_test_deps.source_path "lib/keeper"
 
 let rec collect_ml_files dir acc =
-  let entries = try Sys.readdir dir with Sys_error _ -> [||] in
+  let entries = Sys.readdir dir in
   Array.fold_left
     (fun acc name ->
       let p = Filename.concat dir name in
@@ -31,6 +31,16 @@ let rec collect_ml_files dir acc =
       else acc)
     acc
     entries
+;;
+
+(* An empty scope satisfies every assertion below, so it fails instead:
+   the swallowed [Sys_error] used to turn a root that stopped resolving into
+   a guard that read no files and passed (#34385). *)
+let keeper_sources () =
+  let root = keeper_root () in
+  match collect_ml_files root [] with
+  | [] -> failwith (Printf.sprintf "no keeper sources under %s" root)
+  | files -> files
 ;;
 
 let basename_no_ext path =
@@ -109,7 +119,7 @@ let intentional_boundary_module_set () =
 ;;
 
 let test_all_files_have_keeper_prefix () =
-  let files = collect_ml_files (keeper_root ()) [] in
+  let files = keeper_sources () in
   let boundary_modules = intentional_boundary_module_set () in
   let offenders =
     List.filter
@@ -141,7 +151,7 @@ let test_boundary_registry_is_sorted_unique_and_necessary () =
       boundary_modules_path
       (String.concat "; " registered)
       (String.concat "; " sorted_registered);
-  let files = collect_ml_files (keeper_root ()) [] in
+  let files = keeper_sources () in
   let required =
     files
     |> List.map basename_no_ext

@@ -128,20 +128,14 @@ let make_goal_task_links_recovery_path_unwritable config =
   make_path_unwritable (Workspace_goal_index.goal_task_links_path config ^ ".last-good")
 ;;
 
-(* [make_path_unwritable] swaps the file for a directory, which fails the read
-   before the write is ever reached. The two rollback cases below are about the
-   write, so they leave the backlog file readable and take the write bit off its
-   directory instead: the atomic publish cannot create the temporary it renames
-   from. Restored before the body returns so [with_test_env] can still clean up. *)
-let with_backlog_write_blocked config f =
-  let dir = Filename.dirname (Workspace_backlog.backlog_path config) in
-  let previous = (Unix.stat dir).Unix.st_perm in
-  Unix.chmod dir 0o555;
-  Fun.protect ~finally:(fun () -> Unix.chmod dir previous) f
-;;
-
-let make_backlog_path_unwritable config =
-  make_path_unwritable (Workspace_backlog.backlog_path config)
+(* A readable snapshot at the final revision reaches the real backlog
+   precommit refusal after the provisional link has been written. *)
+let exhaust_backlog_revision config =
+  let backlog = match Workspace_backlog.read_backlog_r config with
+    | Ok backlog -> backlog
+    | Error detail -> Alcotest.fail detail in
+  Workspace_utils.write_json config (Workspace_backlog.backlog_path config)
+    (backlog_to_yojson { backlog with version = max_int })
 ;;
 
 let goal_link_exists_in_file path ~goal_id ~task_id =
@@ -394,10 +388,7 @@ let test_add_task_goal_link_write_failure_does_not_publish_task () =
         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
-        check_bool
-          "failed provisional link settlement fenced dashboard readers"
-          true
-          (mutation_count () > 0);
+        check_int "source rejection performs no mutation notification" 0 (mutation_count ());
         check_no_create_side_effects
           config
           ~message_count_before
@@ -426,16 +417,10 @@ let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
              (Workspace.batch_add_tasks_error_to_string err)
         | Ok created ->
           Alcotest.failf "expected failure, created %d tasks" created.count);
-        (* The backlog path is a directory in this test, so it cannot be read
-           back to confirm nothing was published -- [get_tasks_safe] only
-           guards the uninitialized case and propagates the read failure. The
-           rollback checks below do not touch the backlog. *)
+        check_int "batch tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
-        check_bool
-          "failed provisional batch link settlement fenced dashboard readers"
-          true
-          (mutation_count () > 0);
+        check_int "batch source rejection performs no mutation notification" 0 (mutation_count ());
         check_no_create_side_effects
           config
           ~message_count_before
@@ -447,7 +432,7 @@ let test_add_task_backlog_write_failure_rolls_back_goal_link () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
-        make_backlog_path_unwritable config;
+        exhaust_backlog_revision config;
         let message_count_before = message_count config in
         (match
            Workspace.add_task_with_result
@@ -457,14 +442,15 @@ let test_add_task_backlog_write_failure_rolls_back_goal_link () =
              ~priority:1
              ~description:""
          with
-         | Error (Workspace.Backlog_read_failed msg) ->
+         | Error (Workspace.Backlog_write_failed msg) ->
            check_bool "failure message is populated" true (String.length msg > 0)
          | Error err ->
            Alcotest.failf
-             "expected Backlog_read_failed, got %s"
+             "expected Backlog_write_failed, got %s"
              (Workspace.add_task_error_to_string err)
          | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_int "failed backlog commit publishes no tasks" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_create_side_effects
           config
           ~message_count_before
@@ -476,7 +462,7 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
-        make_backlog_path_unwritable config;
+        exhaust_backlog_revision config;
         let message_count_before = message_count config in
         (match
            Workspace.batch_add_tasks_with_contracts_result
@@ -485,16 +471,17 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
              ; "blocked batch b", 2, "", None, Some "goal-b"
              ]
          with
-         | Error (Workspace.Batch_backlog_read_failed msg) ->
+         | Error (Workspace.Batch_backlog_write_failed msg) ->
            check_bool "failure message is populated" true (String.length msg > 0)
          | Error err ->
            Alcotest.failf
-             "expected Batch_backlog_read_failed, got %s"
+             "expected Batch_backlog_write_failed, got %s"
              (Workspace.batch_add_tasks_error_to_string err)
          | Ok created ->
            Alcotest.failf "expected failure, created %d tasks" created.count);
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+        check_int "failed backlog commit publishes no tasks" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_create_side_effects
           config
           ~message_count_before
@@ -502,17 +489,17 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
           mutation_count)))
 ;;
 
-let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
+let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
         let message_count_before = message_count config in
-        (* Placed before the directory is sealed: the hook below re-runs this
-           and [make_path_unwritable] is a no-op once the directory exists. *)
-        make_goal_task_links_recovery_path_unwritable config;
-        with_backlog_write_blocked config @@ fun () ->
+        exhaust_backlog_revision config;
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
-          (fun hook_config ~goal_id:_ ~task_id:_ ->
+          (fun hook_config ~goal_id ~task_id ->
+             check_bool "provisional link exists before rollback injection" true
+               (goal_link_exists_in_file (Workspace_goal_index.goal_task_links_path hook_config)
+                  ~goal_id ~task_id);
              make_goal_task_links_recovery_path_unwritable hook_config)
           (fun () ->
              match
@@ -523,14 +510,14 @@ let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
                  ~priority:1
                  ~description:""
              with
-             | Error (Workspace.Goal_link_write_failed msg) ->
+             | Error (Workspace.Backlog_write_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
                  (string_contains ~needle:"goal link rollback failed" msg)
              | Error err ->
                Alcotest.failf
-                 "expected Goal_link_write_failed, got %s"
+                 "expected Backlog_write_failed, got %s"
                  (Workspace.add_task_error_to_string err)
              | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         (* Rollback failure is surfaced above; unlike the successful rollback
@@ -539,6 +526,7 @@ let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
           "failed rollback settlement fenced dashboard readers"
           true
           (mutation_count () > 0);
+        check_int "failed backlog commit publishes no tasks" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_create_side_effects
           config
           ~message_count_before
@@ -546,15 +534,17 @@ let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
           mutation_count)))
 ;;
 
-let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
+let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
         let message_count_before = message_count config in
-        make_goal_task_links_recovery_path_unwritable config;
-        with_backlog_write_blocked config @@ fun () ->
+        exhaust_backlog_revision config;
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
-          (fun hook_config ~goal_id:_ ~task_id:_ ->
+          (fun hook_config ~goal_id ~task_id ->
+             check_bool "provisional link exists before rollback injection" true
+               (goal_link_exists_in_file (Workspace_goal_index.goal_task_links_path hook_config)
+                  ~goal_id ~task_id);
              make_goal_task_links_recovery_path_unwritable hook_config)
           (fun () ->
              match
@@ -564,14 +554,14 @@ let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
                  ; "rollback failure batch b", 2, "", None, Some "goal-b"
                  ]
              with
-             | Error (Workspace.Batch_goal_link_write_failed msg) ->
+             | Error (Workspace.Batch_backlog_write_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
                  (string_contains ~needle:"goal link rollback failed" msg)
              | Error err ->
                Alcotest.failf
-                 "expected Batch_backlog_read_failed, got %s"
+                 "expected Batch_backlog_write_failed, got %s"
                  (Workspace.batch_add_tasks_error_to_string err)
              | Ok created ->
                Alcotest.failf "expected failure, created %d tasks" created.count);
@@ -581,6 +571,7 @@ let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
           "failed batch rollback settlement fenced dashboard readers"
           true
           (mutation_count () > 0);
+        check_int "failed backlog commit publishes no tasks" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_create_side_effects
           config
           ~message_count_before
@@ -755,11 +746,11 @@ let () =
           ; test_case
               "single create surfaces rollback failure when backlog write fails"
               `Quick
-              test_add_task_goal_link_write_failure_surfaces_rollback_failure
+              test_add_task_backlog_write_failure_surfaces_rollback_failure
           ; test_case
               "batch create surfaces rollback failure when backlog write fails"
               `Quick
-              test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure
+              test_batch_add_task_backlog_write_failure_surfaces_rollback_failure
           ; test_case
               "a link row without task_ids is not an empty goal"
               `Quick

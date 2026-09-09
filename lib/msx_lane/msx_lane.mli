@@ -131,6 +131,10 @@ val frame : unit -> frame option
     Repeated reads of the same machine state reuse immutable rendered pixels.
     Advancing, loading, restoring, or replacing media invalidates that snapshot. *)
 
+val step_frame : frames:int -> (frame * entry list, error) result
+(** Advance once and capture the resulting pixels, metadata and oldest-first
+    input ledger under one machine lock. Encoding happens outside that lock. *)
+
 val capture : unit -> (observation * frame, error) result
 (** Copy observation and pixels under the same machine lock. Does not advance
     the machine. Consumers encode/persist the immutable copy outside the lock. *)

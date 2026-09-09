@@ -1242,6 +1242,45 @@ let board_stats_output_schema =
       [ "post_count"; "comment_count"; "expired_pending"; "last_sweep"; "backend" ]
 ;;
 
+(* Keeper_msx_screen.handle captures observation and pixels together, then adds
+   a handle in the calling Keeper's vision store. This is the Keeper dispatch
+   contract, not the generic MCP screen result (which has no image handle). *)
+let msx_screen_output_schema =
+  let string_schema = `Assoc [ "type", `String "string" ] in
+  let integer_schema = `Assoc [ "type", `String "integer" ] in
+  let nullable_string =
+    `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+  in
+  let sprite =
+    object_output_schema
+      ~properties:(List.map (fun name -> name, integer_schema)
+        [ "index"; "x"; "y"; "pattern"; "color" ])
+      ~required:[ "index"; "x"; "y"; "pattern"; "color" ]
+  in
+  object_output_schema
+    ~properties:
+      [ "frame", integer_schema
+      ; "mode", string_schema
+      ; "pc", string_schema
+      ; "halted", `Assoc [ "type", `String "boolean" ]
+      ; "cartridge", nullable_string
+      ; "disk", nullable_string
+      ; "screen_text", string_schema
+      ; "screen_view", string_schema
+      ; "tiles", `Assoc [ "type", `String "array"; "items", string_schema ]
+      ; "sprites", `Assoc [ "type", `String "array"; "items", sprite ]
+      ; "artifact", string_schema
+      ; "media_type", string_schema
+      ; "width", integer_schema
+      ; "height", integer_schema
+      ; "bytes", integer_schema
+      ]
+    ~required:
+      [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
+      ; "screen_text"; "screen_view"; "tiles"; "sprites"; "artifact"
+      ; "media_type"; "width"; "height"; "bytes" ]
+;;
+
 let time_now_output_schema =
   object_output_schema
     ~properties:
@@ -2564,7 +2603,8 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "msx_save" "masc_msx_save" ~readonly:false
   ; masc_misc_descriptor "msx_restore" "masc_msx_restore" ~readonly:false
   ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
-  ; masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
+  ; (masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
+     |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
   ; masc_misc_descriptor "dashboard" "masc_dashboard"

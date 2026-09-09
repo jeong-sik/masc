@@ -264,25 +264,57 @@ type board_read_allocation = {
 let board_comment_share = 3
 let board_comment_floor_rows = 5
 
+(* The box the pane draws: its top and bottom, the title, the actions line,
+   two dividers, the heading and the author. *)
+let board_read_box_rows = 8
+
+(* The key footer the surface writes under that box. It was not counted here,
+   so the box filled the surface on its own and the footer landed on the row
+   the composer owns -- z:wide, Y:copy link, c:reply and left/Esc:back were
+   drawn every frame and reached the screen in none of them. *)
+let board_read_footer_rows = 1
+
+(* The "post rows X-Y of Z" line, which the pane writes only when the post or
+   the thread has more lines than it can show. It was not counted either, so
+   an overflowing post pushed the footer one row further out than a short one
+   did. *)
+let board_read_position_rows = 1
+
 let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
-  (* Eight rows are invariant chrome. A visible Comments section adds its
-     divider and heading; keep one body row when the post has body text, then
-     give comments the smaller of what they need and what they may take. *)
+  (* Keep one body row when the post has body text, then give comments the
+     smaller of what they need and what they may take. *)
   let comment_count = max 0 comment_count in
   let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
-  let available = max 0 (terminal_rows - 8 - comment_chrome_rows) in
-  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
-  let comment_ceiling =
-    max board_comment_floor_rows
-      (max
-         (available - max 0 body_line_count)
-         (available / board_comment_share))
+  let allocate ~position_rows =
+    let available =
+      max 0
+        (terminal_rows - board_read_box_rows - board_read_footer_rows
+         - comment_chrome_rows - position_rows)
+    in
+    let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+    let comment_ceiling =
+      max board_comment_floor_rows
+        (max
+           (available - max 0 body_line_count)
+           (available / board_comment_share))
+    in
+    let comment_rows =
+      min (min comment_ceiling comment_count)
+        (max 0 (available - minimum_body_rows))
+    in
+    let body_rows = max 0 (available - comment_rows) in
+    { body_rows; comment_rows }
   in
-  let comment_rows =
-    min (min comment_ceiling comment_count) (max 0 (available - minimum_body_rows))
-  in
-  let body_rows = max 0 (available - comment_rows) in
-  { body_rows; comment_rows }
+  (* The position line appears exactly when something does not fit, which is a
+     property of the allocation it has to fit beside. Taking a row away can
+     only make more of the content overflow, never less, so asking once more
+     with the row reserved settles it. *)
+  let unpositioned = allocate ~position_rows:0 in
+  if
+    body_line_count > unpositioned.body_rows
+    || comment_count > unpositioned.comment_rows
+  then allocate ~position_rows:board_read_position_rows
+  else unpositioned
 
 type board_read_scroll = {
   normalized_scroll : int;

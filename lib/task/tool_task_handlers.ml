@@ -384,21 +384,6 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
-  else if Option.is_some goal_id
-          && not
-               (* DET-OK: [Option.value ~default:""] is guarded by
-                  the [Option.is_some goal_id] guard above; the
-                  empty default is unreachable.  Refactoring to a
-                  match would split the boolean chain awkwardly. *)
-               (Goal_store.list_goals ctx.config ()
-                |> List.exists (fun (goal : Goal_store.goal) ->
-                       String.equal goal.id (Option.value ~default:"" goal_id)))
-  then
-    Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name ~start_time
-      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
-      (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result, skills_result with
     | Error error, _ ->
@@ -416,7 +401,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
             | Some author -> author
             | None -> ctx.agent_name
           in
-          Workspace.add_task_with_result ?contract
+          Task_goal_assignment.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
             ~skills
@@ -444,7 +429,12 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error err ->
            Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
+             ~failure_class:(match err with
+               | Workspace.Unknown_goal _ | Workspace.Unknown_predecessor _
+               | Workspace.Predecessor_not_terminal _ -> Tool_result.Workflow_rejection
+               | Workspace.Goal_source_unavailable _ | Workspace.Backlog_read_failed _
+               | Workspace.Goal_link_write_failed _ | Workspace.Backlog_write_failed _
+               | Workspace.Unexpected_error _ -> Tool_result.Runtime_failure)
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err)))
@@ -491,7 +481,12 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error err ->
         Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
+          ~failure_class:(match err with
+            | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _
+            | Task_goal_assignment.Already_assigned _ -> Tool_result.Workflow_rejection
+            | Task_goal_assignment.Goal_source_unavailable _
+            | Task_goal_assignment.Backlog_read_failed _
+            | Task_goal_assignment.Link_write_failed _ -> Tool_result.Runtime_failure)
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -568,7 +563,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
         | Some author -> author
         | None -> ctx.agent_name
       in
-      Workspace.batch_add_tasks_with_contracts_result
+      Task_goal_assignment.batch_add_tasks_with_contracts_result
         ~created_by ctx.config tasks
     in
     (match batch_result with
@@ -586,7 +581,11 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error err ->
        Tool_result.error
-         ~failure_class:Tool_result.Workflow_rejection
+         ~failure_class:(match err with
+           | Workspace.Batch_unknown_goal _ -> Tool_result.Workflow_rejection
+           | Workspace.Batch_goal_source_unavailable _ | Workspace.Batch_backlog_read_failed _
+           | Workspace.Batch_goal_link_write_failed _ | Workspace.Batch_backlog_write_failed _
+           | Workspace.Batch_unexpected_error _ -> Tool_result.Runtime_failure)
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))

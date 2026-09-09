@@ -122,6 +122,37 @@ Kitty's protocol specifies image/placement replacement and chunk completion:
 Ghostty behavior must also be exercised: a protocol-compliant byte stream is
 not evidence that a real terminal displayed it smoothly.
 
+## Single-request retained tick protocol
+
+The advancing spectator path is `POST /api/v1/msx/tick`, not the read-only
+frame GET. Conditional GET/304 savings do not demonstrate steady spectator
+improvement. The TUI requests `{"pixel_response":"retained"}` and, once it has
+decoded pixels, includes `known_pixels` with their SHA256 `revision`, `width`
+and `height`. This remains one advancing request per poll; it does not add an
+image-fetch round trip or retry a failed mutation.
+
+Every loaded response supplies fresh frame number, mode, media and players.
+Its `pixels` object has `kind="inline"` with `rgb_base64`, or `kind="retained"`
+without encoded pixels; both include the revision and dimensions. The server
+captures the stepped frame and input ledger under one lock, then compares,
+hashes and encodes immutable pixels in the strict worker. A separate response
+worker serializes/compresses the result without replaying the mutation.
+Ordinary tick requests and frame GETs continue to return complete images.
+Deploy the updated server before or together with this TUI: an older server
+rejects the new request fields. The client does not retry an advancing request
+with a different body when a server refuses or fails it.
+
+The client retains one pixel buffer scoped to host, port and captured auth
+headers. A retained response must match what that request advertised. Fresh
+metadata is rebuilt around those bytes; changed images replace them, an empty
+machine clears them, and errors never become cached success. Late responses
+cannot overwrite newer cached pixels. This cache does not change simulation
+clock ownership or coordinate multiple spectators.
+
+Measure actual POST ticks on unchanged and changing screens, including
+concurrent MCP requests and the real TUI. Protocol byte savings alone do not
+establish latency or smoothness, and the 0.1ms objective remains unproven.
+
 ## Acceptance evidence still required
 
 - Real Keeper use of published primitive-based Skills, including newly learned

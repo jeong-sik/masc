@@ -181,9 +181,14 @@ jobs:
         env:
           DUNE_JOBS: "4"
         # NO continue-on-error: the build is deterministic and must hard-fail.
+        # @test/stanzas/runtest is the generator-and-diff rule for the coverage
+        # group stanza: a shell script and a diff, nothing linked. It is where a
+        # suite that left the group without leaving coverage_test_names.txt is
+        # caught on its own pull request instead of on the next nightly
+        # (#33922 was caught by #34367 a week later, #34392 the day after).
         run: |
           set -euo pipefail
-          dune build @check
+          dune build @check @test/stanzas/runtest
 
       # #32511 dropped the nine-job lane and took this ratchet with it: the
       # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and

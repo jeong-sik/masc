@@ -2518,7 +2518,13 @@ let temp_workspace_dir () =
   Unix.mkdir dir 0o755;
   dir
 
-let schema_complaint = "must contain exactly one tasks list"
+(* What separates a malformed backlog from an absent one: the decode was
+   reached and failed. #34482 replaced the hand-written schema sentence this
+   pinned ("must contain exactly one tasks list") with the derived decoder's
+   own message, so the phrase to hold is the one decode_backlog puts in front
+   of it -- workspace_backlog.ml writes it, and absence never reaches there
+   (#29562 split absence out ahead of the decode). *)
+let decode_complaint = "backlog decode failed for"
 
 let test_absent_backlog_is_not_reported_as_malformed () =
   Eio_main.run @@ fun env ->
@@ -2537,9 +2543,9 @@ let test_absent_backlog_is_not_reported_as_malformed () =
        true
        (str_contains message "no recovery mirror at");
      Alcotest.(check bool)
-       "does not claim a schema violation"
+       "does not claim a decode failure"
        false
-       (str_contains message schema_complaint));
+       (str_contains message decode_complaint));
   let _ = Workspace.reset config in
   ()
 
@@ -2589,9 +2595,9 @@ let test_malformed_backlog_still_reports_the_schema () =
    | Ok _ -> Alcotest.fail "an empty object is not a backlog"
    | Error message ->
      Alcotest.(check bool)
-       "reports the schema violation"
+       "reports the decode failure"
        true
-       (str_contains message schema_complaint);
+       (str_contains message decode_complaint);
      Alcotest.(check bool)
        "does not claim the file is absent"
        false

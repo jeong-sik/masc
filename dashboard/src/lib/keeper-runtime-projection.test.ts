@@ -45,7 +45,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         heartbeat_healthy: true,
         turn_healthy: true,
         context_handoff_needed: false,
-        handoff_active: false,
         operator_paused: false,
         stop_requested: false,
         restart_requested: false,

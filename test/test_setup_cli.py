@@ -169,6 +169,20 @@ supports_native_streaming = true
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
                 try:
+                    verification = run('runtime-verify','ollama_cloud.setup-fixture-owned-model')
+                    receipt = json.loads(verification.stdout)
+                    self.assertEqual(receipt['schema'],'masc.runtime_verification.v1')
+                    self.assertEqual(receipt['runtime_id'],'ollama_cloud.setup-fixture-owned-model')
+                    if missing_key:
+                        self.assertEqual(verification.returncode,2,verification.stderr)
+                        self.assertEqual(receipt['status'],'unavailable')
+                        self.assertEqual(receipt['failure']['code'],'missing_credential')
+                    else:
+                        self.assertEqual(verification.returncode,0,verification.stderr)
+                        self.assertEqual(receipt['status'],'verified')
+                        self.assertEqual(receipt['model'],'setup-fixture-owned-model')
+                        self.assertEqual(receipt['observed_model'],'setup-fixture-owned-model')
+                        self.assertEqual(receipt['checks'],{'response':True,'tool_called':True,'tool_roundtrip':True})
                     result = run('setup', '--no-tui', '--port', str(server.server_port))
                 finally:
                     server.shutdown()
@@ -183,7 +197,7 @@ supports_native_streaming = true
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(posted, [('/api/v1/keepers/imp/boot', {'name': 'imp'})])
                 self.assertIn('Model response and harmless tool roundtrip verified.', result.stdout)
-                self.assertEqual(len(model_requests),2)
+                self.assertEqual(len(model_requests),4)
                 self.assertTrue(all(request['model']=='setup-fixture-owned-model' for request in model_requests))
                 self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))
                 self.assertNotIn((base / '.masc/auth/local-admin.token').read_text().strip(), result.stdout)

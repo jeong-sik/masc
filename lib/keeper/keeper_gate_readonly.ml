@@ -9,7 +9,7 @@
     This bounded Git correction retains the established policy for other
     commands; it is not a complete effect proof for every Unix/Git option. *)
 
-type git_command = Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
+type git_command = Status | Diff | Log | Show | Grep | Reflog | Whatchanged | Blame | Annotate
 
 type observation_reason =
   | Git_configuration_override
@@ -21,6 +21,7 @@ type classification =
   | Needs_observation of observation_reason
 
 let git_command_name = function
+  | Status -> "status"
   | Diff -> "diff"
   | Log -> "log"
   | Show -> "show"
@@ -78,18 +79,20 @@ let observation_commands =
    helper-capable and reflog commands are handled separately below, never
    admitted by this table merely because their command name sounds like a read. *)
 let git_read_subcommands =
-  [ "status"; "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
+  [ "describe"; "shortlog"; "rev-parse"; "rev-list"; "merge-base"; "cherry"
   ; "ls-files"; "ls-remote"; "ls-tree"; "cat-file"; "name-rev"
   ]
 
-(* git-diff/git-log document --output and external helpers. git-grep may
+(* git-status may execute the repository-configured core.fsmonitor hook.
+   git-diff/git-log document --output and external helpers. git-grep may
    invoke a pager; reflog includes write/delete/expire actions. Whatchanged
    shares log's machinery, and builtin/blame.c enables textconv for both
    blame and annotate. Absence of a flag on this argv proves none of those
    repository-configured effects absent.
-   Sources: git-scm.com/docs/{git-diff,git-log,git-grep,git-reflog,git-whatchanged};
+   Sources: git-scm.com/docs/{git-config,git-diff,git-log,git-grep,git-reflog,git-whatchanged};
    github.com/git/git/blob/v2.50.1/builtin/blame.c (allow_textconv). *)
 let git_command_requiring_execution = function
+  | "status" -> Some Status
   | "diff" -> Some Diff
   | "log" -> Some Log
   | "show" -> Some Show

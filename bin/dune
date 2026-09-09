@@ -984,6 +984,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_runtime_config_view
@@ -1163,6 +1164,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit
   masc.sse_wire

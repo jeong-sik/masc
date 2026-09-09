@@ -17,8 +17,9 @@ The screenshot captures its editor after scrolling within the original text.
 This proves registry application, persistence and display only. The observed
 turn-record string fields did not contain the complete inserted section; this
 does not establish its absence from provider input, which may be stored by
-reference. Actual subsequent input admission and autonomous behavior remain
-unverified. No Keeper was restarted or force-woken for this observation.
+reference. The subsequent snapshot-to-record comparison below supplies input evidence;
+autonomous behavior remains unverified. No Keeper was restarted or force-woken
+for this observation.
 
 A later observation (`admitted-prompt.json`) joins the saved code-reviewer
 agent-core system prompt to the turn-record keeper_instructions block by exact

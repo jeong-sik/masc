@@ -824,7 +824,7 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
           ~initial_messages:[]
           ~goal_blocks:[ image_block ]
           ~first_candidate
-          ~remaining_runtimes
+          ~candidates:remaining_runtimes
       in
       (match decision_for_image with
        | Runtime_agent.No_capable_runtime { required } ->

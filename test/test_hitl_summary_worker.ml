@@ -7,6 +7,12 @@ module Q = Masc.Keeper_approval_queue
 module QT = Keeper_approval_queue_rules_types
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
+let http_flow_evidence prepared =
+  match Worker.For_testing.flow_evidence prepared with
+  | Some evidence -> evidence
+  | None -> Alcotest.fail "expected an HTTP flow in this fixture"
+;;
+
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
@@ -897,7 +903,7 @@ let test_flow_order_completion_and_replay () =
        publish_lane [ "hitl-first"; "hitl-second" ] snapshot;
        let entry = pending_entry ~base_path () in
        let prepared = prepare_exn entry in
-       let evidence = Worker.For_testing.flow_evidence prepared in
+       let evidence = http_flow_evidence prepared in
        check
          (list string)
          "immutable candidate order"
@@ -919,7 +925,7 @@ let test_flow_order_completion_and_replay () =
          (list string)
          "only the reached candidate is admitted"
          [ "hitl-first" ]
-         ((Worker.For_testing.flow_evidence prepared).admissions
+         ((http_flow_evidence prepared).admissions
           |> List.map admission_id);
        check int "first candidate posted once" 1 (F.post_count first);
        check int "second candidate not used" 0 (F.post_count second);
@@ -986,7 +992,7 @@ let test_keeper_preference_reorders_the_hitl_lane () =
        let entry = pending_entry ~base_path () in
        let prepared = prepare_exn entry in
        let declared =
-         Worker.For_testing.flow_evidence prepared
+         http_flow_evidence prepared
          |> fun evidence ->
          List.map candidate_id evidence.declared_candidate_snapshot
        in
@@ -1030,7 +1036,7 @@ let test_predispatch_failure_advances_only_to_agent_core_successor () =
          prepared
        |> require_executed;
        check int "AGENT_CORE-selected successor posted once" 1 (F.post_count successor);
-       (match (Worker.For_testing.flow_evidence prepared).advances with
+       (match (http_flow_evidence prepared).advances with
         | [ advance ] ->
           check string
             "advance targets the frozen successor"
@@ -1190,7 +1196,7 @@ let test_json_syntax_candidate_is_admitted_without_structured_capability () =
          (prompt_only_snapshot "http://127.0.0.1:1");
        let entry = pending_entry ~base_path () in
        let prepared = prepare_exn entry in
-       let before = Worker.For_testing.flow_evidence prepared in
+       let before = http_flow_evidence prepared in
        check
          (list string)
          "prompt-only topology remains frozen"
@@ -1217,7 +1223,7 @@ let test_json_syntax_candidate_is_admitted_without_structured_capability () =
          (list string)
          "execution records the admitted candidate"
          [ "hitl-incapable" ]
-         ((Worker.For_testing.flow_evidence prepared).admissions
+         ((http_flow_evidence prepared).admissions
           |> List.map admission_id);
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
@@ -2613,13 +2619,13 @@ let with_cli_runtimes f =
        | Ok () -> f ())
 ;;
 
-let publish_unreachable_lane_with_cli ~cli_slot_ids ~source =
+let publish_unreachable_lane_with_cli ?(cli_only = false) ~cli_slot_ids ~source () =
   let fixtures : F.target_fixture list =
     [ { id = "hitl-cli-unreachable"; base_url = "http://127.0.0.1:1" } ]
   in
   publish_lane
     ~cli_slot_ids
-    [ "hitl-cli-unreachable" ]
+    (if cli_only then [] else [ "hitl-cli-unreachable" ])
     (F.resolver_snapshot ~source fixtures)
 ;;
 
@@ -2642,7 +2648,7 @@ let test_cli_bind_rejection_after_release_settles_the_entry () =
        with_cli_runtimes @@ fun () ->
        publish_unreachable_lane_with_cli
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
-         ~source:"hitl-cli-bind-rejected";
+         ~source:"hitl-cli-bind-rejected" ();
        let entry = pending_entry ~base_path () in
        let cli_bind_rejections = ref 0 in
        let bind
@@ -2705,7 +2711,7 @@ let test_cli_bind_rejection_after_release_settles_the_entry () =
             dangling")
 ;;
 
-let test_cli_slot_answers_after_catalog_exhaustion () =
+let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
   run_eio @@ fun ~sw:_ ~net ~clock ->
   with_temp_dir "hitl-cli-summary" @@ fun base_path ->
   Fun.protect
@@ -2715,9 +2721,13 @@ let test_cli_slot_answers_after_catalog_exhaustion () =
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
        with_cli_runtimes @@ fun () ->
-       publish_unreachable_lane_with_cli
+       publish_unreachable_lane_with_cli ~cli_only
          ~cli_slot_ids:[ cli_primary ]
-         ~source:"hitl-cli-summary";
+         ~source:"hitl-cli-summary" ();
+       if cli_only then
+         (match Worker.snapshot_topology_readiness () with
+          | Ok () -> ()
+          | Error detail -> fail detail);
        let entry = pending_entry ~base_path () in
        let seen_runtime = ref None in
        let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt =
@@ -2761,7 +2771,7 @@ let test_cli_walk_advances_past_domain_invalid_output () =
        with_cli_runtimes @@ fun () ->
        publish_unreachable_lane_with_cli
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
-         ~source:"hitl-cli-advance";
+         ~source:"hitl-cli-advance" ();
        let entry = pending_entry ~base_path () in
        let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          if String.equal runtime_id cli_primary
@@ -2807,7 +2817,7 @@ let test_cli_quota_order_keeps_durable_dispatch_identity () =
        let separate = "agy.gemini" in
        publish_unreachable_lane_with_cli
          ~cli_slot_ids:[cli_primary; cli_secondary; separate]
-         ~source:"hitl-cli-quota-order";
+         ~source:"hitl-cli-quota-order" ();
        let calls = ref [] in
        let dispatched_call_ids = ref [] in
        let execute input_tag =
@@ -2861,7 +2871,7 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
        with_cli_runtimes @@ fun () ->
        publish_unreachable_lane_with_cli
          ~cli_slot_ids:[ cli_primary; cli_secondary ]
-         ~source:"hitl-cli-exhausted";
+         ~source:"hitl-cli-exhausted" ();
        let entry = pending_entry ~base_path () in
        let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
          Error "subscription window exhausted"
@@ -3126,7 +3136,9 @@ let () =
         ; test_case
             "a cli slot answers after catalog exhaustion"
             `Quick
-            test_cli_slot_answers_after_catalog_exhaustion
+            (fun () -> test_cli_slot_answers_after_catalog_exhaustion ())
+        ; test_case "CLI-only Host Gate completes its durable judgment" `Quick
+            (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
         ; test_case
             "the cli walk advances past domain-invalid output"
             `Quick

@@ -63,6 +63,10 @@ product grows (see [Dashboard](#dashboard)).
 After selecting your model in the installer wizard, authenticate its CLI or export
 its API credential and start Docker. Then run:
 
+For Claude Code and Codex, the wizard uses the installed catalog for known
+model context sizes and enables CLI tools and streaming automatically. Unknown
+models ask for their context size. Z.AI credentials use `ZAI_API_KEY`.
+
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
 ```

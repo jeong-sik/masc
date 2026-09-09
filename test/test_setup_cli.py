@@ -20,7 +20,7 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
-    def scenario(self, foreign=False, missing_key=False):
+    def scenario(self, foreign=False, missing_key=False, stale_token=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)
             commands = base / 'commands'
@@ -44,12 +44,22 @@ class Setup(unittest.TestCase):
                 runtime.write_text(runtime.read_text() + '\n[providers.ollama_cloud.credentials]\ntype = "env"\nkey = "MASC_SETUP_TEST_KEY"\n')
             manifest = config / 'keepers/imp.toml'
             original = manifest.read_bytes()
+            if stale_token:
+                token = base / '.masc/auth/local-admin.token'
+                token.parent.mkdir(parents=True, exist_ok=True)
+                token.write_text('revoked-operator-token')
             posted = []
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     self.send({'paths': {'effective_base_path': str(base.parent if foreign else base)},
                                'startup': {'state_ready': True}})
                 def do_POST(self):
+                    token = base / '.masc/auth/local-admin.token'
+                    expected = token.read_text().strip() if token.exists() else ''
+                    if not expected or expected == 'revoked-operator-token' or self.headers.get('Authorization') != 'Bearer ' + expected:
+                        self.send_response(401)
+                        self.end_headers()
+                        return
                     posted.append((self.path, json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
                     self.send({'ok': True, 'action': 'up', 'name': 'imp',
                                'detail': {'name': 'imp'}})
@@ -79,12 +89,16 @@ class Setup(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(posted, [('/api/v1/keepers/imp/boot', {'name': 'imp'})])
                 self.assertIn('Model replies are verified by your first conversation', result.stdout)
+                self.assertNotIn((base / '.masc/auth/local-admin.token').read_text().strip(), result.stdout)
 
     def test_preserves_default_imp_and_starts_by_name(self):
         self.scenario()
 
     def test_refuses_another_workspace_before_minting_or_starting(self):
         self.scenario(foreign=True)
+
+    def test_recovers_a_revoked_operator_token(self):
+        self.scenario(stale_token=True)
 
     def test_missing_model_key_has_actionable_error(self):
         self.scenario(missing_key=True)

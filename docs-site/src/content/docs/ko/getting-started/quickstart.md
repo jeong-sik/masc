@@ -32,6 +32,10 @@ export PATH="$HOME/.local/bin:$PATH"
 3. macOS에서는 Docker Desktop, Linux에서는 Docker Engine을 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
 
+Claude Code·Codex는 알려진 모델의 context 크기를 설치된 카탈로그에서 읽고
+CLI 도구 호출·streaming을 자동 설정합니다. 미등록 모델만 context 크기를
+입력합니다. Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다.
+
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
 ```

@@ -61,6 +61,10 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 설치 마법사에서 보유 모델을 고른 뒤 해당 CLI에 로그인하거나 API 인증 환경변수를
 설정하고 Docker를 시작하세요. 다음 명령으로 기존 `imp`를 시작합니다.
 
+Claude Code·Codex는 알려진 모델의 context 크기를 설치된 카탈로그에서 읽고
+CLI 도구 호출·streaming을 자동 설정합니다. 미등록 모델만 context 크기를
+입력합니다. Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다.
+
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
 ```

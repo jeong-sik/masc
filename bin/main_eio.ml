@@ -2380,6 +2380,23 @@ let sandbox_image_cmd =
     (Cmd.info "sandbox-image" ~doc ~man)
     Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
 
+let runtime_model_info_cmd =
+  let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
+  let run model =
+    match Llm_provider.Model_catalog.load_default () with
+    | Error message -> prerr_endline message; 1
+    | Ok catalog ->
+      match Llm_provider.Model_catalog.lookup catalog model with
+      | Some entry ->
+        (match entry.max_context_tokens with
+        | Some context ->
+          print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
+        | None -> 1)
+      | None -> 1
+  in
+  Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read a model's declared context size from the installed catalog.")
+    Term.(const run $ model)
+
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path with
@@ -2414,8 +2431,12 @@ let setup_cmd_exit base_path port no_tui =
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
           | Ok credential -> credential.role = Masc_domain.Admin
           | Error _ -> false) -> 0
-      | Some _ | None -> login_cmd_exit base_path "127.0.0.1" port default_login_agent
-          Masc_domain.Admin "MASC_TOKEN" false None false false)
+      | Some _ | None ->
+        (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port
+            ~agent_name:default_login_agent ~role:Masc_domain.Admin
+            ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
+        | Ok _ -> print_endline "Local operator credential ready."; 0
+        | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1))
     ~start_keeper:(fun () ->
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
         ~agent:default_login_agent ~token:None ~keeper_name:"imp"
@@ -2459,6 +2480,7 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
+    ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd

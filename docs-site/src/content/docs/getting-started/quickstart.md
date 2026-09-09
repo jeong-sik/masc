@@ -34,6 +34,10 @@ claim that 0.35.0 has been published. Check the release tag before downloading.
 3. Install and start Docker Desktop on macOS, or Docker Engine on Linux.
    `docker info` must succeed as your current user. Then run:
 
+For Claude Code and Codex, the wizard uses the installed catalog for known
+model context sizes and enables CLI tools and streaming automatically. Unknown
+models ask for their context size. Z.AI credentials use `ZAI_API_KEY`.
+
 ```bash
 masc setup --base-path "$HOME/masc-workspace"
 ```

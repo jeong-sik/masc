@@ -725,9 +725,26 @@ configure_runtime_source() {
       ;;
   esac
   model=$(runtime_setup_input 'Model ID from your server or CLI') || die "runtime setup cancelled"
-  context=$(runtime_setup_integer 'Configured model context window in tokens') || die "runtime setup cancelled"
-  tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
-  streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
+  case "$source" in
+    claude_code|codex)
+      # The official clients support MASC dynamic tools and streaming. Their
+      # installed model catalog supplies the context; no capability quiz.
+      local model_info
+      if model_info=$("$DEST" runtime-model-info "$model" 2>/dev/null); then
+        context=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["max_context"])' <<< "$model_info")
+        log "using installed model catalog context: $context tokens"
+      else
+        context=$(runtime_setup_integer 'Model not in the installed catalog; enter its context window in tokens') || die "runtime setup cancelled"
+      fi
+      tools=y
+      streaming=y
+      ;;
+    *)
+      context=$(runtime_setup_integer 'Configured model context window in tokens') || die "runtime setup cancelled"
+      tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
+      streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
+      ;;
+  esac
   if [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would configure $source with model $model in $base_path/.masc/config"
     return 0

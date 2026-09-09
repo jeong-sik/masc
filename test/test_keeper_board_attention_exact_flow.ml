@@ -602,6 +602,32 @@ let prepared_with_cli_tail ~net ~cli_slot_ids candidate =
   | Error _ -> Alcotest.fail "board attention flow did not prepare"
 ;;
 
+let test_cli_only_executes_without_http_provenance () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock:_ ->
+      let candidate = candidate "board-attention-cli-only" in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
+      let prepared = match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "CLI-only Board lane must prepare" in
+      Alcotest.(check bool) "no HTTP flow allocated" false (Exact_flow.has_http_flow prepared);
+      let calls = ref 0 in
+      let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr calls;
+        Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
+      match Exact_flow.execute ~cli_runner:runner
+        ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
+        ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
+        prepared with
+      | Error _ -> Alcotest.fail "CLI-only Board judgment failed"
+      | Ok judgment ->
+        Alcotest.(check int) "one actual CLI dispatch" 1 !calls;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ -> Alcotest.fail "fabricated HTTP provenance"))))
+;;
+
 let test_cli_tail_judges_with_its_own_provenance () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
@@ -742,7 +768,9 @@ let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
     [ ( "production adapter"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick
+            test_cli_only_executes_without_http_provenance
+        ; Alcotest.test_case
             "CLI domain mismatch advances with correct provenance"
             `Quick test_cli_tail_advances_after_wrong_candidate
         ; Alcotest.test_case

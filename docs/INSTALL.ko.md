@@ -157,10 +157,13 @@ Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 �
 설치돼 있지 않아도 선택지가 사라지지 않고, 로컬 서버는 다른 컴퓨터의 endpoint를
 가리킬 수도 있습니다.
 
-고른 연결만 추가합니다. 모델 ID와 context 크기는 실제 서버·CLI 설정에 맞게 적습니다.
-도구 호출과 streaming은 직접 확인한 것만 켭니다. 모델 이름만 보고 이미지·reasoning·
-도구 지원을 짐작하지 않습니다. HTTP 모델은 그 provider에만 적용되는 capability
-overlay를 같이 만듭니다. API 키는 값이 아니라 환경변수 이름을 적습니다.
+고른 연결만 추가합니다. Claude Code·Codex는 모델 ID를 입력하면 설치된 모델
+카탈로그에서 context 크기를 가져오고 도구 호출·streaming 질문은 생략합니다.
+카탈로그에 없는 모델만 context 크기를 직접 입력합니다. HTTP 연결은 서버의
+context 크기와 도구 호출·streaming 지원 여부를 직접 확인해 입력합니다.
+HTTP capability overlay는 해당 provider에만 적용됩니다. API 키는 값이 아니라
+환경변수 이름을 적습니다. 기본 Z.AI 연결은 MASC를 시작하는 shell의
+`ZAI_API_KEY`를 읽습니다.
 
 설정은 임시 workspace에서 같은 바이너리의 runtime 검사를 통과한 뒤에야 반영됩니다.
 검사가 실패하거나 원본이 그 사이에 바뀌면 기존 설정을 그대로 둡니다. 같은 setup의

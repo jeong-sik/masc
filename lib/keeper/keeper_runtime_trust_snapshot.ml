@@ -158,55 +158,25 @@ let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
            ?summary
            disposition)
 
-let belongs_to_current_turn ~meta ~turn_field record =
-  match json_string_opt_member "trace_id" record,
-        json_int_opt_member turn_field record with
-  | Some trace_id, Some turn_id ->
-    String.equal trace_id (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    && Int.equal turn_id meta.runtime.usage.total_turns
-  | _ -> false
+let has_runtime_blocker runtime_blocker_fields =
+  Option.is_some (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields)
 
-let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+let current_receipt_for_runtime_state ~runtime_blocker_fields
     latest_receipt =
-  match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
-  | None -> false
-  | Some _ ->
-    not (Option.fold ~none:false
-           ~some:(belongs_to_current_turn ~meta ~turn_field:"turn_count")
-           latest_receipt)
-
-let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
-    latest_receipt =
-  if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-       latest_receipt
+  if has_runtime_blocker runtime_blocker_fields
   then None
   else latest_receipt
 
-let runtime_blocker_timeline_ts ~observed_at_unix ~meta
-    ~runtime_blocker_fields latest_receipt =
-  if
-    runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-      latest_receipt
-    && meta.runtime.usage.last_turn_ts > 0.0
-  then meta.runtime.usage.last_turn_ts
-  else observed_at_unix
-
-let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
+let latest_terminal_reason_opt ~runtime_blocker_fields ~latest_decision
     ~latest_receipt =
-  let current_decision =
-    Option.bind latest_decision (fun decision ->
-      if Option.is_none (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields)
-         || belongs_to_current_turn ~meta ~turn_field:"turn_id" decision
-      then terminal_reason_from_decision decision
-      else None)
-  in
-  match current_decision with
-  | Some _ as value -> value
-  | None ->
-    if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-         latest_receipt
-    then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
-    else Option.bind latest_receipt terminal_reason_from_receipt
+  (* Registry failure is current state, including failures after the last turn.
+     A historical success cannot clear it; only the registry owner can. *)
+  if has_runtime_blocker runtime_blocker_fields then
+    terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
+  else
+    match Option.bind latest_decision terminal_reason_from_decision with
+    | Some _ as value -> value
+    | None -> Option.bind latest_receipt terminal_reason_from_receipt
 
 let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
   let source_json, ts_unix_opt, reason_opt =
@@ -650,15 +620,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
 let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     ~latest_receipt ~latest_tool_call ~latest_approval_audit
     ~runtime_blocker_fields ~next_human_action =
-  let blocker_ts_unix =
-    runtime_blocker_timeline_ts ~observed_at_unix ~meta
-      ~runtime_blocker_fields latest_receipt
-  in
-  let blocker_observation_only =
-    not
-      (runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-         latest_receipt)
-  in
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   [
@@ -667,11 +628,11 @@ let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     Option.bind latest_receipt receipt_timeline_event;
     Option.bind latest_tool_call tool_call_timeline_event;
     Option.bind latest_approval_audit approval_event_timeline_event;
-    blocker_timeline_event ~ts_unix:blocker_ts_unix
-      ~observed_at_unix:blocker_ts_unix
+    blocker_timeline_event ~ts_unix:observed_at_unix
+      ~observed_at_unix
       ~runtime_blocker_fields ?task_id
       ~trace_id ~next_human_action
-      ~observation_only:blocker_observation_only ();
+      ~observation_only:true ();
   ]
   |> List.filter_map Fun.id
   |> sort_timeline_events
@@ -761,11 +722,11 @@ let collect_summary_raw ~(config : Workspace.config) ~(meta : keeper_meta) =
 
 let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
   let latest_receipt_for_runtime_state =
-    current_receipt_for_runtime_state ~meta
+    current_receipt_for_runtime_state
       ~runtime_blocker_fields:raw.runtime_blocker_fields raw.latest_receipt
   in
   let latest_terminal_reason =
-    latest_terminal_reason_opt ~meta
+    latest_terminal_reason_opt
       ~runtime_blocker_fields:raw.runtime_blocker_fields
       ~latest_decision:raw.latest_decision ~latest_receipt:raw.latest_receipt
   in
@@ -855,21 +816,12 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
   let blocker_events =
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let blocker_ts_unix =
-      runtime_blocker_timeline_ts ~observed_at_unix ~meta
-        ~runtime_blocker_fields latest_receipt
-    in
-    let blocker_observation_only =
-      not
-        (runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-           latest_receipt)
-    in
     [
-      blocker_timeline_event ~ts_unix:blocker_ts_unix
-        ~observed_at_unix:blocker_ts_unix
+      blocker_timeline_event ~ts_unix:observed_at_unix
+        ~observed_at_unix
         ~runtime_blocker_fields ?task_id
         ~trace_id ~next_human_action
-        ~observation_only:blocker_observation_only ()
+        ~observation_only:true ()
     ]
     |> List.filter_map Fun.id
   in
@@ -955,12 +907,12 @@ let collect_raw_snapshot_with_pending_reader
 let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let observations = raw.observations in
   let latest_receipt_for_runtime_state =
-    current_receipt_for_runtime_state ~meta
+    current_receipt_for_runtime_state
       ~runtime_blocker_fields:observations.runtime_blocker_fields
       observations.latest_receipt
   in
   let latest_terminal_reason =
-    latest_terminal_reason_opt ~meta
+    latest_terminal_reason_opt
       ~runtime_blocker_fields:observations.runtime_blocker_fields
       ~latest_decision:observations.latest_decision
       ~latest_receipt:observations.latest_receipt

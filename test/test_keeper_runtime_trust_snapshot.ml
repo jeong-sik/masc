@@ -115,7 +115,7 @@ let test_trust_blocker_uses_structured_state () =
   Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention
 ;;
 
-let test_blocker_receipt_requires_current_trace_and_turn () =
+let test_active_blocker_overrides_success_until_cleared () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -156,7 +156,11 @@ let test_blocker_receipt_requires_current_trace_and_turn () =
           (snapshot |> member "latest_receipt" |> member "trace_id" |> to_string))
         [ "previous turn in same second", trace_id, 6, "Alert"
         ; "different trace with same turn", "previous-trace", 7, "Alert"
-        ; "current execution receipt", trace_id, 7, "Pass" ])
+        ; "same turn before later failure", trace_id, 7, "Alert" ];
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name None;
+      let recovered = observe trace_id 7 in
+      Alcotest.(check string) "registry recovery restores receipt disposition" "Pass"
+        (recovered |> member "disposition" |> to_string))
 ;;
 
 let test_active_model_missing_attempt_is_unknown () =
@@ -995,8 +999,8 @@ let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
     [ ( "status_runtime_provenance"
-      , [ Alcotest.test_case "blocker receipt is bound to trace and turn" `Quick
-            test_blocker_receipt_requires_current_trace_and_turn
+      , [ Alcotest.test_case "active blocker survives historical success" `Quick
+            test_active_blocker_overrides_success_until_cleared
         ; Alcotest.test_case "trust follows structured blocker state" `Quick
             test_trust_blocker_uses_structured_state
         ; Alcotest.test_case

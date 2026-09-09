@@ -1472,6 +1472,7 @@ let test_gemini_stream_function_call_preserves_thought_signature () =
        ; ContentBlockDelta
            { index = delta_idx; delta = InputJsonSnapshot {|{"q":"test"}|} }
        ; MessageDelta { stop_reason = Some StopToolUse; _ }
+       ; MessageStop
        ] ->
        check int "redacted index" 0 redacted_idx;
        check int "tool index" 1 tool_idx;
@@ -1549,6 +1550,7 @@ let test_gemini_stream_textual_parts_preserve_thought_signatures () =
        ; ContentBlockStart { index = 3; content_type = "thinking"; _ }
        ; ContentBlockDelta { index = 3; delta = ThinkingDelta "plan" }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier
          ~target:"text"
@@ -1601,6 +1603,7 @@ let test_gemini_stream_signed_inline_image () =
                  { media_type = "image/png"; source_type = Base64; data = "iVBORw0KGgo=" }
            }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
+       ; MessageStop
        ] ->
        check_part_signature_carrier ~target:"image" ~signature:"sig-stream-image" carrier
      | _ -> fail "expected signed image carrier and media delta");

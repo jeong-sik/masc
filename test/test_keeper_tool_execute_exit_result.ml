@@ -105,11 +105,16 @@ let install_always_allow_gate ~base =
    Omitting it leaves the runtime to stand in the keeper's own playground
    root, which is where a caller that names no directory runs and what the
    Execute probe in test_keeper_tool_dispatch_runtime relies on. Neither case
-   here needs a particular directory. *)
+   here needs a particular directory.
+
+   The factory is what lets the command run at all: guest dispatch with none
+   answers "typed Shell IR guest dispatch requires a turn sandbox factory (no
+   factory provided)" before anything executes. The shared helper wires the
+   one the production turn bundle wires. *)
 let run_execute ~config ~meta ~argv =
   Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
     ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-    ~turn_sandbox_factory:None
+    ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
     ~config
     ~meta
     ~args:(`Assoc [ "argv", `List (List.map (fun a -> `String a) argv) ])

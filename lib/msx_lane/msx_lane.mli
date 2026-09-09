@@ -21,6 +21,13 @@ val key_of_string : string -> (key, string) result
 val key_to_string : key -> string
 (** Canonical ledger spelling; inverse of {!key_of_string} for named keys. *)
 
+val is_bitmap_mode : string -> bool
+(** Whether an observation [mode] name draws pixels rather than a name table:
+    GRAPHIC4-7 and the undefined combinations. In those the observation's
+    [screen_text] is empty — the name table underneath is leftover noise, and
+    sending it anyway cost ~2 KB per screen (measured over 315 keeper calls
+    averaging 3.7 KB), which is what crowds out the useful fields. *)
+
 type sprite = {
   index : int;  (** SAT slot 0-31 *)
   x : int;
@@ -35,7 +42,10 @@ type observation = {
   pc : int;
   halted : bool;
   screen_text : string;
-      (** name table as characters — meaningful when the pattern set is a font *)
+      (** name table as characters — meaningful when the pattern set is a font.
+          Empty in bitmap modes ({!is_bitmap_mode}): there the name table is
+          leftover noise, not what the game drew; read {!screen_view} or the
+          image artifact instead. *)
   screen_view : string;
       (** a 64x24 luminance ASCII picture of the frame — readable in any mode,
           for a keeper with no vision runtime. Rows are newline-separated. *)

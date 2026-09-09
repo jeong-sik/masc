@@ -233,7 +233,7 @@ masc_msx_save	Checkpoint the MSX machine under a name.
 Save the complete workspace MSX machine to a named checkpoint without advancing it. Includes CPU, RAM, VRAM, cartridge SRAM, disk bytes and open file positions; survives server restart. Replaces the named slot.
 masc_msx_screen	Read the MSX frame without advancing time.
 
-Read the current MSX frame without advancing time: mode, PC, screen_text, screen_view, tiles and sprites. screen_view is a 64x24 ASCII picture of the screen, readable in any mode, so a keeper with no vision runtime can recognise the layout (a title, a menu, a map). screen_text only reads text-mode text and is noise in bitmap modes; tile numbers are game-specific. Keeper calls also return a PNG artifact and dimensions; a keeper with a vision runtime can use keeper_analyze_image on it.
+Read the current MSX frame without advancing time: mode, PC, screen_text, screen_view, tiles and sprites. screen_view is a 64x24 ASCII picture of the screen, readable in any mode, so a keeper with no vision runtime can recognise the layout (a title, a menu, a map). screen_text only reads text-mode text and is empty in bitmap modes; tile numbers are game-specific. Keeper calls also return a PNG artifact and dimensions; a keeper with a vision runtime can use keeper_analyze_image on it.
 masc_msx_step	Advance the shared MSX machine by frames with no key held.
 
 Returns the observation (see masc_msx_screen). Use it to let a title, a fade or a level intro play out. Frames are 1/60 s; at most 300 per call.

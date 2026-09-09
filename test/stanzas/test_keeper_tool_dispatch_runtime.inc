@@ -1,6 +1,7 @@
 (test
  (name test_keeper_tool_dispatch_runtime)
  (modules test_keeper_tool_dispatch_runtime)
+ (deps fixtures/browser-webdriver-script.cjs)
  (libraries
   masc_test_deps
   masc.msx_lane

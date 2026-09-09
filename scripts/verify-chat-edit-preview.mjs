@@ -30,6 +30,7 @@ const artifacts = new Map([before, after, bad].map(value => [value.sha256, value
 function ref({ sha256, bytes, mime }) { return { _blob: { sha256, bytes, mime, preview: '' } } }
 function receipt(path, edit_snapshots) {
   return { ts: 1, keeper: 'preview-writer', tool: 'Edit', success: true, duration_ms: 3,
+    execution_id: `execution:${path}`, tool_call_id: 'provider-reused-id',
     input: {}, route_evidence: { descriptor_id: 'agent.edit_file' },
     output: JSON.stringify({ ok: true, mode: 'patch', path, occurrences: 1, edit_snapshots }) }
 }
@@ -67,7 +68,7 @@ try {
   page.on('worker', worker => workers.push(worker.url()))
   await page.goto(`http://127.0.0.1:${server.address().port}/dashboard/dev-fixtures/chat-edit-snapshots.html`)
   const normal = page.locator('[data-scenario="0"]')
-  await normal.getByRole('button').click()
+  await normal.getByRole('button', { name: '편집 전후 원본 보기', exact: true }).click()
   const diff = normal.getByLabel('편집 원본의 Unified diff')
   await diff.waitFor()
   assert.equal(await diff.textContent(),
@@ -81,7 +82,7 @@ try {
   await diff.focus()
   assert.equal(await diff.evaluate(element => document.activeElement === element), true)
   assert.ok(await page.locator('[data-scenario="1"]').textContent().then(text => text.includes('scenario: storage unavailable')))
-  await page.locator('[data-scenario="2"]').getByRole('button').click()
+  await page.locator('[data-scenario="2"]').getByRole('button', { name: '편집 전후 원본 보기', exact: true }).click()
   await page.locator('[data-scenario="2"]').getByRole('alert').waitFor()
   assert.equal(await page.locator('[data-scenario="2"] pre').count(), 0)
   await page.screenshot({ path: resolve(output, 'desktop.png'), fullPage: true })
@@ -92,6 +93,6 @@ try {
   assert.deepEqual(errors, [])
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ observed_at: new Date().toISOString(),
     manifest, requests, workers, errors, deployment: false,
-    scope: 'CI-built production component and actual worker; synthetic receipts and artifact HTTP responses' }, null, 2) + '\n')
+    scope: 'CI-built full ChatTranscript, canonical execution join and actual worker; synthetic receipts and artifact HTTP responses' }, null, 2) + '\n')
   console.log(JSON.stringify({ evidence: output, workers: workers.length, scenarios: 3 }))
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)) }

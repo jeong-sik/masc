@@ -12,6 +12,14 @@
     byte of its content channel. *)
 
 type state
+type snapshot
+
+val snapshot : state -> snapshot
+(** Immutable capture of the current channel and held tag-prefix bytes. *)
+
+val restore : state -> snapshot -> unit
+(** Restore a captured parser state after its projected chunk is rejected.
+    Snapshots may be reused and are not mutated by subsequent feeds. *)
 
 val create : unit -> state
 

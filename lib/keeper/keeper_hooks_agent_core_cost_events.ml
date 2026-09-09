@@ -60,6 +60,7 @@ let assemble_cost_event_payload
     ~(output_tokens : int)
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
+    ?response_id
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -134,6 +135,25 @@ let assemble_cost_event_payload
         ("cache_miss_input_tokens", `Int cache_miss_input_tokens);
       ]
   in
+  (* Input includes cache creation after provider normalization. Cache misses
+     alone exclude those writes, so they are not the non-cached input total.
+     An invalid partition is unknown, never a clamped zero observation. *)
+  let non_cached_input_tokens =
+    if usage_missing || input_tokens < 0 || cache_read_input_tokens < 0
+       || cache_creation_input_tokens < 0
+       || cache_read_input_tokens > input_tokens
+       || cache_creation_input_tokens > input_tokens - cache_read_input_tokens
+    then `Null
+    else `Int (input_tokens - cache_read_input_tokens)
+  in
+  let response_id =
+    match usage_projection, response_id with
+    | Cost_ledger.Raw_observation, Some id ->
+        (match String_util.trim_nonempty id with
+         | Some id -> `String id
+         | None -> `Null)
+    | Cost_ledger.Raw_observation, None | Cost_ledger.Resolved_delta, _ -> `Null
+  in
   let telemetry_fields = match telemetry with
     | Some t ->
       int_field "reasoning_tokens" t.reasoning_tokens
@@ -183,7 +203,9 @@ let assemble_cost_event_payload
   let entry =
     Cost_ledger.to_json
       ~extra_fields:
-        ([ (key_provider, `String runtime_lane_label)
+        ([ ("response_id", response_id)
+         ; ("non_cached_input_tokens", non_cached_input_tokens)
+         ; (key_provider, `String runtime_lane_label)
          ; (key_cost_status, `String cost_status_label)
          ; (key_cost_status_reason, `String cost_status_reason_label)
          ; (key_cost_usd_source, `String cost_usd_source)
@@ -215,6 +237,7 @@ let cost_event_payload
     ~(output_tokens : int)
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
+    ?response_id
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -232,6 +255,7 @@ let cost_event_payload
      ~output_tokens
      ~cost_usd
      ~usage_projection
+     ?response_id
      ~cache_creation_input_tokens
      ~cache_read_input_tokens
      ~usage_missing
@@ -251,6 +275,7 @@ let emit_cost_event
     ~(output_tokens : int)
     ~(cost_usd : float)
     ?(usage_projection = Cost_ledger.Raw_observation)
+    ?response_id
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -270,6 +295,7 @@ let emit_cost_event
       ~output_tokens
       ~cost_usd
       ~usage_projection
+      ?response_id
       ~cache_creation_input_tokens
       ~cache_read_input_tokens
       ~usage_missing

@@ -36,9 +36,9 @@ let test_create_sets_model () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-haiku-4-5" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~net ~model:"claude-opus-5" |> Builder.build_safe |> Result.get_ok
   in
-  check_model "model" "claude-haiku-4-5" (Agent.state agent).config.model
+  check_model "model" "claude-opus-5" (Agent.state agent).config.model
 ;;
 
 (* --- 2. with_system_prompt --- *)

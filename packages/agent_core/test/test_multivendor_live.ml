@@ -153,7 +153,7 @@ let test_anthropic () =
       Llm_provider.Provider_config.make
         ~kind:Llm_provider.Provider_config.Anthropic
         ~provider_id:"anthropic"
-        ~model_id:"claude-haiku-4-5"
+        ~model_id:"claude-opus-5"
         ~base_url:"https://api.anthropic.com"
         ~api_key:(Option.get (Sys.getenv_opt "ANTHROPIC_API_KEY"))
         ~headers:[ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
@@ -165,7 +165,7 @@ let test_anthropic () =
       ~sw
       ~provider_label:"anthropic"
       ~provider_config
-      ~model:"claude-haiku-4-5"
+      ~model:"claude-opus-5"
 ;;
 
 (* ── Openai (via OpenAICompat) ────────────────────────────────── *)

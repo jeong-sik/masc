@@ -343,7 +343,7 @@ let test_message_start_missing_output_tokens () =
 let test_parse_with_explicit_event_type () =
   (* event_type parameter overrides the 'type' field in JSON *)
   let data =
-    {|{"message":{"id":"msg_02","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":10}}}|}
+    {|{"message":{"id":"msg_02","model":"claude-opus-5-20260101","usage":{"input_tokens":10}}}|}
   in
   match Agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
   | Some (MessageStart { id; _ }) ->

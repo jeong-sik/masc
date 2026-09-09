@@ -183,7 +183,7 @@ let with_authority config keeper_name f = protect (fun () ->
       match Keeper_lifecycle_reservation.acquire ~base_path:config.base_path
         ~keeper_name ~purpose:Configuration_removal with
       | Error (Already_reserved snapshot) -> Error (Conflict (Keeper_lifecycle_reservation.snapshot_to_string snapshot))
-      | Ok token -> Fun.protect ~finally:(fun () -> ignore (Keeper_lifecycle_reservation.release token)) (fun () ->
+      | Ok token -> Fun.protect ~finally:(fun () -> ignore (* fire-and-forget: reservation release on cleanup path, failure is non-fatal *) (Keeper_lifecycle_reservation.release token)) (fun () ->
         let path = manifest_path config keeper_name in
         match File_lock_eio.with_durable_lock_observed ~lock_path:(path ^ ".lock") f with
         | Lock_not_acquired error -> Error (Storage_error (File_lock_eio.durable_lock_error_to_string error))

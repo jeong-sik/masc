@@ -481,7 +481,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
       | Keeper_configuration_artifact :: rest when not remove_configuration -> remove rest
       | Keeper_runtime_configuration_artifact :: rest ->
         (match Runtime.with_keeper_assignment_transaction
-          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path)
+          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path)
           ~keeper_name:keeper_name Runtime.commit_keeper_removal with
          | Error _ as error -> error
          | Ok receipt ->

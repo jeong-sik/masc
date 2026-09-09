@@ -8,7 +8,6 @@ import { resetTaskSearch, expandedTasks } from './goal-helpers'
 import type { Task } from '../../types'
 import * as actions from '../../api/actions'
 import * as store from '../../store'
-import * as confirmation from '../common/confirm-dialog'
 
 function makeDoneTask(index: number): Task {
   const day = String(26 - index).padStart(2, '0')

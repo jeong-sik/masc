@@ -463,7 +463,79 @@ let earlier_match left right =
     if Re.Group.start code 0 <= Re.Group.start image 0 then left else right
   | Some _, Some _ -> left
 
+(* Official-client runtimes (codex spark and friends) carry whole turns in
+   envelope messages, so the content field arrives as raw schema JSON.
+   Rendering it verbatim drowned the chat in one giant JSON line; the
+   envelope's content_blocks are what the reader wants. A schema we do not
+   know folds to a marker instead of spilling, so the next runtime switch
+   shows a readable placeholder rather than another dump. *)
+let official_client_message_blocks raw =
+  let trimmed = String.trim raw in
+  if not (String.starts_with ~prefix:"{\"schema\":" trimmed) then None
+  else
+    match Yojson.Safe.from_string trimmed with
+    | exception _ -> None
+    | `Assoc fields -> (
+      match List.assoc_opt "schema" fields, List.assoc_opt "message" fields with
+      | Some (`String schema), Some (`Assoc message) -> (
+        match schema with
+        | "masc.official-client-context-message.v2" -> (
+          match List.assoc_opt "content_blocks" message with
+          | Some (`List blocks) ->
+            Some
+              (List.filter_map
+                 (fun json ->
+                   match json with
+                   | `Assoc block -> (
+                     match List.assoc_opt "type" block with
+                     | Some (`String "text") -> (
+                       match List.assoc_opt "text" block with
+                       | Some (`String text) when text <> "" ->
+                         Some (Text { html = escape_html text })
+                       | _ -> None)
+                     | Some (`String "thinking") -> (
+                       match List.assoc_opt "thinking" block with
+                       | Some (`String content) when content <> "" ->
+                         Some (Thinking { content; redacted = false })
+                       | _ -> None)
+                     | Some (`String "tool_use") -> (
+                       match List.assoc_opt "name" block with
+                       | Some (`String name) ->
+                         Some
+                           (Text
+                              { html =
+                                  escape_html (Printf.sprintf "[%s 도구 호출]" name)
+                              })
+                       | _ -> None)
+                     | Some (`String "tool_result") ->
+                       Some (Text { html = escape_html "[도구 결과]" })
+                     | Some (`String kind) ->
+                       Some
+                         (Text
+                            { html =
+                                escape_html
+                                  (Printf.sprintf "[지원 밖 메시지 블록: %s]" kind)
+                            })
+                     | _ -> None)
+                   | _ -> None)
+                 blocks)
+          | _ -> None)
+        | other ->
+          Some
+            [ Text
+                { html =
+                    escape_html
+                      (Printf.sprintf "[외부 런타임 메시지 형식: %s]" other)
+                } ]
+        )
+      | _ -> None)
+    | _ -> None
+;;
+
 let parse_text_to_blocks text : chat_block list =
+  match official_client_message_blocks text with
+  | Some blocks -> blocks
+  | None ->
   let rec scan acc last_index =
     let next_image =
       Option.map (fun group -> Image_match group) (Re.exec_opt ~pos:last_index md_image_re text)

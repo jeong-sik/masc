@@ -20,7 +20,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
       let goal, _ = Goal_store.upsert_goal config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
-      let task = Task_goal_assignment.add_task_with_result config ~goal_id:goal.id
+      let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
         ~title:"Evaluate alternatives" ~priority:2 ~description:"Choose and explain" |> require "task" in
       Workspace.claim_task_r config ~agent_name:"fusion-keeper" ~task_id:task.task_id () |> require "claim" |> ignore;
       let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"} in
@@ -68,7 +68,11 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     Yojson.Safe.Util.(member "keeper_decisions" readback |> member "records" |> to_list |> List.mem event);
   let changed = Fusion_decision.parse (args task_id "rejected" "different choice in same turn") |> require "parse" in
   rejected (Fusion_decision.record ~config ~keeper:meta.name ~turn_ref changed);
-  rejected (Fusion_decision.record ~config ~keeper:"foreign" ~turn_ref changed);
+  (match Fusion_decision.record ~config ~keeper:"foreign" ~turn_ref changed with
+   | Error (Fusion_decision.Rejected _ as error) ->
+       check bool "foreign ownership is workflow rejection" true
+         (Fusion_decision.failure_class error = Tool_result.Workflow_rejection)
+   | Error (Fusion_decision.Storage_failure _) | Ok _ -> fail "foreign actor misclassified");
   rejected (Fusion_decision.parse (`Assoc ["actor", `String "fusion-keeper"]));
   let missing_turn = Keeper_tool_runtime.handle {ctx with gate_context=None} ~descriptor ~args:input in
   check bool "caller cannot fabricate missing turn" true (match missing_turn with
@@ -80,7 +84,11 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
   rejected (Fusion_decision.read_for_keeper ~config ~keeper:"fusion-keeper" ~run_id:"absent");
   let dated = Jsonl_writer.dated_path_now ~base_dir:(Filename.concat (Workspace.masc_dir config) "events") in
   Fs_compat.append_file dated.path "malformed historical event\n";
-  rejected (Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal))
+  (match Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal with
+   | Error (Fusion_decision.Storage_failure _ as error) ->
+       check bool "corrupt storage is runtime failure" true
+         (Fusion_decision.failure_class error = Tool_result.Runtime_failure)
+   | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
 let () = run "Fusion decision attribution" ["behavior", [
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;

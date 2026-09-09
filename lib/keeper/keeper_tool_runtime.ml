@@ -479,11 +479,11 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_fusion_decision ->
     let result =
       let open Result.Syntax in
-      let* proposal = Fusion_decision.parse args in
+      let* proposal = Fusion_decision.parse args |> Result.map_error (fun detail -> Fusion_decision.Rejected detail) in
       let* turn_id = match ctx.gate_context with
         | Some context -> (match (context ()).Keeper_gate.turn_id with
-            | Some turn_id -> Ok turn_id | None -> Error "decision requires exact current turn context")
-        | None -> Error "decision requires exact current turn context" in
+            | Some turn_id -> Ok turn_id | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context"))
+        | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context") in
       Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name
         ~turn_ref:(Ids.Turn_ref.make
           ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id) ~absolute_turn:turn_id)
@@ -491,7 +491,7 @@ let handle_in_process ctx descriptor args =
     Some (match result with
       | Ok recorded -> Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true; "decision", recorded.event;
           "cleanup_warning", (match recorded.cleanup_warning with Some detail -> `String detail | None -> `Null)])
-      | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection detail)
+      | Error error -> Keeper_tool_execution.failure ~class_:(Fusion_decision.failure_class error) (Fusion_decision.error_to_string error))
   | Tool_masc_fusion_status ->
     (* read-only: reads the in-memory run registry, no server context needed. *)
     Some

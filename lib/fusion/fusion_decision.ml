@@ -7,6 +7,12 @@ let disposition_of_string = function
   | "adopted" -> Ok Adopted | "rejected" -> Ok Rejected | "modified" -> Ok Modified
   | _ -> Error "decision must be adopted, rejected or modified"
 
+type error = Rejected of string | Storage_failure of string
+let error_to_string = function Rejected detail | Storage_failure detail -> detail
+let failure_class = function
+  | Rejected _ -> Tool_result.Workflow_rejection
+  | Storage_failure _ -> Tool_result.Runtime_failure
+
 type recorded = { event : Yojson.Safe.t; cleanup_warning : string option }
 
 type proposal = { run_id:string; task_id:string; disposition:disposition; choice:string; reason:string }
@@ -33,9 +39,9 @@ let source ~keeper ~run_id =
   | Some post when Board.Agent_id.to_string post.author = keeper ->
     (match post.origin with
      | Some {source=Some "fusion"; fusion_run_id=Some actual; _} when actual=run_id -> Ok post
-     | _ -> Error "source is not exact Fusion evidence")
-  | Some _ -> Error "Fusion run belongs to another Keeper"
-  | None -> Error "Fusion run has no durable deliberation evidence"
+     | _ -> Error (Rejected "source is not exact Fusion evidence"))
+  | Some _ -> Error (Rejected "Fusion run belongs to another Keeper")
+  | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
 
 let validate_event json =
   let names = ["type"; "decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task";
@@ -59,7 +65,7 @@ let validate_event json =
 let events_root config = Filename.concat (Workspace.masc_dir config) "events"
 let protect f = try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _ | Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
+  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _ | Yojson.Json_error _) as exn -> Error (Storage_failure (Printexc.to_string exn))
 
 (* Read the existing task event journal without an arbitrary history cap. A
    malformed row prevents a new write from guessing whether its identity exists. *)
@@ -86,12 +92,12 @@ let read ~config ~run_id = protect (fun () ->
 let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
   let* post = source ~keeper ~run_id:proposal.run_id in
   Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
-  let* backlog = Workspace_backlog.read_backlog_r config in
+  let* backlog = Workspace_backlog.read_backlog_r config |> Result.map_error (fun detail -> Storage_failure detail) in
   let* task = match List.find_opt (fun (task : Masc_domain.task) -> task.id = proposal.task_id) backlog.tasks with
-    | Some task -> Ok task | None -> Error "task does not exist" in
+    | Some task -> Ok task | None -> Error (Rejected "task does not exist") in
   let* () = if Masc_domain.task_assignee_of_status task.task_status = Some keeper then Ok ()
-    else Error "decision task is not assigned to this Keeper" in
-  let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+    else Error (Rejected "decision task is not assigned to this Keeper") in
+  let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config |> Result.map_error (fun detail -> Storage_failure detail) in
   let goal_ids = List.filter_map (fun (goal_id, tasks) -> if List.mem proposal.task_id tasks then Some goal_id else None) links
     |> List.sort_uniq String.compare in
   let identity = `Assoc ["fusion_run_id", `String proposal.run_id; "task", `String proposal.task_id;
@@ -110,8 +116,8 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
     match List.find_opt (fun row -> Json_util.get_string row "decision_id" = Some decision_id) existing with
     | Some (`Assoc stored as row) ->
       if List.for_all (fun (key,value) -> List.assoc_opt key stored = Some value) fields then Ok {event=row; cleanup_warning=None}
-      else Error "this turn already recorded a different decision for this run and task"
-    | Some _ -> Error "invalid existing decision event"
+      else Error (Rejected "this turn already recorded a different decision for this run and task")
+    | Some _ -> Error (Storage_failure "invalid existing decision event")
     | None ->
       let event = `Assoc (fields @ ["ts", `String (Masc_domain.now_iso ())]) in
       let dated = Jsonl_writer.dated_path_now ~base_dir:(events_root config) in
@@ -119,8 +125,11 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
        | Fs_compat.Private_file_succeeded () -> Ok {event; cleanup_warning=None}
        | Fs_compat.Private_file_succeeded_with_cleanup_failure {cleanup_failure; _} ->
          Ok {event; cleanup_warning=Some (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)}
-       | Fs_compat.Private_file_failed _ | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
-         Error "decision journal append failed; read task history to reconcile"))))
+       | Fs_compat.Private_file_failed error ->
+         Error (Storage_failure (Fs_compat.private_jsonl_append_error_to_string error))
+       | Fs_compat.Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
+         Error (Storage_failure (Fs_compat.private_jsonl_append_error_to_string error ^ "; cleanup: "
+           ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))))
 
 let read_for_keeper ~config ~keeper ~run_id =
   let* _ = source ~keeper ~run_id in
@@ -129,4 +138,4 @@ let read_for_keeper ~config ~keeper ~run_id =
 
 let read_to_yojson = function
   | Ok records -> `Assoc ["state", `String "available"; "records", `List records]
-  | Error detail -> `Assoc ["state", `String "unavailable"; "detail", `String detail]
+  | Error error -> `Assoc ["state", `String "unavailable"; "detail", `String (error_to_string error)]

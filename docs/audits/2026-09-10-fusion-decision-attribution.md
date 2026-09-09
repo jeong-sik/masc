@@ -22,7 +22,10 @@ Keeper and turn. An exact same-turn retry returns the original event; a
 conflicting rewrite is refused. A later turn can record a new judgment without
 overwriting history. Appending uses the existing durable locked JSONL writer;
 a committed append with cleanup failure returns the recorded event plus an
-explicit warning. An unreadable journal cannot be treated as an empty history.
+explicit warning. An unreadable journal cannot be treated as an empty history. Domain/ownership
+refusals are typed `Rejected`; storage reads, malformed journal rows and append
+failures are typed `Storage_failure`, projected as runtime failures. No error
+message text selects the failure class.
 
 Readback is available in `masc_task_history`, the existing dashboard Task
 history (including choice/reason in notes), `masc_fusion_status` with a run ID,

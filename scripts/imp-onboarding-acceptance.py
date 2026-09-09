@@ -75,11 +75,12 @@ def directory_execution(traces):
         if not isinstance(script, str):
             return False
         try:
-            lexer = shlex.shlex(script, posix=True, punctuation_chars=';&|')
+            lexer = shlex.shlex(script, posix=True, punctuation_chars=';&|\n')
+            lexer.whitespace = ' \t\r'
             lexer.whitespace_split = True
             commands = [[]]
             for token in lexer:
-                if token in (';', '&&'):
+                if token in (';', '&&', '\n'):
                     commands.append([])
                 elif token in ('&', '|', '||'):
                     return False
@@ -182,7 +183,7 @@ def measure(args):
                 prompts = [
                     'Hello imp. Please introduce yourself briefly.',
                     'Create a Board post titled Imp first conversation and a Task titled Imp onboarding check. Leave the task open.',
-                    'List your sandbox working directory and show its current path.',
+                    'Show the current path and a detailed directory listing, including hidden entries, inside your default sandbox.',
                     'Fetch https://example.com and tell me what it says.',
                 ]
                 for index, prompt in enumerate(prompts):

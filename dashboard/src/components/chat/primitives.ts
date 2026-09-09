@@ -3447,10 +3447,15 @@ function toolTraceSourceBadge(entry: KeeperConversationEntry | null, traceStep?:
   }
 }
 
-function isUnlinkedTraceTool(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): boolean {
-  return traceStep !== undefined
-    && entry === null
-    && !traceStep.executionId?.trim()
+function isUnlinkedTraceTool(
+  entry: KeeperConversationEntry | null,
+  traceStep?: ChatTraceToolStep,
+  canMarkMissing = false,
+): boolean {
+  if (entry === null) return traceStep !== undefined && !traceStep.executionId?.trim()
+  // Provider delivery rows can finish without a canonical execution binding.
+  // That proves the output cannot be joined, not that execution lost a result.
+  return canMarkMissing && !entry.executionId?.trim() && !traceStep?.executionId?.trim()
 }
 
 function ToolTraceStep({
@@ -3481,7 +3486,7 @@ function ToolTraceStep({
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
-  const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep)
+  const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep, canMarkMissing)
   const sourceBadge = structuralSummary
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
     : toolTraceSourceBadge(entry, traceStep)
@@ -3805,7 +3810,8 @@ function ToolTraceCard({
   // Surface unjoined outputs as "missing" only once the turn and output
   // hydration have both settled.
   const missingN = orderedToolSteps.filter(
-    (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry),
+    (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry)
+      && !isUnlinkedTraceTool(s.entry, s.kind === 'tool' ? s.step : undefined, true),
   ).length
   const coverageGapN = orderedToolSteps.filter(
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'coverage-gap',
@@ -3814,7 +3820,9 @@ function ToolTraceCard({
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
   ).length
   const unlinkedN = orderedToolSteps.filter(
-    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.executionId?.trim(),
+    (s) => !structuralSummary && s.output === null
+      && isUnlinkedTraceTool(s.entry, s.kind === 'tool' ? s.step : undefined,
+        s.entry !== null && canMarkMissingForEntry(s.entry)),
   ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),

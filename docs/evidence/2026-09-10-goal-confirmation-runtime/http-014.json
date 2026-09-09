@@ -1,0 +1,7 @@
+{
+  "path": "/api/v1/goals/confirmation?goal_id=goal-1788995514248-d795c8d8",
+  "request": null,
+  "authenticated": true,
+  "status": 200,
+  "raw": "{\"goal\":{\"id\":\"goal-1788995514248-d795c8d8\",\"criterion_revision\":\"5e84069cad450f6d84192d55985c5e55\",\"title\":\"Synthetic marker inspection\",\"metric\":\"marker count in fixture/evidence.txt\",\"target_value\":\"1\",\"due_date\":null,\"priority\":3,\"phase\":\"awaiting_confirmation\",\"last_review_note\":null,\"last_review_at\":\"2026-09-09T23:11:54Z\",\"created_at\":\"2026-09-09T23:11:54Z\",\"updated_at\":\"2026-09-09T23:11:54Z\"},\"verification\":{\"goal_id\":\"goal-1788995514248-d795c8d8\",\"completion\":{\"state\":\"proof_proven\",\"verdict\":{\"outcome\":\"proven\",\"reason\":null,\"request_id\":\"fd8f5e970304ff3c5bb6432aa3db3844\",\"criterion\":{\"revision\":\"5e84069cad450f6d84192d55985c5e55\",\"title\":\"Synthetic marker inspection\",\"metric\":\"marker count in fixture/evidence.txt\",\"target_value\":\"1\"},\"verification_run_id\":\"01a08871-2fa1-7000-9faa-1d402c5e6538\",\"authority\":{\"kind\":\"system_llm_agent\",\"actor\":\"verifier_exact\"},\"evidence\":\"Synthetic verifier read the real fixture file and observed exactly one marker.\",\"recorded_at\":\"2026-09-09T23:11:54Z\"}},\"updated_at\":\"2026-09-09T23:11:54Z\"}}"
+}

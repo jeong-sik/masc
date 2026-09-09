@@ -63,12 +63,15 @@ def main():
                 arguments = {'verdict': 'APPROVE', 'reason': 'Synthetic verifier read the real fixture file and observed exactly one marker.'}
             choice = {'index': 0, 'message': {'role': 'assistant', 'content': None, 'tool_calls': [
                 {'id': f'fixture-{index}', 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments)}}]}, 'finish_reason': 'tool_calls'}
+            if index >= 2:
+                choice = {'index': 0, 'message': {'role': 'assistant', 'content': 'Synthetic verifier finished after its one verdict.'}, 'finish_reason': 'stop'}
             usage = {'prompt_tokens': 10, 'completion_tokens': 10, 'total_tokens': 20}
             if body.get('stream'):
                 delta = choice['message']
-                delta['tool_calls'][0]['index'] = 0
+                if 'tool_calls' in delta:
+                    delta['tool_calls'][0]['index'] = 0
                 chunks = [ {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'model': 'goal-fixture', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]},
-                    {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}], 'usage': usage} ]
+                    {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': choice['finish_reason']}], 'usage': usage} ]
                 raw = (''.join('data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks) + 'data: [DONE]\n\n').encode()
                 content_type = 'text/event-stream'
             else:
@@ -85,6 +88,7 @@ def main():
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["goal_fixture.proof"]\n'
+    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\nmax-request-body-bytes = 1048576\n'
     overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
     overlay += f'''
 [[providers]]
@@ -199,6 +203,11 @@ model_id = "goal-fixture"
         assert confirmation['verdict'] == verdict
         assert http(endpoint, binding) == applied
         save(out / 'confirmed-readback.json', readback)
+        events = [json.loads(line) for line in (base / '.masc/goal_events.jsonl').read_text().splitlines()]
+        completions = [event for event in events if event.get('payload', {}).get('phase') == 'completed']
+        assert len(completions) == 1 and completions[0]['payload']['actor'] == confirmation['operator_id']
+        assert completions[0]['payload']['request_id'] == binding['request_id']
+        save(out / 'confirmation-event.json', completions[0])
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'reopen'})
         http(endpoint, binding, expected_status=400)
         receipt.update(status='verified', goal_id=goal_id, binding=binding, operator_id=confirmation['operator_id'], confirmed_at=confirmation['confirmed_at'], verifier_requests=len(requests), unauthenticated_status=401, spoof_body_status=400, stale_run_status=400, reopened_replay_status=400)

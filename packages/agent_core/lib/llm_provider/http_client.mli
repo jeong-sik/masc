@@ -754,11 +754,6 @@ val read_ndjson
   -> unit
   -> unit
 
-(** [true] when the error indicates local resource exhaustion
-    (ephemeral port depletion, FD limit).  Cascading to another
-    provider cannot help — the bottleneck is the local machine. *)
-val is_local_resource_exhaustion : http_error -> bool
-
 (** Parse an HTTP [Retry-After] header value (RFC 9110 S10.2.3) into a
     delay in seconds. Accepts either grammar the spec allows:
     - [delay-seconds]: a non-negative integer, returned as-is.

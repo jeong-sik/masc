@@ -74,7 +74,3 @@ val describe_json_value : Yojson.Safe.t -> string
     E.g. ["integer"], ["one of: "compact", "full""], ["exactly 3"].
     @since 0.234.0 *)
 val describe_expected : expected -> string
-
-(** Check if a JSON value matches the expected param_type.
-    @since 0.120.0 *)
-val matches_type : Types.param_type -> Yojson.Safe.t -> bool

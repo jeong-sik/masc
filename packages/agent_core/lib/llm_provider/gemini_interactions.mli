@@ -31,11 +31,6 @@ type 'payload response =
 (** Typed parse failure attributed to [parser] (e.g. ["image_generation"]). *)
 val parse_failure : parser:string -> string -> ('a, Http_client.http_error) result
 
-(** A well-formed interaction whose status is not ["completed"]: a
-    provider-reported outcome ([Unknown_provider_failure]), not a parser
-    defect, so parse-error alarms stay meaningful. *)
-val status_failure : string -> ('a, Http_client.http_error) result
-
 (** [required_string ~parser name json]: missing/null reports
     ["%s is required"], a blank or non-string value reports
     ["%s must be non-empty"]. *)

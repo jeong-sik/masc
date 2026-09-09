@@ -42,6 +42,8 @@ let cache_store preview =
 let mosaic_cache_mu = Stdlib.Mutex.create ()
 let mosaic_cache : (string, string list) Hashtbl.t = Hashtbl.create 64
 
+(* Rendered half-block mosaic lines for an image URL, or [None] if not yet
+   downloaded and decoded. *)
 let mosaic_lookup url =
   Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.find_opt mosaic_cache url)
 

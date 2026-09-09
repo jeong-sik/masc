@@ -1466,9 +1466,36 @@ let confined_write_is_keeper_playground
     (normalized (Keeper_sandbox.host_root_abs_of_meta ~config meta))
 ;;
 
+let before_write_authorization_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let before_edit_snapshot_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let store_edit_snapshots ~config ~before ~after =
+  let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  let persist bytes =
+    Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_edit_snapshot_key);
+    Tool_blob_store.put_durable store ~bytes ~mime:"application/octet-stream"
+    |> fun reference -> Tool_output.with_preview reference ""
+    |> Tool_output.normalized_artifact_ref_to_json
+  in
+  try
+    let before = persist before in
+    let after = persist after in
+    `Assoc [ "status", `String "stored"; "before", before; "after", after ]
+  with
+  | Sys_error detail ->
+    `Assoc [ "status", `String "unavailable"; "detail", `String detail ]
+  | Unix.Unix_error _ as exn ->
+    `Assoc [ "status", `String "unavailable"; "detail", `String (Printexc.to_string exn) ]
+;;
+
 type file_write_attempt =
   | Write_succeeded of
-      { payload : string
+      { payload : Yojson.Safe.t
       ; file_change_evidence : Keeper_file_change_evidence.t option
       }
   | Write_authorized of Keeper_gate.authorization * file_write_attempt
@@ -1976,7 +2003,7 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 
 let rec file_write_attempt_to_execution = function
   | Write_succeeded { payload; file_change_evidence } ->
-    let execution = Keeper_tool_execution.success payload in
+    let execution = Keeper_tool_execution.success_data payload in
     (match file_change_evidence with
      | Some evidence ->
        Keeper_tool_execution.with_file_change_evidence evidence execution
@@ -2251,6 +2278,7 @@ let handle_file_write_with_outcome
      [Keeper_tool_write_mode.of_args] for why there is no default. *)
   let mode_result = Keeper_tool_write_mode.of_args args in
   let after_gate ~confined ~target ~input continue =
+    Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_write_authorization_key);
     if confined_write_is_keeper_playground ~config ~meta confined
     then (
       Log.Keeper.info
@@ -2445,14 +2473,13 @@ let handle_file_write_with_outcome
       Ok
         (Write_succeeded
            { payload =
-               Yojson.Safe.to_string
-                 (`Assoc
+               `Assoc
                      ([ "ok", `Bool true
                       ; "path", `String target
                       ; "mode", `String mode_label
                       ; "bytes_written", `Int (String.length content)
                       ]
-                      @ via_field))
+                      @ via_field)
            ; file_change_evidence =
                (match mode with
                 | Overwrite -> Some (Keeper_file_change_evidence.written content)
@@ -2725,6 +2752,7 @@ let handle_file_write_with_outcome
               let target = Keeper_alerting_path.confined_host_path confined in
               let finish_write
                     ~gate_effect
+                    ~before
                     ~updated
                     ~occurrence_count
                     ~line_occurrences
@@ -2806,6 +2834,9 @@ let handle_file_write_with_outcome
                        ; class_ = Tool_result.Runtime_failure
                        })
                 | Ok () ->
+                  (* The file has committed. Cancellation must not turn its
+                     snapshot I/O into a failed tool result for an applied edit. *)
+                  Eio.Cancel.protect (fun () ->
                   Log.Keeper.info
                     "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch op=%s replace_all=%b \
                      occurrences=%d bytes=%d"
@@ -2825,17 +2856,17 @@ let handle_file_write_with_outcome
                   Ok
                     (Write_succeeded
                        { payload =
-                           Yojson.Safe.to_string
-                             (`Assoc
+                           `Assoc
                                  ([ "ok", `Bool true
                                   ; "path", `String target
                                   ; "mode", `String "patch"
+                                  ; "edit_snapshots", store_edit_snapshots ~config ~before ~after:updated
                                   ]
                                   @ operation_fields
                                   @ [ "occurrences", `Int occurrence_count
                                     ; "bytes_written", `Int (String.length updated)
                                     ]
-                                  @ via_field))
+                                  @ via_field)
                        ; file_change_evidence =
                            Some
                              (match line_occurrences with
@@ -2844,7 +2875,7 @@ let handle_file_write_with_outcome
                               | None ->
                                 Keeper_file_change_evidence.edited_ranges_omitted
                                   ~occurrence_count)
-                       })
+                       }))
                 in
                 match
                   Keeper_publication_recovery_availability.with_access
@@ -2889,6 +2920,7 @@ let handle_file_write_with_outcome
                 in
                 finish_write
                   ~gate_effect
+                  ~before:current
                   ~updated:application.updated
                   ~occurrence_count:application.occurrence_count
                   ~line_occurrences:application.line_occurrences
@@ -2993,6 +3025,14 @@ let handle_file_write_with_outcome
 ;;
 
 module For_testing = struct
+  let with_before_write_authorization hook f =
+    Eio.Fiber.with_binding before_write_authorization_key hook f
+  ;;
+
+  let with_before_edit_snapshot hook f =
+    Eio.Fiber.with_binding before_edit_snapshot_key hook f
+  ;;
+
   type created_directory_fault_stage =
     | Before_create_directory
     | Before_inspect_created_directory

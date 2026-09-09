@@ -721,7 +721,7 @@ let test_roster_decodes_an_error_row_without_refusing_the_rest () =
   in
   match Decode.decode_keeper_runtime_list json with
   | Error detail -> Alcotest.failf "roster must decode past an error row: %s" detail
-  | Ok (rows, _, _) ->
+  | Ok (rows, _, _, _) ->
       Alcotest.(check int) "both rows survive" 2 (List.length rows);
       let broken =
         List.find (fun r -> String.equal r.Decode.kr_name "broken-meta") rows

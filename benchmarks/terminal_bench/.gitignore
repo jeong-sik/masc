@@ -3,3 +3,4 @@ dist/
 results/jobs/
 __pycache__/
 .pytest_cache/
+configs/out/

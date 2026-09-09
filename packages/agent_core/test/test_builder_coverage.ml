@@ -3,7 +3,7 @@
 
     Focuses on:
     - Builder chainable API: with_* methods not yet covered
-    - build_safe validation: invalid max_tokens and thinking_budget
+    - build_safe validation: invalid max_tokens
     - Agent accessors: state, tools, context, options, description
     - Agent.default_options fields
     - Agent.clone *)
@@ -53,13 +53,11 @@ let test_builder_thinking () =
   let b =
     Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_enable_thinking true
-    |> Builder.with_thinking_budget 1000
     |> Builder.with_reasoning_effort Llm_provider.Reasoning_effort.Max
   in
   match Builder.build_safe b with
   | Ok agent ->
     let config = (Agent.state agent).config in
-    Alcotest.(check (option int)) "numeric budget" (Some 1000) config.thinking_budget;
     Alcotest.(check (option string))
       "categorical effort"
       (Some "max")
@@ -124,21 +122,6 @@ let test_build_safe_invalid_max_tokens () =
     Alcotest.(check string) "field" "max_tokens" field
   | Error _ -> Alcotest.fail "expected InvalidConfig for max_tokens"
   | Ok _ -> Alcotest.fail "expected Error for max_tokens <= 0"
-;;
-
-let test_build_safe_preserves_independent_thinking_budget () =
-  Eio_main.run
-  @@ fun env ->
-  let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
-    |> Builder.with_thinking_budget 500
-  in
-  match Builder.build_safe b with
-  | Ok agent ->
-    let config = (Agent.state agent).config in
-    Alcotest.(check (option bool)) "enable_thinking omitted" None config.enable_thinking;
-    Alcotest.(check (option int)) "budget preserved" (Some 500) config.thinking_budget
-  | Error error -> Alcotest.fail (Error.to_string error)
 ;;
 
 (* ── Agent accessors ──────────────────────────────────────── *)
@@ -292,10 +275,6 @@ let () =
             "invalid max_tokens"
             `Quick
             test_build_safe_invalid_max_tokens
-        ; Alcotest.test_case
-            "independent thinking budget"
-            `Quick
-            test_build_safe_preserves_independent_thinking_budget
         ] )
     ; ( "agent_accessors"
       , [ Alcotest.test_case "state/tools/context/desc" `Quick test_agent_accessors

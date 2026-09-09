@@ -103,7 +103,6 @@ let sampling_patch_changed (before : t) (after : t) =
   || before.min_p <> after.min_p
   || before.enable_thinking <> after.enable_thinking
   || before.preserve_thinking <> after.preserve_thinking
-  || before.thinking_budget <> after.thinking_budget
   || before.reasoning_effort <> after.reasoning_effort
 ;;
 
@@ -159,7 +158,6 @@ let compute_delta (before : t) (after : t) =
          ; min_p = after.min_p
          ; enable_thinking = after.enable_thinking
          ; preserve_thinking = after.preserve_thinking
-         ; thinking_budget = after.thinking_budget
          ; reasoning_effort = after.reasoning_effort
          });
   if limits_patch_changed before after
@@ -231,7 +229,6 @@ let apply_delta base delta =
             ; min_p = patch.min_p
             ; enable_thinking = patch.enable_thinking
             ; preserve_thinking = patch.preserve_thinking
-            ; thinking_budget = patch.thinking_budget
             ; reasoning_effort = patch.reasoning_effort
             }
         | Replace_limits (patch : limits_patch) ->

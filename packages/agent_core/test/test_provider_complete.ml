@@ -992,7 +992,6 @@ let test_kimi_direct_with_tools_and_thinking () =
       ~model_id:"kimi-for-coding"
       ~base_url:"https://api.kimi.com/coding"
       ~enable_thinking:true
-      ~thinking_budget:4096
       ()
   in
   let tool =

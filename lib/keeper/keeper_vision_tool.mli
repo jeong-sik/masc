@@ -71,14 +71,16 @@ val sniff_image_media_type : string -> (string, string) result
     {!Keeper_image_dimensions.image_dimensions}, kept apart so the chat store
     can measure an attachment without this tool's dependency cone. *)
 
-val vision_runtime_ids : unit -> string list
+val vision_runtime_ids : now:float -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
-    first, then declaration order. The handler tries these candidates in order
+    first, then declaration order, with every candidate whose quota scope has
+    an active window at [now] ({!Runtime_quota_window}) moved behind the rest in
+    the same relative order. The handler tries these candidates in order
     for timeout/provider failures and output-token truncation. Capacity and
     output-token failures advance immediately; transient failures retain the
     configured backoff. There is no tool-owned cumulative deadline. *)
 
-val first_vision_runtime_id : unit -> (string, string) result
+val first_vision_runtime_id : now:float -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
     [Error] when none is configured. *)
 

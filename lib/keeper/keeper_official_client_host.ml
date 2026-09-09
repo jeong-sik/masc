@@ -497,7 +497,6 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
             ^ " official-client runtime does not project this turn parameter"))
   in
   let* () = unsupported_parameter "temperature" turn_params.temperature in
-  let* () = unsupported_parameter "thinking_budget" turn_params.thinking_budget in
   let* () = unsupported_parameter "preserve_thinking" turn_params.preserve_thinking in
   let* reasoning_effort =
     resolve_reasoning_effort

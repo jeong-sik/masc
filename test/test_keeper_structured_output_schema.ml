@@ -305,12 +305,7 @@ let test_deterministic_subcall_suppresses_thinking () =
     (option bool)
     "clear_thinking must be explicitly true"
     (Some true)
-    cfg.Llm_provider.Provider_config.clear_thinking;
-  check
-    bool
-    "thinking_budget must be cleared"
-    true
-    (cfg.Llm_provider.Provider_config.thinking_budget = None)
+    cfg.Llm_provider.Provider_config.clear_thinking
 ;;
 
 let test_deterministic_subcall_disables_tool_surface () =

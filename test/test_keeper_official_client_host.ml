@@ -1795,7 +1795,6 @@ let persistence_checkpoint ~session_id =
     ; enable_thinking = None
     ; preserve_thinking = None
     ; response_format = Agent_core.Types.Off
-    ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()

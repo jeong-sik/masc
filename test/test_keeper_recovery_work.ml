@@ -27,7 +27,7 @@ let checkpoint marker =
     created_at=1000.; tools=[]; tool_choice=None; disable_parallel_tool_use=false;
     temperature=None; top_p=None; top_k=None; min_p=None; reasoning_effort=None;
     enable_thinking=None; preserve_thinking=None; response_format=Off;
-    thinking_budget=None; cache_system_prompt=false; context=Agent_core.Context.create_sync ();
+    cache_system_prompt=false; context=Agent_core.Context.create_sync ();
     mcp_sessions=[]; working_context=None}
 let with_fixture f =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->

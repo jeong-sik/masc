@@ -6763,6 +6763,14 @@ let test_write_then_unchanged_read_completes () =
             in
             let result = tool.call ~call_id:"conditional-read-composition" (`Assoc []) in
             check bool "conditional-read composition completes" true result.success;
+            let read_action =
+              Yojson.Safe.Util.(parse_json result.content |> member "actions" |> to_list)
+              |> List.find (fun action ->
+                   Yojson.Safe.Util.(action |> member "node_id" |> to_string) = "read")
+            in
+            check string "read reused the exact conditional revision" "unchanged"
+              Yojson.Safe.Util.
+                (read_action |> member "result" |> member "data" |> member "kind" |> to_string);
             (match bundle.terminal_effect_state () with
              | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
              | _ -> fail "completed conditional read changed terminal effect state");

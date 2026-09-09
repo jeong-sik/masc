@@ -1,6 +1,6 @@
 name = "masc_browser_interact"
 description = """
-Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Use documentId and nodeId from BrowserRead mode=scene, or a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Returns the current URL and scroll position; read/capture again to verify the resulting page. No arbitrary JavaScript."""
+Interact with one explicit Firefox/Zen tab: click one uniquely matched CSS selector, fill a text input/textarea without Enter or submit, or scroll by x/y CSS pixels. Works on live and automation lanes. Use documentId and nodeId from BrowserRead mode=scene, or a selector known from page inspection; BrowserRead text is not a full DOM inventory. Set expectedUrl from the last read to reject intervening navigation. Fill emits input/change events; page handlers can react. Returns the current URL and scroll position; read/capture again to verify the resulting page. Screenshot click_at uses normalized viewport coordinates and requires the observed viewport and expectedUrl. Drag uses trusted pointer actions on the automation lane. No arbitrary JavaScript."""
 additional_properties = false
 
 [[params]]
@@ -24,7 +24,7 @@ description = "Reject if the tab URL changed since this observation."
 name = "action"
 type = "string"
 required = true
-enum = ["click", "fill", "scroll"]
+enum = ["click", "fill", "scroll", "click_at", "drag"]
 
 [[params]]
 name = "selector"
@@ -60,3 +60,103 @@ description = "Document identity from BrowserRead mode=scene. Supply with nodeId
 name = "nodeId"
 type = "string"
 description = "Observed element identity from scene. Survives reordering; detached/replaced nodes fail rather than targeting a replacement."
+
+[[params]]
+name = "point"
+type = "object"
+description = "For click_at: {x,y} normalized viewport coordinates, each >=0 and <1. Copy viewport and expectedUrl from the screenshot."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params]]
+name = "from"
+type = "object"
+description = "For drag: starting {x,y} normalized viewport coordinates. Drag requires the automation lane."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params]]
+name = "to"
+type = "object"
+description = "For drag: ending {x,y} normalized viewport coordinates. Each coordinate must be >=0 and <1."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0
+description = "Normalized viewport fraction; must be less than 1."
+
+[[params]]
+name = "viewport"
+type = "object"
+description = "Required for click_at/drag. Copy screenshot viewport exactly: documentId, width, height, scrollX, scrollY. Rejects changed documents, dimensions or scroll positions."
+
+additional_properties = false
+
+[[params.params]]
+name = "documentId"
+type = "string"
+required = true
+description = "Observed document identity."
+
+[[params.params]]
+name = "width"
+type = "number"
+required = true
+description = "Observed viewport width in CSS pixels; positive."
+
+[[params.params]]
+name = "height"
+type = "number"
+required = true
+description = "Observed viewport height in CSS pixels; positive."
+
+[[params.params]]
+name = "scrollX"
+type = "number"
+required = true
+description = "Observed horizontal scroll position in CSS pixels."
+
+[[params.params]]
+name = "scrollY"
+type = "number"
+required = true
+description = "Observed vertical scroll position in CSS pixels."

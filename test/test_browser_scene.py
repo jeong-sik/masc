@@ -6,6 +6,7 @@ p=argparse.ArgumentParser();p.add_argument('--driver',required=True);p.add_argum
 root=Path(__file__).resolve().parents[1]
 scene=(root/'lib/browser_scene_script.ml').read_text().split('let runtime = {js|',1)[1].split('|js}',1)[0]
 interaction=(root/'lib/browser_interaction.ml').read_text().split('let script = {js|',1)[1].split('|js}',1)[0]
+guard=(root/'lib/browser_interaction.ml').read_text().split('let pointer_guard_script = {js|',1)[1].split('|js}',1)[0]
 bg=(root/'connectors/browser/extension/background.js').read_text();assert bg.startswith(scene+'\n'), 'scene runtime differs between extension and driver'
 html='''<!doctype html><meta charset="utf-8"><title>Semantic Zen fixture</title><style>body{font:22px sans-serif;margin:28px;background:#101d2c;color:#d8f4ee}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{padding:24px;border:1px solid #55958c;border-radius:16px}button,textarea{font:inherit;padding:10px}canvas{background:linear-gradient(45deg,#3baaa0,#662db1)}.hidden{display:none}</style><h1>한글과 실제 DOM</h1><p>Copy exact text: 별빛🙂 café</p><div style="visibility:hidden">HIDDEN_PARENT<span style="visibility:visible">VISIBLE_CHILD</span></div><div class="grid"><section><button id="increment" onclick="document.querySelector('#count').textContent=String(+document.querySelector('#count').textContent+1)">Increase</button><p id="count">0</p><label>Message<textarea id="message" aria-label="Message"></textarea></label><input type="password" value="SECRET_VALUE_MUST_NOT_APPEAR"></section><section><canvas width="180" height="100" style="font-size:0" aria-label="Gradient canvas"></canvas><p class="hidden">HIDDEN_MUST_NOT_APPEAR</p></section></div>'''
 class H(http.server.BaseHTTPRequestHandler):
@@ -60,6 +61,27 @@ try:
  try:act(s3,control(s3,'Increase'),action='click');raise AssertionError('reload accepted old reference')
  except RuntimeError as e:check('same-URL reload rejects old document','scene_document_changed' in str(e))
  latest=observe();check('same-URL reload gets new document ID',latest['documentId']!=s['documentId'])
+ # Screenshot positions are normalized CSS viewport coordinates, independent of PNG scale.
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=document.querySelector('#increment').getBoundingClientRect();return {x:(r.x+r.width/2)/innerWidth,y:(r.y+r.height/2)/innerHeight};")
+ args={'action':'click_at','point':point,'viewport':viewport,'expectedUrl':latest['url']}
+ js(scene+interaction,[args]);check('screenshot point clicks observed button',js("return document.querySelector('#count').textContent;")=='1')
+ js("window.pointerEvents=[];document.addEventListener('pointerdown',e=>pointerEvents.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));document.addEventListener('pointerup',e=>pointerEvents.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));")
+ js(scene+guard,[args])
+ def move(p):return {'type':'pointerMove','duration':0,'origin':'viewport','x':int(p['x']*viewport['width']),'y':int(p['y']*viewport['height'])}
+ destination={'x':point['x']+.15,'y':point['y']+.1}
+ call('POST','/session/'+sid+'/actions',{'actions':[{'type':'pointer','id':'masc-browser-pointer','parameters':{'pointerType':'mouse'},'actions':[move(point),{'type':'pointerDown','button':0},move(destination),{'type':'pointerUp','button':0}]}]})
+ call('DELETE','/session/'+sid+'/actions')
+ events=js('return pointerEvents;')
+ check('native drag produces trusted press and release at distinct coordinates',len(events)==2 and all(e['trusted'] for e in events) and events[0]['x']!=events[1]['x'] and events[0]['y']!=events[1]['y'])
+ js("document.body.style.minHeight='3000px';window.scrollTo(0,200);")
+ try:js(scene+interaction,[args]);raise AssertionError('stale viewport accepted')
+ except RuntimeError as e:check('scroll invalidates screenshot point','observed_viewport_changed' in str(e))
+ js('window.scrollTo(0,0);')
+ call('POST','/session/'+sid+'/refresh',{})
+ try:js(scene+guard,[args]);raise AssertionError('reloaded screenshot accepted')
+ except RuntimeError as e:check('reload invalidates native pointer gesture','observed_viewport_changed' in str(e))
+
  png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
  report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
  (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))

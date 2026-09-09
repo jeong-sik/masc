@@ -13887,7 +13887,7 @@ def run_browser_scene_regression(executable: str) -> None:
         interact=interact, http_fixtures=fixtures)
 
 
-def run_browser_viewport_regression(executable: str) -> None:
+def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = True) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     captures, actions = [], []
@@ -13918,7 +13918,7 @@ def run_browser_viewport_regression(executable: str) -> None:
     def scroll(body):
         request = json.loads(body)
         actions.append(request)
-        expected_point = {"x":0.5,"y":0.5} if len(actions)==1 else {"x":9.5/60,"y":6.5/30}
+        expected_point = {"x":0.5,"y":0.5} if len(actions)==1 or not cell_geometry else {"x":9.5/60,"y":6.5/30}
         assert request == dict(target, expectedUrl=url, action="scroll_at", x=0, y=120,
             point=expected_point,viewport={"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0})
         if len(actions) == 2:
@@ -13948,6 +13948,8 @@ def run_browser_viewport_regression(executable: str) -> None:
 
         palette_go(process, master, output, b"go Browser Lane", b"owned browser body")
         image_input(b"\x0f")
+        if not cell_geometry:
+            wait_for_output(process, master, output, b"wheel:center", timeout=3)
         image_input(b"j")
         assert len(actions) == 1 and len(captures) == 2
         # Global shortcuts and pasted text belong to the visible viewport.
@@ -13986,7 +13988,7 @@ def run_browser_viewport_regression(executable: str) -> None:
     try:
         run_terminal_scenario(executable, description="Browser visual viewport input and late frame ownership",
             interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
-            preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+            preload_input=(b"\x1b[6;20;10t" if cell_geometry else b"")+GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
 
@@ -14061,6 +14063,7 @@ def run_browser_pointer_regression(executable: str) -> None:
 def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
+    run_browser_viewport_regression(executable, cell_geometry=False)
     fixtures = overview_event_http_fixtures()
     client_id = "11111111-1111-4111-8111-111111111111"
     requests: list[dict[str, object]] = []

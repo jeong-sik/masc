@@ -109,8 +109,11 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Scene support requires the updated coordinator/native host and extension 0.3.0
-in the selected browser profile. Source changes and script-level Gecko evidence
+Scene support requires the updated coordinator/native host and extension 0.4.0
+in the selected browser profile. Version 0.4.0 adds live `scroll_at`; after upgrading,
+reload the extension in `about:debugging` and confirm its version there. The
+Browser Lane client list reports the browser version, not the extension version.
+Source changes and script-level Gecko evidence
 alone do not establish that an installed TUI has been updated.
 
 

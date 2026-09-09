@@ -72,14 +72,14 @@ additional_properties = false
 name = "x"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params]]
@@ -93,14 +93,14 @@ additional_properties = false
 name = "x"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params]]
@@ -114,14 +114,14 @@ additional_properties = false
 name = "x"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params.params]]
 name = "y"
 type = "number"
 required = true
-minimum = 0
+minimum = 0.0
 description = "Normalized viewport fraction; must be less than 1."
 
 [[params]]
@@ -141,12 +141,14 @@ description = "Observed document identity."
 name = "width"
 type = "number"
 required = true
+exclusive_minimum = 0.0
 description = "Observed viewport width in CSS pixels; positive."
 
 [[params.params]]
 name = "height"
 type = "number"
 required = true
+exclusive_minimum = 0.0
 description = "Observed viewport height in CSS pixels; positive."
 
 [[params.params]]

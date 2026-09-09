@@ -1,0 +1,170 @@
+[
+  {
+    "ts": "2026-09-09T22:33:39Z",
+    "keeper_turn_id": 1,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:33:39Z",
+    "keeper_turn_id": 1,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:35:27Z",
+    "keeper_turn_id": 2,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:35:27Z",
+    "keeper_turn_id": 2,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:36:07Z",
+    "keeper_turn_id": 3,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:36:07Z",
+    "keeper_turn_id": 3,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:37:47Z",
+    "keeper_turn_id": 4,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:37:47Z",
+    "keeper_turn_id": 4,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:37:54Z",
+    "keeper_turn_id": 5,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:37:54Z",
+    "keeper_turn_id": 5,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:00Z",
+    "keeper_turn_id": 6,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:00Z",
+    "keeper_turn_id": 6,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:07Z",
+    "keeper_turn_id": 7,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:07Z",
+    "keeper_turn_id": 7,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:12Z",
+    "keeper_turn_id": 8,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:12Z",
+    "keeper_turn_id": 8,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:19Z",
+    "keeper_turn_id": 9,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:19Z",
+    "keeper_turn_id": 9,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:25Z",
+    "keeper_turn_id": 10,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:25Z",
+    "keeper_turn_id": 10,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:34Z",
+    "keeper_turn_id": 11,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:34Z",
+    "keeper_turn_id": 11,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  },
+  {
+    "ts": "2026-09-09T22:38:41Z",
+    "keeper_turn_id": 12,
+    "event": "runtime_completed",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "completed"
+  },
+  {
+    "ts": "2026-09-09T22:38:41Z",
+    "keeper_turn_id": 12,
+    "event": "turn_finished",
+    "runtime_id": "kimi_coding.kimi-for-coding",
+    "status": "ok"
+  }
+]

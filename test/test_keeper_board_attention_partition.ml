@@ -420,12 +420,9 @@ let cli_judgment ?(judged_at = 101.0) ~slot_id () : A.judgment =
   }
 ;;
 
-(* RFC cli-runtimes-as-lane-slots: the tail answers only after the catalog is
-   exhausted, and there is no attempt receipt to match a completion against.
-   What stands in for it is the binding the exhausted flow left behind, so an
-   Unbound partition must still refuse -- otherwise a lane could reach the tail
-   without ever dispatching its own slots. *)
-let test_cli_slot_completion_requires_an_exhausted_binding () =
+(* A CLI judgment has no HTTP receipt. Its durable candidate claim owns
+   completion, including when no HTTP slot was configured. *)
+let test_cli_slot_completion_uses_its_durable_claim () =
   with_temp_base "board-attention-partition-cli-tail" @@ fun base_path ->
   let pending = candidate ~id:"candidate-cli-tail" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
@@ -436,22 +433,10 @@ let test_cli_slot_completion_requires_an_exhausted_binding () =
     ; judgment = cli_judgment ~slot_id:"claude_code.claude-sonnet-5" ()
     }
   in
-  expect_error
-    "cli completion without a durable exact binding"
-    (P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item);
-  let bound =
-    P.bind_before_dispatch
-      ~worker_epoch:owner
-      ~base_path
-      ~partition:claimed
-      ~provenance:(provenance ())
-    |> ok "bind before dispatch"
-    |> fsynced "bind before dispatch"
-  in
   let completed =
-    P.complete ~now:12.0 ~worker_epoch:owner ~base_path ~partition:bound ~item
-    |> ok "cli completion after exhaustion"
-    |> fsynced "cli completion after exhaustion"
+    P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item
+    |> ok "CLI-only completion uses its durable candidate claim"
+    |> fsynced "CLI-only completion"
   in
   match completed.state with
   | P.Completed { item = persisted; _ } ->
@@ -1223,9 +1208,9 @@ let () =
             `Quick
             test_binding_owns_completion_and_settlement
         ; Alcotest.test_case
-            "a cli-slot completion requires an exhausted exact binding"
+            "CLI-only completion uses its durable candidate claim"
             `Quick
-            test_cli_slot_completion_requires_an_exhausted_binding
+            test_cli_slot_completion_uses_its_durable_claim
         ; Alcotest.test_case
             "existing judgment completion is atomic and restart safe"
             `Quick

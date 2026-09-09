@@ -1,0 +1,58 @@
+retry: 1500
+
+data: {"type":"CUSTOM","threadId":"default","timestamp":1788930516.346495,"name":"KEEPER_CHAT_OPERATION_ACCEPTED","value":{"operation_id":"kmsg-onboarding-88129-3","state":"Queued","queued_count":1}}
+
+id: 0
+data: {"type":"RUN_STARTED","threadId":"keeper:imp","timestamp":1788930516.351323,"runId":"keeper-operation-run-kmsg-onboarding-88129-3"}
+
+id: 1
+data: {"type":"TEXT_MESSAGE_START","threadId":"keeper:imp","timestamp":1788930516.351521,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3","role":"assistant"}
+
+id: 2
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930516.379746,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_RUNTIME_ATTEMPT_STARTED","value":null}
+
+id: 3
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930524.445476,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_STREAM_MESSAGE_START","value":{"provider_message_id":"01a08491-84e0-7ce3-a7fc-9a0f370743fa","model":"gpt-5.3-codex-spark"}}
+
+id: 4
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930530.304902,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_CONTENT_BLOCK_START","value":{"index":1,"content_type":"tool_use","tool_call_id":"call_0XfNyuvx3ufkKFRogxj58pAj","tool_call_name":"WebFetch"}}
+
+id: 5
+data: {"type":"TOOL_CALL_START","threadId":"keeper:imp","timestamp":1788930530.305122,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","toolCallId":"call_0XfNyuvx3ufkKFRogxj58pAj","toolCallName":"WebFetch","toolStreamScope":0,"providerMessageId":"01a08491-84e0-7ce3-a7fc-9a0f370743fa","toolCallBlockIndex":1}
+
+id: 6
+data: {"type":"TOOL_CALL_ARGS","threadId":"keeper:imp","timestamp":1788930530.305851,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","toolCallId":"call_0XfNyuvx3ufkKFRogxj58pAj","toolStreamScope":0,"providerMessageId":"01a08491-84e0-7ce3-a7fc-9a0f370743fa","toolCallBlockIndex":1,"snapshot":"{\"url\":\"https://example.com\"}"}
+
+id: 7
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930530.380886,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_CONTENT_BLOCK_STOP","value":{"index":1}}
+
+id: 8
+data: {"type":"TOOL_CALL_END","threadId":"keeper:imp","timestamp":1788930530.381053,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","toolCallId":"call_0XfNyuvx3ufkKFRogxj58pAj","toolStreamScope":0,"providerMessageId":"01a08491-84e0-7ce3-a7fc-9a0f370743fa","toolCallBlockIndex":1}
+
+id: 9
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:imp","timestamp":1788930533.49757,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3","delta":"`tool_discovery`에서 `WebFetch`(스네이크케이스 `web_fetch` 대응 툴)로 확인했고, 해당 툴로 `https://example.com`을 조회했습니다.\n\n실제 결과:\n- URL: `"}
+
+id: 10
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:imp","timestamp":1788930533.49784,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3","delta":"https://example.com/`\n- HTTP 상태: `200`\n- 최종 상태: `status: ok`\n- 추출 모드: `markdown`\n- `truncated`: `false`\n- 추출 텍스트:\n  -"}
+
+id: 11
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:imp","timestamp":1788930533.576026,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3","delta":" `# Example Domain`\n  - `This domain is for use in documentation examples without needing permission. Avoid use in operations.`\n  - `[Learn more](https://iana.org/domains/example)`\n- 제목: `Example Domain`\n-"}
+
+id: 12
+data: {"type":"TEXT_MESSAGE_CONTENT","threadId":"keeper:imp","timestamp":1788930533.656445,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3","delta":" `downloaded_bytes`: `388`\n\n원문 소스: [https://example.com/](https://example.com/)"}
+
+id: 13
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930533.850135,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_STREAM_MESSAGE_DELTA","value":{"stop_reason":"end_turn"}}
+
+id: 14
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930533.850412,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}
+
+id: 15
+data: {"type":"CUSTOM","threadId":"keeper:imp","timestamp":1788930533.897754,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","name":"KEEPER_REPLY_DETAILS","value":{"reply":"`tool_discovery`에서 `WebFetch`(스네이크케이스 `web_fetch` 대응 툴)로 확인했고, 해당 툴로 `https://example.com`을 조회했습니다.\n\n실제 결과:\n- URL: `https://example.com/`\n- HTTP 상태: `200`\n- 최종 상태: `status: ok`\n- 추출 모드: `markdown`\n- `truncated`: `false`\n- 추출 텍스트:\n  - `# Example Domain`\n  - `This domain is for use in documentation examples without needing permission. Avoid use in operations.`\n  - `[Learn more](https://iana.org/domains/example)`\n- 제목: `Example Domain`\n- `downloaded_bytes`: `388`\n\n원문 소스: [https://example.com/](https://example.com/)","turn_outcome":"visible_reply","turn_ref":"trace-1788930482261-00000#4"}}
+
+id: 16
+data: {"type":"TEXT_MESSAGE_END","threadId":"keeper:imp","timestamp":1788930533.898007,"runId":"keeper-operation-run-kmsg-onboarding-88129-3","messageId":"keeper-operation-message-kmsg-onboarding-88129-3"}
+
+id: 17
+data: {"type":"RUN_FINISHED","threadId":"keeper:imp","timestamp":1788930533.898299,"runId":"keeper-operation-run-kmsg-onboarding-88129-3"}
+

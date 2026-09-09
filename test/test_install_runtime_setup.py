@@ -98,6 +98,16 @@ runtime.write_text(runtime.read_text().replace('original.model', sys.argv[4]))
         self.assertIn(result['runtime_id'].encode(), self.runtime.read_bytes())
         self.assertTrue(self.overlay.read_bytes().startswith(self.originals[1]))
 
+    def test_http_exact_target_uses_same_endpoint_model_and_credential(self):
+        import tomllib
+        runtime_id, _, overlay = SETUP.render(dict(spec(), api_key_env='MY_MODEL_KEY'))
+        catalog = tomllib.loads(overlay.decode())
+        provider = catalog['providers'][0]
+        target = catalog['targets'][0]
+        self.assertEqual(provider['base_url'], spec()['endpoint'])
+        self.assertEqual(provider['api_key_env'], 'MY_MODEL_KEY')
+        self.assertEqual(target, dict(id=runtime_id, provider_ref=provider['id'], model_id=spec()['model']))
+
     def test_changed_snapshot_is_not_overwritten(self):
         self.validator('Path(' + repr(str(self.runtime)) + ").write_text('operator concurrent update')\n")
         with self.assertRaisesRegex(SETUP.SetupError, 'changed during validation'):

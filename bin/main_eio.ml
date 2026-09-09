@@ -1322,7 +1322,7 @@ let runtime_default_id =
   let doc = "Concrete runtime id to write into [runtime].default" in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
 
-let runtime_default_set_cmd_exit base_path runtime_id =
+let runtime_default_set_cmd_exit base_path runtime_id setup_lanes =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   let result =
     try
@@ -1337,7 +1337,8 @@ let runtime_default_set_cmd_exit base_path runtime_id =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
           ~config_root:(Filename.dirname runtime_config_path) ()
       in
-      Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+      (if setup_lanes then Runtime.set_first_run_runtime else Runtime.set_runtime_default)
+        ~runtime_config_path ~runtime_id ()
     with Env_config_core.Config_error message -> Error message
   in
   match result with
@@ -1355,7 +1356,9 @@ let runtime_default_set_cmd =
      config writer."
   in
   let info = Cmd.info "runtime-default-set" ~doc in
-  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id)
+  let setup_lanes = Arg.(value & flag & info ["setup-lanes"]
+    ~doc:"Use this runtime for the default and internal model lanes in a single-provider workspace.") in
+  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id $ setup_lanes)
 
 let runtime_wizard_field ~field value =
   if String.exists (Char.equal '\000') value
@@ -1939,7 +1942,7 @@ let keeper_create_declaration_from_editor () =
    the reason to have it rather than to skip it: relying on the two staying in
    step leaves a widened name grammar to show up as a malformed request line.
    The TUI's own keeper calls encode the same segment. *)
-let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
+let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_name
       ~declaration =
   let bearer =
     match token with
@@ -1954,10 +1957,11 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
   in
   let url =
     Printf.sprintf
-      "http://%s:%d/api/v1/keepers/%s/up"
+      "http://%s:%d/api/v1/keepers/%s/%s"
       host
       port
       (Uri.pct_encode keeper_name)
+      (match action with `Up -> "up" | `Boot -> "boot")
   in
   let body = Yojson.Safe.to_string declaration in
   let outcome =
@@ -1983,7 +1987,11 @@ let keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
         | Ok (status, response_body) ->
           Masc_cli_keeper_create.outcome_of_response ~status ~body:response_body)))
   in
-  let text, code = Masc_cli_keeper_create.render outcome in
+  let text, code =
+    match action, outcome with
+    | `Boot, (Masc_cli_keeper_create.Created _ | Masc_cli_keeper_create.Reconfigured _) -> "imp is running.", 0
+    | _ -> Masc_cli_keeper_create.render outcome
+  in
   if code = 0 then print_endline text else prerr_endline text;
   code
 
@@ -2011,7 +2019,7 @@ let keeper_create_cmd_exit base_path host port flags_result token agent edit =
       prerr_endline "Nothing was created.";
       2)
     else
-      keeper_create_post ~base_path ~host ~port ~agent ~token ~keeper_name
+      keeper_lifecycle_post ~action:`Up ~base_path ~host ~port ~agent ~token ~keeper_name
         ~declaration
 
 let keeper_create_cmd =
@@ -2372,6 +2380,74 @@ let sandbox_image_cmd =
     (Cmd.info "sandbox-image" ~doc ~man)
     Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
 
+let runtime_model_info_cmd =
+  let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
+  let run model =
+    match Llm_provider.Model_catalog.load_default () with
+    | Error message -> prerr_endline message; 1
+    | Ok catalog ->
+      match Llm_provider.Model_catalog.lookup catalog model with
+      | Some entry ->
+        (match entry.max_context_tokens with
+        | Some context ->
+          print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
+        | None -> 1)
+      | None -> 1
+  in
+  Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read a model's declared context size from the installed catalog.")
+    Term.(const run $ model)
+
+let setup_validate_runtime base_path =
+  let config_path = runtime_config_path_for_base_path base_path in
+  match Runtime.load_list ~config_path with
+  | Error message -> prerr_endline message; 1
+  | Ok (runtimes, default, assignments, _, _) ->
+    let selected = match List.assoc_opt "imp" assignments with
+      | None -> Some default
+      | Some id -> List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes in
+    match selected with
+    | None -> prerr_endline "imp's assigned runtime is unavailable. Choose a model in the installation wizard."; 1
+    | Some runtime ->
+      Printf.printf "Model connection: %s\n%!" runtime.id;
+      if not runtime.model.tools_support then (
+        prerr_endline "This model has tool calling disabled. Select a tool-capable model in the installation wizard before starting imp."; 1)
+      else match runtime.execution with
+      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _ ->
+        runtime_probe_cmd_exit base_path runtime.id
+      | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
+        match runtime.provider.credentials with
+        | Some (Runtime_schema.Env key) when Option.fold ~none:true ~some:(fun value -> String.equal value "") (Sys.getenv_opt key) ->
+          Printf.eprintf "Set %s in this terminal, then rerun setup. No credential is stored by setup.\n" key; 1
+        | _ -> 0
+
+let setup_cmd_exit base_path port no_tui =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+    ~initialize:(fun () -> init_cmd_exit base_path false false)
+    ~validate_runtime:(fun () -> setup_validate_runtime base_path)
+    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok None))
+    ~login:(fun () ->
+      match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
+      | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
+          | Ok credential -> credential.role = Masc_domain.Admin
+          | Error _ -> false) -> 0
+      | Some _ | None ->
+        (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port
+            ~agent_name:default_login_agent ~role:Masc_domain.Admin
+            ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
+        | Ok _ -> print_endline "Local operator credential ready."; 0
+        | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1))
+    ~start_keeper:(fun () ->
+      keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
+        ~agent:default_login_agent ~token:None ~keeper_name:"imp"
+        ~declaration:(`Assoc ["name", `String "imp"]))
+
+let setup_cmd =
+  let no_tui = Arg.(value & flag & info ["no-tui"]
+    ~doc:"Prepare imp and leave the server running without opening the terminal UI.") in
+  Cmd.v (Cmd.info "setup" ~doc:"Prepare the default Docker sandbox, start imp, and open its workspace.")
+    Term.(const setup_cmd_exit $ base_path $ port $ no_tui)
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -2404,10 +2480,12 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; runtime_probe_cmd
+    ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; setup_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

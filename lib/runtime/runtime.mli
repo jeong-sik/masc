@@ -776,6 +776,17 @@ val set_runtime_default :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
+val set_first_run_runtime :
+  ?runtime_config_path:string ->
+  runtime_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Atomically select the default runtime and bind the librarian, Board attention,
+    Host Gate judge, and verifier exact-output lanes to that same runtime.
+    HTTP runtimes use catalog slots; official clients use CLI slots. Intended
+    for an explicit first-install setup action, since existing lane choices
+    are replaced. Validation failures leave the configuration unchanged. *)
+
 val set_runtime_media_failover :
   ?runtime_config_path:string ->
   runtime_ids:string list ->

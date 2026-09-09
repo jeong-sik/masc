@@ -442,6 +442,30 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
         Alcotest.failf
           "cli-suffixed lane must resolve: %s"
           (Registry.lane_resolution_error_to_string error)));
+  (match Registry.publish
+      ~required_lane_ids:[ "cli-required" ]
+      ~lanes:[ { id = "cli-required"; slot_ids = []; cli_slot_ids = cli } ]
+      snapshot with
+   | Error error -> Alcotest.failf "CLI-only required lane must publish: %s"
+       (Registry.publication_error_to_string error)
+   | Ok registry ->
+     (match Registry.resolve_lane registry ~lane_id:"cli-required" with
+      | Ok { selected_slots = []; cli_slots } ->
+        Alcotest.(check (list string)) "required CLI runtime" cli cli_slots
+      | _ -> Alcotest.fail "required CLI-only lane must resolve"));
+  (match Registry.publish
+      ~required_lane_ids:[ "verifier_exact" ]
+      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = cli } ]
+      snapshot with
+   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+   | Ok _ ->
+     (match Runtime.verifier_exact_lane_slot_ids () with
+      | Ok slots -> Alcotest.(check (list string)) "completion authority receives CLI runtimes" cli slots
+      | Error detail -> Alcotest.fail detail));
+  (match Registry.publish
+      ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
+   | Error (Registry.Empty_lane _) -> ()
+   | _ -> Alcotest.fail "a lane with neither transport must remain invalid");
   match
     Registry.publish
       ~lanes:
@@ -803,7 +827,7 @@ let test_repo_seed_board_attention_lane_admits () =
        "repo Board attention lane has configured slots"
        true
        (lane.slot_ids <> []));
-  let credential_envs = [ "ZAI_API_KEY_SB"; "DEEPSEEK_API_KEY" ] in
+  let credential_envs = [ "ZAI_API_KEY"; "DEEPSEEK_API_KEY" ] in
   let previous_credentials =
     List.map
       (fun credential_env -> credential_env, Sys.getenv_opt credential_env)

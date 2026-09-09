@@ -13,7 +13,7 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 이미지가 실린 턴은 지금 "lane 안에서 이미지를 받는 첫 후보" 하나를 고르고, 그 후보가 죽어 있어도 다음 턴에 또 고른다. 후보 집합을 lane 과 `media_failover` 의 합집합으로 만들고, 402·429·quota 로 끝난 후보는 같은 걸음에서 뒤로 보내며, 살아 있는 후보가 없으면 이미지를 떨구지 않고 위임(`keeper_analyze_image` 경로)으로 내려간다.
 
-## 1. 측정 (2026-09-09, `~/me/.masc`)
+## 1. 측정 (2026-09-09, `<base-path>/.masc`)
 
 채팅 요청 12건 전부를 `keeper_chat_events/*/tui-*.jsonl` 로 재었다.
 
@@ -53,7 +53,7 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 ## 5. 오늘의 임시 조치 (WORKAROUND)
 
-`~/me/.masc/config/runtime.toml` 에서 `media_failover` 머리를 `claude_code.claude-haiku-4-5`, `glm-coding.glm-4.6v` 로 올리고, glm-5.3 lane 에 `claude_code.claude-haiku-4-5` 를 deepseek 앞에 넣었다. 첫 번째만 고르는 구조를 그대로 둔 채 첫 번째를 살아 있는 것으로 바꾼 것이라 워크어라운드다. §7 PR-A 가 들어가면 lane 에 끼운 haiku 는 뺀다.
+`<base-path>/.masc/config/runtime.toml` 에서 `media_failover` 머리를 `claude_code.claude-haiku-4-5`, `glm-coding.glm-4.6v` 로 올리고, glm-5.3 lane 에 `claude_code.claude-haiku-4-5` 를 deepseek 앞에 넣었다. 첫 번째만 고르는 구조를 그대로 둔 채 첫 번째를 살아 있는 것으로 바꾼 것이라 워크어라운드다. §7 PR-A 가 들어가면 lane 에 끼운 haiku 는 뺀다.
 
 ## 6. 검증
 

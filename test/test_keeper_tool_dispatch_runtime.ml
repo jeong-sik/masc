@@ -7663,7 +7663,7 @@ let test_workspace_memory_read_dispatch () =
       let invalid = invoke (`Assoc ["id", `String "../private"]) in
       check string "invalid ID is failure" "failure" (outcome_label invalid.disposition);
       let path = Filename.concat config.base_path
-        (Masc.Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+        (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
       let channel = open_out_bin path in output_string channel "broken"; close_out channel;
       let corrupt = invoke (`Assoc ["id", `String id]) in
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))

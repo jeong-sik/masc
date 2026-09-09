@@ -57,17 +57,20 @@ type hitl_announcement =
   }
 
 let pending_hitl_announcements ~announced ~counts =
-  let announced_count name =
-    Option.value ~default:0 (List.assoc_opt name announced)
-  in
   let changed =
     List.filter_map
       (fun (name, count) ->
-         if count = announced_count name
-         then None
-         else Some { keeper_name = name; pending_count = count })
+         match List.assoc_opt name announced with
+         | Some previous when previous = count -> None
+         (* Never announced, or announced with another count: news either
+            way. *)
+         | Some _ | None -> Some { keeper_name = name; pending_count = count })
       counts
   in
+  (* [counts] lists the keepers the workspace config knows with a non-zero
+     queue. A keeper that left it is reported as zero: it either drained, or
+     it was removed from the config while entries stayed queued, and in the
+     second case the sweep itself no longer sees those entries either. *)
   let cleared =
     List.filter_map
       (fun (name, count) ->
@@ -80,8 +83,12 @@ let pending_hitl_announcements ~announced ~counts =
 ;;
 
 (* The counts last announced, keyed by workspace and keeper. Process-local
-   memory for log deduplication, not authority: after a restart the first
-   sweep announces every non-zero count once more. *)
+   memory for log deduplication, not authority: after a process restart the
+   first sweep announces every non-zero count once more; stopping and
+   starting the sweep inside one process keeps the memory. The sweep is one
+   pulse fiber per workspace, so the read-modify-write below is not raced;
+   a second sweep on the same workspace would at worst announce a line
+   twice, never lose a change. *)
 let announced_pending_hitl : ((string * string) * int) list Atomic.t =
   Atomic.make []
 ;;

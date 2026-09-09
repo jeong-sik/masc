@@ -1048,7 +1048,10 @@ let test_tool_handle_async_success_projects_running_then_completed ?(with_contex
         match Fusion_run_registry.get registry ~run_id with
         | Some { Fusion_run_registry.status = Completed _; _ } -> ()
         | Some { Fusion_run_registry.status = Running; _ } | None ->
-          Eio.Fiber.yield ();
+          (* A perpetually runnable yield-loop can starve the system-thread
+             fsync completions that project the result. Wait on the clock so
+             the scheduler services I/O; retain the existing overall deadline. *)
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.001;
           await_projection ()
       in
       await_projection ());

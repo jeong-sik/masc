@@ -209,6 +209,10 @@ def configure(binary, base_path, spec):
 def configure_many(binary, base_path, specs, selected_ids=None, verify=False, default_id=None):
     if not isinstance(specs, list):
         raise SetupError('connections must be a list')
+    if selected_ids is not None and (not isinstance(selected_ids, list) or not all(model_text(value) for value in selected_ids)):
+        raise SetupError('runtime_ids must be a list of runtime identifiers')
+    if default_id is not None and not model_text(default_id):
+        raise SetupError('default_runtime_id must be a runtime identifier')
     rendered = [render(spec) for spec in specs]
     selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
     if not selected:
@@ -265,10 +269,11 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
                         receipt = json.loads(probe.stdout)
                     except ValueError:
                         raise SetupError('runtime verification did not return a result; configuration was preserved')
-                    if (not isinstance(receipt, dict) or probe.returncode or receipt.get('schema') != 'masc.runtime_verification.v1'
+                    checks = receipt.get('checks') if isinstance(receipt, dict) else None
+                    if (not isinstance(receipt, dict) or not isinstance(checks, dict) or probe.returncode or receipt.get('schema') != 'masc.runtime_verification.v1'
                             or receipt.get('runtime_id') != runtime_id or receipt.get('status') != 'verified'
-                            or receipt.get('checks', {}).get('response') is not True
-                            or receipt.get('checks', {}).get('tool_roundtrip') is not True):
+                            or checks.get('response') is not True
+                            or checks.get('tool_roundtrip') is not True):
                         raise VerificationError(runtime_id, receipt.get('failure') if isinstance(receipt, dict) else None)
                     verifications.append(receipt)
         if [snapshot(path) for path in paths] != originals:

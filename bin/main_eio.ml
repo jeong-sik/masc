@@ -2387,26 +2387,48 @@ let sandbox_image_cmd =
    as if they were concrete CLI model IDs. *)
 type wizard_model_client = Wizard_claude_code | Wizard_codex
 
+let wizard_model_client_arg =
+  Arg.enum [ "claude-code", Wizard_claude_code; "codex", Wizard_codex ]
+
+let wizard_model_entries client catalog =
+  Llm_provider.Model_catalog.model_entries catalog
+  |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+    match client, entry.provider_name with
+    | Wizard_claude_code, (None | Some "anthropic") ->
+      String.starts_with ~prefix:"claude-" entry.id_prefix
+    | Wizard_codex, (None | Some "openai-responses") ->
+      String.starts_with ~prefix:"gpt-" entry.id_prefix
+    | _ -> false)
+
+let wizard_model_context model entries =
+  let contexts = entries
+    |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+      let exact = String.equal entry.id_prefix model
+        || Option.fold ~none:false ~some:(List.mem model) entry.supported_models in
+      match entry.max_context_tokens with
+      | Some context when exact && context > 0 -> Some context
+      | _ -> None)
+    |> List.sort_uniq Int.compare
+  in
+  match contexts with [ context ] -> Some context | [] | _ :: _ -> None
+
 let runtime_model_list_cmd =
   let client =
-    Arg.(required & pos 0
-      (some (enum [ "claude-code", Wizard_claude_code; "codex", Wizard_codex ]))
-      None & info [] ~docv:"CLIENT")
+    Arg.(required & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
   in
   let run client =
     match Llm_provider.Model_catalog.load_default () with
     | Error message -> prerr_endline message; 1
     | Ok catalog ->
-      let prefix = match client with Wizard_claude_code -> "claude-" | Wizard_codex -> "gpt-5" in
-      let models =
-        Llm_provider.Model_catalog.model_entries catalog
-        |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-          match entry.provider_name, entry.max_context_tokens with
-          | None, Some context when context > 0 && String.starts_with ~prefix entry.id_prefix ->
-            Some (`Assoc [ "id", `String entry.id_prefix
-                         ; "label", `String entry.id_prefix
-                         ; "max_context", `Int context ])
-          | _ -> None)
+      let entries = wizard_model_entries client catalog in
+      let models = entries
+        |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+        |> List.sort_uniq String.compare
+        |> List.filter_map (fun model ->
+          Option.map (fun context -> `Assoc [ "id", `String model
+                                            ; "label", `String model
+                                            ; "max_context", `Int context ])
+            (wizard_model_context model entries))
       in
       print_endline (Yojson.Safe.to_string (`Assoc [
         "source", `String "installed MASC model catalog";
@@ -2419,20 +2441,25 @@ let runtime_model_list_cmd =
 
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
-  let run model =
+  let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
+  let run model client =
     match Llm_provider.Model_catalog.load_default () with
     | Error message -> prerr_endline message; 1
     | Ok catalog ->
-      match Llm_provider.Model_catalog.lookup catalog model with
-      | Some entry ->
-        (match entry.max_context_tokens with
-        | Some context ->
-          print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
-        | None -> 1)
+      let entries = match client with
+        | None -> Llm_provider.Model_catalog.model_entries catalog
+        | Some client -> wizard_model_entries client catalog
+      in
+      (* A generic family prefix is not evidence for the context of a model
+         the installer does not know. Include provider-scoped exact rows, and
+         reject conflicting declarations rather than pick a convenient one. *)
+      match wizard_model_context model entries with
+      | Some context ->
+        print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
       | None -> 1
   in
-  Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read a model's declared context size from the installed catalog.")
-    Term.(const run $ model)
+  Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read an exact model's declared context size from the installed catalog.")
+    Term.(const run $ model $ client)
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in

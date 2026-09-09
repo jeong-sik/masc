@@ -331,7 +331,7 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     context = selected['context'] if selected else None
     context_source = origin if context else None
     if context is None and choice in ('codex', 'claude_code'):
-        result = subprocess.run([binary, 'runtime-model-info', model], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run([binary, 'runtime-model-info', model, '--client', {'codex':'codex','claude_code':'claude-code'}[choice]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if result.returncode == 0:
             try:
                 info = json.loads(result.stdout)

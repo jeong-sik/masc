@@ -49,6 +49,16 @@ class ModelSelection(unittest.TestCase):
                 self.assertEqual(selected,dict(model='observed-id',max_context=4567))
                 self.assertIn('No number to enter',terminal.getvalue())
 
+    def test_astra_uses_codex_effective_context_instead_of_api_maximum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory,'models_cache.json').write_text(json.dumps({'models':[{
+                'slug':'gpt-6-astra','display_name':'GPT-6-Astra','visibility':'list',
+                'context_window':272000,'max_context_window':872000}]}))
+            with patch.dict(os.environ,{'CODEX_HOME':directory}), patch('sys.stdin',io.StringIO('1\n')), patch('subprocess.run') as cli, contextlib.redirect_stderr(io.StringIO()):
+                selected=SETUP.select_model('/fixture/masc','codex')
+            self.assertEqual(selected,dict(model='gpt-6-astra',max_context=272000))
+            cli.assert_not_called()
+
     def test_empty_codex_cache_uses_installed_list(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
             def cli(argv, **kwargs):
@@ -188,6 +198,17 @@ runtime.write_text(runtime.read_text().replace('original.model', sys.argv[4]))
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class InstalledModelCatalog(unittest.TestCase):
+    def test_astra_exact_provider_scoped_catalog_is_not_generic_gpt_fallback(self):
+        result=subprocess.run([BINARY,'runtime-model-list','codex'],check=True,capture_output=True,text=True)
+        models=json.loads(result.stdout)['models']
+        astra=next(row for row in models if row['id']=='gpt-6-astra')
+        self.assertEqual(astra['max_context'],1050000)
+        result=subprocess.run([BINARY,'runtime-model-info','gpt-6-astra','--client','codex'],check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(result.stdout)['max_context'],1050000)
+        unknown=subprocess.run([BINARY,'runtime-model-info','gpt-unknown-fixture','--client','codex'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+
     def test_claude_list_includes_sonnet5_and_selects_without_context_question(self):
         result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
         catalog=json.loads(result.stdout)

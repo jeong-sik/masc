@@ -277,10 +277,19 @@ val for_model_id_catalog : string -> capabilities option
     [provider_name] and complete normalized [id_prefix] equal [provider_label]
     and [model_id], respectively. AGENT_CORE never rewrites either value into slash,
     colon, or dot-qualified candidates, and does not apply family/prefix
-    matching inside the provider scope. When the exact pair is absent, a
-    catalog-declared provider base for [wire] is used first;
-    [allow_bare_fallback] controls only the subsequent fallback to a
-    provider-independent {!for_model_id} row.
+    matching inside the provider scope. When the exact pair is absent and
+    [allow_bare_fallback] is set, the provider-independent {!for_model_id}
+    row is tried next -- it does apply prefix matching, so it is what reads a
+    catalog row that names a model family. The catalog-declared provider base
+    for [wire] answers last, being what every model of that provider gets
+    when no row names it.
+
+    Until 2026-09-09 the base came before that row. Every [[providers]] entry
+    declares a base, so it always answered and the bare row was unreachable:
+    44 of the catalog's 125 bare rows could not be read by an anonymous config
+    of their own wire (#34301). With [allow_bare_fallback] false -- a config
+    that named a [provider_id] -- the order is unchanged, because a bare row
+    must not answer for a scoped provider whose base deliberately differs.
 
     [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
     one. It selects the base a matched row is laid over for a provider whose

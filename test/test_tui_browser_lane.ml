@@ -113,7 +113,8 @@ let screenshot_response ?(source="live") ?(client=firefox.client_id) ?(tab_id=2)
   `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String source; "clientId", (if source = "automation" then `Null else `String client); "tabId", `Int tab_id; "title", `String "second";
     "url", `String "https://example.org/"; "mimeType", `String mime;
-    "data", `String "UE5H"; "elapsed_ms", `Float 13.]]
+    "data", `String "UE5H"; "viewport", `Assoc ["documentId",`String "fixture";
+      "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]; "elapsed_ms", `Float 13.]]
 
 let test_screenshot_ownership_and_draft () =
   let pending = { (loaded ()) with scroll = 3; url_draft = Some "https://example.org/?q=한글";
@@ -216,9 +217,22 @@ let test_visual_scroll_ownership () =
   let same, image = accept_screenshot ~generation:41 (Ok shot) switched in
   expect "closed or switched visual mode rejects an old frame" (same = switched && image = None)
 
+let test_visual_pointer_navigation () =
+  let shot = match decode_screenshot (screenshot_response ()) with Ok shot -> shot | Error e -> failwith e in
+  let action = Browser_lane.Click_at {point={x=0.5;y=0.5};viewport=shot.viewport} in
+  let pending = {(loaded ()) with load=Loading (52,Viewport_pointer {
+    tab_id=2;expected_url=shot.url;action})} in
+  let next = {shot with url="https://example.org/channel"} in
+  let settled,image = accept_screenshot ~generation:52 (Ok next) pending in
+  expect "clicked link may navigate the same selected tab" (not (busy settled) && image=Some next);
+  let wrong = {next with tab_id=3} in
+  let _,image = accept_screenshot ~generation:52 (Ok wrong) pending in
+  expect "pointer completion never switches target tab" (image=None)
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["visual scroll ownership", test_visual_scroll_ownership;
+    ["visual pointer navigation", test_visual_pointer_navigation;
+     "visual scroll ownership", test_visual_scroll_ownership;
      "client connection ownership", test_client_connection_ownership;
      "client inventory contract", test_clients_decode;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;

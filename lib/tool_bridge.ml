@@ -359,12 +359,22 @@ let to_agent_core_typed_result
     (* Keep producer recovery details in model content. Data already carried
        verbatim by the message or metadata needs no second copy. *)
     let model_data =
+      let serialized = Yojson.Safe.to_string data in
+      let carried_by_message =
+        match data with
+        | `String text -> String.equal text message || String.equal serialized message
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+          String.equal serialized message
+      in
+      let carried_by_metadata =
+        match metadata with
+        | Some metadata -> Yojson.Safe.equal data metadata
+        | None -> false
+      in
       match data with
       | `Null -> None
-      | `String text when String.equal text message -> None
-      | _ when Option.fold ~none:false ~some:(Yojson.Safe.equal data) metadata -> None
-      | _ when String.equal (Yojson.Safe.to_string data) message -> None
-      | _ -> Some data
+      | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ ->
+        if carried_by_message || carried_by_metadata then None else Some data
     in
     let message =
       match metadata, model_data with

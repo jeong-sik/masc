@@ -5131,7 +5131,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc_tui_types))
+ (libraries masc.browser_lane masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -5438,7 +5438,8 @@
  (libraries masc_test_deps exec_ssh_protocol eio eio_main)
  (deps test_docker_observe_transport.py)
  (action
-  (run python3 %{dep:test_docker_observe_transport.py} %{test})))
+  (run python3 %{dep:test_docker_observe_transport.py}
+   %{exe:test_docker_observe_transport.exe})))
 
 (rule
  (alias runtest-test_docker_observe_transport)

@@ -127,6 +127,10 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type elicitation_mode = Form | Openai_form | Url
+
+type elicitation_cancel_reason = Host_input_unavailable
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -141,6 +145,11 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Elicitation_cancelled of
+      { server_name : string
+      ; mode : elicitation_mode
+      ; reason : elicitation_cancel_reason
+      }
   | Turn_finished of { text : string }
 
 type history_role =

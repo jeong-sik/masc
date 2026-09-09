@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,9 +32,17 @@ def main():
         base = root / "base"
         base.mkdir()
         shim = root / "masc-exec-shim"
-        # Always build the exact checked-out shim source in CI; no mtime reuse.
-        build = run([str(repo / "scripts/build-shim-static.sh"), str(shim)], cwd=repo)
-        (root / "shim-build.log").write_text(build.stdout + build.stderr)
+        # Use the release builder: its pinned compiler and non-PIE static
+        # linking are part of the executable's Linux portability contract.
+        arch = {"x86_64": "amd64", "aarch64": "arm64"}[platform.machine()]
+        build_dir = Path("dist") / ("observe-shim-" + uuid.uuid4().hex)
+        try:
+            build = run([str(repo / "scripts/remote-ssh/build-shim.sh"),
+                         "--arch", arch, "--out", str(build_dir)], cwd=repo)
+            (root / "shim-build.log").write_text(build.stdout + build.stderr)
+            shutil.copy2(repo / build_dir / ("masc-exec-shim-linux-" + arch), shim)
+        finally:
+            shutil.rmtree(repo / build_dir, ignore_errors=True)
         fixture = root / "image"
         fixture.mkdir()
         (fixture / "Dockerfile").write_text(

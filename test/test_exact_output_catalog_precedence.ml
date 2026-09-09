@@ -768,7 +768,36 @@ require_lane_slots
     "explicit HITL lane preserves configured slot order"
     ~lane_id:"hitl_auto_judge"
     ~expected:explicit_slots
-    (current_registry "explicit HITL lane bootstrap")
+    (current_registry "explicit HITL lane bootstrap");
+  (* Exercise the first-install writer followed by the actual server admission
+     path, not only the lower-level registry. Neither CLI needs credentials to
+     prove configuration admission; authentication is a separate setup check. *)
+  List.iter
+    (fun (protocol, command) ->
+       write_file runtime_path
+         (runtime_toml replacement_target
+          ^ Printf.sprintf
+              "\n[providers.first_cli]\nprotocol = %S\ncommand = %S\nis-non-interactive = true\n[first_cli.replacement]\n"
+              protocol command);
+       create_server_state ();
+       let runtime_id = "first_cli.replacement" in
+       (match Runtime.set_first_run_runtime ~runtime_config_path:runtime_path
+                ~runtime_id () with
+        | Ok _ -> ()
+        | Error detail -> Alcotest.failf "first-run CLI selection failed: %s" detail);
+       create_server_state ();
+       let registry = current_registry "CLI-only server bootstrap" in
+       List.iter
+         (fun lane_id ->
+            match Registry.resolve_lane registry ~lane_id with
+            | Ok { selected_slots = []; cli_slots } ->
+              Alcotest.(check (list string)) (protocol ^ " " ^ lane_id)
+                [ runtime_id ] cli_slots
+            | Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
+            | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
+                (Registry.lane_resolution_error_to_string error))
+         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ])
+    [ "codex-app-server", "codex"; "claude-code", "claude" ]
 ;;
 
 let test_published_registry_value_is_generation_stable () =

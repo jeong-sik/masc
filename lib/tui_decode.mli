@@ -2790,3 +2790,6 @@ type async_request_observation =
 
 val decode_async_request_observation :
   Yojson.Safe.t -> (async_request_observation, string) result
+
+val sgr_left_release : string -> char -> (int * int) option
+(** Plain SGR left release position for screenshot click/drag gestures. *)

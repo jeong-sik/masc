@@ -1481,6 +1481,11 @@ let sgr_left_press (parameters : string) (final : char) : (int * int) option =
         | _, _ -> None)
     | _ -> None
 
+(** Browser screenshots use release coordinates to distinguish a click from a drag.
+    Other surfaces continue to consume only presses. *)
+let sgr_left_release parameters final =
+  if final = 'm' then sgr_left_press parameters 'M' else None
+
 (** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
     three raw bytes) into the same key an SGR report produces.
 

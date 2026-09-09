@@ -621,6 +621,7 @@ type input_event =
           the operator was writing. Reading it is what keeps that from
           happening, whether or not anyone is waiting for it. *)
   | Mouse_left_press of int * int
+  | Mouse_left_release of int * int
       (** [(row, column)] of an unmodified left-button press, 1-based as the
           terminal reported it. Only surfaces that map frame rows to their own
           rows consume one; everywhere else it is inert, like a wheel notch on
@@ -732,7 +733,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                        match Masc.Tui_decode.sgr_left_press params final with
                        | Some (row, column) ->
                            Some (Mouse_left_press (row, column))
-                       | None -> key "unknown-esc"))
+                       | None -> (match Masc.Tui_decode.sgr_left_release params final with
+                           | Some (row,column) -> Some (Mouse_left_release (row,column))
+                           | None -> key "unknown-esc")))
                (* A bare [CSI M] is the legacy X10 mouse report: three raw
                   bytes follow and belong to the report, not to the typist.
                   Terminals that ignore the SGR half of the [?1006;1000h]
@@ -4163,7 +4166,7 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4177,7 +4180,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ ->
+        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4216,6 +4219,12 @@ let launch_browser_lane state ~mailbox operation =
               Result.bind
                 (Masc_tui_http.scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y)
                 (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
+          }
+        | Viewport_pointer {tab_id;expected_url;action} -> Browser_lane_screenshot_ready {
+            generation; image_generation;
+            result = call (fun () -> Result.bind
+              (Masc_tui_http.act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action)
+              (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
             (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
@@ -6626,6 +6635,8 @@ let paste_clipboard_image state =
 let terminal_draws_images = ref None
 let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 let image_cell_pixels = ref None
+let browser_image_region : Masc_tui_graphics.image_region option ref = ref None
+let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -6865,6 +6876,8 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
   else begin
   state.browser_viewport <- None;
+  browser_image_region := None;
+  browser_pointer_press := None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
   | Error detail -> refuse detail
   | Ok media when not (String.equal media Masc_tui_graphics.payload_media_type)
@@ -6888,6 +6901,22 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         ; rows = max 1 (rows - header_rows - 2)
         }
       in
+      (* Use the same aspect-preserving placement as the terminal. With no
+         measured cell size the image still renders, but coordinates are unknown. *)
+      let image_pixels = Masc.Keeper_image_dimensions.image_dimensions data in
+      (match !image_cell_pixels, image_pixels with
+       | Some (cw,ch), Some (iw,ih) when cw > 0 && ch > 0 && iw > 0 && ih > 0 ->
+           let cw = float_of_int cw and ch = float_of_int ch in
+           let iw = float_of_int iw and ih = float_of_int ih in
+           let height_cells = match !active_graphics_protocol with
+             | Masc_tui_graphics.ITerm2_protocol ->
+                 min (float_of_int box.rows) (float_of_int box.columns *. cw *. ih /. iw /. ch)
+             | Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.Unsupported_protocol ->
+                 float_of_int (Masc_tui_graphics.fit_rows ~cell_pixels:!image_cell_pixels
+                   ~image_pixels ~columns:box.columns ~rows:box.rows) in
+           browser_image_region := Some {top=header_rows+1;left=1;height_cells;
+             width_cells=height_cells *. ch *. iw /. ih /. cw}
+       | _ -> ());
       let img_escape =
         match !active_graphics_protocol with
         | Masc_tui_graphics.ITerm2_protocol ->
@@ -7244,6 +7273,8 @@ let open_named_image state ~mailbox =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  browser_pointer_press := None;
+  browser_image_region := None;
   state.browser_viewport <- None;
   match state.image_open with
   | false -> ()
@@ -7260,10 +7291,16 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     state.browser_lane <- Option.map
       (fun (view : Browser_lane_view.t) -> { view with load = Failed detail }) state.browser_lane
   in
+  let pointer_hint = match !image_cell_pixels with
+    | Some (width, height) when width > 0 && height > 0 ->
+        (match shot.source with
+         | Browser_lane_view.Live -> "click: link   drag: requires automation"
+         | Browser_lane_view.Automation -> "click: link   drag: move")
+    | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:"  wheel / ↑↓ / j k: scroll page   r: refresh   Esc: back" bytes;
+    ~footer:("  Esc: back   r:refresh   wheel / j k:scroll   " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -14741,6 +14778,28 @@ and is loaded on demand through keeper_skill.
            let scroll y = launch_browser_lane state ~mailbox:async_messages
              (Browser_lane_view.Viewport_scroll {tab_id=shot.tab_id; expected_url=shot.url; y}) in
            (match event with
+            | Mouse_left_press (row,column) ->
+                browser_pointer_press := None;
+                (match state.browser_lane, !browser_image_region with
+                 | Some view, Some region when not (Browser_lane_view.busy view) ->
+                     (match Masc_tui_graphics.image_point region ~row ~column with
+                      | Some (x,y) -> browser_pointer_press := Some (row,column,{x;y})
+                      | None -> ())
+                 | _ -> ())
+            | Mouse_left_release (row,column) ->
+                let pressed = !browser_pointer_press in
+                browser_pointer_press := None;
+                (match pressed, !browser_image_region with
+                 | Some (start_row,start_column,from), Some region ->
+                     (match Masc_tui_graphics.image_point region ~row ~column with
+                      | Some (x,y) ->
+                          let action = if row=start_row && column=start_column then
+                            Browser_lane.Click_at {point=from;viewport=shot.viewport}
+                          else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport} in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;action})
+                      | None -> ())
+                 | _ -> ())
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
             | Key ("j" | "down") | Mouse_wheel (Masc.Tui_decode.Wheel_down, _, _) -> scroll 120
@@ -14881,7 +14940,7 @@ and is loaded on demand through keeper_skill.
               | Pane_row _ -> None
               | Pane_miss -> Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
-          | Some (Mouse_left_press _) | None -> None
+          | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
       in
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
@@ -15074,7 +15133,7 @@ and is loaded on demand through keeper_skill.
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _)
-       | Some (Mouse_left_press _) | Some (Mouse_wheel _) | None -> ());
+       | Some (Mouse_left_press _) | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       (let now_ns = Mtime_clock.elapsed_ns () in

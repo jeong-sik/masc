@@ -28,7 +28,7 @@ let snapshot_execution_of_response result response =
   match result.Keeper_tool_execution.disposition with
   | Tool_result.Completed () ->
     let data = Snapshot_protocol.to_yojson response in
-    { result with raw_output = Yojson.Safe.to_string data; data = Some data }
+    Keeper_tool_execution.success_data data
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 

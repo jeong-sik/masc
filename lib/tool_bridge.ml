@@ -129,7 +129,7 @@ let resolve_blob_store ?base_path () =
     available; otherwise pass through unchanged. A configured store that
     cannot persist the bytes returns a typed error: putting the oversized
     payload back on the provider wire would defeat this boundary. *)
-let maybe_externalize ?base_path ?(mime = "text/plain")
+let maybe_externalize ?base_path ?stored_preview ?(mime = "text/plain")
       ?(threshold_bytes = default_externalize_threshold_bytes) (msg : string)
   : (string, externalization_error) result
   =
@@ -144,7 +144,9 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
            in
            Ok
              (Tool_output.encode_for_agent_core
-                (Tool_output.Stored reference))
+                (Tool_output.Stored
+                   (Option.fold ~none:reference
+                      ~some:(Tool_output.with_preview reference) stored_preview)))
          with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -158,10 +160,10 @@ let make_tool_error ?(recoverable = false) ?error_class message
   : Agent_core.Types.tool_result =
   Error { Agent_core.Types.message; recoverable; error_class }
 
-let project_content ?base_path ~model_projection message =
+let project_content ?base_path ?stored_preview ~model_projection message =
   match model_projection with
   | Tool_output.Store_above { threshold_bytes } ->
-    maybe_externalize ?base_path ~threshold_bytes message
+    maybe_externalize ?base_path ?stored_preview ~threshold_bytes message
   | Tool_output.Inline_up_to { maximum_bytes } ->
     if String.length message <= maximum_bytes
     then Ok message
@@ -277,6 +279,7 @@ let params_of_json_schema schema =
 
 let project_result
       ?base_path
+      ?stored_preview
       ?on_externalization_error
       ~model_projection
       ~structured_content
@@ -285,7 +288,9 @@ let project_result
       on_content
   : Agent_core.Types.tool_result
   =
-  let project () = project_content ?base_path ~model_projection message in
+  let project () =
+    project_content ?base_path ?stored_preview ~model_projection message
+  in
   let projected =
     match Tool_output.normalized_artifact_refs_in_json structured_content with
     | [] -> project ()
@@ -297,6 +302,10 @@ let project_result
        | Ok (_ :: _) ->
          (match artifact_manifest_from_metadata metadata with
           | Ok reference ->
+            let reference =
+              Option.fold ~none:reference
+                ~some:(Tool_output.with_preview reference) stored_preview
+            in
             Ok (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
           | Error message -> Error { kind = Artifact_storage_failure; message }))
   in
@@ -381,7 +390,14 @@ let to_agent_core_typed_result
                   | Some metadata -> [ "masc.payload", metadata ]
                   | None -> [])))
     in
+    let stored_preview =
+      match next_move with
+      | Some next_move ->
+        Printf.sprintf "failure_class=%s — %s" failure_class next_move
+      | None -> Printf.sprintf "failure_class=%s" failure_class
+    in
     project_result
+      ~stored_preview
       ?base_path
       ?on_externalization_error
       ~model_projection

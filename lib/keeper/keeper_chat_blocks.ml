@@ -527,13 +527,13 @@ let official_client_message_blocks raw =
             (* An empty projection must not hand the message back to the
                plain-text path: broadcast omits empty blocks and the
                dashboard would re-parse the raw envelope JSON. *)
-            (* sound-partial: allow — the catch-all arms below never guess at
-               the unknown content; they hand back a fixed placeholder marker
-               so the reader sees "something unrenderable arrived" instead of
-               either a silent drop or the raw envelope JSON. *)
             (match projected with
              | [] -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ]
+             (* sound-partial: allow — no guess: hands back the already-built
+                projection, not a default for unknown input. *)
              | _ -> Some projected)
+          (* sound-partial: allow — fixed placeholder marker, not a guessed
+             default, when content_blocks itself is absent. *)
           | _ -> Some [ Text { html = escape_html "[빈 official-client 메시지]" } ])
         | other ->
           Some

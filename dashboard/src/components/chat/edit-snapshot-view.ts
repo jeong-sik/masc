@@ -15,7 +15,7 @@ export function EditSnapshotView({ refs }: { refs: EditSnapshots }) {
     const controller = new AbortController()
     setState({ kind: 'loading' })
     void fetchEditSnapshots(refs, controller.signal).then(async result => ({
-      ...result, diff: await editSnapshotDiff(result.before, result.after),
+      ...result, diff: await editSnapshotDiff(result.before, result.after, controller.signal),
     })).then(
       result => { if (!controller.signal.aborted) setState({ kind: 'loaded', ...result }) },
       error => { if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) }) },

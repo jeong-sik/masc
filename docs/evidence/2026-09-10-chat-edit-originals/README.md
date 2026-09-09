@@ -4,13 +4,13 @@ This frontend stack consumes the durable edit snapshots introduced by #34924.
 It adds an explicit button to fetch both complete files from the artifact API,
 checks each response's byte length and SHA-256 against the recorded reference,
 and renders a unified diff plus both verified originals without interpreting HTML.
-The established jsdiff engine is loaded on demand and computes asynchronously. Input snippets are not
+The established jsdiff engine is loaded on demand and runs in a dedicated worker that is terminated when the view closes. Input snippets are not
 required for this view. Closing the view cancels pending fetches; reopening
 retries failures.
 
 ## Verification
 
-Focused Vitest run on 2026-09-10 KST passed 19 tests across:
+Focused Vitest run on 2026-09-10 KST passed 21 tests across:
 
 - `src/api/edit-snapshots.test.ts`
 - `src/components/chat/edit-evidence.test.ts`
@@ -18,7 +18,10 @@ Focused Vitest run on 2026-09-10 KST passed 19 tests across:
 
 Coverage includes CRLF and whitespace preservation, altered-response rejection,
 missing input snippets, explicit persistence/retrieval failure, retry, keyboard
-focus, CRLF changes and a final-newline-only diff.
+focus, CRLF changes, a final-newline-only diff, cancellation before computation,
+and worker termination on close/reopen/unmount. Component tests simulate the
+worker transport while executing the real jsdiff engine; actual browser worker
+loading remains pending CI artifact verification.
 No local build was run. CI build and browser screenshots are still pending.
 
 ## Remaining acceptance work

@@ -433,7 +433,7 @@ and subst_dq buf = parse
   | '"' { Buffer.add_char buf '"' }
   | "$(" {
       Buffer.add_string buf "$(";
-      subst_body 1 buf lexbuf;
+      ignore (subst_body 1 buf lexbuf);
       Buffer.add_char buf ')';
       subst_dq buf lexbuf
     }

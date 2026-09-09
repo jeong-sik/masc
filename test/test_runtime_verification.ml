@@ -217,6 +217,12 @@ enabled = true
 apps = true
 hooks = true
 |} in
+  (match Runtime_verification_codex_home.project_config source with
+   | Error detail -> fail detail
+   | Ok projected ->
+     let doc = Otoml.Parser.from_string projected in
+     check bool "user-home server entirely absent from isolated home" true
+       (Otoml.find_opt doc Fun.id ["mcp_servers"; "dangerous"] = None));
   match Runtime_verification_codex_home.project_config ~disabled_mcp_servers:["dangerous"] source with
   | Error detail -> fail detail
   | Ok projected ->

@@ -59,7 +59,7 @@ let cli_overrides ~home =
     Printf.sprintf "mcp_servers.\"%s\".enabled=false" (Toml_line_editor.escape_string name)))
 ;;
 
-let inherited_server_names ~directory ~source =
+let inherited_server_names ~directory =
   let rec ancestors path =
     let config = Filename.concat path ".codex/config.toml" in
     let parent = Filename.dirname path in
@@ -67,7 +67,10 @@ let inherited_server_names ~directory ~source =
   in
   (* Codex's documented Unix system configuration layer is independent of
      CODEX_HOME. CLI overrides below outrank it and project ancestor layers. *)
-  let paths = "/etc/codex/config.toml" :: Filename.concat source "config.toml" :: ancestors directory in
+  (* The original user home is absent from the isolated client's layers.
+     Do not add disabled-only entries for those absent servers: Codex still
+     requires a transport definition even when a server is disabled. *)
+  let paths = "/etc/codex/config.toml" :: ancestors directory in
   paths |> List.concat_map (fun path ->
     if Sys.file_exists path then server_names (Fs_compat.load_file path) else [])
   |> List.sort_uniq String.compare
@@ -82,7 +85,7 @@ let prepare ~directory =
   let source = if Filename.is_relative source then Filename.concat (Sys.getcwd ()) source else source in
   let source_config = Filename.concat source "config.toml" in
   let body = if Sys.file_exists source_config then Fs_compat.load_file source_config else "" in
-  match project_config ~disabled_mcp_servers:(inherited_server_names ~directory ~source) body with
+  match project_config ~disabled_mcp_servers:(inherited_server_names ~directory) body with
   | Error _ as error -> error
   | Ok config ->
     let destination = Filename.concat directory "codex-home" in

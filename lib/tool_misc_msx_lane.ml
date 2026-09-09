@@ -15,7 +15,12 @@ let reject ~tool_name ~start_time message =
   Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time message
 ;;
 
-let observation_fields (o : Msx_lane.observation) =
+(* Sprites ride an observation only when asked for: keepers play by the
+   screen, and the attribute table (32 slots, ~60 bytes each) was dead weight
+   in every bitmap-mode observation — 2 calls of peek against 204 screens in
+   a day (2026-09-09 system log) showed nobody reads RAM state through it
+   either. [~sprites] opts one call in. *)
+let observation_fields ?(sprites = false) (o : Msx_lane.observation) =
   let sprite (s : Msx_lane.sprite) : Yojson.Safe.t =
     `Assoc
       [ ("index", `Int s.index)
@@ -34,16 +39,16 @@ let observation_fields (o : Msx_lane.observation) =
   ; ("screen_text", `String o.screen_text)
   ; ("screen_view", `String o.screen_view)
   ; ("tiles", `List (List.map (fun row -> `String row) o.tiles))
-  ; ("sprites", `List (List.map sprite o.sprites))
   ]
+  @ (if sprites then [ ("sprites", `List (List.map sprite o.sprites)) ] else [])
 ;;
 
-let of_lane ?(extra = []) ~tool_name ~start_time
+let of_lane ?(extra = []) ?sprites ~tool_name ~start_time
     (result : (Msx_lane.observation, Msx_lane.error) result) =
   match result with
   | Ok o ->
     Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc (observation_fields o @ extra))
+      ~data:(`Assoc (observation_fields ?sprites o @ extra))
       ()
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
@@ -250,8 +255,10 @@ let handle_ram_diff ~tool_name ~start_time () =
   | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
 ;;
 
-let handle_screen ~tool_name ~start_time _args =
-  of_lane ~tool_name ~start_time (Msx_lane.screen ())
+let handle_screen ~tool_name ~start_time args =
+  of_lane ~tool_name ~start_time
+    ~sprites:(get_bool args "sprites" false)
+    (Msx_lane.screen ())
 ;;
 
 let handle_step ~tool_name ~start_time args =

@@ -1,0 +1,74 @@
+Skip to main content
+작업
+0 실행 중
+! Gate observation unavailable
+◷ 예약
+Reconnecting...
+Client WS · disconnected
+Login required
+Chat
+⌘J
+Build unavailable
+Tweaks
+M
+!
+WORK
+PLANS & GOALS
+REPOSITORIES
+VERIFICATION
+목표 관리자
+백로그
+전체
+점유 지연
+0
+책임 원장
+0
+책임 매트릭스
+0
+계획 상태
+BACKLOG와 장기 목표를 함께 보는 조감도입니다
+
+아직 등록된 항목 없음
+
+계획 데이터 새로고침
+전체 태스크
+0
+할 일
+0
+진행 중
+0
+완료
+0
+높은 우선순위
+0
+백로그 항목
+태스크 추가
+이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 P1이 가장 높습니다.
+태스크 추가
+빠른 시작
+↗
+목표 파이프라인
+장기 목표 파이프라인
+0
+
+등록된 목표 없음
+
+빠른 시작
+↗
+
+태스크 cleanup-target는 삭제됐습니다. 삭제 후 정리가 남아 있습니다.
+
+primary link store unreadable
+삭제 후 정리 재시도
+태스크 백로그
+등록된 태스크가 없습니다
+목표 파이프라인
+장기 목표
+목표 트리에서 보기
+→
+
+등록된 목표 없음
+
+Chat
+서버 연결 실패 — 데이터를 불러올 수 없습니다
+태스크는 삭제됐지만 삭제 후 정리가 실패했습니다. 아래에서 재시도할 수 있습니다.

@@ -1,0 +1,10 @@
+{
+  "source_commit": "5cdf1aee64aa0942a9c390387ad284e5b6bc37b2",
+  "workflow_run_id": "34298781705",
+  "scope": "Real Chrome and CI-built Dashboard with synthetic HTTP deletion receipts; not backend runtime or deployment proof",
+  "passed": true,
+  "same_id_delete_calls": 2,
+  "archive_sha256": "e43e0e1c0e84d477b4a808a56e21097c7c1b825641c88dbaffc4ac7f0d15dbf1",
+  "index_sha256": "cc074fe741c8d6411cff3aab7727f8335a458d2711c37b6a7fa8f9ef8f530d62",
+  "page_errors": []
+}

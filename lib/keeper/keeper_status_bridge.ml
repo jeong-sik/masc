@@ -36,7 +36,6 @@ type override_field_detail =
 
 let override_field = Keeper_status_bridge_override.override_field
 let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
-let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
 let nonempty_string_list_override =
   Keeper_status_bridge_override.nonempty_string_list_override
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
@@ -72,10 +71,10 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
       ~live_value:(`String runtime_id)
     :: acc
   else acc)
-  |> maybe_bool_override
-       "proactive.enabled"
-       defaults.proactive_enabled
-       meta.proactive.enabled
+  |> maybe_string_override
+       "activation_mode"
+       (Option.map Keeper_activation_mode.to_string defaults.activation_mode)
+       (Keeper_activation_mode.to_string meta.activation_mode)
   |> List.rev
 ;;
 

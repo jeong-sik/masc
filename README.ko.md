@@ -11,6 +11,11 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 상태를 MCP로 열어 어떤 MCP 클라이언트든 들어오게 하고, 전부를 터미널 UI로 보여
 줍니다.
 
+**개발 방향:** 맡긴 변경을 끝까지 확인하고, 끊기면 이미 적용된 결과를 확인해
+남은 작업을 이어갑니다. 이 보장을 유지하며 동시 작업 규모를 늘리는 것이 목표입니다.
+[완료·복구·규모 확장 로드맵](docs/RELIABLE-CHANGE-ROADMAP.md)에 측정 가능한 Goal과
+현재 구현된 부분, 앞으로 증명할 보장을 구분했습니다.
+
 하는 일은 셋입니다.
 
 - **에이전트가 같이 쓰는 상태.** 같은 체크아웃에서 에이전트 둘을 돌리면 각자
@@ -305,8 +310,7 @@ false`로 들어오므로 모델과 샌드박스를 갖추고 직접 시작하�
 
 ```toml
 [keeper]
-autoboot_enabled = true
-proactive_enabled = true
+activation_mode = "autonomous"
 sandbox_profile = "docker"
 sandbox_image = "node:22-bookworm"
 network_mode = "none"

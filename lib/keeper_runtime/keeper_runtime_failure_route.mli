@@ -62,6 +62,21 @@ type rotate_class =
           the route names that rotation instead of calling the failure
           deterministic *)
 
+(** What the driver had observed of tool effects when it fenced a provider
+    attempt. Only the two dispositions that fence an attempt appear here:
+    [No_effect_observed] never fences (it routes to [Contract_violation]).
+    Carried on the route because the two answer differently to
+    {!response_observed}: an attempted effect is a model answer, an
+    unavailable observation is set before any answer (#32956 review). *)
+type fence_disposition =
+  | Fenced_effect_attempted
+      (** a dynamic tool handler was entered; another candidate could
+          duplicate the effect *)
+  | Fenced_observation_unavailable
+      (** the adapter cannot prove whether an effect was attempted; the
+          claude-code lane sets it on spawn, the codex lane when the turn
+          input could not be written *)
+
 (** Typed terminal classes that mechanical retry or rotation cannot change. *)
 type terminal_class =
   | Deterministic_request  (** request-body/schema rejections; retry is futile *)
@@ -79,8 +94,8 @@ type terminal_class =
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
   | Terminal_effect_operator_cancelled
-  | Provider_attempt_effect_fenced
-  | Tool_correction_lost
+  | Provider_attempt_effect_fenced of fence_disposition
+  | Tool_correction_lost of fence_disposition
   | Internal_opaque
       (** unhandled internal exceptions, serialization/io/orchestration/agent
           family errors; the failure stays visible while the keeper remains
@@ -139,3 +154,26 @@ val route_kind_label : route -> string
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
     [terminal_class_label] respectively). *)
+
+val response_observed : route -> bool
+(** Whether the provider answered the request that carried the turn's input,
+    so that what failed is the answer or what the turn did with it, not the
+    delivery of the input. A Gate continuation that fails on such a route has
+    already shown the model its replay evidence; the heartbeat settles the
+    approval instead of carrying the same evidence into the next cycle
+    (#32956: one approval rode 24 turns in 51 minutes, every turn ending at
+    [MaxTokens]).
+
+    [true]: the three [No_progress_*] rotations (the accept gate rejected an
+    answer), [Contract_violation] (an incomplete tool transcript or a proven
+    pre-effect tool failure), the five [Terminal_effect_*] classes (a tool
+    the model called failed terminally), and the two effect fences with
+    [Fenced_effect_attempted] (a tool handler was entered, so the model had
+    answered).
+
+    [false]: every [Retry_after_observed] class, every other rotation and
+    terminal class, and the two effect fences with
+    [Fenced_observation_unavailable], which the lanes set before any answer.
+    [Internal_opaque] is [false] although it also holds an accept rejection
+    without a no-progress hint: the route cannot tell that apart from an
+    unhandled exception, so the evidence keeps its wake. *)

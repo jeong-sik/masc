@@ -46,6 +46,8 @@ type runtime =
   ; sweep_pending : bool Atomic.t
       (** A whole-backlog read is due. Boot recovery and a failed backlog read
           are the only things that need one: they have no key to aim at. *)
+  ; rejection_delivery_pending : bool Atomic.t
+  ; rejection_retry_pending : bool Atomic.t
   ; targets : review_key list Atomic.t
       (** Verifications a submission or a retryable deferral asked for by name.
           The submission hook already receives [task], [assignee] and
@@ -496,87 +498,6 @@ let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~re
   process_outcome_of_evaluator_retryable evaluator_retryable
 ;;
 
-let observe_rejection_wakeup
-      (runtime : runtime)
-      (task : Masc_domain.task)
-      ~assignee
-      ~verification_id
-      ~reason
-      ~authority
-  =
-  match
-    Completion_authority_wakeup.wake_rejected_producer
-      ~config:runtime.config
-      ~producer:assignee
-      ~task_id:task.id
-      ~verification_id
-      ~reason
-      ~authority
-  with
-  | Completion_authority_wakeup.Signaled { keeper_name } ->
-    Log.Misc.info
-      "completion authority rejection durably queued and signaled producer Keeper task_id=%s verification_id=%s keeper=%s"
-      task.id
-      verification_id
-      keeper_name
-  | Completion_authority_wakeup.Durable_deferred { keeper_name; wakeup } ->
-    (match wakeup with
-     | Keeper_registry.Deferred_unregistered ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper is unregistered task_id=%s verification_id=%s keeper=%s"
-         task.id
-         verification_id
-         keeper_name
-     | Keeper_registry.Deferred_not_running phase ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper is not running task_id=%s verification_id=%s keeper=%s phase=%s"
-         task.id
-         verification_id
-         keeper_name
-         (Keeper_state_machine.phase_to_string phase)
-     | Keeper_registry.Deferred_lifecycle denial ->
-       Log.Misc.warn
-         "completion authority rejection durably queued; producer Keeper wake denied task_id=%s verification_id=%s keeper=%s reason=%s"
-         task.id
-         verification_id
-         keeper_name
-         (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-     | Keeper_registry.Signaled ->
-       Log.Misc.error
-         "completion authority rejection returned deferred Signaled outcome task_id=%s verification_id=%s keeper=%s"
-         task.id
-         verification_id
-         keeper_name)
-  | Completion_authority_wakeup.Durable_wake_failed { keeper_name; detail } ->
-    Log.Misc.error
-      "completion authority rejection durably queued but live wake failed task_id=%s verification_id=%s keeper=%s detail=%s"
-      task.id
-      verification_id
-      keeper_name
-      detail
-  | Completion_authority_wakeup.Unroutable_producer { producer; task_id } ->
-    Log.Misc.error
-      "completion authority rejection has no registered or persisted Keeper producer binding task_id=%s producer=%s verification_id=%s"
-      task_id
-      producer
-      verification_id
-  | Completion_authority_wakeup.Producer_identity_lookup_failed
-      { producer; task_id; detail } ->
-    Log.Misc.error
-      "completion authority rejection producer identity lookup failed task_id=%s producer=%s verification_id=%s detail=%s"
-      task_id
-      producer
-      verification_id
-      detail
-  | Completion_authority_wakeup.Durable_queue_failed { keeper_name; detail } ->
-    Log.Misc.error
-      "completion authority rejection durable queue failed task_id=%s verification_id=%s keeper=%s detail=%s"
-      task.id
-      verification_id
-      keeper_name
-      detail
-;;
-
 (* Returns the control-flow outcome the scan loop acts on, paired with the
    observation outcome recorded for this review. [on_commit] is the exact
    semantic verdict produced by the evaluator. Infrastructure failures never
@@ -585,7 +506,6 @@ let observe_rejection_wakeup
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
-      ~assignee
       ~verification_id
       ~authority
       ~verdict
@@ -606,16 +526,6 @@ let commit_verdict
       ()
   with
   | Ok _ ->
-    (match verdict with
-     | Masc_domain.Verdict_approved -> ()
-     | Masc_domain.Verdict_rejected { reason } ->
-       observe_rejection_wakeup
-         runtime
-         task
-         ~assignee
-         ~verification_id
-         ~reason
-         ~authority);
     Log.Misc.info
       "system LLM completion authority committed task_id=%s verification_id=%s authority=%s verdict=%s"
       task.id
@@ -848,7 +758,6 @@ let process_task_once
            (commit_verdict
               runtime
               task
-              ~assignee
               ~verification_id
               ~authority
               ~verdict
@@ -1042,6 +951,31 @@ let process_scope (runtime : runtime) ~scope =
       (entries_in_scope ~scope entries)
 ;;
 
+let request_rejection_delivery (runtime : runtime) =
+  Atomic.set runtime.rejection_delivery_pending true;
+  Eio.Condition.broadcast runtime.wake
+;;
+
+let retry_rejection_delivery (runtime : runtime) =
+  if Atomic.compare_and_set runtime.rejection_retry_pending false true then
+    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
+      Atomic.set runtime.rejection_retry_pending false;
+      request_rejection_delivery runtime)
+;;
+
+let process_rejection_deliveries (runtime : runtime) =
+  (* Separate from review scopes: retrying a delivery must never run another
+     model judgment over an already-settled verdict. The backlog is the durable
+     obligation and this timer only accelerates the next attempt. *)
+  match Completion_authority_wakeup.reconcile_pending ~config:runtime.config with
+  | Ok { retained = 0; _ } -> ()
+  | Ok _ -> retry_rejection_delivery runtime
+  | Error detail ->
+    Log.Misc.error "completion repair backlog unavailable: %s" detail;
+    retry_rejection_delivery runtime
+;;
+
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
     (* Targets first: a named verification is the common case and costs one
@@ -1052,10 +986,16 @@ let run (runtime : runtime) : [ `Stop_daemon ] =
      | (_ :: _) as keys -> process_scope runtime ~scope:(Targets keys));
     if Atomic.exchange runtime.sweep_pending false
     then process_scope runtime ~scope:Whole_backlog;
+    if Atomic.exchange runtime.rejection_delivery_pending false
+    then process_rejection_deliveries runtime;
     None)
 ;;
 
 let install_callback (runtime : runtime) =
+  Atomic.set Workspace_hooks.rejection_delivery_requested_fn (fun config ->
+    if String.equal config.Workspace.base_path runtime.config.base_path
+    then request_rejection_delivery runtime
+    else Log.Misc.error "completion repair rejected wake from another base path");
   Atomic.set Workspace_hooks.verification_submitted_fn
     (fun config ~task ~assignee ~verification_id ->
        if not (String.equal config.base_path runtime.config.base_path)
@@ -1086,6 +1026,8 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; clock
     ; wake = Eio.Condition.create ()
     ; sweep_pending = Atomic.make true
+    ; rejection_delivery_pending = Atomic.make true
+    ; rejection_retry_pending = Atomic.make false
     ; targets = Atomic.make []
     ; retry_pending = Atomic.make None
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
@@ -1116,10 +1058,15 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     let previous_submitted_hook =
       Atomic.get Workspace_hooks.verification_submitted_fn
     in
+    let previous_rejection_hook =
+      Atomic.get Workspace_hooks.rejection_delivery_requested_fn
+    in
     install_callback runtime;
     Eio.Switch.on_release sw (fun () ->
       if Atomic.compare_and_set active_runtime owner None
-      then Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted_hook);
+      then (
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted_hook;
+        Atomic.set Workspace_hooks.rejection_delivery_requested_fn previous_rejection_hook));
     Eio.Fiber.fork_daemon ~sw (fun () -> run runtime)
 ;;
 

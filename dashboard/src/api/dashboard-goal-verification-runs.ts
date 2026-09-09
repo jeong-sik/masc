@@ -4,24 +4,28 @@
 
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
+import { decodeGoalProofCriterion } from './goal-proof'
+import type { GoalProofCriterion } from '../types/core'
 import {
   parseVerificationToolObservation,
   type VerificationToolObservation,
 } from './dashboard-verification-runs'
 
 export type GoalVerificationReviewKind = 'proof'
-export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised'
+export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised' | 'superseded' | 'review_cancelled'
 
 export interface GoalVerificationRunRecord {
   runId: string
   goalId: string
+  requestId: string
+  criterion: GoalProofCriterion
+  evaluatedVerdict?: { decision: 'approved' | 'rejected'; reason: string } | null
   reviewKind: GoalVerificationReviewKind
   authorityActor: string
   startedAt: number
   status: GoalVerificationRunStatus
   elapsedSeconds?: number
   evaluatorRuntime?: string
-  retryable?: boolean
   detail?: string
   tools?: VerificationToolObservation[]
 }
@@ -68,7 +72,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
   const context = `runs[${index}]`
   if (!isRecord(raw)) protocolError(`${context} must be an object`)
   const status = raw.status
-  if (status !== 'running' && status !== 'reviewed' && status !== 'committed' && status !== 'deferred' && status !== 'raised') {
+  if (status !== 'running' && status !== 'reviewed' && status !== 'committed' && status !== 'deferred' && status !== 'raised' && status !== 'superseded' && status !== 'review_cancelled') {
     protocolError(`${context}.status has unknown value ${JSON.stringify(status)}`)
   }
   const reviewKind = raw.review_kind
@@ -78,6 +82,8 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
   const baseFields = [
     'run_id',
     'goal_id',
+    'request_id',
+    'criterion',
     'review_kind',
     'authority_actor',
     'started_at',
@@ -86,22 +92,37 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
   const outcomeFields = status === 'running'
     ? []
     : status === 'reviewed' || status === 'committed'
-      ? ['elapsed_s', 'tools']
-      : status === 'deferred'
-        ? ['elapsed_s', 'tools', 'retryable', 'detail']
-        : ['elapsed_s', 'tools', 'detail']
+      ? ['elapsed_s', 'tools', 'evaluated_verdict']
+      : ['elapsed_s', 'tools', 'evaluated_verdict', 'detail']
   exactFields(raw, [...baseFields, ...outcomeFields], status === 'running' ? [] : ['evaluator_runtime'], context)
+  if (!isRecord(raw.criterion)) protocolError(`${context}.criterion must be an object`)
+  exactFields(raw.criterion, ['revision', 'title', 'metric', 'target_value'], [], `${context}.criterion`)
+  const criterion = decodeGoalProofCriterion(raw.criterion)
+  if (!criterion) protocolError(`${context}.criterion is invalid`)
+  let evaluatedVerdict: GoalVerificationRunRecord['evaluatedVerdict']
+  if (status !== 'running') {
+    const value = raw.evaluated_verdict
+    if (value === null) {
+      if (status === 'reviewed' || status === 'committed') protocolError(`${context} requires an evaluated verdict`)
+      evaluatedVerdict = null
+    } else {
+      if (!isRecord(value)) protocolError(`${context}.evaluated_verdict must be an object or null`)
+      exactFields(value, ['decision', 'reason'], [], `${context}.evaluated_verdict`)
+      if (value.decision !== 'approved' && value.decision !== 'rejected') protocolError(`${context}.evaluated_verdict.decision is unknown`)
+      evaluatedVerdict = { decision: value.decision, reason: nonEmptyString(value.reason, `${context}.evaluated_verdict.reason`) }
+    }
+  }
   const tools = status === 'running'
     ? undefined
     : Array.isArray(raw.tools)
       ? raw.tools.map((tool, toolIndex) => parseVerificationToolObservation(tool, `${context}.tools[${toolIndex}]`))
       : protocolError(`${context}.tools must be an array`)
-  if (status === 'deferred' && typeof raw.retryable !== 'boolean') {
-    protocolError(`${context}.retryable must be a boolean`)
-  }
   return {
     runId: nonEmptyString(raw.run_id, `${context}.run_id`),
     goalId: nonEmptyString(raw.goal_id, `${context}.goal_id`),
+    requestId: nonEmptyString(raw.request_id, `${context}.request_id`),
+    criterion,
+    evaluatedVerdict,
     reviewKind,
     authorityActor: nonEmptyString(raw.authority_actor, `${context}.authority_actor`),
     startedAt: finiteNonNegative(raw.started_at, `${context}.started_at`),
@@ -112,8 +133,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     evaluatorRuntime: raw.evaluator_runtime === undefined
       ? undefined
       : nonEmptyString(raw.evaluator_runtime, `${context}.evaluator_runtime`),
-    retryable: status === 'deferred' ? raw.retryable as boolean : undefined,
-    detail: status === 'deferred' || status === 'raised'
+    detail: status === 'deferred' || status === 'raised' || status === 'superseded' || status === 'review_cancelled'
       ? nonEmptyString(raw.detail, `${context}.detail`)
       : undefined,
     tools,

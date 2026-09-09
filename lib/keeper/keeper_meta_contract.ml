@@ -10,9 +10,6 @@ let now_iso () = Masc_domain.now_iso ()
 
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
-type proactive_policy =
-  { enabled : bool }
-
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -257,7 +254,6 @@ type keeper_meta =
   ; network_mode : Keeper_types_profile.network_mode
   ; microvm_backend : Keeper_microvm_backend.t option
   ; mention_targets : string list
-  ; proactive : proactive_policy
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -270,7 +266,7 @@ type keeper_meta =
         transcript-corruption reset-required paths may write it. [None] while
         paused is a fail-closed unclassified state that requires operator
         action. *)
-  ; autoboot_enabled : bool
+  ; activation_mode : Keeper_activation_mode.t
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
       Set when keeper claims a task; cleared on masc_transition action=done.
@@ -389,16 +385,10 @@ let effective_meta_of_profile_defaults
       in
       Ok
         { meta with
-          proactive =
-            { enabled =
-                apply_profile_default defaults.proactive_enabled
-                  Keeper_config.default_proactive_enabled
-            };
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
-          autoboot_enabled =
-            apply_profile_default defaults.autoboot_enabled
-              meta.autoboot_enabled;
+          activation_mode =
+            apply_profile_default defaults.activation_mode meta.activation_mode;
           mention_targets =
             (match defaults.mention_targets with
              | [] -> meta.mention_targets

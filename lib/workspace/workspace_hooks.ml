@@ -386,3 +386,7 @@ let verification_notify_verdict_fn
            (Masc_domain.completion_authority_actor authority)
            decision_kind)
 
+
+let rejection_delivery_requested_fn
+  : (Workspace_utils_backend_setup.config -> unit) Atomic.t
+  = Atomic.make (fun _config -> ())

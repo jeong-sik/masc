@@ -1,3 +1,5 @@
+import { normalizeTask } from '../store-normalizers'
+import type { Task } from '../types'
 import { get, post } from './core'
 import {
   callMcpTool,
@@ -111,6 +113,17 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
     task_id: taskId,
     limit,
   })
+}
+
+export async function fetchTaskDetail(taskId: string): Promise<Task> {
+  const params = new URLSearchParams({ task_id: taskId })
+  const response = await get<unknown>(`/api/v1/dashboard/tasks/detail?${params}`)
+  const raw = response && typeof response === 'object' && 'task' in response ? response.task : null
+  const task = normalizeTask(raw)
+  if (!task || typeof task.description !== 'string' || task.id !== taskId || task.detail_level === 'summary') {
+    throw new Error('Task detail response does not identify a complete requested task.')
+  }
+  return { ...task, detail_level: 'full' }
 }
 
 export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> {

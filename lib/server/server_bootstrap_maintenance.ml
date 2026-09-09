@@ -172,7 +172,7 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
    attention takes no evidence-free Ignored label, #32114). Asking whether the
    queue is non-empty made a deliberate retention read the same as work the
    owner has never been handed, so the same entry could be re-woken with no
-   terminal condition: one Discord attention entry on sangsu reached 336
+   terminal condition: one Discord attention entry on one measured Keeper reached 336
    retentions across 5.7 hours. New work does not depend on this sweep;
    [wakeup_keeper ~stimulus] flips the hint as it enqueues.
 
@@ -411,6 +411,7 @@ let recover_projected_durable_demand_owner
         | Supervise_recoverable_owner ->
           let owner_ctx = { ctx with agent_name = meta.name } in
           Keeper_supervisor.supervise_keepalive
+            ~intent:Keeper_activation_readiness.Requested_work
             ~proactive_warmup_sec:0
             owner_ctx
             meta

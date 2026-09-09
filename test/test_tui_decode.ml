@@ -774,6 +774,27 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
 
+let test_goal_store_unavailable_preserves_source_detail () =
+  let detail = "goals.json: criterion_revision is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
+                      "error", `String detail ] in
+  (match Tui_decode.decode_planning_snapshot json with
+   | Error message -> Alcotest.(check string) "planning source failure" detail message
+   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure" detail message
+  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+
+let test_goal_link_source_unavailable_preserves_detail () =
+  let detail = "goal_task_links: primary registry is missing" in
+  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
+                      "error", `String detail ] in
+  match Tui_decode.decode_goal_detail_timeline json with
+  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
+      Alcotest.(check string) "link source failure is retained" detail message
+  | _ -> Alcotest.fail "link source failure became an empty or successful detail"
+
 let test_decode_planning_snapshot_current_contract () =
   match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
   | Error err -> Alcotest.fail err
@@ -6837,6 +6858,35 @@ let test_lane_detail_distinguishes_null_missing_and_unavailable () =
     (decoded.lrd_output_availability = Some unavailable);
   Alcotest.(check bool) "unavailable is not JSON null" true (decoded.lrd_output = None)
 
+let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement () =
+  let make status verdict =
+    match hitl_lane_run_detail_json "approve" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
+      `Assoc [ "run", `Assoc
+        ([ "run_kind", `String "goal_verification";
+           "lane", `String Runtime.verifier_exact_lane_id;
+           "status", `String status;
+           "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
+         @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
+    | _ -> Alcotest.fail "invalid fixture"
+  in
+  List.iter (fun (status, decision, expected) ->
+    let json = make status [ "evaluated_verdict", `Assoc
+      [ "decision", `String decision; "reason", `String "measured original criterion" ] ] in
+    let detail = Tui_decode.decode_lane_run_detail json |> Result.get_ok in
+    Alcotest.(check bool) "actual evaluator decision is preserved" true (detail.lrd_decision = expected);
+    Alcotest.(check string) "run settlement remains separate" status
+      (Tui_decode.lane_run_status_label detail.lrd_status))
+    [ "committed", "rejected", Tui_decode.Lane_run_decision_rejected;
+      "superseded", "approved", Tui_decode.Lane_run_decision_approved ];
+  List.iter (fun verdict ->
+    Alcotest.(check bool) "committed run cannot omit or invent judgement" true
+      (Result.is_error (Tui_decode.decode_lane_run_detail (make "committed" verdict))))
+    [ []; [ "evaluated_verdict", `Null ];
+      [ "evaluated_verdict", `Assoc [ "decision", `String "maybe"; "reason", `String "unknown" ] ] ]
+;;
+
 let test_decode_lane_run_detail_requires_the_payload () =
   let json =
     `Assoc
@@ -7719,6 +7769,20 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
 
+let test_goal_timeline_missing_source_does_not_invent_gate_failure () =
+  let cases = [
+    "{}";
+    {|{"ok":false,"error":"other source failed"}|};
+    {|{"timeline":null}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"ready","operator_detail":"not an error"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unexpected","operator_detail":"unknown"}}|};
+    {|{"timeline":null,"approval_queue_state":{"state":"unavailable","operator_detail":" "}}|}
+  ] in
+  List.iter (fun source ->
+    match Tui_decode.decode_goal_detail_timeline (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail ("invalid source state became a Gate failure: " ^ source)) cases
+
 let test_goal_timeline_rejects_a_thin_event () =
   let json =
     Yojson.Safe.from_string
@@ -8321,6 +8385,8 @@ let () =
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail
+      ; Alcotest.test_case "missing source never invents a Gate failure" `Quick
+          test_goal_timeline_missing_source_does_not_invent_gate_failure
       ; Alcotest.test_case "rejects a thin event" `Quick
           test_goal_timeline_rejects_a_thin_event
       ] );
@@ -8520,6 +8586,8 @@ let () =
           test_decode_verifier_detail_keeps_kind_subject_and_tool_result;
         Alcotest.test_case "detail requires the payload" `Quick
           test_decode_lane_run_detail_requires_the_payload;
+        Alcotest.test_case "Goal evaluated decision is independent of run settlement" `Quick
+          test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
         Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
           test_lane_detail_distinguishes_null_missing_and_unavailable;
       ] );
@@ -8617,6 +8685,10 @@ let () =
       [
         Alcotest.test_case "current contract" `Quick
           test_decode_planning_snapshot_current_contract;
+        Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
+          test_goal_store_unavailable_preserves_source_detail;
+        Alcotest.test_case "Goal link source unavailable retains detail" `Quick
+          test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
         Alcotest.test_case "goal carries the judge verdict" `Quick

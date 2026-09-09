@@ -419,7 +419,7 @@ let decode_current_meta fields =
        TOML owns them and [Keeper_meta_contract.effective_meta_of_profile_defaults]
        overlays the real ones on the way out, so [meta_to_json] never writes
        them and this decoder has nothing to read back. A caller that writes
-       [{ meta with autoboot_enabled = false }] through [write_keeper_meta]
+       [{ meta with activation_mode = Manual }] through [write_keeper_meta]
        compiles, stores nothing and reads back [true] (#27357). Splitting
        config out of this record is the fix; until then the round-trip
        contract is pinned by test_keeper_meta_config_not_durable. *)
@@ -452,14 +452,13 @@ let decode_current_meta fields =
          drift the comment above describes, in a second field. *)
       ; microvm_backend = None
       ; mention_targets = []
-      ; proactive = { enabled = default_proactive_enabled }
       ; always_allow = None
       ; voice_always_allow = None
       ; created_at
       ; updated_at
       ; paused
       ; latched_reason
-      ; autoboot_enabled = true
+      ; activation_mode = Keeper_activation_mode.default
       ; current_task_id
       ; max_context_override = None
       ; telemetry_feedback_enabled = None

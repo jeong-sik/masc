@@ -10,7 +10,10 @@
     "Agent X was given tools [A,B,C] at T0; tool B was called at T1 and
     failed at T2 with error E."
 
-    Storage: [Dated_jsonl] at [data/tool-events/YYYY-MM/DD.jsonl].
+    Storage: [Dated_jsonl] at [data/tool-events/YYYY-MM/DD.jsonl] under the
+    base path in force when an event is emitted. A server's base path never
+    moves; when a test executable's does, the store is reopened under the new
+    base path and the index below starts over with it.
     In-memory index: immutable atomic agent_id → latest assignment_id snapshot
     (survives lookups but not server restarts; rebuild via [warm_up]). *)
 

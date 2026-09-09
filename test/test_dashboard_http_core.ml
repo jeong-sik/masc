@@ -2103,6 +2103,119 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_goal_source_failure_is_not_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  let planning () = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check int "fresh planning store is empty" 0
+    (planning () |> member "goals" |> to_list |> List.length);
+  check int "fresh tree store is empty" 0
+    (tree () |> member "tree" |> to_list |> List.length);
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+      ~metric:"visible goals" ~target_value:"1" () with
+    | Ok goal -> goal | Error detail -> fail detail
+  in
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  check int "valid primary is visible" 1
+    (planning () |> member "goals" |> to_list |> List.length);
+  let check_unavailable label =
+    let detail = match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+      | Ok json -> json | Error error -> fail error
+    in
+    List.iter (fun (surface, json) ->
+      check bool (label ^ surface ^ " not successful") false
+        (json |> member "ok" |> to_bool);
+      check string (label ^ surface ^ " source classification")
+        "goal_store_unavailable" (json |> member "error_code" |> to_string);
+      check bool (label ^ surface ^ " preserves cause") true
+        (String.length (json |> member "error" |> to_string) > 0);
+      List.iter (fun field ->
+        check bool (label ^ surface ^ " no invented " ^ field) true
+          (member field json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
+      ["planning", planning (); "tree", tree (); "detail", detail]
+  in
+  let invalid_schema =
+    match Yojson.Safe.from_string original with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if key = "goals" then
+            key, `List (value |> to_list |> List.map (function
+              | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+              | json -> json))
+          else key, value) fields)
+    | _ -> fail "saved Goal store must be an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+  check_unavailable "invalid criterion schema: ";
+  Fs_compat.save_file primary "unreadable primary";
+  check_unavailable "valid mirror: ";
+  check string "read does not replace primary" "unreadable primary"
+    (Fs_compat.load_file primary);
+  check string "read does not alter mirror" original (Fs_compat.load_file mirror);
+  Fs_compat.save_file mirror "unreadable mirror";
+  check_unavailable "both invalid: ";
+  Sys.remove primary;
+  Fs_compat.save_file mirror original;
+  check_unavailable "primary missing: ";
+  check bool "read does not recreate missing primary" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  check int "both absent is a fresh store" 0
+    (planning () |> member "goals" |> to_list |> List.length)
+
+let test_goal_link_source_failure_preserves_unrelated_planning () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Linked source"
+      ~metric:"tasks" ~target_value:"1" ()) in
+  let created = match Workspace.add_task_with_result ~goal_id:goal.id config
+      ~title:"Linked task" ~priority:3 ~description:"evidence" with
+    | Ok created -> created
+    | Error error -> fail (Workspace.add_task_error_to_string error) in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = links_path ^ ".last-good" in
+  let original = Fs_compat.load_file links_path in
+  let open Yojson.Safe.Util in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let detail () = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
+  let assert_link_visible () =
+    let node = tree () |> member "tree" |> to_list |> List.hd in
+    check int "tree preserves linked task" 1 (node |> member "tasks" |> to_list |> List.length);
+    check int "detail preserves linked task" 1
+      (detail () |> member "linked_tasks" |> to_list |> List.length)
+  in
+  assert_link_visible ();
+  let check_unavailable () =
+    List.iter (fun json ->
+      check bool "source failure is explicit" false (json |> member "ok" |> to_bool);
+      check string "link source is named" "goal_task_links_unavailable"
+        (json |> member "error_code" |> to_string);
+      check bool "no invented task collection" true (member "linked_tasks" json = `Null);
+      check bool "no fabricated tree" true (member "tree" json = `Null)) [tree (); detail ()];
+    (match Dashboard_goals.build_forest ~config ~goals:[goal]
+        ~tasks:(Workspace.get_tasks_safe config) ~pending_approvals:[] with
+     | Error _ -> () | Ok _ -> fail "forest builder accepted unavailable links");
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    check int "unrelated planning still lists its Goal" 1
+      (planning |> member "goals" |> to_list |> List.length);
+    check bool "unrelated Task remains available" true
+      (List.exists (fun (task : Masc_domain.task) -> task.id = created.task_id)
+        (Workspace.get_tasks_safe config))
+  in
+  Fs_compat.save_file links_path "{broken";
+  check_unavailable ();
+  check string "read does not repair primary" "{broken" (Fs_compat.load_file links_path);
+  check string "read does not alter recovery" original (Fs_compat.load_file mirror);
+  Sys.remove links_path;
+  check_unavailable ();
+  check bool "read does not recreate primary" false (Sys.file_exists links_path);
+  Fs_compat.save_file links_path original;
+  assert_link_visible ()
+
 let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
@@ -2127,6 +2240,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     let projection = Dashboard_goals.verification_projection ~config in
     let keeper_goal =
       Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
+      |> get_ok
       |> List.find (fun (node : Dashboard_goals.tree_node) -> node.goal.id = goal_id)
       |> Dashboard_goals.tree_node_to_json ~verification_for_goal:projection
     in
@@ -3017,13 +3131,13 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   mkdir_p keepers_dir;
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
+    "[keeper]\nactivation_mode = \"manual\"\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   write_file
     (Filename.concat keepers_dir "beta.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
   Config_dir_resolver.reset ();
   Fun.protect
@@ -3056,7 +3170,7 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
         (json |> member "counts" |> member "persisted_keepers" |> to_int);
       write_file
         (Filename.concat keepers_dir "base.toml")
-        "[keeper]\nautoboot_enabled = true\n";
+        "[keeper]\nactivation_mode = \"autonomous\"\n";
       Config_dir_resolver.reset ();
       let configured_names_after_autoboot_change =
         Masc.Keeper_meta_store.configured_keeper_names config
@@ -4259,8 +4373,7 @@ let prepare_config_sync_keeper ~sw config name =
     | Error error -> fail ("meta fixture: " ^ error)
     | Ok meta ->
       { meta with
-        Masc.Keeper_meta_contract.autoboot_enabled = true
-      ; proactive = { enabled = false }
+        Masc.Keeper_meta_contract.activation_mode = Masc.Keeper_activation_mode.On_demand
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
            keeper.toml -- before it will materialize a keeper.
@@ -4290,7 +4403,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
+       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -4489,7 +4602,7 @@ let test_config_post_requires_expected_revision () =
   let raw, _ =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true}|}
+      ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
   ignore
@@ -4595,7 +4708,7 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             expected_config )
-      ; "proactive_enabled", `Bool true
+      ; "activation_mode", `String "autonomous"
       ]
     |> Yojson.Safe.to_string
   in
@@ -4677,12 +4790,12 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok revision -> revision
     | Error detail -> failf "initial revision: %s" detail
   in
-  let body proactive_enabled =
+  let body activation_mode =
     `Assoc
       [ ( "expected_config_revision"
         , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
             initial_revision )
-      ; "proactive_enabled", `Bool proactive_enabled
+      ; "activation_mode", `String activation_mode
       ]
     |> Yojson.Safe.to_string
   in
@@ -4690,11 +4803,11 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
   in
   let winner_raw, _ =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body true)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "autonomous")
   in
   expect_http_status "winner HTTP 200" 200 winner_raw;
   let loser_raw, loser_json =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body false)
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "manual")
   in
   expect_http_status "loser HTTP 409" 409 loser_raw;
   let open Yojson.Safe.Util in
@@ -4724,8 +4837,8 @@ let test_config_post_rejects_second_writer_with_same_revision () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "winner remains durable" (Some true)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled");
+  check (option string) "winner remains durable" (Some "autonomous")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode");
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -4744,7 +4857,7 @@ let test_config_post_restarts_from_atomic_toml () =
       let raw, response =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
            ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-           ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
+           ~name {|{"activation_mode":"autonomous"}|}
       in
       expect_http_status "atomic config restart HTTP 200" 200 raw;
       check string "readback carries manifest SHA-256 revision" "sha256"
@@ -4765,13 +4878,11 @@ let test_config_post_restarts_from_atomic_toml () =
       (match parsed with
        | Error error -> fail error
        | Ok doc ->
-         check (option bool) "autoboot committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
-         check (option bool) "proactive committed" (Some true)
-           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
+         check (option string) "activation committed" (Some "autonomous")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
       check bool "running projection converged" true
         (match Masc.Keeper_registry.get ~base_path:config.base_path name with
-         | Some entry -> entry.meta.proactive.enabled
+         | Some entry -> Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode
          | None -> false))
 
 let test_config_post_materializes_missing_toml () =
@@ -4788,12 +4899,12 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"proactive_enabled":true,"sandbox_profile":"docker"}|}
+          ~name {|{"activation_mode":"autonomous","sandbox_profile":"docker"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
-      check bool "runtime projection applied proactive config" true
-        (json |> member "proactive" |> member "enabled" |> to_bool);
+      check string "runtime projection applied activation mode" "autonomous"
+        (json |> member "activation_mode" |> to_string);
       let path =
         Config_dir_resolver.keepers_dir_for_base_path
           ~base_path:config.Workspace.base_path
@@ -4810,8 +4921,8 @@ let test_config_post_materializes_missing_toml () =
       | Ok doc ->
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
-        check (option bool) "materialized proactive config" (Some true)
-          (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
+        check (option string) "materialized activation mode" (Some "autonomous")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
 
 let test_config_post_rolls_back_missing_runtime_assignment () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4826,7 +4937,7 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"runtime_id":"missing.runtime"}|}
+      ~name {|{"activation_mode":"autonomous","runtime_id":"missing.runtime"}|}
   in
   expect_http_status "HTTP 503" 503 raw;
   let open Yojson.Safe.Util in
@@ -4844,8 +4955,27 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "TOML is rolled back" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "TOML is rolled back" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+let test_config_post_rejects_invalid_activation_mode () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-activation" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let original = In_channel.with_open_bin toml_path In_channel.input_all in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  List.iter
+    (fun body ->
+      let raw, _ =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name body
+      in
+      expect_http_status "invalid activation mode is rejected" 400 raw;
+      check string "rejected activation preserves config bytes" original
+        (In_channel.with_open_bin toml_path In_channel.input_all))
+    [ {|{"activation_mode":true}|}
+    ; {|{"activation_mode":"unknown"}|}
+    ]
 
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -4855,7 +4985,7 @@ let test_config_post_prevalidates_mixed_request () =
   let raw, _ =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"proactive_enabled":true,"allowed_paths":["*"]}|}
+      ~name {|{"activation_mode":"autonomous","allowed_paths":["*"]}|}
   in
   expect_http_status "HTTP 400" 400 raw;
   let doc =
@@ -4866,8 +4996,8 @@ let test_config_post_prevalidates_mixed_request () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "activation was not committed" (Some false)
-    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+  check (option string) "activation was not committed" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_round_trips_typed_tools_patch () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -5415,6 +5545,10 @@ let () =
             test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "Goal proof surfaces share persisted criterion truth" `Quick
             test_goal_proof_surfaces_share_persisted_criterion_truth;
+          test_case "Goal source failure is not empty" `Quick
+            test_goal_source_failure_is_not_empty;
+          test_case "Goal link source error preserves unrelated planning" `Quick
+            test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick
@@ -5593,6 +5727,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config rejects invalid activation mode" `Quick
+            test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick
             test_config_post_round_trips_typed_tools_patch;
           test_case "typed Skills patch preserves all, exact and none" `Quick

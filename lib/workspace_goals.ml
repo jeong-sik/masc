@@ -248,7 +248,10 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok (), Ok phase ->
-    let goals = Goal_store.list_goals ctx.config ?phase () in
+    match Goal_store.list_goals_result ctx.config ?phase () with
+    | Error detail ->
+      error_result_typed ~tool_name ~start_time ~code:Internal_error detail
+    | Ok goals ->
     let rollup = Goal_store.compute_rollup goals in
     (* RFC-0387 (stage 1): the verification ledger joins each goal here (not
        in [Goal_store.goal_to_yojson], which is the persistence codec). The
@@ -256,7 +259,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
        does not decode renders the explicit [ledger_error] marker per goal —
        never the pre-verification default, which would disguise corruption as
        "not verified yet". *)
-    let records = Goal_verification.load_records ctx.config in
+    let records = Goal_verification.load_records_authoritative ctx.config in
     let goal_json (goal : Goal_store.goal) =
       let verification =
         match records with

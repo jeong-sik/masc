@@ -2,7 +2,7 @@
    and an empty answer is never recorded as an answer. *)
 
 open Alcotest
-module Names = Masc.Connector_names
+module Names = Masc.Keeper_connector_names
 
 let with_temp_base f =
   let base_path =

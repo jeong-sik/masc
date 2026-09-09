@@ -2,6 +2,7 @@
 // Sub-components: agent-detail-state, agent-detail-timeline, agent-detail-journal, agent-detail-worker
 
 import { html } from 'htm/preact'
+import { useTaskSearchText, TaskSearchFeedback } from './common/task-search-text'
 import { useSignal } from '@preact/signals'
 import { formatPct } from '../lib/format-number'
 import { useMemo, useRef } from 'preact/hooks'
@@ -166,9 +167,11 @@ export function AgentDetailOverlay() {
   const taskQuery = useSignal('')
   const purgePending = useSignal(false)
   const historyRows = taskHistories.value
+  const taskSearch = useTaskSearchText(ownedTasks, taskQuery.value)
+  const searchableTasks = taskSearch.kind === 'ready' ? taskSearch.tasks : []
   const visibleOwnedTasks = useMemo(
-    () => filterOwnedTasks(ownedTasks, taskQuery.value),
-    [ownedTasks, taskQuery.value],
+    () => filterOwnedTasks(searchableTasks, taskQuery.value),
+    [searchableTasks, taskQuery.value],
   )
   const visibleHistories = useMemo(
     () => filterTaskHistories(historyRows, taskQuery.value),
@@ -327,7 +330,7 @@ export function AgentDetailOverlay() {
         <div class="flex items-center justify-between gap-2">
           <div class="text-2xs uppercase tracking-wider text-[var(--color-fg-secondary)]">
             작업 필터
-            ${isFilteringTasks
+            ${isFilteringTasks && taskSearch.kind === 'ready'
               ? html`<span class="ml-2 normal-case tracking-normal text-[var(--color-fg-muted)]">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
               : null}
           </div>
@@ -343,7 +346,7 @@ export function AgentDetailOverlay() {
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <${SectionCard} label="할당된 작업">
-            ${renderOwnedTasks(ownedTasks, visibleOwnedTasks, isFilteringTasks)}
+            ${taskSearch.kind === 'ready' ? renderOwnedTasks(ownedTasks, visibleOwnedTasks, isFilteringTasks) : html`<${TaskSearchFeedback} state=${taskSearch} />`}
           <//>
 
           ${lines.length > 0

@@ -773,9 +773,13 @@ async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
   await Promise.all([refreshShell(opts), refreshExecution(opts)])
 }
 
+let goalObservationOwner = Symbol('initial Goal observation')
+let pendingGoalRefresh: symbol | null = null
+
 function hydrateDashboardBootstrap(
   data: DashboardBootstrapResponse,
   executionRequestGeneration: number,
+  goalOwnerAtStart: symbol,
 ): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
@@ -787,9 +791,6 @@ function hydrateDashboardBootstrap(
   hydrateShellSnapshot(data.shell, { light: true })
   hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
-  if (data.planning && !bootstrapSliceError(data.planning)) {
-    hydratePlanningSnapshot(data.planning)
-  }
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
     const normalized = normalizeNamespaceTruth(data.namespace_truth)
     namespaceTruth.value = normalized
@@ -800,11 +801,40 @@ function hydrateDashboardBootstrap(
       normalized.root.status ?? null,
     )
   }
-  if (data.goals && !bootstrapSliceError(data.goals)) {
-    if (!hydrateGoalTreeSnapshot(data.goals)) {
-      hydrateGoalTreeObservationError(
-        new Error('Goal Store tree payload was malformed'),
-      )
+  // A bootstrap may omit Goal slices. Such a response must not take ownership
+  // away from an explicit refresh already loading the combined Goal snapshot.
+  const hasGoalObservation = data.goals != null || bootstrapSliceError(data.planning)
+    || (data.planning != null && pendingGoalRefresh === null)
+  if (!hasGoalObservation || goalObservationOwner !== goalOwnerAtStart) return
+  const owner = Symbol('bootstrap Goal observation')
+  goalObservationOwner = owner
+  pendingGoalRefresh = null
+  try {
+    if (data.planning && !bootstrapSliceError(data.planning)) {
+      hydratePlanningSnapshot(data.planning)
+    }
+    if (data.goals && !bootstrapSliceError(data.goals)) {
+      if (!hydrateGoalTreeSnapshot(data.goals)) {
+        hydrateGoalTreeObservationError(new Error('Goal Store tree payload was malformed'))
+      }
+    }
+    const goalSourceErrors = [data.planning, data.goals]
+      .filter(bootstrapSliceError).map(slice => slice.error)
+    if (goalSourceErrors.length > 0) {
+      goals.value = []
+      lastGoalsRefreshAt.value = null
+      hydrateGoalTreeObservationError(goalSourceErrors.join('; '))
+    }
+  } catch (error) {
+    if (goalObservationOwner === owner) {
+      goals.value = []
+      lastGoalsRefreshAt.value = null
+      hydrateGoalTreeObservationError(error)
+    }
+  } finally {
+    if (goalObservationOwner === owner) {
+      goalsLoading.value = false
+      goalTreeLoading.value = false
     }
   }
 }
@@ -814,6 +844,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
     const executionRequestGeneration = executionSnapshotRequestGeneration()
+    const goalOwnerAtStart = goalObservationOwner
     try {
       executionLoading.value = true
       executionError.value = null
@@ -821,6 +852,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
         hydrateDashboardBootstrap(
           await fetchDashboardBootstrap(),
           executionRequestGeneration,
+          goalOwnerAtStart,
         )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
@@ -1421,9 +1453,13 @@ export async function loadMoreBoardPosts(): Promise<void> {
 // --- Goals fetcher ---
 
 export async function refreshGoals(): Promise<void> {
+  const owner = Symbol('explicit Goal observation')
+  goalObservationOwner = owner
+  pendingGoalRefresh = owner
   goalsLoading.value = true
   goalTreeLoading.value = true
-  goalTreeError.value = null
+  // A retry is not a new observation. Keep the last source error until a
+  // successful response replaces it, so an empty cache cannot look healthy.
   try {
     const [
       { fetchDashboardPlanning },
@@ -1436,6 +1472,7 @@ export async function refreshGoals(): Promise<void> {
       fetchDashboardPlanning(),
       fetchDashboardGoalsTree(),
     ])
+    if (goalObservationOwner !== owner) return
     const errors: string[] = []
     let generatedAt: string | undefined
     if (planning.status === 'fulfilled') {
@@ -1466,6 +1503,7 @@ export async function refreshGoals(): Promise<void> {
     if (errors.length > 0) {
       // Any failure invalidates the combined goal/tree snapshot so consumers
       // do not act on stale or partially-hydrated data.
+      goals.value = []
       goalTreeData.value = null
       lastGoalsRefreshAt.value = null
       goalTreeError.value = errors.join('; ')
@@ -1474,13 +1512,18 @@ export async function refreshGoals(): Promise<void> {
       lastGoalsRefreshAt.value = generatedAt ?? new Date().toISOString()
     }
   } catch (err) {
+    if (goalObservationOwner !== owner) return
+    goals.value = []
     console.warn('[Planning] fetch error:', err)
     hydrateGoalTreeObservationError(err)
     lastGoalsRefreshAt.value = null
     showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
   } finally {
-    goalsLoading.value = false
-    goalTreeLoading.value = false
+    if (goalObservationOwner === owner) {
+      pendingGoalRefresh = null
+      goalsLoading.value = false
+      goalTreeLoading.value = false
+    }
   }
 }
 

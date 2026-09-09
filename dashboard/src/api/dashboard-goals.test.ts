@@ -7,6 +7,7 @@ vi.mock('./core', () => ({
 }))
 
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-goals'
+import { fetchDashboardPlanning } from './dashboard-mission'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -361,5 +362,30 @@ describe('Goal proof projection through tree and detail APIs', () => {
       linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
     const detail = await fetchDashboardGoalDetail('proof-goal')
     expect(detail.goal.verification).toEqual(proof)
+  })
+})
+
+
+describe('Goal source unavailable across HTTP projections', () => {
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s retains the backend source error', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ok: false, error_code: 'goal_store_unavailable',
+      error: 'goals.json: criterion_revision is missing' })
+    await expect(fetch()).rejects.toThrow('goals.json: criterion_revision is missing')
+  })
+})
+
+
+describe('Goal–Task link source unavailable', () => {
+  it.each([
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s preserves the link source cause', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ok: false, error_code: 'goal_task_links_unavailable',
+      error: 'goal_task_links: primary registry is missing; recovery is non-authoritative' })
+    await expect(fetch()).rejects.toThrow('primary registry is missing')
   })
 })

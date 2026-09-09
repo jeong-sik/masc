@@ -2,92 +2,42 @@ import { describe, expect, it } from 'vitest'
 import { parseFusionRunsResponse } from '../../api/dashboard'
 import { fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
 
+const row = { run_id: 'r-1', keeper: 'k1', preset: 'balanced', topology: 'simple', started_at: 100, status: 'running' }
+const envelope = (runs: unknown[] = [row]) => ({
+  generated_at: '2026-06-20T01:00:00Z', count: runs.length, runs,
+  replay: { status: 'not_replayed' }, historical_evidence: [],
+})
+
 describe('parseFusionRunsResponse', () => {
-  it('keeps rejected replay rows and historical Board identities without inventing runs', () => {
-    const parsed = parseFusionRunsResponse({ runs: [], count: 0,
+  it('preserves current rows, genuinely empty snapshots, and replay warnings', () => {
+    const parsed = parseFusionRunsResponse(envelope())
+    expect(parsed.runs[0]).toMatchObject({ runId: 'r-1', status: 'running', topology: 'simple', startedAt: 100 })
+    expect(parseFusionRunsResponse(envelope([])).runs).toEqual([])
+    const warned = parseFusionRunsResponse({ ...envelope([]),
       replay: { status: 'complete', lines_read: 68, malformed_lines: 34, dropped_running: 0 },
       historical_evidence: [{ run_id: 'old-run', post_id: 'exact-post', title: 'Old evidence', created_at: 100 }],
     })
-    expect(parsed.runs).toEqual([])
-    expect(parsed.replay).toEqual({ status: 'complete', linesRead: 68, malformedLines: 34, droppedRunning: 0 })
-    expect(parsed.historicalEvidence).toEqual([{ runId: 'old-run', postId: 'exact-post', title: 'Old evidence', createdAt: 100 }])
-    expect(parsed.historicalEvidence[0]).not.toHaveProperty('status')
+    expect(warned.replay).toMatchObject({ malformedLines: 34 })
+    expect(warned.historicalEvidence[0]).toMatchObject({ runId: 'old-run', postId: 'exact-post' })
   })
 
-  it('rejects malformed replay and historical identity instead of dropping them', () => {
-    for (const fields of [
-      { replay: { status: 'guessed' } },
-      { replay: { status: 'complete', lines_read: 1, malformed_lines: -1, dropped_running: 0 } },
-      { historical_evidence: [{ run_id: 'r', post_id: '', title: 'x', created_at: 1 }] },
-    ]) expect(() => parseFusionRunsResponse({ runs: [], ...fields })).toThrow()
-  })
-  it('maps snake_case rows to FusionRunRecord and falls back count to length', () => {
-    const parsed = parseFusionRunsResponse({
-      generated_at: '2026-06-20T01:00:00Z',
-      runs: [
-        { run_id: 'r-1', keeper: 'k1', preset: 'balanced', started_at: 100, status: 'running' },
-        { run_id: 'r-2', keeper: 'k2', preset: 'deep', started_at: 200, status: 'completed' },
-      ],
-    })
-    expect(parsed.generatedAt).toBe('2026-06-20T01:00:00Z')
-    expect(parsed.count).toBe(2)
-    expect(parsed.runs[0]).toEqual({
-      runId: 'r-1',
-      keeper: 'k1',
-      preset: 'balanced',
-      // A row from before the registry tracked topology decodes to null rather
-      // than to a guessed shape.
-      topology: null,
-      startedAt: 100,
-      status: 'running',
-      error: undefined,
-      failureCode: undefined,
-    })
+  it.each([
+    null, [], {}, { ...envelope(), runs: null }, { ...envelope(), runs: {} },
+    envelope([null]), envelope([{ ...row, run_id: undefined }]),
+    envelope([{ ...row, run_id: '' }]), envelope([{ ...row, status: 'weird' }]),
+    envelope([{ ...row, topology: 'unknown' }]), envelope([{ ...row, started_at: '100' }]),
+    envelope([{ ...row, status: 'failed' }]), envelope([row, row]),
+    { ...envelope(), count: 0 }, { ...envelope(), count: -1 },
+    { ...envelope(), replay: { status: 'guessed' } },
+    { ...envelope(), historical_evidence: {} },
+  ])('rejects malformed source without inventing an outcome: %j', raw => {
+    expect(() => parseFusionRunsResponse(raw)).toThrow()
   })
 
-  it('maps an unrecognized status to failed (never a healthy default) and drops rows without a run_id', () => {
-    const parsed = parseFusionRunsResponse({
-      runs: [
-        { run_id: 'r-ok', keeper: 'k', preset: 'p', started_at: 1, status: 'weird' },
-        { keeper: 'k', preset: 'p', started_at: 2, status: 'running' }, // no run_id -> dropped
-      ],
-    })
-    expect(parsed.runs).toHaveLength(1)
-    expect(parsed.runs[0]?.runId).toBe('r-ok')
-    expect(parsed.runs[0]?.status).toBe('failed')
-  })
-
-  it('returns an empty, well-formed response for a non-object payload', () => {
-    const parsed = parseFusionRunsResponse(null)
-    expect(parsed.runs).toEqual([])
-    expect(parsed.count).toBe(0)
-    expect(parsed.generatedAt).toBeNull()
-  })
-
-  it('carries the additive error / failure_code fields on a failed row', () => {
-    const parsed = parseFusionRunsResponse({
-      runs: [
-        {
-          run_id: 'r-fail',
-          keeper: 'k',
-          preset: 'deep',
-          started_at: 1,
-          status: 'failed',
-          error: 'judge timed out after 30s',
-          failure_code: 'timeout',
-        },
-        { run_id: 'r-run', keeper: 'k', preset: 'p', started_at: 2, status: 'running' },
-      ],
-    })
-    expect(parsed.runs[0]).toMatchObject({
-      runId: 'r-fail',
-      status: 'failed',
-      error: 'judge timed out after 30s',
-      failureCode: 'timeout',
-    })
-    // running rows carry no failure attribution
-    expect(parsed.runs[1]?.error).toBeUndefined()
-    expect(parsed.runs[1]?.failureCode).toBeUndefined()
+  it('keeps a real failed execution distinct from a decoding failure', () => {
+    const parsed = parseFusionRunsResponse(envelope([{ ...row, status: 'failed', error: 'provider disconnected', failure_code: 'provider_error' }]))
+    expect(parsed.runs[0]).toMatchObject({ status: 'failed', error: 'provider disconnected', failureCode: 'provider_error' })
+    expect(() => parseFusionRunsResponse(envelope([{ ...row, status: 'failed', error: '', failure_code: '' }]))).not.toThrow()
   })
 })
 

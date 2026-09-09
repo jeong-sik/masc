@@ -169,8 +169,7 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
              ; "instructions", `String "must not be persisted"
              ; "sandbox_profile", `String "docker"
              ; "runtime_id", `String "test_provider.test_model"
-             ; "proactive_enabled", `Bool false
-             ; "autoboot_enabled", `Bool false
+             ; "activation_mode", `String "manual"
              ])
        in
        (* A reservation is observed, not obeyed. It records that a shutdown
@@ -236,8 +235,7 @@ let test_create_wins_intake_fence_overlap_through_production_handoff () =
           [ "name", `String keeper_name
           ; "instructions", `String "create must retain its admission epoch"
           ; "sandbox_profile", `String "docker"
-          ; "proactive_enabled", `Bool false
-          ; "autoboot_enabled", `Bool false
+          ; "activation_mode", `String "manual"
           ])
     in
     Eio.Promise.resolve resolve_create_done result);
@@ -301,8 +299,7 @@ let test_config_only_keeper_materializes_without_rewriting_manifest () =
     {|[keeper]
 instructions = "Materialize this declarative Keeper"
 sandbox_profile = "docker"
-proactive_enabled = false
-autoboot_enabled = true
+activation_mode = "on_demand"
 |}
   in
   write_file toml_path declarative_bytes;
@@ -331,7 +328,7 @@ autoboot_enabled = true
        (match Store.read_meta config keeper_name with
         | Ok (Some meta) ->
           check bool "declarative autoboot survives materialization" true
-            meta.autoboot_enabled
+            (Masc.Keeper_activation_mode.restore_owner meta.activation_mode)
         | Ok None -> fail "materialized Keeper has no owner metadata"
         | Error detail -> fail detail);
        match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with

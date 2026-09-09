@@ -84,7 +84,6 @@ const KeeperPhaseDiagnosisSchema = object({
     heartbeat_healthy: boolean(),
     turn_healthy: boolean(),
     context_handoff_needed: boolean(),
-    handoff_active: boolean(),
     operator_paused: boolean(),
     stop_requested: boolean(),
     restart_requested: boolean(),

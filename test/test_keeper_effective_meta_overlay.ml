@@ -541,7 +541,7 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
     {|[keeper]
 instructions = "Improve MASC autonomously"
 sandbox_profile = "docker"
-proactive_enabled = true
+activation_mode = "autonomous"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -555,7 +555,7 @@ proactive_enabled = true
     {
       persisted with
       instructions = "stale instructions";
-      proactive = { enabled = false };
+      activation_mode = Masc.Keeper_activation_mode.On_demand;
     }
   in
   (match Store.replace_snapshot config stale with
@@ -589,7 +589,7 @@ proactive_enabled = true
   Alcotest.(check bool)
     "returned proactive enabled is TOML canonical"
     true
-    returned.proactive.enabled;
+    (Masc.Keeper_activation_mode.spontaneous returned.activation_mode);
   Alcotest.(check string)
     "returned sandbox_profile is TOML canonical"
     "docker"
@@ -837,8 +837,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       ; "instructions", `String "durable direct instructions"
       ; "sandbox_profile", `String "docker"
       ; "mention_targets", `List [ `String "operator" ]
-      ; "proactive_enabled", `Bool false
-      ; "autoboot_enabled", `Bool false
+      ; "activation_mode", `String "manual"
       ; "max_context_override", `Int 128_001
       ]
   in
@@ -853,8 +852,7 @@ let test_keeper_up_materializes_missing_profile_source () =
       instructions = "durable direct instructions"
     ; sandbox_profile = Profile.Docker
     ; mention_targets = [ "operator" ]
-    ; proactive = { enabled = false }
-    ; autoboot_enabled = false
+    ; activation_mode = Masc.Keeper_activation_mode.Manual
     ; max_context_override = Some 128_001
     }
   in
@@ -879,11 +877,11 @@ let test_keeper_up_materializes_missing_profile_source () =
     Alcotest.(check (option bool))
       "proactive persisted"
       (Some false)
-      defaults.proactive_enabled;
+      (Option.map Masc.Keeper_activation_mode.spontaneous defaults.activation_mode);
     Alcotest.(check (option bool))
       "autoboot persisted"
       (Some false)
-      defaults.autoboot_enabled;
+      (Option.map Masc.Keeper_activation_mode.restore_owner defaults.activation_mode);
     Alcotest.(check (option int))
       "context override persisted"
       (Some 128_001)

@@ -68,7 +68,7 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { executionTaskTotal, goals, keepers, tasks } from '../store'
-import { goalTreeData } from '../goal-tree-state'
+import { goalTreeData, goalTreeError } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
@@ -145,6 +145,7 @@ describe('Work', () => {
     selectedTask.value = null
     showGoalCreate.value = false
     goalTreeData.value = null
+    goalTreeError.value = null
   })
 
   beforeEach(() => {
@@ -155,6 +156,7 @@ describe('Work', () => {
     // one test would silently drive every KPI assertion after it.
     executionTaskTotal.value = null
     goalTreeData.value = null
+    goalTreeError.value = null
     showGoalCreate.value = false
   })
 
@@ -218,6 +220,18 @@ describe('Work', () => {
         params: { section: 'work' },
         postId: null,
       }
+    })
+
+    it.each(['goals.json: criterion_revision is missing', 'goal_task_links: primary registry is missing'])('shows source failure instead of zero goals: %s', detail => {
+      goals.value = []
+      goalTreeData.value = null
+      goalTreeError.value = detail
+      render(html`<${Work} />`)
+      expect(screen.getByTestId('work-goal-source-error').textContent).toContain(detail)
+      expect(screen.getByTestId('kpi-goals').textContent).toBe('—')
+      expect(screen.queryByTestId('wka-flagged-calm')).toBeNull()
+      expect(screen.queryByText('주의 목표 없음 · 정상 순환')).toBeNull()
+      goalTreeError.value = null
     })
 
     it.each([

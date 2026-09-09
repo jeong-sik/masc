@@ -17,7 +17,7 @@ let health raw =
   | None -> invalid_arg ("unknown test Keeper health: " ^ raw)
 
 let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
-    ?(next_action = None) ?(autoboot_enabled = true) ?(proactive_enabled = true)
+    ?(next_action = None) ?(activation_mode = Decode.Activation_autonomous)
     ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running")
     ?(sandbox_profile = "docker") name :
     Decode.keeper_runtime =
@@ -26,8 +26,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_paused = paused
   ; kr_next_action = next_action
   ; kr_keepalive_running = keepalive_running
-  ; kr_autoboot_enabled = autoboot_enabled
-  ; kr_proactive_enabled = proactive_enabled
+  ; kr_activation_mode = activation_mode
   ; kr_runtime_id = runtime_id
   ; kr_phase = phase
   ; kr_sandbox_profile = sandbox_profile
@@ -557,8 +556,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
        "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,
-       "phase":%S,"keepalive_running":true,"autoboot_enabled":true,
-       "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
+       "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase
 
@@ -620,8 +618,7 @@ let test_a_row_without_a_sandbox_profile_is_rejected () =
          {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
           "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
           "health":"healthy","paused":false,"next_action":null,
-          "phase":"running","keepalive_running":true,"autoboot_enabled":true,
-          "proactive_enabled":true,"runtime_id":"r",
+          "phase":"running","keepalive_running":true,"activation_mode":"autonomous","runtime_id":"r",
           "created_at":"c","updated_at":"u"}]}|}
   in
   match Decode.decode_keeper_runtime_list json with

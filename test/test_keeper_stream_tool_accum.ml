@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module A = Keeper_stream_tool_accum
+module A = Masc.Keeper_stream_tool_accum
 module S = Agent_core.Llm_provider.Complete_stream_acc
 
 let start_runtime_attempt t =

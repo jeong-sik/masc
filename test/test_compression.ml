@@ -271,7 +271,42 @@ let test_prepared_snapshot_roundtrips () =
   Alcotest.(check (option string)) "no false gzip header" None
     (List.assoc_opt "content-encoding" headers)
 
+(* Observational codec profile, not a timing gate or production fixture.
+   Alternating level order reduces systematic warm-up/order bias. Sys.time
+   measures process CPU consumed during encode; decode and checks are outside. *)
+let test_gzip_level_profile () =
+  let rows = List.init 700 (fun i ->
+    let description = String.concat " " (List.init 12 (fun j ->
+      Digest.to_hex (Digest.string (Printf.sprintf "fixture:%d:%d" i j)))) in
+    Printf.sprintf
+      {|{"id":"task-%d","title":"Synthetic task %d","description":"%s","status":"todo"}|}
+      i i description) in
+  let source = "[" ^ String.concat "," rows ^ "]" in
+  let encode level =
+    match Compression_gzip.compress ~level source with
+    | Compression_gzip.Compressed payload -> payload
+    | Compression_gzip.Unchanged _ -> Alcotest.fail "profile fixture must compress"
+  in
+  List.iter (fun level -> ignore (encode level)) [1; 4];
+  for round = 0 to 11 do
+    let levels = if round mod 2 = 0 then [1; 4] else [4; 1] in
+    List.iter (fun level ->
+      let allocated_before = Gc.allocated_bytes () in
+      let started = Sys.time () in
+      let payload = encode level in
+      let cpu_ms = (Sys.time () -. started) *. 1000. in
+      let allocated_bytes = Gc.allocated_bytes () -. allocated_before in
+      (match gunzip payload with
+       | Ok decoded -> Alcotest.(check string) "profile roundtrip" source decoded
+       | Error message -> Alcotest.fail message);
+      Printf.printf
+        "gzip_profile round=%d level=%d input_bytes=%d output_bytes=%d process_cpu_ms=%.6f allocated_bytes=%.0f\n%!"
+        round level (String.length source) (String.length payload) cpu_ms allocated_bytes
+    ) levels
+  done
+
 let gzip_tests = [
+  "level profile preserves bytes", `Quick, test_gzip_level_profile;
   "round trips through a real gunzip", `Quick, test_gzip_round_trips;
   "is deterministic", `Quick, test_gzip_is_deterministic;
   "skips payloads below min_size", `Quick, test_gzip_skips_small_payloads;

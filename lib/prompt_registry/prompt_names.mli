@@ -151,6 +151,7 @@ val keeper_world_transcript_intro : string
 (** Durable direct-conversation transcript block, prepended to the quoted
     recent-conversation rows in the turn context. *)
 
+val keeper_world_active_goals_unavailable : string
 val keeper_world_active_goals_heading : string
 val keeper_world_active_goals_row : string
 val keeper_world_active_goals_row_untitled : string

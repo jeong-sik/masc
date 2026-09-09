@@ -45,7 +45,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused f =
            (`Assoc
               [ "name", `String keeper_name
               ; "trace_id", `String "trace-paused-cancel-owner"
-              ; "autoboot_enabled", `Bool false
+              ; "activation_mode", `String "manual"
               ])
          |> require_ok "parse Keeper metadata fixture"
        in

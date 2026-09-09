@@ -190,6 +190,13 @@ val list_goals :
 (** Reads the state, applies optional filters, then sorts
     by [(priority, updated_at desc)]. *)
 
+val list_goals_result :
+  Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->
+  (goal list, string) result
+(** Current primary observation. An unreadable primary or a missing primary
+    with an existing mirror is an error; a fresh store is [Ok []].
+    Does not repair the store or present recovery data as current. *)
+
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->
@@ -217,3 +224,14 @@ val upsert_goal :
       the freshly decoded state, so an undecodable store hits
       the fail-closed persistence error, never this one.
       Updating an existing row is not gated. *)
+
+(** Run a dependent mutation while all referenced Goals exist in the primary
+    store. Lock order: Goal, backlog, goal-task links. The callback must not
+    acquire the Goal lock again. An empty list performs no Goal store access. *)
+type goal_reference_error =
+  | Goal_source_unavailable of string
+  | Goal_missing of string
+
+val with_existing_goals :
+  Workspace_utils.config -> goal_ids:string list -> (unit -> 'a) ->
+  ('a, goal_reference_error) result

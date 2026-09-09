@@ -2027,10 +2027,10 @@ let classify_before_judge (request : request) =
          ~input:request.input)
 ;;
 
-(* The box is asked after every cheaper authority has declined. Observe
-   failures retain the judge. Guest_local results have already executed on
-   the keeper's tree, even when they failed: returning their exact result
-   avoids replaying an arbitrary script's completed prefix. *)
+(* The box is asked after every cheaper authority has declined. A completed
+   payload remains its exact restricted result, including nonzero exits.
+   Only setup/refusal or unavailable-box evidence retains the Judge; payload
+   failure alone never requests effect permission or licenses replay. *)
 let decide_after_observation request ~observe =
   match observe with
   | None -> defer request Judge_requested
@@ -2064,9 +2064,11 @@ let decide_after_observation request ~observe =
        defer request Judge_requested)
 ;;
 
-let decide_from_selected_mode ?observe request = function
+let decide_from_selected_mode ~intent ?observe request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
+  | Ok Keeper_gate_mode.Auto_judge when intent = Keeper_tool_execute_typed_input.Request_effect ->
+    defer request Judge_requested
   | Ok Keeper_gate_mode.Auto_judge ->
     (* Observation-only requests have a deterministic safety answer —
        read-only argv dispatched into a disposable guest (the typed
@@ -2129,7 +2131,7 @@ let decide_from_selected_mode ?observe request = function
     allow request source [ audit_receipt ]
 ;;
 
-let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request =
+let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -2169,7 +2171,7 @@ let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request 
         with
         | Error error ->
           observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode ?observe request mode
+          decide_from_selected_mode ~intent ?observe request mode
         | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
           let audit_receipt =
@@ -2182,12 +2184,12 @@ let decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request 
           allow request source [ audit_receipt ]
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
-          decide_from_selected_mode ?observe request mode
+          decide_from_selected_mode ~intent ?observe request mode
         | Ok Keeper_approval_queue_rules_types.Rule_match_absent ->
-          decide_from_selected_mode ?observe request mode))
+          decide_from_selected_mode ~intent ?observe request mode))
 ;;
 
-let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
+let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable
@@ -2201,7 +2203,7 @@ let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow reque
     in
     allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~read_mode ?observe ~keeper_always_allow request
+    decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -2226,9 +2228,10 @@ let decide_with_mode ~read_mode ?cycle_grant ?observe ~keeper_always_allow reque
     Unavailable reason
 ;;
 
-let decide ?cycle_grant ?observe ~keeper_always_allow request =
+let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?observe ~keeper_always_allow request =
   decide_with_mode
     ~read_mode:Keeper_gate_mode.resolve
+    ~intent
     ?cycle_grant
     ?observe
     ~keeper_always_allow

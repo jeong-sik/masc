@@ -7,13 +7,13 @@ let meta () =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String "periodic"; "trace_id", `String "trace-periodic"]) with
   | Error error -> fail error
-  | Ok meta -> { meta with proactive = { enabled = true }; autoboot_enabled = true }
+  | Ok meta -> { meta with activation_mode = Keeper_activation_mode.Autonomous }
 
 let base_obs : WO.world_observation =
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = 0
-  ; active_goals = []
+  ; active_goals = Ok []
   ; unclaimed_task_count = 0
   ; claimable_tasks = []
   ; held_task_skills = []

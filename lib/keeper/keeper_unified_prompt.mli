@@ -92,7 +92,7 @@ type goal_summary = {
 val active_goal_summaries_for_task :
   config:Workspace.config ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  goal_summary list
+  (goal_summary list, string) result
 (** The Goals this turn's task is linked to and still open enough to progress.
 
     A Goal is shared intent and names no keeper, so the store answers the same
@@ -100,7 +100,8 @@ val active_goal_summaries_for_task :
     this turn's context. {!Goal_phase.admits_self_directed_progress} decides
     which of the linked Goals stay -- [Verifying] stays in (the gate holds the
     phase, not the work) and terminal phases drop out. A turn holding no task
-    carries none of them; [masc_goal_list] answers the rest. *)
+    carries none of them; [masc_goal_list] answers the rest. An unreadable
+    primary returns [Error] without using or repairing the recovery copy. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -128,7 +129,7 @@ val build_prompt :
   ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
-  ?active_goal_summaries:goal_summary list ->
+  ?active_goal_summaries:(goal_summary list, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
@@ -151,8 +152,9 @@ val build_prompt :
     - [?active_goal_summaries]: the Active Goals layer, with a proof-pending
       annotation on [Verifying] goals (RFC-0387 stage 2). These are the goals
       linked to this turn's task ({!active_goal_summaries_for_task}). Omitted
-      or empty, the layer is absent -- a Keeper holding no task sees no goals,
-      and reaches the rest through [masc_goal_list].
+      or [Ok []], the layer is absent when the world Goal source is available.
+      A failed world or task-linked source renders its error without blocking
+      other context. A Keeper holding no task reaches Goals through [masc_goal_list].
     - [?repository_freshness]: rows for the Repository Checkouts layer,
       measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
       or empty, the layer is absent. *)
@@ -163,7 +165,7 @@ val build_prompt_preview :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
-  ?active_goal_summaries:goal_summary list ->
+  ?active_goal_summaries:(goal_summary list, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

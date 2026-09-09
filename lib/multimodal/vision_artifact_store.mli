@@ -23,9 +23,19 @@ val of_string : string -> handle
 val store : dir:string -> string -> (handle, string) result
 (** [store ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
     returns its handle. Idempotent: identical bytes map to the same handle and
-    file, so a re-store overwrites identical content. [Error msg] on I/O failure. *)
+    file. A re-store compares a bounded owned regular-file read, skipping the atomic write
+    only on an exact match. Missing or different content is written again.
+    [Error msg] when the required directory creation or write fails. *)
 
-val load : dir:string -> handle -> (string, string) result
+type load_error =
+  | Malformed_handle of string
+  | Missing_artifact of string
+  | Hash_mismatch of string
+  | Read_failed of string
+
+val load_error_to_string : load_error -> string
+
+val load : dir:string -> handle -> (string, load_error) result
 (** [load ~dir h] reads the bytes for [h]. [Error] (never a silent empty success)
     if: [h] is not a canonical 64-char lowercase-hex handle (rejected before any
     filesystem access, so a forged "../" handle cannot read outside [dir]); the

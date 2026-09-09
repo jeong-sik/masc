@@ -93,11 +93,22 @@ val store_artifact
 (** Store image bytes in the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
+(** Candidate identity and requested model come from the call configuration.
+    [response_model] is the provider-reported label, not an independently
+    verified model identity. It may be empty when the response supplies no model
+    label. None of these fields attest transcription accuracy. *)
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
     JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
     placeholder). *)
 type vision_outcome =
-  | Vo_ok of string
+  | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
@@ -106,7 +117,9 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-val outcome_of_response : Agent_core.Types.api_response -> vision_outcome
+val outcome_of_response :
+  runtime_id:string -> requested_model:string ->
+  Agent_core.Types.api_response -> vision_outcome
 (** Classify a provider response into a {!vision_outcome}. A reply the model
     truncated mid-JSON fails the structured parse before its text can be read;
     when the stop reason is a MaxTokens cut this is reported as [Vo_truncated]
@@ -115,6 +128,7 @@ val outcome_of_response : Agent_core.Types.api_response -> vision_outcome
 
 val run_vision
   :  ?complete:complete_fn
+  -> ?runtime_id:string
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -125,6 +139,9 @@ val run_vision
   -> vision_outcome
 (** The one-shot vision sub-call core (runtime resolution + Provider-boundary
     call + §2.2 classification). Used by {!handle} and by eager ingestion.
+    When [runtime_id] is supplied, only that configured image candidate is used;
+    unavailable candidates are invalid requests, and no other runtime is tried.
+    Omitting it preserves automatic candidate selection and failover.
     Non-cancellation exceptions are converted to
     [Vo_provider]; provider success whose text is malformed structured output
     is [Vo_invalid_structured_response] — unless the stop reason is a MaxTokens
@@ -166,8 +183,11 @@ val handle_with_outcome
     [sw], [net], and [clock]; missing Eio context is [Runtime_failure]. Returns a JSON
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
-    one of [invalid_args | eio_context_unavailable | artifact_load_failed |
+    one of [invalid_args | invalid_artifact | artifact_not_found |
+    eio_context_unavailable | artifact_load_failed |
     image_too_large | invalid_media_type | invalid_request |
     no_capable_runtime | timeout | provider_error | empty_extraction |
     truncated_extraction]. [complete] defaults to the live provider call (inject
-    in tests). Never returns a raw empty success. *)
+    in tests). Malformed artifact handles are [Policy_rejection], absent artifacts
+    are [Workflow_rejection], and read/integrity failures remain [Runtime_failure].
+    Never returns a raw empty success. *)

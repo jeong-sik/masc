@@ -1,9 +1,9 @@
-(** Task-completion dispatch oracle.
+(** Task-completion production-dispatch oracle with controlled reviewer replies.
 
-    Lifecycle ownership remains deterministic. Once an owned task reaches the
-    completion-quality boundary, only the configured LLM verdict decides:
-    short notes and missing/untrusted evidence are prompt facts, evaluator
-    rejection leaves the task active, and a later LLM approval completes it. *)
+    The real completion-authority daemon commits injected typed verdicts.
+    Success requires a completed Task, and the repair fixture reads a delivered
+    rejection before explicitly dispatching changed evidence. No real-model
+    quality or autonomous Keeper repair is claimed by these fixtures. *)
 
 open Alcotest
 
@@ -22,8 +22,11 @@ type reviewer_response =
   | Reviewer_unavailable
 
 let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
+let reviewer_calls = ref []
+let submitted_verifications = ref []
 
 let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+  reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok (Some verdict)
   | Reviewer_unavailable ->
@@ -104,11 +107,22 @@ let with_ws name fn =
                  ; keeper_name = meta.name
                  }
                in
-               fn
-                 ~config
-                 ~meta
-                 ~publication_recovery
-                 ~ctx_work:(make_ctx ()))))
+               ignore (Workspace.init config ~agent_name:(Some meta.name));
+               reviewer_calls := [];
+               submitted_verifications := [];
+               let clock = Eio.Stdenv.clock env in
+               Masc.Completion_authority_agent.start ~sw ~clock ~config;
+               let submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+               Atomic.set Workspace_hooks.verification_submitted_fn
+                 (fun config ~task ~assignee ~verification_id ->
+                   submitted_verifications := verification_id :: !submitted_verifications;
+                   submitted config ~task ~assignee ~verification_id);
+               Fun.protect
+                 ~finally:(fun () ->
+                   Atomic.set Workspace_hooks.verification_submitted_fn submitted)
+                 (fun () ->
+                   fn ~clock ~config ~meta ~publication_recovery
+                     ~ctx_work:(make_ctx ())))))
 
 let outcome_label = function
   | Tool_result.Completed () -> "success"
@@ -176,32 +190,47 @@ let claim_via_dispatch
     ~input:(`Assoc [ ("task_id", `String task_id) ])
     ()
 
-(* The completion authority decides after the submission (keeper_task_done
-   only files evidence). Where the authority runs in-process the task leaves
-   AwaitingVerification within a bounded number of scheduler turns; where no
-   evaluator runtime resolves, the submission stays parked. Both are ends of
-   the same contract — the caller's match states what each end must
-   guarantee. *)
+(* Controlled reviewers run in the production authority daemon. A deadline is
+   a test failure, never permission to pass with an unreviewed submission. *)
 let find_task config task_id =
   List.find_opt
     (fun (task : Masc_domain.task) -> String.equal task.id task_id)
     (Workspace.get_tasks_raw config)
 
-let await_authority_verdict config task_id =
-  let rec await remaining =
+let await_condition ~clock label condition =
+  match Eio.Time.with_timeout clock 5.0 (fun () ->
+    let rec loop () =
+      if condition () then Ok ()
+      else (Eio.Time.sleep clock 0.001; loop ())
+    in
+    loop ()) with
+  | Ok () -> ()
+  | Error `Timeout -> fail ("timed out waiting for " ^ label)
+
+let await_authority_verdict ~clock config task_id =
+  await_condition ~clock "committed authority verdict" (fun () ->
     match find_task config task_id with
-    | Some { task_status = Masc_domain.AwaitingVerification _; _ }
-      when remaining > 0 ->
-      Eio.Fiber.yield ();
-      await (remaining - 1)
-    | other -> other
-  in
-  await 10_000
+    | Some { task_status = Masc_domain.AwaitingVerification _; _ } -> false
+    | _ -> true);
+  find_task config task_id
+
+let single_submission () =
+  match !submitted_verifications with
+  | [ verification_id ] -> verification_id
+  | ids -> failf "expected one submission identity, got %d" (List.length ids)
+
+let check_submitted_evidence config verification_id expected =
+  match Masc.Verification.load_request config.Workspace.base_path verification_id with
+  | Error detail -> fail ("missing persisted verification request: " ^ detail)
+  | Ok request ->
+    (match Masc.Completion_authority_agent.For_testing.evidence_refs_of_output request.output with
+     | Error detail -> fail ("invalid submitted evidence: " ^ detail)
+     | Ok refs -> check (list string) "submitted evidence refs" expected refs)
 
 (* Test A — non-owner completion is denied (RFC-0262 axis-2 ownership gate). *)
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"foreign-owned task" ~priority:1
@@ -254,7 +283,7 @@ let test_completion_denied_for_non_owner () =
 (* Test B — completion of an unclaimed (Todo) task is denied. *)
 let test_completion_denied_when_unclaimed () =
   with_ws "completion_trust_unclaimed"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"never claimed" ~priority:1
@@ -290,7 +319,7 @@ let test_completion_denied_when_unclaimed () =
 (* Local note length and evidence shape never decide completion. *)
 let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
@@ -315,22 +344,18 @@ let test_short_notes_without_evidence_follow_llm_approval () =
     in
     check string "evidence submission succeeds" "success"
       (outcome_label result.KTE.disposition);
-    match await_authority_verdict config "task-001" with
+    match await_authority_verdict ~clock config "task-001" with
     | Some { task_status = Masc_domain.Done _; _ } -> ()
-    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
-      ->
-      check string "parked submission preserves the submitter"
-        meta.name assignee
     | Some task ->
       fail
-        ("expected Done or a parked submission after LLM approval, got "
+        ("expected Done after controlled reviewer approval, got "
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
 
 let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
@@ -355,118 +380,92 @@ let test_completion_with_evidence_refs_succeeds () =
     in
     check string "completion outcome" "success"
       (outcome_label result.KTE.disposition);
-    let check_handoff_evidence handoff =
-      match handoff with
-      | Some (handoff : Masc_domain.task_handoff_context) ->
-        check (list string) "handoff evidence_refs"
-          [ "note:completion-trust-harness" ] handoff.evidence_refs
-      | None -> fail "submitted evidence refs missing from handoff_context"
-    in
-    match await_authority_verdict config "task-001" with
-    | Some
-        { task_status = Masc_domain.Done { assignee; _ }; handoff_context; _ }
-      ->
+    check_submitted_evidence config (single_submission ())
+      [ "note:completion-trust-harness" ];
+    match await_authority_verdict ~clock config "task-001" with
+    | Some { task_status = Masc_domain.Done { assignee; _ }; _ } ->
       check string "done assignee" meta.name assignee;
-      check_handoff_evidence handoff_context
-    | Some
-        { task_status = Masc_domain.AwaitingVerification { assignee; _ }
-        ; handoff_context
-        ; _
-        } ->
-      check string "parked submission preserves the submitter"
-        meta.name assignee;
-      check_handoff_evidence handoff_context
+      check int "controlled reviewer actually ran" 1 (List.length !reviewer_calls)
     | Some task ->
-      fail
-        ("expected task-001 Done or parked with handoff evidence refs, got "
-         ^ Masc_domain.task_status_to_string task.task_status)
+      fail ("expected task-001 Done, got " ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
-(* An LLM rejection leaves only this task active; a later approval can
-   complete it without changing evidence shape. *)
-let test_llm_rejection_keeps_task_active_then_approval_completes () =
+(* This is a controlled production-dispatch round trip, not proof that a
+   real Keeper model autonomously chooses the repair. The fixture reads and
+   projects the delivered decision into a world event, then explicitly
+   submits changed evidence through the same tool dispatch. *)
+let test_rejection_delivery_then_changed_submission_completes () =
   with_ws "completion_llm_reject_then_approve"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.name));
-    ignore
-      (Workspace.add_task config ~title:"LLM reviewed completion" ~priority:1
-         ~description:"completion follows the evaluator verdict");
-    let claim =
-      claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
-        ~task_id:"task-001"
+    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+    ignore (Workspace.add_task config ~title:"Reviewed completion" ~priority:1
+      ~description:"completion follows the evaluator verdict");
+    let claim = claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+      ~task_id:"task-001" in
+    check string "self-claim succeeds" "success" (outcome_label claim.KTE.disposition);
+    let reason = "deliverable requires corrected evidence" in
+    reviewer_response := Reviewer_verdict (AR.Reject reason);
+    let first = attempt_done ~config ~meta ~publication_recovery ~ctx_work
+      ~task_id:"task-001" ~result:"Initial completion claim"
+      ~evidence_refs:[ "note:first completion review" ] () in
+    check string "first submission succeeds" "success" (outcome_label first.KTE.disposition);
+    let first_id = single_submission () in
+    (match await_authority_verdict ~clock config "task-001" with
+     | Some { task_status = Masc_domain.InProgress { assignee; _ }; _ } ->
+       check string "rejected task returns to same producer" meta.name assignee
+     | Some task -> fail ("expected committed rejection, got " ^
+                          Masc_domain.task_status_to_string task.task_status)
+     | None -> fail "rejected task disappeared");
+    let queue () =
+      match Keeper_event_queue_persistence.load_result
+        ~base_path:config.base_path ~keeper_name:meta.name with
+      | Error detail -> fail ("queue read failed: " ^ detail)
+      | Ok queue -> Keeper_event_queue.to_list queue
     in
-    check string "self-claim succeeds" "success"
-      (outcome_label claim.KTE.disposition);
-    reviewer_response := Reviewer_verdict (AR.Reject "deliverable is not complete");
-    let rejected =
-      attempt_done
-        ~config
-        ~meta
-        ~publication_recovery
-        ~ctx_work
-        ~task_id:"task-001"
-        ~result:"Completed the deliverable."
-        ~evidence_refs:[ "note:first completion review" ]
-        ()
+    let matching_rejection stimulus =
+      match stimulus.Keeper_event_queue.payload with
+      | Keeper_event_queue.Completion_authority_rejected rejection ->
+        String.equal rejection.car_verification_id first_id
+      | _ -> false
     in
-    (* keeper_task_done only files evidence; the reject verdict is the
-       completion authority's, delivered after the submission (same contract
-       shift as the unavailable-evaluator case below). The submission itself
-       succeeds, and what a reject must guarantee is that the task never
-       reaches Done. *)
-    check string "evidence submission succeeds ahead of the reject verdict"
-      "success"
-      (outcome_label rejected.KTE.disposition);
-    let retry_after_reject () =
-      reviewer_response := Reviewer_verdict (AR.Approve "");
-      let approved =
-        attempt_done
-          ~config
-          ~meta
-          ~publication_recovery
-          ~ctx_work
-          ~task_id:"task-001"
-          ~result:"Completed the deliverable."
-          ~evidence_refs:[ "note:first completion review" ]
-          ()
-      in
-      check string "later LLM approval completes" "success"
-        (outcome_label approved.KTE.disposition);
-      match await_authority_verdict config "task-001" with
-      | Some { task_status = Masc_domain.Done _; _ } -> ()
-      | Some task ->
-        fail
-          ("expected Done after LLM approval, got "
-           ^ Masc_domain.task_status_to_string task.task_status)
-      | None -> fail "task-001 missing after approved retry"
+    await_condition ~clock "durable rejection delivery"
+      (fun () -> List.exists matching_rejection (queue ()));
+    let stimulus =
+      match List.filter matching_rejection (queue ()) with
+      | [ stimulus ] -> stimulus
+      | rows -> failf "expected one rejection row, got %d" (List.length rows)
     in
-    match await_authority_verdict config "task-001" with
-    | None -> fail "task-001 missing after rejected submission"
-    | Some { task_status = Masc_domain.Done _; _ } ->
-      fail "a rejected verdict must never complete the task"
-    | Some
-        { task_status =
-            ( Masc_domain.Claimed { assignee; _ }
-            | Masc_domain.InProgress { assignee; _ } )
-        ; _
-        } ->
-      check string "rejected task returns to the same keeper"
-        meta.name assignee;
-      (* The authority is live in this process, so the full round is
-         exercised: a later approval completes the task. *)
-      retry_after_reject ()
-    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
-      ->
-      (* The authority did not run inside this process (environments without
-         a resolvable evaluator runtime park the submission). The submitter
-         identity is still preserved for whoever decides; the approve round
-         needs a live authority and is exercised where one runs. *)
-      check string "parked submission preserves the submitter"
-        meta.name assignee
-    | Some { task_status; _ } ->
-      fail
-        ("rejected task must stay active or parked, got "
-         ^ Masc_domain.task_status_to_string task_status))
+    (match Masc.Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+     | Ok (Some { event_kind = Masc.Keeper_world_observation.Completion_authority_rejected rejection; _ }) ->
+       check string "world event task" "task-001" rejection.car_task_id;
+       check string "world event verification" first_id rejection.car_verification_id;
+       check string "world event reason" reason rejection.car_reason
+     | _ -> fail "delivered rejection did not reach the world observation");
+    reviewer_response := Reviewer_verdict (AR.Approve "");
+    let revised_refs = [ "note:corrected completion evidence after rejection" ] in
+    let second = attempt_done ~config ~meta ~publication_recovery ~ctx_work
+      ~task_id:"task-001" ~result:"Corrected the rejected evidence"
+      ~evidence_refs:revised_refs () in
+    check string "changed evidence submission succeeds" "success"
+      (outcome_label second.KTE.disposition);
+    let second_id =
+      match !submitted_verifications with
+      | [ second; first ] ->
+        check string "original submission preserved" first_id first;
+        check bool "resubmission has a fresh verification identity" false
+          (String.equal second first);
+        second
+      | ids -> failf "expected two submissions, got %d" (List.length ids)
+    in
+    check_submitted_evidence config second_id revised_refs;
+    (match await_authority_verdict ~clock config "task-001" with
+     | Some { task_status = Masc_domain.Done { assignee; _ }; _ } ->
+       check string "approved task owner" meta.name assignee
+     | Some task -> fail ("expected Done after second verdict, got " ^
+                          Masc_domain.task_status_to_string task.task_status)
+     | None -> fail "approved task disappeared");
+    check bool "both controlled verdicts actually ran" true
+      (List.rev !reviewer_calls =
+       [ Reviewer_verdict (AR.Reject reason); Reviewer_verdict (AR.Approve "") ]))
 
 (* Historical shape: keeper_task_done used to consult the reviewer inline and
    an unavailable evaluator rejected the call. The tool now only files
@@ -477,7 +476,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
    what must never happen is the task reaching Done without one. *)
 let test_unavailable_evaluator_keeps_task_active () =
   with_ws "completion_llm_unavailable"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"unavailable evaluator" ~priority:1
@@ -503,6 +502,10 @@ let test_unavailable_evaluator_keeps_task_active () =
     check string "evidence submission succeeds without an inline verdict"
       "success"
       (outcome_label result.KTE.disposition);
+    await_condition ~clock "unavailable evaluator invocation"
+      (fun () -> !reviewer_calls <> []);
+    check bool "controlled evaluator was unavailable" true
+      (List.for_all (( = ) Reviewer_unavailable) !reviewer_calls);
     match
       List.find_opt
         (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
@@ -526,7 +529,7 @@ let test_unavailable_evaluator_keeps_task_active () =
    accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
   with_ws "completion_trust_positive_claim"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"claimable task" ~priority:1
@@ -557,12 +560,12 @@ let () =
             test_completion_denied_for_non_owner
         ; test_case "completion of an unclaimed task is denied" `Quick
             test_completion_denied_when_unclaimed
-        ; test_case "short notes without evidence follow LLM approval"
+        ; test_case "short notes reach committed controlled approval"
             `Quick test_short_notes_without_evidence_follow_llm_approval
-        ; test_case "completion with evidence_refs succeeds"
+        ; test_case "submitted evidence reaches committed controlled approval"
             `Quick test_completion_with_evidence_refs_succeeds
-        ; test_case "LLM reject keeps task active; approval completes"
-            `Quick test_llm_rejection_keeps_task_active_then_approval_completes
+        ; test_case "delivered rejection, changed resubmission, committed approval"
+            `Quick test_rejection_delivery_then_changed_submission_completes
         ; test_case "unavailable evaluator keeps task active"
             `Quick test_unavailable_evaluator_keeps_task_active
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick

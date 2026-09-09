@@ -68,41 +68,22 @@ let links_to_yojson links =
 
 let link_of_yojson = function
   | `Assoc fields ->
-    let goal_id =
-      match List.assoc_opt "goal_id" fields with
-      | Some (`String value) -> String.trim value
-      | _ -> ""
-    in
-    (* [link_to_yojson] always writes "task_ids" as a list, so a row without
-       one — or with something else there — is damaged, not a goal with no
-       links. Folding it to [] made the damage read as an answer: the goal
-       showed zero linked tasks and nothing said the row could not be parsed.
-       Same fact as the [links] guard below, one layer in (#29355). *)
-    let task_ids =
-      match List.assoc_opt "task_ids" fields with
-      | Some (`List values) ->
-        Some
-          (List.filter_map
-             (function
-               | `String value ->
-                 let value = String.trim value in
-                 if String.equal value "" then None else Some value
-               | _ -> None)
-             values)
-      | _ -> None
-    in
-    (match task_ids with
-     | None -> None
-     | Some task_ids ->
-       if String.equal goal_id "" then None else Some (goal_id, task_ids))
+    (match List.assoc_opt "goal_id" fields, List.assoc_opt "task_ids" fields with
+     | Some (`String goal_id), Some (`List values) ->
+       let goal_id = String.trim goal_id in
+       let rec collect acc = function
+         | [] -> Some (goal_id, List.rev acc)
+         | `String value :: rest ->
+           let task_id = String.trim value in
+           if String.equal task_id "" then None
+           else collect (task_id :: acc) rest
+         | _ -> None
+       in
+       if String.equal goal_id "" then None else collect [] values
+     | _ -> None)
   | _ -> None
 ;;
 
-(* The writer above always emits an object with a "links" list, so a file that
-   is neither is damaged, not empty. Folding both to [] made a corrupt registry
-   read as "this goal has no linked tasks" — the reader below already fails
-   closed on an unreadable file, and this is the same fact arriving one layer
-   in (#29355). *)
 let links_of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "links" fields with
@@ -119,34 +100,54 @@ let links_of_yojson = function
        in
        collect [] values
      | Some _ -> Error "goal_task_links: \"links\" is present but not a list"
-     (* [read_json_result] answers a missing key with [`Assoc []], so an absent
-        "links" is a registry nobody has written yet, not a damaged one. *)
-     | None -> Ok [])
+     | None -> Error "goal_task_links: missing links collection")
   | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
+let read_link_json config path =
+  match key_of_path config path with
+  | None -> Error (Printf.sprintf "goal_task_links: path is outside backend root: %s" path)
+  | Some key ->
+    (match backend_get config ~key with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok None -> Ok None
+     | Ok (Some content) ->
+       Safe_ops.parse_json_safe ~context:path content |> Result.map Option.some)
+;;
+
+let read_link_registry config path =
+  match read_link_json config path with
+  | Error detail -> Error detail
+  | Ok None -> Ok None
+  | Ok (Some json) -> links_of_yojson json |> Result.map Option.some
+;;
+
+let read_goal_task_links_authoritative_r config =
+  match read_link_registry config (goal_task_links_path config) with
+  | Error _ as error -> error
+  | Ok (Some links) -> Ok links
+  | Ok None ->
+    (match read_link_registry config (goal_task_links_recovery_path config) with
+     | Error _ as error -> error
+     | Ok (Some _) ->
+       Error "goal_task_links: primary registry is missing; recovery is non-authoritative"
+     | Ok None -> Ok [])
+;;
+
 let read_goal_task_links_r config =
-  let primary_path = goal_task_links_path config in
-  match read_json_result config primary_path with
-  | Ok json -> links_of_yojson json
+  match read_link_json config (goal_task_links_path config) with
+  | Ok (Some json) -> links_of_yojson json
+  | Ok None -> read_goal_task_links_authoritative_r config
   | Error primary_msg ->
     let recovery_path = goal_task_links_recovery_path config in
-    (match read_json_result config recovery_path with
-     | Ok json ->
+    (match read_link_registry config recovery_path with
+     | Ok (Some links) ->
        Log.Misc.warn
          "read_goal_task_links: primary unreadable, recovered from %s (%s)"
-         recovery_path
-         primary_msg;
-       links_of_yojson json
-     | Error recovery_msg ->
-       if not (path_exists config primary_path) then Ok []
-       else
-         Error
-           (Printf.sprintf
-              "%s; recovery read failed for %s: %s"
-              primary_msg
-              recovery_path
-              recovery_msg))
+         recovery_path primary_msg;
+       Ok links
+     | Ok None -> Error primary_msg
+     | Error recovery_msg -> Error (primary_msg ^ "; " ^ recovery_msg))
 ;;
 
 let read_goal_task_links config =
@@ -346,7 +347,7 @@ let remove_link_from_links links ~goal_id ~task_id =
 ;;
 
 let read_goal_task_links_for_mutation config =
-  match read_goal_task_links_r config with
+  match read_goal_task_links_authoritative_r config with
   | Ok links -> Ok links
   | Error msg ->
     Error (Printf.sprintf "goal_task_links read failed before mutation: %s" msg)

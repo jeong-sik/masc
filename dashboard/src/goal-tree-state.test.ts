@@ -7,7 +7,6 @@ import {
   hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from './goal-tree-state'
-import { gateObservationErrorState } from './lib/gate-observation-state'
 
 describe('goal tree approval queue authority', () => {
   beforeEach(() => {
@@ -51,7 +50,7 @@ describe('goal tree approval queue authority', () => {
     )
   })
 
-  it('replaces stale ready state with the shared typed observation error', () => {
+  it('preserves a Goal source error without attributing it to the Gate', () => {
     expect(hydrateGoalTreeSnapshot({
       approval_queue_state: { state: 'ready' },
       tree: [],
@@ -67,11 +66,16 @@ describe('goal tree approval queue authority', () => {
 
     hydrateGoalTreeObservationError(new Error('tree fetch failed'))
 
-    const expected = gateObservationErrorState('tree fetch failed')
     expect(goalTreeData.value).toBeNull()
-    expect(goalTreeApprovalQueueState.value).toEqual(expected)
-    expect(goalTreeError.value).toBe(
-      `${expected.icon} ${expected.title}: ${expected.operator_detail}`,
-    )
+    expect(goalTreeApprovalQueueState.value).toBeNull()
+    expect(goalTreeError.value).toBe('tree fetch failed')
   })
+  it.each(['goal_store_unavailable', 'goal_task_links_unavailable'])('projects %s bootstrap without inventing a Gate failure', errorCode => {
+    expect(hydrateGoalTreeSnapshot({ok: false, error_code: errorCode,
+      error: 'goals.json could not decode'})).toBe(true)
+    expect(goalTreeData.value).toBeNull()
+    expect(goalTreeApprovalQueueState.value).toBeNull()
+    expect(goalTreeError.value).toBe('goals.json could not decode')
+  })
+
 })

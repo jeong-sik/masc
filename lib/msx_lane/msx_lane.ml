@@ -52,6 +52,7 @@ let key_of_string s : (key, string) result =
   | "space" -> Ok Msx.Space
   | "esc" | "escape" -> Ok Msx.Esc
   | "return" | "enter" -> Ok Msx.Return
+  | "backspace" -> Ok Msx.Backspace
   | "trigger_a" -> Ok Msx.Trigger_a
   | "trigger_b" -> Ok Msx.Trigger_b
   | "f1" -> Ok (Msx.Function 1)
@@ -64,7 +65,7 @@ let key_of_string s : (key, string) result =
   | k ->
     Error
       (Printf.sprintf
-         "unknown key %S: use up, down, left, right, space, esc, return, \
+         "unknown key %S: use up, down, left, right, space, esc, return, backspace, \
           trigger_a, trigger_b, f1-f5, or one character"
          k)
 ;;
@@ -77,6 +78,7 @@ let key_to_string : key -> string = function
   | Msx.Space -> "space"
   | Msx.Esc -> "esc"
   | Msx.Return -> "return"
+  | Msx.Backspace -> "backspace"
   | Msx.Trigger_a -> "trigger_a"
   | Msx.Trigger_b -> "trigger_b"
   | Msx.Function n -> Printf.sprintf "f%d" n

@@ -55,6 +55,116 @@ afterEach(() => {
 })
 
 describe('refreshDashboard bootstrap', () => {
+  function pending<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+    return { promise, resolve, reject }
+  }
+
+  const readyPlanning = { generated_at: '2026-09-09T03:00:00Z', goals: [], rollup: {} }
+  const readyTree = { generated_at: '2026-09-09T03:00:00Z', approval_queue_state: { state: 'ready' }, tree: [], summary: { total_goals: 0 } }
+  const sourceFailure = { ok: false, error_code: 'goal_store_unavailable', error: 'new Goal source failure' }
+  function bootstrapGoals(failed: boolean) {
+    return { shell: { generated_at: 'now', status: {}, counts: {}, providers: {} },
+      execution: { generated_at: 'now', status: {}, agents: [], tasks: [], messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
+      planning: failed ? sourceFailure : readyPlanning, goals: failed ? sourceFailure : readyTree }
+  }
+
+  it.each([false, true])('older bootstrap cannot replace newer explicit observation (failure=%s)', async failed => {
+    const oldBootstrap = pending<unknown>()
+    apiMocks.fetchDashboardBootstrap.mockReturnValue(oldBootstrap.promise)
+    apiMocks.fetchDashboardPlanning.mockImplementation(() => failed
+      ? Promise.reject(new Error(sourceFailure.error)) : Promise.resolve(readyPlanning))
+    apiMocks.fetchDashboardGoalsTree.mockImplementation(() => failed
+      ? Promise.reject(new Error(sourceFailure.error)) : Promise.resolve(readyTree))
+    const store = await import('./store')
+    const state = await import('./goal-tree-state')
+    const older = store.refreshDashboard()
+    await store.refreshGoals()
+    const expectedError = state.goalTreeError.value
+    oldBootstrap.resolve(bootstrapGoals(!failed))
+    await older
+    expect(state.goalTreeError.value).toBe(expectedError)
+    expect(state.goalTreeData.value === null).toBe(failed)
+    expect(state.goalTreeLoading.value).toBe(false)
+    expect(store.lastGoalsRefreshAt.value === null).toBe(failed)
+  })
+
+  it.each([false, true])('older explicit observation cannot replace newer bootstrap (failure=%s)', async failed => {
+    const oldPlanning = pending<unknown>()
+    const oldTree = pending<unknown>()
+    const started = pending<void>()
+    apiMocks.fetchDashboardPlanning.mockReturnValue(oldPlanning.promise)
+    apiMocks.fetchDashboardGoalsTree.mockImplementation(() => { started.resolve(); return oldTree.promise })
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue(bootstrapGoals(failed))
+    const store = await import('./store')
+    const state = await import('./goal-tree-state')
+    const older = store.refreshGoals()
+    await started.promise
+    await store.refreshDashboard()
+    const expectedError = state.goalTreeError.value
+    if (failed) { oldPlanning.resolve(readyPlanning); oldTree.resolve(readyTree) }
+    else { oldPlanning.reject(new Error('old failure')); oldTree.reject(new Error('old failure')) }
+    await older
+    expect(state.goalTreeError.value).toBe(expectedError)
+    expect(state.goalTreeData.value === null).toBe(failed)
+    expect(store.goalsLoading.value).toBe(false)
+    expect(state.goalTreeLoading.value).toBe(false)
+    expect(store.lastGoalsRefreshAt.value === null).toBe(failed)
+  })
+
+  it('planning-only bootstrap does not settle or supersede an explicit Goal refresh', async () => {
+    const tree = pending<unknown>()
+    const started = pending<void>()
+    apiMocks.fetchDashboardPlanning.mockResolvedValue(readyPlanning)
+    apiMocks.fetchDashboardGoalsTree.mockImplementation(() => { started.resolve(); return tree.promise })
+    const full = bootstrapGoals(false)
+    const partial = { shell: full.shell, execution: full.execution, planning: full.planning }
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue(partial)
+    const store = await import('./store')
+    const state = await import('./goal-tree-state')
+    state.goalTreeError.value = 'previous source failure'
+    const explicit = store.refreshGoals()
+    await started.promise
+    await store.refreshDashboard()
+    expect(state.goalTreeError.value).toBe('previous source failure')
+    expect(state.goalTreeLoading.value).toBe(true)
+    expect(store.goalsLoading.value).toBe(true)
+    tree.resolve(readyTree)
+    await explicit
+    expect(state.goalTreeError.value).toBeNull()
+    expect(state.goalTreeData.value).not.toBeNull()
+    expect(state.goalTreeLoading.value).toBe(false)
+  })
+
+  it('an older explicit finally cannot finish a newer refresh or overwrite its error', async () => {
+    const oldTree = pending<unknown>()
+    const newTree = pending<unknown>()
+    const firstStarted = pending<void>()
+    const secondStarted = pending<void>()
+    apiMocks.fetchDashboardPlanning.mockResolvedValue(readyPlanning)
+    apiMocks.fetchDashboardGoalsTree
+      .mockImplementationOnce(() => { firstStarted.resolve(); return oldTree.promise })
+      .mockImplementationOnce(() => { secondStarted.resolve(); return newTree.promise })
+    const store = await import('./store')
+    const state = await import('./goal-tree-state')
+    state.goalTreeError.value = 'retained source failure'
+    const older = store.refreshGoals()
+    await firstStarted.promise
+    const newer = store.refreshGoals()
+    await secondStarted.promise
+    oldTree.resolve(readyTree)
+    await older
+    expect(state.goalTreeError.value).toBe('retained source failure')
+    expect(state.goalTreeLoading.value).toBe(true)
+    expect(store.goalsLoading.value).toBe(true)
+    newTree.resolve(readyTree)
+    await newer
+    expect(state.goalTreeError.value).toBeNull()
+    expect(state.goalTreeLoading.value).toBe(false)
+  })
+
   it('hydrates startup dashboard slices from the bootstrap aggregator', async () => {
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       served_at: '2026-05-14T06:00:00Z',
@@ -123,6 +233,24 @@ describe('refreshDashboard bootstrap', () => {
     expect(namespaceStore.namespaceTruth.value?.root.provenance).toBe('bootstrap')
     expect(store.serverStatus.value?.version).toBe('2.200.0')
     expect(goalTreeState.goalTreeData.value?.summary.total_goals).toBe(0)
+  })
+
+  it('preserves a Goal store bootstrap failure instead of retaining a zero-goal success', async () => {
+    const failure = { ok: false, error_code: 'goal_store_unavailable', error: 'goals.json criterion_revision missing' }
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue({
+      shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
+      execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
+        messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
+      planning: failure,
+      goals: failure,
+    })
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+    await store.refreshDashboard({ force: true })
+    expect(goalTreeState.goalTreeError.value).toContain(failure.error)
+    expect(goalTreeState.goalTreeApprovalQueueState.value).toBeNull()
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.goals.value).toEqual([])
   })
 
   it('does not fetch the full goal tree during startup when bootstrap omits goals', async () => {
@@ -202,7 +330,7 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
   })
 
-  it('drives goalTreeLoading while refreshGoals is in flight', async () => {
+  it('keeps the source failure visible until a refresh succeeds', async () => {
     apiMocks.fetchDashboardPlanning.mockResolvedValue({
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
@@ -222,12 +350,15 @@ describe('refreshDashboard bootstrap', () => {
     const store = await import('./store')
     const goalTreeState = await import('./goal-tree-state')
 
+    goalTreeState.goalTreeError.value = 'goals.json could not decode'
     const refreshPromise = store.refreshGoals()
     await new Promise(r => setTimeout(r, 0))
     expect(goalTreeState.goalTreeLoading.value).toBe(true)
+    expect(goalTreeState.goalTreeError.value).toBe('goals.json could not decode')
     resolveTree(treePayload)
     await refreshPromise
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
+    expect(goalTreeState.goalTreeError.value).toBeNull()
   })
 
   it('surfaces a partial error when the Goal Store tree fetch fails and clears stale tree data', async () => {
@@ -300,7 +431,7 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeData.value).toBeNull()
     expect(store.lastGoalsRefreshAt.value).toBeNull()
     expect(goalTreeState.goalTreeError.value).toBe(
-      '! Gate observation unavailable: Goal Store tree payload was malformed',
+      'Goal Store tree payload was malformed',
     )
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(

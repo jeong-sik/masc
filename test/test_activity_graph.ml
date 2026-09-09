@@ -1091,14 +1091,19 @@ let test_default_projections_single_pass_slices_tail_when_exceeding_500 () =
         Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int
       in
       check int "events count is 600" 600 (count_from single.events_default);
-      let events_analyzed json =
+      (* [window_meta] emits [events_shown] (activity_graph.ml:874). Nothing in
+         lib or dashboard emits [events_analyzed], so this read got null and
+         [to_int] raised. The swimlane comparison above stopped the case
+         before reaching it until #34412, which is why a read of a field no
+         producer writes went unnoticed. *)
+      let events_shown json =
         json
         |> Yojson.Safe.Util.member "window"
-        |> Yojson.Safe.Util.member "events_analyzed"
+        |> Yojson.Safe.Util.member "events_shown"
         |> Yojson.Safe.Util.to_int
       in
       check int "graph analyzes exactly 500 events (sliced from 600)" 500
-        (events_analyzed single.graph_default);
+        (events_shown single.graph_default);
       let events_total json =
         json
         |> Yojson.Safe.Util.member "window"

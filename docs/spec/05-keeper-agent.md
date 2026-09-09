@@ -92,7 +92,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`�
 - **Capability boundary**: the flat Tool catalog plus the sandbox path
   boundary; external effects pass through the Gate.
 - **Scope**: `mention_targets`
-- **Proactive**: `proactive_enabled`
+- **Activation**: `activation_mode` (`manual` | `on_demand` | `autonomous`)
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.

@@ -14,22 +14,20 @@ open Keeper_meta_contract
 
 (* Global kill-switches from the feature-flag registry. All default true. *)
 let global () : Keeper_lifecycle_gate.flags =
+  let autonomous = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED" in
   { reactive = Feature_flag_registry.get_bool "MASC_KEEPER_REACTIVE_ENABLED"
-  ; proactive = Feature_flag_registry.get_bool "MASC_KEEPER_PROACTIVE_ENABLED"
-  ; autonomous = Feature_flag_registry.get_bool "MASC_KEEPER_AUTONOMOUS_ENABLED"
-  ; bootstrap = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  ; proactive = autonomous
+  ; autonomous
+  ; bootstrap = autonomous
   }
 
-(* SSOT projection: which per-keeper meta field backs each gate.
-     - reactive  : no per-keeper flag exists; gated by the global switch only.
-     - proactive : meta.proactive.enabled (scheduled cadence turns).
-     - autonomous: meta.autoboot_enabled (autonomous keepalive / backlog).
-     - bootstrap : meta.autoboot_enabled (startup autoboot). *)
+(* One declarative mode owns both spontaneous initiative and automatic owner
+   restoration. Requested work is admitted separately from this projection. *)
 let meta_flags (m : keeper_meta) : Keeper_lifecycle_gate.flags =
   { reactive = true
-  ; proactive = m.proactive.enabled
-  ; autonomous = m.autoboot_enabled
-  ; bootstrap = m.autoboot_enabled
+  ; proactive = Keeper_activation_mode.spontaneous m.activation_mode
+  ; autonomous = Keeper_activation_mode.restore_owner m.activation_mode
+  ; bootstrap = Keeper_activation_mode.restore_owner m.activation_mode
   }
 
 (* The single resolver every lifecycle-gate call site uses:

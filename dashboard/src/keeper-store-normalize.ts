@@ -1,3 +1,4 @@
+import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import type {
   CtxAttribution,
   CtxCompositionTelemetry,
@@ -716,8 +717,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           asNumber(row.keeper_keepalive_interval_s) ?? null,
         heartbeat_stale_after_s:
           asNumber(row.heartbeat_stale_after_s) ?? null,
-        proactive_enabled:
-          typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
+        activation_mode: parseKeeperActivationMode(row.activation_mode) ?? undefined,
         pause_state: asKeeperPauseState(row.pause_state),
         runtime_blocker_state: asKeeperRuntimeBlockerState(row.runtime_blocker_state),
         runtime_blocker_class: runtimeBlockerClass,

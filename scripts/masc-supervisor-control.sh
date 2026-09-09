@@ -22,7 +22,7 @@ Environment:
   MASC_BASE_PATH                    Required workspace BasePath.
   MASC_HOST                         Listener host. Defaults to 127.0.0.1.
   MASC_PORT                         Listener port. Defaults to 8935.
-  MASC_KEEPER_BOOTSTRAP_ENABLED     Defaults to true for this operator path.
+  MASC_KEEPER_AUTONOMOUS_ENABLED     Defaults to true for this operator path.
   MASC_SUPERVISOR_PID_FILE          Defaults below <base>/.masc/logs.
   MASC_SUPERVISOR_LOG               Supervisor event log path.
   MASC_SUPERVISOR_OUTPUT_LOG        Combined stdout/stderr path.
@@ -91,7 +91,7 @@ cmd_start() {
 
   umask 077
   nohup env \
-    MASC_KEEPER_BOOTSTRAP_ENABLED="${MASC_KEEPER_BOOTSTRAP_ENABLED:-true}" \
+    MASC_KEEPER_AUTONOMOUS_ENABLED="${MASC_KEEPER_AUTONOMOUS_ENABLED:-true}" \
     MASC_SUPERVISOR_LOG="$EVENT_LOG" \
     "$SUPERVISOR" \
       --http --host "$HOST" --port "$PORT" --base-path "$BASE_PATH" \

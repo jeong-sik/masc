@@ -1,3 +1,8 @@
+(test
+ (name test_completion_repair_delivery)
+ (modules test_completion_repair_delivery)
+ (libraries masc_test_deps))
+
 ; Run the actual generator comparison through targeted Test CI.
 (rule
  (alias runtest-tool-parity-goldens)
@@ -20,7 +25,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.runtime masc.server masc.tool_types yojson))
+ (libraries alcotest masc masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -1892,7 +1897,22 @@
 (test
  (name test_keeper_stream_tool_accum)
  (modules test_keeper_stream_tool_accum)
- (libraries alcotest masc masc.masc_types masc_server masc.agent_core unix))
+ (libraries alcotest masc masc.masc_types masc.agent_core unix))
+
+; The keeper loop's side of the same collector: a continuation turn's tool
+; rows reach the chat store under the approval's delivery identity (#33127).
+
+(test
+ (name test_keeper_loop_tool_projection)
+ (modules test_keeper_loop_tool_projection)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc.agent_core
+  masc.keeper_chat_delivery_identity
+  masc.runtime
+  unix))
 
 (test
  (name test_keeper_stream_media_accum)
@@ -4327,6 +4347,18 @@
  (name runtest)
  (deps (alias runtest-test_response_latency_probe)))
 
+(rule
+ (alias runtest-test_tool_trace_spans)
+ (deps
+  test_tool_trace_spans.py
+  ../scripts/harness/perf/tool_trace_spans.py)
+ (action
+  (run python3 %{dep:test_tool_trace_spans.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tool_trace_spans)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_capture_tui_keeper_chat)))
@@ -4697,7 +4729,7 @@
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
-(include stanzas/test_connector_names.inc)
+(include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -5037,7 +5069,7 @@
 (test
  (name test_keeper_tool_execute_observe)
  (modules test_keeper_tool_execute_observe)
- (libraries masc_test_deps))
+ (libraries masc_test_deps exec_ssh_protocol))
 
 (test
  (name test_keeper_execute_shim_evidence)
@@ -5272,6 +5304,7 @@
  (name runtest)
  (deps (alias runtest-test_tui_lane_pagination)))
 
+(include stanzas/test_tempo_coverage.inc)
 (include stanzas/test_keeper_periodic_wake.inc)
 
 (test
@@ -5311,6 +5344,16 @@
  (deps (alias runtest-test_tui_lane_detail_owner)))
 
 (rule
+ (alias runtest-test_tui_goal_source_availability)
+ (deps test_tui_goal_source_availability.py test_tui_keyboard_input.py)
+ (action
+  (run python3 %{dep:test_tui_goal_source_availability.py} %{exe:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_goal_source_availability)))
+
+(rule
  (alias runtest-test_tui_goal_proof_identity)
  (deps test_tui_goal_proof_identity.py test_tui_keyboard_input.py)
  (action
@@ -5319,3 +5362,20 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_goal_proof_identity)))
+
+(test
+ (name test_dashboard_task_detail)
+ (modules test_dashboard_task_detail)
+ (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))
+
+(test
+ (name test_dashboard_task_search_text)
+ (modules test_dashboard_task_search_text)
+ (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))
+
+(test
+ (name test_dashboard_task_preview)
+ (modules test_dashboard_task_preview)
+ (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
+
+(include stanzas/test_h2_json_worker.inc)

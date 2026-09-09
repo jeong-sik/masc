@@ -7,7 +7,7 @@ let envelope ?(sandbox_profile = Keeper_types_profile.Micro_vm)
     ~name:"pr-updater"
     ~trace_id:"trace-1"
     ~instructions:"manage open PRs on github.com"
-    ~proactive_enabled:true
+    ~activation_mode:Keeper_activation_mode.Autonomous
     ~max_context_override:None
     ~sandbox_profile
     ~network_mode
@@ -59,8 +59,8 @@ let test_envelope_keeps_its_existing_fields () =
   check string "trace_id" "trace-1" (string_field "trace_id" json);
   check string "instructions" "manage open PRs on github.com"
     (string_field "instructions" json);
-  check bool "proactive_enabled present" true
-    (Option.is_some (field "proactive_enabled" json));
+  check bool "activation_mode present" true
+    (Option.is_some (field "activation_mode" json));
   check bool "max_context_override present" true
     (Option.is_some (field "max_context_override" json));
   check bool "agent_core_env present" true

@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -188,24 +189,63 @@ def stanza_dir(suite_dir: str) -> str:
     return os.path.join(REPO_ROOT, suite_dir, "stanzas")
 
 
+def included_stanza_sources(path: str, ancestors: tuple[str, ...] = ()):
+    """Read literal includes without changing the suite's Dune directory.
+
+    Include filenames are relative to their containing file. Dependencies and
+    actions inside those files still belong to the original dune directory.
+    Keep each source separate so an unrelated included rule cannot donate its
+    environment to the requested suite.
+    """
+    path = os.path.realpath(path)
+    if path in ancestors:
+        raise StanzaError("include cycle: " + " -> ".join((*ancestors, path)))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as exc:
+        raise StanzaError(f"cannot read included stanza {path}: {exc}") from exc
+    forms = parse(tokenize(text))
+    yield text, forms
+    for form in forms:
+        if not isinstance(form, list) or not form or form[0] != "include":
+            continue
+        if len(form) != 2 or not isinstance(form[1], str) or VAR_RE.search(form[1]):
+            raise StanzaError(f"unsupported include in {path}: {form}")
+        yield from included_stanza_sources(
+            os.path.join(os.path.dirname(path), form[1]), (*ancestors, path)
+        )
+
+
+def named_suites(forms: list) -> list[str]:
+    return [
+        name
+        for form in forms
+        if isinstance(form, list) and form and form[0] in ("test", "tests")
+        for name in stanza_names(form)
+    ]
+
+
 def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bool]:
-    """(text, whether it is this suite's own file).
+    """Find the named suite in its dune file or a literal shared include.
 
-    A file under <dir>/stanzas belongs to one suite, so every setenv in it is
-    that suite's -- including the ones in a (rule (alias runtest) ...), which
-    carries no (name ...) to match on. A suite with no such file is declared
-    inline in <dir>/dune among many others, so there the stanza has to be
-    found by name.
-
-    Only test/ has a stanzas/ directory today; the directories outside it
-    declare everything inline, which this reaches through the same fallback.
+    Per-suite files retain their rule-action handling. Shared files must select
+    the named stanza, since sibling tests may have different environments.
     """
     path = os.path.join(stanza_dir(suite_dir), f"{suite}.inc")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as handle:
             return handle.read(), True
-    with open(os.path.join(REPO_ROOT, suite_dir, "dune"), encoding="utf-8") as handle:
-        return handle.read(), False
+    root = os.path.join(REPO_ROOT, suite_dir, "dune")
+    root_text = None
+    for text, forms in included_stanza_sources(root):
+        if root_text is None:
+            root_text = text
+        if suite in named_suites(forms):
+            return text, False
+    # Preserve the unknown-suite error from suite_env instead of silently
+    # answering with an empty environment.
+    return root_text or "", False
 
 
 def suite_env(
@@ -253,10 +293,7 @@ def suite_env(
             # declares none. So a misspelling, or a suite read against the
             # wrong directory, ran with a partial environment and reported a
             # verdict the nightly lane would not agree with, which is the
-            # outcome the header says this reader exists to stop. Verified
-            # 2026-09-07 against every suite declared under a (test) or
-            # (tests) stanza in the tree: 1,053 of 1,053 are found, so
-            # refusing the rest refuses nothing that exists.
+            # outcome the header says this reader exists to stop.
             raise StanzaError(
                 "no (test)/(tests) stanza declares this suite here; check the "
                 "name and the directory it lives in"
@@ -439,6 +476,54 @@ def self_test() -> int:
     env, _ = suite_env("test_one", neighbours, own_file=False)
     check("a suite with no setenv beside one that has some", env, [])
 
+    # Shared includes are real test declarations, not one suite named after
+    # the include file. Exercise the same lookup used by workflow_dispatch.
+    with tempfile.TemporaryDirectory(prefix="stanza-env-") as fixture:
+        os.makedirs(os.path.join(fixture, "stanzas", "nested"))
+
+        def write(relative, text):
+            with open(os.path.join(fixture, relative), "w", encoding="utf-8") as handle:
+                handle.write(text)
+
+        write("dune", "(include stanzas/shared.inc)\n")
+        write("stanzas/shared.inc", "(include nested/group.inc)\n" + FIXTURE_PLAIN)
+        write("stanzas/nested/group.inc",
+              "(tests (names test_shared_one test_shared_two)"
+              " (deps sibling.exe ../config/runtime.toml)"
+              " (action (setenv SHARED_RUNNER %{dep:sibling.exe} (run %{test}))))"
+              + FIXTURE_PLAIN)
+        text, own_file = stanza_text("test_shared_two", fixture)
+        check("shared include selects named group", own_file, False)
+        env, deps = suite_env("test_shared_two", text, own_file=own_file)
+        check("nested include preserves group environment", env,
+              [("SHARED_RUNNER", "sibling.exe")])
+        check("included deps keep the suite directory as their base", deps,
+              ["sibling.exe", "../config/runtime.toml"])
+        text, own_file = stanza_text("test_alpha", fixture)
+        env, _ = suite_env("test_alpha", text, own_file=own_file)
+        check("shared-file sibling environment does not leak", env,
+              [("MASC_EXEC_ALLOW_LOCAL_PLAYGROUND", "true"),
+               ("MASC_BASE_PATH", "/tmp/test-alpha"),
+               ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha")])
+        write("stanzas/nested/group.inc", "(include ../shared.inc)")
+        try:
+            stanza_text("test_absent", fixture)
+            check("include cycle fails explicitly", "accepted", "refused")
+        except StanzaError as exc:
+            check("include cycle names its cause", "include cycle:" in str(exc), True)
+        write("stanzas/nested/group.inc", "(include missing.inc)")
+        try:
+            stanza_text("test_absent", fixture)
+            check("missing included source fails explicitly", "accepted", "refused")
+        except StanzaError as exc:
+            check("missing include names its cause", "missing.inc" in str(exc), True)
+
+    text, own_file = stanza_text("test_types_coverage")
+    check("real shared coverage suite is discoverable",
+          suite_env("test_types_coverage", text, own_file=own_file), ([], []))
+    check("coverage members are included in check-all",
+          "test_types_coverage" in inline_suite_names(), True)
+
     # The one suite test.yml used to hardcode still reads the same three.
     real = os.path.join(stanza_dir(DEFAULT_SUITE_DIR), "test_heartbeat_integration.inc")
     if os.path.exists(real):
@@ -482,15 +567,12 @@ def self_test() -> int:
 
 
 def inline_suite_names() -> list[str]:
-    """The suites test/dune declares directly, rather than through a stanza
-    file. There are far more of these than there are stanza files, and a
-    targeted dispatch names them the same way."""
-    with open(os.path.join(REPO_ROOT, "test", "dune"), encoding="utf-8") as handle:
-        forms = parse(tokenize(handle.read()))
-    names: list[str] = []
-    for form in forms:
-        if isinstance(form, list) and form and form[0] in ("test", "tests"):
-            names.extend(stanza_names(form))
+    """Suites declared by test/dune, including its shared include files."""
+    names = [
+        name
+        for _text, forms in included_stanza_sources(os.path.join(REPO_ROOT, "test", "dune"))
+        for name in named_suites(forms)
+    ]
     return sorted(set(names))
 
 
@@ -527,7 +609,7 @@ def check_all() -> int:
         return 1
     print(
         f"stanza env: read all {len(names)} stanza files and {len(inline)} suites "
-        f"declared inline in test/dune; {with_env} declare an environment"
+        f"declared in test/dune and its includes; {with_env} declare an environment"
     )
     return 0
 

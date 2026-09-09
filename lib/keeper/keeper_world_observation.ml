@@ -225,7 +225,7 @@ type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
-  ; active_goals : string list
+  ; active_goals : (string list, string) result
   ; unclaimed_task_count : int
   ; claimable_tasks : Inputs.claimable_task_identity list
   ; held_task_skills : Inputs.held_task_skills list
@@ -1445,9 +1445,9 @@ let collect_board_events_without_advancing_cursor
 (* Goals are shared intent: the store is the only record of which ones are
    still open, so the observation reads it directly. *)
 let open_goal_ids ~(config : Workspace.config) =
-  Goal_store.list_goals config ()
-  |> List.filter_map (fun (g : Goal_store.goal) ->
-       if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None)
+  Goal_store.list_goals_result config ()
+  |> Result.map (List.filter_map (fun (g : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None))
 ;;
 
 let observe
@@ -1596,11 +1596,9 @@ let keeper_cycle_decision
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
-  (* RFC-0297 P0-1: reactive and proactive turns run only when their lifecycle
-     gate is enabled — the global kill-switch AND the per-keeper flag. Resolved
-     through the single SSOT [Keeper_lifecycle_gate_env.enabled] so the enabled
-     decision is not re-derived inline. Before this the global switches did not
-     exist, so [reactive]/[proactive] enabled = false were silently dropped. *)
+  (* Lifecycle policy is resolved once at the environment boundary. Spontaneous
+     work uses the global autonomy setting and the Keeper activation mode;
+     an explicit due schedule supplies its own execution authority below. *)
   let reactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Reactive meta
   in
@@ -1699,7 +1697,11 @@ let keeper_cycle_decision
         else
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
-      if not proactive_gate_enabled
+      let requested_schedule_due =
+        scheduled_due_from_queue
+        || observation.scheduled_automation.due_ready_count > 0
+      in
+      if not proactive_gate_enabled && not requested_schedule_due
       then
         { should_run = false
         ; channel = Scheduled_autonomous
@@ -1756,7 +1758,7 @@ let keeper_cycle_decision
       (* RFC-0297 P0-1: when the reactive gate is disabled, a pending reactive
          trigger must not itself starve the scheduled-autonomous decision --
          otherwise a persistent trigger (e.g. a stuck mention) permanently
-         blocks proactive turns even when MASC_KEEPER_PROACTIVE_ENABLED=true.
+         blocks proactive turns even when MASC_KEEPER_AUTONOMOUS_ENABLED=true.
          This arm also covers the original no-reactive-trigger ([]) case.
          Only relabel the verdict as [Reactive_disabled] when
          scheduled-autonomous also declines to run, so the more specific,

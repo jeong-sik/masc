@@ -120,13 +120,17 @@ let current_task_of id =
   Keeper_world_observation_inputs.Current_task (task_named id)
 ;;
 
+let get_ok = function Ok value -> value | Error detail -> fail detail
+
 let summary_ids summaries =
+  let summaries = get_ok summaries in
   List.map
     (fun (s : Keeper_unified_prompt.goal_summary) -> s.summary_goal_id)
     summaries
 ;;
 
 let summary_title_opt goal_id summaries =
+  let summaries = get_ok summaries in
   match
     List.find_opt
       (fun (s : Keeper_unified_prompt.goal_summary) ->
@@ -199,7 +203,8 @@ let test_world_observation_drops_terminal_goals () =
   in
   check (list string) "the per-turn frame agrees with the system prompt"
     [ "goal-executing"; "goal-verifying" ]
-    observation.Keeper_world_observation.active_goals
+    (match observation.Keeper_world_observation.active_goals with
+     | Ok ids -> ids | Error detail -> fail detail)
 ;;
 
 (* Terminal phases are the only thing that removes a Goal from the surface.
@@ -222,7 +227,8 @@ let test_no_goals_surface_when_all_are_terminal () =
       ~meta
   in
   check (list string) "and the frame carries none either" []
-    observation.Keeper_world_observation.active_goals
+    (match observation.Keeper_world_observation.active_goals with
+     | Ok ids -> ids | Error detail -> fail detail)
 ;;
 
 (* A Goal is a standing question, not an assignment. Nothing in a turn frame
@@ -267,10 +273,99 @@ let test_no_goal_is_offered_as_work_to_pick_up () =
     (contains_in world "picking one up")
 ;;
 
+let test_unreadable_goals_preserve_context_and_independent_turn () =
+  with_workspace @@ fun config ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+  let runtime_path = Filename.concat config.base_path "runtime.toml" in
+  Fs_compat.save_file runtime_path {|
+[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  seed_all_phases config;
+  Workspace_goal_index.write_goal_task_links config
+    [ "goal-executing", [ "task-linked" ] ];
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  let meta = keeper_meta () in
+  let check_unavailable () =
+    let observation = Keeper_world_observation.observe
+      ~pending_board_events:(Some []) ~config ~meta in
+    let detail = match observation.active_goals with
+      | Error detail -> detail
+      | Ok _ -> fail "an unreadable Goal source became an available list" in
+    check bool "read failure carries its cause" true (String.length detail > 0);
+    let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
+      ~config ~current_task:(current_task_of "task-linked") in
+    (match summaries with
+     | Error _ -> () | Ok _ -> fail "task context lost the Goal read failure");
+    let observation = { observation with pending_messages =
+      [ { Keeper_world_observation_message_scope.message_id = "independent-message"
+        ; speaker = "operator"; content = "Please inspect the independent file."
+        ; kind = Keeper_world_observation_message_scope.Mention } ] } in
+    let decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
+    check bool "independent mention still admits a turn" true decision.should_run;
+    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt
+      ~meta ~config ~turn_decision:decision
+      ~current_task:(current_task_of "task-linked")
+      ~active_goal_summaries:summaries ~observation () in
+    check bool "Goal failure reaches the model context" true
+      (contains_in world_state "goal_store_unavailable");
+    check bool "independent request stays visible" true
+      (contains_in world_state "Please inspect the independent file.");
+    let log_path = Keeper_types_support.keeper_decision_log_path config meta.name in
+    let directory = Filename.dirname log_path in
+    if not (Sys.file_exists directory) then Unix.mkdir directory 0o755;
+    Keeper_unified_metrics_decision.append_decision_record ~config ~meta
+      ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~observation ~latency_ms:0 ~outcome:"completed" ();
+    let rows = Fs_compat.load_file log_path |> String.split_on_char '\n'
+      |> List.filter (fun row -> row <> "") in
+    let row = List.rev rows |> List.hd |> Yojson.Safe.from_string in
+    let open Yojson.Safe.Util in
+    let observed = member "observation" row in
+    check bool "frame does not invent a zero count" true
+      (member "active_goals" observed = `Null);
+    check string "frame retains the unavailable source" "unavailable"
+      (observed |> member "active_goals_source" |> member "status" |> to_string)
+  in
+  Fs_compat.save_file primary "unreadable-primary";
+  check_unavailable ();
+  check string "observing does not repair primary" "unreadable-primary"
+    (Fs_compat.load_file primary);
+  check string "observing leaves the recovery copy unchanged" original
+    (Fs_compat.load_file mirror);
+  Sys.remove primary;
+  check_unavailable ();
+  check bool "missing primary is not recreated" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  let fresh = Keeper_world_observation.observe
+    ~pending_board_events:(Some []) ~config ~meta in
+  check (result (list string) string) "fresh store is genuinely empty"
+    (Ok []) fresh.active_goals
+;;
+
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
-      , [ test_case "the turn surface drops terminal goals" `Quick
+      , [ test_case "unavailable Goal source preserves independent turn and frame" `Quick
+            test_unreadable_goals_preserve_context_and_independent_turn
+        ; test_case "the turn surface drops terminal goals" `Quick
             test_turn_surface_drops_terminal_goals
         ; test_case "the turn surface carries only the task's goals" `Quick
             test_turn_surface_carries_only_the_tasks_goals

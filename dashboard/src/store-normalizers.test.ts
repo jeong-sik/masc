@@ -412,7 +412,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         autoboot_enabled_names: ['analyst', 'base', 'sangsu'],
         details: [{
           name: 'analyst',
-          autoboot_enabled: true,
+          activation_mode: 'autonomous',
           pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
           missing_pause_root_cause: false,

@@ -64,7 +64,7 @@ let with_temp_dir prefix f =
 
 let scrubbed_env_names =
     [
-      "MASC_KEEPER_BOOTSTRAP_ENABLED";
+      "MASC_KEEPER_AUTONOMOUS_ENABLED";
       "MASC_PORT";
       "MASC_HOST";
       "MASC_BASE_PATH";
@@ -188,7 +188,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
   printf 'MASC_SIDECAR_ROOT=%%s\n' "${MASC_SIDECAR_ROOT:-}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
-  printf 'MASC_KEEPER_BOOTSTRAP_ENABLED=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
+  printf 'MASC_KEEPER_AUTONOMOUS_ENABLED=%%s\n' "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
@@ -1440,7 +1440,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
       copy_script (script_path ()) start_script;
       copy_script (loopback_script_path ()) loopback_script;
       write_file (Filename.concat repo_root ".env.local")
-        "MASC_KEEPER_BOOTSTRAP_ENABLED=true\n";
+        "MASC_KEEPER_AUTONOMOUS_ENABLED=true\n";
       make_fake_eio_exe repo_root;
       let home_dir = Filename.concat dir "home" in
       let capture_default = Filename.concat dir "captured-loopback-default.txt" in
@@ -1450,7 +1450,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
             [
               ("FAKE_CAPTURE_FILE", capture_default);
               ("HOME", home_dir);
-              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "true");
+              ("MASC_KEEPER_AUTONOMOUS_ENABLED", "true");
             ]
           [ "--port"; "9961"; "--base-path"; repo_root ]
       in
@@ -1459,7 +1459,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
           code_default stdout_default stderr_default;
       let captured_default = read_file capture_default in
       check bool "loopback disables keeper autoboot by default" true
-        (String_util.contains_substring captured_default "MASC_KEEPER_BOOTSTRAP_ENABLED=false");
+        (String_util.contains_substring captured_default "MASC_KEEPER_AUTONOMOUS_ENABLED=false");
       let capture_override =
         Filename.concat dir "captured-loopback-override.txt"
       in
@@ -1469,7 +1469,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
             [
               ("FAKE_CAPTURE_FILE", capture_override);
               ("HOME", home_dir);
-              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "");
+              ("MASC_KEEPER_AUTONOMOUS_ENABLED", "");
             ]
           [ "--with-keeper-bootstrap"; "--port"; "9962"; "--base-path"; repo_root ]
       in
@@ -1478,7 +1478,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
           code_override stdout_override stderr_override;
       let captured_override = read_file capture_override in
       check bool "loopback honors explicit keeper autoboot opt-in" true
-        (String_util.contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
+        (String_util.contains_substring captured_override "MASC_KEEPER_AUTONOMOUS_ENABLED=true"))
 
 let test_supervisor_stops_on_startup_without_candidate () =
   with_temp_dir "start-masc-supervisor-terminal" (fun repo_root ->
@@ -1549,7 +1549,7 @@ stop() {
 }
 trap stop TERM INT HUP
 {
-  printf 'bootstrap=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
+  printf 'bootstrap=%%s\n' "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}"
   printf 'args=%%s\n' "$*"
 } > %s
 sleep 300 &

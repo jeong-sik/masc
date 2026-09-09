@@ -446,6 +446,121 @@ let test_reconcile_retires_resolution_without_record () =
   check int "the wake left the queue" 0 (queue_length ~base_path ~keeper_name)
 ;;
 
+(* --- settled continuation ------------------------------------------------ *)
+
+(* #32956: the turn that received the replay failed after the provider
+   answered (every one of the 24 turns on one pr-updater approval ended at
+   MaxTokens). The failed receipt settles the continuation: the wake the
+   turn left at the queue head is retired without a turn, and the resolution
+   is not projected into a turn woken by something else. *)
+let spend_grant_with_outcome ~base_path ~approval_id =
+  match
+    Keeper_gate_replay.For_testing.settle_pre_effect_failure
+      ~base_path
+      ~approval_id
+      ~operation:"external-effect"
+      ~detail:"sandbox unavailable before effect"
+  with
+  | Ok _ -> ()
+  | Error detail -> fail detail
+;;
+
+let settle_continuation_as_failed ~base_path ~keeper_name ~approval_id =
+  let resolution : Q.hitl_resolution =
+    { approval_id; decision = Q.Hitl_approved; channel = unrouted }
+  in
+  match
+    Keeper_approval_queue.ensure_failed_continuation_chat_projection
+      ~base_path
+      ~keeper_name
+      ~resolution
+      ~route:
+        (Keeper_runtime_failure_route.Rotate_now
+           { rotate = Keeper_runtime_failure_route.No_progress_truncated })
+  with
+  | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+  | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+    fail "the spent grant was not settled as failed"
+  | Error detail -> fail detail
+;;
+
+let pending_selection_exn ~base_path ~keeper_name =
+  match
+    Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
+  with
+  | Ok [ selection ] -> selection
+  | Ok selections ->
+    failf "expected one pending selection, got %d" (List.length selections)
+  | Error message -> fail message
+;;
+
+let test_reconcile_retires_wake_after_failed_continuation () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-failed-continuation-retire-keeper" in
+  register_keeper_exn ~config keeper_name;
+  let input = `Assoc [ "target", `String "hitl-failed-continuation" ] in
+  let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
+  spend_grant_with_outcome ~base_path ~approval_id;
+  (* Consumption plus a durable outcome is not yet a settlement: the model
+     has not been shown the outcome, so the wake still costs a turn. *)
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       (pending_selection_exn ~base_path ~keeper_name)
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
+     fail "an unsettled continuation was acknowledged"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired _) ->
+     fail "a recorded grant was retired as absent"
+   | Error message -> fail message);
+  check int "the wake stays queued until the continuation settles" 1
+    (queue_length ~base_path ~keeper_name);
+  settle_continuation_as_failed ~base_path ~keeper_name ~approval_id;
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       (pending_selection_exn ~base_path ~keeper_name)
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
+     fail "a failed continuation left the wake to spend another turn"
+   | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired _) ->
+     fail "a recorded grant was retired as absent"
+   | Error message -> fail message);
+  check int "the wake left the queue without a turn" 0
+    (queue_length ~base_path ~keeper_name)
+;;
+
+let test_peek_skips_settled_failed_continuation () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-failed-continuation-peek-keeper" in
+  create_keeper_exn ~config keeper_name;
+  let input = `Assoc [ "target", `String "hitl-failed-continuation-peek" ] in
+  let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
+  let peeked () =
+    Option.map
+      (fun (resolution : Q.hitl_resolution) -> resolution.approval_id)
+      (Keeper_heartbeat_stimulus_intake.ready_hitl_resolution_peek
+         ~base_path
+         ~keeper_name)
+  in
+  check (option string) "an unspent grant is projected" (Some approval_id) (peeked ());
+  spend_grant_with_outcome ~base_path ~approval_id;
+  check (option string)
+    "a spent grant whose outcome the model has not seen is still projected"
+    (Some approval_id) (peeked ());
+  settle_continuation_as_failed ~base_path ~keeper_name ~approval_id;
+  check (option string) "a settled resolution is not projected" None (peeked ());
+  check int "peek leaves the queue alone" 1 (queue_length ~base_path ~keeper_name)
+;;
+
 (* --- absent recipient --------------------------------------------------- *)
 
 (* #31684: a resolution addressed to a Keeper that does not exist used to
@@ -537,6 +652,16 @@ let () =
             "a resolution without a record is retired without a turn"
             `Quick
             test_reconcile_retires_resolution_without_record
+        ] )
+    ; ( "settled continuation"
+      , [ test_case
+            "a failed continuation retires the wake without a turn"
+            `Quick
+            test_reconcile_retires_wake_after_failed_continuation
+        ; test_case
+            "a settled resolution is not projected into a turn"
+            `Quick
+            test_peek_skips_settled_failed_continuation
         ] )
     ; ( "retired recipient"
       , [ test_case

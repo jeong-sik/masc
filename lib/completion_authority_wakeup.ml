@@ -91,3 +91,53 @@ let wake_rejected_producer
         | exn ->
           Durable_wake_failed
             { keeper_name; detail = Printexc.to_string exn }))
+
+
+type recovery_report = { delivered : int; retained : int }
+
+let reconcile_pending ~config =
+  match Workspace_task_rejection_outbox.pending config with
+  | Error detail -> Error detail
+  | Ok pending ->
+    let deliver report (item : Masc_domain.pending_completion_rejection) =
+      let queued =
+        match wake_rejected_producer ~config ~producer:item.producer
+                ~task_id:item.task_id ~verification_id:item.verification_id
+                ~reason:item.reason ~authority:item.authority with
+        | Signaled _ -> Ok ()
+        | Durable_deferred { keeper_name; _ } ->
+          Log.Misc.warn
+            "completion repair queued; Keeper wake deferred task_id=%s keeper=%s"
+            item.task_id keeper_name;
+          Ok ()
+        | Durable_wake_failed { keeper_name; detail } ->
+          Log.Misc.error
+            "completion repair queued; live wake failed task_id=%s keeper=%s detail=%s"
+            item.task_id keeper_name detail;
+          Ok ()
+        | Unroutable_producer { producer; _ } ->
+          Error ("producer Keeper is unavailable: " ^ producer)
+        | Producer_identity_lookup_failed { detail; _ }
+        | Durable_queue_failed { detail; _ } -> Error detail
+      in
+      let acknowledged =
+        match queued with
+        | Error _ as error -> error
+        | Ok () ->
+          Workspace_task_rejection_outbox.acknowledge config
+            ~task_id:item.task_id ~verification_id:item.verification_id
+      in
+      match acknowledged with
+      | Ok () ->
+        Log.Misc.info
+          "completion repair delivered task_id=%s verification_id=%s producer=%s"
+          item.task_id item.verification_id item.producer;
+        { report with delivered = report.delivered + 1 }
+      | Error detail ->
+        Log.Misc.error
+          "completion repair remains pending task_id=%s verification_id=%s producer=%s detail=%s"
+          item.task_id item.verification_id item.producer detail;
+        { report with retained = report.retained + 1 }
+    in
+    Ok (List.fold_left deliver { delivered = 0; retained = 0 } pending)
+;;

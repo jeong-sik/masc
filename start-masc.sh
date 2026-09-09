@@ -574,7 +574,7 @@ clear_repo_local_config_for_explicit_base_path() {
 
 # Caller-provided env must win over repo-local .env/.env.local files.
 for env_name in \
-    MASC_KEEPER_BOOTSTRAP_ENABLED \
+    MASC_KEEPER_AUTONOMOUS_ENABLED \
     MASC_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
@@ -596,7 +596,7 @@ if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
 fi
 
 for env_name in \
-    MASC_KEEPER_BOOTSTRAP_ENABLED \
+    MASC_KEEPER_AUTONOMOUS_ENABLED \
     MASC_PORT \
     MASC_HOST \
     MASC_BASE_PATH \

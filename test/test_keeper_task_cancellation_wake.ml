@@ -44,7 +44,7 @@ let ensure_keeper config ~keeper_name =
       (Masc_test_deps.meta_of_json_fixture
          (`Assoc
              [ "name", `String keeper_name
-             ; "autoboot_enabled", `Bool false
+             ; "activation_mode", `String "manual"
              ]))
       (Keeper_meta_store.replace_snapshot config)
   with
@@ -74,7 +74,7 @@ let seed_task ?handoff_context config ~task_id ~created_by ~status =
   in
   Workspace_backlog.write_backlog
     config
-    { tasks = [ task ]; last_updated = now; version = 1 }
+    { tasks = [ task ]; pending_completion_rejections = []; last_updated = now; version = 1 }
 ;;
 
 let cancelled ~by ~reason =

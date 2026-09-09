@@ -98,13 +98,30 @@ let test_serialization_json_routes_parse_error () =
   Alcotest.(check bool) "JsonParseError routes to Parse_error" true
     (is_parse_error (Store.classify_core_error e))
 
-let test_serialization_version_routes_parse_error () =
-  let e =
-    Agent_core.Error.Serialization
-      (VersionMismatch { expected = 2; got = 1 })
+(* The two directions of a version mismatch need opposite answers, so they are
+   not one classification. An earlier canonical is replaceable: the load already
+   refused it and the keeper started fresh. A later one is not: an older binary
+   is reading a newer workspace, and overwriting it would destroy history that
+   binary can still read, so it stays with the corrupt payloads. *)
+let test_serialization_version_routes_by_direction () =
+  let mismatch ~got =
+    Store.classify_core_error
+      (Agent_core.Error.Serialization
+         (VersionMismatch { expected = 2; got }))
   in
-  Alcotest.(check bool) "VersionMismatch routes to Parse_error" true
-    (is_parse_error (Store.classify_core_error e))
+  (match mismatch ~got:1 with
+   | Store.Superseded_version { expected; got } ->
+     Alcotest.(check (pair int int))
+       "an earlier version routes to Superseded_version, both numbers carried"
+       (2, 1) (expected, got)
+   | other ->
+     Alcotest.failf "an earlier version did not route to Superseded_version: %s"
+       (Store.checkpoint_load_error_to_string other));
+  Alcotest.(check bool) "a later version stays a parse failure" true
+    (is_parse_error (mismatch ~got:3));
+  Alcotest.(check bool) "an equal version cannot reach the classifier as a mismatch"
+    true
+    (is_parse_error (mismatch ~got:2))
 
 let test_serialization_unknown_variant_routes_parse_error () =
   let e =
@@ -153,8 +170,10 @@ let () =
             test_io_validation_failed_routes_store_error;
           Alcotest.test_case "JsonParseError -> Parse_error" `Quick
             test_serialization_json_routes_parse_error;
-          Alcotest.test_case "VersionMismatch -> Parse_error" `Quick
-            test_serialization_version_routes_parse_error;
+          Alcotest.test_case
+            "VersionMismatch routes by direction: earlier is superseded, later              is a parse failure"
+            `Quick
+            test_serialization_version_routes_by_direction;
           Alcotest.test_case "UnknownVariant -> Parse_error" `Quick
             test_serialization_unknown_variant_routes_parse_error;
           Alcotest.test_case "Internal -> Agent_core_error" `Quick

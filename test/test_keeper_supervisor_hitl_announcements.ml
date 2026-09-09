@@ -19,11 +19,11 @@ let test_first_sweep_announces_every_pending_keeper () =
   check
     "nothing announced yet"
     [ { keeper_name = "code-reviewer"; pending_count = 4 }
-    ; { keeper_name = "sangsu"; pending_count = 1 }
+    ; { keeper_name = "verifier"; pending_count = 1 }
     ]
     (S.pending_hitl_announcements
        ~announced:[]
-       ~counts:[ "code-reviewer", 4; "sangsu", 1 ])
+       ~counts:[ "code-reviewer", 4; "verifier", 1 ])
 ;;
 
 let test_unchanged_counts_are_silent () =
@@ -31,25 +31,25 @@ let test_unchanged_counts_are_silent () =
     "same counts as last sweep"
     []
     (S.pending_hitl_announcements
-       ~announced:[ "code-reviewer", 4; "sangsu", 1 ]
-       ~counts:[ "code-reviewer", 4; "sangsu", 1 ])
+       ~announced:[ "code-reviewer", 4; "verifier", 1 ]
+       ~counts:[ "code-reviewer", 4; "verifier", 1 ])
 ;;
 
 let test_a_changed_count_is_announced_alone () =
   check
     "only the keeper whose count moved"
-    [ { keeper_name = "sangsu"; pending_count = 2 } ]
+    [ { keeper_name = "verifier"; pending_count = 2 } ]
     (S.pending_hitl_announcements
-       ~announced:[ "code-reviewer", 4; "sangsu", 1 ]
-       ~counts:[ "code-reviewer", 4; "sangsu", 2 ])
+       ~announced:[ "code-reviewer", 4; "verifier", 1 ]
+       ~counts:[ "code-reviewer", 4; "verifier", 2 ])
 ;;
 
 let test_a_cleared_keeper_is_announced_as_zero () =
   check
-    "sangsu left the pending set"
-    [ { keeper_name = "sangsu"; pending_count = 0 } ]
+    "verifier left the pending set"
+    [ { keeper_name = "verifier"; pending_count = 0 } ]
     (S.pending_hitl_announcements
-       ~announced:[ "code-reviewer", 4; "sangsu", 1 ]
+       ~announced:[ "code-reviewer", 4; "verifier", 1 ]
        ~counts:[ "code-reviewer", 4 ])
 ;;
 

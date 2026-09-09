@@ -37,7 +37,7 @@ description: .masc/config/*.toml 파일의 스키마와 예시입니다.
 | --- | --- | --- |
 | `ollama_cloud` | `ollama.com/v1` | `OLLAMA_CLOUD_API_KEY` |
 | `deepseek` | `api.deepseek.com` | `DEEPSEEK_API_KEY` |
-| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY_SB` |
+| `glm-coding` | `api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY` |
 | `kimi_coding` | `api.kimi.com/coding/v1` | `KIMI_API_KEY` |
 | `ollama` | `localhost:11434` | 없음 |
 

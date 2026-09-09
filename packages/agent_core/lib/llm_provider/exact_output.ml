@@ -591,17 +591,16 @@ let receipt_catalog_generation = Generation_receipt.catalog_generation
 let receipt_catalog_evidence = Generation_receipt.catalog_evidence
 let receipt_target_identity = Generation_receipt.target_identity
 let candidate_visit_count_to_int (Candidate_visit_count count) = count
-let generation_receipt_snapshot = Generation_receipt.snapshot
 let generation_receipt_snapshot_phase = Generation_receipt.snapshot_phase
-
-let generation_receipt_snapshot_dispatch_count =
-  Generation_receipt.snapshot_dispatch_count
-;;
 
 let generation_receipt_snapshot_http_status = Generation_receipt.snapshot_http_status
 
 let generation_receipt_snapshot_provider_trace =
   Generation_receipt.snapshot_provider_trace
+;;
+
+let generation_receipt_snapshot_dispatch_count =
+  Generation_receipt.snapshot_dispatch_count
 ;;
 
 let generation_receipt_snapshot_call_id = Generation_receipt.snapshot_call_id
@@ -694,36 +693,6 @@ let candidate_rejection_disposition (receipt : candidate_rejection_receipt) =
   match receipt.cause with
   | Target_selection_rejected cause -> target_selection_error_disposition cause
   | Request_admission_rejected cause -> admission_error_disposition cause
-;;
-
-let validated_flow_evidence_source_error_to_string = function
-  | Evidence_ordinal_out_of_bounds { collection; ordinal; visited_candidates } ->
-    Printf.sprintf
-      "%s evidence ordinal %d is outside visited range 1..%d"
-      collection
-      ordinal
-      visited_candidates
-  | Evidence_duplicate_ordinal { collection; ordinal } ->
-    Printf.sprintf "%s evidence repeats ordinal %d" collection ordinal
-  | Evidence_missing_entry { collection; ordinal } ->
-    Printf.sprintf "%s evidence is missing ordinal %d" collection ordinal
-  | Evidence_unexpected_entry { collection; ordinal } ->
-    Printf.sprintf "%s evidence is unexpected at ordinal %d" collection ordinal
-  | Evidence_flow_identity_mismatch { collection; ordinal } ->
-    Printf.sprintf
-      "%s evidence has a different flow identity at ordinal %d"
-      collection
-      ordinal
-  | Evidence_unsupported_state { collection; ordinal; detail } ->
-    Printf.sprintf
-      "%s evidence at ordinal %d has unsupported state: %s"
-      collection
-      ordinal
-      detail
-;;
-
-let validated_flow_evidence_invariant_error_to_string =
-  Validated_flow_evidence.invariant_error_to_string
 ;;
 
 let validated_flow_evidence_decode_error_to_string =

@@ -16448,7 +16448,13 @@ let render_prompt_registry (state : state) =
       Some ((Theme.bad ()), Terminal_text.single_line detail)
   in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let combined_height = max 2 (rows - 9 - error_rows) in
+  let notice_rows = match selected with
+    | None -> 0
+    | Some row ->
+        (if Option.is_some (held_back_for row.Tui_decode.pr_key) then 3 else 0)
+        + (if row.pr_override_default_moved then 1 else 0)
+  in
+  let combined_height = max 2 (rows - 9 - error_rows - notice_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
@@ -16537,9 +16543,9 @@ let render_prompt_registry (state : state) =
             (Printf.sprintf "  %s\xe2\x8a\x98 적용 안 됨%s  저장된 오버라이드 %d바이트가 그대로 있습니다"
                (Theme.bad ()) Ansi.reset entry.Tui_decode.hbo_bytes);
           box_line_styled buf cols ~style:(Theme.recede ())
-            (Printf.sprintf
-               "  지금 계약으로는 렌더링할 수 없습니다: %s \xc2\xb7 그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다"
-               (Terminal_text.single_line entry.Tui_decode.hbo_reason)));
+            ("  " ^ Terminal_text.single_line entry.Tui_decode.hbo_reason);
+          box_line_styled buf cols ~style:(Theme.recede ())
+            "  그 변수를 빼고 같은 키를 다시 저장하면 적용됩니다");
        (* The override applies. This line says only that the shipped text it
           replaced has changed since it was written, so the reader knows to
           compare the two once rather than discovering a new default months

@@ -68,30 +68,31 @@ let test_clamp () =
     ()
 ;;
 
-(* Anthropic catalog rows declare [accepted_reasoning_efforts], but the
-   capability layer withholds the list for models whose
-   [thinking_control_format] is [No_thinking_control] (capabilities.ml), so
-   the catalog clamp is a no-op for the Claude lane. This case pins that
-   fact: if the capability layer ever starts exposing the anthropic accepted
-   set, this goes red and the Claude lane's own CLI snap below becomes
-   partially redundant — re-evaluate both then. *)
-let test_catalog_clamp_is_a_noop_for_anthropic_rows () =
+(* Native Anthropic effort declarations now reach the shared catalog clamp.
+   Minimal must become Low; values already admitted by the model stay exact. *)
+let test_catalog_clamp_applies_to_anthropic_rows () =
   let sonnet = "claude-sonnet-5" in
   check_case
     ~label_prefix:"sonnet"
     ~model_id:(Some sonnet)
     ~requested:(Some Effort.Minimal)
-    ~expected:(Some Effort.Minimal)
-    ()
+    ~expected:(Some Effort.Low)
+    ();
+  List.iter (fun effort ->
+    check_case ~label_prefix:"sonnet" ~model_id:(Some sonnet)
+      ~requested:(Some effort) ~expected:(Some effort) ())
+    [ Effort.Low; Effort.Medium; Effort.High; Effort.XHigh; Effort.Max ]
 ;;
 
-(* The Claude lane survives [minimal] through the CLI-vocabulary snap owned
-   by the adapter, not through the catalog: [minimal] is the one effort the
-   CLI refuses and its nearest admitted neighbour is [low]. Before the snap,
-   [reasoning_args] rejected it with Invalid_config and the whole turn
-   died. *)
+(* The CLI snap remains necessary when the model has no catalog declaration.
+   The catalog cannot invent a ladder, but the adapter owns its CLI vocabulary. *)
 let test_claude_cli_snap_admits_minimal_as_low () =
   let snap = Runtime_claude_code.cli_admitted_reasoning_effort in
+  let after_catalog = Map.clamp_reasoning_effort_to_catalog
+    ~model_id:(Some "masc-test-no-such-model") ~requested:(Some Effort.Minimal) in
+  Alcotest.(check string) "catalog miss preserves the request" "minimal" (label after_catalog);
+  Alcotest.(check string) "CLI still admits the uncatalogued request" "low"
+    (label (Option.map snap after_catalog));
   Alcotest.(check string) "minimal snaps to low" "low"
     (Effort.to_string (snap Effort.Minimal));
   List.iter
@@ -109,9 +110,9 @@ let () =
     [ ( "clamp"
       , [ Alcotest.test_case "catalog clamps effort" `Quick test_clamp
         ; Alcotest.test_case
-            "catalog clamp is a no-op for anthropic rows"
+            "catalog clamp applies to anthropic rows"
             `Quick
-            test_catalog_clamp_is_a_noop_for_anthropic_rows
+            test_catalog_clamp_applies_to_anthropic_rows
         ; Alcotest.test_case
             "claude cli snap admits minimal as low"
             `Quick

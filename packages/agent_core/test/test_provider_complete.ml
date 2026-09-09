@@ -956,7 +956,7 @@ let test_gemini_with_json_schema () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-2.5-flash"
+      ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~api_key:"test-key"
       ~response_format:(JsonSchema schema)

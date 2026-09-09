@@ -26,7 +26,7 @@ let%test "gemini_url sync no api_key" =
   let config : Provider_config.t =
     { kind = Provider_config.Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = "https://gen.googleapis.com/v1beta"
     ; api_key = Secret.empty
     ; request_path = ""
@@ -66,14 +66,14 @@ let%test "gemini_url sync no api_key" =
     }
   in
   let url = gemini_url ~config ~stream:false in
-  url = "https://gen.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+  url = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 ;;
 
 let%test "gemini_url sync with api_key" =
   let config : Provider_config.t =
     { kind = Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = "https://gen.googleapis.com/v1beta"
     ; api_key = Secret.of_string "mykey"
     ; request_path = ""
@@ -113,14 +113,14 @@ let%test "gemini_url sync with api_key" =
     }
   in
   let url = gemini_url ~config ~stream:false in
-  url = "https://gen.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+  url = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 ;;
 
 let%test "gemini_url stream with api_key" =
   let config : Provider_config.t =
     { kind = Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = "https://gen.googleapis.com/v1beta"
     ; api_key = Secret.of_string "mykey"
     ; request_path = ""
@@ -161,14 +161,14 @@ let%test "gemini_url stream with api_key" =
   in
   let url = gemini_url ~config ~stream:true in
   url
-  = "https://gen.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+  = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:streamGenerateContent?alt=sse"
 ;;
 
 let%test "gemini_url stream no api_key" =
   let config : Provider_config.t =
     { kind = Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = "https://gen.googleapis.com/v1beta"
     ; api_key = Secret.empty
     ; request_path = ""
@@ -209,14 +209,14 @@ let%test "gemini_url stream no api_key" =
   in
   let url = gemini_url ~config ~stream:true in
   url
-  = "https://gen.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+  = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:streamGenerateContent?alt=sse"
 ;;
 
 let%test "gemini_url never leaks api_key even when set" =
   let config : Provider_config.t =
     { kind = Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = "https://gen.googleapis.com/v1beta"
     ; api_key = Secret.of_string "mykey"
     ; request_path = ""
@@ -267,7 +267,7 @@ let%test "gemini_url empty base_url no trailing slash" =
   let config : Provider_config.t =
     { kind = Gemini
     ; provider_id = None
-    ; model_id = "gemini-2.5-flash"
+    ; model_id = "gemini-3.7-flash"
     ; base_url = ""
     ; api_key = Secret.empty
     ; request_path = ""
@@ -307,5 +307,5 @@ let%test "gemini_url empty base_url no trailing slash" =
     }
   in
   let url = gemini_url ~config ~stream:false in
-  url = "/models/gemini-2.5-flash:generateContent"
+  url = "/models/gemini-3.7-flash:generateContent"
 ;;

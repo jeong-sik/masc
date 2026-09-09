@@ -2254,6 +2254,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
           ~meta
           ~publication_recovery
           ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name
           ~input
           ()
@@ -2317,8 +2318,8 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         json_string_field ~default:"" "output" execute_json |> String.trim
       in
       check string "Execute ran in requested cwd"
-        (Unix.realpath playground)
-        (Unix.realpath observed_cwd))
+        (Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+        observed_cwd)
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
@@ -3649,6 +3650,7 @@ let test_manual_gate_defers_tool_execute_before_process () =
           ~meta
           ~publication_recovery
           ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name:"tool_execute"
           ~input:
             (`Assoc
@@ -3715,6 +3717,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
       let raw =
         KET.Compatibility.execute_keeper_tool_call
           ~config ~meta ~publication_recovery ~ctx_work
+          ?turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
           ~name:"tool_execute" ~input ()
       in
       let json = Yojson.Safe.from_string raw in
@@ -5876,7 +5879,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             in
             Fs_compat.mkdir_p (Filename.dirname blob_root);
             Fs_compat.save_file blob_root "artifact persistence is blocked";
-            let marker = Filename.concat config.base_path "execute-invocations" in
+            let marker = playground_file ~config ~meta "execute-invocations" in
             let oversized =
               String.make
                 (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
@@ -5917,15 +5920,9 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               execute.call
                 ~call_id:"direct-execute-post-effect-failure"
                 (`Assoc
-                   [ ( "argv"
-                     , `List
-                         [ `String "/bin/sh"
-                         ; `String "-c"
-                         ; `String "printf x >> \"$1\"; printf %s \"$2\""
-                         ; `String "keeper-execute-test"
-                         ; `String marker
-                         ; `String oversized
-                         ] )
+                   [ "script", `String
+                       ("printf x >> execute-invocations; printf %s "
+                        ^ Filename.quote oversized)
                    ])
             in
             check bool "artifact persistence failure is visible" false result.success;
@@ -7210,6 +7207,16 @@ let composable_output_probes =
       ~needs_sandbox:true
       "keeper_spawn"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+  ; { tool_name = "masc_msx_screen"
+    ; needs_sandbox = false
+    ; prepare = (fun ~config ~meta:_ ->
+        (match Msx_lane.load
+           ~ledger_dir:(Filename.concat config.Masc.Workspace.base_path "msx-probe")
+           ~roms_dir:"" ~cart_path:None ~disk_path:None with
+         | Ok _ -> ()
+         | Error error -> fail (Msx_lane.error_to_string error));
+        `Assoc [])
+    }
   ; probe "keeper_time_now" (`Assoc [])
   ; probe "keeper_lane_status" (`Assoc [])
   ; { tool_name = "keeper_tasks_list"
@@ -7411,6 +7418,8 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()))
+       @@ fun () ->
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)
        ignore (Workspace.init config ~agent_name:None);

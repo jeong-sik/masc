@@ -89,6 +89,32 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
+let test_trust_blocker_uses_structured_state () =
+  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
+  let decide blocker =
+    Core.decide
+      { approval_queue = Core.Approval_queue_available 0
+      ; runtime_blocker_class = blocker
+      ; receipt_operator_disposition = None
+      ; attention_needs_attention = false
+      ; attention_reason = None
+      ; attention_next_human_action = None
+      ; terminal_next_human_action = None
+      }
+  in
+  let healthy = decide None in
+  Alcotest.(check string) "no blocker is healthy" "healthy"
+    healthy.disposition_reason;
+  let blocked = decide (Some (Ok Masc.Keeper_meta_contract.Internal_bridge_exception)) in
+  Alcotest.(check string) "bridge failure is not a guessed sandbox violation"
+    "critical_block" blocked.disposition_reason;
+  Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
+  let unknown = decide (Some (Error "unknown_sandbox_status")) in
+  Alcotest.(check string) "unknown class is visible without prose classification"
+    "unknown_runtime_blocker" unknown.disposition_reason;
+  Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention
+;;
+
 let test_active_model_missing_attempt_is_unknown () =
   let meta = make_meta "status-runtime-missing-attempt" in
   let unknown_model_label =
@@ -880,7 +906,9 @@ let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
     [ ( "status_runtime_provenance"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "trust follows structured blocker state" `Quick
+            test_trust_blocker_uses_structured_state
+        ; Alcotest.test_case
             "missing runtime attempt does not fabricate active_model"
             `Quick
             test_active_model_missing_attempt_is_unknown

@@ -622,6 +622,84 @@ let test_a_link_row_without_task_ids_is_not_an_empty_goal () =
     | Error _ -> ())
 ;;
 
+let test_link_mutations_require_intact_primary () =
+  let mutations =
+    [ "link", (fun config ->
+        Workspace_goal_index.link_task_to_goal_result config
+          ~goal_id:"goal-new" ~task_id:"task-new")
+    ; "batch", (fun config ->
+        Workspace_goal_index.link_tasks_to_goals_result config
+          [ "task-new", Some "goal-new" ])
+    ; "unlink", (fun config ->
+        Workspace_goal_index.unlink_task_from_goal_result config
+          ~goal_id:"goal-old" ~task_id:"task-old")
+    ; "prune", (fun config ->
+        Workspace_goal_index.prune_links_for_goal_result config ~goal_id:"goal-old")
+    ; "assign", (fun config ->
+        match Workspace_goal_index.link_goalless_task_to_goal config
+          ~goal_id:"goal-new" ~task_id:"task-new" with
+        | Ok () -> Ok ()
+        | Error (Workspace_goal_index.Link_write_failed detail) -> Error detail
+        | Error (Workspace_goal_index.Already_linked_to_goals _) ->
+          Alcotest.fail "source failure must not be classified as already assigned")
+    ]
+  in
+  let good = {|{"links":[{"goal_id":"goal-old","task_ids":["task-old"]}]}|} in
+  let cases =
+    [ "invalid JSON", Some "{", good
+    ; "missing collection", Some "{}", good
+    ; "missing primary", None, good
+    ; "invalid task ID", Some {|{"links":[{"goal_id":"goal-old","task_ids":[123,"task-old"]}]}|}, good
+    ; "blank task ID", Some {|{"links":[{"goal_id":"goal-old","task_ids":["task-old"," "]}]}|}, good
+    ; "both unreadable", Some "{", "{"
+    ]
+  in
+  List.iter (fun (scenario, primary, recovery) ->
+    with_test_env (fun config ->
+      let path = Workspace_goal_index.goal_task_links_path config in
+      let mirror = path ^ ".last-good" in
+      let write path contents =
+        Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc contents)
+      in
+      (match primary with
+       | Some contents -> write path contents
+       | None -> if Sys.file_exists path then Sys.remove path);
+      write mirror recovery;
+      List.iter (fun (name, mutate) ->
+        (match mutate config with
+         | Error _ -> ()
+         | Ok () -> Alcotest.failf "%s: %s accepted damaged primary" scenario name);
+        let actual =
+          if Sys.file_exists path then Some (In_channel.with_open_bin path In_channel.input_all)
+          else None
+        in
+        Alcotest.(check (option string)) (scenario ^ ": primary unchanged") primary actual;
+        Alcotest.(check string) (scenario ^ ": recovery unchanged") recovery
+          (In_channel.with_open_bin mirror In_channel.input_all)) mutations)) cases;
+  with_test_env (fun config ->
+    (match Workspace_goal_index.link_task_to_goal_result config
+       ~goal_id:"goal-new" ~task_id:"task-new" with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "fresh registry must accept links: %s" detail);
+    match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+    | Ok [ ("goal-new", [ "task-new" ]) ] -> ()
+    | _ -> Alcotest.fail "fresh registry must persist the exact new link")
+;;
+
+let test_unreadable_registry_directory_is_not_absence () =
+  with_test_env (fun config ->
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let directory = Filename.dirname path in
+    let permissions = (Unix.stat directory).Unix.st_perm in
+    Unix.chmod directory 0o000;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod directory permissions)
+      (fun () ->
+        match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "unreadable registry directory must not authorize an empty registry"))
+;;
+
 let () =
   Alcotest.run "workspace_goal_index"
     [ ( "build_goal_task_index"
@@ -639,6 +717,14 @@ let () =
     ; ( "persistent registry"
       , Alcotest.
           [ test_case
+              "unreadable registry directory is not absence"
+              `Quick
+              test_unreadable_registry_directory_is_not_absence
+          ; test_case
+              "all link mutations require intact primary without rewriting evidence"
+              `Quick
+              test_link_mutations_require_intact_primary
+          ; test_case
               "add_task persists explicit goal link"
               `Quick
               test_add_task_persists_goal_link

@@ -7760,6 +7760,11 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
         ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
       Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
         ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
+      (match decision with
+       | Keeper_approval_queue_rules_types.Decision.Approve -> ()
+       | Keeper_approval_queue_rules_types.Decision.Reject _ ->
+         Masc.Keeper_approval_queue.For_testing.reset_runtime_state ();
+         Masc.Keeper_approval_queue.install_persistence ~base_path |> require "restore rejected authority" |> ignore);
       Gate.reconcile ~config ~meta |> require "resolution wake";
       let claimed : Keeper_chat_operation.t =
         match Masc.Keeper_owner.claim_next_operation owner |> require "reclaim original" with

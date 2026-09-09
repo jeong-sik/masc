@@ -4377,17 +4377,11 @@ let complete_delivery delivery =
                     rule_audit_receipts @ [ resolution_audit_receipt ]
                 }
             in
-            (match delivery.decision with
-             | Decision.Approve ->
-               (* Keep the resolved journal entry until the exact Gate request
-                  consumes it. The wake event is only a correlation message and
-                  cannot become a second authorization SSOT. *)
-               finish ()
-             | Decision.Reject _ ->
-               (match remove_delivery_from_store delivery with
-                | Error storage_error ->
-                  Error (Persistence_failed { approval_id = id; storage_error })
-               | Ok () -> finish ()))))
+            (* Both decisions remain authoritative after their wake is sent.
+               A waiting direct operation must re-read the exact rejection as
+               well as an approval; the wake alone is not the request store.
+               A retained rejection is never a consumable approval grant. *)
+            finish ()))
 ;;
 
 let delivery_wake_was_observed delivery =

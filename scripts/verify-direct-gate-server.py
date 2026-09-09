@@ -36,13 +36,15 @@ def main():
     p.add_argument('--ci-run', type=int, required=True)
     p.add_argument('--arch', default='macos-arm64')
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--base', type=Path, help='Fresh isolated runtime base on a filesystem shared with the sandbox daemon')
     p.add_argument('--expected-commit', required=True)
     p.add_argument('--port', type=int, default=18941)
     p.add_argument('--observation-seconds', type=int, default=120)
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output.resolve()
-    base = root / 'base'
+    base = args.base.resolve() if args.base else root / 'base'
+    base.mkdir(parents=True, exist_ok=False)
     config = base / '.masc/config'
     config.mkdir(parents=True)
     keeper = 'direct-gate-http-proof'

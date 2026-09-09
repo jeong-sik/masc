@@ -50,7 +50,7 @@ let task ?handoff_context ~status id : Domain.task =
 ;;
 
 let backlog_of tasks : Domain.backlog =
-  { tasks; pending_completion_rejections = []; last_updated = "2026-08-06T00:00:00Z"; version = 1 }
+  { tasks; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-08-06T00:00:00Z"; version = 1 }
 ;;
 
 let apply ~action ~new_status ~handoff_context task =

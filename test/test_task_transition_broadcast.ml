@@ -69,7 +69,7 @@ let make_task ~id ~status : D.task =
 ;;
 
 let seed config task =
-  let backlog : D.backlog = { tasks = [ task ]; pending_completion_rejections = []; last_updated = now; version = 1 } in
+  let backlog : D.backlog = { tasks = [ task ]; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = now; version = 1 } in
   Workspace_backlog.write_backlog config backlog
 ;;
 

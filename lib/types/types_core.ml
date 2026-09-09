@@ -1023,9 +1023,21 @@ type pending_completion_rejection =
   }
 [@@deriving show]
 
+type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
+[@@deriving show]
+
+type task_deletion_receipt =
+  { deletion_id : string
+  ; deleted_task_id : string
+  ; requested_at : string
+  ; phase : task_deletion_phase
+  }
+[@@deriving show]
+
 type backlog = {
   tasks: task list;
   pending_completion_rejections: pending_completion_rejection list;
+  task_deletion_receipts: task_deletion_receipt list;
   last_updated: string;
   version: int;
 } [@@deriving show]
@@ -1090,11 +1102,50 @@ let pending_completion_rejections_of_yojson = function
     decode [] values
   | _ -> Error "backlog.pending_completion_rejections must be a list"
 
+let task_deletion_receipt_to_yojson (receipt : task_deletion_receipt) =
+  `Assoc ["deletion_id", `String receipt.deletion_id;
+    "task_id", `String receipt.deleted_task_id;
+    "requested_at", `String receipt.requested_at;
+    "phase", `String (match receipt.phase with Cleanup_required _ -> "cleanup_required" | Cleanup_verified -> "cleanup_verified");
+    "cleanup_errors", `List (List.map (fun message -> `String message) (match receipt.phase with Cleanup_required errors -> errors | Cleanup_verified -> []))]
+
+let task_deletion_receipts_of_yojson = function
+  | `List values ->
+    let rec read acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+         | ["cleanup_errors", `List errors; "deletion_id", `String deletion_id;
+            "phase", `String phase; "requested_at", `String requested_at;
+            "task_id", `String deleted_task_id]
+           when List.for_all (fun value -> String.trim value <> "") [deletion_id; requested_at; deleted_task_id] ->
+           let rec strings acc = function
+             | [] -> Ok (List.rev acc)
+             | `String value :: rest -> strings (value :: acc) rest
+             | _ -> Error "deletion cleanup_errors must contain strings" in
+           let phase = match phase, strings [] errors with
+             | "cleanup_required", Ok errors -> Ok (Cleanup_required errors)
+             | "cleanup_verified", Ok [] -> Ok Cleanup_verified
+             | "cleanup_verified", Ok (_ :: _) -> Error "verified deletion cannot have cleanup errors"
+             | _, Error message -> Error message
+             | _, Ok _ -> Error "unknown deletion cleanup phase" in
+           (match phase with
+            | Ok phase ->
+              if List.exists (fun old -> String.equal old.deletion_id deletion_id) acc
+              then Error "duplicate deletion receipt identity"
+              else read ({deletion_id; deleted_task_id; requested_at; phase} :: acc) rest
+            | Error message -> Error message)
+         | _ -> Error "deletion receipt requires exact identity, phase and error fields")
+      | _ -> Error "deletion receipt must be an object" in
+    read [] values
+  | _ -> Error "task_deletion_receipts must be a list"
+
 let backlog_to_yojson b =
   `Assoc [
     ("tasks", `List (List.map task_to_yojson b.tasks));
     ("pending_completion_rejections",
       `List (List.map pending_completion_rejection_to_yojson b.pending_completion_rejections));
+    ("task_deletion_receipts", `List (List.map task_deletion_receipt_to_yojson b.task_deletion_receipts));
     ("last_updated", `String b.last_updated);
     ("version", `Int b.version);
   ]
@@ -1110,6 +1161,11 @@ let backlog_of_yojson = function
       | [ _, value ] -> pending_completion_rejections_of_yojson value
       | _ -> Error "duplicate backlog.pending_completion_rejections field"
     in
+    let receipt_fields, fields = List.partition (fun (name,_) -> String.equal name "task_deletion_receipts") fields in
+    let receipt_result = match receipt_fields with
+      | [] -> Ok []
+      | [_, value] -> task_deletion_receipts_of_yojson value
+      | _ -> Error "duplicate backlog.task_deletion_receipts field" in
     let fields =
       List.sort (fun (left, _) (right, _) -> String.compare left right) fields
     in
@@ -1144,10 +1200,10 @@ let backlog_of_yojson = function
                 "backlog.version corrupt: %s"
                 (Yojson.Safe.to_string other))
        in
-       (match decode_tasks 0 [] task_values, version_result, pending_result with
-        | Ok tasks, Ok version, Ok pending_completion_rejections ->
-          Ok { tasks; pending_completion_rejections; last_updated; version }
-        | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
+       (match decode_tasks 0 [] task_values, version_result, pending_result, receipt_result with
+        | Ok tasks, Ok version, Ok pending_completion_rejections, Ok task_deletion_receipts ->
+          Ok { tasks; pending_completion_rejections; task_deletion_receipts; last_updated; version }
+        | Error error, _, _, _ | _, Error error, _, _ | _, _, Error error, _ | _, _, _, Error error -> Error error)
      | [ "last_updated", `String _; "tasks", `List _; "version", _ ] ->
        Error "backlog.last_updated must be a non-blank string"
      | _ ->

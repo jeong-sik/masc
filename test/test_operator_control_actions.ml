@@ -67,7 +67,7 @@ let test_snapshot_marks_recovery_as_non_authoritative () =
          recovered, and this test cannot reach what it is about. *)
       Workspace.write_backlog
         config
-        { Types.tasks = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:00Z"; version = 1 };
+        { Types.tasks = []; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = "2026-06-26T00:00:00Z"; version = 1 };
       write_text (Workspace.backlog_path config) "{not-json";
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in

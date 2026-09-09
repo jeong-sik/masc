@@ -132,10 +132,11 @@ let event_history_task_ids config =
 
 let next_task_number config (backlog : backlog) =
   let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
+  let receipt_ids = List.filter_map (fun receipt -> task_id_to_int receipt.deleted_task_id) backlog.task_deletion_receipts in
   let archive_ids = read_archive_task_ids config in
   (* Event history outlives both the live backlog and its archive after a
      workspace restore. Reusing an id that history still names aliases two
      unrelated task lifecycles in [masc_task_history]. *)
   let event_ids = event_history_task_ids config in
-  let max_id = List.fold_left max 0 (backlog_ids @ archive_ids @ event_ids) in
+  let max_id = List.fold_left max 0 (backlog_ids @ receipt_ids @ archive_ids @ event_ids) in
   max_id + 1

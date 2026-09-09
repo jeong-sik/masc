@@ -332,3 +332,22 @@ let write_backlog ?after_commit config backlog =
   match write_backlog_result ?after_commit config backlog with
   | Ok _ -> ()
   | Error message -> raise (Backlog_write_failed message)
+
+type copy_consistency = Copies_consistent | Copies_unavailable of string list
+
+let observe_copy_consistency config backlog =
+  let compare label read = match read () with
+    | Error message -> Some (label ^ ": " ^ message)
+    | Ok json -> (match backlog_of_yojson json with
+      | Error message -> Some (label ^ ": " ^ message)
+      | Ok copy when copy = backlog -> None
+      | Ok _ -> Some (label ^ ": does not match current primary snapshot")) in
+  let recovery = compare "recovery" (fun () -> read_json_result config (backlog_recovery_path config)) in
+  let mirrors = match config.backend with
+    | FileSystem _ -> []
+    | Memory _ ->
+      [compare "primary mirror" (fun () -> read_json_local_result (backlog_path config));
+       compare "recovery mirror" (fun () -> read_json_local_result (backlog_recovery_path config))] in
+  match List.filter_map Fun.id (recovery :: mirrors) with
+  | [] -> Copies_consistent | errors -> Copies_unavailable errors
+;;

@@ -108,7 +108,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
     Workspace.write_backlog config
       {
         Types.tasks = [ make_in_progress_task ~id:task_id ~assignee:agent_name ];
-        pending_completion_rejections = [];
+        task_deletion_receipts = []; pending_completion_rejections = [];
         last_updated = "2026-06-26T00:00:01Z";
         version = 2;
       };

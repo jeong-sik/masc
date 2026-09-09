@@ -39,7 +39,7 @@ let init config ~agent_name =
     | Error msg -> Log.Workspace.warn "init: local sync of root state failed: %s" msg);
   if not (path_exists_root config root_backlog_path)
   then (
-    let root_backlog = { tasks = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 } in
+    let root_backlog = { tasks = []; task_deletion_receipts = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 } in
     write_json_root config root_backlog_path (backlog_to_yojson root_backlog))
   else (
     let root_backlog_json = read_json_root config root_backlog_path in

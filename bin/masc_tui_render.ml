@@ -1389,7 +1389,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
-    state.palette_open || state.context_inspector_open || state.help_open
+    state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
   if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
@@ -18987,6 +18987,68 @@ let render_link_preview_modal (state : state) =
         ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
 ;;
 
+let keeper_deletions_lines (state : state) ~cols =
+  let lines = match state.keeper_deletions with
+    | None -> ["삭제 기록을 불러오는 중입니다."]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Ok inventory) ->
+      let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
+      let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
+      errors @ (match selected with
+        | None -> ["저장된 키퍼 삭제 기록이 없습니다."]
+        | Some row ->
+          let status = match row.Keeper_control.operation with
+            | Keeper_control.Configuration_removal receipt ->
+              let label = match receipt.state with
+                | Masc.Keeper_configuration_removal.Prepared -> "설정 삭제 접수"
+                | Cleanup_required detail -> "설정 정리 실패: " ^ detail
+                | Artifacts_removed -> "설정 파일 제거 대기"
+                | Removed -> "설정 삭제 및 정리 완료" in
+              Option.fold ~none:label ~some:(fun error -> label ^ ": " ^ error) receipt.last_error
+            | Runtime_shutdown operation ->
+              let open Masc.Keeper_shutdown_types in
+              match operation.phase with
+              | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
+                "파일·설정 정리 실패: " ^ detail
+              | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
+              | Blocked failure -> "종료 작업 중단: " ^ failure.detail
+              | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
+              | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
+          [Printf.sprintf "%d / %d · %s · %s"
+             (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
+             (Keeper_control.deletion_keeper_name row) status;
+           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
+           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+          @ String.split_on_char '\n'
+              (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
+  in
+  List.concat_map (fun line ->
+    Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
+      (Terminal_text.single_line line)) lines
+
+let keeper_deletions_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
+
+let render_keeper_deletions (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  framed_top buf cols;
+  framed_line buf cols (screen_title " 키퍼 삭제 기록"
+    ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""));
+  framed_divider buf cols;
+  let lines = keeper_deletions_lines state ~cols in
+  let height = framed_content_height ~rows in
+  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.keeper_deletions_scroll in
+  lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + height)
+    |> List.iter (framed_line buf cols);
+  framed_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols
+    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기");
+  finish_surface state ~surface_key:"keeper-deletions" ~rows:terminal_rows ~cols buf
+
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -19240,6 +19302,9 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.context_inspector_open then
     let frame, clamped = render_context_inspector state in
+    (frame, clamped, None)
+  else if state.keeper_deletions_open then
+    let frame, clamped = render_keeper_deletions state in
     (frame, clamped, None)
   else if state.help_open then
     let frame, clamped = render_help state in

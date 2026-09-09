@@ -527,7 +527,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                          "Keeper owner metadata disappeared during update" ))
               | Ok (Some published_meta) ->
                 let runtime_assignment_result =
-                  Runtime.commit_keeper_assignment runtime_transaction
+                  Runtime.commit_keeper_assignment ?egress_allow:p.egress_allow_opt runtime_transaction
                     ~runtime_id:
                       (match p.runtime_id_opt with
                        | Some runtime_id -> Some runtime_id
@@ -538,22 +538,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                                (match assignment with
                                 | Runtime.Assignment_missing -> None
                                 | Runtime.Assignment_present runtime_id -> Some runtime_id)))
-                in
-                (* Same transaction as the assignment: a keeper never sits
-                   between entering the policy lane and learning what it may
-                   reach. Omitted leaves any existing allowlist alone; the
-                   args parser has already refused the pair that would not be
-                   consulted. *)
-                let runtime_assignment_result =
-                  match runtime_assignment_result, p.egress_allow_opt with
-                  | (Error _ as error), _ | error, None -> error
-                  | Ok runtime_write, Some allow ->
-                    (match
-                       Runtime.commit_keeper_egress_allow runtime_transaction
-                         ~allow:(Some allow)
-                     with
-                     | Error _ as error -> error
-                     | Ok (_ : Runtime.keeper_assignment_write) -> Ok runtime_write)
                 in
                 (match runtime_assignment_result with
                     | Ok runtime_write ->

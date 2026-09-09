@@ -38,6 +38,7 @@ import {
 } from '../lib/monitoring-runtime'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { KeeperActionButtons } from './keeper-action-panel'
+import { KeeperDeletions } from './keeper-deletions'
 import { keeperExclusionLabel } from './keeper-exclusion-label'
 import {
   expectedKeeperDetailRows,
@@ -1328,6 +1329,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="v2-monitoring-surface fl-shell agent-page">
+      ${keeperFilter !== 'agent-only' ? html`<${KeeperDeletions} />` : null}
       <header class="fl-top" aria-label="Keeper Fleet summary">
         <div class="fl-brand">
           <span class="ov-eyebrow">Observatory</span>

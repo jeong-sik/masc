@@ -3218,6 +3218,12 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  mutable keeper_deletions_open: bool;
+  mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_generation: int;
+  mutable keeper_deletions_cursor: int;
+  mutable keeper_deletions_scroll: int;
+  mutable keeper_deletions: (Masc_tui_keeper_control.deletion_inventory, string) result option;
   (* The [;] agenda overlay: the strip above the composer says whether there
      is anything, and this says what. Modal like the help sheet, and like it
      the scroll survives only while it is open. *)
@@ -4365,7 +4371,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_identity
     && not compact_viewport
   in
-  if
+  if state.keeper_deletions_open then None
+  else if
     state.view = Config
     && state.config_pane = Config_presets
     && Option.is_some state.preset_save_draft
@@ -4889,6 +4896,12 @@ let create_state
   task_flow = None;
   task_focus = Left_pane;
   help_open = false;
+  keeper_deletions_open = false;
+  keeper_deletions_loading = false;
+  keeper_deletions_generation = 0;
+  keeper_deletions_cursor = 0;
+  keeper_deletions_scroll = 0;
+  keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
   hints_visible = true;

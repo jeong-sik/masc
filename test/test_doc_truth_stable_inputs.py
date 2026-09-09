@@ -42,12 +42,25 @@ class StableDocumentationInputs(unittest.TestCase):
 
     def test_candidate_install_pin_requires_explicit_availability_notice(self):
         names = ("README.md", "README.ko.md", "docs/INSTALL.md", "docs/INSTALL.ko.md")
-        originals = {name: (self.repo / name).read_text() for name in names}
+        publication_docs = ("ROADMAP.md", "docs/PRODUCT-OPERATING-PLAN.md")
+        originals = {name: (self.repo / name).read_text()
+                     for name in names + publication_docs}
         version = re.search(r"(?m)^\(version ([^)]+)\)",
                             (self.repo / "dune-project").read_text()).group(1)
         notice = f"> Installation target: v{version} (check tag availability on GitHub Releases)."
+        # Model an unpublished candidate independently of today's release.
+        # The check requires the prior publication to name a real changelog row.
+        prior_versions = [value for value in re.findall(
+            r"(?m)^## \[([0-9][^]]*)\]", (self.repo / "CHANGELOG.md").read_text())
+                          if value != version]
+        self.assertTrue(prior_versions, "fixture needs a previous changelog release")
         try:
             for name, text in originals.items():
+                if name in publication_docs:
+                    text, count = re.subn(
+                        r"(?m)^(> Latest published GitHub release: )v[^ ]+",
+                        lambda match: match.group(1) + "v" + prior_versions[0], text)
+                    self.assertEqual(count, 1)
                 text = re.sub(r"(?m)^TAG=v[^ ]+$", "TAG=v" + version, text)
                 if name.startswith("README") and notice not in text:
                     text = notice + "\n\n" + text

@@ -148,6 +148,8 @@ class Distribution(unittest.TestCase):
             if Path(source).name == "next" and Path(target).name == "masc-browser-host":
                 raise OSError("injected companion publication failure")
             return original(source, target)
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive,
+                       [("masc-tui", self.binary), ("masc-browser-host", self.binary)])
         with patch.object(bundle.os, "replace", side_effect=reject_browser):
             with self.assertRaisesRegex(OSError, "companion publication"):
                 bundle.install(self.binary, self.archive, self.prefix, self.asset,
@@ -188,10 +190,90 @@ class Distribution(unittest.TestCase):
         for name in [self.asset, "masc-tui-" + self.arch, "masc-browser-host-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
                      "masc-check-runtime-deployment-preflight-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
+        companions = [(name, self.binary) for name in sorted(bundle.COMPANIONS)]
+        runtime = None
+        stage = None
+        if self.arch.startswith("macos-"):
+            runtime, stage = self.runtime_fixture()
+            shutil.copy2(runtime, mirror / runtime.name)
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive,
+                       companions, runtime, stage)
         shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))
         shutil.copy2(HELPER, mirror / ("masc-release-dashboard-bundle-" + self.arch + ".py"))
         (mirror / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in mirror.iterdir()))
         return mirror
+
+    def runtime_fixture(self):
+        import sys
+        stage = self.root / "runtime-stage"
+        stage.mkdir(exist_ok=True)
+        shutil.copy2(self.binary, stage / "masc")
+        runtime = self.root / ("masc-runtime-" + self.arch + ".tar.gz")
+        provenance = json.dumps(dict(source_commit=COMMIT, platform=self.arch)).encode()
+        python = ("#!/bin/sh\nexec " + __import__('shlex').quote(sys.executable) + ' "$@"\n').encode()
+        with tarfile.open(runtime, "w:gz") as output:
+            for name, data, mode in [("runtime-provenance.json", provenance, 0o644),
+                                     ("python/bin/python3", python, 0o755),
+                                     ("lib/libfixture.dylib", b"fixture library", 0o644)]:
+                info = tarfile.TarInfo(name)
+                info.size, info.mode = len(data), mode
+                output.addfile(info, io.BytesIO(data))
+        return runtime, stage
+
+    def test_portable_release_binds_runtime_and_companions_and_rolls_back_links(self):
+        previous = self.old()
+        runtime, stage = self.runtime_fixture()
+        companions = [("masc-tui", self.binary)]
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive, companions, runtime, stage)
+        with patch("builtins.print"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset, companions, runtime)
+        installed = (self.prefix / "masc").resolve().parent
+        self.assertEqual((self.prefix / "masc-tui").resolve().parent, installed)
+        self.assertEqual((installed / "lib/libfixture.dylib").read_bytes(), b"fixture library")
+        bundle.verify_tree(installed, self.asset)
+        (installed / "lib/libfixture.dylib").write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "runtime digest"):
+            bundle.verify_tree(installed, self.asset)
+        bundle.rollback(self.prefix)
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertFalse((self.prefix / "masc-tui").exists())
+
+    def test_portable_archive_tampering_never_publishes(self):
+        previous = self.old()
+        runtime, stage = self.runtime_fixture()
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive, (), runtime, stage)
+        runtime.write_bytes(runtime.read_bytes() + b"changed")
+        with self.assertRaisesRegex(ValueError, "runtime archive digest"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset, (), runtime)
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
+
+    def test_runtime_float_mode_is_not_an_integer_receipt(self):
+        runtime, stage = self.runtime_fixture()
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive, (), runtime, stage)
+        def change(entries):
+            for info, data in entries:
+                if info.name == bundle.RECEIPT:
+                    receipt = json.loads(data)
+                    receipt["runtime"]["files"][0]["mode"] = 420.0
+                    data = json.dumps(receipt).encode()
+                    info.size = len(data)
+                yield info, data
+        self.mutate_archive(change)
+        with self.assertRaisesRegex(ValueError, "runtime receipt metadata"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset, (), runtime)
+        self.assertFalse((self.prefix / "masc").exists())
+
+    def test_companion_tampering_never_publishes(self):
+        previous = self.old()
+        companion = self.root / "tui"
+        shutil.copy2(self.binary, companion)
+        companions = [("masc-tui", companion)]
+        bundle.package(self.binary, self.assets, COMMIT, self.asset, self.archive, companions)
+        companion.write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "companion digest"):
+            bundle.install(self.binary, self.archive, self.prefix, self.asset, companions)
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
 
     def run_installer(self, mirror, extra=()):
         env = os.environ.copy()
@@ -234,7 +316,22 @@ class Distribution(unittest.TestCase):
         binary.write_text("#!/bin/sh\nulimit -c 0\n"
                           "echo 'dyld: Library not loaded: /missing/libssl.3.dylib' >&2\n"
                           "kill -ABRT $$\n")
-        (mirror / ("masc-dashboard-" + self.arch + ".tar.gz")).unlink()
+        if self.arch.startswith("macos-"):
+            # Bind the intentionally non-starting bytes without executing them
+            # during fixture packaging; install must expose the loader failure
+            # only after assembling the verified portable tree.
+            def update_digest(entries):
+                for info, data in entries:
+                    if info.name == bundle.RECEIPT:
+                        receipt = json.loads(data)
+                        receipt["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+                        data = json.dumps(receipt).encode()
+                        info.size = len(data)
+                    yield info, data
+            self.mutate_archive(update_digest)
+            shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))
+        else:
+            (mirror / ("masc-dashboard-" + self.arch + ".tar.gz")).unlink()
         (mirror / "SHA256SUMS").write_text("".join(
             f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n"
             for p in mirror.iterdir() if p.name != "SHA256SUMS"))

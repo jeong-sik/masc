@@ -10,7 +10,10 @@ type error =
   | Not_manifested
 
 type entry = { path : string; sha256 : string; size : int; mtime : float }
-type receipt = { source_commit : string; binary_sha256 : string; files : entry list }
+type runtime_entry = { path : string; sha256 : string; size : int; mode : int }
+type receipt =
+  { source_commit : string; binary_sha256 : string; files : entry list
+  ; companions : (string * string) list; runtime_files : runtime_entry list }
 type binding =
   { root : string; device : int; inode : int; receipt_sha256 : string
   ; receipt : receipt; binary_snapshot : Fs_compat.owned_regular_file_snapshot }
@@ -48,38 +51,88 @@ let parse_entry json =
     | Some _ -> Ok () | None -> Error Invalid_receipt in
   if safe_path path && hex 64 sha256 then Ok {path; sha256; size; mtime}
   else Error Invalid_receipt
+let parse_companions = function
+  | `Assoc items ->
+    let names = List.map fst items in
+    if List.length names <> List.length (List.sort_uniq String.compare names) then
+      Error Invalid_receipt
+    else List.fold_left (fun result (name, value) ->
+      let* acc = result in
+      match value with
+      | `String digest when hex 64 digest
+          && List.mem name ["masc-tui"; "masc-browser-host";
+               "masc-deployment-preflight-helper"; "masc-check-runtime-deployment-preflight"] ->
+        Ok ((name, digest) :: acc)
+      | _ -> Error Invalid_receipt) (Ok []) items
+  | _ -> Error Invalid_receipt
+let parse_runtime_entry json =
+  let* f = fields ["path"; "sha256"; "size"; "mode"] json in
+  let* path = string "path" f in
+  let* sha256 = string "sha256" f in
+  let* size = match List.assoc_opt "size" f with
+    | Some (`Int n) when n >= 0 -> Ok n | _ -> Error Invalid_receipt in
+  let* mode = match List.assoc_opt "mode" f with
+    | Some (`Int (0o644 | 0o755 as n)) -> Ok n | _ -> Error Invalid_receipt in
+  let allowed = path = "runtime-provenance.json"
+    || List.exists (fun prefix -> String.starts_with ~prefix path) ["lib/"; "python/"; "licenses/"] in
+  if safe_path path && allowed && hex 64 sha256 then Ok {path; sha256; size; mode}
+  else Error Invalid_receipt
+let parse_runtime binary_asset = function
+  | `Null -> Ok []
+  | json ->
+    let* f = fields ["asset"; "sha256"; "files"] json in
+    let* asset = string "asset" f in
+    let* digest = string "sha256" f in
+    (* binary_asset has already passed the closed platform allowlist. *)
+    let expected = "masc-runtime-" ^ String.sub binary_asset 5 (String.length binary_asset - 5) ^ ".tar.gz" in
+    let* () = if asset = expected && hex 64 digest then Ok () else Error Invalid_receipt in
+    let* files = match List.assoc_opt "files" f with
+      | Some (`List files) -> List.fold_left (fun result json ->
+          let* acc = result in
+          let* entry = parse_runtime_entry json in
+          if List.exists (fun (old : runtime_entry) -> old.path = entry.path) acc then Error Invalid_receipt
+          else Ok (entry :: acc)) (Ok []) files
+      | _ -> Error Invalid_receipt in
+    if List.for_all (fun name -> List.exists (fun (entry : runtime_entry) -> entry.path = name) files)
+         ["python/bin/python3"; "runtime-provenance.json"] then Ok files
+    else Error Invalid_receipt
 let parse body =
   let* json = try Ok (Yojson.Safe.from_string body) with
     | Yojson.Json_error _ -> Error Invalid_receipt in
-  let* f = fields ["schema"; "source_commit"; "binary_asset"; "binary_sha256"; "files"] json in
+  let* f = fields ["schema"; "source_commit"; "binary_asset"; "binary_sha256"; "files"; "companions"; "runtime"] json in
   let* schema = string "schema" f in
   let* source_commit = string "source_commit" f in
   let* binary_sha256 = string "binary_sha256" f in
   let* binary_asset = string "binary_asset" f in
+  let* () = if List.mem binary_asset ["masc-macos-arm64"; "masc-macos-x64"; "masc-linux-x64"; "masc-linux-arm64"]
+    then Ok () else Error Invalid_receipt in
+  let* companions = match List.assoc_opt "companions" f with
+    | Some json -> parse_companions json | None -> Error Invalid_receipt in
+  let* runtime_files = match List.assoc_opt "runtime" f with
+    | Some json -> parse_runtime binary_asset json | None -> Error Invalid_receipt in
   let* files = match List.assoc_opt "files" f with
     | Some (`List files) ->
       List.fold_left (fun result json ->
         let* acc = result in
         let* entry = parse_entry json in
-        if List.exists (fun old -> old.path = entry.path) acc then Error Invalid_receipt
+        if List.exists (fun (old : entry) -> old.path = entry.path) acc then Error Invalid_receipt
         else Ok (entry :: acc)) (Ok []) files
     | _ -> Error Invalid_receipt in
-  if schema = "masc.installed-release.v1" && hex 40 source_commit
+  if schema = "masc.installed-release.v2" && hex 40 source_commit
      && hex 64 binary_sha256
-     && List.mem binary_asset ["masc-macos-arm64"; "masc-macos-x64"; "masc-linux-x64"; "masc-linux-arm64"]
-     && List.for_all (fun name -> List.exists (fun e -> e.path = name) files)
+     && List.for_all (fun name -> List.exists (fun (e : entry) -> e.path = name) files)
           ["index.html"; ".build-stamp"]
-  then Ok {source_commit; binary_sha256; files}
+  then Ok {source_commit; binary_sha256; files; companions; runtime_files}
   else Error Invalid_receipt
 
 let build_stamp_mtime b =
-  Option.map (fun e -> e.mtime)
-    (List.find_opt (fun e -> e.path = ".build-stamp") b.receipt.files)
+  Option.map (fun (e : entry) -> e.mtime)
+    (List.find_opt (fun (e : entry) -> e.path = ".build-stamp") b.receipt.files)
 let assets_root b = Filename.concat b.root "assets"
 let dashboard_root b = Filename.concat (assets_root b) "dashboard"
 let asset_path b relative =
-  Option.map (fun e -> Filename.concat (dashboard_root b) e.path)
-    (List.find_opt (fun e -> e.path = relative) b.receipt.files)
+  Option.map (fun (e : entry) -> Filename.concat (dashboard_root b) e.path)
+    (List.find_opt (fun (e : entry) -> e.path = relative) b.receipt.files)
 let read root path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path with
   | Ok (Some contents) -> Ok contents
@@ -112,7 +165,7 @@ let check_binding b =
   let* contents = read b.root path in
   let* () = check_digest path b.receipt_sha256 contents.content in
   if root_matches b then Ok () else Error Root_identity_changed
-let read_entry b entry =
+let read_entry b (entry : entry) =
   let path = Filename.concat (dashboard_root b) entry.path in
   let* contents = read b.root path in
   let* () = if String.length contents.content = entry.size then Ok ()
@@ -121,11 +174,25 @@ let read_entry b entry =
   Ok contents.content
 let load b relative =
   let* () = check_binding b in
-  let* entry = match List.find_opt (fun e -> e.path = relative) b.receipt.files with
+  let* entry = match List.find_opt (fun (e : entry) -> e.path = relative) b.receipt.files with
     | Some entry -> Ok entry | None -> Error Not_manifested in
   let* body = read_entry b entry in
   let* () = check_binding b in
   Ok body
+
+let check_runtime_files root receipt =
+  let* () = List.fold_left (fun result (name, expected) ->
+    let* () = result in
+    let* contents = read root (Filename.concat root name) in
+    check_digest name expected contents.content) (Ok ()) receipt.companions in
+  List.fold_left (fun result (entry : runtime_entry) ->
+    let* () = result in
+    let* contents = read root (Filename.concat root entry.path) in
+    let* () = if String.length contents.content = entry.size then Ok ()
+      else Error (Size_mismatch entry.path) in
+    let* () = if contents.snapshot.permissions = entry.mode then Ok ()
+      else Error (Exact_read_failed ("installed runtime mode differs: " ^ entry.path)) in
+    check_digest entry.path entry.sha256 contents.content) (Ok ()) receipt.runtime_files
 
 let inspect ~executable_path ~binary_commit =
   let root = Filename.dirname executable_path in
@@ -153,6 +220,10 @@ let inspect ~executable_path ~binary_commit =
       (* Pin the receipt/root/binary around the complete startup scan. Re-reading
          the full receipt twice per file would make manifest I/O quadratic. *)
       let* () = check_binding b in
+      (* Runtime/companion payloads are verified once at startup. Dashboard
+         requests continue to revalidate the binding and requested asset, not
+         re-read the entire bundled Python tree on every request. *)
+      let* () = check_runtime_files root receipt in
       let* () = List.fold_left (fun result entry ->
         let* () = result in Result.map (fun _ -> ()) (read_entry b entry))
           (Ok ()) receipt.files in

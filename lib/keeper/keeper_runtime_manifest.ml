@@ -313,6 +313,7 @@ let decision_public_allowlist =
        Dropping these here made intra-lane failover unreadable on every
        API consumer. *)
     ; "idx"; "runtime_id"; "error_kind"
+    ; "routing_run_id"; "attempt_total_usage"; "attempt_usage_status"
     ]
 
 let clock_refs_public_allowlist =

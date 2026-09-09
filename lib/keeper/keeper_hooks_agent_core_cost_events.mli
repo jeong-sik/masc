@@ -36,6 +36,7 @@ val cost_event_payload
   -> cost_usd:float
   -> ?usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
+  -> ?runtime_attempt:(string * string * int)
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool
@@ -57,6 +58,7 @@ val emit_cost_event
   -> cost_usd:float
   -> ?usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
+  -> ?runtime_attempt:(string * string * int)
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool

@@ -1673,7 +1673,16 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
   Alcotest.(check (list string))
     "manifest runtime ids"
     [ "primary.test_model"; "primary.test_model" ]
-    (List.map decision_runtime_id events)
+    (List.map decision_runtime_id events);
+  List.iter (fun (event, _, decision) ->
+      match event, decision with
+      | Runtime_manifest.Runtime_failed, Some json ->
+          let open Yojson.Safe.Util in
+          Alcotest.(check string) "failed attempt usage is unresolved" "unresolved"
+            (json |> member "attempt_usage_status" |> to_string);
+          Alcotest.(check bool) "failure is not zero-token consumption" true
+            (json |> member "attempt_total_usage" = `Null)
+      | _ -> ()) events
 
 let test_failed_lane_receipt_counts_missing_tail () =
   let last_attempt_index = ref 0 in

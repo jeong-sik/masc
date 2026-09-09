@@ -82,11 +82,15 @@ type named_run_result =
   }
 
 type runtime_attempt =
-  { runtime_id : string
+  { routing_run_id : string
+  ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
   }
-(** Exact materialized candidate selected immediately before dispatch. Lane
+(** Exact materialized candidate selected immediately before dispatch.
+    [routing_run_id] identifies one lane walk, including reentry into the same
+    Keeper turn. Together with [lane_attempt_index] it joins raw response usage
+    to routed/completed/failed manifest rows. Lane
     assignment ids and later runtime-table lookups are not attempt authority. *)
 
 type attempt_input =

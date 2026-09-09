@@ -126,6 +126,9 @@ let test_runtime_attempt_attribution_public_projection () =
   let decision =
     `Assoc
       [ ("idx", `Int 1)
+      ; ("routing_run_id", `String "routing-run")
+      ; ("attempt_total_usage", `Null)
+      ; ("attempt_usage_status", `String "unresolved")
       ; ("runtime_id", `String "glm-coding.glm-5-turbo")
       ; ("error_kind", `String "api")
       ; ("not_allowlisted_probe", `String "must-not-leak")
@@ -145,6 +148,12 @@ let test_runtime_attempt_attribution_public_projection () =
     "attempted candidate retained"
     "glm-coding.glm-5-turbo"
     (projected |> member "runtime_id" |> to_string);
+  Alcotest.(check string) "routing identity survives API projection" "routing-run"
+    (projected |> member "routing_run_id" |> to_string);
+  Alcotest.(check string) "failure usage remains explicitly unresolved" "unresolved"
+    (projected |> member "attempt_usage_status" |> to_string);
+  Alcotest.(check bool) "unknown usage is not zero" true
+    (projected |> member "attempt_total_usage" = `Null);
   Alcotest.(check string)
     "error_kind retained" "api" (projected |> member "error_kind" |> to_string);
   Alcotest.(check bool)

@@ -5445,3 +5445,5 @@
  (action
   (run python3 %{dep:test_docker_observe_transport.py}
    %{exe:test_docker_observe_transport.exe})))
+
+(include stanzas/test_browser_composition.inc)

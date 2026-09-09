@@ -127,16 +127,27 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = temp_dir "exec_costume_advice_" in
+  (* Output capture runs through the Eio process runtime. Without [init] the
+     runtime falls back to a path that cannot preserve the output, and publish
+     reports the call as Failed ("Execute ran, but its complete output could
+     not be preserved") whatever the command did. Same call as
+     test_keeper_tool_dispatch_runtime's with_exec_fixture. *)
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / base)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"costume-advice" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
+    ~finally:(fun () ->
+      Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
+      cleanup_dir base)
     (fun () ->
-      let config = Workspace.default_config base in
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_meta ~name:"costume-advice" in
       (* [;] used to be the construct this test reached for; RFC-0391 put it
          in Shell_ir.connector, so a substitution stands in. What is being
          checked is unchanged: a costume the subset cannot say still runs, and
@@ -204,16 +215,27 @@ let test_a_backgrounded_child_still_holds_the_call () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = temp_dir "exec_background_holds_" in
+  (* Output capture runs through the Eio process runtime. Without [init] the
+     runtime falls back to a path that cannot preserve the output, and publish
+     reports the call as Failed ("Execute ran, but its complete output could
+     not be preserved") whatever the command did. Same call as
+     test_keeper_tool_dispatch_runtime's with_exec_fixture. *)
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / base)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"background-holds" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
+    ~finally:(fun () ->
+      Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
+      cleanup_dir base)
     (fun () ->
-      let config = Workspace.default_config base in
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
       install_always_allow_gate ~base;
-      let meta = make_meta ~name:"background-holds" in
       let execution =
         run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ]
       in

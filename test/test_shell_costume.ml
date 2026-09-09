@@ -86,7 +86,13 @@ let test_measured_dispositions () =
   case "echo hi > out.txt" "representable";
   case "echo $(date)" "cmd_subst";
   case "sleep 5 &" "background";
-  case "cat <<'EOF'\nbody\nEOF" "heredoc";
+  (* A quoted tag means the body is literal, so the subset can hold it
+     without an expansion pass (bash_lexer.mll:87-92) and the costume hides
+     nothing. Measured "heredoc" on 2026-08-24, before the lexer read the
+     quoted forms. The unquoted tag beside it is what still leaves the
+     subset, and having both here is what says where the line is. *)
+  case "cat <<'EOF'\nbody\nEOF" "representable";
+  case "cat <<EOF\nbody\nEOF" "heredoc";
   (* A loop has no rule of its own -- [for], [while] and [if] lex as words --
      so it is reported by the excluded lexeme it does reach, here the [$f].
      [`Control_flow] still has no producer, and a count grouped by tag still

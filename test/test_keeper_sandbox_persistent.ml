@@ -4,7 +4,7 @@
     server restarts, removed only when the keeper is. Two things make that
     safe, and both are testable without a docker daemon:
 
-    - the name is a pure function of (keeper, network mode, base path), so
+    - the name is a pure function of (keeper, network mode, base path, resolved image reference), so
       any process of this keeper computes the same name and adoption is just
       a probe;
     - the stale-container sweep keeps a persistent container whose owning

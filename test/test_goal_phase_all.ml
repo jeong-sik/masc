@@ -20,12 +20,12 @@ let test_phase_roundtrip () =
 
 let test_phase_set () =
   let strs = List.map GP.to_string GP.all in
-  check int "phase count" 4 (List.length GP.all);
+  check int "phase count" 5 (List.length GP.all);
   check int "no duplicate phase strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "phase set and order"
-    [ "executing"; "verifying"; "completed"; "dropped" ]
+    [ "executing"; "verifying"; "awaiting_confirmation"; "completed"; "dropped" ]
     strs
 
 let test_action_roundtrip () =
@@ -39,7 +39,7 @@ let test_action_roundtrip () =
 
 let test_action_set () =
   let strs = List.map GP.action_to_string GP.all_actions in
-  check int "action count" 5 (List.length GP.all_actions);
+  check int "action count" 6 (List.length GP.all_actions);
   check int "no duplicate action strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
@@ -48,6 +48,7 @@ let test_action_set () =
     ; "drop"
     ; "reopen"
     ; "record_proof_proven"
+    ; "confirm_completion"
     ; "record_proof_refuted"
     ]
     strs
@@ -70,7 +71,9 @@ let test_public_action_set () =
         (PA.of_string (PA.to_string action) = Some action))
     PA.all;
   check bool "verifier action is not public" true
-    (Option.is_none (PA.parse "record_proof_proven"))
+    (Option.is_none (PA.parse "record_proof_proven"));
+  check bool "human confirmation is not public" true
+    (Option.is_none (PA.parse "confirm_completion"))
 
 (* The 6x11 matrix in [decide_transition] had no behavioural test. Its comment
    says the compiler "refuses a matrix with a hole in it", and that is true --
@@ -97,7 +100,7 @@ let matrix =
     (GP.Verifying, GP.Request_complete, "already:verifying");
     (GP.Verifying, GP.Drop, "invalid");
     (GP.Verifying, GP.Reopen, "invalid");
-    (GP.Verifying, GP.Record_proof_proven, "move_to:completed");
+    (GP.Verifying, GP.Record_proof_proven, "move_to:awaiting_confirmation");
     (GP.Verifying, GP.Record_proof_refuted, "move_to:executing");
     (GP.Completed, GP.Request_complete, "already:completed");
     (GP.Completed, GP.Drop, "move_to:dropped");
@@ -109,6 +112,16 @@ let matrix =
     (GP.Dropped, GP.Reopen, "move_to:executing");
     (GP.Dropped, GP.Record_proof_proven, "invalid");
     (GP.Dropped, GP.Record_proof_refuted, "invalid");
+    (GP.Executing, GP.Confirm_completion, "invalid");
+    (GP.Verifying, GP.Confirm_completion, "invalid");
+    (GP.Completed, GP.Confirm_completion, "already:completed");
+    (GP.Dropped, GP.Confirm_completion, "invalid");
+    (GP.Awaiting_confirmation, GP.Request_complete, "already:awaiting_confirmation");
+    (GP.Awaiting_confirmation, GP.Reopen, "move_to:executing");
+    (GP.Awaiting_confirmation, GP.Drop, "move_to:dropped");
+    (GP.Awaiting_confirmation, GP.Record_proof_proven, "invalid");
+    (GP.Awaiting_confirmation, GP.Record_proof_refuted, "invalid");
+    (GP.Awaiting_confirmation, GP.Confirm_completion, "move_to:completed");
   ]
 
 let test_matrix_is_total () =

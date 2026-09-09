@@ -536,7 +536,7 @@ type activity_kind =
 let handler_activity_kind handler =
   let open Masc.Keeper_tool_descriptor in
   match handler with
-  | Tool_masc_fusion_dispatch | Tool_masc_fusion_status -> Fusion_activity
+  | Tool_masc_fusion_dispatch | Tool_masc_fusion_status | Tool_masc_fusion_decision -> Fusion_activity
   | Tool_keeper_spawn_dispatch | Tool_masc_keeper_dispatch -> Keeper_activity
   | Tool_execute
   | Tool_search_files

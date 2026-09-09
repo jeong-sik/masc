@@ -5,7 +5,7 @@ function completionLabel(proof: GoalProofCompletion): string {
   switch (proof.state) {
     case 'idle': return '미제출'
     case 'pending': return '검증 대기'
-    case 'proven': return '증명됨'
+    case 'proven': return proof.confirmation ? `운영자 확인 · ${proof.confirmation.operatorId}` : '증명됨 · 최종 확인 대기'
     case 'refuted': return '반증됨'
   }
 }

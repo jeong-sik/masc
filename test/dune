@@ -5491,3 +5491,8 @@
  (name test_keeper_direct_runtime_resume)
  (modules test_keeper_direct_runtime_resume)
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
+
+(test
+ (name test_fusion_decision)
+ (modules test_fusion_decision)
+ (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))

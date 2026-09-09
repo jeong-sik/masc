@@ -418,6 +418,7 @@ let make_hooks
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
+             ~response_id:response.id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens
@@ -451,6 +452,8 @@ let make_hooks
                [
                  (key_type, `String sse_turn_observation);
                  ("usage_projection", `String "raw_observation");
+                 ("response_id", Json_util.string_opt_to_json
+                    (String_util.trim_nonempty response.id));
                  (key_name, `String meta.name);
                  (key_turn, `Int turn);
                  (key_model_used, `Null);

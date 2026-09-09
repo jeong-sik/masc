@@ -1,0 +1,17 @@
+{
+  "observed_at": "2026-09-09T10:42:21.921220+00:00",
+  "source": "costs/2026-09/09.jsonl",
+  "bytes": 1981325,
+  "sha256": "56146a9ef2ac53e3430cc8f1aab384251b13fe64ecdc221e3577a332a4b837e3",
+  "resolved_claude_rows": 327,
+  "reported_sums": {
+    "input_tokens": 432881769,
+    "cache_read_tokens": 424757140,
+    "cache_creation_tokens": 8122143,
+    "cache_miss_input_tokens": 2486
+  },
+  "derived_non_cached_input_tokens": 8124629,
+  "raw_rows": 2122,
+  "raw_rows_with_response_id": 0,
+  "validation": "Read-only installed baseline. Derived arithmetic is not execution of the changed OCaml code. No deployment, tests, or provider requests."
+}

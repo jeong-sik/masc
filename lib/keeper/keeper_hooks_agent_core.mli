@@ -81,7 +81,8 @@ val record_cost_emit_source : String.t -> unit
 val cache_miss_input_tokens :
   input_tokens:int ->
   cache_creation_input_tokens:int -> cache_read_input_tokens:int -> int
-(** Derive uncached input tokens from AGENT_CORE usage counters, clamped at zero. *)
+(** Input excluding cache reads and cache creation. Invalid negative counts
+    remain observable; this is not total non-cached input. *)
 
 val cost_event_payload :
   agent_name:string ->
@@ -94,12 +95,17 @@ val cost_event_payload :
   output_tokens:int ->
   cost_usd:float ->
   ?usage_projection:Cost_ledger.usage_projection ->
+  ?response_id:string ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
   ?telemetry:Agent_core.Types.inference_telemetry -> unit -> Yojson.Safe.t
-(** Assemble the structured cost-ledger event without writing it. *)
+(** Assemble the structured cost-ledger event without writing it.
+    [response_id] is the opaque AGENT_CORE/CLI response identity, not necessarily
+    a vendor request ID. It is emitted only for raw observations; settlements
+    may aggregate multiple responses and carry null. [non_cached_input_tokens]
+    includes cache creation and is null for missing/invalid input partitions. *)
 
 val emit_cost_event :
   masc_root:string ->
@@ -113,6 +119,7 @@ val emit_cost_event :
   output_tokens:int ->
   cost_usd:float ->
   ?usage_projection:Cost_ledger.usage_projection ->
+  ?response_id:string ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->

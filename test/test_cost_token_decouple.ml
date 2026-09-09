@@ -307,6 +307,41 @@ let test_timings_cache_fields_land_on_payload () =
   check int "prompt_n" 26 (int_field payload "prompt_n")
 ;;
 
+let test_response_and_settlement_accounting () =
+  let response id ~creation ~read ~input ~missing projection =
+    H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
+      ~keeper_turn_id:7 ~agent_core_turn_ordinal:2 ~model:"model"
+      ~response_id:id ~usage_projection:projection
+      ~input_tokens:input ~output_tokens:12 ~cost_usd:0.0
+      ~cache_creation_input_tokens:creation ~cache_read_input_tokens:read
+      ~usage_missing:missing ()
+  in
+  let raw = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
+      Cost_ledger.Raw_observation in
+  check string "raw observation links to the exact response" "reply-1"
+    (string_field raw "response_id");
+  check int "cache writes are newly processed input too" 30
+    (int_field raw "non_cached_input_tokens");
+  check int "cache misses remain a separate measurement" 10
+    (int_field raw "cache_miss_input_tokens");
+  let settled = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
+      Cost_ledger.Resolved_delta in
+  check_null_field settled "response_id";
+  check string "settlement is never disguised as another response" "resolved_delta"
+    (string_field settled "usage_projection");
+  let missing = response "reply-2" ~creation:0 ~read:0 ~input:0 ~missing:true
+      Cost_ledger.Raw_observation in
+  check string "missing usage still has response identity" "reply-2"
+    (string_field missing "response_id");
+  check_null_field missing "non_cached_input_tokens";
+  let invalid = response "reply-3" ~creation:40 ~read:70 ~input:100 ~missing:false
+      Cost_ledger.Raw_observation in
+  check_null_field invalid "non_cached_input_tokens";
+  let cached = response "reply-4" ~creation:0 ~read:100 ~input:100 ~missing:false
+      Cost_ledger.Raw_observation in
+  check int "fully cached input is a reported zero" 0
+    (int_field cached "non_cached_input_tokens")
+
 let () =
   run "cost_token_decouple"
     [
@@ -326,6 +361,8 @@ let () =
         ] );
       ( "cache-delta",
         [
+          test_case "response and settlement token attribution" `Quick
+            test_response_and_settlement_accounting;
           test_case "trusted tokens include cache delta" `Quick
             test_trusted_tokens_include_cache_delta;
           test_case "invalid tokens retain cache delta" `Quick

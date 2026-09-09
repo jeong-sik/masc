@@ -372,6 +372,7 @@ let strip_trailing_newlines s =
    scheduling decision of its own. *)
 let remaining_timeout ~started = function
   | None -> None
+  (* NDT-OK: budget arithmetic on the wall clock, never a scheduling decision. *)
   | Some budget -> Some (budget -. (Unix.gettimeofday () -. started))
 
 (* A stage's own redirections travel with it, so a pipeline that names a file

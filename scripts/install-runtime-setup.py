@@ -364,7 +364,33 @@ def ollama_model_details(endpoint, model, api_key_env='', timeout=10, load=False
     return dict(context=matches[0] if matches else None, context_source='Ollama running context window' if matches else None, tools=tools)
 
 
-def discover_models(choice, endpoint='', api_key_env='', timeout=10):
+def codex_model_rows(command, timeout):
+    path = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'models_cache.json'
+    try:
+        rows = json.loads(path.read_text())['models']
+        if isinstance(rows, list) and rows:
+            return rows, 'Codex local model list (cached; availability is checked after selection)'
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    # A fresh user has no cache. Ask the installed client for its own bundled
+    # catalog, without logging in, starting a turn, or inheriting credentials.
+    # Its context_window is distinct from an API model's maximum capacity.
+    with tempfile.TemporaryDirectory(prefix='masc-codex-models-') as home:
+        env = {key: value for key, value in os.environ.items() if key in ('PATH', 'LANG', 'LC_ALL')}
+        env.update(HOME=home, CODEX_HOME=str(Path(home) / '.codex'))
+        try:
+            result = subprocess.run([command, 'debug', 'models', '--bundled'],
+                                    cwd=home, env=env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, timeout=timeout)
+            rows = json.loads(result.stdout)['models'] if result.returncode == 0 else None
+            if isinstance(rows, list):
+                return rows, 'Installed Codex CLI bundled model catalog (availability is checked after selection)'
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            pass
+    return [], 'Codex model details unavailable. Refresh after updating/signing in to your CLI, or choose another connection.'
+
+
+def discover_models(choice, endpoint='', api_key_env='', timeout=10, command='codex'):
     """Return observed IDs, not guessed names or inferred context capacities."""
     if choice == 'ollama':
         try:
@@ -377,15 +403,7 @@ def discover_models(choice, endpoint='', api_key_env='', timeout=10):
         except (OSError, ValueError, KeyError, TypeError, URLError):
             return [], 'Ollama model list unavailable. Start Ollama, then choose Refresh.'
     elif choice == 'codex':
-        path = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'models_cache.json'
-        try:
-            cache = json.loads(path.read_text())
-            rows = cache['models']
-            if not isinstance(rows, list):
-                raise ValueError('invalid model cache')
-        except (OSError, ValueError, KeyError, TypeError):
-            return [], 'No readable Codex model list. Sign in with Codex and open its /model picker to find an exact model ID.'
-        origin = 'Codex local model list (cached; availability is checked after selection)'
+        rows, origin = codex_model_rows(command, timeout)
         models = []
         for row in rows:
             if not isinstance(row, dict) or row.get('visibility') != 'list' or not model_text(row.get('slug')):
@@ -441,7 +459,10 @@ def catalog_models(binary, choice):
         rows = json.loads(result.stdout)['models']
         if not isinstance(rows, list):
             return []
-        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'])
+        # API catalog capacities do not establish a Codex client window. Keep
+        # names as suggestions, but require client metadata or advanced input.
+        return [dict(id=row['id'], label=row.get('label', row['id']),
+                     context=None if choice == 'codex' else row['max_context'])
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
@@ -482,7 +503,7 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
             print('Enter a model ID or a listed number; blank input cannot choose a model.', file=sys.stderr)
     context = selected['context'] if selected else None
     context_source = origin if context else None
-    if context is None and choice in ('codex', 'claude_code'):
+    if context is None and choice == 'claude_code':
         result = subprocess.run([binary, 'runtime-model-info', model, '--client', {'codex':'codex','claude_code':'claude-code'}[choice]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if result.returncode == 0:
             try:
@@ -637,7 +658,8 @@ def source_label(source):
 def source_models(binary, source, timeout):
     choice = source['choice']
     can_discover = choice and source.get('credential_kind', 'none') in ('none', 'env')
-    observed, origin = discover_models(choice, source['endpoint'], source['api_key_env'], timeout) if can_discover else ([], 'Configured models')
+    observed, origin = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
+                                      command=source.get('command') or 'codex') if can_discover else ([], 'Configured models')
     rows = []
     for model in observed:
         existing_rows = [row for row in source['rows'] if row['model'] == model['id']]

@@ -126,6 +126,10 @@ Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 �
 
 ## 모델 연결 선택
 
+Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록에서 context 한도를
+읽습니다. 인증이나 모델 호출은 하지 않으며, API catalog의 최대값을 Codex 한도로
+사용하지 않습니다. 실제 모델 사용 가능 여부는 저장 전 응답·도구 검사로 확인합니다.
+
 기존 API 공급자, Claude Code, Codex, 로컬 Ollama 모델을 목록에서 선택합니다.
 **Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
 다른 컴퓨터의 Ollama를 연결할 수 있습니다. 기존 Antigravity 연결도 표시되지만

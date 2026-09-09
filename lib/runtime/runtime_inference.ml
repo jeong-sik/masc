@@ -55,9 +55,8 @@ type seed = {
     id, or before [Runtime.init_default]): no per-model signal, leave the
     caller policy unchanged.
 
-    [thinking_budget] stays [None] here: the per-model [max_thinking_budget] is
-    a ceiling, not an active budget, so wiring it as the active budget would be
-    a category error — the keeper's adaptive budget owns the active value. *)
+    [thinking_budget] stays [None] here: no configuration produces an active
+    token budget, and the keeper's adaptive budget owns the active value. *)
 let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : bool option)
   : seed
   =

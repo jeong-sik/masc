@@ -236,7 +236,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
       ? `preserve:${spec.model.preserve_thinking ? 'on' : 'off'}`
       : null,
     thinking,
-    typeof spec.model?.max_thinking_budget === 'number' ? `budget:${spec.model.max_thinking_budget}` : null,
     caps?.thinking_control_format ? `wire:${caps.thinking_control_format}` : null,
     typeof caps?.max_output_tokens === 'number' ? `out:${caps.max_output_tokens}` : null,
     formats.length > 0 ? `format:${formats.join(',')}` : null,

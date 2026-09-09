@@ -119,7 +119,6 @@ export interface DashboardRuntimeDeclaredModelSpec {
   max_context?: number | null
   thinking_support?: boolean
   preserve_thinking?: boolean | null
-  max_thinking_budget?: number | null
   streaming?: boolean
   temperature?: number | null
   top_p?: number | null
@@ -582,7 +581,6 @@ function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredM
     max_context: asNumber(raw.max_context) ?? null,
     thinking_support: asBoolean(raw.thinking_support),
     preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
-    max_thinking_budget: asNumber(raw.max_thinking_budget) ?? null,
     streaming: asBoolean(raw.streaming),
     temperature: asNumber(raw.temperature) ?? null,
     top_p: asNumber(raw.top_p) ?? null,

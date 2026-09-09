@@ -51,7 +51,6 @@ let qwen_model =
   ; max_context = Some 160000
   ; thinking_support = true
   ; preserve_thinking = Some false
-  ; max_thinking_budget = None
   ; streaming = true
   ; temperature = None
   ; top_p = None

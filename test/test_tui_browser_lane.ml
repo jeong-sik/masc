@@ -192,9 +192,10 @@ let test_clients_decode () =
 let test_visual_scroll_ownership () =
   let view = loaded () in
   let expected_url = "https://example.org/" in
-  let pending = { view with load = Loading (41, Viewport_scroll {tab_id=2; expected_url; y=120}) } in
   let shot = success (decode_screenshot (screenshot_response ())) in
-  let body = viewport_request ~tab_id:2 ~expected_url ~y:120 view in
+  let action = Browser_lane.Scroll_at {point={x=0.5;y=0.5};viewport=shot.viewport;x=0;y=120} in
+  let pending = { view with load = Loading (41, Viewport_pointer {tab_id=2;expected_url;action}) } in
+  let body = viewport_request ~tab_id:2 ~expected_url ~action view in
   let fields = match body with `Assoc fields -> fields | _ -> failwith "not an object" in
   expect "scroll targets observed client, tab and URL"
     (List.assoc "clientId" fields = `String firefox.client_id

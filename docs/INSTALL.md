@@ -373,7 +373,7 @@ controlling, and verifying a browser. It does not install a browser, an
 extension, or authentication. An existing skill package is not overwritten,
 so on upgrade compare your changes with the new guidance and merge them in.
 The Gecko scene features need the native host together with browser
-extension 0.3.0 or later. Update an existing browser extension separately.
+extension 0.4.0 or later. Update an existing browser extension separately.
 
 Choosing `--team classic` adds the following four Keeper TOMLs.
 

@@ -4177,7 +4177,7 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4191,7 +4191,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_scroll _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4223,13 +4223,6 @@ let launch_browser_lane state ~mailbox operation =
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
-          }
-        | Viewport_scroll {tab_id; expected_url; y} -> Browser_lane_screenshot_ready {
-            generation; image_generation;
-            result = call (fun () ->
-              Result.bind
-                (Masc_tui_http.scroll_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~y)
-                (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Viewport_pointer {tab_id;expected_url;action} -> Browser_lane_screenshot_ready {
             generation; image_generation;
@@ -7308,10 +7301,13 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
          | Browser_lane_view.Automation -> "click: link   drag: move")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+  let wheel_hint = match !image_cell_pixels with
+    | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
+    | _ -> "wheel:center" in
   draw_image state ~refuse ~title:("Browser viewport · " ^ shot.title)
     ~caption:[Printf.sprintf "%s · tab %d · %.1f ms"
         (Browser_lane_view.source_name shot.source) shot.tab_id shot.elapsed_ms; shot.url]
-    ~footer:("  Esc: back   r:refresh   wheel / j k:scroll   " ^ pointer_hint) bytes;
+    ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
@@ -14786,8 +14782,14 @@ and is loaded on demand through keeper_skill.
            in
            (* Viewport keys and wheel notches move by 120 CSS pixels. Inputs during an in-flight request are consumed,
               never queued or replayed after a possible browser side effect. *)
-           let scroll y = launch_browser_lane state ~mailbox:async_messages
-             (Browser_lane_view.Viewport_scroll {tab_id=shot.tab_id; expected_url=shot.url; y}) in
+           let scroll_at point y = launch_browser_lane state ~mailbox:async_messages
+             (Browser_lane_view.Viewport_pointer {tab_id=shot.tab_id;expected_url=shot.url;
+               action=Browser_lane.Scroll_at {point;viewport=shot.viewport;x=0;y}}) in
+           let wheel row column y = match !browser_image_region with
+             | Some region -> (match Masc_tui_graphics.image_point region ~row ~column with
+                 | Some (x,y_point) -> scroll_at {x;y=y_point} y
+                 | None -> ())
+             | None -> scroll_at {x=0.5;y=0.5} y in
            (match event with
             | Mouse_left_press (row,column) ->
                 browser_pointer_press := None;
@@ -14813,8 +14815,10 @@ and is loaded on demand through keeper_skill.
                  | _ -> ())
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
-            | Key ("j" | "down") | Mouse_wheel (Masc.Tui_decode.Wheel_down, _, _) -> scroll 120
-            | Key ("k" | "up") | Mouse_wheel (Masc.Tui_decode.Wheel_up, _, _) -> scroll (-120)
+            | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
+            | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
+            | Mouse_wheel (Masc.Tui_decode.Wheel_down,row,column) -> wheel row column 120
+            | Mouse_wheel (Masc.Tui_decode.Wheel_up,row,column) -> wheel row column (-120)
             | _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in

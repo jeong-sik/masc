@@ -109,8 +109,11 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Scene support requires the updated coordinator/native host and extension 0.3.0
-in the selected browser profile. Source changes and script-level Gecko evidence
+Scene support requires the updated coordinator/native host and extension 0.4.0
+in the selected browser profile. Version 0.4.0 adds live `scroll_at`; after upgrading,
+reload the extension in `about:debugging` and confirm its version there. The
+Browser Lane client list reports the browser version, not the extension version.
+Source changes and script-level Gecko evidence
 alone do not establish that an installed TUI has been updated.
 
 
@@ -131,3 +134,11 @@ The builtin browser-design, frontend-implement and frontend-verify packages cove
 visual intent, verified source editing and browser evidence. They are discoverable
 skills; users need not name a skill for an ordinary UI request. Newly built MASC
 installs seed missing packages through the existing builtin-skill installer.
+
+In screenshot view, the mouse wheel scrolls the area under the pointer, allowing
+message lists and sidebars to scroll independently. `j/k` and the up/down keys
+scroll the area at the center of the viewport. When terminal cell geometry is
+unavailable, the wheel also uses the center and the footer shows `wheel:center`.
+The automation lane sends native browser wheel input; the live lane finds the
+scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
+same tab again.

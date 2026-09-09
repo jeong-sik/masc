@@ -68,7 +68,8 @@ let test_pointer_actions () =
     ignore (match Interaction.parse wire with Ok _ -> () | Error e -> fail e);
     check bool "pointer action requires its observed URL" true
       (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
-    ["click_at",["point",point];"drag",["from",point;"to",point]];
+    ["click_at",["point",point];"drag",["from",point;"to",point];
+     "scroll_at",["point",point;"x",`Int 0;"y",`Int 120]];
   List.iter (fun bad ->
     check bool "invalid screenshot coordinates rejected before dispatch" true
       (Result.is_error (Interaction.parse (`Assoc

@@ -241,6 +241,10 @@ shape.
 - State files are JSON or JSONL where practical, so an operator can read them.
 - Nothing outside the binary is required to build, boot, or run a Keeper
   turn. Graph and vector integrations exist for specific workflows only.
+- A change that stops reading a state file's existing rows is a hard cut. The
+  code does not read or convert the old shape. The pull request adds a
+  `Fresh state required` entry to `CHANGELOG.md` that names the file and says
+  whether to delete or rewrite it, and the load error names the file path.
 
 ### Runtime assignment
 

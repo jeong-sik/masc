@@ -270,6 +270,22 @@ let test_other_unknown_goal_field_still_fails () =
       true
       (String_util.contains_substring detail "refusing to write")
 
+let test_undecodable_store_read_error_names_path () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "read-error" "read error names the store path" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  add_goal_field config "unexpected_assignment" (`String "still-closed");
+  match Goal_store.list_goals_result config () with
+  | Ok _ -> fail "undecodable store listed goals"
+  | Error detail ->
+    check bool "read error says the store did not decode" true
+      (String_util.contains_substring detail "store did not decode");
+    check bool "read error names the store path" true
+      (String_util.contains_substring detail (Goal_store.goals_path config));
+    check bool "read error keeps the decode detail" true
+      (String_util.contains_substring detail "unexpected_assignment")
+
 let test_phaseless_row_no_longer_decodes () =
   with_workspace @@ fun config ->
   (* Counterfactual for the removed status->phase inference: a status-only
@@ -570,6 +586,8 @@ let () =
             test_serializer_omits_status;
           test_case "other unknown goal field still fails" `Quick
             test_other_unknown_goal_field_still_fails;
+          test_case "undecodable store read error names the path" `Quick
+            test_undecodable_store_read_error_names_path;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
           test_case "priority-less row no longer decodes" `Quick

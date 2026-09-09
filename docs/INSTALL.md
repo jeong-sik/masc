@@ -431,6 +431,12 @@ configuration you explicitly reset are not part of this prefix transaction.
 If the process was killed and a `.masc-install-transaction` is left behind,
 see the [distribution transaction guide](design/installed-dashboard-distribution.md).
 
+Some releases change a state file's contract instead of converting the old
+file. The `Fresh state required` entries in `CHANGELOG.md` list those files.
+Delete or rewrite them before the new server starts. Otherwise the boot log
+reports the file as undecodable, and the surface that reads it (Keeper
+profiles, Goals) stays empty or returns that error until you do.
+
 A running server is not replaced by the install alone. Wind down the work in
 progress, restart the server, and check `masc --version`, `/health?full=1`,
 and the dashboard again. To go back to an earlier version, use that tag's

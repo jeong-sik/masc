@@ -1740,6 +1740,15 @@ network_mode = "none"
     check (option string) "parsed profile_defaults retains sandbox_image"
       (Some "masc-keeper-sandbox:custom-tag")
       parsed.profile_defaults.sandbox_image;
+    (match Keeper_turn_up_args.parse ~docker_preflight ctx
+       (`Assoc ["name", `String keeper_name; "sandbox_profile", `String "docker";
+                "sandbox_image", `String "requested-image:v2"]) with
+     | Ok parsed ->
+       check (option string) "explicit image is preflighted instead of old TOML"
+         (Some "requested-image:v2") !probed_image;
+       check (option string) "requested image materializes"
+         (Some "requested-image:v2") parsed.profile_defaults.sandbox_image
+     | Error result -> fail (Keeper_types_profile.tool_result_body result));
     let failing_docker_preflight ?image ~timeout_sec:_ () =
       probed_image := image;
       Some (preflight_fixture ~ok:false)
@@ -1875,6 +1884,38 @@ let test_parse_rejects_unknown_keys () =
      failf "known key rejected: %s"
        (Keeper_types_profile.tool_result_body result))
 
+let test_sandbox_image_persistence () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let name = "image-persistence" in
+  let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+    | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
+    | Error error -> fail error in
+  let apply fields =
+    let parsed = match parse_stating_a_profile ctx (`Assoc (("name", `String name) :: fields)) with
+      | Ok parsed -> parsed
+      | Error result -> fail (Keeper_types_profile.tool_result_body result) in
+    let meta = { meta with sandbox_image = parsed.profile_defaults.sandbox_image } in
+    (match Keeper_turn_up_config_persistence.persist
+       ~expected_revision:(current_revision_exn ctx.config name)
+       ~config:ctx.config ~parsed ~meta () with
+     | Ok _ -> () | Error e -> fail (Keeper_turn_up_config_persistence.error_to_string e));
+    match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path:ctx.config.base_path name with
+    | Ok defaults -> defaults.sandbox_image
+    | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e) in
+  check (option string) "image set on disk" (Some "registry.example/documents:v1")
+    (apply ["sandbox_image", `String "registry.example/documents:v1"]);
+  check (option string) "omission retains image" (Some "registry.example/documents:v1")
+    (apply ["instructions", `String "new instructions"]);
+  check (option string) "image replacement materializes" (Some "registry.example/documents:v2")
+    (apply ["sandbox_image", `String "registry.example/documents:v2"]);
+  check (option string) "explicit clear removes override" None (apply ["sandbox_image", `Null]);
+  List.iter (fun image ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with
+    | Error _ -> () | Ok _ -> fail "invalid image accepted") [`String " "; `Int 1; `Bool true]
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [ _
@@ -1891,7 +1932,8 @@ let () =
   run
     "keeper_turn_up_args"
     [ ( "mention_targets"
-      , [ test_case
+      , [ test_case "sandbox image set omit replace and clear" `Quick test_sandbox_image_persistence
+        ; test_case
             "absent mention_targets uses fallback"
             `Quick
             test_resolve_mention_targets_uses_fallback_when_absent

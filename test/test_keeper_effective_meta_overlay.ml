@@ -1335,6 +1335,18 @@ instructions = "Missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_config_snapshot_exposes_sandbox_image () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "image-config-snapshot" in
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"example/documents:v1\"\ninstructions = \"image fixture\"\n";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  | `Not_found, _ -> Alcotest.fail "missing config snapshot"
+  | `OK, json -> Alcotest.(check (option string)) "effective config image"
+      (Some "example/documents:v1") (json_string_field "sandbox_image" json)
+
 let test_config_snapshot_does_not_fallback_to_raw_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "bad-config-snapshot" in
@@ -1556,6 +1568,7 @@ let () =
           Alcotest.test_case
             "config snapshot never falls back to raw effective fields"
             `Quick test_config_snapshot_does_not_fallback_to_raw_meta;
+        Alcotest.test_case "config snapshot exposes sandbox image" `Quick test_config_snapshot_exposes_sandbox_image;
           Alcotest.test_case
             "config snapshot prompt is nested only"
             `Quick test_config_snapshot_prompt_is_nested_only;

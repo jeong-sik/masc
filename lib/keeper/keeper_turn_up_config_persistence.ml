@@ -344,6 +344,9 @@ let full_fields
     ; "activation_mode", Keeper_toml_loader.Toml_string (Keeper_activation_mode.to_string meta.activation_mode)
     ]
   in
+  let fields = match meta.sandbox_image with
+    | None -> fields
+    | Some image -> ("sandbox_image", Keeper_toml_loader.Toml_string image) :: fields in
   let fields =
     match meta.microvm_backend with
     | None -> fields
@@ -411,6 +414,11 @@ let explicit_edits
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "activation_mode" set_string (Option.map Keeper_activation_mode.to_string parsed.activation_mode_opt)
   |> fun fields ->
+  let fields = match parsed.sandbox_image_patch with
+    | None -> fields
+    | Some image -> ("sandbox_image", match image with
+        | None -> Keeper_toml_loader.Remove
+        | Some image -> set_string image) :: fields in
   let fields =
     match parsed.microvm_backend_patch with
     | None -> fields

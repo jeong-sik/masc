@@ -112,11 +112,6 @@ let thinking_config_for_config mode (config : Provider_config.t) =
       | Capabilities.Anthropic_adaptive_only
       | Capabilities.Anthropic_adaptive_preferred ) ) ->
     Some (`Assoc [ "type", `String "adaptive" ])
-  | Some true, Capabilities.Anthropic_manual_budget ->
-    (match config.thinking_budget with
-     | Some budget ->
-       Some (`Assoc [ "type", `String "enabled"; "budget_tokens", `Int budget ])
-     | None -> None)
   | Some false, Capabilities.Anthropic_adaptive_default ->
     Some (`Assoc [ "type", `String "disabled" ])
   | Some false, _ | None, _ -> None
@@ -136,20 +131,9 @@ let validate_thinking_controls mode (config : Provider_config.t) =
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
   | _, _, _ ->
-    (match mode, config.thinking_budget with
-     | Capabilities.Anthropic_manual_budget, Some _
-       when config.enable_thinking = Some true ->
-       Provider_config.validate_reasoning_effort_request config
-     | Capabilities.Anthropic_manual_budget, Some _ ->
-       Error "thinking_budget requires enable_thinking=true"
-     | Capabilities.Anthropic_manual_budget, None when config.enable_thinking = Some true
-       -> Error "manual-budget thinking requires an explicit thinking_budget"
-     | ( ( Capabilities.Anthropic_adaptive_only
-         | Capabilities.Anthropic_adaptive_default
-         | Capabilities.Anthropic_adaptive_preferred
-         | Capabilities.Anthropic_always_adaptive )
-       , Some _ ) -> Error "thinking_budget is unsupported by adaptive thinking"
-     | _, None -> Provider_config.validate_reasoning_effort_request config)
+    (match config.thinking_budget with
+     | Some _ -> Error "thinking_budget is unsupported by adaptive thinking"
+     | None -> Provider_config.validate_reasoning_effort_request config)
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =
@@ -338,7 +322,7 @@ let build_request_payload
    | Count_tokens, _ | Completion _, None -> ());
   let thinking_mode =
     match config.kind with
-    | Provider_config.Kimi -> Capabilities.Anthropic_manual_budget
+    | Provider_config.Kimi -> Capabilities.Anthropic_adaptive_default
     | Provider_config.Anthropic ->
       (match anthropic_thinking_control with
        | Some mode -> mode
@@ -348,7 +332,7 @@ let build_request_payload
               "Backend_anthropic.build_request: model %S has no catalog-declared \
                Anthropic thinking-control policy"
               config.model_id)
-       | None -> Capabilities.Anthropic_manual_budget)
+       | None -> Capabilities.Anthropic_adaptive_default)
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
@@ -624,7 +608,7 @@ let validate_nonexact_thinking_controls (config : Provider_config.t) =
             config.model_id)
      | None -> Ok ())
   | Provider_config.Kimi ->
-    validate_thinking_controls Capabilities.Anthropic_manual_budget config
+    validate_thinking_controls Capabilities.Anthropic_adaptive_default config
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama
   | Provider_config.Gemini

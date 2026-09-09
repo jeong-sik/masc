@@ -378,7 +378,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
       | Some catalog -> Model_catalog.set_global catalog
       | None -> Model_catalog.clear_global ())
     (fun () ->
-       Model_catalog.set_global (thinking_catalog "manual_budget");
+       Model_catalog.set_global (thinking_catalog "adaptive_default");
        let observations = ref [] in
        let (result, admitted_evidence, fresh_serialization), completion_body =
          with_admitted_http_mock ~stream:false
@@ -387,7 +387,6 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
            { (config ~max_context:512 base_url) with
              model_id = "frozen-catalog-model"
            ; enable_thinking = Some true
-           ; thinking_budget = Some 1024
            ; tool_choice = Some Auto
            ; response_format = Off
            }

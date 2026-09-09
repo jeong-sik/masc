@@ -1620,9 +1620,9 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Response_format_json_schema
       , Replay_not_required
       , Delta_stream "reasoning" )
-    ; ( "Claude Haiku 4.5"
+    ; ( "Claude Sonnet 5"
       , Native_provider Provider_config.Anthropic
-      , "claude-haiku-4-5"
+      , "claude-sonnet-5"
       , Extended_thinking
       , Native_structured_output
       , Replay_every_turn

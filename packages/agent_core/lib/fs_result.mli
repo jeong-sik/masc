@@ -21,11 +21,6 @@ val write_file : string -> string -> (unit, Error.t) result
     The file is created with mode [0o600] (owner read/write only). *)
 val append_file : string -> string -> (unit, Error.t) result
 
-(** Like {!write_file} but guarantees owner-only ([0o600]) permissions using
-    [O_CREAT|O_EXCL] and an atomic rename.  Use for files that may contain
-    secrets or sensitive session data. *)
-val write_file_secret : string -> string -> (unit, Error.t) result
-
 (** {1 Directory operations} *)
 
 (** Ensure directory exists (recursive).

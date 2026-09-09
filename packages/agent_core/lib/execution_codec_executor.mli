@@ -66,7 +66,6 @@ val compare_canonical_payload
   -> (bool, failure) result
 
 val failure_to_string : failure -> string
-val pp_failure : Format.formatter -> failure -> unit
 val show_failure : failure -> string
 
 (** Read-only per-operation coherent snapshots. These observations never

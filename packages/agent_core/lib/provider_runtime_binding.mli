@@ -42,10 +42,6 @@ val find : string -> t option
     overlay. Embedded and registry providers are intentionally excluded. *)
 val find_catalog : string -> t option
 
-(** Return all known binding ids and selector aliases. This is a display /
-    diagnostics surface; callers should use {!find} for resolution. *)
-val known_labels : unit -> string list
-
 (** Resolve the runtime binding explicitly carried by a concrete provider
     config. Provider aliases are canonicalized through {!find}. A config with
     no [provider_id], or an unknown explicit id, has no binding; endpoint URLs,

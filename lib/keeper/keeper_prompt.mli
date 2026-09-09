@@ -2,8 +2,6 @@
     for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
-val exact_direct_mention_present : targets:string list -> string -> bool
-
 val system_prompt_body : unit -> string
 (** The shared [keeper] block, read from the prompt registry. *)
 

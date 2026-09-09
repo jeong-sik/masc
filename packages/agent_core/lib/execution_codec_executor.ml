@@ -330,10 +330,6 @@ let failure_to_string = function
       (cause_to_string cause)
 ;;
 
-let pp_failure formatter failure =
-  Format.pp_print_string formatter (failure_to_string failure)
-;;
-
 let show_failure failure = failure_to_string failure
 
 let stats (t : t) =

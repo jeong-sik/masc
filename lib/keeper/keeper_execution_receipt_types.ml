@@ -129,12 +129,6 @@ let completion_contract_result_of_label = function
     Completion_tool_execution_observed
 ;;
 
-let completion_contract_result_of_string raw =
-  raw
-  |> Completion_contract_label.of_string
-  |> Option.map completion_contract_result_of_label
-;;
-
 type runtime_rotation_attempt =
   { from_runtime : string
   ; to_runtime : string

@@ -1290,10 +1290,6 @@ let snapshot journal =
   { scope_id = journal.scope_id; reducer }
 ;;
 
-let snapshot_cursor (snapshot : snapshot) =
-  make_cursor snapshot.scope_id (Reducer.last_seq snapshot.reducer)
-;;
-
 let snapshot_find_node (snapshot : snapshot) node_id =
   match Reducer.find_node_record snapshot.reducer node_id with
   | None -> None

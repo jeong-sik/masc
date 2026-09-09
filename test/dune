@@ -5394,3 +5394,5 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+
+(include stanzas/test_keeper_msx_observe.inc)

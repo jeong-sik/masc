@@ -73,7 +73,7 @@ masc setup --base-path "$HOME/masc-workspace"
 
 Setup prepares the default image, starts the workspace server and `imp`, and opens
 the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
-and read https://example.com with web_fetch. Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0350).
+and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0350).
 Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary availability.
 
 ### Published binaries

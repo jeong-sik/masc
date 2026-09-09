@@ -188,19 +188,6 @@ let error t message fields = emit t Error message fields
 
 (* ── Built-in sinks ──────────────────────────────────────────── *)
 
-let json_sink (flow : _ Eio.Flow.sink) : sink =
-  fun record ->
-  let record =
-    { record with
-      message = redact record.message
-    ; fields = List.map redact_field_value record.fields
-    }
-  in
-  let json = record_to_json record in
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  Eio.Flow.copy_string line flow
-;;
-
 let stderr_sink () : sink =
   fun record ->
   let ts_str =

@@ -39,13 +39,6 @@ let maybe_string_override field ?(normalize = fun value -> value) default live a
   | _ -> acc
 ;;
 
-let maybe_bool_override field default live acc =
-  match default with
-  | Some value when value <> live ->
-    override_field field ~default_value:(`Bool value) ~live_value:(`Bool live) :: acc
-  | _ -> acc
-;;
-
 let nonempty_string_list_override field default live acc =
   if default <> [] && default <> live
   then

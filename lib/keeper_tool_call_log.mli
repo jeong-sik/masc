@@ -349,10 +349,6 @@ val carried_entry_answers :
     floor. Exposed because the read that uses it needs a clock and this does
     not. *)
 
-val reset_file_change_cache_for_testing : unit -> unit
-(** Drop every carried tally. Tests that write rows and read them back in one
-    process need the next read to start from an empty window. *)
-
 val read_window :
   ?keeper_name:string ->
   window_hours:float ->

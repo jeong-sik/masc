@@ -5335,6 +5335,18 @@ let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
   let decode_row json =
     match member "effective_meta_error" json with
+    | `Null when member "status" json = `String "error" ->
+        let* name = required_string_field json "name" in
+        let* () = match member "health" json with
+          | `Null -> Ok ()
+          | `String raw when Option.is_some (keeper_health_of_string raw) -> Ok ()
+          | `String raw -> Error (Printf.sprintf "keeper %S has unknown health %S" name raw)
+          | bad -> field_type_error "health" "a string or null" bad in
+        let* detail = match member "message" json with
+          | `String message -> Ok message
+          | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
+          | bad -> field_type_error "message" "a string or null" bad in
+        Ok (Error (name, detail))
     | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
     | error ->
         let* name = required_string_field json "name" in

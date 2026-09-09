@@ -793,8 +793,6 @@ let%test "unknown base label resolves to None, not a permissive default" =
 (** Merge Discovery ctx_size into capabilities. *)
 let with_context_size caps ~ctx_size = { caps with max_context_tokens = Some ctx_size }
 
-let with_tool_support caps ~supports_tools = { caps with supports_tools }
-
 (* ── Capability manifest integration ───────────────────── *)
 
 (** Apply a capability manifest entry on top of a base capabilities record.
@@ -2146,7 +2144,7 @@ let%test
             && c.max_output_tokens = Some 128_000 )
       ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
       ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
-      ; ("claude-opus-4-20250501", fun c -> c.max_output_tokens = Some 128_000)
+      ; ("claude-opus-4-6-20260101", fun c -> c.max_output_tokens = Some 128_000)
       ; ("gpt-4.1-mini", fun c -> c.max_output_tokens = Some 32_000)
         (* Agent Core contract: the real provider model ids ([deepseek-v4-flash],
          [deepseek-v4-pro]) must resolve to the DeepSeek capability route.

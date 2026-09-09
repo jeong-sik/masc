@@ -11,6 +11,8 @@ type verdict =
    200. 4 KiB leaves room for a provider adapter that adds fields. *)
 let envelope_allowance_bytes = 4096
 
+(* Factor applied to the edge the byte ratio predicts, because encoders do
+   not scale bytes exactly with pixel count. *)
 let shrink_margin = 0.9
 
 (* Standard base64: every 3 input bytes become 4, the last group padded. *)

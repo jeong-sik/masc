@@ -3,13 +3,18 @@
    Pinned here:
    1. Parser goldens — the boundary tokenizer keeps the legacy
       token-equality contract (@alicex / email@alice.com never hit
-      "@alice") and adds canonical minting ("@keeper-alice"
-      reaches "alice": the documented widening).
+      "@alice"). "@keeper-alice" used to mint "alice" -- the documented
+      widening -- until RFC-0393 made the keeper name the only spelling
+      and Keeper_id.of_string stopped stripping the wrapper. It mints
+      "keeper-alice" now, which is nobody, and that is the point of the
+      hard cut: one name, not two.
    2. Legacy decision equivalence — the deleted read-time
       [line_mentions] is replicated verbatim as an oracle; over a
       corpus of contents and target sets, parse-then-match must agree
-      with it everywhere (the corpus avoids keeper-shaped @-tokens,
-      which are the documented widening, pinned separately).
+      with it everywhere. The corpus still avoids keeper-shaped
+      @-tokens; with the widening gone that exclusion no longer buys
+      anything, but widening the corpus is a separate change from
+      recording what the parser does.
    3. Store roundtrip — append parses at the boundary and [load]
       returns the persisted ids; pre-P4 rows read as []. *)
 
@@ -43,8 +48,11 @@ let test_parser_goldens () =
   check ids "two distinct"
     [ "alice"; "alpha" ]
     (parse "@alpha and @alice please");
-  check ids "keeper-shaped form canonicalizes (documented widening)"
-    [ "alice" ]
+  (* Not "alice". RFC-0393 hard cut: the keeper name is the only spelling,
+     so a keeper-shaped token is its own id and matches no keeper called
+     alice. #33104 recorded the same cut in test_playground_paths. *)
+  check ids "keeper-shaped form is its own id, not a second spelling"
+    [ "keeper-alice" ]
     (parse "cc @keeper-alice");
   (* Apostrophe is an internal (kept) character — "@alpha's" is its own
      token and never reaches "alpha"; same as the legacy tokenizer. *)

@@ -1,5 +1,8 @@
 name = "masc_msx_restore"
-description = "Restore a named MSX checkpoint, replacing the current machine only after validation. Resumes the saved frame, mounted media and input ledger without rebooting."
+description = """
+Resume a saved MSX machine.
+
+Restore a named MSX checkpoint, replacing the current machine only after validation. Resumes the saved frame, mounted media and input ledger without rebooting."""
 additional_properties = false
 defer_loading = true
 

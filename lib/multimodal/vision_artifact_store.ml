@@ -44,9 +44,22 @@ let store ~dir (raw : string) : (handle, string) result =
   with
   | Error _ as e -> e
   | Ok () ->
-    (match Fs_compat.save_file_atomic (path_of ~dir h) raw with
-     | Ok () -> Ok h
-     | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
+    let path = path_of ~dir h in
+    (* Verify bytes on every store: a handle or cached stat cannot establish
+       that the destination still exists and contains this image. A failed
+       comparison falls through to the existing atomic repair/write path. *)
+    let already_stored =
+      match Fs_compat.load_owned_regular_file_prefix
+              ~ownership_root:dir ~max_bytes:(String.length raw) path with
+      | Ok (Some existing) ->
+          not existing.truncated && String.equal existing.content raw
+      | Ok None | Error _ -> false
+    in
+    if already_stored then Ok h
+    else
+      (match Fs_compat.save_file_atomic path raw with
+       | Ok () -> Ok h
+       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
 
 type load_error =
   | Malformed_handle of string

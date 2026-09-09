@@ -4907,6 +4907,25 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
+let test_config_post_rejects_invalid_activation_mode () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-activation" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let original = In_channel.with_open_bin toml_path In_channel.input_all in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  List.iter
+    (fun body ->
+      let raw, _ =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name body
+      in
+      expect_http_status "invalid activation mode is rejected" 400 raw;
+      check string "rejected activation preserves config bytes" original
+        (In_channel.with_open_bin toml_path In_channel.input_all))
+    [ {|{"activation_mode":true}|}
+    ; {|{"activation_mode":"unknown"}|}
+    ]
+
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-invalid-mixed" in
@@ -5655,6 +5674,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config rejects invalid activation mode" `Quick
+            test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick
             test_config_post_round_trips_typed_tools_patch;
           test_case "typed Skills patch preserves all, exact and none" `Quick

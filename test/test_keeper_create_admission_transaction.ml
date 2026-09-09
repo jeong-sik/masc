@@ -336,6 +336,71 @@ activation_mode = "on_demand"
        | None -> fail "materialized Keeper has no running lane")
 ;;
 
+let check_config_boot_runtime_assignment ~requested_runtime ~expected_runtime () =
+  with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
+  let keeper_name = "imp" in
+  let toml_path = Filename.concat keepers_dir "imp.toml" in
+  write_file toml_path
+    {|[keeper]
+instructions = "Use the connection selected before first boot"
+sandbox_profile = "docker"
+activation_mode = "manual"
+|};
+  (* Complete request ceilings make both configured HTTP bindings writable;
+     the non-runtime recovery provider and manual activation make no model call. *)
+  let configured =
+    runtime_toml ^ {|
+max-request-body-bytes = 65536
+
+[models.other_model]
+api-name = "other-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.other_model]
+max-request-body-bytes = 65536
+
+[runtime.assignments]
+imp = "test_provider.test_model"
+other = "test_provider.test_model"
+|}
+  in
+  write_file runtime_path configured;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Runtime.set_runtime_default ~runtime_config_path:runtime_path
+     ~runtime_id:"test_provider.other_model" () with
+   | Ok _ -> () | Error detail -> fail detail);
+  let before = read_file runtime_path in
+  let ctx : _ Profile.context =
+    { config; agent_name = "test-agent"; sw; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None; net = None
+    ; publication_recovery_provider = Masc_test_deps.non_runtime_publication_recovery_provider }
+  in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_keepalive.stop_keepalive keeper_name)
+    (fun () ->
+      let fields = [ "name", `String keeper_name ] @
+        (match requested_runtime with None -> [] | Some id -> [ "runtime_id", `String id ]) in
+      let result = Turn_up.handle_keeper_up ctx (`Assoc fields) in
+      check bool ("boot succeeds: " ^ Profile.tool_result_body result) true
+        (Profile.tool_result_success result);
+      check (option string) "first boot retains the selected assignment"
+        (Some expected_runtime) (Runtime.runtime_id_for_keeper keeper_name);
+      check (option string) "unrelated assignment remains"
+        (Some "test_provider.test_model") (Runtime.runtime_id_for_keeper "other");
+      (match requested_runtime with
+       | None -> check string "omitted runtime does not rewrite runtime.toml" before (read_file runtime_path)
+       | Some _ -> ());
+      match Store.read_meta config keeper_name with
+      | Ok (Some meta) ->
+        check string "materialized Keeper resolves the preserved assignment"
+          expected_runtime (Masc.Keeper_meta_contract.runtime_id_of_meta meta)
+      | Ok None -> fail "boot produced no Keeper metadata"
+      | Error detail -> fail detail)
+;;
+
 let () =
   Alcotest.run
     "keeper_create_admission_transaction"
@@ -352,6 +417,12 @@ let () =
             "config-only declarative Keeper materializes without rewrite"
             `Quick
             test_config_only_keeper_materializes_without_rewriting_manifest
+        ; test_case "first boot preserves explicit imp runtime after default changes" `Quick
+            (check_config_boot_runtime_assignment ~requested_runtime:None
+               ~expected_runtime:"test_provider.test_model")
+        ; test_case "explicit boot runtime replaces the previous assignment" `Quick
+            (check_config_boot_runtime_assignment ~requested_runtime:(Some "test_provider.other_model")
+               ~expected_runtime:"test_provider.other_model")
         ] )
     ]
 ;;

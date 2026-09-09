@@ -113,3 +113,27 @@ let () =
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
        assert (json |> member "source" |> member "sha256" |> to_string = located.digest));
   print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"
+
+(* Repeated ids are what the target index is for: a scene can hold the same
+   node twice, and both copies must carry the number of its first appearance.
+   The projection used to answer this by rescanning the deduplicated list for
+   every node, which rebuilt that list each time. *)
+let () =
+  let node node_id text : Masc.Browser_scene.node =
+    { node_id; kind = Text; tag = "p"; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped } in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/doc"; title = "Doc";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    nodes = [node "a" "first"; node "b" "second"; node "a" "first again"; node "c" "third"] } in
+  let view = { (Lane.create ()) with
+    scene = Some { source = Live; client_id = None; tab_id = 1; content; elapsed_ms = 1. };
+    scene_cursor = 2 } in
+  if List.length (Lane.scene_targets view) <> 3 then
+    failwith "repeated node ids must collapse to one target each";
+  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
+  if lines <> ["[1 p] first"; "[2 p] second"; "[1 p] first again"; "[>3 p] third"] then
+    failwith "each node must carry the number of its id's first appearance, and the cursor its marker";
+  print_endline "PASS repeated scene node ids keep one number each"

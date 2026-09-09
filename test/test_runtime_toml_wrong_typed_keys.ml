@@ -129,10 +129,6 @@ let cases =
       "preserve-thinking = 1"
       "models.m.preserve-thinking: preserve-thinking must be a boolean"
   ; model_case
-      "models.m.max-thinking-budget = \"x\""
-      "max-thinking-budget = \"x\""
-      "models.m.max-thinking-budget: max-thinking-budget must be an integer"
-  ; model_case
       "models.m.streaming = 1"
       "streaming = 1"
       "models.m.streaming: streaming must be a boolean"

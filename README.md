@@ -78,17 +78,12 @@ stores one; the server reads keys from the environment it is started in.
 
 The wizard reports two axes:
 
-- **Model source.** The seeded `runtime.toml` carries five providers: Ollama
-  Cloud, DeepSeek, GLM Coding Plan, Kimi for Coding, and a local Ollama. A
-  cloud provider is keyed by its environment variable; the local server is
-  probed at its health path and shown `reachable` or `not running`. Templates
-  for llama-server, vLLM, MLX, and the subscription CLIs (Claude Code, Codex,
-  Antigravity) sit commented out in the same file. Uncomment one and the
-  wizard lists it, showing a CLI as `installed` when it is on `PATH` and
-  `signed in` when its own login check passes; a template with more than
-  one model binding (Claude Code) also needs `wizard-default = true` on one
-  of them, or the wizard skips it. Anthropic and OpenAI have no seeded block
-  yet. `--provider <id>` picks one without prompting.
+- **Model source.** The wizard lists what `.masc/config/runtime.toml`
+  declares: the providers seeded there, plus any commented-out template you
+  uncomment. Each is shown with whether it answered, whether it still wants a
+  credential, or whether it is not there at all. That file holds the provider
+  list, the environment variable each one reads, and the templates — the
+  wizard adds none of its own. `--provider <id>` picks one without prompting.
 - **Execution sandbox.** Which of `docker`, `microvm`, and `remote_ssh` this
   host can offer. The wizard reports and does not choose. The sandbox is set
   per Keeper, or by a `--team <preset>` that carries its own choice.

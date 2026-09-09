@@ -475,7 +475,12 @@ def send_and_wait(
 ) -> bytes:
     read_available(master_fd, output)
     start = len(output)
-    os.write(master_fd, data)
+    # Through write_all, not os.write: the master is non-blocking and the
+    # terminal's input queue holds about a kilobyte, so a single write of a
+    # longer payload returns short and the rest is dropped without an error.
+    # A scenario that types 1,819 bytes and waits for the tail was waiting on
+    # bytes the terminal never received -- 1,022 of them arrived.
+    write_all(master_fd, output, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
     needle_end = end_of_needle(output, needle, start)
     wait_for_output(

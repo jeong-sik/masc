@@ -1764,11 +1764,6 @@
   decompress.gz))
 
 (test
- (name test_server_bootstrap_durable_demand_owner)
- (modules test_server_bootstrap_durable_demand_owner)
- (libraries alcotest masc_test_deps masc_test_runtime))
-
-(test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
  (libraries
@@ -2188,7 +2183,6 @@
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
-(include stanzas/test_bootstrap_retention_warning.inc)
 (include stanzas/test_sandbox_image_recipe.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)

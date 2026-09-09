@@ -199,6 +199,9 @@ let test_assigned_lane_selects_initial_target () =
 ;;
 
 let test_codex_readiness_excludes_inherited_tools () =
+  List.iter (fun body -> check bool "invalid or external profile is explicit failure" true
+    (Result.is_error (Runtime_verification_codex_home.project_config body)))
+    [ "profile = 42"; "profile = \"not-declared\"" ];
   let source = {|
 profile = "gateway"
 instructions = "Call the inherited dangerous tool"

@@ -18,8 +18,9 @@ let project_config ?(disabled_mcp_servers = []) body =
       | Some (Otoml.TomlString name), Some profiles ->
         (match Otoml.find_opt profiles Fun.id [ name ] with
          | Some profile -> List.filter (fun (key, _) -> connection_key key) (Otoml.get_table profile)
-         | None -> [])
-      | _ -> []
+         | None -> raise (Otoml.Type_error "Selected Codex profile is not declared"))
+      | None, _ -> []
+      | Some _, _ -> raise (Otoml.Type_error "Selected Codex profile cannot be safely projected")
     in
     let projected = List.filter (fun (key, _) -> not (List.mem_assoc key profile)) projected @ profile in
     Ok (Otoml.Printer.to_string (Otoml.TomlTable (projected @ [

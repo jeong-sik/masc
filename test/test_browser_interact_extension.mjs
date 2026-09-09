@@ -82,3 +82,58 @@ page.getComputedStyle = el => ({display:'block',visibility:'visible',overflowY:e
 const nested = await command({...observed,action:'scroll_at',x:0,y:-120});
 assert.equal(nested.ok,true);assert.equal(pane.scrollTop,-120);
 console.log('PASS: extension dispatches screenshot point click, rejects stale viewport and unsupported drag, scrolls reverse-flow pane');
+
+const innerHost = {shadowRoot: {elementFromPoint: () => button}};
+const outerHost = {shadowRoot: {elementFromPoint: () => innerHost}};
+page.document.elementFromPoint = () => outerHost;
+pane.scrollTop = 0;
+const shadowScroll = await command({...observed,action:'scroll_at',x:0,y:-120});
+assert.equal(shadowScroll.ok,true);
+assert.equal(pane.scrollTop,-120,'nested open shadow roots reach the internal scroll pane');
+console.log('PASS: nested open shadow roots target the internal scroll pane');
+
+// Following an observed href never runs an application click handler/new window.
+class Anchor {
+  constructor(target = '', href = 'https://example.org/destination') {this.target=target;this.href=href;}
+  hasAttribute(name) {return name === 'href';}
+  getAttribute(name) {return name === 'target' ? this.target : null;}
+  getClientRects() {return [{}];}
+  click() {throw new Error('follow must not run window.open handlers');}
+}
+let followed, assigned = [];
+const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL,
+  browserScene: () => followed,
+  location:{href:'https://example.org/source',assign:url=>assigned.push(url)},
+  document:{title:'Still source',querySelector:()=>null},scrollX:0,scrollY:0,
+  getComputedStyle:()=>({display:'block',visibility:'visible'})});
+vm.runInContext(driverFunction,followPage);
+const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
+followed=new Anchor('_blank');
+assert.throws(follow,/follow_link_requires_same_tab/);
+assert.equal(assigned.length,0,'new-tab target rejects before navigation');
+followed=new Anchor('', 'javascript:window.open("other")');
+assert.throws(follow,/follow_link_requires_http_url/);
+assert.equal(assigned.length,0);
+followed=new Anchor();
+const receipt=follow();
+assert.equal(receipt.destinationUrl,'https://example.org/destination');
+assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
+assert.deepEqual(assigned,['https://example.org/destination']);
+
+// Exercise the actual native message dispatch and injected scene resolver.
+page.HTMLAnchorElement=Anchor;page.URL=URL;
+page.getComputedStyle=()=>({display:'block',visibility:'visible'});
+page.document.querySelector=()=>null;
+page.location.assign=url=>assigned.push(url);
+page.followAnchor=new Anchor('_blank');
+page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
+vm.runInContext("window[Symbol.for('masc.browser.scene.v1')].nodes.set('follow-link',new WeakRef(followAnchor))",page);
+const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
+assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
+page.followAnchor.target='_self';
+const dispatchedReceipt=await command(dispatchedFollow);
+assert.equal(dispatchedReceipt.ok,true,JSON.stringify(dispatchedReceipt));
+assert.equal(dispatchedReceipt.data.tabId,7);
+assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
+assert.equal(dispatchedReceipt.data.action,'follow_link');
+console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');

@@ -96,7 +96,7 @@ function browserScene(args) {
   const view = args.view === undefined ? 'content' : args.view;
   if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
   if (view === 'regions' && root) {
-    const selector = 'main,nav,aside,section,article,[role=main],[role=navigation],[role=complementary],[role=region],[role=log]';
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
     const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
     for (const region of regions) {
       if (truncated) break;
@@ -292,6 +292,25 @@ function interactInPage(args) {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
     throw new Error("page_url_changed");
   const before = location.href;
+  if (args.action === "follow_link") {
+    const element = browserScene({...args,mode:'resolve'});
+    if (!(element instanceof HTMLAnchorElement) || !element.hasAttribute('href'))
+      throw new Error('follow_link_requires_anchor');
+    const style = getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility !== 'visible' || style.display === 'none')
+      throw new Error('element_not_visible');
+    const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
+    if (target !== '' && target.toLowerCase() !== '_self') throw new Error('follow_link_requires_same_tab');
+    if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
+    const destination = new URL(element.href, location.href);
+    if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
+    const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      title:document.title,scrollX:scrollX,scrollY:scrollY};
+    // Follow the observed href directly: page click handlers cannot redirect
+    // this primitive into window.open or an unrelated application action.
+    location.assign(destination.href);
+    return result;
+  }
   if (args.action === "drag") throw new Error("trusted_drag_requires_automation");
   if (args.action === "click_at" || args.action === "scroll_at") {
     const current = browserScene({mode:'viewport'}), expected = args.viewport;
@@ -301,7 +320,7 @@ function interactInPage(args) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
         || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
       throw new Error('invalid_viewport_point');
-    const element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    let element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
     if (!element) throw new Error('point_has_no_element');
     if (args.action === 'click_at') {
       if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
@@ -310,6 +329,13 @@ function interactInPage(args) {
     } else {
       if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
         throw new Error('scroll_coordinates_must_be_integers');
+      // document.elementFromPoint retargets shadow descendants to their host.
+      // Find the innermost accessible hit before walking scroll ancestors.
+      while (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+        const inner = element.shadowRoot.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+        if (!inner || inner === element) break;
+        element = inner;
+      }
       // Follow actual scroll containers under the pointer. Slack's message
       // pane scrolls independently of document.body and its channel sidebar.
       const scrollAxis = (delta, axis) => {
@@ -386,7 +412,7 @@ function interactInPage(args) {
 
 async function pageInteract(args) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
-  if (!['click', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
+  if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
   // JSON encoding keeps selectors and text out of executable source syntax.
   const [result] = await browser.tabs.executeScript(args.tabId, {
     code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,

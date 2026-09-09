@@ -354,7 +354,12 @@ let execute_unlocked t = function
             | _ -> pointer_actions in
           (* Release even if transport cancellation interrupts a pressed gesture.
              The enclosing session lock remains held throughout cleanup. *)
-          let applied, released =
+          let applied, released = match action with
+            | Browser_lane.Scroll_at _ ->
+                (* Wheel actions do not press buttons. Session acquisition
+                   already recovers any older pending pointer release. *)
+                call t session `POST "/actions" (Some actions), Ok ()
+            | _ ->
             let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->
@@ -363,7 +368,7 @@ let execute_unlocked t = function
                 released := Some result);
               session.pointer_state <- Release_required;
               call t session `POST "/actions" (Some actions)) in
-            applied, (match !released with Some result -> result
+            applied, (match !released with Some result -> Result.map (fun _ -> ()) result
               | None -> Error (Protocol "pointer cleanup did not run")) in
           let* _ = applied in
           let* _ = released in

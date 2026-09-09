@@ -132,9 +132,22 @@ MASC에서는 `keeper_skill`에 이 스킬의 동일한 `identity`와 해당 상
 전체 페이지 응답을 영역 읽기의 성공으로 받아들이지 않는다. 같은 영역을
 새로 읽을 때도 scope를 유지하고, reload/detach 거절은 새 관측으로 해소한다.
 
-사이트 instruction이 실제 이동 대상을 고른 뒤 Available 목록의
-`browser-live-click-regions` composition을 필요할 때 읽는다. 이 Skill은 live
-브라우저의 관측된 링크를 한 번 클릭하고 그 탭의 새 영역 목록을 반환한다.
-실패한 클릭을 재시도하지 않으며 새 영역 선택은 모델 판단으로 남긴다.
-composition은 모델 왕복을 줄이는 도구이고, 스크롤된 전체 이력이나 요청 채널
-도착을 자체 증명하지 않는다. 결과 URL·영역 이름·본문을 확인한다.
+composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문서가 아니라
+`keeper_compose_<name>` 형태로 노출되는 호출 도구다. 현재 도구 목록에서 정확한
+이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 instruction Skill에서
+필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
+composition을 읽으려 하지 않는다.
+
+BrowserInteract 클릭 응답은 조작 접수와 원래 탭 정체를 나타낸다. 목적지 로딩 완료나
+SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수 있으므로 BrowserTabs와
+페이지 관측에서 목적지를 식별한 후 그 탭의 영역을 읽는다. URL만 바뀌어도 메시지는
+이전 채널일 수 있다. 요청 채널의 제목·영역·본문을 확인하고, 전환 중이거나 목적지가
+아직 관측되지 않으면 미확인으로 남겨 다음 관측에서 판단한다. 관측 실패 때문에
+이미 적용된 클릭을 재실행하지 않는다.
+
+관측된 같은 탭 HTTP(S) 링크를 따라갈 때 현재 도구 목록에 있는
+`keeper_compose_browser-live-click-regions`를 호출할 수 있다. 이 경로는 실제 href를
+검증하고 직접 이동하므로 클릭 핸들러를 실행하지 않는다. 새 창 대상·다운로드는
+이동 전에 거절된다. 후속 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
+전환 오류이면 저장된 이동 결과에서 URL을 가져와 BrowserRead만 재시도한다.
+일치하는 URL도 사이트 내용의 준비 완료는 아니며 채널 제목과 본문을 검증한다.

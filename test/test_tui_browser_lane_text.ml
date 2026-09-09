@@ -94,6 +94,12 @@ let () =
   assert ((Lane.accept_scene ~generation:42 (Ok scene) focused).scene=None);
   let scoped_scene = {scene with content={content with scope=Some target}} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) focused).scene=Some scoped_scene);
+  let clicked = {focused with load=Loading (42,Scene_click {tab_id=1;
+    document_id=content.document_id;node_id=node.node_id;expected_url=content.url;scope=Some target})} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) clicked).scene=Some scoped_scene);
+  assert ((Lane.accept_scene ~generation:42 (Ok scene) clicked).scene=None);
+  let invalidated = Lane.accept_scene ~generation:42 (Error "scene_document_changed") clicked in
+  assert (invalidated.scene=None && invalidated.load=Failed "scene_document_changed");
   assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
   let located : Masc.Browser_source_context.location = {file="dashboard/src/a.ts";line=2;column=3;
     kind=Template;digest=String.make 64 'a'} in

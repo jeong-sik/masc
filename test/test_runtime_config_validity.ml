@@ -628,7 +628,7 @@ let test_repo_deepseek_thinking_request () =
       String.equal runtime.id "deepseek.deepseek-v4-pro") runtimes with
     | Some runtime -> runtime
     | None -> fail "direct DeepSeek seed runtime is missing" in
-  check bool "thinking remains enabled by model policy" true runtime.model.thinking_support;
+  check (option bool) "thinking remains enabled by model policy" (Some true) runtime.model.thinking_support;
   let provider_config = agent_core_provider_config runtime in
   List.iter (fun (enabled, effort, expected) ->
     let config = { provider_config with

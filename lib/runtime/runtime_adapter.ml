@@ -410,6 +410,10 @@ let model_capabilities_override_of_model_spec
          ; supports_required_tool_choice = caps.supports_required_tool_choice
          ; supports_named_tool_choice = caps.supports_named_tool_choice
          ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
+         (* DET-OK: absent request policy supplies no capability override. For a
+            model absent from the catalog, retain the existing provider default
+            capability; explicit true/false overrides remain distinguishable.
+            This does not synthesize an enable_thinking request. *)
          ; supports_reasoning = Option.value spec.thinking_support ~default:base.supports_reasoning
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format

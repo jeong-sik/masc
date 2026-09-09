@@ -1389,6 +1389,20 @@ masc_reported_version() {
   run_masc_with_install_env "$bin" --version 2>/dev/null | tail -n1
 }
 
+# Automatic upgrades apply only to ordered stable release versions. Unknown
+# development/prerelease strings and downgrades still require an explicit force.
+is_stable_upgrade() {
+  python3 - "$1" "${2#v}" <<'PY_VERSION'
+import re, sys
+
+def release(value):
+    return tuple(map(int, value.split('.'))) if re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', value) else None
+
+installed, requested = map(release, sys.argv[1:])
+sys.exit(0 if installed is not None and requested is not None and installed < requested else 1)
+PY_VERSION
+}
+
 SKIP_DL=0
 if [ -e "$DEST" ]; then
   # The pipeline `... | tail -n1` masks the binary's own exit status, so
@@ -1400,6 +1414,8 @@ if [ -e "$DEST" ]; then
       SKIP_DL=1
     elif [ "$existing_ver" = "${VERSION#v}" ]; then
       warn "existing $DEST already reports $existing_ver; refreshing because --force is set"
+    elif [ "$FORCE" -eq 0 ] && is_stable_upgrade "$existing_ver" "$VERSION"; then
+      log "upgrading $DEST from $existing_ver to ${VERSION#v}; preserving workspace config"
     elif [ "$FORCE" -eq 0 ]; then
       warn "existing $DEST is version $existing_ver, target is ${VERSION#v}; pass --force to overwrite"
       exit 1

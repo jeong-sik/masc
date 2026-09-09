@@ -82,10 +82,18 @@ and does not fix loader or OS compatibility problems.
 TAG=v0.35.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+After installation, run this separate command to update PATH in the current terminal.
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
+
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 `--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
 for the workspace path that will hold `.masc`. For a new workspace it

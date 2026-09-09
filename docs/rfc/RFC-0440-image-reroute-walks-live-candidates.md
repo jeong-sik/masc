@@ -38,7 +38,7 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 ## 3. 판단
 
-- 후보 집합은 한 곳이 답한다. "키퍼 K 의 이미지 후보" 는 lane 의 이미지 후보에 `media_failover` 를 이어 붙인 목록(중복 제거, lane 먼저)이고, reroute 와 `keeper_vision_tool` 이 같은 함수를 부른다.
+- 후보 집합은 한 곳이 답한다. "키퍼 K 의 이미지 후보" 는 lane 의 이미지 후보 → `media_failover` → 나머지 선언 런타임 중 이미지를 받는 것(선언 순서)을 이어 붙이고 중복을 뺀 목록이다. 지금 `keeper_vision_tool` 이 쓰는 꼬리(선언 순서)를 그대로 포함하므로 도구 경로가 잃는 후보는 없고, reroute 는 lane 밖 후보를 얻는다. 두 경로가 같은 함수를 부른다.
 - reroute 는 걸음이다. 후보가 402·429·`insufficient_quota` 같은 `should_try_next` 오류로 끝나면 같은 걸음에서 다음 이미지 후보로 간다. 같은 턴에서 같은 후보를 다시 방문하지 않는다. lane 의 텍스트 failover 는 이미지를 받지 못하는 후보라 이 걸음에 끼지 않는다.
 - 바닥은 위임이다. 살아 있는 이미지 후보가 없으면 `No_capable_runtime` 으로 이미지를 떨구는 대신 `Keeper_vision_ingest` 의 eager read 로 내려간다. 읽기 결과가 텍스트로 들어가므로 키퍼의 lane 은 그대로다.
 - `delegates_media` 는 "이미지를 받는 후보가 있나" 가 아니라 "살아 있는 이미지 후보가 있나" 를 본다. 이번 턴의 걸음 결과가 그 답이다.

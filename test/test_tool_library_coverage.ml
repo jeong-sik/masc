@@ -124,7 +124,7 @@ let test_add_on_fresh_base () =
           ~args:(`Assoc ["topic", `String title]) in
       Alcotest.(check bool) "saved document readable" true ok;
       Alcotest.(check bool) "exact content retained" true
-        (Masc.String_util.contains_substring content "fresh base evidence")))
+        (String_util.contains_substring content "fresh base evidence")))
     ["Fresh library"; "새 도서관"]
 
 (* ============================================================

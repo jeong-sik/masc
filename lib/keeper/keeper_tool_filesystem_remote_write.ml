@@ -93,14 +93,14 @@ let success_payload ~target ~(meta : keeper_meta) fields : Yojson.Safe.t =
        @ [ "via", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) ])
 ;;
 
-let handle_with_endpoint
+let handle_content_with_endpoint
+      ~content
       ~(endpoint : Keeper_sandbox_remote.t)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let content = Safe_ops.json_string ~default:"" "content" args in
   let failure ?class_ ~target message =
     Keeper_tool_execution.failure ?class_ (error_json ~fields:[ "path", `String target ] message)
   in
@@ -242,6 +242,15 @@ let handle_with_endpoint
                               (describe_status status)
                               (Keeper_sandbox_remote.name endpoint)
                               (Exec_policy.truncate_for_log stderr))))))
+;;
+
+let handle_with_endpoint ~endpoint ~config ~meta ~args =
+  match Keeper_write_content.of_args args with
+  | Error error -> Keeper_write_content.failure error
+  | Ok source ->
+    (match Keeper_write_content.bytes ~config source with
+     | Error error -> Keeper_write_content.failure error
+     | Ok content -> handle_content_with_endpoint ~content ~endpoint ~config ~meta ~args)
 ;;
 
 let handle ~turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~args =

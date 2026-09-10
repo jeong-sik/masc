@@ -1374,7 +1374,7 @@ let approved_write_of_gate_input input =
     let carried =
       List.filter_map
         (fun name -> Option.map (fun value -> name, value) (field name))
-        [ "content"; "old_string"; "new_string"; "replace_all"; "insert_before_line"; "insert_text" ]
+        [ "content"; "content_artifact"; "old_string"; "new_string"; "replace_all"; "insert_before_line"; "insert_text" ]
     in
     Ok { target; mode; carried }
   | _ -> Error "approved Gate input is not a JSON object"
@@ -1407,6 +1407,7 @@ let file_write_gate_input
       ~gate_effect
       ~requested_target
       ~content
+      ?content_source
       ?old_string
       ?new_string
       ?replace_all
@@ -1429,8 +1430,8 @@ let file_write_gate_input
   `Assoc
     ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
      ; "requested_target", `String requested_target
-     ; "content", `String content
      ]
+     @ Keeper_write_content.fields (Option.value ~default:(Keeper_write_content.Text content) content_source)
      @ optional_string "old_string" old_string
      @ optional_string "new_string" new_string
      @ optional_bool "replace_all" replace_all
@@ -2264,7 +2265,8 @@ let content_write_observation = function
     }
 ;;
 
-let handle_file_write_with_outcome
+let handle_file_write_content_with_outcome
+      ~content_source ~content
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -2298,7 +2300,6 @@ let handle_file_write_with_outcome
     | None -> []
   in
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let content = Safe_ops.json_string ~default:"" "content" args in
   (* Absent, non-string and unknown modes are all rejected; see
      [Keeper_tool_write_mode.of_args] for why there is no default. *)
   let mode_result = Keeper_tool_write_mode.of_args args in
@@ -2438,6 +2439,7 @@ let handle_file_write_with_outcome
       file_write_gate_input
         ~gate_effect
         ~requested_target:target
+        ~content_source
         ~content
         ()
     in
@@ -3095,3 +3097,14 @@ module For_testing = struct
     Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
   ;;
 end
+
+let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~meta
+    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
+  match Keeper_write_content.of_args args with
+  | Error error -> Keeper_write_content.failure error
+  | Ok content_source ->
+    (match Keeper_write_content.bytes ~config content_source with
+     | Error error -> Keeper_write_content.failure error
+     | Ok content -> handle_file_write_content_with_outcome ~content_source ~content
+         ~turn_sandbox_factory ~config ~meta ~publication_recovery
+         ?continuation_channel ?gate_context ?gate_grant ~args ())

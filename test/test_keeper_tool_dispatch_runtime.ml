@@ -7937,9 +7937,37 @@ let test_edit_manifest_through_model_projection () =
 
 ;;
 
+let test_binary_write_reference_survives_replay () =
+  with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+    let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let reference = Tool_blob_store.put_durable store ~bytes ~mime:"image/png" in
+    let target = playground_file ~config ~meta "received.png" in
+    let input = `Assoc (["requested_target", `String target;
+       "effect", `Assoc ["operation", `String "atomic_replace_entry"]]
+       @ Masc.Keeper_write_content.fields (Masc.Keeper_write_content.Artifact reference)) in
+    let encoded = Yojson.Safe.to_string input in
+    check bool "binary never enters approval JSON" false (String_util.contains_substring encoded bytes);
+    let persisted = Filename.concat config.base_path "approved-write.json" in
+    Fs_compat.save_file_atomic persisted encoded;
+    let replay_args = match Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+        (Yojson.Safe.from_string (Fs_compat.load_file persisted)) with
+      | Ok args -> args | Error detail -> fail detail in
+    let invoke () = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~publication_recovery ~args:replay_args () in
+    let result = invoke () in
+    check bool "replayed content completed" true (result.disposition = Tool_result.Completed ());
+    check string "recipient PNG bytes exact" bytes (Fs_compat.load_file target);
+    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store)
+       (String.sub reference.sha256 0 2)) reference.sha256 in
+    Fs_compat.save_file blob "corrupt";
+    check bool "replay fails on corrupt content" true ((invoke ()).disposition <> Tool_result.Completed ());
+    check string "corrupt replay leaves recipient intact" bytes (Fs_compat.load_file target))
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
+    ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);

@@ -17,8 +17,17 @@ let fixture test = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     | Ok (Unix.WEXITED 0,s,_) -> String.trim s | _ -> Alcotest.fail "Python fixture unavailable" in
   let binary=Filename.concat base "native-fixture" in
   save binary ("#!" ^ python ^ {|
-import json,sys
+import json,sys,os
 args=sys.argv[1:]
+if args[0]=='runtime-antigravity-account':
+    assert args[1]=='--base-path' and args[3:]==['--cli-path','agy']
+    credential=os.path.join(args[2],'fixture-account.json')
+    with open(credential,'w') as f: f.write('fixture-imported-account')
+    os.chmod(credential,0o600)
+    print(json.dumps({'schema':'masc.antigravity_account.v1','credential_file':credential,
+      'provider_timeout_s':123.5,'invocation_verified':False,
+      'catalog':{'models':[{'id':'fresh-antigravity','label':'Fresh account model','context':None}]}}))
+    sys.exit(0)
 if args[0]=='runtime-codex-models':
     print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
@@ -70,7 +79,22 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
     let model=json |> member "models" |> to_list |> List.hd in
     Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
     Alcotest.check Alcotest.bool "child private field not projected" true (json |> member "credential_file" = `Null)))
+let test_account_reference () = fixture (fun base _runtime binary _net ->
+  let receipt=get (Actions.import_account ~binary ~base_path:base (`Assoc ["integration_id",`String "antigravity"])) in
+  let open Yojson.Safe.Util in
+  let reference=receipt |> member "account_ref" |> to_string in
+  Alcotest.check Alcotest.bool "opaque account identity" true (Auth.is_generated_token_shape reference);
+  Alcotest.check Alcotest.bool "import is not invocation verification" false (receipt |> member "invocation_verified" |> to_bool);
+  Alcotest.check (Alcotest.list Alcotest.string) "safe import response only"
+    (List.sort String.compare ["schema";"account_ref";"account_imported";"invocation_verified";"catalog"])
+    (receipt |> to_assoc |> List.map fst |> List.sort String.compare);
+  let selected=`Assoc ["integration_id",`String "antigravity";"account_ref",`String reference] in
+  ignore (get (Actions.save ~binary ~base_path:base (request base selected)));
+  Alcotest.check Alcotest.bool "browser cannot replace account source path" true
+    (Actions.import_account ~binary ~base_path:base (`Assoc ["integration_id",`String "antigravity";"credential_file",`String "/private/source"])
+      = Error Actions.Invalid_request))
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
-  Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata]]
+  Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
+  Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference]]

@@ -49,7 +49,12 @@ let classify_blocks blocks =
        | Agent_core.Types.Thinking { content; _ } -> text, thinking ^ content, details
        | Agent_core.Types.ReasoningDetails { details = d; _ } ->
          text, thinking, details @ d
-       | _ -> text, thinking, details)
+       | Agent_core.Types.RedactedThinking _
+       | Agent_core.Types.ToolUse _
+       | Agent_core.Types.ToolResult _
+       | Agent_core.Types.Image _
+       | Agent_core.Types.Document _
+       | Agent_core.Types.Audio _ -> text, thinking, details)
     ("", "", [])
     blocks
 ;;
@@ -57,7 +62,7 @@ let classify_blocks blocks =
 let detail_type (d : Agent_core.Types.reasoning_detail) =
   match Yojson.Safe.Util.member "type" d.raw with
   | `String s -> s
-  | _ -> "<untyped>"
+  | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> "<untyped>"
 ;;
 
 let () =
@@ -120,7 +125,10 @@ let () =
       | Llm_provider.Http_client.NetworkError { message; _ } -> "network: " ^ message
       | Llm_provider.Http_client.TimeoutError { message; _ } -> "timeout: " ^ message
       | Llm_provider.Http_client.AcceptRejected { reason } -> "rejected: " ^ reason
-      | _ -> "unclassified transport failure"
+      | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
+        "provider terminal: " ^ message
+      | Llm_provider.Http_client.ProviderFailure { message; _ } ->
+        "provider failure: " ^ message
     in
     Printf.eprintf "stream failed: %s\n" described;
     exit 1

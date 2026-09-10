@@ -222,3 +222,23 @@ Independent pdfinfo inspection confirms booklet.pdf has3 pages. Direct
 pdftoppm rendering of page1 differs from the Keeper-supplied renders/page1.png,
 which make_renders draws separately with PIL. Those PNGs cannot verify the PDF's
 actual layout. Both images and the queued operator feedback are retained.
+
+## Connected Dashboard and target-suite result
+
+Vite proxy investigation reproduced401 with the original Origin/Host mapping.
+Preserving Host alone failed the backend authority check. A development-only
+proxy fix validates the incoming browser origin against its host, then maps
+both headers to the configured backend. Authenticated browser hello connected
+on port18963; a cross-origin browser remained rejected. The root inspected the
+screenshot showing prior operator history, both Keepers and task-001. This
+proves the source preview, not a packaged/installed Dashboard.
+
+Integration run34482020814 passed all10 requested suites at6ebc266c50. The only
+change from running binary9cc33feff4 was the vision-test module reference;
+source identities remain distinct. Image PR35116's separate4suite run also
+passed, while two broader schema contracts required further edits.
+
+The designer was asked to finish the actual poster after successful visual
+reading. The operator explicitly allowed the equivalent fee wording0원 to
+avoid the prior word-edit loop. This is further operator steering, not proof
+of autonomous recovery. Its operation remains separately tracked.

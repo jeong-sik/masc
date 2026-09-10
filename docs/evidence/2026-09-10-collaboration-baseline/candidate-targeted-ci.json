@@ -1,0 +1,13 @@
+{
+  "running_binary_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "tested_commit": "6ebc266c5009e931c32d003ef8a78538668bd9c3",
+  "changed_paths_since_binary": [
+    "test/test_keeper_vision_tool.ml"
+  ],
+  "targeted_run": 34482020814,
+  "targeted_conclusion": "success",
+  "suite_count": 10,
+  "image_pr_targeted_run": 34481922898,
+  "image_pr_targeted_conclusion": "success",
+  "image_pr_other_checks": "schema byte and deferred summary contracts need separate repair; PR head has since changed"
+}

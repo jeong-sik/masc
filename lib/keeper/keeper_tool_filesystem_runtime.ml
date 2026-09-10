@@ -317,6 +317,18 @@ type read_file_attempt =
   | Read_failed_payload of string
   | Read_failed_message of string
 
+let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
+  let* target =
+    resolve_read_file_target ~config ~meta ~args:(`Assoc []) ~raw_path:path
+    |> Result.map_error (function Read_path_error detail -> detail)
+  in
+  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
+    ~host_path:target ~max_bytes
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
+  |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
+;;
+
 let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -2914,9 +2926,12 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* (application : Keeper_tool_patch.patch_application) =
-                  Keeper_tool_patch.apply operation current
-                in
+                match Keeper_tool_patch.apply operation current with
+                | Error message ->
+                  Ok (Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Workflow_rejection })
+                | Ok application ->
                 if String.equal current application.updated then
                   Ok (Write_unchanged (`Assoc
                     ([ "ok", `Bool true; "changed", `Bool false

@@ -99,7 +99,7 @@ let acquire ~host ~run =
         |> Result.map_error (fun () -> Download_failed) in
       let* actual,size = file_digest path in
       if actual <> sha256 || size <= 0 then Error Digest_mismatch else
-      preserve := true;
+      let () = preserve := true in
       let result, cleaned = mounted ~run ~directory ~path (fun app ->
         let* () = verify_app ~run app in
         let* version = run ["/usr/bin/plutil";"-extract";"CFBundleShortVersionString";"raw";

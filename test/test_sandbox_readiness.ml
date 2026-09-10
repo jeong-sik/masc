@@ -26,6 +26,17 @@ let test_service_not_presence () =
   let healthy = probe linux (docker []) S.Docker in
   check bool "service ready" true (healthy.state = S.Service_ready);
   check bool "no guest execution claimed" true (healthy.guest_verification = S.Not_run)
+let test_catalog_selection_boundary () =
+  let rows = [probe mac (docker []) S.Docker; probe mac [] S.Apple_container] in
+  let catalog = S.catalog_json ~host:mac ~configured:None rows in
+  let selected_id = Yojson.Safe.Util.member "recommended" catalog |> Yojson.Safe.Util.to_string in
+  check bool "serialized recommendation resolves to real backend" true
+    (S.backend_of_id selected_id = Some S.Docker);
+  List.iter (fun id -> check bool "unknown or host fallback request rejected" true
+      (S.backend_of_id id = None)) ["local"; "host"; "docker;sh"; ""];
+  let candidates = Yojson.Safe.Util.member "candidates" catalog |> Yojson.Safe.Util.to_list in
+  List.iter (fun row -> check bool "catalog does not advertise executed guests" true
+    (Yojson.Safe.Util.member "guest_verification" row = `String "not_run")) candidates
 let test_hardening () =
   check bool "required rootless absent" true
     (match (probe ~rootless:true linux (docker []) S.Docker).state with
@@ -89,6 +100,7 @@ let test_commit_conflict () =
           (In_channel.with_open_text path In_channel.input_all)))
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
+  test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
   test_case "hardening requirements" `Quick test_hardening;
   test_case "OS recommendation and configured preference" `Quick test_recommendation;
   test_case "Kata prerequisites" `Quick test_kata_prerequisites;

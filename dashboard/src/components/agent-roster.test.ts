@@ -1999,6 +1999,8 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
     const keys = Array.from(
       container.querySelectorAll('[data-testid="fleet-aside-actions"] .fl-actbar .fl-btn'),
     ).map(el => (el as HTMLElement).dataset.action)
-    expect(keys).toEqual(['pause', 'wakeup', 'shutdown'])
+    // purge in every phase: #34700 made canPurge unconditional because the
+    // confirmed request shuts the Keeper down durably before it cleans up.
+    expect(keys).toEqual(['pause', 'wakeup', 'shutdown', 'purge'])
   })
 })

@@ -297,6 +297,22 @@ changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
 
 select_sources || exit 0
 
+# The suites main is known not to pass. The nightly ratchet holds this list in
+# both directions -- a suite that fails unlisted is a new break, a listed one
+# that passes has to come off -- so it is the record of what a pull request is
+# not answerable for. Running one here and failing on it would stop a pull
+# request for a break it did not cause, which is what kept this step advisory.
+known_failures_file="test/ci-known-failures.txt"
+known_failures=""
+if [ -f "${known_failures_file}" ]; then
+  known_failures=$( { grep -vE '^[[:space:]]*(#|$)' "${known_failures_file}" \
+    || [ $? -eq 1 ]; } | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//')
+fi
+
+is_known_failure() {
+  printf '%s\n' "${known_failures}" | grep -Fxq "$1"
+}
+
 ran=0
 skipped=0
 failed=""
@@ -304,6 +320,11 @@ while IFS= read -r source; do
   [ -n "${source}" ] || continue
   dir=$(dirname "${source}")
   name=$(basename "${source}" .ml)
+  if is_known_failure "${dir}/${name}"; then
+    echo "-- ${dir}/${name}: listed in ${known_failures_file}"
+    skipped=$((skipped + 1))
+    continue
+  fi
   verdict=$(python3 "${scope_tool}" "${dir}" "${name}")
   case "${verdict}" in
     run) ;;

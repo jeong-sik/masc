@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [0.35.7] - 2026-09-11
+
+### Fixed
+
+- Anthropic keeper lanes no longer fail every turn with `Invalid request: 'temperature' may only be set to 1 when thinking is enabled or in adaptive mode` for models whose capability row declares `ignored_sampling_parameters`. The Anthropic reasoning-dialect arm hardcoded its transport shape and never consulted the model's capability record, so the declaration was silently dropped and `temperature`/`top_p` reached the wire unconditionally; the dialect now derives its sampling policy from the capability record, and the Anthropic request builder routes `temperature`/`top_p`/`top_k` through the shared sampling-field gate (a dropped field logs the existing one-shot WARN) (#35193).
+
 ## [0.35.6] - 2026-09-10
 
 ### Fixed

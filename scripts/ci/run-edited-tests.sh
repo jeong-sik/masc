@@ -104,16 +104,27 @@ test/test_keeper_tool_schema_bytes.ml"
   # Measured over origin/main's last 60 commits: 18 pick up at least one suite,
   # the largest picks up 6, and none reaches the max_suites cap above. Of the
   # 673 modules that match at all, the per-module cap drops 26.
+  #
+  # packages/*/lib is in the scope for the same reason bin and lib are. It was
+  # not, and neither test root was searched but the top one, so no edit under
+  # agent_core selected a suite by name at all. Measured 2026-09-10: of 223
+  # package sources, 94 name a suite, 79 of those within the per-module cap,
+  # median 1. The 15 over the cap are the namespace modules the cap is for --
+  # base/tool.ml names 61 suites, runtime.ml 31.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
     stem=$(basename "${changed_source}" .ml)
     stem=${stem#masc_}
-    # Both spellings: the suite named for the module, and the family under it.
-    matches=$( { ls "test/test_${stem}.ml" "test/test_${stem}"_*.ml 2>/dev/null \
+    # Both spellings, in both test roots: the suite named for the module, and
+    # the family under it.
+    matches=$( { ls \
+      "test/test_${stem}.ml" "test/test_${stem}"_*.ml \
+      "packages/agent_core/test/test_${stem}.ml" \
+      "packages/agent_core/test/test_${stem}"_*.ml 2>/dev/null \
       || true; } | sort -u)
     [ -n "${matches}" ] || continue
     matched=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
@@ -132,17 +143,25 @@ SOURCES
   # A structural guard is named after what it asserts, not after the module it
   # reads, so the name mapping above cannot find it -- and the modules those
   # guards watch are the umbrella ones it deliberately skips. But such a guard
-  # states its own input: every Ast_grep call carries ~module_path:"<file>".
-  # Take the dependency from the declaration rather than from the name.
+  # names its own input: it has the path in a string literal, because it opens
+  # the file. Take the dependency from the literal rather than from the name.
   #
   # The regression this exists for: #35011 changed bin/masc_tui_render.ml,
-  # which test_tui_http_ast watches through 52 such declarations, and the name
-  # mapping looks for test_tui_render_* instead. The pull request merged green
-  # and main was red on that suite until #35019.
+  # which test_tui_http_ast watches through 52 Ast_grep ~module_path
+  # declarations, and the name mapping looks for test_tui_render_* instead. The
+  # pull request merged green and main was red on that suite until #35019.
   #
-  # Measured 2026-09-10: 23 source files are named this way across 30 suites,
-  # at most 5 suites per file. The per-module cap above does not apply -- it
-  # guards against a name that is a namespace, and these are declarations.
+  # Matching the bare literal rather than ~module_path: reaching only through
+  # that one helper made the rule about which API a guard uses. A guard that
+  # opens the file itself watches its input just as much: 52 suites read a real
+  # repository source without ever calling Ast_grep -- among them
+  # test_blocker_class_mirror, which extracts the blocker class list straight
+  # out of lib/keeper/keeper_meta_contract.ml.
+  #
+  # Measured 2026-09-10: 132 source files are named this way across 78 suites;
+  # 110 of them by exactly one suite, and bin/masc_tui_render.ml by the most, 8.
+  # The per-module cap above does not apply -- it guards against a name that is
+  # a namespace, and these are exact paths. max_suites still bounds the run.
   declared_suites=""
   while IFS= read -r changed_source; do
     # Trimmed, unlike the loop above: the heredoc indents its first line, and
@@ -152,7 +171,10 @@ SOURCES
     changed_source=$(printf '%s' "${changed_source}" \
       | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     [ -n "${changed_source}" ] || continue
-    watchers=$( { grep -rl "~module_path:\"${changed_source}\"" \
+    # -F: the path carries a dot before the extension, and as a regex that
+    # dot matches any character, so lib/foo.ml would also select a suite that
+    # names lib/fooXml.
+    watchers=$( { grep -rlF "\"${changed_source}\"" \
       test packages/agent_core/test --include='test_*.ml' 2>/dev/null \
       || true; } | sort -u)
     [ -n "${watchers}" ] || continue
@@ -247,16 +269,34 @@ self_test() {
   # still selects is the four guards that name the file themselves. The name
   # mapping and the declared mapping answer different questions, and only the
   # first one has to stay quiet here.
+  # test_tui_decode is here for a path inside a JSON fixture rather than a
+  # read: it is one of the two such entries in 170 (source, suite) pairs, and
+  # narrowing the match to exclude it would cost the guards that assign the
+  # path to a plain let-binding.
   check "an umbrella module selects only the guards that name it" \
-    "test/test_tui_agenda.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the
   # name mapping looks for test_tui_render_* instead. Both mappings answer
   # here, and the guard is in the answer.
   check "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml" \
     "bin/masc_tui_render.ml"
+  # A guard that reads its input with open_in instead of Ast_grep is watching
+  # it just the same. test_blocker_class_mirror pulls the blocker class list
+  # out of this file and compares it to the dashboard mirror; the name mapping
+  # looks for test_keeper_meta_contract_*, and there is no suite by that name,
+  # so before this the only edit that ran the mirror was an edit to itself.
+  check "a guard that opens its input is selected too" \
+    "test/test_blocker_class_mirror.ml" \
+    "lib/keeper/keeper_meta_contract.ml"
+  # A package source names its suites the same way, in whichever test root
+  # holds them. event_bus has one in each, which is why it is the fixture:
+  # before this, an edit under packages/ selected nothing by name.
+  check "a package source selects its suites in both test roots" \
+    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
+    "packages/agent_core/lib/event_bus.ml"
   check "a doc-only change selects nothing" "" \
     "docs/x.md"
   # A tool definition reaches both: the one that says the asset embeds and

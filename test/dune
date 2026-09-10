@@ -1805,6 +1805,13 @@
  (modules test_server_mcp_session_persist)
  (libraries alcotest masc_server unix))
 
+; The /health?full=1 operator rollup: which sections overall_status is
+; answerable for, and which it structurally cannot reach (#34893).
+(test
+ (name test_server_health_rollup)
+ (modules test_server_health_rollup)
+ (libraries alcotest masc_server yojson))
+
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test

@@ -761,6 +761,48 @@ let parse_table_array toml key parse =
            results)
 ;;
 
+(* A catalog row excluded by the lenient loaders; see [parse_table_array_lenient]. *)
+type skipped_entry =
+  { entry_label : string
+  ; skip_reason : string
+  }
+
+let skipped_entry_label ~kind ~id_key position item =
+  match
+    (try Otoml.find_opt item Otoml.get_string [ id_key ] with
+     | Otoml.Type_error _ -> None)
+  with
+  | Some raw when String.trim raw <> "" -> String.trim raw
+  | Some _ | None -> Printf.sprintf "<%s entry #%d>" kind position
+;;
+
+(* Lenient variant of [parse_table_array]: a row that fails [parse] is
+   excluded and reported instead of failing the whole load. Deployment
+   overlays are hand-written and outlive the binary that wrote them; a stale
+   field introduced by a newer release (or removed by an older one) must not
+   block every other row. Whole-file failures stay fail-closed — see
+   [catalog_of_toml_lenient]. *)
+let parse_table_array_lenient ~kind ~id_key toml key parse =
+  match Otoml.find_opt toml (Otoml.get_array Fun.id) [ key ] with
+  | None -> [], []
+  | Some items ->
+    let entries, skipped =
+      List.fold_left
+        (fun (entries, skipped) (position, item) ->
+           match parse item with
+           | Ok entry -> entry :: entries, skipped
+           | Error reason ->
+             ( entries
+             , { entry_label = skipped_entry_label ~kind ~id_key position item
+               ; skip_reason = reason
+               }
+               :: skipped ))
+        ([], [])
+        (List.mapi (fun index item -> index + 1, item) items)
+    in
+    List.rev entries, List.rev skipped
+;;
+
 let normalize_label value = String.lowercase_ascii (String.trim value)
 
 let model_row_key (entry : model_entry) =
@@ -814,7 +856,24 @@ let catalog_of_toml toml =
         | Ok () -> Ok { models; providers }))
 ;;
 
-let parse_catalog ~source parse =
+let catalog_of_toml_lenient toml =
+  let models, model_skipped =
+    parse_table_array_lenient ~kind:"model" ~id_key:"id_prefix" toml "models" parse_entry
+  in
+  let providers, provider_skipped =
+    parse_table_array_lenient
+      ~kind:"provider"
+      ~id_key:"id"
+      toml
+      "providers"
+      Model_provider_catalog.parse_entry
+  in
+  match reject_duplicate_rows models providers with
+  | Error _ as e -> e
+  | Ok () -> Ok ({ models; providers }, model_skipped @ provider_skipped)
+;;
+
+let parse_catalog_with ~source parse catalog_of =
   let parse_res =
     try Ok (parse ()) with
     | Sys_error msg ->
@@ -826,14 +885,27 @@ let parse_catalog ~source parse =
   in
   match parse_res with
   | Error _ as e -> e
-  | Ok toml -> catalog_of_toml toml
+  | Ok toml -> catalog_of toml
 ;;
+
+let parse_catalog ~source parse = parse_catalog_with ~source parse catalog_of_toml
 
 let of_toml_string ~source contents =
   parse_catalog ~source (fun () -> Otoml.Parser.from_string contents)
 ;;
 
 let load_file path = parse_catalog ~source:path (fun () -> Otoml.Parser.from_file path)
+
+let of_toml_string_lenient ~source contents =
+  parse_catalog_with
+    ~source
+    (fun () -> Otoml.Parser.from_string contents)
+    catalog_of_toml_lenient
+;;
+
+let load_file_lenient path =
+  parse_catalog_with ~source:path (fun () -> Otoml.Parser.from_file path) catalog_of_toml_lenient
+;;
 
 let load_default () =
   of_toml_string ~source:"embedded default model catalog" Model_catalog_embedded.contents
@@ -859,6 +931,79 @@ let lookup t model_id =
   |> fun entries -> lookup_entries entries model_id
 ;;
 
+let%test "of_toml_string_lenient keeps valid rows and skips the poisoned one" =
+  match
+    of_toml_string_lenient
+      ~source:"fixture"
+      "[[models]]\n\
+       id_prefix = \"good-model\"\n\
+       supports_tools = true\n\
+       [[models]]\n\
+       id_prefix = \"stale-model\"\n\
+       supports_extended_thinking = true\n"
+  with
+  | Ok (catalog, [ { entry_label = "stale-model"; skip_reason } ]) ->
+    String.equal
+      skip_reason
+      "model entry \"stale-model\" contains unknown field(s): supports_extended_thinking"
+    && Option.is_some (lookup catalog "good-model")
+    && Option.is_none (lookup catalog "stale-model")
+  | Ok _ | Error _ -> false
+;;
+
+let%test "of_toml_string_lenient skips every poisoned row without failing the load" =
+  match
+    of_toml_string_lenient
+      ~source:"fixture"
+      "[[models]]\n\
+       id_prefix = \"stale-a\"\n\
+       supports_extended_thinking = true\n\
+       [[models]]\n\
+       id_prefix = \"stale-b\"\n\
+       supports_reasoning_budget = 1024\n"
+  with
+  | Ok (catalog, [ a; b ]) ->
+    String.equal a.entry_label "stale-a"
+    && String.equal b.entry_label "stale-b"
+    && Option.is_none (lookup catalog "stale-a")
+    && Option.is_none (lookup catalog "stale-b")
+  | Ok _ | Error _ -> false
+;;
+
+let%test "of_toml_string_lenient keeps whole-file TOML breakage fail-closed" =
+  match of_toml_string_lenient ~source:"fixture" "not toml" with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let%test "of_toml_string_lenient keeps duplicate surviving rows fail-closed" =
+  (* Skipping poisoned rows must not turn a contradiction into a silent
+     winner: two surviving rows with one identity still decide pricing, so
+     the load fails rather than picks one. *)
+  match
+    of_toml_string_lenient
+      ~source:"fixture"
+      "[[models]]\n\
+       id_prefix = \"dup-model\"\n\
+       [[models]]\n\
+       id_prefix = \"dup-model\"\n"
+  with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let%test "of_toml_string_lenient labels a row with no readable id by position" =
+  match
+    of_toml_string_lenient
+      ~source:"fixture"
+      "[[models]]\n\
+       id_prefix = \"good-model\"\n\
+       [[models]]\n\
+       supports_tools = true\n"
+  with
+  | Ok (_, [ { entry_label = "<model entry #2>"; _ } ]) -> true
+  | Ok _ | Error _ -> false
+;;
 
 (* Wire-kind labels ("openai_compat", "gemini", ...) are what
    [capability_provider_label] synthesizes when a config declares no
@@ -904,6 +1049,35 @@ let provider_entry_for_label t provider_name =
               (fun alias -> String.equal requested (normalize_label alias))
               entry.aliases)
       t.providers
+;;
+
+let%test "of_toml_string_lenient skips poisoned provider rows after model skips" =
+  match
+    of_toml_string_lenient
+      ~source:"fixture"
+      "[[models]]\n\
+       id_prefix = \"stale-model\"\n\
+       supports_extended_thinking = true\n\
+       [[providers]]\n\
+       id = \"good-provider-id\"\n\
+       kind = \"openai_compat\"\n\
+       base_url = \"https://api.example.com\"\n\
+       request_path = \"/v1/chat/completions\"\n\
+       api_key_env = \"EXAMPLE_API_KEY\"\n\
+       [[providers]]\n\
+       id = \"stale-provider\"\n\
+       kind = \"openai_compat\"\n\
+       base_url = \"https://api.example.com\"\n\
+       request_path = \"/v1/chat/completions\"\n\
+       api_key_env = \"EXAMPLE_API_KEY\"\n\
+       supports_extended_thinking = true\n"
+  with
+  | Ok (catalog, [ model_skip; provider_skip ]) ->
+    String.equal model_skip.entry_label "stale-model"
+    && String.equal provider_skip.entry_label "stale-provider"
+    && Option.is_some (provider_entry_for_label catalog "good-provider-id")
+    && Option.is_none (provider_entry_for_label catalog "stale-provider")
+  | Ok _ | Error _ -> false
 ;;
 
 let lookup_for_provider t ~provider_name ~model_id =

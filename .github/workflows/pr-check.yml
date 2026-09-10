@@ -192,9 +192,25 @@ jobs:
         # suite that left the group without leaving coverage_test_names.txt is
         # caught on its own pull request instead of on the next nightly
         # (#33922 was caught by #34367 a week later, #34392 the day after).
+        #
+        # The node targets are the five browser-parity rules: each asserts the
+        # extension and the OCaml driver carry the same injection script, a
+        # match kept by hand across background.js and lib/browser_*.ml. None of
+        # them had ever run in CI -- @check links test/ without running it, the
+        # targeted runner builds a <name>.exe these rules do not have, and the
+        # edited-test selector reads only test/test_*.ml (#34837). PR #34831
+        # edited three of those sources and both node suites and the log shows
+        # only the OCaml suite beside them. 3.3s for all five, node startup
+        # included.
+        #
+        # Computed rather than listed here so a sixth rule joins by existing;
+        # the reader exits non-zero when it finds none, because a build line
+        # that expands to nothing reports success.
         run: |
           set -euo pipefail
-          dune build @check @test/stanzas/runtest
+          node_targets=$(python3 scripts/ci/list-node-alias-targets.py)
+          printf 'browser parity suites:\n%s\n' "${node_targets}"
+          dune build @check @test/stanzas/runtest ${node_targets}
 
       # #32511 dropped the nine-job lane and took this ratchet with it: the
       # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and
@@ -302,6 +318,24 @@ jobs:
         # NO continue-on-error: main is green here once #33548 lands, and a
         # type error is deterministic. Do not merge this before that one.
         run: pnpm typecheck
+
+      - name: Run the dashboard tests that read backend source
+        # These suites assert that a TypeScript vocabulary still matches the
+        # OCaml that produces it -- the SSE event union, turn outcomes, keeper
+        # attention reasons, the lane registry fields, lifecycle events, the
+        # TUI answering glow. Nothing else selects them: a backend token rename
+        # touches no file under dashboard/, and the dashboard suite as a whole
+        # is not in CI (#35032). That is how `keepalive_stopped` reached main
+        # with no label on the dashboard side (#35031).
+        #
+        # The list is computed, not kept here, so a seventh such test joins the
+        # lane by existing. 57 tests, ~4s locally.
+        run: |
+          set -euo pipefail
+          coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
+          printf 'backend-coupled dashboard suites:\n%s\n' "${coupled}"
+          cd dashboard
+          pnpm exec vitest run ${coupled}
 
       - name: Build browser preview
         working-directory: dashboard

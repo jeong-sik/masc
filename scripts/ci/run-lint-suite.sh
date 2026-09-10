@@ -260,6 +260,14 @@ blocking_pr_lints() {
     python3 scripts/ci/check-fun-protect-finally-guard.py --base "${base}" --head HEAD
   run_lint "ignore justification self-test" \
     python3 scripts/test-lint-ignore-without-comment.py
+  # The dashboard parity lane runs whatever this detector selects, so a
+  # detector that quietly stops matching would empty the lane.
+  run_lint "Dashboard backend-coupled test detector self-test" \
+    python3 scripts/ci/list-dashboard-backend-coupled-tests.py --self-test
+  # Same shape: the build line runs whatever this reader prints, so a reader
+  # that stopped matching would drop the browser parity suites again.
+  run_lint "Node alias target reader self-test" \
+    python3 scripts/ci/list-node-alias-targets.py --self-test
   run_lint "ignore justification (new sites)" \
     bash scripts/ci/check-ignore-without-comment-diff.sh --base "${base}" --head HEAD
   run_lint "Stale-base revert guard self-test (RFC-0235)" \

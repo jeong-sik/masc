@@ -2522,7 +2522,9 @@ let setup_validate_runtime base_path =
     with Env_config_core.Config_error message -> Error message
   in
   match loaded with
-  | Error message -> prerr_endline message; 1
+  | Error message ->
+    prerr_endline (Server_runtime_bootstrap.config_load_failure_diagnostic ~detail:message);
+    1
   | Ok (runtimes, default, assignments, _, lanes) ->
     let selected =
       Option.bind

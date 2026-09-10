@@ -1503,9 +1503,16 @@ let resume_model_configuration () =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
           with Env_config_core.Config_error _ -> false
         in
-        Runtime_startup_state.set Available;
-        Server_routes_http_runtime.invalidate_full_health_snapshot ();
-        Ok authority_available)
+        let withdrawn =
+          if authority_available then Ok ()
+          else Runtime_exact_output_registry.unpublish ()
+        in
+        match withdrawn with
+        | Error _ -> Error "authority publication busy"
+        | Ok () ->
+          Runtime_startup_state.set Available;
+          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          Ok authority_available)
     in
     Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
 

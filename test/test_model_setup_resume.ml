@@ -34,5 +34,21 @@ let test_deferred_owner_activation () =
   match Server_model_setup_resume.request ~base_path:"/fixture-owner" with
   | Error Owner_not_ready -> () | _ -> Alcotest.fail "closed owner retained activation authority"
 
+let test_stale_authority_is_withdrawn () =
+  let module Exact = Agent_core.Exact_output in
+  let snapshot = match Exact.load_resolver_snapshot
+    ~io:{getenv=(fun _ -> Ok None)}
+    ~target_binding_policy:Exact.Exclude_unbound_targets
+    ~catalog:Exact.Embedded_default () with
+    | Ok snapshot -> snapshot | Error _ -> Alcotest.fail "embedded resolver unavailable" in
+  ignore (Runtime_exact_output_registry.publish ~lanes:[] snapshot |> Result.get_ok);
+  check Alcotest.bool "prior authority published" true
+    (Result.is_ok (Runtime_exact_output_registry.current ()));
+  ignore (Runtime_exact_output_registry.unpublish () |> Result.get_ok);
+  (match Runtime_exact_output_registry.current () with
+   | Error Registry_not_published -> () | _ -> Alcotest.fail "old authority remained usable");
+  ignore (Runtime_exact_output_registry.unpublish () |> Result.get_ok)
+
 let () = Alcotest.run "model setup resume"
-  ["owner lifecycle",[Alcotest.test_case "save, retry and exactly-once activation" `Quick test_deferred_owner_activation]]
+  ["owner lifecycle",[Alcotest.test_case "save, retry and exactly-once activation" `Quick test_deferred_owner_activation;
+    Alcotest.test_case "changed config revokes stale authority" `Quick test_stale_authority_is_withdrawn]]

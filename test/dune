@@ -5522,4 +5522,4 @@
 (test
  (name test_model_setup_resume)
  (modules test_model_setup_resume)
- (libraries alcotest masc.runtime masc.server eio eio_main))
+ (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))

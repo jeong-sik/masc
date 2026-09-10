@@ -1,0 +1,5 @@
+(library
+ (name owner_process_identity)
+ (public_name masc.owner_process_identity)
+ (libraries unix)
+ (foreign_stubs (language c) (names owner_process_identity_stubs)))

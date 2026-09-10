@@ -1,12 +1,20 @@
 (* The rollup for [/health?full=1]. See the .mli for what it reads and what
    it cannot. *)
 
+type t =
+  { overall_status : string
+  ; operator_action_required : bool
+  ; operator_action_reasons : string list
+  ; overall_status_reasons : string list
+  }
+
 let cached_field_names =
   [
     "feature_flags";
     "overall_status";
     "operator_action_required";
     "operator_action_reasons";
+    "overall_status_reasons";
     "keeper_fibers";
     "fd_observation";
     "fd_accountant";
@@ -60,6 +68,10 @@ let operator_summary ~sections ~runtime_startup_degradation
   =
   let status = ref "ok" in
   let reasons = ref [] in
+  let status_lines = ref [] in
+  let prefixed component component_reasons =
+    List.map (fun reason -> Printf.sprintf "%s:%s" component reason) component_reasons
+  in
   let note_status component json =
     match Json_util.assoc_string_opt "status" json with
     | None -> ()
@@ -68,6 +80,26 @@ let operator_summary ~sections ~runtime_startup_degradation
        | None -> ()
        | Some parsed_component_status ->
          status := Health_status.max_string !status component_status;
+         (* A section that moved the grade off Ok says so here whether or not
+            its gate opens. It used to say so only through the gate, and the
+            gate is rank >= 3 plus Unknown -- so a section at Degraded, Stale,
+            Warning or Unavailable with operator_action_required=false raised
+            overall_status and left no line anywhere. The dashboard renders
+            "Runtime health warning · status=warning ·
+            operator_action_required=false" and nothing else, so the operator
+            could not tell which section it was (#34895).
+
+            #34781 made that combination common on purpose: a queue holding
+            only runnable backlog is warning and needs no answer. *)
+         if Health_status.rank parsed_component_status > 0
+         then begin
+           let observed =
+             match Json_util.json_string_list_member "status_reasons" json with
+             | [] -> [ component_status ]
+             | values -> values
+           in
+           status_lines := List.rev_append (prefixed component observed) !status_lines
+         end;
          let action_required =
            match Json_util.assoc_bool_opt "operator_action_required" json with
            | Some value -> value
@@ -101,12 +133,7 @@ let operator_summary ~sections ~runtime_startup_degradation
                 | [] -> [ fallback_reason json component_status ]
                 | values -> values)
            in
-           let prefixed_reasons =
-             List.map
-               (fun reason -> Printf.sprintf "%s:%s" component reason)
-               component_reasons
-           in
-           reasons := List.rev_append prefixed_reasons !reasons
+           reasons := List.rev_append (prefixed component component_reasons) !reasons
          end)
   in
   List.iter
@@ -115,6 +142,11 @@ let operator_summary ~sections ~runtime_startup_degradation
   (* Rolled up and not cached: see the .mli. *)
   note_status "runtime_startup_degradation" runtime_startup_degradation;
   status := Health_status.max_string !status keeper_config_schema_status;
+  if Health_status.rank (Health_status.of_string keeper_config_schema_status) > 0
+  then
+    status_lines :=
+      Printf.sprintf "keeper_config_schema:%s" keeper_config_schema_status
+      :: !status_lines;
   if keeper_config_operator_action_required || keeper_config_schema_blocking
   then
     reasons :=
@@ -123,12 +155,18 @@ let operator_summary ~sections ~runtime_startup_degradation
   if lazy_task_boot_guard_fires_total > 0
   then begin
     status := Health_status.max_string !status "degraded";
-    reasons :=
+    let line =
       Printf.sprintf
         "lazy_task_boot_guard_fires_total:%d"
         lazy_task_boot_guard_fires_total
-      :: !reasons
+    in
+    status_lines := line :: !status_lines;
+    reasons := line :: !reasons
   end;
-  let reasons = List.rev !reasons in
-  (!status, reasons <> [], reasons)
+  let operator_action_reasons = List.rev !reasons in
+  { overall_status = !status
+  ; operator_action_required = operator_action_reasons <> []
+  ; operator_action_reasons
+  ; overall_status_reasons = List.rev !status_lines
+  }
 ;;

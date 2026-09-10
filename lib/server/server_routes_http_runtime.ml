@@ -614,7 +614,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
      `Int lazy_task_boot_guard_fires_total);
   ]
   in
-  let overall_status, operator_action_required, operator_action_reasons =
+  let rollup =
     Server_health_rollup.operator_summary
       ~sections
       ~runtime_startup_degradation:runtime_startup_degradation_json
@@ -625,13 +625,17 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       ~keeper_config_operator_action_required
       ~lazy_task_boot_guard_fires_total
   in
+  let string_list reasons = `List (List.map (fun reason -> `String reason) reasons) in
   Tool_args.ok_assoc
     (sections
      @ [
-         ("overall_status", `String overall_status);
-         ("operator_action_required", `Bool operator_action_required);
+         ("overall_status", `String rollup.Server_health_rollup.overall_status);
+         ( "operator_action_required",
+           `Bool rollup.Server_health_rollup.operator_action_required );
          ( "operator_action_reasons",
-           `List (List.map (fun reason -> `String reason) operator_action_reasons) );
+           string_list rollup.Server_health_rollup.operator_action_reasons );
+         ( "overall_status_reasons",
+           string_list rollup.Server_health_rollup.overall_status_reasons );
        ])
 
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
@@ -725,6 +729,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("overall_status", `String status);
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);
+    ("overall_status_reasons", `List []);
     ("keeper_fibers", `Int 0);
     ( "fd_observation",
       full_health_component_placeholder ?error ~component_timed_out ~status

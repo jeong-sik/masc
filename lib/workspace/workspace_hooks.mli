@@ -206,9 +206,13 @@ val goal_verification_pending_fn :
   (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
 
 (** Publishes the completion-verdict notification after the task status
-    commit. A missing runtime adapter is logged explicitly by the default. *)
+    commit. A missing runtime adapter is logged explicitly by the default.
+    [producer] is the evidence author whose verdict this is — the identity a
+    runtime adapter needs to route the approval wake to its queue. *)
 val verification_notify_verdict_fn :
-  (task_id:string ->
+  (Workspace_utils_backend_setup.config ->
+   task_id:string ->
+   producer:string ->
    authority:Masc_domain.completion_authority ->
    verification_id:string ->
    decision:[ `Approve of string | `Reject of string ] ->

@@ -306,6 +306,8 @@ let keeper_world_completion_authority_heading =
 ;;
 
 let keeper_world_completion_authority_intro = "keeper.world.completion_authority.intro"
+let keeper_world_task_outcomes_heading = "keeper.world.task_outcomes.heading"
+let keeper_world_task_outcomes_intro = "keeper.world.task_outcomes.intro"
 let keeper_world_task_cancellations_heading = "keeper.world.task_cancellations.heading"
 let keeper_world_task_cancellations_intro = "keeper.world.task_cancellations.intro"
 let keeper_world_own_recent_actions_heading = "keeper.world.own_recent_actions.heading"
@@ -374,6 +376,14 @@ let keeper_world_event_rows_completion_authority_title =
 
 let keeper_world_event_rows_completion_authority_preview =
   "keeper.world.event_rows.completion_authority_preview"
+;;
+
+let keeper_world_event_rows_task_outcome_title =
+  "keeper.world.event_rows.task_outcome_title"
+;;
+
+let keeper_world_event_rows_task_outcome_preview =
+  "keeper.world.event_rows.task_outcome_preview"
 ;;
 
 let keeper_world_event_rows_task_cancelled_title =

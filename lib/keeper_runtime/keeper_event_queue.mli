@@ -144,6 +144,12 @@ type stimulus_payload =
           back. Measured over 2026-08-18..26: 22 submissions, 12 reads, and a
           result sat unread for a median of 21.9s against a median 2.7ms of
           work -- one waited 47 minutes. Mirrors [Delegate_completed]. *)
+  | Task_outcome of task_outcome
+      (** A completion authority approved this Keeper's submitted evidence —
+          the approval twin of [Completion_authority_rejected]. Pointer-only:
+          the verdict record and the Board receipt stay the content stores,
+          this carries the correlation keys so the producer's next turn can
+          act without a scan. (#25868: approval used to wake nobody.) *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -267,6 +273,18 @@ and scheduled_wake = {
     schedule creation captured an authorized originating continuation.
     [occurrence_id] is the exact schedule occurrence correlation key. *)
 
+and task_outcome = {
+  to_task_id : string;
+  to_verification_id : string;
+  to_producer : string;
+  to_authority : Masc_domain.completion_authority;
+}
+(** Typed follow-up context for an approved completion-evidence submission:
+    the task and verification the producer submitted, the producer identity,
+    and the authenticated authority that judged. The approval fact itself
+    stays in the verdict record and the Board receipt; this payload is the
+    wake that ends the producer's wait. *)
+
 and completion_authority_rejection = {
   car_task_id : string;
   car_verification_id : string;
@@ -326,6 +344,11 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 
 val completion_authority_rejection_post_id :
   completion_authority_rejection -> post_id
+
+val task_outcome_post_id : task_outcome -> post_id
+(** Dedup/correlation id for [Task_outcome]: ["task-outcome:<task_id>"]. An
+    approval is terminal and one task is approved at most once, so the task id
+    alone is a complete key. *)
 
 val task_cancellation_post_id : task_cancellation -> post_id
 (** Dedup/correlation id for [Task_cancelled]: ["task-cancelled:<task_id>"].

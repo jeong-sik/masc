@@ -28,19 +28,23 @@ val configure_agent_core_model_catalog_env :
 
 val configure_agent_core_model_catalog_overlay :
   ?config_root:string ->
-  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
+  ?load_catalog:(string ->
+    (Llm_provider.Model_catalog.t * Llm_provider.Model_catalog.skipped_entry list, string) result) ->
   ?set_overlay:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
   string option
 (** Install the deployment capability overlay (RFC-0342 D1 / Agent Core contract).
     Resolves config-root [agent-core-models-overlay.toml] only; there is no parent
-    or env fallback. When present, the parsed overlay is installed with
-    [Model_catalog.set_global_overlay], so [Model_catalog.global] serves the
-    embedded catalog merged with the deployment's delta rows. An explicit
-    [AGENT_CORE_MODEL_CATALOG] installed by {!configure_agent_core_model_catalog_env} keeps
-    replacement precedence over the overlay. Returns the installed overlay path. An
-    unreadable or invalid overlay raises [Env_config_core.Config_error]
-    (fail-loud at boot, same as the full-catalog path). *)
+    or env fallback. Rows that fail to parse are skipped with one WARN per row and
+    the surviving rows are installed with [Model_catalog.set_global_overlay], so
+    [Model_catalog.global] serves the embedded catalog merged with the
+    deployment's delta rows; config residue from another release must not block
+    boot. An explicit [AGENT_CORE_MODEL_CATALOG] installed by
+    {!configure_agent_core_model_catalog_env} keeps replacement precedence over
+    the overlay. Returns the installed overlay path. An unreadable file, broken
+    TOML, or duplicate identities among surviving rows raise
+    [Env_config_core.Config_error] (fail-loud at boot, same as the full-catalog
+    path). *)
 
 val config_load_failure_diagnostic : detail:string -> string
 (** Operator-facing diagnostic for configuration load failures (catalog overlay,

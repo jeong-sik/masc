@@ -260,6 +260,7 @@ let queued_workspace_messages ~base_path ~keeper_name =
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Ask_answered _
       | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_outcome _
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Delegate_completed _
       | Keeper_event_queue.Composition_completed _ -> None)

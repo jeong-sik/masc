@@ -99,9 +99,15 @@ let resolve_agent_core_model_catalog_overlay_path ?config_root () =
     else
       existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
 
+(* Per-row degradation: a poisoned overlay row (e.g. a stale field left by
+   another release) is excluded with one WARN per row instead of failing the
+   whole boot — install must not be blocked by config residue. Whole-file
+   failures (unreadable, broken TOML, duplicate surviving rows) still raise
+   [Config_error], as does the [AGENT_CORE_MODEL_CATALOG] full-replacement
+   path, which keeps the strict loader. *)
 let configure_agent_core_model_catalog_overlay
       ?config_root
-      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(load_catalog = Llm_provider.Model_catalog.load_file_lenient)
       ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
       ()
   =
@@ -109,7 +115,15 @@ let configure_agent_core_model_catalog_overlay
   | None -> None
   | Some path ->
     (match load_catalog path with
-     | Ok overlay ->
+     | Ok (overlay, skipped) ->
+       List.iter
+         (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
+            Log.Misc.warn
+              "model_catalog: overlay %s skipping entry %s: %s"
+              path
+              skip.entry_label
+              skip.skip_reason)
+         skipped;
        set_overlay overlay;
        Log.Misc.info
          "model_catalog: deployment overlay %s installed onto embedded catalog"

@@ -116,6 +116,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Ask_answered _ -> Keeper_ask_answer
   | Completion_authority_rejected _ -> Completion_authority
+  | Task_outcome _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
   | Workspace_message _ -> Keeper_workspace_message
   | Delegate_completed _ -> Keeper_delegate
@@ -155,6 +156,10 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
   | Completion_authority_rejected rejection ->
     [ "rejection_reason", `String rejection.car_reason
     ; "rejection_task_id", `String rejection.car_task_id
+    ]
+  | Task_outcome outcome ->
+    [ "outcome_task_id", `String outcome.to_task_id
+    ; "outcome_verification_id", `String outcome.to_verification_id
     ]
   | Ask_answered answered -> [ "answered_ask_id", `String answered.ask_id ]
   | Task_cancelled cancellation ->
@@ -231,6 +236,8 @@ let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = functio
   | Ask_answered _ -> "질문에 답이 왔음"
   | Completion_authority_rejected rejection ->
     Printf.sprintf "작업 %s 완료 증거 거절됨" rejection.car_task_id
+  | Task_outcome outcome ->
+    Printf.sprintf "작업 %s 증거 승인됨 (%s)" outcome.to_task_id outcome.to_verification_id
   | Task_cancelled cancellation ->
     Printf.sprintf
       "%s가 작업 %s 취소"

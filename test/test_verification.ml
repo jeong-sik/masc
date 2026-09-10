@@ -1117,13 +1117,16 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
-            (fun ~task_id ~authority ~verification_id ~decision ->
+            (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
                committed_verification_id := Some verification_id;
-               previous_notification
-                 ~task_id
-                 ~authority
-                 ~verification_id
-               ~decision;
+               ignore
+                 (previous_notification
+                    _config
+                    ~task_id
+                    ~producer:"system-test-worker"
+                    ~authority
+                    ~verification_id
+                    ~decision);
                Eio.Promise.resolve resolve_verdict_committed ());
           let contract : Masc_domain.task_contract =
             { strict = true
@@ -1346,12 +1349,15 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
-            (fun ~task_id ~authority ~verification_id ~decision ->
-               previous_notification
-                 ~task_id
-                 ~authority
-                 ~verification_id
-                 ~decision;
+            (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
+               ignore
+                 (previous_notification
+                    _config
+                    ~task_id
+                    ~producer:"system-test-worker"
+                    ~authority
+                    ~verification_id
+                    ~decision);
                Eio.Promise.resolve resolve_verdict_committed ());
           let original_contract : Masc_domain.task_contract =
             { strict = true

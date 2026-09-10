@@ -39,6 +39,7 @@ export function OverviewRuntimeStats() {
   }, [windowMinutes, generation])
   const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
   const ledger = data?.cost_ledger_read
+  const cache = data?.cache
   return html`<section class="ov-card min-w-0" aria-label="런타임 사용 통계" data-overview-runtime-stats>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2>런타임 사용 통계</h2>
@@ -55,7 +56,15 @@ export function OverviewRuntimeStats() {
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
     ${data ? html`
       <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' || state.kind === 'pending' ? state.receivedAt.toLocaleString() : ''}</p>
-      <p class="text-xs text-text-muted">집계 기준 시각과 결정 기록의 보존·읽기 누락은 API가 제공하지 않습니다. 선택한 기간 전체가 관측되었다는 의미는 아닙니다.</p>
+      <p class="text-sm" data-runtime-cache-state=${cache?.state ?? 'unreported'}>
+        ${cache?.state === 'stale_refreshing' ? '집계 갱신 중 · 이전 집계 표시'
+          : cache?.state === 'fresh' ? '서버가 최근 갱신한 집계'
+            : cache?.state === 'warming' ? '서버가 첫 집계를 준비 중'
+              : '집계 갱신 상태 미보고'}
+        ${cache && cache.state !== 'warming' ? html` · 응답 시점의 집계 경과 ${number(cache.age_s, '초')}` : null}
+      </p>
+      ${cache?.last_error ? html`<p role="alert">최근 집계 갱신 오류: ${cache.last_error}. 표시된 값은 마지막으로 읽은 집계입니다.</p>` : null}
+      <p class="text-xs text-text-muted">응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.</p>
       ${ledger?.state === 'pending' ? html`<p role="status">서버가 첫 집계를 준비하고 있습니다. 표시 중에는 자동으로 다시 읽습니다.</p>`
         : ledger?.state === 'unavailable' ? html`<p role="alert">비용 원장을 읽지 못했습니다: ${ledger.detail ?? '상세 미보고'}. 아래 값은 읽을 수 있었던 결정 기록 기반입니다.</p>`
         : ledger?.state === 'available' ? html`<p class="text-xs">비용 원장 읽기 완료 · 형식 오류 ${number(ledger.malformed_rows)} · 스키마 위반 ${number(ledger.schema_violation_rows)} · 식별 충돌 ${number(ledger.identity_conflict_rows)}행</p>`

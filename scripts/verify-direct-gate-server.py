@@ -276,7 +276,7 @@ def main():
         save(root / 'receipt.json', receipt)
         database = base / '.masc/keepers' / keeper / 'chat-operations.sqlite3'
         waiting = None
-        while time.monotonic() < deadline:
+        while True:
             with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as db:
                 db.row_factory = sqlite3.Row
                 operations = [dict(row) for row in db.execute('SELECT * FROM operations')]
@@ -314,8 +314,16 @@ def main():
         approval_resolved.set()
         resolution = http('/api/v1/dashboard/gate/resolve', {'id': approval_id, 'decision': 'approve'})
         save(root / 'gate-resolution.json', resolution)
-        while time.monotonic() < deadline:
-            observed = call('masc_keeper_delegate_status', {'target': {'kind': 'keeper', 'name': keeper}, 'operation_id': operation_id})
+        while True:
+            if server.poll() is not None:
+                raise RuntimeError('Server exited while observing the original operation')
+            try:
+                observed = call('masc_keeper_delegate_status', {'target': {'kind': 'keeper', 'name': keeper}, 'operation_id': operation_id})
+            except (URLError, ConnectionError) as error:
+                save(root / 'operation-observation-error.json', {'operation_id': operation_id,
+                    'error': str(error), 'action': 'continue observing the same operation'})
+                time.sleep(0.5)
+                continue
             if observed.get('state') in ['Succeeded', 'Failed', 'Completed', 'succeeded', 'failed']:
                 break
             time.sleep(0.5)
@@ -393,6 +401,19 @@ def main():
             raise AssertionError('Original Gate wait lost its exact retained checkpoint')
         save(root / 'retained-checkpoint.json', json.loads(retained[0].read_text()))
         receipt['input_sha256'] = admissions[0]['execution_digest']
+        # Observe the wake consumer, not merely a quiet instant before shutdown.
+        ack_text = 'acknowledged spent Gate grant replay without a turn keeper=' + keeper
+        while True:
+            if server.poll() is not None:
+                raise RuntimeError('Server exited before spent Gate wake acknowledgement')
+            if len(events) != 4:
+                raise AssertionError('Gate wake invoked an additional provider turn')
+            ack_lines = [line for line in (root / 'server.log').read_text().splitlines() if ack_text in line]
+            if ack_lines:
+                save(root / 'spent-wake-ack.json', {'operation_id': operation_id,
+                    'approval_id': approval_id, 'provider_requests': len(events), 'log_lines': ack_lines})
+                break
+            time.sleep(0.5)
         receipt['status'] = 'verified'
         receipt['provider_requests'] = len(events)
         receipt['effect_exists'] = effect.exists()

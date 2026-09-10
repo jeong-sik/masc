@@ -710,6 +710,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         runtime_ref: normalizeRuntimeRef(row.runtime_ref),
         runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
         selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
+        declaration_only: row.declaration_only === true,
+        preparation_requirements: Array.isArray(row.preparation_requirements)
+          ? row.preparation_requirements.filter((value): value is 'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid' =>
+            value === 'runtime_check_required' || value === 'sandbox_check_required' || value === 'declaration_invalid')
+          : [],
         status: normalizeKeeperAgentStatus(statusRaw),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,

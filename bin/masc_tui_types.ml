@@ -4693,8 +4693,10 @@ let keeper_reading (state : state) (keeper : keeper) :
   { name = keeper.k_name
   ; paused = keeper.k_paused
   ; liveness =
-      Masc_tui_keeper_control.liveness_of_roster state.keeper_roster
-        keeper.k_name
+      (match keeper.k_origin with
+       | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
+       | Persisted_keeper ->
+         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
 let acting_flat_entries state =

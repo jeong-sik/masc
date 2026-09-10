@@ -68,7 +68,7 @@ let calculate_kpis (state : state) =
   in
   { total_keepers = List.length state.keepers;
     unpaused_keepers = List.fold_left
-      (fun count (keeper : keeper) -> count + (if keeper.k_paused then 0 else 1))
+      (fun count (keeper : keeper) -> count + (match keeper.k_origin with Tui_decode.Declared_keeper _ -> 0 | Persisted_keeper -> if keeper.k_paused then 0 else 1))
       0 state.keepers;
     turns;
     tasks = Option.map (fun flow -> flow.Task_flow.current) state.task_flow;

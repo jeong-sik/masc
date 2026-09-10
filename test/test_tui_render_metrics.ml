@@ -9,7 +9,7 @@ let make_state () =
 ;;
 
 let make_keeper ?(paused = false) name : Decode.keeper =
-  { k_name = name
+  { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
   ; k_trace_id = "trace-" ^ name
   ; k_paused = paused
   ; k_current_task_id = None

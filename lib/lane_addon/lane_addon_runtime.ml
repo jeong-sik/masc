@@ -76,6 +76,9 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
+let release_detached m e =
+  if e.phase = Detached && not e.running && not e.cleanup_running
+  then Hashtbl.remove m.entries e.instance_id
 let stop_entry ~sw m e =
   if not e.cleanup_running then
     match e.connection with
@@ -86,13 +89,14 @@ let stop_entry ~sw m e =
           let result = try c.stop () with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn) in
-          e.cleanup_running <- false;
           (match result with
            | Ok () -> e.phase <- Detached; wake e;
                Option.iter (fun cancel -> cancel ()) e.cancel_worker
            | Error message -> e.phase <- Failed ("cleanup incomplete: " ^ message));
-          match persist m e with Ok () -> () | Error message ->
-            e.phase <- Failed ("cleanup state persistence: " ^ message))
+          (match persist m e with Ok () -> () | Error message ->
+            e.phase <- Failed ("cleanup state persistence: " ^ message));
+          e.cleanup_running <- false;
+          release_detached m e)
 let namespace e seq output =
   let prefix value = e.instance_id ^ "/" ^ string_of_int seq ^ "/" ^ value in
   { output with rows = List.map (fun (row : row) -> { row with
@@ -151,8 +155,9 @@ let run ~sw backend m e =
     | exn -> failed m e (Printexc.to_string exn)
     in
     match work () with
-    | () -> e.running <- false; e.cancel_worker <- None
-    | exception exn -> e.running <- false; e.cancel_worker <- None; raise exn)
+    | () -> e.running <- false; e.cancel_worker <- None; release_detached m e
+    | exception exn -> e.running <- false; e.cancel_worker <- None;
+        release_detached m e; raise exn)
 let backend () = match !override with
   | Some backend -> backend
   | None -> {
@@ -347,15 +352,20 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
                | _ -> Error "evidence delivery requires an authenticated caller" in
              let* handler = match !delivery_handler with
                | Some handler -> Ok handler | None -> Error "Keeper evidence delivery is unavailable" in
-             let* fields = object_ frozen in let* prompt = text fields "message" in
-             try handler ~config ~caller ~keeper_name ~prompt with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Error (Printexc.to_string exn)
+             let* evidence = offload (fun () -> Lane_addon_store.publish_for_keeper
+               ~base_path:config.base_path m.store frozen) in
+             let* fields = object_ evidence in let* prompt = text fields "message" in
+             let receipt = try handler ~config ~caller ~keeper_name ~prompt with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Error (Printexc.to_string exn) in
+             Ok (evidence, receipt)
            in
-           let delivery = match deliver () with
+           let published, receipt = match deliver () with
+             | Ok result -> result | Error message -> frozen, Error message in
+           let delivery = match receipt with
              | Ok receipt -> `Assoc ["status", `String "accepted"; "receipt", receipt]
              | Error message -> `Assoc ["status", `String "failed"; "error", `String message] in
-           let* fields = object_ frozen in Ok (`Assoc (("delivery", delivery) :: fields)))
+           let* fields = object_ published in Ok (`Assoc (("delivery", delivery) :: fields)))
   | Attach ->
       let* path = text args "manifest_path" in let* run_id = text args "run_id" in
       let* binding = match List.assoc_opt "binding" args with Some (`Assoc _ as value) -> Ok value

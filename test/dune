@@ -5600,5 +5600,5 @@
 (test
  (name test_lane_addon_store_query)
  (modules test_lane_addon_store_query)
- (libraries alcotest yojson unix masc))
+ (libraries alcotest yojson unix masc masc.masc_tool_blob_store))
 

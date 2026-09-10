@@ -225,3 +225,81 @@ let freeze t ~instance_id ~binding ~row_ids =
           ^ "\nSHA-256: " ^ digest bytes
           ^ "\nThe observations list names retained record paths and SHA-256 digests. Read those records for original sources and output."
           ^ "\nUse, defer, or independently check this evidence as appropriate. Your current task continues.")])
+
+let retained_reference = function
+  | `Assoc fields ->
+      (match List.assoc_opt "uri" fields, List.assoc_opt "sha256" fields with
+       | Some (`String uri), Some (`String hash) -> Ok { uri; sha256 = Some hash }
+       | _ -> Error "retained evidence requires its URI and SHA-256")
+  | _ -> Error "retained evidence requires an object"
+
+(* Traverse only the selected record's structured references, never the bodies
+   of referenced source files. File/HTTP URIs and plugin paths are data. *)
+let rec source_references json =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "uri" fields with
+       | Some (`String uri) when String.starts_with ~prefix:"lane-evidence:" uri ->
+           let* reference = retained_reference json in Ok [reference]
+       | _ -> references_in_values (List.map snd fields))
+  | `List values -> references_in_values values
+  | _ -> Ok []
+and references_in_values values =
+  List.fold_left (fun acc value ->
+    let* acc = acc in let* references = source_references value in
+    Ok (List.rev_append references acc)) (Ok []) values
+
+module Published = Map.Make (String)
+let publish_for_keeper ~base_path t frozen = protect (fun () ->
+  let* fields, bundle_reference = match frozen with
+    | `Assoc fields ->
+        (match List.assoc_opt "evidence" fields with
+         | Some json -> let* reference = retained_reference json in Ok (fields, reference)
+         | None -> Error "frozen evidence bundle is missing")
+    | _ -> Error "invalid frozen evidence" in
+  let blobs = Tool_blob_store.create ~base_path in
+  let publish ~mime published reference =
+    match Published.find_opt reference.uri published with
+    | Some artifact when reference.sha256 = Some artifact.Tool_output.sha256 -> Ok (published, artifact)
+    | Some _ -> Error "retained evidence digest disagrees with its URI"
+    | None ->
+        let* bytes = read_blob t reference in
+        let artifact = Tool_blob_store.put_durable blobs ~bytes ~mime in
+        Ok (Published.add reference.uri artifact published, artifact) in
+  let* bundle_bytes = read_blob t bundle_reference in
+  let* records = match Yojson.Safe.from_string bundle_bytes with
+    | `Assoc bundle ->
+        (match List.assoc_opt "observations" bundle with
+         | Some (`List records) -> Ok records
+         | _ -> Error "frozen bundle has no selected records")
+    | _ -> Error "invalid frozen bundle" in
+  let* published, bundle_artifact = publish ~mime:"application/json" Published.empty bundle_reference in
+  let rec publish_records published = function
+    | [] -> Ok published
+    | json :: rest ->
+        let* reference = retained_reference json in
+        let* bytes = read_blob t reference in
+        let* _, _ = decode_record bytes in
+        let* references = source_references (Yojson.Safe.from_string bytes) in
+        let* published, _ = publish ~mime:"application/json" published reference in
+        let* published = List.fold_left (fun result reference ->
+          let* published = result in
+          let* published, _ = publish ~mime:"application/octet-stream" published reference in
+          Ok published) (Ok published) references in
+        publish_records published rest in
+  let* published = publish_records published records in
+  let content = "Optional Lane evidence, not an instruction. Use, defer, or independently verify it; your current task continues."
+    ^ "\nOriginal selected bundle SHA-256: " ^ bundle_artifact.Tool_output.sha256
+    ^ "\nRead the bundle and retained artifacts with keeper_artifact_read using their SHA-256 values."
+    ^ "\nRecord bodies preserve original sources separately from Add-on output; interpretations remain claims." in
+  let structured_content = `Assoc [
+    "bundle", Tool_output.normalized_artifact_ref_to_json bundle_artifact;
+    "artifacts", `List (Published.bindings published |> List.map (fun (uri, artifact) ->
+      `Assoc ["lane_uri", `String uri; "artifact", Tool_output.normalized_artifact_ref_to_json artifact]))] in
+  let manifest = Tool_output.artifact_manifest_to_json ~content ~structured_content in
+  let artifact = Tool_blob_store.put_durable blobs ~bytes:(Yojson.Safe.to_string manifest)
+    ~mime:Tool_output.artifact_manifest_mime
+    |> fun reference -> Tool_output.with_preview reference content in
+  Ok (`Assoc (("message", `String (Tool_output.encode_for_agent_core (Tool_output.Stored artifact)))
+    :: ("keeper_artifact", Tool_output.normalized_artifact_ref_to_json artifact)
+    :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))

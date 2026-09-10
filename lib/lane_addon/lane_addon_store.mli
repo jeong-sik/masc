@@ -20,3 +20,11 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
     response bound is reached or a retained interval cannot be read. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
+val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+(** Publishes a frozen bundle, its selected records and their retained source
+    bodies byte-for-byte through the existing Tool artifact store. Only this
+    store's verified content addresses are read; source bodies stay opaque.
+    The returned [message] is an exact retained artifact marker, and
+    [keeper_artifact] names the manifest whose child references retain all
+    published bytes for [keeper_artifact_read]. No message is sent here. *)

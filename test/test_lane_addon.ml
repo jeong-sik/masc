@@ -198,7 +198,25 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     check Alcotest.int "one explicitly requested delivery" 1 (List.length !delivered);
     check string "acceptance keeps deferred receipt" "deferred"
       (accepted |> member "delivery" |> member "receipt" |> text "status");
+    let sender, keeper, prompt = List.hd !delivered in
+    check string "original authenticated sender preserved" "operator" sender;
+    check string "explicitly selected Keeper preserved" "keeper" keeper;
+    (match Tool_output.decode_from_agent_core prompt with
+     | Tool_output.Decoded reference ->
+         check string "message preserves the exact retention marker"
+           (Tool_output.encode_for_agent_core (Tool_output.Stored reference)) prompt;
+         check string "message names a traversable evidence manifest"
+           Tool_output.artifact_manifest_mime reference.mime;
+         check bool "result preserves the same normalized manifest reference" true
+           (member "keeper_artifact" accepted = Tool_output.normalized_artifact_ref_to_json reference)
+     | _ -> fail "Keeper evidence was not delivered as a readable artifact");
     detach config id; await_phase clock config id "detached";
+    await clock (fun () ->
+      inspect config |> member "rows" |> Yojson.Safe.Util.to_list = []);
+    let historical_slice = unwrap (dispatch config Runtime.Slice []) in
+    check bool "detached rows leave active memory but remain queryable" true
+      (historical_slice |> member "rows" |> Yojson.Safe.Util.to_list
+       |> List.exists (fun row -> text "id" row = selected));
     let captured = instance config id in
     Runtime.For_testing.reset ();
     check string "confirmed detach survives process restart" "detached" (phase (instance config id));

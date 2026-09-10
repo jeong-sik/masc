@@ -102,7 +102,7 @@ let remove_and_sync path =
     Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
       Unix.unlink path;
       Unix.fsync directory))
-let publish_using ~write changes =
+let publish_using ~(write:string -> int -> string -> (unit,Fs_compat.atomic_replace_failure) result) changes =
   let rec restore = function
     | [] -> true
     | (path,original)::rest ->

@@ -5097,7 +5097,7 @@
 (test
  (name test_browser_lane)
  (modules test_browser_lane)
- (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
+ (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_native_host.inc)
 

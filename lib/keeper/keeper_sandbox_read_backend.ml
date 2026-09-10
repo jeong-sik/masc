@@ -305,7 +305,20 @@ let run_command_with_capture ?turn_sandbox_factory
       (match max_bytes with
        | Some max_bytes -> Keeper_turn_sandbox_runtime.run_command_with_status
            ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
-       | None -> Error "Complete capture requires an endpoint or Docker fallback")
+       | None ->
+         let capture_dir = Keeper_execute_output_files.capture_directory ~base_path:config.base_path in
+         (match Keeper_turn_sandbox_runtime.run_exec_with_output_files
+             ~capture_dir ~timeout_sec runtime ~cwd ~command_argv with
+          | Error detail -> Error detail
+          | Ok (status, _, _, Some files) ->
+            (match status, files.stdout with
+             | Unix.WEXITED 0, Process_output_capture.Complete_file {path; byte_length} ->
+               (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
+                | Ok (Some bytes) when String.length bytes = byte_length -> Ok (status, bytes)
+                | Ok _ | Error _ -> Error "Frozen runtime binary capture is missing or changed")
+             | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+               Error "Frozen runtime binary command failed or did not produce complete stdout")
+          | Ok (_, _, _, None) -> Error "Frozen runtime has no authoritative binary output capture"))
     | Ok Docker_fallback ->
       let image =
         (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
@@ -478,29 +491,9 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
              (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
                 operation argument (Unix.error_message error)))
 
-let read_complete_endpoint_file ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
+let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
   let ( let* ) = Result.bind in
-  let* backend_path = container_path_of_host ~config ~meta ~host_path in
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Shared_mount -> Error "Complete endpoint read requires an endpoint-owned tree"
-  | Keeper_types_profile_sandbox.Endpoint_owned ->
-    let* _, bytes = run_endpoint_command_with_status
-      ~acquire_endpoint:(fun ~cwd -> match meta.sandbox_profile with
-        | Keeper_types_profile_sandbox.Micro_vm ->
-          Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ()
-        | Keeper_types_profile_sandbox.Remote_ssh ->
-          Keeper_sandbox_remote_lane.endpoint ~config ~meta ~cwd ()
-        | Keeper_types_profile_sandbox.Docker -> Error "Docker is not an endpoint-owned tree")
-      ~config ~meta ~command_argv:["cat"; backend_path] ~max_bytes:None ~timeout_sec () in
-    Ok bytes
-
-let read_complete_file ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Endpoint_owned ->
-    read_complete_endpoint_file ~config ~meta ~host_path ~timeout_sec ()
-  | Keeper_types_profile_sandbox.Shared_mount ->
-    let ( let* ) = Result.bind in
-    let* path = container_path_of_host ~config ~meta ~host_path in
-    let* _, bytes = run_command_with_capture ~config ~meta ~command_argv:["cat"; path]
-        ~max_bytes:None ~timeout_sec () in
-    Ok bytes
+  let* path = container_path_of_host ~config ~meta ~host_path in
+  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
+      ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
+  Ok bytes

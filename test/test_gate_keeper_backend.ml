@@ -2862,6 +2862,29 @@ let test_stream_protocol_error_summary_includes_diagnostics () =
      | Some _ | None -> fail "typed quarantine was missing from protocol JSON")
   | _ -> fail "stream protocol error JSON is not an object"
 
+let test_keeper_stream_bridge_rejects_reasoning_as_public_text () =
+  let open Agent_core.Types in
+  List.iter (fun content_type ->
+    let events = translate_agent_core_stream_events
+      [ ContentBlockStart {index=0; content_type; tool_id=None; tool_name=None};
+        ContentBlockDelta {index=0; delta=TextDelta "PRIVATE_REASONING_MARKER"} ] in
+    check bool "mismatched reasoning never becomes public text" false
+      (List.exists (function Keeper_chat_events.Text_delta _ -> true | _ -> false) events);
+    check bool "typed protocol failure retained" true
+      (List.exists (function Keeper_chat_events.Agent_core_stream_protocol_error _ -> true | _ -> false) events))
+    ["thinking"; "reasoning_details"];
+  let valid = translate_agent_core_stream_events
+    [ ContentBlockStart {index=0; content_type="thinking"; tool_id=None; tool_name=None};
+      ContentBlockDelta {index=0; delta=ThinkingDelta "PRIVATE_REASONING_MARKER"};
+      ContentBlockDelta {index=0; delta=ThinkingSignatureDelta "signature"};
+      ContentBlockStop {index=0};
+      ContentBlockStart {index=1; content_type="text"; tool_id=None; tool_name=None};
+      ContentBlockDelta {index=1; delta=TextDelta "PUBLIC_ANSWER"} ] in
+  check (list string) "valid signature preserves separate answer" ["PUBLIC_ANSWER"]
+    (List.filter_map (function Keeper_chat_events.Text_delta text -> Some text | _ -> None) valid);
+  check bool "valid reasoning has no protocol error" false
+    (List.exists (function Keeper_chat_events.Agent_core_stream_protocol_error _ -> true | _ -> false) valid)
+
 let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   let open Agent_core.Types in
   let unknown_then_incomplete =
@@ -3878,6 +3901,8 @@ let () =
             test_keeper_stream_bridge_rejects_unsupported_media_source;
           test_case "stream bridge masks media write failure reason" `Quick
             test_keeper_stream_bridge_masks_media_write_failure_reason;
+          test_case "stream bridge rejects reasoning as public text" `Quick
+            test_keeper_stream_bridge_rejects_reasoning_as_public_text;
           test_case "stream bridge preserves non-tool block lifecycle" `Quick
             test_keeper_stream_bridge_preserves_non_tool_block_lifecycle;
           test_case "stream bridge rejects tool start missing identity" `Quick

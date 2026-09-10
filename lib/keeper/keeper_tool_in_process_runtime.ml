@@ -2084,7 +2084,7 @@ let handle_masc_schedule_with_outcome
    either is unavailable we return an explicit error JSON rather than
    silently dropping the request (CLAUDE.md Silent-Failure avoidance). *)
 let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta)
-      ?continuation_channel ~args () =
+      ?gate_context ?continuation_channel ~args () =
   match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     (match Fusion_config_loader.load ~base_path:config.Workspace.base_path with
@@ -2095,7 +2095,16 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
             (`Assoc [ "ok", `Bool false; "error", `String msg ]))
      | Ok policy ->
        let now_unix = Time_compat.now () in
+       let turn_ref = Option.bind gate_context (fun context ->
+         Option.map (fun turn -> Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~absolute_turn:turn)
+           (context ()).Keeper_gate.turn_id) in
+       (match Fusion_request_context.capture ~config ~keeper:meta.name ~turn_ref ~args with
+        | Error error -> Keeper_tool_execution.failure ~class_:(Fusion_request_context.failure_class error)
+            (Fusion_request_context.error_to_string error)
+        | Ok source_context ->
        Fusion_tool.handle_result
+         ~source_context
          ~sw
          ~net
          ~base_dir:config.Workspace.base_path
@@ -2105,7 +2114,7 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
          ?continuation_channel
          ~args
          ()
-       |> Keeper_tool_execution.of_tool_result)
+       |> Keeper_tool_execution.of_tool_result))
   | _ ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
@@ -2263,9 +2272,14 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
     | Some _ | None -> not_found ())
 ;;
 
-let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
+let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
   let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
-  fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id
+  let status = fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id in
+  if run_id = "" then status else
+    match Yojson.Safe.from_string status with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("keeper_decisions",
+        Fusion_decision.read_for_keeper ~config ~keeper:meta.name ~run_id |> Fusion_decision.read_to_yojson) :: fields))
+    | _ -> status
 ;;
 
 (* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the

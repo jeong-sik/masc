@@ -1,0 +1,39 @@
+{
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-f57ada332514ed2265b915cc3999ed8e",
+    "sequence": "12",
+    "created_at": 1788997002.653074,
+    "execution_digest": "809f380c4a2c64e293f40c98b97418c4afa6f2410e6740e5d608902c6a3a6711",
+    "source": {
+      "channel": "agent",
+      "channel_user_id": "",
+      "channel_user_name": "",
+      "channel_workspace_id": "",
+      "continuation_channel": {
+        "kind": "dashboard",
+        "thread_id": "keeper:memory-continuity-proof"
+      },
+      "conversation_id": null,
+      "external_message_id": null,
+      "extra_mentions": [],
+      "schema": "masc.keeper_chat_operation.source.v1",
+      "submitted_by": "guide-integration",
+      "surface": {
+        "kind": "agent"
+      },
+      "thread_id": "keeper:memory-continuity-proof",
+      "user_row_origin": "needs_append",
+      "workspace_id": null
+    },
+    "input": null,
+    "state": "Succeeded",
+    "completed_at": 1788997007.264434,
+    "outcome_ref": "trace-1788993187645-00000#13"
+  },
+  "response": "기억나는 설정은 화자 이름이 루메린, 고향이 은빛정류장, 약속한 시각이 04:17이고, 정정된 우산 색은 노란색, 정한 계절은 가을입니다. 모르는 항목은 없습니다.",
+  "elapsed_from_initial_input_seconds": 3808.3399770259857,
+  "elapsed_from_previous_recall_seconds": 3480.662768125534,
+  "limitation": "on-demand delayed recall after idle interval; prior final recall repeated all facts; not continuous autonomous work, restart or compaction proof",
+  "input": "앞선 대화 이후 시간이 지났습니다. 외부파일이나 도구를 사용하지 말고, 우리가 정했던 화자의 이름, 고향, 약속 시각, 정정된 우산 색, 계절을 기억나는 대로 한 문장으로 답해주세요. 기억나지 않는 항목은 모른다고 명시하세요."
+}

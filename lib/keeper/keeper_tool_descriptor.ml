@@ -108,6 +108,7 @@ type runtime_handler =
   | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
+  | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
@@ -143,6 +144,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -236,6 +238,7 @@ let runtime_handler_to_string = function
   | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
+  | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
@@ -271,6 +274,7 @@ let runtime_handler_to_string = function
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_masc_fusion_decision -> "tool_masc_fusion_decision"
   | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
@@ -455,6 +459,7 @@ let descriptor
       | Tool_capability_search
       | Tool_context_status
       | Tool_artifact_read
+      | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
       | Tool_library_read
@@ -485,6 +490,7 @@ let descriptor
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
+      | Tool_masc_fusion_decision
       | Tool_masc_file_dispatch
       | Tool_masc_library_dispatch
       | Tool_masc_local_runtime_dispatch
@@ -1099,6 +1105,10 @@ let surface_read_schema = shard_surface_schema "keeper_surface_read"
 let surface_post_schema = shard_surface_schema "keeper_surface_post"
 let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
+let workspace_memory_schema_source, workspace_memory_schema =
+  base_schema_declared "keeper_workspace_memory_read"
+;;
+
 let memory_search_schema_source, memory_search_schema =
   base_schema_declared "keeper_memory_search"
 ;;
@@ -1513,11 +1523,12 @@ let goal_list_output_schema =
             ~properties:
               [ "active_count", `Assoc [ "type", `String "integer" ]
               ; "verifying_count", `Assoc [ "type", `String "integer" ]
+              ; "awaiting_confirmation_count", `Assoc [ "type", `String "integer" ]
               ; "done_count", `Assoc [ "type", `String "integer" ]
               ; "dropped_count", `Assoc [ "type", `String "integer" ]
               ]
             ~required:
-              [ "active_count"; "verifying_count"; "done_count"
+              [ "active_count"; "verifying_count"; "awaiting_confirmation_count"; "done_count"
               ; "dropped_count" ] )
       ]
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
@@ -2228,6 +2239,18 @@ let internal_descriptors : t list =
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:workspace_memory_schema_source
+      ~id:"keeper.workspace.memory.read"
+      ~name:"keeper_workspace_memory_read"
+      ~description:workspace_memory_schema.description
+      ~input_schema:workspace_memory_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_workspace_memory_read
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
@@ -2357,6 +2380,17 @@ let internal_descriptors : t list =
       (* The explicit [Internal_name] projection makes Fusion available. *)
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.fusion.decision"
+      ~name:Keeper_runtime_schemas_toml.fusion_decision.name
+      ~description:Keeper_runtime_schemas_toml.fusion_decision.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_decision.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_fusion_decision
       ()
     (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
   ; in_process_descriptor_with_schema_source

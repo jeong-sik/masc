@@ -4377,17 +4377,11 @@ let complete_delivery delivery =
                     rule_audit_receipts @ [ resolution_audit_receipt ]
                 }
             in
-            (match delivery.decision with
-             | Decision.Approve ->
-               (* Keep the resolved journal entry until the exact Gate request
-                  consumes it. The wake event is only a correlation message and
-                  cannot become a second authorization SSOT. *)
-               finish ()
-             | Decision.Reject _ ->
-               (match remove_delivery_from_store delivery with
-                | Error storage_error ->
-                  Error (Persistence_failed { approval_id = id; storage_error })
-               | Ok () -> finish ()))))
+            (* Both decisions remain authoritative after their wake is sent.
+               A waiting direct operation must re-read the exact rejection as
+               well as an approval; the wake alone is not the request store.
+               A retained rejection is never a consumable approval grant. *)
+            finish ()))
 ;;
 
 let delivery_wake_was_observed delivery =
@@ -4592,6 +4586,19 @@ module For_testing = struct
 
   let with_pending_store_lock = with_pending_store_lock
   let get_pending_entry_unchecked = find_pending_entry_unchecked
+
+  let with_unavailable_workspace ~base_path f =
+    let previous = with_pending_store_lock (fun () ->
+      let stores = Atomic.get unavailable_stores in
+      let previous = SMap.find_opt base_path stores in
+      Atomic.set unavailable_stores (SMap.add base_path
+        {path=base_path; reason="injected unavailable Gate authority"} stores);
+      previous) in
+    Fun.protect ~finally:(fun () -> with_pending_store_lock (fun () ->
+      let stores = Atomic.get unavailable_stores in
+      Atomic.set unavailable_stores (match previous with
+        | None -> SMap.remove base_path stores
+        | Some error -> SMap.add base_path error stores))) f
 
   let reset_runtime_state () =
     with_pending_store_lock (fun () ->
@@ -4852,3 +4859,17 @@ let pending_count_for_keeper_in_workspace ~base_path ~keeper_name =
       0
       entries)
 ;;
+
+type waiting_observation =
+  { waiting_request : pending_approval; waiting_decision : decision option }
+let observe_waiting_request ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      match SMap.find_opt id (Atomic.get deliveries), SMap.find_opt id (Atomic.get pending) with
+      | Some delivery, _ when delivery.entry.audit_base_path = base_path ->
+        Ok (Some {waiting_request=delivery.entry; waiting_decision=Some delivery.decision})
+      | None, Some entry when entry.audit_base_path = base_path ->
+        Ok (Some {waiting_request=entry; waiting_decision=None})
+      | Some _, _ | None, Some _ | None, None -> Ok None)

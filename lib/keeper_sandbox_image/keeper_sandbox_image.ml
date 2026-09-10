@@ -23,10 +23,9 @@ let dockerfile =
 # the whole context and there is no COPY, so it builds the same way from an
 # installed binary as from a checkout.
 #
-# This is what a Keeper turn needs to read, search and edit a repository, and
-# to hand the result back. A Keeper that has to build a project needs that
-# project's toolchain instead: point it at another image with `sandbox_image`
-# in its TOML.
+# General work includes documents, diagrams, slides, audio and video as well
+# as repository edits. These tools are installed before the read-only runtime
+# starts. Project-specific build toolchains still belong in sandbox_image.
 FROM debian:bookworm-slim
 
 # bash: the turn is run as `bash -l -s`, so a shell that is not bash cannot
@@ -43,7 +42,11 @@ FROM debian:bookworm-slim
 #     (keeper_sandbox_remote_checkouts.ml). Without it the probe exits 127 and
 #     the Keeper reports its workspace as unreadable.
 #
-# These two are not a toolchain choice. They are what MASC itself asks the
+# PDF/SVG: ReportLab, CairoSVG and Poppler create and inspect real documents.
+# Nanum fonts retain Korean glyphs in rendered output. Pillow handles raster
+# images; Pandoc and Impress produce and render slides; FFmpeg handles media.
+#
+# The shell and checkout prerequisites are not a toolchain choice. They are what MASC itself asks the
 # guest for, and an image that ships without them breaks a contract MASC
 # already made. Which language toolchain a Keeper needs stays the operator's
 # call, named per Keeper with sandbox_image.
@@ -53,11 +56,20 @@ RUN apt-get update \
        ca-certificates \
        curl \
        findutils \
+       ffmpeg \
+       fontconfig \
+       fonts-nanum \
+       libreoffice-impress \
+       pandoc \
+       poppler-utils \
        gh \
        git \
        less \
        procps \
        python3 \
+       python3-cairosvg \
+       python3-pil \
+       python3-reportlab \
        ripgrep \
   && rm -rf /var/lib/apt/lists/*
 

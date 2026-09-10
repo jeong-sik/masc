@@ -461,6 +461,12 @@ let stage_release_mirror base_path =
   write_file
     (Filename.concat dir ("masc-release-dashboard-bundle-" ^ suffix ^ ".py"))
     (read_file bundle_helper);
+  (* Existing-workspace preflight downloads this release helper even when the
+     model wizard is disabled. Stage its actual source bytes before computing
+     SHA256SUMS, just as release assembly and install-smoke do. *)
+  write_file
+    (Filename.concat dir "install-runtime-setup.py")
+    (read_file (Filename.concat (source_root ()) "scripts/install-runtime-setup.py"));
   (* These are test-owned bundle bytes, never a product dashboard build. The
      packaging tool still pairs them with the actual tested binary digest. *)
   let dashboard = Filename.concat dir "fixture-dashboard" in

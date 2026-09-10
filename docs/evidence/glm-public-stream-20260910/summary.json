@@ -1,0 +1,43 @@
+{
+  "request_id": "bedd26ad-5662-4827-a86e-ce910cb0ae10",
+  "keeper": "rondo",
+  "configured_runtime_id": "glm-coding.glm-5.3-flash",
+  "raw_capture_sha256": "b1e534fcfef0d0cc8cf471808ddf9f26b36024b666939c149298f6ccb2698424",
+  "raw_capture_local_path": "/tmp/masc-glm-stream-20260910/stream.jsonl",
+  "public_delta_count": 101,
+  "reasoning_delta_count": 99,
+  "first_public_s": 19.844312249915674,
+  "last_public_s": 22.09054841590114,
+  "final_details_s": 22.723071665968746,
+  "streamed_reply": "**408**\n\n검산은 이렇게 됩니다. 24 × 10 = 240, 24 × 7 = 168 이므로 240 + 168 = 408 입니다. 다른 방법으로도 17 × 12 = 204 를 두 배하면 408 로 같은 값이 나옵니다. 두 검산 모두 처음 계산과 일치하므로 결과는 408 이 맞습니다.",
+  "final_reply": "**408**\n\n검산은 이렇게 됩니다. 24 × 10 = 240, 24 × 7 = 168 이므로 240 + 168 = 408 입니다. 다른 방법으로도 17 × 12 = 204 를 두 배하면 408 로 같은 값이 나옵니다. 두 검산 모두 처음 계산과 일치하므로 결과는 408 이 맞습니다.",
+  "stream_equals_final": true,
+  "turn_ref": "trace-1788312314416-00007#3342",
+  "tool_events": 0,
+  "event_counts": {
+    "KEEPER_CHAT_OPERATION_ACCEPTED": 1,
+    "RUN_STARTED": 1,
+    "TEXT_MESSAGE_START": 1,
+    "KEEPER_RUNTIME_ATTEMPT_STARTED": 1,
+    "KEEPER_CONNECTED": 1,
+    "KEEPER_CONTENT_BLOCK_START": 2,
+    "KEEPER_THINKING_DELTA": 99,
+    "TEXT_MESSAGE_CONTENT": 101,
+    "KEEPER_CONTENT_BLOCK_STOP": 2,
+    "KEEPER_STREAM_MESSAGE_DELTA": 1,
+    "KEEPER_STREAM_MESSAGE_STOP": 1,
+    "KEEPER_REPLY_DETAILS": 1,
+    "TEXT_MESSAGE_END": 1,
+    "RUN_FINISHED": 1
+  },
+  "scope": "Installed live Keeper stream baseline, not unmerged PR34905 validation or browser rendering proof.",
+  "observed_server_build": {
+    "binary_commit": "e361d0f1c00a611c2c01f7aada77dd7e836dcb65",
+    "executable_sha256": "d08adac98d706c3bf70c38cbfd398a7c4a5e39bde157735eb139139c719d4dcc",
+    "runtime_instance_id": "01a086e1-ffe8-7000-9d74-118691b92b3d",
+    "started_at": "2026-09-09T15:55:53Z",
+    "provenance_source": "self_observed"
+  },
+  "reported_input_tokens": 66917,
+  "reported_output_tokens": 222
+}

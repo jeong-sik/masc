@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-09-09T19:38:55.749060+00:00",
+  "build": {
+    "release_version": "0.35.1",
+    "binary_version": "0.35.1",
+    "commit": "3dd470d9f9bd9e818ecfe7387aba334604872ca4",
+    "commit_source": "embedded",
+    "binary_commit": "3dd470d9f9bd9e818ecfe7387aba334604872ca4",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "c4da50b214d2fda1296e49c386e8cf3a358c1bb1d50010e75da45b11680d2b9e",
+    "binary_commit_unix_ts": 1788970896.0,
+    "binary_commit_age_seconds": 11839,
+    "repo_head_commit": "f08612e420",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788796203.0,
+    "repo_head_commit_age_seconds": 186532,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me",
+    "runtime_instance_id": "01a086fc-41c4-7000-bc6c-d39031b40db5",
+    "started_at": "2026-09-09T16:24:33Z",
+    "uptime_seconds": 11661
+  }
+}

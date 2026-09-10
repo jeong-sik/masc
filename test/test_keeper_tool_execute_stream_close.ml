@@ -51,6 +51,36 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
   output_string oc content
 
+(* Dispatch rejection is injected below, but guest preparation happens first.
+   Keep that prerequisite test-owned instead of starting a real host container. *)
+let with_fixture_docker f =
+  let dir = temp_dir () in
+  let docker = Filename.concat dir "docker" in
+  write_file docker {|#!/bin/sh
+set -eu
+case "$1" in
+  info) printf '[]\n' ;;
+  image) [ "$2" = inspect ]; printf '[]\n' ;;
+  inspect)
+    case "$3" in
+      *State.Running*) printf 'true\n' ;;
+      *) printf 'fixture-container-id\n' ;;
+    esac ;;
+  ps|rm|exec) exit 0 ;;
+  run) printf 'fixture-container-id\n' ;;
+  *) printf 'unexpected fixture docker invocation: %s\n' "$1" >&2; exit 2 ;;
+esac
+|};
+  Unix.chmod docker 0o700;
+  let previous = Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value previous ~default:"");
+      cleanup_dir dir)
+    (fun () ->
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" docker;
+      f ())
+
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -76,6 +106,7 @@ let make_meta ~name () =
   | Error e -> Alcotest.fail e
 
 let setup f =
+  with_fixture_docker @@ fun () ->
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -155,6 +186,7 @@ let rejected_cases =
 let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () =
   setup @@ fun ~config ~meta ~factory ~playground ->
   let stream_end_status = ref None in
+  let dispatch_count = ref 0 in
   Keeper_keepalive_signal.register_record_execute_stream_end
     (fun ~keeper_name:_ ~task_id:_ ~status -> stream_end_status := Some status);
   Fun.protect
@@ -163,7 +195,9 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
       Keeper_keepalive_signal.register_record_execute_stream_end
         (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ()))
     (fun () ->
-      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some dispatch;
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
+        incr dispatch_count;
+        dispatch ());
       let raw =
         Keeper_tool_execute_runtime.handle_tool_execute
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
@@ -173,6 +207,7 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
           ~args:(typed_exec_args ~cwd:playground)
           ()
       in
+      check int (name ^ ": reached the rejected dispatch") 1 !dispatch_count;
       (match parse_bool_field raw "ok" with
        | Some true -> Alcotest.failf "%s: rejected response unexpectedly ok: %s" name raw
        | Some false | None -> ());

@@ -214,6 +214,7 @@ let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
 type rollup = {
   active_count : int;
   verifying_count : int;
+  awaiting_confirmation_count : int;
   done_count : int;
   dropped_count : int;
 }
@@ -619,7 +620,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     if not criterion_changed then next_goal
                     else
                       let phase = match next_goal.phase with
-                        | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
+                        | Goal_phase.Awaiting_confirmation | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
                         | Goal_phase.Executing | Goal_phase.Dropped as phase -> phase
                       in
                       { next_goal with criterion_revision = Random_id.hex ~bytes:16;
@@ -693,6 +694,7 @@ let compute_rollup goals =
   {
     active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
     verifying_count = count (fun goal -> goal.phase = Goal_phase.Verifying);
+    awaiting_confirmation_count = count (fun goal -> goal.phase = Goal_phase.Awaiting_confirmation);
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }

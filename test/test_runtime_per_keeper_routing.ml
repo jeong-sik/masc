@@ -785,6 +785,13 @@ let test_deleted_keeper_loses_assignment_and_egress_together () =
 
 let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
   with_runtime_file (fun path ->
+    (* Both writers must change the observed assignment. Otherwise the writer
+       reasserting the fixture's initial openai.gpt can legitimately finish as
+       Assignment_unchanged before the other writer commits, with no conflict. *)
+    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path
+             ~keeper_name:"routingtest" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.failf "clear initial assignment failed: %s" detail);
     let expected =
       match Runtime.observe_keeper_assignment ~runtime_config_path:path
               ~keeper_name:"routingtest" () with

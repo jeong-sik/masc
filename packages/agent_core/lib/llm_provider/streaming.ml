@@ -796,9 +796,13 @@ type tool_block_identity =
   ; origin : tool_identity_origin
   }
 
+type inline_channel = Inline_text | Inline_thinking
+
 type openai_stream_state =
   { mutable thinking_block_started : bool
   ; mutable thinking_block_index : int
+  ; mutable reasoning_details_index : int option
+  ; mutable inline_active_block : (inline_channel * int) option
   ; mutable text_block_started : bool
   ; mutable text_block_index : int
   ; tool_blocks_by_id : (string, int) Hashtbl.t
@@ -834,6 +838,8 @@ let create_openai_stream_state
   =
   { thinking_block_started = false
   ; thinking_block_index = -1
+  ; reasoning_details_index = None
+  ; inline_active_block = None
   ; text_block_started = false
   ; text_block_index = -1
   ; tool_blocks_by_id = Hashtbl.create 4
@@ -852,6 +858,8 @@ let create_openai_stream_state
 type openai_projection_scalar_snapshot =
   { snapshot_thinking_block_started : bool
   ; snapshot_thinking_block_index : int
+  ; snapshot_reasoning_details_index : int option
+  ; snapshot_inline_active_block : (inline_channel * int) option
   ; snapshot_text_block_started : bool
   ; snapshot_text_block_index : int
   ; snapshot_next_block_index : int
@@ -866,6 +874,7 @@ type openai_projection_undo =
 type openai_projection_tx =
   { state : openai_stream_state
   ; scalar_snapshot : openai_projection_scalar_snapshot
+  ; inline_snapshot : (Inline_reasoning_split.state * Inline_reasoning_split.snapshot) option
   ; mutable undo : openai_projection_undo list
   }
 
@@ -874,11 +883,14 @@ let begin_openai_projection state =
   ; scalar_snapshot =
       { snapshot_thinking_block_started = state.thinking_block_started
       ; snapshot_thinking_block_index = state.thinking_block_index
+      ; snapshot_reasoning_details_index = state.reasoning_details_index
+      ; snapshot_inline_active_block = state.inline_active_block
       ; snapshot_text_block_started = state.text_block_started
       ; snapshot_text_block_index = state.text_block_index
       ; snapshot_next_block_index = state.next_block_index
       ; snapshot_thinking_state = state.thinking_state
       }
+  ; inline_snapshot = Option.map (fun split -> split, Inline_reasoning_split.snapshot split) state.inline_reasoning
   ; undo = []
   }
 ;;
@@ -893,10 +905,13 @@ let rollback_openai_projection tx =
   let snapshot = tx.scalar_snapshot in
   state.thinking_block_started <- snapshot.snapshot_thinking_block_started;
   state.thinking_block_index <- snapshot.snapshot_thinking_block_index;
+  state.reasoning_details_index <- snapshot.snapshot_reasoning_details_index;
+  state.inline_active_block <- snapshot.snapshot_inline_active_block;
   state.text_block_started <- snapshot.snapshot_text_block_started;
   state.text_block_index <- snapshot.snapshot_text_block_index;
   state.next_block_index <- snapshot.snapshot_next_block_index;
   state.thinking_state <- snapshot.snapshot_thinking_state;
+  Option.iter (fun (split, captured) -> Inline_reasoning_split.restore split captured) tx.inline_snapshot;
   List.iter
     (function
       | Undo_tool_block_by_id (id, previous) ->
@@ -1139,12 +1154,32 @@ let openai_open_block_stops (state : openai_stream_state) : sse_event list =
   let indices =
     (if state.thinking_block_started then [ state.thinking_block_index ] else [])
     @ (if state.text_block_started then [ state.text_block_index ] else [])
+    @ Option.to_list state.reasoning_details_index
+    @ (match state.inline_active_block with None -> [] | Some (_, index) -> [index])
     @ Hashtbl.fold
         (fun block_index _identity acc -> block_index :: acc)
         state.tool_block_identities
         []
   in
   indices |> List.sort_uniq compare |> List.map (fun index -> ContentBlockStop { index })
+;;
+
+let emit_inline_segments state emit segments =
+  List.iter (fun segment ->
+    let channel, content_type, delta = match segment with
+      | Inline_reasoning_split.Text text -> Inline_text, "text", TextDelta text
+      | Inline_reasoning_split.Reasoning text -> Inline_thinking, "thinking", ThinkingDelta text in
+    let index = match state.inline_active_block with
+      | Some (previous, index) when previous = channel -> index
+      | previous ->
+          Option.iter (fun (_, index) -> emit (ContentBlockStop {index})) previous;
+          let index = state.next_block_index in
+          state.next_block_index <- index + 1;
+          state.inline_active_block <- Some (channel, index);
+          emit (ContentBlockStart {index; content_type; tool_id = None; tool_name = None});
+          index
+    in
+    emit (ContentBlockDelta {index; delta})) segments
 ;;
 
 (** Project one parsed chunk into locally buffered events. Tool route failures
@@ -1207,25 +1242,18 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
      (match state.thinking_state with
       | Not_thinking -> state.thinking_state <- Thinking_started (Unix.gettimeofday ())
       | Thinking_started _ | Thinking_done -> ());
-     if not state.thinking_block_started
-     then (
-       state.thinking_block_index <- state.next_block_index;
-       emit
-         (ContentBlockStart
-            { index = state.next_block_index
-            ; content_type = "reasoning_details"
-            ; tool_id = None
-            ; tool_name = None
-            });
-       state.thinking_block_started <- true;
-       state.next_block_index <- state.next_block_index + 1);
-     emit
-       (ContentBlockDelta
-          { index = state.thinking_block_index
-          ; delta =
-              ReasoningDetailsDelta
-                { reasoning_content = delta_reasoning_content; details = delta_details }
-          })
+     let index = match state.reasoning_details_index with
+       | Some index -> index
+       | None ->
+           let index = state.next_block_index in
+           state.reasoning_details_index <- Some index;
+           state.next_block_index <- index + 1;
+           emit (ContentBlockStart {index; content_type = "reasoning_details";
+                                    tool_id = None; tool_name = None});
+           index
+     in
+     emit (ContentBlockDelta {index; delta = ReasoningDetailsDelta
+       {reasoning_content=delta_reasoning_content;details=delta_details}})
    | None -> ());
   let emit_text_delta text =
     if not state.text_block_started
@@ -1242,20 +1270,14 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
       state.next_block_index <- state.next_block_index + 1);
     emit (ContentBlockDelta { index = state.text_block_index; delta = TextDelta text })
   in
-  (* Text content delta. A model that declares [template_parser] also puts
-     reasoning in this channel, wrapped in tags; it is separated here so the
-     reply block carries the reply and nothing else. Reasoning goes out ahead
-     of the text it preceded, which is the order it arrived in. *)
+  (* Explicit content framing is independent of the native reasoning dialect.
+     Preserve inline segment order and distinct native/inline block identities. *)
   (match chunk.delta_content with
    | Some text when text <> "" ->
      (match state.inline_reasoning with
       | None -> emit_text_delta text
       | Some split ->
-        let { Inline_reasoning_split.reasoning; text } =
-          Inline_reasoning_split.feed split text
-        in
-        if reasoning <> "" then emit_thinking_delta reasoning;
-        if text <> "" then emit_text_delta text)
+        emit_inline_segments state emit (Inline_reasoning_split.feed_segments split text))
    | Some empty_text ->
      let (_ : string) = empty_text in
      ()
@@ -1318,11 +1340,7 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
        (match state.inline_reasoning with
         | None -> ()
         | Some split ->
-          let { Inline_reasoning_split.reasoning; text } =
-            Inline_reasoning_split.flush split
-          in
-          if reasoning <> "" then emit_thinking_delta reasoning;
-          if text <> "" then emit_text_delta text);
+          emit_inline_segments state emit (Inline_reasoning_split.flush_segments split));
        List.iter emit (openai_open_block_stops state);
        emit
          (MessageDelta
@@ -3355,11 +3373,7 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
      (match state.inline_reasoning with
       | None -> emit_text_delta text
       | Some split ->
-        let { Inline_reasoning_split.reasoning; text } =
-          Inline_reasoning_split.feed split text
-        in
-        if reasoning <> "" then emit_thinking_delta reasoning;
-        if text <> "" then emit_text_delta text)
+        emit_inline_segments state emit (Inline_reasoning_split.feed_segments split text))
    | Some empty_text ->
      let (_ : string) = empty_text in
      ()
@@ -3406,16 +3420,12 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
     (* Bytes the inline-reasoning splitter was holding back belong to this
        message; an unterminated tag means the stream was cut mid-thought.
        Paths that never see a done chunk (provider error, truncated stream)
-       drop the held bytes instead — finalize fails closed on the missing
-       terminal [stop_reason], so nothing half-parsed reaches a surface. *)
+       retain an incomplete outcome. Previously emitted deltas are already
+       observable; terminal validation cannot retract them. *)
     (match state.inline_reasoning with
      | None -> ()
      | Some split ->
-       let { Inline_reasoning_split.reasoning; text } =
-         Inline_reasoning_split.flush split
-       in
-       if reasoning <> "" then emit_thinking_delta reasoning;
-       if text <> "" then emit_text_delta text);
+       emit_inline_segments state emit (Inline_reasoning_split.flush_segments split));
     let stop_reason =
       match chunk.oll_done_reason with
       (* Non-streaming parsing can reject before returning content. Streaming
@@ -3428,6 +3438,7 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
              (Stop_reason_wire.wire_finish_of_string reason)
              ~has_tool_blocks:(chunk.oll_tool_calls <> []))
     in
+    List.iter emit (openai_open_block_stops state);
     emit
       (MessageDelta
          { stop_reason
@@ -3703,6 +3714,10 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
         ; tool_name = Some "search"
         }
     ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot args }
+      (* [openai_open_block_stops] closes every block this state opened once the
+         terminal chunk arrives, so the tool block's stop belongs between the
+         arguments and the message end. *)
+    ; ContentBlockStop { index = 0 }
     ; MessageDelta { stop_reason = Some StopToolUse; _ }
     ; MessageStop
     ] -> String.starts_with ~prefix:"call_agent_core_" tool_id && args = {|{"q":"hello"}|}
@@ -3783,11 +3798,8 @@ let%test "ollama_chunk_to_events: a cut thought is released as reasoning at done
 
 let%test "ollama_chunk_to_events: text resuming after a think block stays well-formed"
   =
-  (* text -> <think> -> text: the resumed text rides the already-open text
-     block (no second start for an index that already carries payload — the
-     accumulator rejects start-after-payload), and the thinking segment gets
-     its own block. Cross-index delta order is tolerated: the accumulator
-     keys blocks by index and the chat bridge projects per lane. *)
+  (* Each channel transition opens a fresh index, preserving the original
+     order in both the live deltas and the final indexed block sequence. *)
   let state = create_openai_stream_state ~inline_reasoning:true () in
   let feed content =
     let line =
@@ -3812,7 +3824,7 @@ let%test "ollama_chunk_to_events: text resuming after a think block stays well-f
   in
   List.filter_map test_thinking_text events = [ "more" ]
   && List.filter_map test_reply_text events = [ "answer "; " tail" ]
-  && starts = [ 0, "text"; 1, "thinking" ]
+  && starts = [ 0, "text"; 1, "thinking"; 2, "text" ]
 ;;
 
 (* parse_sse_event regression: the previous implementation returned [None]
@@ -3894,4 +3906,52 @@ let%test "parse_sse_event: known event still parses normally" =
   | unexpected_event ->
     let (_ : sse_event option) = unexpected_event in
     false
+;;
+
+let%test "native details and inline reasoning retain distinct block payloads" =
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let chunk = { (test_content_chunk "A<think>B</think>C") with
+    delta_reasoning_details = Some {delta_reasoning_content = Some "native"; delta_details = []} } in
+  let events, _ = openai_chunk_to_events state chunk in
+  let starts = List.filter_map (function ContentBlockStart {index;content_type;_} -> Some (index,content_type) | _ -> None) events in
+  let deltas = List.filter_map (function ContentBlockDelta {index;delta} -> Some (index,delta) | _ -> None) events in
+  starts = [0,"reasoning_details";1,"text";2,"thinking";3,"text"]
+  && List.exists (function 2, ThinkingDelta "B" -> true | _ -> false) deltas
+  && not (List.exists (function 0, ThinkingDelta _ -> true | _ -> false) deltas)
+;;
+
+let%test "inline answer emits incrementally after reasoning before terminal" =
+  let state = create_openai_stream_state ~inline_reasoning:true () in
+  let first, _ = openai_chunk_to_events state (test_content_chunk "<think>private</think>hel") in
+  let second, _ = openai_chunk_to_events state (test_content_chunk "lo") in
+  let visible events = List.filter_map (function ContentBlockDelta {delta=TextDelta text;_} -> Some text | _ -> None) events in
+  visible first = ["hel"] && visible second = ["lo"]
+;;
+
+let%test "rejected tool chunk restores inline mode and held tag bytes" =
+  let check prefix rejected continuation expected =
+    let state = create_openai_stream_state ~inline_reasoning:true () in
+    let tool id =
+      { tc_index = 0; tc_id = id; tc_name = Some "fixture";
+        tc_arguments = Some (Args_fragment "") } in
+    let initial = { (test_content_chunk prefix) with delta_tool_calls = [tool None] } in
+    let before, _ = openai_chunk_to_events state initial in
+    (* A provider identity cannot replace the synthesized identity of that
+       existing call. The preceding content in this same chunk must roll back. *)
+    let invalid = { (test_content_chunk rejected) with
+      delta_tool_calls = [tool (Some "late-provider-id")] } in
+    let rejected_events, _ = openai_chunk_to_events state invalid in
+    let after, _ = openai_chunk_to_events state
+      { (test_content_chunk continuation) with finish_reason = Some "stop" } in
+    let payloads = List.filter_map (function
+      | ContentBlockDelta {delta = TextDelta text; _} -> Some (`Text text)
+      | ContentBlockDelta {delta = ThinkingDelta text; _} -> Some (`Thinking text)
+      | _ -> None) (before @ after) in
+    (match rejected_events with [SSEParseFailed _] -> true | _ -> false)
+    && payloads = expected
+  in
+  check "<thi" "nk>discarded</think>" "nk>private</think>reply"
+    [`Thinking "private"; `Text "reply"]
+  && check "<think>private</thi" "nk>discarded" "nk>reply"
+    [`Thinking "private"; `Text "reply"]
 ;;

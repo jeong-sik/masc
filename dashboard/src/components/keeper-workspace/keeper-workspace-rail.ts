@@ -408,8 +408,8 @@ function RuntimeSection({
                         <span class=${`rtc-flag ${catalogEntry.entry.tools_support ? 'on' : 'off'}`}>
                           ${catalogEntry.entry.tools_support ? '✓' : '✕'} tools
                         </span>
-                        <span class=${`rtc-flag ${catalogEntry.entry.thinking_support ? 'on' : 'off'}`}>
-                          ${catalogEntry.entry.thinking_support ? '✓' : '✕'} thinking
+                        <span class=${`rtc-flag ${catalogEntry.entry.thinking_support === true ? 'on' : catalogEntry.entry.thinking_support === false ? 'off' : 'na'}`}>
+                          ${catalogEntry.entry.thinking_support === true ? '✓' : catalogEntry.entry.thinking_support === false ? '✕' : '—'} thinking
                         </span>
                         <span class=${`rtc-flag ${catalogEntry.entry.streaming ? 'on' : 'off'}`}>
                           ${catalogEntry.entry.streaming ? '✓' : '✕'} streaming

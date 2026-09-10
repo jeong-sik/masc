@@ -1,0 +1,83 @@
+{
+  "id": "vrf-e98a49e8b919f2e8d0b3b7d180861d83",
+  "task_id": "task-001",
+  "output": {
+    "evidence_refs": [
+      "artifact:memory_proposal_guide.pdf",
+      "artifact:renders/page1.png",
+      "artifact:renders/page2.png",
+      "artifact:renders/page3.png",
+      "artifact:source-receipt.json",
+      "artifact:verify_summary.txt",
+      "note:Submitted copied PDF, summary, source hashes and three complete page renderings for independent review against the original criteria. No semantic verdict is supplied."
+    ],
+    "task_title": "Independent review of current three-page memory proposal PDF",
+    "required_artifacts": [
+      "artifact:memory_proposal_guide.pdf",
+      "artifact:renders/page1.png",
+      "artifact:renders/page2.png",
+      "artifact:renders/page3.png",
+      "artifact:source-receipt.json",
+      "artifact:verify_summary.txt"
+    ],
+    "submitted_evidence": [
+      {
+        "kind": "artifact_unreadable",
+        "reference": "artifact:memory_proposal_guide.pdf",
+        "reason": {
+          "code": "invalid_utf8"
+        }
+      },
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:renders/page1.png",
+        "bytes": 166776,
+        "sha256": "cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af",
+        "format": "png",
+        "body": "evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/1.bin"
+      },
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:renders/page2.png",
+        "bytes": 190109,
+        "sha256": "b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2",
+        "format": "png",
+        "body": "evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/2.bin"
+      },
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:renders/page3.png",
+        "bytes": 134793,
+        "sha256": "38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d",
+        "format": "png",
+        "body": "evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/3.bin"
+      },
+      {
+        "kind": "artifact",
+        "reference": "artifact:source-receipt.json",
+        "content": "{\n  \"container\": \"a193b2f5144a\",\n  \"root\": \"/home/keeper/playground/memory-guide-proof\",\n  \"files\": [\n    {\n      \"relative\": \"memory_proposal_guide.pdf\",\n      \"bytes\": 136937,\n      \"sha256\": \"bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86\"\n    },\n    {\n      \"relative\": \"verify_summary.txt\",\n      \"bytes\": 6115,\n      \"sha256\": \"25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1\"\n    },\n    {\n      \"relative\": \"renders/page1.png\",\n      \"bytes\": 166776,\n      \"sha256\": \"cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af\"\n    },\n    {\n      \"relative\": \"renders/page2.png\",\n      \"bytes\": 190109,\n      \"sha256\": \"b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2\"\n    },\n    {\n      \"relative\": \"renders/page3.png\",\n      \"bytes\": 134793,\n      \"sha256\": \"38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d\"\n    }\n  ]\n}\n",
+        "bytes": 904,
+        "truncated": false
+      },
+      {
+        "kind": "artifact",
+        "reference": "artifact:verify_summary.txt",
+        "content": "=== pdfinfo ===\nTitle:           기억 제안 해석 안내\nSubject:         (unspecified)\nKeywords:        \nAuthor:          memory-guide-proof\nCreator:         (unspecified)\nProducer:        ReportLab PDF Library - www.reportlab.com\nCreationDate:    Wed Sep  9 23:27:31 2026 UTC\nModDate:         Wed Sep  9 23:27:31 2026 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage size:       595.276 x 841.89 pts (A4)\nPage rot:        0\nFile size:       136937 bytes\nOptimized:       no\nPDF version:     1.4\n\n=== pdffonts ===\nname                                 type              encoding         emb sub uni object ID\n------------------------------------ ----------------- ---------------- --- --- --- ---------\nHelvetica                            Type 1            WinAnsi          no  no  no       2  0\nAAAAAA+NanumGothic                   TrueType          WinAnsi          yes yes yes     10  0\nAAAAAB+NanumGothic                   TrueType          WinAnsi          yes yes yes     14  0\nAAAAAA+NanumGothicBold               TrueType          WinAnsi          yes yes yes     18  0\nAAAAAB+NanumGothicBold               TrueType          WinAnsi          yes yes yes     22  0\nTimes-Roman                          Type 1            WinAnsi          no  no  no       5  0\n\n=== pdftotext (처음 2500자) ===\n기억 제안 해석 안내 — memory-guide-proof\n\nsynthetic-scenario 예시\n\n기억 제안(메모리 제안) 해석 안내\n대상 제안: d0420c0c2fbcca66a97f27d2152351dc9544e288601ea21962b7235e8ec3395f · 조회일 2026-09-09 · 문서\n작성 memory-guide-proof\n\n먼저 읽을 세 가지\n이 문서의 모든 예시는 synthetic-scenario(시나리오) 데이터입니다. 네 건의 출처(s1–s4) 모두 원문\norigin.trace_id가 “synthetic-scenario”로 확인되므로, 실제 운영 기록·측정이 아닙니다.\n기억 제안은 모델이 제안한 해석이지 검증된 사실이 아닙니다. 원문 status=model_proposed,\nsemantic_verification=not_performed.\n이 문서는 저장소 조회 결과(저장된 주장)와 직접 확인한 사실(독립 검증)을 구분해 적었습니다. 검증이 “미수행”인\n항목은 사실로 받아들이지 마세요.\n\n1. 기억 제안이란 무엇인가\n기억 제안은 여러 Keeper의 기억 스냅샷을 모아 모델이 “이렇게 합쳐도 되는가”를 제안한 초안입니다. 각 출처는\nKeeper별 기억 저장소의 스냅샷에서 온 저장된 주장이고, 제안은 그 주장들을 비교해 상충(conflicts), 합의\n후보(shared_claims), 누락(gaps)으로 분류합니다. 분류 결과 자첳보다 “어떤 출처가 무엇을 주장했는지”를 먼저\n보세요.\nstatus=model_proposed — 모델이 만든 제안이며, 채택되기 전 상태입니다.\nsemantic_verification=not_performed — 의미 검증이 시행되지 않았다는 뜻이지, 불가능하다는 뜻이\n아닙니다. 나중에 수행되면 판단이 바뀔 수 있습니다.\n제안을 읽는 것만으로는 아무 것도 확정되지 않습니다. 원문 출처(s1–s4)와 실제 파일·로그를 대조해야 비로소\n검증됩니다.\n\n2. 원문 구조 한눈에 보기\n조회한 제안 원문의 구성입니다. (아래 표는 원문에서 직접 확인한 값입니다.)\n항목\n\n원문 값\n\n읽는 법\n\n제안 ID\n\nd0420c0c…3395f\n\n목록에서 다시 읽을 때 쓰는 식별자\n\nstatus / 검증\n\nmodel_proposed / not_performed\n\n모델 제안 · 의미 검증 미실시\n\n출처 수\n\n4건 (s1–s4)\n\n모두 origin.kind=authored\n\ntrace_id\n\nsynthetic-scenario\n\n전체가 시나리오 데이터\n\n스냅샷\n\nsnapshot1/2/3 (ordinary)\n\nKeeper별 일반 저장소\n\ngaps\n\nsource_bound 3건 missing\n\n저장소 관측 부재(외부 원본과 별개)\n\n3. 예시 1 — 상충 관측(conflicts): “PDF가 만들어졌다” vs “실패했다”\n출처\n\nKeeper\n\n저장된 주장(원문 번역)\n\n검증\n\ns1\n\nwriter\n\nReport R이 PDF로 생성되었다.\n\n미수행\n\ns2\n\nreviewer\n\nReport R은 일반 Markdown 바이트이며 PDF 생성은 실패했다.\n\n미수행\n\n본 문서의 모든 예시는 synthetic-scenario 데이터입니다 — 실제 운영 관측이 아닙니다.\n1\n\n\f기억 제안 해석 안내 — memory-guide-proof\n\nsynthetic-scenario 예시\n\n이 제안을 읽는 법\nconflicts 항목은 두 주장을 병합하지 않고 상충으로 보존합니다. 어느 쪽이 옳은지는 제안이 판단하지 않습니다.\n판단하려면 Report R 파일을 직접 열어 바이트·생성 로그를 대조해야 합니다. 이 문서 작성 시점에는 그 확인을\n수행하지 못했습니다(미수행). 출처가 synthetic-scenario라 실제 파일이 있을 것 같지는 않지만, 원문 증거만으로\n“파일이 없다”고 단정하지는 않습니다.\n따라서 권장 결론은 보류입니다. 한쪽 주장을 골라 기록하면 근거 없는 사실로 굳어집니다.\n\n4. 예시 2 — 수치 정정(shared_claims): 12초 → 21초\n출처\n\nKeeper\n\n저장된 주장(원문 번역)\n\n검증\n\ns3\n\nanalyst\n\n측정 M은 12초였다.\n\n미수행\n\ns4\n\nanalyst\n\n정정: 원본 로그 기준 측정 M은 21초, 12초가 아니다.\n\n미수행\n\n이 제안을 읽는 법\n두 주장은 모순처럼 보이지만 정정 관계입니다. 제안은 “21초로 정정되어 12초를 대체한다”는 합의 후보로\n묶었습니다.\n“정정”은 그 자체로 검증이 아닙니다. 21초가 맞는지는 원본 로그 대조가 필요하며, 이 문서에서는 그 대조를\n수행하지 못했습니다(미수행). 로그가 없다고 단정한 것이 아닙니다.\n기억으로 남길 때는 “21초(정정됨, 근거: 원본 로그 — 미확인)”처럼 검증 상태를 함께 적으세요.\n\n5. 예시 3 — 저장소별 누락(gaps): ordinary와 source_bound\ngaps 항목은 세 Keeper 모두 source_bound 저장소에서 관측이 없음(missing)을 기록합니다. 스냅샷은\nordinary에만 존재합니다.\nKeeper\n\nordinary 스냅샷\n\nsource_bound 관측\n\n의미\n\nwrit\n",
+        "bytes": 6115,
+        "truncated": false
+      },
+      {
+        "kind": "note",
+        "content": "Submitted copied PDF, summary, source hashes and three complete page renderings for independent review against the original criteria. No semantic verdict is supplied."
+      }
+    ]
+  },
+  "criteria": [
+    "PDF 정확히 3페이지",
+    "본문과 흐름도 모든 한글이 누락 glyph 없이 읽힘",
+    "텍스트 겹침과 잘림 없음",
+    "synthetic 예시와 실제 검증의 구분 유지"
+  ],
+  "worker": "pdf-proof-producer",
+  "created_at": 1788999584.118193
+}

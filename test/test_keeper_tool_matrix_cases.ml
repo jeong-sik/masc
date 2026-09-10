@@ -333,6 +333,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   match name with
   | "keeper_time_now"
   | "keeper_lane_status"
+  | "keeper_workspace_memory_read"
   | "keeper_context_status"
   | "keeper_tools_list"
   | "keeper_tasks_audit"

@@ -1,0 +1,15 @@
+name = "keeper_workspace_memory_read"
+description = """
+Read the workspace's durable shared memory proposals from its curator. Without \
+id, list saved proposal IDs, attributed claims, disagreements and source counts. \
+With id, retrieve the full proposal including original owners, source facts, \
+snapshot metadata and unavailable-store gaps. These are model-proposed \
+interpretations, not verified truths: preserve disagreements and attribution \
+when using them, and inspect the full sources before relying on a claim. This \
+read does not promote claims or modify any Keeper's memory."""
+additional_properties = false
+
+[[params]]
+name = "id"
+type = "string"
+description = "Exact proposal ID returned by this tool's list. Omit to discover saved proposals."

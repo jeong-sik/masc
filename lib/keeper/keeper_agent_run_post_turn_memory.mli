@@ -38,6 +38,11 @@ val run :
     side external-effect heuristic. *)
 
 module For_testing : sig
+  val goal_context_for_task :
+    config:Workspace.config ->
+    Keeper_id.Task_id.t option ->
+    Keeper_librarian.goal_context
+
   val counterpart_observations_before :
     base_dir:string ->
     keeper_name:string ->

@@ -3178,32 +3178,6 @@ let test_an_injected_reader_answers_under_the_text_line () =
       Alcotest.(check bool) "and stays marked truncated"
         true (List.nth items 1 |> member "truncated" |> to_bool))
 
-let test_artifact_reference_size_uses_the_injected_reader () =
-  with_temp_dir (fun base_path ->
-      let artifact_read =
-        Some
-          (fun ~worker ~relative ->
-             ignore worker;
-             if String.equal relative "big.log" then Ok (VS.Text_payload ("", 90_000, true))
-             else Error (VS.Evidence_read_error "backend: not found"))
-      in
-      Alcotest.(check (option int))
-        "size comes from the reader, not the host bundle"
-        (Some 90_000)
-        (VS.artifact_reference_size
-           ?artifact_read
-           ~base_path
-           ~worker:"endpoint-worker"
-           "artifact:big.log");
-      Alcotest.(check (option int))
-        "a reader failure is not a size"
-        None
-        (VS.artifact_reference_size
-           ?artifact_read
-           ~base_path
-           ~worker:"endpoint-worker"
-           "artifact:gone.log"))
-
 (* Endpoint-owned trees (microvm, remote-ssh) read through the backend;
    a shared-mount (Docker) tree keeps the store's direct host read. The
    returned closure is not called here -- the routing is the unit. *)
@@ -3745,8 +3719,6 @@ let () =
         test_checkout_relative_artifact_is_not_guessed;
       Alcotest.test_case "an injected artifact read answers the snapshot" `Quick
         test_injected_artifact_read_answers_the_snapshot;
-      Alcotest.test_case "the size pre-check uses the injected reader" `Quick
-        test_artifact_reference_size_uses_the_injected_reader;
       Alcotest.test_case "the reader routes by where the tree lives" `Quick
         test_reader_routes_by_where_the_tree_lives;
       Alcotest.test_case

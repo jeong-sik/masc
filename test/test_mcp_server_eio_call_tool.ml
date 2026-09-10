@@ -534,7 +534,8 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
 let test_failure_observation_uses_typed_failed_payload () =
   let failed : Tool_result.result =
     Tool_result.Failed
-      { class_ = Tool_result.Policy_rejection
+      { effect_disposition = Tool_result.Effect_outcome_unknown
+      ; class_ = Tool_result.Policy_rejection
       ; message = "operator denied"
       ; data = `Null
       ; metadata = None

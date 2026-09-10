@@ -234,7 +234,7 @@ let with_turn_sandbox_factory ~enabled ~config ~meta f =
 let test_patch_unique_match () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
-  Fs_compat.save_file path "let x = 1\nlet y = 2\n";
+  Fs_compat.save_file path "\tlet x = 1\r\nlet y = 2\n";
   let raw =
     handle_file_write
       ~turn_sandbox_factory:None
@@ -254,9 +254,101 @@ let test_patch_unique_match () =
   Alcotest.(check bool) "ok" true (parse_ok raw);
   Alcotest.(check (option int)) "occurrences=1" (Some 1)
     (parse_int raw "occurrences");
+  let snapshots = Yojson.Safe.from_string raw |> Json.member "edit_snapshots" in
+  Alcotest.(check string) "snapshots are stored" "stored"
+    (Json.member "status" snapshots |> Json.to_string);
+  let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  let read_snapshot key =
+    match Tool_output.normalized_artifact_ref_of_json (Json.member key snapshots) with
+    | Tool_output.Decoded_normalized_artifact_ref reference ->
+      Alcotest.(check string) "no file bytes in inline preview" "" reference.preview;
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some bytes) -> bytes
+       | Ok None -> Alcotest.fail "snapshot bytes missing"
+       | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+    | _ -> Alcotest.fail "snapshot does not contain a valid artifact reference" in
+  Alcotest.(check string) "before file includes unchanged lines and final newline"
+    "\tlet x = 1\r\nlet y = 2\n" (read_snapshot "before");
+  Alcotest.(check string) "after file includes unchanged lines and final newline"
+    "\tlet x = 42\r\nlet y = 2\n" (read_snapshot "after");
   let after = Fs_compat.load_file path in
   Alcotest.(check string) "file content updated"
-    "let x = 42\nlet y = 2\n" after
+    "\tlet x = 42\r\nlet y = 2\n" after
+
+let test_snapshot_failure_preserves_successful_edit () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "snapshot-failure.ml" in
+  Fs_compat.save_file path "  before\n";
+  let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  Fs_compat.save_file (Tool_blob_store.root_dir store) "not a directory";
+  let raw = handle_file_write ~turn_sandbox_factory:None ~config ~meta
+    ~publication_recovery
+    ~args:(`Assoc [ "path", `String path; "mode", `String "patch"
+                 ; "old_string", `String "before"; "new_string", `String "after" ]) () in
+  Alcotest.(check bool) "completed edit remains successful" true (parse_ok raw);
+  Alcotest.(check string) "file changed despite unavailable snapshot store"
+    "  after\n" (Fs_compat.load_file path);
+  let snapshots = Yojson.Safe.from_string raw |> Json.member "edit_snapshots" in
+  Alcotest.(check string) "snapshot failure is visible" "unavailable"
+    (Json.member "status" snapshots |> Json.to_string);
+  Alcotest.(check bool) "failed store does not publish a reference" true
+    (Json.member "before" snapshots = `Null && Json.member "after" snapshots = `Null)
+;;
+
+exception Snapshot_cancel
+
+let test_snapshot_cancellation_preserves_applied_result () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "snapshot-cancel.ml" in
+  Fs_compat.save_file path "  before\n";
+  let returned = ref None in
+  let snapshot_calls = ref 0 in
+  let cancelled =
+    try
+      Eio.Cancel.sub (fun context ->
+        Keeper_tool_filesystem_runtime.For_testing.with_before_edit_snapshot
+          (fun () ->
+            incr snapshot_calls;
+            (* This is after the actual patch commit and before the first
+               snapshot I/O; no timer or scheduler race selects the boundary. *)
+            Alcotest.(check string) "edit committed before snapshot cancellation"
+              "  after\n" (Fs_compat.load_file path);
+            if !snapshot_calls = 1 then Eio.Cancel.cancel context Snapshot_cancel;
+            Eio.Fiber.yield ())
+          (fun () ->
+            returned := Some
+              (handle_file_write_with_outcome ~turn_sandbox_factory:None
+                 ~config ~meta ~publication_recovery
+                 ~args:(`Assoc [ "path", `String path; "mode", `String "patch"
+                              ; "old_string", `String "before"
+                              ; "new_string", `String "after" ]) ()));
+        (* Protect must defer the cancellation, not consume it. *)
+        Eio.Fiber.yield ());
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "caller cancellation remains pending" true cancelled;
+  Alcotest.(check int) "both snapshot I/O boundaries reached" 2 !snapshot_calls;
+  let execution = match !returned with
+    | Some execution -> execution
+    | None -> Alcotest.fail "applied edit lost its successful result to cancellation"
+  in
+  Alcotest.(check bool) "applied edit returns success" true
+    (parse_ok execution.raw_output);
+  ignore (file_change_evidence execution);
+  let snapshots = parse execution.raw_output |> Json.member "edit_snapshots" in
+  Alcotest.(check string) "snapshots persisted despite cancellation" "stored"
+    (Json.member "status" snapshots |> Json.to_string);
+  let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in
+  List.iter (fun (field, expected) ->
+    match Tool_output.normalized_artifact_ref_of_json (Json.member field snapshots) with
+    | Tool_output.Decoded_normalized_artifact_ref reference ->
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some bytes) -> Alcotest.(check string) field expected bytes
+       | _ -> Alcotest.fail "cancelled snapshot did not retain its bytes")
+    | _ -> Alcotest.fail "cancelled snapshot has no artifact reference")
+    [ "before", "  before\n"; "after", "  after\n" ]
+;;
 
 let test_patch_multiline_line_evidence () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
@@ -381,6 +473,22 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
          Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
        with
        | [ row ] ->
+         Alcotest.(check int) "both snapshots survive into durable artifact references"
+           2 (Json.member "artifact_refs" row |> Json.to_list |> List.length);
+         let producer_refs =
+           Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
+           |> List.map (fun reference ->
+             Tool_output.with_preview reference ""
+             |> Tool_output.normalized_artifact_ref_to_json)
+           |> List.sort_uniq Stdlib.compare
+         in
+         Alcotest.(check string) "durable references belong to this exact producer result"
+           (Yojson.Safe.to_string (`List producer_refs))
+           (Json.member "artifact_refs" row |> Yojson.Safe.to_string);
+         Alcotest.(check int) "committed invocation releases its snapshot references"
+           0
+           (Masc.Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ()
+            |> List.length);
          let expected =
            Keeper_file_change_evidence.edited
              [ Keeper_file_change_evidence.edit_occurrence
@@ -960,23 +1068,24 @@ let test_symlink_component_swap_cannot_escape_allowed_root
     let outside_target = Filename.concat case_outside "target.txt" in
     Option.iter (Fs_compat.save_file target) inside_content;
     Option.iter (Fs_compat.save_file outside_target) outside_content;
-    let gate_context () =
+    let race_ran = ref false in
+    let before_authorization () =
+      race_ran := true;
       Unix.rename component moved_component;
-      Unix.symlink case_outside component;
-      { Masc.Keeper_gate.turn_id = None
-      ; snapshot = `Assoc [ "race", `String "symlink_component_swap" ]
-      }
+      Unix.symlink case_outside component
     in
     let raw =
-      handle_file_write
-        ~turn_sandbox_factory
-        ~config
-        ~meta
-        ~publication_recovery
-        ~gate_context
-        ~args:(`Assoc (args_for target))
-        ()
+      Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+        before_authorization (fun () ->
+          handle_file_write
+            ~turn_sandbox_factory
+            ~config
+            ~meta
+            ~publication_recovery
+            ~args:(`Assoc (args_for target))
+            ())
     in
+    Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
     if not (parse_ok raw)
     then Alcotest.failf "%s write did not use pinned parent: %s" label raw;
     if with_runtime
@@ -1042,28 +1151,29 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
   ensure_dir outside;
   let target = Filename.concat playground "root-swap.txt" in
   let outside_target = Filename.concat outside "root-swap.txt" in
-  let gate_context () =
+  let race_ran = ref false in
+  let before_authorization () =
+    race_ran := true;
     Unix.rename playground moved_playground;
-    Unix.symlink outside playground;
-    { Masc.Keeper_gate.turn_id = None
-    ; snapshot = `Assoc [ "race", `String "sandbox_root_swap" ]
-    }
+    Unix.symlink outside playground
   in
   let raw =
-    handle_file_write
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ~publication_recovery
-      ~gate_context
-      ~args:
-        (`Assoc
-           [ "path", `String target
-           ; "mode", `String "overwrite"
-           ; "content", `String "pinned-root-write"
-           ])
-      ()
+    Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+      before_authorization (fun () ->
+        handle_file_write
+          ~turn_sandbox_factory
+          ~config
+          ~meta
+          ~publication_recovery
+          ~args:
+            (`Assoc
+               [ "path", `String target
+               ; "mode", `String "overwrite"
+               ; "content", `String "pinned-root-write"
+               ])
+          ())
   in
+  Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
   Alcotest.(check bool) "write completed through pinned root" true (parse_ok raw);
   if with_runtime
   then
@@ -1099,23 +1209,24 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     let outside_target = Filename.concat outside (label ^ ".txt") in
     Fs_compat.save_file target initial;
     Fs_compat.save_file outside_target ("outside-" ^ label);
-    let gate_context () =
+    let race_ran = ref false in
+    let before_authorization () =
+      race_ran := true;
       Unix.rename target moved_target;
-      Unix.symlink outside_target target;
-      { Masc.Keeper_gate.turn_id = None
-      ; snapshot = `Assoc [ "race", `String "leaf_swap" ]
-      }
+      Unix.symlink outside_target target
     in
     let raw =
-      handle_file_write
-        ~turn_sandbox_factory
-        ~config
-        ~meta
-        ~publication_recovery
-        ~gate_context
-        ~args:(`Assoc (("path", `String target) :: args))
-        ()
+      Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+        before_authorization (fun () ->
+          handle_file_write
+            ~turn_sandbox_factory
+            ~config
+            ~meta
+            ~publication_recovery
+            ~args:(`Assoc (("path", `String target) :: args))
+            ())
     in
+    Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
     Alcotest.(check bool) (label ^ " success contract") expected_success (parse_ok raw);
     if expected_success
     then
@@ -1169,27 +1280,28 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
   let target = Filename.concat parent "target.txt" in
   let outside_target = Filename.concat outside "append-missing.txt" in
   Fs_compat.save_file outside_target "outside-append-missing";
-  let gate_context () =
-    Unix.symlink outside_target target;
-    { Masc.Keeper_gate.turn_id = None
-    ; snapshot = `Assoc [ "race", `String "missing_leaf_appeared" ]
-    }
+  let race_ran = ref false in
+  let before_authorization () =
+    race_ran := true;
+    Unix.symlink outside_target target
   in
   let raw =
-    handle_file_write
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ~publication_recovery
-      ~gate_context
-      ~args:
-        (`Assoc
-           [ "path", `String target
-           ; "mode", `String "append"
-           ; "content", `String "must-not-follow"
-           ])
-      ()
+    Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_write_authorization
+      before_authorization (fun () ->
+        handle_file_write
+          ~turn_sandbox_factory
+          ~config
+          ~meta
+          ~publication_recovery
+          ~args:
+            (`Assoc
+               [ "path", `String target
+               ; "mode", `String "append"
+               ; "content", `String "must-not-follow"
+               ])
+          ())
   in
+  Alcotest.(check bool) "race injected after capability pinning" true !race_ran;
   Alcotest.(check bool) "missing append race failed closed" false (parse_ok raw);
   Alcotest.(check bool) "missing append race surfaced an error" true
     (Option.is_some (parse_error raw));
@@ -1500,6 +1612,10 @@ let () =
         [
           Alcotest.test_case "unique match replaces" `Quick
             test_patch_unique_match;
+          Alcotest.test_case "snapshot store failure preserves successful edit" `Quick
+            test_snapshot_failure_preserves_successful_edit;
+          Alcotest.test_case "snapshot cancellation preserves applied success" `Quick
+            test_snapshot_cancellation_preserves_applied_result;
           Alcotest.test_case "multiline match records old and new ranges" `Quick
             test_patch_multiline_line_evidence;
           Alcotest.test_case "exact invocation carries evidence through handler and hook"

@@ -664,6 +664,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ~artifact_refs:(Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name

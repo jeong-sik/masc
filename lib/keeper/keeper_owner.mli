@@ -122,6 +122,7 @@ type error =
   | Owner_closed
 
 type operation_execution =
+  | Operation_deferred
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
       { kind : Chat_operation.failure_kind
@@ -277,6 +278,14 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.runtime_retry option, error) result
+val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
+  (Chat_operation.t, error) result
+val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
+
 val interrupt_running_operation
   :  t
   -> Chat_operation.Operation_id.t
@@ -335,3 +344,24 @@ module For_testing : sig
 
   val mailbox_depth : t -> int
 end
+
+val direct_gate_state : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_wait_state option, error) result
+val direct_gate_obligations : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_obligation list, error) result
+val defer_direct_gate : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  waiting:Keeper_semantic_execution.gate_wait -> (Chat_operation.t, error) result
+val resolve_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  resolution:Keeper_semantic_execution.gate_resolution -> (Chat_operation.t, error) result
+val resume_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  waiting:Keeper_semantic_execution.gate_wait -> resolution:Keeper_semantic_execution.gate_resolution -> (unit, error) result
+
+val direct_gate_waits : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result
+val discharge_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  obligation:Keeper_semantic_execution.gate_obligation -> (unit, error) result
+
+val defer_direct_gate_reconciliation : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  binding:Keeper_semantic_execution.gate_binding -> diagnostic:string -> (Chat_operation.t, error) result
+
+val direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_binding option, error) result

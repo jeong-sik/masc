@@ -44,6 +44,7 @@ export interface PromptDestination {
 
 const LIBRARIAN_INPUT_CONTRACT: ReadonlyArray<{ name: string; meaning: string }> = [
   { name: 'keeper_instructions', meaning: '이 Keeper의 현재 instructions 원문' },
+  { name: 'goal_context', meaning: '턴 종료 시점 Task의 연결 Goal 성공 조건과 조회 상태' },
   { name: 'current_memory', meaning: 'commit 직전의 complete current-memory snapshot' },
   { name: 'conversation_history', meaning: 'cadence 시점에 선택된 bounded recent message window' },
   { name: 'counterpart_observations', meaning: 'host provenance가 붙은 최근 상대 관측' },
@@ -270,6 +271,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [draft, setDraft] = useState('')
   const [draftPromptKey, setDraftPromptKey] = useState<string | null>(null)
   const [preset, setPreset] = useState<PromptPresetId>('all')
+  const [showPresetContent, setShowPresetContent] = useState(false)
   // '레지스트리' = the existing effective/override editor; '라이브러리' = the
   // read-only curated prompt-library catalog (PromptBookPanel). Defaults to the
   // editor so the registry stays the landing view.
@@ -278,6 +280,8 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const report = useMemo(() => buildKeeperPromptAssemblyReport(prompts), [prompts])
   const presets = promptPresetOptions(prompts, report)
   const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
+  const presetPrompts = filterPrompts(prompts, 'all', '', report, activePreset)
+  const activePresetLabel = presets.find(item => item.id === activePreset)?.label ?? '전체'
   const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
   const selectedPromptFromKey = selectedKey ? prompts.find(prompt => prompt.key === selectedKey) ?? null : null
   const selectedPromptVisible = selectedPromptFromKey
@@ -414,6 +418,50 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
+
+      <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3" aria-label="프리셋 원문" data-prompt-preset-content data-active-preset=${activePreset}>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <label class="text-sm">프리셋
+            <select aria-label="원문을 볼 프리셋" class="ml-2 rounded-md border border-border bg-[var(--color-bg-surface)] p-1"
+              value=${activePreset} onChange=${(event: Event) => {
+                setPreset((event.target as HTMLSelectElement).value as PromptPresetId)
+                setStatus(null)
+              }}>
+              ${presets.map(item => html`<option key=${item.id} value=${item.id}>${item.label} (${item.count})</option>`)}
+            </select>
+          </label>
+          <span class="text-xs">${activePresetLabel} · ${presetPrompts.length}개 프롬프트</span>
+          <button type="button" class="rounded-md border border-border px-2 py-1 text-sm focus-visible:ring-2 focus-visible:ring-ring"
+            aria-expanded=${showPresetContent}
+            onClick=${() => setShowPresetContent(!showPresetContent)}>
+            ${showPresetContent ? '프리셋 원문 접기' : '프리셋 전체 원문 보기'}
+          </button>
+        </div>
+        ${showPresetContent ? html`
+          <p class="my-2 text-xs text-[var(--color-fg-muted)]">
+            선택한 프리셋의 현재 원문 전체입니다. 아래 검색·출처 필터와 편집 중인 초안은 이 보기에 영향을 주지 않습니다.
+            실행 시 채워지는 변수는 그대로 표시되며, 실제 실행 입력은 각 턴의 기록에서 확인할 수 있습니다.
+          </p>
+          ${presetPrompts.length === 0 ? html`<p>이 프리셋에 등록된 원문이 없습니다.</p>` : null}
+          ${presetPrompts.map(prompt => html`
+            <article key=${prompt.key} class="my-3" data-preset-prompt=${prompt.key}>
+              <h3 class="text-sm font-semibold">${prompt.key}</h3>
+              <div class="text-xs text-[var(--color-fg-muted)]">${prompt.description}</div>
+              <div class="my-1 break-all text-xs text-[var(--color-fg-muted)]">
+                출처: ${SOURCE_LABELS[prompt.source]} · 기준 파일: ${prompt.file_path ?? '파일 경로 없음'}
+              </div>
+              ${prompt.source === 'override' ? html`
+                <p class="my-2 text-xs text-[var(--color-status-warn)]">
+                  저장된 오버라이드가 적용 중입니다. 기준 파일을 수정해도 오버라이드를 해제하기 전에는 이 원문이 유지됩니다.
+                </p>
+              ` : null}
+              ${prompt.source === 'missing'
+                ? html`<p role="status">원문을 불러올 수 없습니다.</p>`
+                : html`<pre tabIndex=${0} role="region" aria-label=${`${prompt.key} 원문`} class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-3 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">${prompt.effective === '' ? '(빈 원문)' : prompt.effective}</pre>`}
+            </article>
+          `)}
+        ` : null}
+      </section>
 
       <${LibrarianRuntimeContract}
         prompt=${librarianPrompt}

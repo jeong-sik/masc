@@ -1,0 +1,53 @@
+{
+  "model": "qwen3:8b",
+  "stream": false,
+  "format": {
+    "type": "object",
+    "properties": {
+      "decisions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "verdict": {
+              "type": "string"
+            },
+            "source_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explanation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "verdict",
+            "source_ids",
+            "explanation"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "decisions"
+    ],
+    "additionalProperties": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "Evaluate synthetic shared-memory evidence. Do not invent facts or resolve unsupported conflicts by voting. Return one decision per case with every relevant source ID. Verdicts: not_proven, corrected_21_seconds, unresolved_conflict. Explanations must preserve provenance. This is evaluation only; no memory is stored."
+    },
+    {
+      "role": "user",
+      "content": "[{\"id\": \"artifact\", \"records\": [{\"id\": \"a1\", \"keeper\": \"writer\", \"text\": \"I generated report.pdf; it is ready.\"}, {\"id\": \"a2\", \"keeper\": \"verifier\", \"text\": \"Read report.pdf: bytes begin with plain markdown, not PDF. PDF rendering failed.\"}], \"question\": \"Does the supplied evidence establish a valid rendered PDF?\"}, {\"id\": \"revision\", \"records\": [{\"id\": \"r1\", \"keeper\": \"analyst\", \"text\": \"Measurement run M1: 12 seconds.\"}, {\"id\": \"r2\", \"keeper\": \"analyst\", \"text\": \"Correction of M1 after checking the original log: 21 seconds. Retract the 12-second claim.\"}], \"question\": \"What is the corrected measurement, preserving attribution?\"}, {\"id\": \"conflict\", \"records\": [{\"id\": \"c1\", \"keeper\": \"alpha\", \"text\": \"Dataset D contains 10 samples. No underlying file supplied.\"}, {\"id\": \"c2\", \"keeper\": \"beta\", \"text\": \"Dataset D contains 15 samples. No underlying file supplied.\"}], \"question\": \"Can a single verified sample count be consolidated?\"}]"
+    }
+  ]
+}

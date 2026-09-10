@@ -194,9 +194,15 @@ let with_exec_fixture
   else
   let dir = temp_dir name in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      if bind_eio_context then Time_compat.clear_clock ();
+      cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
+      (* Eio_context.with_test_env scopes its own registry only. Browser_lane's
+         asynchronous response loop sleeps through Time_compat, which needs the
+         same live clock until this fixture's switch has fully shut down. *)
+      if bind_eio_context then Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run @@ fun sw ->
       if process
@@ -7197,16 +7203,12 @@ type output_probe =
 let probe ?(needs_sandbox = false) tool_name args =
   { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
-(* Browser lane verbs race a timeout on the process-wide Time_compat clock,
-   which a test arms explicitly (test_browser_controls does the same). The
-   fixture binds an Eio clock; adopt it before issuing a lane verb. *)
-let arm_browser_probe_clock () =
-  match Eio_context.get_clock_opt () with
-  | Some clock -> Time_compat.set_clock clock
-  | None -> fail "composable-output fixture lost its bound Eio clock"
-
 let composable_output_probes =
-  [ probe
+  [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 1])
+  ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 1;
+      "action",`String "scroll";"x",`Int 0;"y",`Int 100;
+      "expectedUrl",`String "https://example.org/probe"])
+  ; probe
       ~needs_sandbox:true
       "Execute"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
@@ -7320,79 +7322,6 @@ let composable_output_probes =
            in
            `Assoc [ "sha256", `String reference.Tool_output.sha256 ])
     }
-    (* The automation lane's executor is an installable seam
-       (Browser_lane.install_automation_executor), the same one
-       test_browser_controls drives a stub backend through, so the two
-       browser probes run the real producers
-       (Tool_misc_browser_lane.handle_interact_with_phase / handle_read)
-       without a browser. The finally in
-       test_composable_outputs_satisfy_declared_schema disarms the seam. *)
-  ; { tool_name = "BrowserInteract"
-    ; needs_sandbox = false
-    ; prepare =
-        (fun ~config:_ ~meta:_ ->
-           arm_browser_probe_clock ();
-           Browser_lane.install_automation_executor
-             (Some
-                (function
-                  | Browser_lane.Page_interact { tab_id; _ } ->
-                    Browser_lane.Answered
-                      (`Assoc
-                        [ "ok", `Bool true
-                        ; ( "data"
-                          , `Assoc
-                              [ "tabId", `Int tab_id
-                              ; "url", `String "https://probe.invalid/after"
-                              ; "urlBefore", `String "https://probe.invalid/before"
-                              ; "action", `String "click"
-                              ] )
-                        ])
-                  | verb ->
-                    Browser_lane.Refused
-                      ("unexpected browser verb: "
-                       ^ Browser_lane.verb_to_string verb)));
-           `Assoc
-             [ "lane", `String "automation"
-             ; "tabId", `Int 1
-             ; "action", `String "click"
-             ; "selector", `String "a"
-             ])
-    }
-    (* BrowserRead's declared schema is the deliberately permissive
-       whole-object envelope (browser_read_output_schema in
-       keeper_tool_descriptor.ml: mode-specific payloads), so the plain text
-       mode is the producer path this probe puts in front of it. *)
-  ; { tool_name = "BrowserRead"
-    ; needs_sandbox = false
-    ; prepare =
-        (fun ~config:_ ~meta:_ ->
-           arm_browser_probe_clock ();
-           Browser_lane.install_automation_executor
-             (Some
-                (function
-                  | Browser_lane.Page_read _ ->
-                    Browser_lane.Answered
-                      (`Assoc
-                        [ "ok", `Bool true
-                        ; ( "data"
-                          , `Assoc
-                              [ "url", `String "https://probe.invalid/after"
-                              ; "title", `String "probe"
-                              ; "text", `String "probe page text"
-                              ; "chars", `Int 15
-                              ; "truncated", `Bool false
-                              ] )
-                        ])
-                  | verb ->
-                    Browser_lane.Refused
-                      ("unexpected browser verb: "
-                       ^ Browser_lane.verb_to_string verb)));
-           `Assoc
-             [ "lane", `String "automation"
-             ; "tabId", `Int 1
-             ; "mode", `String "text"
-             ])
-    }
   ]
 
 let test_every_composable_tool_has_an_output_probe () =
@@ -7503,17 +7432,53 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       Fun.protect
-         ~finally:(fun () ->
-           ignore (Msx_lane.eject ());
-           (* The browser probes arm the automation lane's executor seam; an
-              executor left installed would answer browser verbs for every
-              later test in this executable. *)
-           Browser_lane.install_automation_executor None;
-           (* The same probes arm the process-wide Time_compat clock; a
-              stale clock would serve later sleeps in this executable. *)
-           Time_compat.clear_clock ())
+       (* The seam is the primitive WebDriver HTTP transport. Execute/sync
+          evaluates the actual production JavaScript, then Browser_webdriver
+          constructs the response consumed by Keeper and the schema validator. *)
+       let module Driver = Masc.Browser_webdriver in
+       let request ~method_ ~path ~body =
+         match method_, path with
+         | `POST, "/session" -> Ok (`Assoc [
+             "sessionId", `String "owned";
+             "capabilities", `Assoc ["webSocketUrl",
+               `String "ws://localhost:1234/session/owned"]])
+         | `GET, "/session/owned/window/handles" -> Ok (`List [`String "fixture"])
+         | `GET, "/session/owned/window" -> Ok (`String "fixture")
+         | `POST, "/session/owned/window"
+         | `POST, "/session/owned/frame"
+         | `DELETE, "/session/owned" -> Ok `Null
+         | `POST, "/session/owned/execute/sync" ->
+           let input = match body with
+             | Some json -> Yojson.Safe.to_string json
+             | None -> fail "execute/sync requires script and args" in
+           let channel = Unix.open_process_args_in "node"
+             [|"node"; "fixtures/browser-webdriver-script.cjs"; input|] in
+           let output = Buffer.create 256 in
+           (try while true do
+              Buffer.add_string output (input_line channel);
+              Buffer.add_char output '\n'
+            done with End_of_file -> ());
+           (match Unix.close_process_in channel with
+            | Unix.WEXITED 0 -> Ok (Yojson.Safe.from_string (Buffer.contents output))
+            | _ -> fail "production browser JavaScript fixture failed")
+         | _ -> fail ("unexpected primitive WebDriver request: " ^ path)
+       in
+       let start_downloads ~session_id:_ ~websocket_url:_ =
+         Ok Masc.Browser_downloads.{
+           read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
+           check=(fun () -> Ok ()); close=(fun () -> ())}
+       in
+       let driver = Driver.create ~start_downloads ~request () in
+       Browser_lane.install_automation_executor (Some (Driver.execute driver));
+       Fun.protect ~finally:(fun () ->
+         Browser_lane.install_automation_executor None;
+         ignore (Driver.close driver);
+         ignore (Msx_lane.eject ()))
        @@ fun () ->
+       List.iter (fun verb -> match Driver.execute driver verb with
+         | Browser_lane.Answered _ -> ()
+         | _ -> fail "browser producer fixture initialization failed")
+         [Browser_lane.Session_open {headless=Some true}; Browser_lane.Tabs_list];
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)
        ignore (Workspace.init config ~agent_name:None);
@@ -7620,9 +7585,331 @@ let test_composable_outputs_satisfy_declared_schema () =
            (List.length composable_output_probes)
            (String.concat "\n" failures))
 
+let test_native_filesystem_approval_preserves_producer_boundary () =
+  with_exec_fixture "native-filesystem-approval-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
+       | Ok _ -> () | Error detail -> fail detail);
+      let invoke name input =
+        (match Masc.Keeper_tool_approval_policy.verdict_for ~composition_plan_index:None
+           ~tool_name:name ~input with
+         | Masc.Keeper_tool_approval_policy.Run _ -> ()
+         | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery
+          ~ctx_work ~name ~input () in
+      let target = playground_file ~config ~meta "result.txt" in
+      let write = invoke "Write" (`Assoc ["file_path", `String target; "content", `String "first"]) in
+      check string "confined write authorized by producer" "success" (outcome_label write.disposition);
+      let edit = invoke "Edit" (`Assoc ["file_path", `String target;
+        "old_string", `String "first"; "new_string", `String "second"]) in
+      check string "confined edit authorized by producer" "success" (outcome_label edit.disposition);
+      check string "actual file changed" "second" (Fs_compat.load_file target);
+      let outside = Filename.concat config.Workspace.base_path "operator-owned.txt" in
+      let denied = invoke "Write" (`Assoc ["file_path", `String outside; "content", `String "unauthorized"]) in
+      check string "native delegation never bypasses confinement" "failure" (outcome_label denied.disposition);
+      check bool "external file untouched" false (Sys.file_exists outside);
+      (* The external filesystem effect authority still durably defers requests
+         in Manual mode; allowing the native hook does not grant that authority. *)
+      match Masc.Keeper_gate.decide ~keeper_always_allow:false
+        { keeper_name = meta.Masc.Keeper_meta_contract.name
+        ; operation = Masc.Keeper_gate.filesystem_write_gate_operation
+        ; input = `Assoc ["path", `String outside]
+        ; call_summary = Some "test external filesystem authorization"
+        ; sandbox_profile = None; base_path = config.base_path
+        ; causal_context = None; task_id = None; continuation_channel = None } with
+      | Masc.Keeper_gate.Deferred { approval_id; _ } ->
+          check bool "durable approval identity exists" true (String.length approval_id > 0)
+      | Masc.Keeper_gate.Allow _ -> fail "Manual Gate authorized an unapproved external effect"
+      | Masc.Keeper_gate.Unavailable reason -> fail (Masc.Keeper_gate.unavailable_reason_to_string reason))
+;;
+
+let test_workspace_memory_read_dispatch () =
+  with_exec_fixture "keeper-workspace-memory-read"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let invoke input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name:"keeper_workspace_memory_read" ~input () in
+      let empty = invoke (`Assoc []) |> check_success_result "empty workspace" in
+      check int "missing store is empty" 0
+        Yojson.Safe.Util.(member "proposals" empty |> to_list |> List.length);
+      let snapshot owner text = `Assoc [
+        "snapshot_id", `String owner; "keeper_id", `String owner;
+        "store", `String "ordinary"; "snapshot_sha256", `String (String.make 64 'a');
+        "metadata", `Assoc ["revision", `Int 2;
+          "change", `Assoc ["removed", `List [`String text]]]] in
+      let source owner = `Assoc ["source_id", `String owner;
+        "snapshot_id", `String owner; "evidence_path", `List [`String "change"]] in
+      let payload = `Assoc ["status", `String "model_proposed";
+        "context_sha256", `String (String.make 64 'b');
+        "snapshots", `List [snapshot "writer" "PDF completed"; snapshot "reviewer" "PDF incomplete"];
+        "sources", `List [source "writer"; source "reviewer"];
+        "gaps", `List [];
+        "proposal", `Assoc ["shared_claims", `List []; "excluded", `List [];
+          "conflicts", `List [`Assoc ["description", `String "Owners disagree on PDF completion";
+            "source_ids", `List [`String "writer"; `String "reviewer"]]]]] in
+      let id, stored = match Masc.Workspace_memory_proposal.submit ~base_path:config.base_path payload with
+        | Ok value -> value
+        | Error _ -> fail "could not save shared memory fixture" in
+      let listed = invoke (`Assoc []) |> check_success_result "list proposal" in
+      let row = Yojson.Safe.Util.(member "proposals" listed |> to_list |> List.hd) in
+      check string "discover saved ID" id Yojson.Safe.Util.(member "id" row |> to_string);
+      let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read proposal" in
+      let actual = Yojson.Safe.Util.(member "result" fetched |> member "proposal") in
+      check bool "dispatcher preserves complete conflicting evidence" true
+        (Yojson.Safe.equal (Masc.Workspace_memory_proposal.to_json stored) actual);
+      let missing = invoke (`Assoc ["id", `String (String.make 64 'c')])
+        |> check_success_result "missing proposal" in
+      check bool "missing is explicit" false Yojson.Safe.Util.(member "found" missing |> to_bool);
+      let invalid = invoke (`Assoc ["id", `String "../private"]) in
+      check string "invalid ID is failure" "failure" (outcome_label invalid.disposition);
+      let path = Filename.concat config.base_path
+        (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+      let channel = open_out_bin path in output_string channel "broken"; close_out channel;
+      let corrupt = invoke (`Assoc ["id", `String id]) in
+      check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
+;;
+
+let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+  with_exec_fixture "direct_gate_current_history"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
+      let module Registry = Masc.Keeper_owner_registry in
+      let module Gate = Masc.Keeper_direct_gate_continuation in
+      let module Checkpoint = Masc.Keeper_checkpoint_store in
+      let base_path = config.Workspace.base_path and keeper_name = meta.name in
+      let owner = Registry.get ~base_path ~keeper_name |> require "owner" in
+      let operation_id = Keeper_chat_operation.Operation_id.of_string "original-gate-operation"
+        |> require "operation ID" in
+      let input = `Assoc ["message", `String "Finish the original research";
+        "task_id", `String "research-task"; "attachments", `List [`String "original-attachment"];
+        "channel", `String "original-channel"] in
+      let canonical = Keeper_chat_operation.canonical_json input |> require "canonical input" in
+      Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source:(`Assoc []) ~input:canonical
+        |> require "submit original" |> ignore;
+      let claimed = Masc.Keeper_owner.claim_next_operation owner |> require "claim original" in
+      check bool "original claim" true (Option.is_some claimed);
+      Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual |> require "manual mode" |> ignore;
+      let deferred = KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery ~ctx_work
+        ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; snapshot=`Assoc []})
+        ~name:"WebSearch" ~input:(`Assoc ["query", `String "original research evidence"; "limit", `Int 1]) () in
+      let approval_id = match deferred.deferred_kind with
+        | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
+        | None | Some Masc.Keeper_tool_execution.Generic_deferred
+        | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
+      let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let root = Masc.Keeper_fs.session_base_dir config in
+      ignore (Masc.Keeper_fs.ensure_dir root);
+      let session_root = if channel_session then Filename.concat (Filename.concat root "channels") "original-channel" else root in
+      ignore (Masc.Keeper_fs.ensure_dir session_root);
+      let session_dir = Filename.concat session_root session_id in
+      ignore (Masc.Keeper_fs.ensure_dir session_dir);
+      let context = Agent_core.Context.create_sync () in
+      let scope = Keeper_execution_scope_id.direct_operation operation_id in
+      let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh scope) |> require "original scope" in
+      Masc.Keeper_repetition_scope.save context frame;
+      let original = Masc.Keeper_context_runtime.checkpoint_of_context ctx_work in
+      let original = {original with Agent_core.Checkpoint.session_id; context;
+        messages=[Agent_core.Types.user_msg "Finish the original research";
+          Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
+      Checkpoint.save_agent_core_classified ~session_dir original |> require "original checkpoint" |> ignore;
+      if checkpoint_failure then (
+        let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
+        output_string channel "retention destination is not a directory";
+        close_out channel);
+      let runtime_lane = if runtime_failure then Some
+        (Masc.Keeper_turn_driver.restore_deferred_runtime_lane ~assignment_id:"frozen-direct-assignment"
+          ~failed_runtime_id:"primary.fixture" ~next_runtime_id:"alternate.fixture"
+          ~later_runtime_ids:["final.fixture"]
+          ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
+      let suspend () = Gate.suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
+      check bool "actual yield parks the same operation" true
+        ((if binding_failure then Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path suspend
+          else suspend ()) |> require "suspend");
+      check bool "unresolved request is not claimable" true
+        ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
+      if checkpoint_failure || binding_failure then (
+        let binding = match Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable binding" with
+          | Some value -> value | None -> fail "missing unresolved Gate binding" in
+        check bool "producer approval identity retained before lookup" true (binding.approval_ids = [approval_id]);
+        (match runtime_lane, binding.runtime_suffix with
+         | None, None -> ()
+         | Some expected, Some actual ->
+           check string "runtime assignment retained without checkpoint authority" expected.assignment_id actual.assignment_id;
+           check bool "runtime suffix retained without checkpoint authority" true
+             (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
+         | None, Some _ | Some _, None -> fail "lost frozen suffix during Gate binding failure");
+        let original = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
+        check bool "retention failure preserves original input" true
+          (match original with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
+        check bool "unconfirmed checkpoint is explicit nonterminal state" true
+          ((Gate.pending ~base_path ~keeper_name ~operation_id |> require "pending reconciliation")
+           = Some Gate.Checkpoint_reconciliation);
+        Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+          ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "resolved despite retention failure" |> ignore;
+        Gate.reconcile ~config ~meta |> require "do not invent checkpoint";
+        check bool "approval cannot authorize missing checkpoint replay" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None))
+      else (
+      (* A different completed turn appends history while the original waits. *)
+      let newer = {original with Agent_core.Checkpoint.messages=original.messages @
+        [Agent_core.Types.user_msg "Independent newer user context"]} in
+      Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" |> ignore;
+      Gate.reconcile ~config ~meta |> require "pending reconciliation";
+      check bool "no resolution invented" true
+        ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
+      Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+        ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
+      (match decision with
+       | Keeper_approval_queue_rules_types.Decision.Approve -> ()
+       | Keeper_approval_queue_rules_types.Decision.Reject _ ->
+         Masc.Keeper_approval_queue.For_testing.reset_runtime_state ();
+         Masc.Keeper_approval_queue.install_persistence ~base_path |> require "restore rejected authority" |> ignore);
+      Gate.reconcile ~config ~meta |> require "resolution wake";
+      let claimed : Keeper_chat_operation.t =
+        match Masc.Keeper_owner.claim_next_operation owner |> require "reclaim original" with
+        | Some operation -> operation | None -> fail "resolved original request not ready" in
+      check bool "same operation and complete original input" true
+        (Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
+      let admission = match Gate.load ~config ~meta ~operation_id ~session_dir |> require "admit current history" with
+        | Some value -> value | None -> fail "missing Gate admission" in
+      (match runtime_lane, Gate.runtime_lane admission with
+       | None, None -> ()
+       | Some expected, Some actual ->
+         check string "same frozen runtime assignment survives approval" expected.assignment_id actual.assignment_id;
+         check bool "frozen candidate suffix survives approval" true
+           (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
+       | None, Some _ | Some _, None -> fail "simultaneous Gate/runtime obligation lost");
+      let checkpoint = Gate.checkpoint admission in
+      check bool "newer history survives" true
+        (List.mem (Agent_core.Types.user_msg "Independent newer user context") checkpoint.messages);
+      let checkpoint = match decision with
+        | Keeper_approval_queue_rules_types.Decision.Reject _ -> checkpoint
+        | Keeper_approval_queue_rules_types.Decision.Approve ->
+          let resolution = Gate.resolution admission in
+          let grant = match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+            | Some value -> value | None -> fail "no approved grant" in
+          let replay () = Masc.Keeper_gate_replay.replay_approved_effect ~config ~meta ~publication_recovery
+            ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
+            ~grant ~approval_id () in
+          let outcome = Masc.Tool_misc.with_web_search_simulation_for_test
+            ~outcomes:["searxng", `Hits ["Research evidence", "https://example.com/evidence", "actual source evidence"]]
+            replay in
+          (match outcome with Masc.Keeper_gate_replay.Applied _ -> ()
+           | Masc.Keeper_gate_replay.Not_applicable | Masc.Keeper_gate_replay.Applied_with_warning _
+           | Masc.Keeper_gate_replay.Failed _ | Masc.Keeper_gate_replay.Indeterminate _
+           | Masc.Keeper_gate_replay.Repair_required _ | Masc.Keeper_gate_replay.Resolution_absent _ ->
+             fail (Masc.Keeper_gate_replay.outcome_to_string outcome));
+          (* A second entry uses the consumed grant's saved outcome. *)
+          ignore (replay ());
+          let model = Masc.Keeper_gate_replay.user_message_with_hitl_resolution ~base_path
+            ~user_message:"Finish the original research" (Some resolution) in
+          let evidence = match model.replay_evidence with Some value -> value | None -> fail "missing replay evidence" in
+          let identity, message = Masc.Keeper_gate_replay.approval_input evidence |> require "evidence identity" in
+          Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
+      Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
+        ~checkpoint admission |> require "discharge only admitted evidence";
+      Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
+        ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry";
+      check bool "all Gate obligations accounted" true
+        ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
+      (match Gate.record_completed ~config ~keeper_name admission |> require "completed direct continuation receipt" with
+       | Masc.Keeper_approval_queue.Continuation_projection_recorded -> ()
+       | Masc.Keeper_approval_queue.Continuation_projection_not_ready -> fail "successful direct continuation remained unresolved");
+      let selections = Masc.Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> require "remaining approval wake" in
+      let approval_selection = List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        match selection.source.payload with
+        | Keeper_event_queue.Hitl_resolved resolution -> resolution.approval_id = approval_id
+        | _ -> false) selections in
+      (match approval_selection with
+       | None -> fail "fixture lost its pending Gate wake before reconciliation"
+       | Some selection ->
+         match Masc.Keeper_heartbeat_stimulus_intake.reconcile_spent_selection ~config ~keeper_name selection
+           |> require "retire completed direct continuation wake" with
+         | Masc.Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
+         | Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable
+         | Masc.Keeper_heartbeat_stimulus_intake.Absent_grant_retired _ -> fail "completed Gate requested another model turn");
+      Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
+        |> require "same operation completion" |> ignore))
+
+let test_edit_manifest_through_model_projection () =
+  List.iter (fun fail_manifest ->
+    with_exec_fixture ~always_allow:true "edit-model-manifest"
+      (fun ~config ~meta ~publication_recovery ~ctx_work ->
+        let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+          ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work () in
+        Fun.protect ~finally:bundle.cleanup @@ fun () ->
+        let edit = List.find (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name "Edit") bundle.tools in
+        let target = playground_file ~config ~meta "manifest-edit.txt" in
+        Fs_compat.save_file target "before\n";
+        let store = Tool_blob_store.create ~base_path:config.base_path in
+        let root = Tool_blob_store.root_dir store in
+        let saved_root = root ^ ".fixture-saved" in
+        let blocked = ref false in
+        let invoke () = Agent_core.Tool.execute
+          ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+          edit (`Assoc ["file_path", `String target;
+            "old_string", `String "before"; "new_string", `String "after"]) in
+        let result = Fun.protect ~finally:(fun () ->
+          if !blocked then (Unix.unlink root; Unix.rename saved_root root))
+          (fun () ->
+            if fail_manifest then
+              Masc.Keeper_tool_filesystem_runtime.For_testing.with_before_result_manifest
+                (fun () ->
+                  check string "file applied before manifest failure" "after\n" (Fs_compat.load_file target);
+                  Unix.rename root saved_root;
+                  Fs_compat.save_file root "manifest storage blocked";
+                  blocked := true)
+                invoke
+            else invoke ()) in
+        check string "edit happened exactly once" "after\n" (Fs_compat.load_file target);
+        let refs = match fail_manifest, result with
+          | false, Ok output ->
+            (match Tool_output.decode_from_agent_core output.Agent_core.Types.content with
+             | Tool_output.Decoded reference ->
+               check string "model receives durable manifest" Tool_output.artifact_manifest_mime reference.mime
+             | _ -> fail "successful Edit omitted durable manifest");
+            let payload = structured_tool_output_exn ~base_path:config.base_path output.content in
+            Tool_output.normalized_artifact_refs_in_json payload
+          | true, Error error ->
+            let payload = Yojson.Safe.from_string error.Agent_core.Types.message in
+            check string "known applied effect reaches model error" "proven_post_effect"
+              Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+            check bool "failure injection reached the manifest store" true !blocked;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check bool "terminal boundary retains applied effect" true
+                 (failure.effect_disposition = Tool_result.Proven_post_effect)
+             | _ -> fail "post-effect manifest failure lost terminal evidence");
+            Tool_output.normalized_artifact_refs_in_json payload
+          | false, Error error -> fail error.Agent_core.Types.message
+          | true, Ok _ -> fail "manifest storage failure was disguised as success" in
+        check int "both snapshot handles retained" 2 (List.length refs);
+        let bytes = List.map (fetch_artifact_exn ~base_path:config.base_path) refs in
+        check (slist string String.compare) "snapshots retain exact before and after"
+          ["before\n"; "after\n"] bytes)) [false; true]
+
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
+    ("direct_gate_resume", [
+      test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unretained checkpoint keeps frozen runtime suffix without replay" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "channel-scoped Gate resumes original input with current channel history" `Quick
+        (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "new Gate and runtime failure retain both obligations" `Quick
+        (test_direct_gate_current_history_resume ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "checkpoint retention failure preserves nonterminal original input" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "approved Gate resumes same input with newer history and exact replay" `Quick
+        (test_direct_gate_current_history_resume Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "denied Gate resumes same input with authoritative denial" `Quick
+        (test_direct_gate_current_history_resume (Keeper_approval_queue_rules_types.Decision.Reject "declined by authority"));
+    ]);
     ("execute_keeper_tool_call_with_outcome", [
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
@@ -7636,6 +7923,10 @@ let () =
         test_initializing_recovery_isolates_only_publication_writes;
       test_case "identical Keeper invocations join across production boundaries" `Quick
         test_identical_keeper_invocations_join_across_production_boundaries;
+      test_case "native filesystem approval preserves producer boundary" `Quick
+        test_native_filesystem_approval_preserves_producer_boundary;
+      test_case "Edit manifest survives complete model projection" `Quick
+        test_edit_manifest_through_model_projection;
       test_case "Manual Gate does not defer internal memory write" `Quick
         test_manual_gate_does_not_defer_internal_memory_write;
       test_case "initialization crash is redacted from tool output" `Quick
@@ -7652,6 +7943,8 @@ let () =
         test_real_publication_release_failure_preserves_effect_truth;
       test_case "directory publication preserves cleanup failure truth" `Quick
         test_real_directory_release_failure_preserves_effect_truth;
+      test_case "workspace memory read dispatch preserves shared attribution" `Quick
+        test_workspace_memory_read_dispatch;
       test_case "model-visible local tools dispatch to runtime handlers" `Quick
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick

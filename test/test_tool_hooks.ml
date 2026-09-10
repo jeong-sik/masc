@@ -65,7 +65,8 @@ let test_pre_hook_short_circuits () =
     log_call "pre_block";
     Tool_dispatch.Reject
       (Tool_result.Failed
-         { Tool_result.class_ = Tool_result.Runtime_failure
+         { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
          ; message = "blocked"
          ; data = `String "blocked"
          ; metadata = None
@@ -99,7 +100,8 @@ let test_multiple_pre_hooks_first_wins () =
     log_call "pre2_block";
     Tool_dispatch.Reject
       (Tool_result.Failed
-         { Tool_result.class_ = Tool_result.Runtime_failure
+         { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
          ; message = "denied"
          ; data = `String "denied"
          ; metadata = None

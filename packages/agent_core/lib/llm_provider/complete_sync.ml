@@ -65,7 +65,7 @@ let parse_sync_response
     | Provider_http_codec.Anthropic_messages ->
       Ok (Backend_anthropic.parse_response (Yojson.Safe.from_string body))
     | Provider_http_codec.Ollama_chat ->
-      (match Backend_ollama.parse_ollama_response body with
+      (match Backend_ollama.parse_ollama_response ~content_inline_reasoning body with
        | Ok response -> Ok response
        | Error message ->
          Error

@@ -449,6 +449,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             })
 
 let project
+    ?source_context
     ~registry
     ~base_dir
     ~topology
@@ -469,7 +470,7 @@ let project
          { expected; answered; failed });
   Fusion_sink.broadcast_run_status ~registry ~run_id:request.run_id;
   match
-    Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+    Fusion_sink.emit ~source_context ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
       ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
       ~judge_usage:deliberation.judge_usage ~tool_trace:deliberation.tool_trace

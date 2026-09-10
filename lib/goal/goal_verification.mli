@@ -23,11 +23,14 @@ type verdict = {
   recorded_at : string;
 }
 
+type confirmation = { operator_id : string; confirmed_at : string }
+
 type completion_state =
   | Completion_idle
   | Proof_pending of { requested_at : string; request_id : string; criterion : Goal_store.criterion }
   | Proof_proven of verdict
   | Proof_refuted of verdict
+  | Human_confirmed of verdict * confirmation
 
 type record = {
   goal_id : string;
@@ -128,3 +131,6 @@ val record_proof_verdict :
 
 val validate_state_json : Yojson.Safe.t -> (unit, string) result
 (** Pure current-schema validation. Does not read, repair or write a store. *)
+
+val record_human_confirmation : Workspace_utils.config -> goal_id:string -> verdict -> operator_id:string -> (record, string) result
+(** Caller holds the Goal transaction and supplies token-bound operator identity. *)

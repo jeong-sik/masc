@@ -43,6 +43,19 @@ describe('recorded chat edit', () => {
     expect(view.getByLabelText('기록된 바꾸기 입력 조각').textContent).toBe('shortened…')
     expect(view.getByText(/실제 파일 diff와 다를 수 있습니다/)).toBeTruthy()
   })
+  it('shows snapshot persistence failure for an applied insertion without find/replace snippets', () => {
+    const view = render(html`<${ChatEditEvidence} output=${{ ...receipt,
+      input: { insert_before: 'anchor', content: 'inserted' },
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1,
+        edit_snapshots: { status: 'unavailable', detail: 'disk full <b>error</b>' } }),
+    }} />`)
+    expect(view.getByText('essay.md · 1곳 편집')).toBeTruthy()
+    expect(view.getByRole('status').textContent).toContain('편집은 적용됐지만 원본 저장에 실패')
+    expect(view.getByRole('status').textContent).toContain('disk full <b>error</b>')
+    expect(view.getByRole('status').querySelector('b')).toBeNull()
+    expect(view.queryByLabelText('기록된 찾기 입력 조각')).toBeNull()
+    expect(view.queryByRole('button')).toBeNull()
+  })
   it.each([
     null,
     { ...receipt, success: false },

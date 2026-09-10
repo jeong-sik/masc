@@ -23,8 +23,16 @@ type tool_observation =
   ; outcome : tool_observation_outcome
   }
 
+type goal_context =
+  | No_task
+  | Task_goals of
+      { task_id : string
+      ; criteria : ((string * Goal_phase.t * Goal_store.criterion) list, string) result
+      }
+
 type input =
   { turn_ref : Ids.Turn_ref.t
+  ; goal_context : goal_context
   ; keeper_instructions : string
   ; current : current_selection option
   ; messages : Agent_core.Types.message list
@@ -181,9 +189,25 @@ let format_tool_observations_for_prompt observations =
   |> Yojson.Safe.pretty_to_string
 ;;
 
+let goal_context_to_json = function
+  | No_task -> `Assoc [ "status", `String "no_task" ]
+  | Task_goals { task_id; criteria } ->
+    let fields = match criteria with
+      | Error detail -> [ "status", `String "unavailable"; "detail", `String detail ]
+      | Ok goals ->
+        [ "status", `String "available"
+        ; "goals", `List (List.map (fun (goal_id, phase, criterion) ->
+            `Assoc [ "goal_id", `String goal_id
+                   ; "phase", `String (Goal_phase.to_string phase)
+                   ; "criterion", Goal_store.criterion_to_yojson criterion ]) goals) ]
+    in
+    `Assoc (("task_id", `String task_id) :: fields)
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )

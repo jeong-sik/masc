@@ -61,7 +61,8 @@ let validate_via_agent_core ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson
       in
       Reject
         (Tool_result.Failed
-           { Tool_result.class_ = Tool_result.Runtime_failure
+           { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
            ; message = msg
            ; data = `Assoc [("error", `String msg)]
            ; metadata = None

@@ -1,0 +1,31 @@
+{
+  "container": "a193b2f5144a",
+  "root": "/home/keeper/playground/memory-guide-proof",
+  "files": [
+    {
+      "relative": "memory_proposal_guide.pdf",
+      "bytes": 136937,
+      "sha256": "bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86"
+    },
+    {
+      "relative": "verify_summary.txt",
+      "bytes": 6115,
+      "sha256": "25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1"
+    },
+    {
+      "relative": "renders/page1.png",
+      "bytes": 166776,
+      "sha256": "cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af"
+    },
+    {
+      "relative": "renders/page2.png",
+      "bytes": 190109,
+      "sha256": "b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2"
+    },
+    {
+      "relative": "renders/page3.png",
+      "bytes": 134793,
+      "sha256": "38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d"
+    }
+  ]
+}

@@ -95,6 +95,25 @@ val fail_running
   -> outcome_ref:string option
   -> (Operation.t, error) result
 
+val direct_runtime_retry :
+  t -> operation_id:Operation.Operation_id.t ->
+  (Semantic.runtime_retry option, error) result
+(** A pending continuation is bound to the same operation's current canonical
+    input digest. Terminal, edited or mismatched input cannot authorize replay. *)
+val defer_direct_runtime_retry :
+  t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  continuation:Semantic.runtime_retry -> (Operation.t, error) result
+(** Atomically preserve the original operation input and frozen checkpoint/runtime
+    authority in the existing semantic journal, and return the same operation to
+    Queued. The caller must already have persisted the canonical checkpoint. *)
+val resume_direct_runtime_retry :
+  t -> now:float -> operation_id:Operation.Operation_id.t ->
+  observed:Semantic.runtime_retry -> (unit, error) result
+(** The caller independently re-reads and validates the canonical checkpoint.
+    After Owner claim, compare that observed checkpoint/runtime identity before
+    consuming continuation into Running. An interrupted resumed execution needs
+    reconciliation; it is never blindly replayed from a stale checkpoint. *)
+
 val settle_running_after_restart : t -> now:float -> (int, error) result
 val error_to_string : error -> string
 
@@ -140,3 +159,25 @@ val semantic_apply :
 (** Exact-record CAS; terminal records are immutable. Only Running occupies the
     single semantic execution slot. Startup moves interrupted Running records
     to Recovering without clearing frames, allowing unrelated work to proceed. *)
+
+(** Gate waiting remains the original queued operation, but cannot be claimed
+    until a bound durable resolution is supplied. No clock controls readiness. *)
+val has_claimable_queued : t -> (bool, error) result
+val direct_gate_state : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_wait_state option, error) result
+val direct_gate_obligations : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_obligation list, error) result
+val defer_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  waiting:Semantic.gate_wait -> (Operation.t, error) result
+val resolve_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  resolution:Semantic.gate_resolution -> (Operation.t, error) result
+val resume_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  waiting:Semantic.gate_wait -> resolution:Semantic.gate_resolution -> (unit, error) result
+
+val discharge_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  obligation:Semantic.gate_obligation -> (unit, error) result
+
+val direct_gate_waits : t -> ((Operation.Operation_id.t * Semantic.gate_wait_state) list, error) result
+
+val defer_direct_gate_reconciliation : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  binding:Semantic.gate_binding -> diagnostic:string -> (Operation.t, error) result
+
+val direct_gate_binding : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_binding option, error) result

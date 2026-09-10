@@ -1,0 +1,83 @@
+[
+  {
+    "created_at": 1788997658.200896,
+    "current_sources": [],
+    "frame": {
+      "active": {
+        "id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb",
+        "kind": "direct_operation"
+      },
+      "schema": "masc.keeper_repetition_scopes.v1",
+      "scopes": [
+        {
+          "id": {
+            "id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb",
+            "kind": "direct_operation"
+          },
+          "observations": []
+        }
+      ]
+    },
+    "gate_obligations": [
+      {
+        "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+        "input_hash": "ddba34327d51daf0966d3ef98c0c32d006dd6a3d89d6bce1f3b995d906c28671",
+        "tool_name": "tool_execute"
+      }
+    ],
+    "id": {
+      "id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb",
+      "kind": "direct_operation"
+    },
+    "input": {
+      "payload": {
+        "attachments": [],
+        "message": "Synthetic Gate probe: request the supplied one-time file effect, wait for its durable approval, then finish this exact original request.",
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "surface_context": null,
+        "turn_instructions": null,
+        "user_blocks": []
+      }
+    },
+    "input_sha256": "580a77ed1df79179d3e463688aed6ff9d8ca5ad09eb65870824aecc7b1384c86",
+    "phase": {
+      "detail": "waiting for durable Gate resolution",
+      "kind": "recovering",
+      "origin": {
+        "kind": "gate_wait",
+        "resolution": null,
+        "waiting": {
+          "checkpoint": {
+            "sha256": "67605a482bac6d17965ddeb6557ef56f98113a5bc118868ba68d394d22710414",
+            "trace_id": "trace-1788997657847-00000",
+            "turn_count": 1
+          },
+          "obligations": [
+            {
+              "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+              "input_hash": "ddba34327d51daf0966d3ef98c0c32d006dd6a3d89d6bce1f3b995d906c28671",
+              "tool_name": "tool_execute"
+            }
+          ],
+          "runtime_retry": {
+            "assignment_id": "primary.sample",
+            "checkpoint": {
+              "sha256": "67605a482bac6d17965ddeb6557ef56f98113a5bc118868ba68d394d22710414",
+              "trace_id": "trace-1788997657847-00000",
+              "turn_count": 1
+            },
+            "failed_runtime_id": "primary.sample",
+            "kind": "runtime_retry",
+            "later_runtime_ids": [],
+            "next_runtime_id": "alternate.sample"
+          },
+          "session_scope": []
+        }
+      }
+    },
+    "revision": 3,
+    "schema": "masc.keeper_semantic_execution.v1",
+    "sources": [],
+    "updated_at": 1788997658.200896
+  }
+]

@@ -38,4 +38,4 @@ val build_request
   -> unit
   -> string
 
-val parse_ollama_response : string -> (Types.api_response, string) result
+val parse_ollama_response : ?content_inline_reasoning:Capabilities.content_inline_reasoning -> string -> (Types.api_response, string) result

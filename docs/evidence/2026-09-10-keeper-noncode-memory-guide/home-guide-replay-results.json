@@ -1,0 +1,70 @@
+[
+  {
+    "approval_id": "appr_01a087d2-0781-7000-b673-fa5e69181ef0",
+    "replay_kind": "applied",
+    "output_sha256": "ca9e25f21d5379c98774a1e8bd3e009281d57c192d9c94566cc16024a93975da",
+    "output": {
+      "ok": false,
+      "status": {
+        "kind": "exit",
+        "code": 1
+      },
+      "shim_execution_evidence": {
+        "status": "not_observed",
+        "receipts": []
+      },
+      "cwd": "/home/keeper/playground/memory-guide-proof",
+      "execution_location": {
+        "cwd": "/home/keeper/playground/memory-guide-proof",
+        "cwd_source": "explicit_cwd",
+        "scope": "playground_root",
+        "playground_root": "/home/keeper/playground/memory-guide-proof",
+        "relative_cwd": ".",
+        "repo_name": null,
+        "repo_root": null
+      },
+      "output_completeness": "complete",
+      "output": "total 4\ndrwxr-xr-x 3 root   root     96 Sep  9 20:18 .\ndrwxr-xr-x 3 root   root   4096 Sep  9 20:18 ..\ndrwxr-xr-x 4 keeper keeper  128 Sep  9 20:18 .docker-identity\n---\n/usr/bin/python3\n---\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'reportlab'\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'weasyprint'\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'cairosvg'\n",
+      "typed": true,
+      "execution_time_ms": 122,
+      "requested_sandbox": "docker",
+      "via": "docker",
+      "sandbox_profile": "docker"
+    }
+  },
+  {
+    "approval_id": "appr_01a087da-3a7e-7000-a700-e09e9eabf769",
+    "replay_kind": "applied",
+    "output_sha256": "3ea83002f7e350eea8b9fd2c3fd3a55abc271caa6799682db3d181da303accc1",
+    "output": {
+      "ok": false,
+      "status": {
+        "kind": "exit",
+        "code": 1
+      },
+      "shim_execution_evidence": {
+        "status": "not_observed",
+        "receipts": []
+      },
+      "cwd": "/home/keeper/playground/memory-guide-proof",
+      "execution_location": {
+        "cwd": "/home/keeper/playground/memory-guide-proof",
+        "cwd_source": "explicit_cwd",
+        "scope": "playground_root",
+        "playground_root": "/home/keeper/playground/memory-guide-proof",
+        "relative_cwd": ".",
+        "repo_name": null,
+        "repo_root": null
+      },
+      "output_completeness": "complete",
+      "output": "3.11.2 (main, May 12 2026, 05:17:27) [GCC 12.2.0]\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'reportlab'\n",
+      "typed": true,
+      "execution_time_ms": 86,
+      "error": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'reportlab'",
+      "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'reportlab'",
+      "requested_sandbox": "docker",
+      "via": "docker",
+      "sandbox_profile": "docker"
+    }
+  }
+]

@@ -36,11 +36,6 @@ let _rp_deser_float json =
   | `Int i -> Ok (float_of_int i)
   | _ -> Error "expected number"
 
-let _rp_deser_bool json =
-  match json with
-  | `Bool b -> Ok b
-  | _ -> Error "expected boolean"
-
 let _rp_int ~key ~default ~min_v ~max_v ~description () =
   Runtime_params.register ~key
     ~default
@@ -58,12 +53,3 @@ let _rp_float ~key ~default ~min_v ~max_v ~description () =
     ~meta:{ Runtime_params.description; value_type = "float";
             min_value = Some (`Float min_v); max_value = Some (`Float max_v); choices = [] }
     ~deserialize:_rp_deser_float ()
-
-let _rp_bool ~key ~default ~description () =
-  Runtime_params.register ~key
-    ~default
-    ~validate:(fun _ -> Ok ())
-    ~serialize:(fun v -> `Bool v)
-    ~meta:{ Runtime_params.description; value_type = "bool";
-            min_value = None; max_value = None; choices = [] }
-    ~deserialize:_rp_deser_bool ()

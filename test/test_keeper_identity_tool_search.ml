@@ -303,6 +303,26 @@ let test_a_named_tool_becomes_callable_in_the_running_agent () =
     (Agent_core.Tool_set.mem "atlassian_jira_search" (Agent_core.Agent.tools agent))
 ;;
 
+let test_an_already_callable_tool_is_not_reported_missing () =
+  Eio_main.run @@ fun env ->
+  let agent = Agent_core.Agent.create
+      ~config:(Agent_core.Types.default_config ~model:"test-model") ~net:env#net () in
+  let existing = List.hd (offered ["plan", "Record the execution plan"]) |> build in
+  Agent_core.Agent.extend_tools agent [existing];
+  let listing = match search ~agent_cell:(ref (Some agent))
+      (offered ["jira_search", "Search issues"]) with
+    | Some tool -> tool | None -> fail "expected listing" in
+  (match execute listing (names_input ["atlassian_plan"]) with
+   | Error e -> failf "existing callable refused: %s" e.Agent_core.Types.message
+   | Ok {content; _} -> check string "reports existing capability"
+       "already callable:\n- atlassian_plan: Record the execution plan" content);
+  check int "lookup did not install another tool" 1
+    (Agent_core.Tool_set.size (Agent_core.Agent.tools agent));
+  match execute existing (`Assoc []) with
+  | Ok {content; _} -> check string "original callable still executes" "plan" content
+  | Error e -> fail e.Agent_core.Types.message
+;;
+
 let test_a_name_that_is_not_offered_is_refused () =
   Eio_main.run
   @@ fun env ->
@@ -1251,6 +1271,8 @@ let () =
     ; ( "loading"
       , [ test_case "makes a named tool callable in the running agent" `Quick
             test_a_named_tool_becomes_callable_in_the_running_agent
+        ; test_case "recognizes an already callable tool" `Quick
+            test_an_already_callable_tool_is_not_reported_missing
         ; test_case "refuses a name that is not offered" `Quick
             test_a_name_that_is_not_offered_is_refused
         ; test_case "loads what exists and reports the rest" `Quick

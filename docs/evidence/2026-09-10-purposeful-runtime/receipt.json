@@ -1,0 +1,12 @@
+{
+  "observed_at": "2026-09-09T18:09:16.240207+00:00",
+  "http_status": 200,
+  "source": "override",
+  "before_sha256": "efb476e71b57c193e9e79ae9aa95f90535ef2244ea4c70ff15b65016e8c76272",
+  "after_sha256": "9360fb87bcc5fd03c881126156e734b4d0d3674e2734e1ebf3ccb7411a0a6ea8",
+  "separate_read_matches": true,
+  "effective_base_path": "/Users/dancer/me",
+  "effective_masc_root": "/Users/dancer/me/.masc",
+  "scope": "Prompt registry effective value; later Keeper model-input and behavior verification still required",
+  "source_commit": "91671d0aee6bc3e2731710130fc5ee00eabc3be4"
+}

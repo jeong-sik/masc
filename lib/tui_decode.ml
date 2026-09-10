@@ -449,6 +449,7 @@ type planning_goal = {
 type planning_rollup = {
   pr_active : int;
   pr_verifying : int;
+  pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
 }
@@ -1670,7 +1671,7 @@ let decode_goal_proof json =
        (match string_at completion "state" with
         | Some "stale_criterion" ->
           Proof_stale (verdict_text (member "historical_completion" completion))
-        | Some "proof_proven" -> Proof_proven (verdict_text completion)
+        | Some ("proof_proven" | "human_confirmed") -> Proof_proven (verdict_text completion)
         | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
         | Some "proof_pending" -> Proof_pending
         | Some "idle" -> Proof_idle
@@ -1719,12 +1720,24 @@ let decode_planning_goal json =
       pg_updated_at;
     }
 
+(* One field per Goal_phase constructor, all required: the producer is
+   Goal_store.rollup, whose record has a counter per phase, so a missing key
+   is a wire mismatch rather than an old payload. *)
 let decode_planning_rollup json =
   let* pr_active = required_int_field json "active_count" in
   let* pr_verifying = required_int_field json "verifying_count" in
+  let* pr_awaiting_confirmation =
+    required_int_field json "awaiting_confirmation_count"
+  in
   let* pr_done = required_int_field json "done_count" in
   let* pr_dropped = required_int_field json "dropped_count" in
-  Ok { pr_active; pr_verifying; pr_done; pr_dropped }
+  Ok
+    { pr_active
+    ; pr_verifying
+    ; pr_awaiting_confirmation
+    ; pr_done
+    ; pr_dropped
+    }
 
 let decode_planning_backlog json =
   let* pb_todo = required_int_field json "todo" in

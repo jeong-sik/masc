@@ -572,10 +572,9 @@ val max_output_tokens_of_runtime_id : string -> int option
     default. *)
 
 val thinking_support_of_runtime_id : string -> bool option
-(** [thinking-support] capability of the model bound to runtime [id], or [None]
-    when the id is not configured (e.g. before {!init_default}).  Consumed by
-    {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
-    runtime.toml SSOT. *)
+(** Explicit [thinking-support] policy for the runtime's model. [None] means
+    the field is absent or the runtime is not configured. Consumed by
+    {!Runtime_inference.for_runtime}; absence must not become a disable request. *)
 
 val temperature_of_runtime_id : string -> float option
 (** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)

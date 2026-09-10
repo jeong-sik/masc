@@ -464,9 +464,11 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                p.instructions_opt);
     sandbox_profile;
     sandbox_image =
-      (match p.profile_defaults.sandbox_image with
-       | Some _ as img -> img
-       | None -> old.sandbox_image);
+      (match p.sandbox_image_patch with
+       | Some image -> image
+       | None -> (match p.profile_defaults.sandbox_image with
+           | Some _ as image -> image
+           | None -> old.sandbox_image));
     network_mode;
     microvm_backend = p.profile_defaults.microvm_backend;
     activation_mode;

@@ -50,3 +50,5 @@ let of_json json =
        | Some id -> Ok (autonomous_admission id)
        | None -> Error "autonomous admission ID must be a UUID")
   | _ -> Error "unknown repetition scope origin"
+
+let direct_operation_id = function Direct_operation id -> Some id | Autonomous_admission _ -> None

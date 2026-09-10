@@ -1,0 +1,14 @@
+{
+  "started_at": "2026-09-09T17:50:52.856345+00:00",
+  "context_sha256": "c2caf257d0c54e468d6df3a9341211b5458b7f67a0bdd6f0a838c6b2c330a4d4",
+  "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "endpoint": "http://127.0.0.1:11434",
+  "semantic_verification": "not_performed",
+  "runtime_mutation": false,
+  "status": "proposed",
+  "source_count": 4,
+  "model_digest": "c66cf836b05b503a80e2c488e800dd4f1c1ad2497cb93c212cd41582373b8dda",
+  "prompt_eval_count": 1141,
+  "eval_count": 4529,
+  "elapsed_seconds": 386.23326749994885
+}

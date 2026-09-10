@@ -1,4 +1,4 @@
-import { get } from './core'
+import { get, postControlPlane } from './core'
 import { isRecord } from '../lib/type-guards'
 
 export const sandboxNames = { docker: 'Docker', apple_container: 'Apple Container', nerdctl_kata: 'Kata (nerdctl)', microsandbox: 'microsandbox', remote_ssh: 'Remote SSH' }
@@ -13,6 +13,7 @@ export interface SandboxCatalog {
   candidates: SandboxCandidate[]
   configured: { backend: SandboxBackend; network: NetworkMode } | null
   configurationError: string | null
+  revision: string | null
 }
 const backend = (value: unknown): value is SandboxBackend => typeof value === 'string' && Object.hasOwn(sandboxNames, value)
 const network = (value: unknown): value is NetworkMode => value === 'inherit' || value === 'none' || value === 'policy'
@@ -34,5 +35,14 @@ export async function fetchSandboxCatalog(): Promise<SandboxCatalog> {
   const selected = data.configured_selection
   if (selected !== null && (!isRecord(selected) || !backend(selected.backend) || !network(selected.network_mode))) throw new Error('Invalid sandbox selection')
   if (data.configuration_error !== null && typeof data.configuration_error !== 'string') throw new Error('Invalid sandbox declaration')
-  return { candidates, configured: selected === null ? null : { backend: selected.backend as SandboxBackend, network: selected.network_mode as NetworkMode }, configurationError: data.configuration_error }
+  return { revision: typeof data.selection_revision === 'string' ? data.selection_revision : null, candidates, configured: selected === null ? null : { backend: selected.backend as SandboxBackend, network: selected.network_mode as NetworkMode }, configurationError: data.configuration_error }
+}
+
+export async function prepareSandbox(catalog: SandboxCatalog, backend: SandboxBackend, network_mode: NetworkMode): Promise<void> {
+  if (!catalog.revision) throw new Error('Sandbox selection must be refreshed')
+  const result = await postControlPlane<unknown>('/api/v1/setup/sandbox/prepare', { backend, network_mode, revision: catalog.revision })
+  if (!isRecord(result) || result.schema !== 'masc.sandbox_preparation.v1'
+    || result.configuration_saved !== true || result.image_prepared !== true || result.backend !== backend
+    || result.network_mode !== network_mode || result.model_verification !== 'not_run'
+    || result.guest_verification !== 'not_run') throw new Error('Sandbox preparation unconfirmed')
 }

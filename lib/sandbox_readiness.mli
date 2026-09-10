@@ -30,5 +30,10 @@ val selection_of_contents : host:host -> path:string -> contents:string ->
   microvm_backend:Keeper_microvm_backend.t option ->
   network_mode:Keeper_types_profile_sandbox.network_mode option -> (selection, string) result
 val stage_contents : path:string -> contents:string -> selection -> (string, string) result
-val commit_staged : path:string -> original:string -> staged:string -> (unit, string) result
-(** Commit under the keeper manifest lock only if captured bytes still match. *)
+val commit_staged_with_publication : with_publication:((unit -> (unit,string) result) -> (unit,string) result) -> path:string -> original:string -> staged:string -> (unit, string) result
+(** Commit under the keeper manifest lock only if captured bytes still match.
+    [with_publication] may add an owner lifecycle guard around the actual CAS
+    and write, after the manifest lock is acquired. Preserve manifest-before-
+    lifecycle lock ordering; the default publishes directly. *)
+
+val commit_staged : path:string -> original:string -> staged:string -> (unit,string) result

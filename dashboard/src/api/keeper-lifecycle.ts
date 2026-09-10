@@ -13,6 +13,7 @@ import {
 
 interface KeeperLifecycleResponse {
   ok: boolean
+  already_live?: boolean
   action?: 'boot' | 'shutdown' | 'reset' | 'clear' | 'pause' | 'resume' | 'wakeup'
   name?: string
   detail?: unknown

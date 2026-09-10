@@ -1702,8 +1702,21 @@ let add_routes ~sw ~clock router =
          (fun state _agent_name req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Response.json_value ~request:req
-             (Masc.Sandbox_readiness.inspect ~base_path:(Some base_path)) reqd)
+             (Server_sandbox_setup.inspect ~base_path) reqd)
          request reqd)
+  |> Http.Router.post "/api/v1/setup/sandbox/prepare" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let request = try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None in
+             let result = match request with
+               | None -> Error Server_sandbox_setup.Invalid_request
+               | Some request -> Server_sandbox_setup.prepare ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path request in
+             match result with
+             | Ok receipt -> Http.Response.json_value ~request:req receipt reqd
+             | Error error -> respond_dashboard_error ~status:`Conflict ~request:req reqd
+                 (Server_sandbox_setup.error_message error))) request reqd)
   |> Http.Router.get "/api/v1/setup/status" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

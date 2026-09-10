@@ -91,7 +91,7 @@ class Setup(unittest.TestCase):
             commands = base / 'commands'
             commands.mkdir()
             docker = commands / 'docker'
-            docker.write_text('#!/bin/sh\nexit 0\n')
+            docker.write_text("#!/bin/sh\nif [ \"$1\" = info ]; then echo '{\"OSType\":\"linux\",\"SecurityOptions\":[]}'; fi\nexit 0\n")
             docker.chmod(0o755)
             env = {key: value for key, value in os.environ.items()
                    if key in ('PATH', 'HOME', 'LANG', 'TMPDIR')}

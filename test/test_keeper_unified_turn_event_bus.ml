@@ -205,6 +205,13 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
          "pending count from captured bus"
          1
          (EB.For_testing.get_state t).pending_tool_count;
+       (* #29230: the terminal-path from-state reads this public accessor;
+          it must mirror the authoritative value exactly. *)
+       check
+         int
+         "public pending_tool_count mirrors the authoritative value"
+         1
+         (EB.pending_tool_count t);
        unsubscribe_once ();
        Agent_core.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
        let summary_after_unsubscribe =

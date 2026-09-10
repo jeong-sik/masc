@@ -73,6 +73,7 @@ type transition_action =
   | ProviderTimeout
   | StreamYieldsTool
   | ToolReturned
+  | ToolTimeout
   | StreamComplete
   | FinishTurn
   | ReceiptLost

@@ -171,6 +171,31 @@ let test_written_and_skipped_answers_are_readable () =
     (contains skipped.Keeper_world_observation.preview "skipped")
 ;;
 
+let test_complete_multi_question_answers_reach_the_prompt () =
+  let written_question id header =
+    match Keeper_ask.question ~question_id:id ~header ~prompt:header ~choices:[]
+        ~mode:Keeper_ask.Single
+        ~free_text:(Keeper_ask.Free_text_allowed { hint = None }) with
+    | Ok question -> question
+    | Error error -> fail (Keeper_ask.invalid_question_to_string error)
+  in
+  let ask = ask_with
+      [ written_question "format" "행사 형태"
+      ; written_question "details" "확정 정보"
+      ] in
+  let format = String.concat " " (List.init 80 (fun _ -> "허구의 오프라인 전시입니다.")) in
+  let details = "2026-10-17 14:00–17:00 / 은빛정류장 전시실 / 무료. 주최와 링크는 미정이며 만들지 마세요." in
+  let row = Keeper_world_observation.pending_board_event_of_ask_answer
+      ~meta ~ask
+      ~answers:(answers_for ask
+        [ "format", Keeper_ask.Wrote format; "details", Keeper_ask.Wrote details ])
+      ~responder ~answered_at:200. in
+  let fields = Keeper_unified_prompt.For_testing.board_event_fields row in
+  check string "all question answers survive model-facing field projection"
+    ("행사 형태: " ^ format ^ " · 확정 정보: " ^ details)
+    (List.assoc "preview" fields)
+;;
+
 (* The row is what the turn renders. Left out of the rendered set, the Keeper
    is woken with an empty pending-events list — a wake it cannot act on, which
    is the failure this whole change is about. *)
@@ -289,6 +314,8 @@ let () =
             test_the_row_says_what_the_human_picked
         ; test_case "written and skipped answers are readable" `Quick
             test_written_and_skipped_answers_are_readable
+        ; test_case "complete multi-question answers reach the prompt" `Quick
+            test_complete_multi_question_answers_reach_the_prompt
         ; test_case "the row is one the turn renders" `Quick
             test_the_row_is_one_the_turn_renders
         ; test_case "the row is not a Board post" `Quick

@@ -5363,6 +5363,16 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"a waiting line is not shown in NEXT; "
                     f"missing {expected!r}: {plain!r}"
                 )
+        # D3: a waiting row names what it waits behind. Both lines queue
+        # while this Keeper's turn is still running, so each row carries the
+        # running-turn reason -- "pending" alone cannot say whether the wait
+        # is behind the turn or behind another line. The queue may coalesce
+        # into one NEXT row holding both lines, so the reason is asked of
+        # the rows that are there, not of two separate rows.
+        if b"behind this Keeper's running turn" not in plain:
+            raise AssertionError(
+                f"a waiting row does not name what it waits behind: {plain!r}"
+            )
         if b"TURN \xc2\xb7 QUEUED" in plain:
             raise AssertionError(f"pending input leaked into the transcript: {plain!r}")
         if turn_user.search(plain).start() > plain.find(b"NEXT 1"):

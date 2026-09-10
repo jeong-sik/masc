@@ -754,6 +754,18 @@ let evidence_read_failure_of_owned_read_failure = function
   | Owned_file_operation_failed { cause; _ } ->
     Evidence_read_error (Printexc.to_string cause)
 
+let binary_format_of_path path =
+  let extension = String.lowercase_ascii (Filename.extension path) in
+  if extension = "" then "unknown"
+  else String.sub extension 1 (String.length extension - 1)
+
+let image_media_type_of_binary_format = function
+  | "png" -> Some "image/png"
+  | "jpeg" | "jpg" -> Some "image/jpeg"
+  | "gif" -> Some "image/gif"
+  | "webp" -> Some "image/webp"
+  | _ -> None
+
 let read_regular_file_prefix ~ownership_root path =
   match
     Fs_compat.load_owned_regular_file_prefix
@@ -765,16 +777,23 @@ let read_regular_file_prefix ~ownership_root path =
     Error (evidence_read_failure_of_owned_read_failure error.failure)
   | Ok None -> Error Evidence_missing
   | Ok (Some prefix) ->
-    (match scan_utf8 prefix.content with
-     | Utf8_valid ->
-       Ok (prefix.content, prefix.file_size, prefix.truncated)
-     | Utf8_incomplete_at index when prefix.truncated ->
-       Ok
-         ( String.sub prefix.content 0 index
-         , prefix.file_size
-         , true )
-     | Utf8_incomplete_at _ | Utf8_invalid ->
-       Error Evidence_invalid_utf8)
+    let format = binary_format_of_path path in
+    match image_media_type_of_binary_format format with
+    | Some _ when prefix.truncated ->
+      Error (Evidence_read_error
+        (Printf.sprintf "image evidence has %d bytes, exceeding capture limit %d; submit a complete smaller rendering"
+           prefix.file_size verification_evidence_max_bytes))
+    | Some _ ->
+      Ok (Binary_payload
+        { data = prefix.content; bytes = prefix.file_size; format
+        ; sha256 = Digestif.SHA256.(digest_string prefix.content |> to_hex) })
+    | None ->
+      (match scan_utf8 prefix.content with
+       | Utf8_valid ->
+         Ok (Text_payload (prefix.content, prefix.file_size, prefix.truncated))
+       | Utf8_incomplete_at index when prefix.truncated ->
+         Ok (Text_payload (String.sub prefix.content 0 index, prefix.file_size, true))
+       | Utf8_incomplete_at _ | Utf8_invalid -> Error Evidence_invalid_utf8)
 
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"
@@ -875,25 +894,10 @@ let persist_binary_body ~base_path ?request_id ?index data =
     Some (Filename.concat (Filename.concat "evidence" request_id) file)
   | _ -> None
 
-(* RFC-0436 §4.3: whether a binary artifact's format is an image a runtime
-   accepts as attached input, and as which media type. The four accepted
-   types are the same set every runtime's image cap lists, decided here so
-   the format taxonomy stays with the store that produces it. *)
-let image_media_type_of_binary_format = function
-  | "png" -> Some "image/png"
-  | "jpeg" | "jpg" -> Some "image/jpeg"
-  | "gif" -> Some "image/gif"
-  | "webp" -> Some "image/webp"
-  | _ -> None
-
-(* The filed body read back as base64 for an attached media block. Only a
-   binary artifact captured in-process carries a body path; one decoded from
-   persistence files none, and this reader reports that as an error rather
-   than guessing at the bytes. A body above the capture ceiling is refused
-   the same way (RFC-0436 §4.5): the judge then rests on the recorded hash
-   and size, which is the §4.4 posture for it. The ceiling is the capture
-   ceiling on purpose — a body the store would not capture is not a body it
-   delivers, so both limits are one number (#27397's rule, applied here). *)
+(* Read the request-owned body back as base64, including after the snapshot
+   was decoded from persistence. Missing bodies and bodies above the capture
+   ceiling are not delivered as images; their recorded references remain in
+   the review evidence. The runtime still owns model capability selection. *)
 let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   match item with
   | Evidence_artifact_binary { reference; body = Some relative; _ } ->
@@ -973,8 +977,11 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
     in
     let target = Filename.concat ownership_root relative_path in
     match read_regular_file_prefix ~ownership_root target with
-    | Ok (content, bytes, truncated) ->
+    | Ok (Text_payload (content, bytes, truncated)) ->
       Evidence_artifact { reference; content; bytes; truncated }
+    | Ok (Binary_payload { data; bytes; sha256; format }) ->
+      let body = persist_binary_body ~base_path ?request_id ?index data in
+      Evidence_artifact_binary { reference; bytes; sha256; format; body }
     | Error (Evidence_missing as reason)
     | Error (Evidence_not_regular_file as reason)
     | Error (Evidence_outside_worker_playground as reason)

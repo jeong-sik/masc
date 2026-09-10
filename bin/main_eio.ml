@@ -2523,6 +2523,21 @@ let runtime_model_list_cmd =
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
     Term.(const run $ client)
 
+let runtime_discover_models_cmd =
+  let spec = Arg.(required & opt (some string) None & info ["spec"]
+    ~doc:"Private JSON connection specification containing credential references, never raw secrets.") in
+  let run path =
+    let parsed = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
+      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
+    match parsed with
+    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
+    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        match Runtime_model_discovery.discover ~sw ~net:(Eio.Stdenv.net env) connection with
+        | Ok result -> print_endline (Yojson.Safe.to_string result); 0
+        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
+  Cmd.v (Cmd.info "runtime-discover-models" ~doc:"Read account or server model metadata without creating a runtime.")
+    Term.(const run $ spec)
+
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
@@ -2763,6 +2778,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
+    ; runtime_discover_models_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

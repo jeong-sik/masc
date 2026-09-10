@@ -1044,7 +1044,7 @@
 .wk-lin-ev.done { color: var(--status-ok); }
 .wk-lin-ev.bad { color: var(--status-bad); }
 .wk-lin-arr { color: var(--volt-strong); font-size: var(--fs-12); }
-.wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
+.wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; overflow-wrap: anywhere; }
 
 /* ── work 뷰 토글 (호라이즌 / 칸반) ── */
 .wk-head-r { display: flex; align-items: center; gap: 12px; }

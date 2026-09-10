@@ -63,7 +63,8 @@ class OwnerWithoutModel(unittest.TestCase):
                         self.assertEqual(observation['reason'], reason)
                         self.assertIn(get('/api/v1/runtime/config/raw')[0], (401, 403))
                         subprocess.run([BINARY, 'login', '--base-path', tmp, '--port', str(port),
-                                        '--agent', 'local-admin', '--role', 'admin'],
+                                        '--agent', 'local-admin', '--role', 'admin',
+                                        '--client-env', 'FIXTURE_MASC_TOKEN'],
                                        env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
                         token = (base/'.masc/auth/local-admin.token').read_text().strip()
                         status, _ = get('/api/v1/runtime/config/raw', {'Authorization': 'Bearer '+token,

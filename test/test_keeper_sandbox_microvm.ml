@@ -2142,6 +2142,8 @@ let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
      Alcotest.failf "unexpected Root_unreadable: %s" detail
    | Error (Root_not_directory _) ->
      Alcotest.fail "unexpected Root_not_directory"
+   | Error (Root_probe_unreachable { reason; _ }) ->
+     Alcotest.failf "unexpected Root_probe_unreachable: %s" reason
    | Ok _ -> Alcotest.fail "expected Root_missing for unbooted microvm guest");
   (match Masc.Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
    | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->

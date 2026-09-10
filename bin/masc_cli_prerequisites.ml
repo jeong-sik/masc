@@ -58,7 +58,7 @@ let execute host = function
        Fun.protect ~finally:(fun () -> Apple.remove artifact) (fun () ->
          prerr_endline "Package verified. The administrator installer may request your password.";
          match Apple.install ~executable_path:Sys.executable_name
-                 ~run:(fun argv -> run_terminal argv |> Result.map (fun () -> "")) artifact with
+                 ~run:capture ~elevate:run_terminal artifact with
          | Ok () -> Prerequisites.Commands_completed_recheck_required
          | Error error -> Prerequisites.Failed {step=2; reason=Apple.error_message error}))
 let run ~dependency:name ~action =

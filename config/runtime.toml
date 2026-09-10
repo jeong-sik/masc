@@ -1339,8 +1339,18 @@ X-Title = "MASC"
 # (probe4-*-effort-only.json: gpt-5.5 returned reasoning.summary +
 # reasoning.encrypted, deepseek-v4-flash returned reasoning.text).
 #
-# No entry claims wizard-default and the fleet default above is unchanged:
-# these are dispatchable runtimes, not a new house model.
+# The fleet default above is unchanged: these are dispatchable runtimes, not a
+# new house model. One binding does claim wizard-default, because the install
+# wizard refuses a provider with several enabled bindings and no default
+# ("provider openrouter has 12 enabled bindings and no install wizard
+# default") and then reports the provider as unknown - the provider would be
+# uninstallable. A wizard choice also owes a seed overlay [[targets]] row, and
+# an exact-output target wants thinking off so the answer lands in content
+# rather than the reasoning field. That rules out the cheaper glm-5.3-flash:
+# its endpoint refuses reasoning_effort "none" outright (HTTP 400, probe7), so
+# a disable is not encodable there. deepseek-v4-flash takes the disable, and
+# among the ids that do it is the cheapest on both axes ($0.0886/$0.177 per
+# 1M).
 #
 # No entry pins max-context either: the catalog row already carries the
 # window and resolve_max_context_of_runtime reads it when runtime.toml
@@ -1435,6 +1445,7 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-deepseek-v4-flash]
+wizard-default = true
 
 [models.openrouter-deepseek-v4-pro]
 api-name = "deepseek/deepseek-v4-pro"

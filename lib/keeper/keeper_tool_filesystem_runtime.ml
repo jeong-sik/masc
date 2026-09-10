@@ -3099,7 +3099,7 @@ module For_testing = struct
   ;;
 end
 
-let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~meta
+let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
     ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->

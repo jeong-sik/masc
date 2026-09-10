@@ -35,6 +35,15 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+val read_sandbox_bytes :
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  path:string -> max_bytes:int ->
+  (string, string) result
+(** Resolve like Read, enforce this Keeper's containment, and read binary bytes
+    through the existing sandbox runner. Never falls back to a host read. *)
+
 val handle_owned_read_file_with_outcome :
   ownership_root:string ->
   args:Yojson.Safe.t ->

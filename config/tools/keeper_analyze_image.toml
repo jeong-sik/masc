@@ -1,6 +1,6 @@
 name = "keeper_analyze_image"
 description = """
-Read a stored image artifact and return a text description or answer. \
+Read a stored image artifact or an image file in your sandbox and return a text description or answer. \
 Delegates to a vision model in a sub-call; the image is never added to this \
 conversation. Returns the extracted text, or a typed error (invalid_args | \
 eio_context_unavailable | artifact_load_failed | invalid_timeout | \
@@ -11,11 +11,15 @@ additional_properties = false
 [[params]]
 name = "artifact"
 type = "string"
-required = true
 description = """
 Handle of a stored image artifact (the content-addressed id returned when \
-the image was stored). The raw image is read in a vision sub-call and never \
+the image was stored). Provide exactly one of artifact or path. A file hash alone does not store the file. The raw image is read in a vision sub-call and never \
 enters this conversation."""
+
+[[params]]
+name = "path"
+type = "string"
+description = "Image file in your own sandbox, resolved like Read. Use this for a PNG/JPEG/GIF/WebP you generated. Provide exactly one of path or artifact. Bytes are read through the sandbox, stored under this Keeper, and analyzed; the response includes the stored artifact handle for further questions."
 
 [[params]]
 name = "query"

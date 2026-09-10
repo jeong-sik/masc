@@ -100,6 +100,11 @@ daemon 장애로 제거를 확인하지 못하면 cleanup incomplete다. 다른 
 
 근거 전달은 기존 Keeper 메시지 경로를 사용한다. 전달 영수증과 Keeper의 실제 읽기·조치,
 독립 검증은 서로 다른 증거다. 선택적으로 보낸 근거가 상위 지침으로 승격되지 않는다.
+Keeper에게 전달할 때는 선택한 원문을 기존 Tool blob store에 동일한 SHA-256으로 보존하고,
+표준 artifact manifest로 자식 근거를 연결한다. Keeper는 기존 `keeper_artifact_read`로 읽는다.
+host 파일 경로를 guest에서 읽으라고 요구하거나 샌드박스의 mount 범위를 넓히지 않는다.
+제거가 확인되고 상태가 저장되면 worker와 마지막 출력은 메모리에서 해제하며,
+이후의 조회와 증거 선택은 보존한 기록을 사용한다.
 
 ## 합격 행렬
 

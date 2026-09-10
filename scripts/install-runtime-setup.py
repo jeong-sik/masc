@@ -569,12 +569,13 @@ def pick(title, labels, multiple=False, defaults=()):
         for index, label in enumerate(labels, 1):
             print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter keeps marked choices; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
             if not answer:
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -593,7 +594,7 @@ def pick(title, labels, multiple=False, defaults=()):
             start = min(max(0, current - count + 1), max(0, len(labels) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            lines = [terminal_text(title), '↑/↓ move · Space select · Enter continue · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
+            lines = [terminal_text(title), '↑/↓ move · Space mark several · Enter choose · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
             for index in range(start, min(len(labels), start + count)):
                 marker = '[x]' if index in selected else '[ ]'
                 lines.append(('› ' if index == current else '  ') + (marker + ' ' if multiple else '') + terminal_text(labels[index]))
@@ -628,6 +629,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 
@@ -683,9 +685,9 @@ def source_label(source):
     elif source.get('credential_file'):
         status = 'saved private API key; access will be checked'
     elif command:
-        status = 'CLI found' if shutil.which(command) else 'CLI not found'
+        status = 'CLI found; sign-in checked after selection' if shutil.which(command) else 'CLI needs installation'
     elif key:
-        status = key + (' is set' if os.environ.get(key) else ' is not set')
+        status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
     else:
         status = endpoint or 'configured connection'
     return source['label'] + ' — ' + status
@@ -693,8 +695,9 @@ def source_label(source):
 
 class PendingCredentials:
     """Own only files created by this wizard, until a config commit retains them."""
-    def __init__(self, binary):
+    def __init__(self, binary, base_path=None):
         self.binary = binary
+        self.base_path = base_path
         self.pending = {}
 
     def __enter__(self):
@@ -734,6 +737,99 @@ class PendingCredentials:
             raise SetupError('MASC did not return a valid private credential reference')
         self.pending[path] = (info.st_dev, info.st_ino)
         return path
+
+    def register_account_reference(self, path):
+        info = os.lstat(path)
+        if not os.path.isabs(path) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise SetupError('Antigravity did not return a private account reference')
+        self.pending[path] = (info.st_dev, info.st_ino)
+
+
+def antigravity_catalog_rows(catalog):
+    if (catalog.get('source') != 'antigravity_cli_models'
+            or catalog.get('account_availability_verified') is not False
+            or not isinstance(catalog.get('models'), list)):
+        raise SetupError('Antigravity returned an unsupported model list')
+    result = []
+    for row in catalog['models']:
+        if not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label')):
+            raise SetupError('Antigravity returned an invalid model entry')
+        result.append(dict(id=row['id'], label=row['label'], context=None))
+    return result
+
+
+def prepare_antigravity_account(source, credentials):
+    if credentials is None or credentials.base_path is None:
+        raise SetupError('Open masc setup to select an Antigravity account')
+    actions = [('current', 'Use the account signed in to Antigravity on this computer'),
+               ('signin', 'Sign in with the official Antigravity client'), ('back', 'Back to connections')]
+    if source.get('credential_file'):
+        actions.insert(0, ('saved', 'Use this workspace’s saved Antigravity account'))
+    selected = actions[pick('Antigravity account', [label for _, label in actions])[0]][0]
+    if selected == 'back':
+        raise SetupError('returned to connection selection')
+    arguments = [str(credentials.binary), 'runtime-antigravity-account', '--base-path', str(credentials.base_path),
+                 '--cli-path', source['command']]
+    if selected == 'signin':
+        arguments.append('--sign-in')
+    elif selected == 'saved':
+        arguments += ['--credential-file', source['credential_file']]
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(response.stdout)
+        if response.returncode:
+            if receipt.get('schema') == 'masc.antigravity_setup_error.v1':
+                raise SetupError(terminal_text(receipt['error']))
+            raise ValueError('invalid failure')
+        if (receipt.get('schema') != 'masc.antigravity_account.v1' or receipt.get('invocation_verified') is not False
+                or not isinstance(receipt.get('provider_timeout_s'), (int, float))
+                or not math.isfinite(receipt['provider_timeout_s']) or receipt['provider_timeout_s'] <= 0):
+            raise ValueError('invalid account receipt')
+        credential = receipt['credential_file']
+        models = antigravity_catalog_rows(receipt['catalog'])
+        credentials.register_account_reference(credential)
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity account selection did not return a readable result')
+    source.update(credential_file=credential, credential_kind='file', credential_replaced=True,
+                  account_catalog=models, provider_timeout_s=receipt['provider_timeout_s'])
+    if receipt.get('catalog_error'):
+        print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)
+    return source
+
+
+def antigravity_models(binary, source):
+    if 'account_catalog' in source:
+        return source.pop('account_catalog')
+    response = subprocess.run([str(binary), 'runtime-antigravity-models', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file']],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if response.returncode:
+        raise SetupError('Antigravity could not refresh models. Check sign-in and retry account selection.')
+    try:
+        return antigravity_catalog_rows(json.loads(response.stdout))
+    except (TypeError, ValueError):
+        raise SetupError('Antigravity did not return a readable model list')
+
+
+def antigravity_context(binary, source, model_id):
+    print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
+    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file'], '--model', model_id],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if response.returncode:
+            if observed.get('schema') == 'masc.antigravity_setup_error.v1' and isinstance(observed.get('error'), str):
+                raise SetupError(terminal_text(observed['error']))
+            raise ValueError('invalid error')
+        context = observed['context']
+        if (observed.get('source') != 'antigravity_statusline' or observed.get('model') != model_id
+                or observed.get('invocation_verified') is not False
+                or context is not None and not positive_integer(context)):
+            raise ValueError('invalid context')
+        return context
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity did not return a valid context for the selected model')
 
 
 def prerequisite_menu(binary, dependency):
@@ -791,6 +887,9 @@ def prepare_connection(source, credentials):
             client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(source['choice'])
             if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
                 raise SetupError('Install the selected client, then return to connection setup')
+        if source['choice'] == 'antigravity':
+            source['command'] = shutil.which(command)
+            return prepare_antigravity_account(source, credentials)
         return source
     if not source['endpoint']:
         urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
@@ -865,14 +964,18 @@ def native_serving_context(binary, source, model, timeout, load=False):
 def source_models(binary, source, timeout):
     choice = source['choice']
     can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
-    if can_discover and CHOICES[choice][1] is None:
+    if choice == 'antigravity' and source.get('credential_file'):
+        observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
+    elif can_discover and CHOICES[choice][1] is None:
         observed, origin = native_discover_models(binary, source, timeout)
     else:
         observed, origin = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
                                           command=source.get('command') or 'codex') if can_discover else ([], 'Configured models')
     rows = []
+    # An account switch invalidates both membership and effective CLI context.
+    declared_rows = [] if choice == 'antigravity' and source.get('credential_replaced') else source['rows']
     for model in observed:
-        existing_rows = [row for row in source['rows'] if row['model'] == model['id']]
+        existing_rows = [row for row in declared_rows if row['model'] == model['id']]
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
             for existing in existing_rows:
@@ -882,11 +985,11 @@ def source_models(binary, source, timeout):
                                  existing=None if source.get('credential_replaced') else existing))
         else:
             rows.append(dict(model, existing=None))
-    for row in source['rows']:
+    for row in declared_rows:
         if source.get('credential_replaced') and any(item['id'] == row['model'] for item in rows):
             continue
         if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
-            duplicates = sum(other['model'] == row['model'] for other in source['rows']) > 1
+            duplicates = sum(other['model'] == row['model'] for other in declared_rows) > 1
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
             rows.append(dict(id=row['model'], label=label, context=row['max_context'],
                              existing=None if source.get('credential_replaced') else row))
@@ -906,9 +1009,11 @@ def resolve_model_spec(source, model, timeout, binary=None):
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
-    if choice is None or choice == 'antigravity':
+    if choice is None:
         raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
     context = model.get('context')
+    if choice == 'antigravity' and binary:
+        context = antigravity_context(binary, source, model['id'])
     if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -952,19 +1057,43 @@ def resolve_model_spec(source, model, timeout, binary=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
+    if choice == 'antigravity':
+        spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec)[0], spec
 
 
+def pick_connection_sources(sources):
+    def detected(source):
+        return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
+                and (bool(source.get('command') and shutil.which(source['command']))
+                     or bool(source.get('credential_file'))
+                     or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
+    found = [source for source in sources if detected(source)]
+    show_all = not found
+    while True:
+        shown = sources if show_all else found
+        labels = [source_label(source) for source in shown] + ['Add another server URL', 'Configure later']
+        if not show_all:
+            labels.append('Browse all providers and advanced connections')
+        title = 'Choose connections' if show_all else 'Fast setup · clients and account keys found on this computer'
+        chosen = pick(title + ' (Space marks several; Enter chooses)', labels, multiple=True)
+        if not show_all and len(shown) + 2 in chosen:
+            if len(chosen) != 1:
+                print('Choose Browse all on its own, or select the connections to use.', file=sys.stderr)
+                continue
+            show_all = True
+            continue
+        return shown, chosen
+
+
 def select_connections(binary, inventory, timeout, credentials=None):
-    sources = connection_sources(inventory)
-    labels = [source_label(source) for source in sources] + ['Add another server URL', 'Configure later']
-    chosen = pick('Select model connections (you can choose several)', labels, multiple=True)
+    sources, chosen = pick_connection_sources(connection_sources(inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
             raise SetupError('choose Configure later alone, or select connections')
@@ -1044,7 +1173,7 @@ def login_command(runtime_id, specs, inventory):
 
 
 def wizard(binary, base_path, timeout):
-    with PendingCredentials(binary) as credentials:
+    with PendingCredentials(binary, base_path) as credentials:
         return wizard_with_credentials(binary, base_path, timeout, credentials)
 
 
@@ -1241,6 +1370,61 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
+def select_setup_server(binary, base_path, port):
+    while True:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            observed = json.loads(response.stdout)
+            if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
+                raise ValueError('invalid server observation')
+        except (TypeError, ValueError):
+            raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
+        state = observed.get('status')
+        if state == 'free':
+            return port
+        if state == 'same_workspace':
+            server_version = observed['server_version']
+            choices = [('use', 'Continue with this running workspace'),
+                       ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
+                       ('later', 'Finish later')]
+            if server_version != observed['installed_version']:
+                choices[0], choices[1] = choices[1], choices[0]
+            selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
+                                    [label for _, label in choices])[0]][0]
+            if selected == 'use':
+                return port
+            if selected == 'later':
+                raise SetupError('setup paused; the existing workspace server was preserved')
+            result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
+                                     '--port', str(port), '--expected-version', server_version],
+                                    stdout=subprocess.PIPE, text=True)
+            try:
+                receipt = json.loads(result.stdout)
+                if result.returncode:
+                    if receipt.get('schema') == 'masc.setup_server_error.v1':
+                        print(terminal_text(receipt['error']), file=sys.stderr)
+                        return None
+                    raise ValueError('invalid error')
+                if receipt.get('schema') != 'masc.setup_server_stopped.v1' or receipt.get('owner_stopped') is not True:
+                    raise ValueError('invalid shutdown receipt')
+            except (TypeError, KeyError, ValueError):
+                raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            continue  # server or port might have changed during graceful drain
+        if state not in ('other_workspace', 'unknown_server'):
+            raise SetupError('MASC returned an unknown server observation')
+        if state == 'other_workspace':
+            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
+        else:
+            print('Another service is using port ' + str(port), file=sys.stderr)
+        suggested = observed.get('suggested_port')
+        if not positive_integer(suggested) or suggested > 65535:
+            raise SetupError('MASC could not find an unused local port')
+        if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            raise SetupError('setup paused; existing services were preserved')
+        port = suggested
+
+
 def select_sandbox(binary, base_path):
     advanced = False
     names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
@@ -1324,6 +1508,9 @@ def journey(binary, base_path, port, timeout, resume=False):
     if selection == 2:
         return 0
     base = proposed if selection == 0 else ask_text('Workspace directory')
+    port = select_setup_server(binary, base, port)
+    if port is None:
+        return 1
     base = workspace_check(binary, base)['base_path']
     if subprocess.run([str(binary), 'init', '--base-path', base], stdout=sys.stderr).returncode != 0:
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')

@@ -1608,6 +1608,7 @@ let verify_runtime_execution runtime timeout_s =
     Eio_context.set_env env;
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
+      ~secure_random:(Eio.Stdenv.secure_random env)
       ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
@@ -2647,6 +2648,18 @@ let setup_validate_runtime base_path =
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
+let ensure_local_operator_login ~base_path ~port ~agent =
+  match Auth_login.read_persisted_token ~base_path ~agent_name:agent with
+  | Some token when (match Auth.verify_token base_path ~agent_name:agent ~token with
+      | Ok credential -> credential.role = Masc_domain.Admin
+      | Error _ -> false) -> 0
+  | Some _ | None ->
+    (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port
+        ~agent_name:agent ~role:Masc_domain.Admin
+        ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
+    | Ok _ -> prerr_endline "Local operator credential ready."; 0
+    | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1)
+
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network_mode =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run_with_selection ~network_mode ~base_path ~port ~open_tui:(not no_tui)
@@ -2658,17 +2671,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
       sandbox_image_cmd_exit false None (Ok runtime))
-    ~login:(fun () ->
-      match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
-      | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
-          | Ok credential -> credential.role = Masc_domain.Admin
-          | Error _ -> false) -> 0
-      | Some _ | None ->
-        (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port
-            ~agent_name:default_login_agent ~role:Masc_domain.Admin
-            ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
-        | Ok _ -> print_endline "Local operator credential ready."; 0
-        | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1))
+    ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent:default_login_agent)
     ~resume_models:(fun () -> Masc_cli_model_resume.run ~base_path ~port ~agent:default_login_agent)
     ~start_keeper:(fun () ->
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
@@ -2702,6 +2705,55 @@ let workspace_upgrade_cmd =
     | None -> prerr_endline "Choose inspection, --apply KEEPER with --source-sha256, or --restore BACKUP_ID."; 1 in
   Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect known configuration upgrades and private recovery backups.")
     Term.(const run $ base_path $ apply $ source_sha256 $ restore)
+
+let antigravity_account_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let sign_in = Arg.(value & flag & info ["sign-in"] ~doc:"Open official sign-in in a private account directory.") in
+  let credential = Arg.(value & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run base_path cli_path sign_in credential =
+    let action = match sign_in, credential with
+      | true, Some _ -> None
+      | true, None -> Some Masc_cli_antigravity.Sign_in
+      | false, Some path -> Some (Use_reference path)
+      | false, None -> Some Import_current in
+    match action with
+    | None -> prerr_endline "Choose sign-in or an existing account reference."; 1
+    | Some action -> Masc_cli_antigravity.account ~base_path ~cli_path
+        ~timeout_s:runtime_probe_subscription_timeout_s ~action in
+  Cmd.v (Cmd.info "runtime-antigravity-account" ~doc:"Select an Antigravity account and list its actual models without a model turn.")
+    Term.(const run $ base_path $ cli_path $ sign_in $ credential)
+
+let antigravity_models_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run cli_path oauth_source = Masc_cli_antigravity.models ~cli_path ~oauth_source
+    ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
+    Term.(const run $ cli_path $ credential)
+
+let antigravity_context_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let model = Arg.(required & opt (some string) None & info ["model"] ~docv:"MODEL_ID") in
+  let run cli_path oauth_source model_id =
+    match Masc_cli_onboarding.python (Unix.realpath Sys.executable_name) with
+    | None -> prerr_endline "The installed Python helper is missing. Reinstall the complete MASC release."; 1
+    | Some python_path -> Masc_cli_antigravity.context ~python_path ~cli_path ~oauth_source ~model_id
+        ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt.")
+    Term.(const run $ cli_path $ credential $ model)
+
+let setup_server_cmd =
+  let inspect base_path port = Masc_cli_owner_upgrade.inspect ~base_path ~port in
+  Cmd.v (Cmd.info "setup-server" ~doc:"Inspect this setup port and offer an unused port without changing any server.")
+    Term.(const inspect $ base_path $ port)
+
+let setup_stop_owner_cmd =
+  let expected_version = Arg.(required & opt (some string) None & info ["expected-version"] ~docv:"VERSION") in
+  let stop base_path port agent expected_version = Masc_cli_owner_upgrade.stop ~base_path ~port ~agent ~expected_version
+    ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent) in
+  Cmd.v (Cmd.info "setup-stop-previous-owner" ~doc:"Gracefully stop the authenticated owner selected for workspace upgrade.")
+    Term.(const stop $ base_path $ port $ login_agent $ expected_version)
 
 let sandbox_catalog_cmd =
   let inspect requested =
@@ -2891,6 +2943,11 @@ let cmd =
     ; setup_preflight_cmd
     ; runtime_resume_cmd
     ; workspace_upgrade_cmd
+    ; antigravity_account_cmd
+    ; antigravity_models_cmd
+    ; antigravity_context_cmd
+    ; setup_server_cmd
+    ; setup_stop_owner_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
     ; token_cmd

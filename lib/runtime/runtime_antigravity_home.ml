@@ -539,12 +539,11 @@ let ensure_login_keychain home_dir =
       else Present)
 ;;
 
-let prepare ~runtime_root ~owner_leaf ~oauth_source =
+let prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
   else
     let* () = verify_runtime_root runtime_root in
-    let* oauth_seed = read_oauth_seed oauth_source in
     let* official_clients = ensure_private_child runtime_root "official-clients" in
     let* antigravity_root = ensure_private_child official_clients "antigravity" in
     let* home_dir = ensure_private_child antigravity_root owner_leaf in
@@ -559,17 +558,38 @@ let prepare ~runtime_root ~owner_leaf ~oauth_source =
       | Error _ as error -> error
       | Ok `Present -> Ok ()
       | Ok `Missing ->
-        write_private_file
-          ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
-          oauth_path
-          oauth_seed
+        (match oauth_seed with
+         | None -> Ok ()
+         | Some seed ->
+           write_private_file
+             ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
+             oauth_path seed)
     in
     let* () = write_private_settings settings_path in
     let keychain = ensure_login_keychain home_dir in
     Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
 ;;
 
+let prepare ~runtime_root ~owner_leaf ~oauth_source =
+  let* seed = read_oauth_seed oauth_source in
+  prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed)
+;;
+
+let prepare_for_login ~runtime_root ~owner_leaf =
+  prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed:None
+;;
+
+let oauth_path t = t.oauth_path
 let home_dir t = t.home_dir
+let write_context_observation_settings t ~command =
+  let settings = `Assoc [
+    "statusLine", `Assoc ["type", `String "command"; "command", `String command; "enabled", `Bool true];
+    "altScreenMode", `String "never";
+    "permissions", `Assoc ["allow", `List []; "deny", `List (List.map (fun name -> `String name)
+      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"; "unsandboxed(*)"])]] in
+  write_private_file ~make_error:(fun path detail -> Settings_write_failed {path;detail})
+    t.settings_path (Yojson.Safe.to_string settings)
+
 let keychain_state t = t.keychain
 
 let keychain_state_to_string = function

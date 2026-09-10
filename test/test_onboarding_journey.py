@@ -31,6 +31,83 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_antigravity_context_observation_avoids_numeric_input(self):
+        source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
+                      credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            source='antigravity_statusline', model='selected-model', context=1048576, invocation_verified=False)), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, \
+                patch.object(SETUP, 'pick') as picker, contextlib.redirect_stderr(io.StringIO()):
+            _, spec = SETUP.resolve_model_spec(source, dict(id='selected-model', context=None), 10, binary='/owned/masc')
+        self.assertEqual(spec['max_context'], 1048576)
+        self.assertTrue(spec['streaming'])
+        self.assertEqual(run.call_args.args[0][-2:], ['--model', 'selected-model'])
+        picker.assert_not_called()
+
+    def test_other_workspace_port_choice_never_stops_its_server(self):
+        replies = [dict(status='other_workspace', server_workspace='/someone-else', suggested_port=32768),
+                   dict(status='free')]
+        replies = [subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5', **row)), '') for row in replies]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/workspace', 8945), 32768)
+        self.assertTrue(all(call.args[0][1] == 'setup-server' for call in run.call_args_list))
+        self.assertEqual(run.call_args.args[0][-1], '32768')
+
+    def test_selected_previous_owner_restart_requires_its_exact_version_receipt(self):
+        same = dict(schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5',
+                    server_version='0.35.4', status='same_workspace')
+        stopped = dict(schema='masc.setup_server_stopped.v1', owner_stopped=True, port_available=True)
+        free = dict(schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5', status='free')
+        responses = [subprocess.CompletedProcess([], 0, json.dumps(value), '') for value in (same, stopped, free)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=responses) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/workspace', 8945), 8945)
+        self.assertEqual(run.call_args_list[1].args[0], ['/owned/masc', 'setup-stop-previous-owner',
+            '--base-path', '/workspace', '--port', '8945', '--expected-version', '0.35.4'])
+
+    def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
+        catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
+                       models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
+        rows = SETUP.antigravity_catalog_rows(catalog)
+        self.assertEqual(rows, [dict(id='exact-model-high', label='Exact model (High)', context=None)])
+        source = dict(choice='antigravity', command='/owned/agy', rows=[], endpoint='', api_key_env='',
+                      credential_file='/private/account', credential_kind='file', account_catalog=rows)
+        observed, _ = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(observed[0]['id'], 'exact-model-high')
+        self.assertIsNone(observed[0]['context'])  # architecture capacity is never substituted
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_antigravity_account_import_keeps_original_and_lists_exact_models(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home, 'workspace')
+            (base / '.masc').mkdir(parents=True, mode=0o700)
+            original = Path(home, '.gemini/antigravity-cli/antigravity-oauth-token')
+            original.parent.mkdir(parents=True)
+            original.write_text('fixture-private-oauth-never-print')
+            original.chmod(0o600)
+            catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
+                           command=dict(name='models', data=dict(models=[dict(id='account-only-id', label='Account only model')])))
+            client = Path(home, 'fake-agy')
+            client.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                              'assert sys.argv[1:] == ["--output-format","json","models"]\n'
+                              'assert os.environ["HOME"] != ' + repr(home) + '\n'
+                              'print(' + repr(json.dumps(catalog)) + ')\n')
+            client.chmod(0o700)
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config')
+            result = subprocess.run([BINARY, 'runtime-antigravity-account', '--base-path', str(base),
+                                     '--cli-path', str(client)], env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertFalse(receipt['invocation_verified'])
+            self.assertEqual(receipt['catalog']['models'][0]['id'], 'account-only-id')
+            selected = Path(receipt['credential_file'])
+            self.assertNotEqual(selected, original)
+            self.assertEqual(selected.read_bytes(), original.read_bytes())
+            self.assertEqual(selected.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(original.read_text(), 'fixture-private-oauth-never-print')
+            self.assertNotIn(original.read_text(), result.stdout + result.stderr)
     def test_upgrade_selection_uses_reviewed_digest_and_stops_after_failed_file(self):
         plans = [dict(keeper_name=name, plan=dict(activation_mode='on_demand', source_sha256=name + '-digest'))
                  for name in ('imp', 'helper', 'third')]
@@ -255,6 +332,7 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP.Path, 'home', return_value=Path(home)), \
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
+                    patch.object(SETUP, 'select_setup_server', return_value=9876), \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
                     patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
@@ -290,6 +368,7 @@ class Journey(unittest.TestCase):
         with patch.object(SETUP, 'onboarding_status', return_value=observation('/workspace')), \
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
                 patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \

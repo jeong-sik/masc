@@ -105,6 +105,21 @@ class ModelSelection(unittest.TestCase):
             self.assertTrue(key.exists())
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
 
+    def test_antigravity_account_switch_drops_old_models_and_context(self):
+        source = dict(choice='antigravity', endpoint='', api_key_env='',
+                      credential_file='/private/new-account', credential_kind='file',
+                      credential_replaced=True, rows=[
+                          dict(id='old.shared', model='shared-model', max_context=8192),
+                          dict(id='old.exclusive', model='old-account-only', max_context=16384)])
+        with patch.object(SETUP, 'antigravity_models', return_value=[
+                dict(id='shared-model', label='Shared model', context=None),
+                dict(id='new-model', label='New model', context=65536)]):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual([model['id'] for model in models], ['shared-model', 'new-model'])
+        self.assertIsNone(models[0]['context'])
+        self.assertEqual(models[1]['context'], 65536)
+        self.assertTrue(all(model['existing'] is None for model in models))
+
     def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
                       api_key_env='', credential_file='/private/saved-key', credential_kind='file',
@@ -368,7 +383,7 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
 
 
 class MultipleSelection(unittest.TestCase):
-    def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
+    def terminal_choice(self, keys, expected):
         master, slave = pty.openpty()
         original = termios.tcgetattr(slave)
         program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
@@ -382,7 +397,7 @@ class MultipleSelection(unittest.TestCase):
             while b'0 selected' not in terminal:
                 self.assertTrue(select.select([master], [], [], 5)[0], 'picker did not render')
                 terminal += os.read(master, 65536)
-            os.write(master, b' \x1b[B \r')
+            os.write(master, keys)
             # macOS waits for terminal output to drain while restoring termios.
             # Keep consuming the UI, just as a real terminal emulator does.
             while True:
@@ -394,7 +409,7 @@ class MultipleSelection(unittest.TestCase):
                     break
             output, _ = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, terminal)
-            self.assertEqual(json.loads(output), [0, 1])
+            self.assertEqual(json.loads(output), expected)
             restored = termios.tcgetattr(slave)
             # PENDIN is kernel-maintained pending-input state on macOS, not a
             # terminal mode chosen by the picker.
@@ -408,6 +423,29 @@ class MultipleSelection(unittest.TestCase):
             process.stdout.close()
             os.close(master)
             os.close(slave)
+
+    def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
+        self.terminal_choice(b' \x1b[B \r', [0, 1])
+
+    def test_enter_selects_focused_option_without_space_or_typing(self):
+        self.terminal_choice(b'\x1b[B\r', [1])
+
+    def test_accessible_enter_selects_first_option(self):
+        with patch('sys.stdin', io.StringIO('\n')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude'], multiple=True), [0])
+
+    def test_fast_setup_still_exposes_every_provider_through_browse(self):
+        sources = [dict(choice='claude_code', command='claude', credential_file=None, api_key_env='',
+                        endpoint='', label='Claude Code'),
+                   dict(choice='openai_compatible', command='', credential_file=None, api_key_env='FIXTURE_NO_API_KEY',
+                        endpoint='https://example.org', label='Another provider')]
+        with patch.object(SETUP.shutil, 'which', return_value='/owned/claude'), \
+                patch.dict(os.environ, {'FIXTURE_NO_API_KEY': ''}), \
+                patch.object(SETUP, 'pick', side_effect=[[3], [1]]) as picker:
+            shown, selected = SETUP.pick_connection_sources(sources)
+        self.assertEqual(len(picker.call_args_list[0].args[1]), 4)
+        self.assertIn('Fast setup', picker.call_args_list[0].args[0])
+        self.assertEqual(shown[selected[0]], sources[1])
 
     def test_accessible_number_input_selects_several_without_model_typing(self):
         with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):

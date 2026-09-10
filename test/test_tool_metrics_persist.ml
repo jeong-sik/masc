@@ -5,7 +5,7 @@ module R = Tool_result
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then R.Completed { R.tool_name = name; data = `Null; metadata = None; duration_ms }
+  then R.Completed { content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
     R.Failed
       { R.class_ = Runtime_failure

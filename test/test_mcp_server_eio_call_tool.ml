@@ -545,7 +545,7 @@ let test_failure_observation_uses_typed_failed_payload () =
   in
   let completed : Tool_result.result =
     Tool_result.Completed
-      { data = `Null
+      { content_blocks = None; data = `Null
       ; metadata = None
       ; tool_name = "completed-tool"
       ; duration_ms = 0.0
@@ -576,7 +576,7 @@ let test_records_mcp_server_operation_duration_metric () =
   in
   let result : Tool_result.result =
     Tool_result.Completed
-      { Tool_result.data = `String "ok"
+      { content_blocks = None; Tool_result.data = `String "ok"
       ; metadata = None
       ; tool_name = "get-weather"
       ; duration_ms = 123.0

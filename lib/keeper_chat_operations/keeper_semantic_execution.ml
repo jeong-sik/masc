@@ -66,17 +66,25 @@ let session_scope components =
   else Ok (Session_scope components)
 let session_scope_components (Session_scope components) = components
 type gate_wait =
-  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list }
+  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 let gate_wait ~checkpoint ~session_scope ~obligations =
   if obligations = [] then Error "Gate waiting requires an obligation"
   else if List.length (List.sort_uniq String.compare (List.map (fun row -> row.approval_id) obligations))
           <> List.length obligations then Error "duplicate Gate obligation"
-  else Ok {checkpoint; session_scope; obligations}
+  else Ok {checkpoint; session_scope; obligations; runtime_retry=None}
+let gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~(runtime_retry : runtime_retry) =
+  match gate_wait ~checkpoint ~session_scope ~obligations with
+  | Error _ as error -> error
+  | Ok waiting ->
+    if Keeper_checkpoint_ref.equal checkpoint runtime_retry.checkpoint
+    then Ok {waiting with runtime_retry=Some runtime_retry}
+    else Error "Gate and runtime continuation must share their exact checkpoint"
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
 let equal_gate_wait left right = Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
   && left.session_scope = right.session_scope && left.obligations = right.obligations
+  && Option.equal equal_runtime_retry left.runtime_retry right.runtime_retry
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -352,11 +360,19 @@ let checkpoint_json checkpoint =
   `Assoc [ "trace_id", `String (Keeper_id.Trace_id.to_string checkpoint.Keeper_checkpoint_ref.trace_id)
          ; "turn_count", `Int checkpoint.turn_count
          ; "sha256", `String checkpoint.sha256 ]
+let runtime_retry_json (retry : runtime_retry) =
+  `Assoc [ "kind", `String "runtime_retry"
+             ; "checkpoint", checkpoint_json retry.checkpoint
+             ; "assignment_id", `String retry.assignment_id
+             ; "failed_runtime_id", `String retry.failed_runtime_id
+             ; "next_runtime_id", `String retry.next_runtime_id
+             ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids) ]
 let gate_obligation_json value = `Assoc ["approval_id", `String value.approval_id;
   "tool_name", `String value.tool_name; "input_hash", `String value.input_hash]
-let gate_wait_json value = `Assoc ["checkpoint", checkpoint_json value.checkpoint;
+let gate_wait_json value = `Assoc (["checkpoint", checkpoint_json value.checkpoint;
   "session_scope", `List (List.map (fun value -> `String value) (session_scope_components value.session_scope));
-  "obligations", `List (List.map gate_obligation_json value.obligations)]
+  "obligations", `List (List.map gate_obligation_json value.obligations)] @
+  (match value.runtime_retry with None -> [] | Some retry -> ["runtime_retry", runtime_retry_json retry]))
 let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json value.obligation;
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
     | Gate_denied detail -> `Assoc ["kind", `String "denied"; "detail", `String detail])]
@@ -367,12 +383,7 @@ let recovery_origin_json = function
   | Gate_wait state -> `Assoc ["kind", `String "gate_wait"; "waiting", gate_wait_json state.waiting;
       "resolution", Option.fold ~none:`Null ~some:gate_resolution_json state.resolution]
   | Runtime_retry retry ->
-      `Assoc [ "kind", `String "runtime_retry"
-             ; "checkpoint", checkpoint_json retry.checkpoint
-             ; "assignment_id", `String retry.assignment_id
-             ; "failed_runtime_id", `String retry.failed_runtime_id
-             ; "next_runtime_id", `String retry.next_runtime_id
-             ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids) ]
+      runtime_retry_json retry
   | Checkpointed checkpoint ->
       `Assoc ["kind", `String "checkpointed"; "checkpoint", checkpoint_json checkpoint]
 let phase_json = function
@@ -460,8 +471,24 @@ let gate_obligation_of_json json =
   let* tool_name = string "tool_name" fields in
   let* input_hash = string "input_hash" fields in
   gate_obligation ~approval_id ~tool_name ~input_hash
+let runtime_retry_of_json json =
+      let* fields = exact ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
+          "next_runtime_id"; "later_runtime_ids"] json in
+      let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
+      let* assignment_id = string "assignment_id" fields in
+      let* failed_runtime_id = string "failed_runtime_id" fields in
+      let* next_runtime_id = string "next_runtime_id" fields in
+      let* later_runtime_ids = match field "later_runtime_ids" fields with
+        | `List values ->
+          List.fold_right (fun value result -> let* ids = result in match value with
+            | `String id -> Ok (id :: ids) | _ -> Error "runtime suffix identity must be a string") values (Ok [])
+        | _ -> Error "runtime suffix must be a list" in
+      runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
 let gate_wait_of_json json =
-  let* fields = exact ["checkpoint";"session_scope";"obligations"] json in
+  let json = match json with
+    | `Assoc fields when not (List.mem_assoc "runtime_retry" fields) -> `Assoc (("runtime_retry", `Null) :: fields)
+    | json -> json in
+  let* fields = exact ["checkpoint";"session_scope";"obligations";"runtime_retry"] json in
   let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
   let* obligations = match field "obligations" fields with
     | `List rows -> decode_list gate_obligation_of_json rows
@@ -471,7 +498,10 @@ let gate_wait_of_json json =
       let* components = decode_list (function `String value -> Ok value | _ -> Error "invalid session component") rows in
       session_scope components
     | _ -> Error "Gate session scope must be a list" in
-  gate_wait ~checkpoint ~session_scope ~obligations
+  match field "runtime_retry" fields with
+  | `Null -> gate_wait ~checkpoint ~session_scope ~obligations
+  | json -> let* runtime_retry = runtime_retry_of_json json in
+      gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~runtime_retry
 let gate_resolution_of_json json =
   let* fields = exact ["obligation";"decision"] json in
   let* obligation = gate_obligation_of_json (field "obligation" fields) in
@@ -502,18 +532,7 @@ let recovery_origin_of_json json =
       if Option.fold ~none:true ~some:(fun r -> List.mem r.obligation waiting.obligations) resolution
       then Ok (Gate_wait {waiting; resolution}) else Error "Gate resolution is not an obligation"
   | "runtime_retry" ->
-      let* fields = exact ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
-          "next_runtime_id"; "later_runtime_ids"] json in
-      let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
-      let* assignment_id = string "assignment_id" fields in
-      let* failed_runtime_id = string "failed_runtime_id" fields in
-      let* next_runtime_id = string "next_runtime_id" fields in
-      let* later_runtime_ids = match field "later_runtime_ids" fields with
-        | `List values ->
-          List.fold_right (fun value result -> let* ids = result in match value with
-            | `String id -> Ok (id :: ids) | _ -> Error "runtime suffix identity must be a string") values (Ok [])
-        | _ -> Error "runtime suffix must be a list" in
-      runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
+      runtime_retry_of_json json
       |> Result.map (fun retry -> Runtime_retry retry)
   | "checkpointed" ->
       let* fields = exact ["kind";"checkpoint"] json in

@@ -7,15 +7,24 @@ type t = {incumbent:incumbent; observe:unit -> (string,error) result;
   lock:Eio.Mutex.t; mutable phase:phase}
 let ( let* ) = Result.bind
 let decode ~base_path body =
-  let open Yojson.Safe.Util in
+  let unique = function
+    | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Some fields
+    | _ -> None in
   try
-    let json = Yojson.Safe.from_string body in
-    let actual = json |> member "paths" |> member "effective_base_path" |> to_string |> Unix.realpath in
-    let version = json |> member "version" |> to_string in
-    if actual <> base_path then Error Different_workspace
-    else if String.trim version = "" then Error Invalid_health
-    else Ok {base_path;version}
-  with Yojson.Json_error _ | Type_error _ | Unix.Unix_error _ -> Error Invalid_health
+    match unique (Yojson.Safe.from_string body) with
+    | None -> Error Invalid_health
+    | Some fields ->
+      (match List.assoc_opt "version" fields, Option.bind (List.assoc_opt "paths" fields) unique with
+       | Some (`String version), Some paths ->
+         (match List.assoc_opt "effective_base_path" paths with
+          | Some (`String path) ->
+            let actual = Unix.realpath path in
+            if actual <> base_path then Error Different_workspace
+            else if String.trim version = "" then Error Invalid_health
+            else Ok {base_path;version}
+          | _ -> Error Invalid_health)
+       | _ -> Error Invalid_health)
+  with Yojson.Json_error _ | Unix.Unix_error _ -> Error Invalid_health
 let prepare_with ~sw ~base_path ~observe ~authorize ~capture =
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let* body = observe () in

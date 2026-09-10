@@ -48,7 +48,21 @@ let test_drain_requires_lease_and_port_release () =
     Unix.close socket;
     (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
      | Ok Replacement_can_start -> () | _ -> Alcotest.fail "released owner/port not observed"))
+let test_duplicate_health_never_authorizes () =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let base = Filename.get_temp_dir_name () in
+    let path = Yojson.Safe.to_string (`String base) in
+    let payloads = [
+      "{\"version\":\"0.35.2\",\"version\":\"0.35.5\",\"paths\":{\"effective_base_path\":" ^ path ^ "}}";
+      "{\"version\":\"0.35.2\",\"paths\":{\"effective_base_path\":" ^ path ^ ",\"effective_base_path\":\"/\"}}"] in
+    List.iter (fun body ->
+      match Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
+        ~observe:(fun () -> Ok body)
+        ~authorize:(fun () -> Alcotest.fail "ambiguous health transmitted credentials")
+        ~capture:(fun () -> Alcotest.fail "ambiguous health captured owner") with
+      | Error Invalid_health -> () | _ -> Alcotest.fail "duplicate identity fields accepted") payloads))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
-    Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release]]
+    Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
+    Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes]]

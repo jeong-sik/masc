@@ -230,6 +230,7 @@ let run (ctx : ctx)
                  ~task_skill_selection
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
+                 ~answered_ask_inputs:(Keeper_unified_prompt.answered_ask_inputs observation)
                  ~history_user_source:"world_state_prompt"
                  (* This is an ordinary durable conversation turn. The current
                     observation remains ephemeral dynamic context, while the

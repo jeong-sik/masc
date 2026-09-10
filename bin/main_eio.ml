@@ -2515,7 +2515,10 @@ let runtime_model_list_cmd =
         |> List.filter_map (fun model ->
           Option.map (fun context -> `Assoc [ "id", `String model
                                             ; "label", `String model
-                                            ; "max_context", `Int context ])
+                                            ; "max_context", `Int context
+                                            ; "release", Model_release_evidence.default_model_json
+                                                ~publisher:(match client with Wizard_claude_code -> "anthropic" | Wizard_codex -> "openai")
+                                                ~model_id:model ])
             (wizard_model_context model entries))
       in
       print_endline (Yojson.Safe.to_string (`Assoc [
@@ -2540,6 +2543,12 @@ let runtime_setup_batch_cmd =
   let request = Arg.(required & opt (some string) None & info ["request"] ~doc:"Private setup selection JSON file.") in
   Cmd.v (Cmd.info "runtime-setup-batch" ~doc:"Validate and save the selected runtimes against their original revision.")
     Term.(const (fun base_path request_path -> Masc_cli_runtime_setup.configure ~base_path ~request_path) $ base_path $ request)
+
+let runtime_codex_models_cmd =
+  let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let run cli_path = Masc_cli_codex_models.run ~cli_path ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
+    Term.(const run $ cli)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
@@ -2969,6 +2978,7 @@ let cmd =
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
     ; runtime_setup_batch_cmd
+    ; runtime_codex_models_cmd
     ; runtime_discover_models_cmd
     ; runtime_store_credential_cmd
     ; runtime_serving_context_cmd

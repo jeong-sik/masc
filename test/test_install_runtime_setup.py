@@ -328,6 +328,103 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertTrue(key.exists())
 
 
+class CodexExplicitRefresh(unittest.TestCase):
+    def test_refresh_bypasses_cached_discovery_and_keeps_exact_context(self):
+        source = dict(choice='codex', command='/owned/codex', endpoint='', api_key_env='', rows=[])
+        receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
+                       models=[dict(id='new-model', label='New model', context=272000, is_default=True)])
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
+                patch.object(SETUP, 'discover_models', side_effect=AssertionError('stale cache consulted')), \
+                patch.object(SETUP, 'catalog_models', return_value=[]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
+        self.assertIn('refreshed', origin)
+
+    def test_unavailable_refresh_is_labeled_offline_fallback(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'refresh_codex_models', side_effect=SETUP.SetupError('Online unavailable; cached fallback.')), \
+                patch.object(SETUP, 'discover_models', return_value=([dict(id='cached', label='Cached', context=123)], 'CLI cache')), \
+                patch.object(SETUP, 'catalog_models', return_value=[]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['id'], 'cached')
+        self.assertIn('cached fallback', origin)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original = home / '.codex'
+            original.mkdir()
+            (original / 'auth.json').write_text('{"fixture":"private"}')
+            (original / 'auth.json').chmod(0o600)
+            (original / 'models_cache.json').write_text('{"models":[{"slug":"stale","context_window":1}]}')
+            before = {p.name: p.read_bytes() for p in original.iterdir()}
+            client = home / 'fake-codex'
+            client.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+home = pathlib.Path(os.environ['CODEX_HOME'])
+assert home != pathlib.Path(os.environ['HOME']) / '.codex'
+assert not (home / 'models_cache.json').exists()
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    if method == 'initialized': continue
+    if method == 'initialize': result = {'userAgent':'fixture/1'}
+    elif method == 'account/read': result = {'account':{'type':'apiKey'}, 'requiresOpenaiAuth':True}
+    elif method == 'model/list':
+        (home / 'models_cache.json').write_text(json.dumps({'models':[{'slug':'fresh-model','context_window':272000}]}))
+        result = {'data':[{'id':'ui-id','model':'fresh-model','displayName':'Fresh model','isDefault':True}], 'nextCursor':None}
+    else: raise AssertionError('unexpected operation ' + method)
+    print(json.dumps({'id':request['id'],'result':result}), flush=True)
+''')
+            client.chmod(0o700)
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client)],
+                env=dict(os.environ, HOME=str(home), CODEX_HOME=str(original)), capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertEqual(receipt['source'], 'isolated_cli_cache')
+            self.assertEqual(receipt['models'][0]['id'], 'fresh-model')
+            self.assertEqual(receipt['models'][0]['context'], 272000)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in original.iterdir()})
+            self.assertNotIn('private', result.stdout)
+
+
+class ModelReleaseSelection(unittest.TestCase):
+    def test_discovery_release_join_keeps_context_and_unknown_models(self):
+        recent = dict(status='official_release', kind='general_availability',
+                      released_on='2026-07-09', recency='within_three_calendar_months',
+                      source_url='https://official.example/release')
+        release_catalog = dict(schema='masc.model_release_catalog.v1', models=[
+            dict(publisher='openai', model_id='exact-recent', release=recent),
+            dict(publisher='anthropic', model_id='other-publisher', release=recent)])
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[],
+                      model_release_catalog=release_catalog)
+        observed = [dict(id='unknown', label='Unknown', context=272000, created=9999999999),
+                    dict(id='exact-recent', label='Recent', context=272000),
+                    dict(id='exact-recent-alias', label='Unproven alias', context=1000),
+                    dict(id='other-publisher', label='Other publisher', context=2000)]
+        with patch.object(SETUP, 'discover_models', return_value=(observed, 'actual CLI metadata')), \
+                patch.object(SETUP, 'catalog_models', return_value=[]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(rows[0]['id'], 'exact-recent')
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(len(rows), 4)
+        self.assertIn('recent release', SETUP.model_choice_label(rows[0]))
+        for row in rows[1:]:
+            self.assertIsNone(row['release'])
+            self.assertIn('release date unknown', SETUP.model_choice_label(row))
+        self.assertEqual(origin, 'actual CLI metadata')
+        # An explicit gateway is not an official publisher identity.
+        self.assertIsNone(SETUP.release_metadata(dict(source, endpoint='https://gateway.example'), 'exact-recent'))
+
+    def test_limited_release_is_visible_without_general_release_recommendation(self):
+        row = dict(id='limited', label='Limited', release=dict(status='official_release',
+            kind='limited_release', released_on='2026-09-03', recency='within_three_calendar_months'))
+        self.assertFalse(SETUP.recently_released(row))
+        self.assertIn('limited release 2026-09-03', SETUP.model_choice_label(row))
+
+
 class MultipleSelection(unittest.TestCase):
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))

@@ -130,6 +130,9 @@ let test_vertex_endpoint_and_bearer () =
     (Provider_config.auth_headers_for_config config);
   Alcotest.check Alcotest.bool "token absent from persistent nonsecret headers" true
     (not (List.mem_assoc "Authorization" config.headers));
+  Alcotest.check Alcotest.bool "different authentication scheme partitions cached responses" true
+    (Cache.request_fingerprint ~config ~messages:[] () <>
+     Cache.request_fingerprint ~config:{config with auth_scheme=Provider_default} ~messages:[] ());
   Alcotest.check Alcotest.string "native streaming resource"
     (global ^ "/models/gemini-3.7-flash:streamGenerateContent?alt=sse")
     (Complete_sampling.gemini_url ~config ~stream:true)

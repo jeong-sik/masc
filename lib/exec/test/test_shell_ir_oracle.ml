@@ -71,9 +71,21 @@ let test_unknown_feature_fixture () =
   assert_incompatible "unknown_feature" "unknown:future_feature"
 ;;
 
+let test_command_substitution_fixture () =
+  (* $( ) is inside the subset, so the feature is reported but is no
+     longer a structural blocker. *)
+  let facts = load "command_substitution" in
+  Alcotest.(check (list string)) "features" [ "command_substitution" ]
+    (Oracle.feature_names facts);
+  Alcotest.(check (list string)) "blockers" [] (Oracle.structural_blockers facts);
+  Alcotest.(check bool) "compatible" true
+    (Result.is_ok (Oracle.structurally_compatible facts))
+;;
+
 let () =
   test_simple_fixture ();
   test_pipeline_fixture ();
+  test_command_substitution_fixture ();
   test_redirect_fixture ();
   test_heredoc_fixture ();
   test_parse_error_fixture ();

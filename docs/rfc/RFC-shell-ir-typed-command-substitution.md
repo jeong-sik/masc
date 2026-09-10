@@ -1,6 +1,6 @@
 # RFC: typed 커맨드 치환 — `$(cmd)`를 자식 IR로 읽고, 그 stdout을 argv 한 원소로 쓴다
 
-상태: 승인 (구현 전 — PR-A 파서부터). 선행: RFC-shell-ir-lines-heredoc-dquote,
+상태: 구현 완료 (PR-A + PR-B). 선행: RFC-shell-ir-lines-heredoc-dquote,
 RFC-shell-ir-simple-param-expansion, RFC-0391.
 
 ## 1. 측정

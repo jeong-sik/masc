@@ -25,6 +25,10 @@ type reason_too_complex =
   [ `Heredoc
   | `Here_string
   | `Cmd_subst
+  | `Shell_builtin of string
+      (** [eval], [source], [.] in program position: they re-parse their
+          arguments in the shell that runs the line, which no IR node holds
+          (RFC-shell-ir-typed-command-substitution §2.4). *)
   | `Proc_subst
   | `Subshell
   | `Arith_expansion

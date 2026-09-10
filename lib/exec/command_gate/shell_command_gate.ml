@@ -60,9 +60,25 @@ let host_sandbox : sandbox_context = { target = ST.host () }
    which rule applies: the pipe rule belongs to a [Pipeline] node and to
    nothing else. Flattening to a list of stages loses that -- [a && b] would
    be counted as two pipeline stages. *)
+(* Unlike [Shell_ir.with_sandbox], this rewrite has no [Delegated] carve-out:
+   it overwrites every stage's target unconditionally.  That divergence is
+   harmless because the rewritten copy feeds only the gate's own read-only
+   analyses (stage_bins, syntax and refusal checks); execution runs the
+   caller's original IR, where a [Delegated] stage keeps its own target. *)
 let rec with_sandbox ~(sandbox : sandbox_context) (ir : SI.t) : SI.t =
+  let rec arg_rewritten = function
+    | SI.Subst child -> SI.Subst (with_sandbox ~sandbox child)
+    | SI.Concat parts -> SI.Concat (List.map arg_rewritten parts)
+    | (SI.Lit _ | SI.Var _) as leaf -> leaf
+  in
   match ir with
-  | SI.Simple s -> SI.Simple { s with SI.sandbox = sandbox.target }
+  | SI.Simple s ->
+    SI.Simple
+      { s with
+        SI.sandbox = sandbox.target
+      ; args = List.map arg_rewritten s.SI.args
+      ; env = List.map (fun (k, v) -> k, arg_rewritten v) s.SI.env
+      }
   | SI.Pipeline stages -> SI.Pipeline (List.map (with_sandbox ~sandbox) stages)
   | SI.Sequence { head; tail } ->
     SI.Sequence
@@ -73,7 +89,15 @@ let rec with_sandbox ~(sandbox : sandbox_context) (ir : SI.t) : SI.t =
 
 let rec simples_of (ir : SI.t) : SI.simple list =
   match ir with
-  | SI.Simple s -> [ s ]
+  | SI.Simple s ->
+    (* A substitution's children are commands too: a caller reading [stages]
+       must see what [$(git status)] runs, not only the stage holding it.
+       The stage itself lists first, its substitution children after. *)
+    s
+    :: List.concat_map
+         (fun arg ->
+           List.concat_map simples_of (SI.subst_children_of_arg arg))
+         (s.SI.args @ List.map snd s.SI.env)
   | SI.Pipeline stages -> List.concat_map simples_of stages
   | SI.Sequence { head; tail } ->
     simples_of head @ List.concat_map (fun (_connector, part) -> simples_of part) tail
@@ -102,7 +126,15 @@ let rec check_syntax ~(syntax_policy : syntax_policy) (ir : SI.t) =
   | SI.Simple s ->
     if stage_has_redirect s && not syntax_policy.redirect_allowed
     then Error (Redirect 1)
-    else Ok ()
+    else
+      (* A substitution's children are command positions too: [$(a | b)]
+         holds a pipeline under the policy, even nested inside a word. *)
+      List.fold_left
+        (fun acc child ->
+          Result.bind acc (fun () -> check_syntax ~syntax_policy child))
+        (Ok ())
+        (List.concat_map SI.subst_children_of_arg
+           (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
     let stage_n = List.length stages in
     if not syntax_policy.allow_pipes
@@ -175,6 +207,7 @@ let too_complex_reason_tag = function
   | Unsupported_construct `Heredoc -> "heredoc"
   | Unsupported_construct `Here_string -> "here_string"
   | Unsupported_construct `Cmd_subst -> "cmd_subst"
+  | Unsupported_construct (`Shell_builtin _) -> "shell_builtin"
   | Unsupported_construct `Proc_subst -> "proc_subst"
   | Unsupported_construct `Subshell -> "subshell"
   | Unsupported_construct `Arith_expansion -> "arith_expansion"
@@ -225,7 +258,16 @@ let rec structural_refusal (ir : SI.t) =
     Some (`Too_complex (Unsupported_construct `Param_expansion))
   else
   match ir with
-  | SI.Simple _ -> None
+  | SI.Simple s ->
+    (* A [Subst] child is part of the typed IR this gate answers for: a
+       nested pipeline, or an under-arity pipeline, hidden under a
+       substitution gets the same refusal it would get at the top — the
+       gate must not vouch for a shape it did not walk. *)
+    List.find_map
+      structural_refusal
+      (List.concat_map
+         SI.subst_children_of_arg
+         (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
     if List.exists (function SI.Pipeline _ -> true | _ -> false) stages
     then Some (`Too_complex Unsupported_nested_pipeline)
@@ -301,6 +343,11 @@ let lower_typed_pipeline ~stages ~sandbox () : verdict =
   verdict
 ;;
 
+(* [stage_bins] includes the stages a [Shell_ir.Subst] child carries (see
+   [simples_of]), so a single command with a substitution counts more than
+   one stage: [echo $(date)] has [stage_count] 2, [is_pipeline] true and
+   [last_stage_bin] (Some "date").  These accessors feed diagnostics only;
+   no allow/deny decision reads them. *)
 let stage_count context = List.length context.stage_bins
 
 let last_stage_bin context =

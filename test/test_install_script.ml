@@ -765,12 +765,14 @@ let test_quickstart_writes_worker_bearer_env () =
   assert_contains "quickstart bearer file is private" script {|chmod 600 "$env_file"|}
 ;;
 
-let test_installer_prints_authenticated_mcp_next_step () =
+let test_installer_prints_owner_journey_next_steps () =
   let script = install_script () in
-  assert_contains "installer prints login command" script "login --base-path";
-  assert_contains "installer login is worker scoped" script "--role worker";
-  assert_contains "installer login names bearer env" script "--client-env MASC_TOKEN";
-  assert_contains "installer does not print unauthenticated MCP config anchor" script "source the printed bearer exports in the shell that starts your MCP client"
+  assert_contains "installer offers bare workspace launch" script {|  "$DEST"
+|};
+  assert_contains "installer offers model and sandbox setup" script {|  "$DEST" setup|};
+  assert_contains "installer offers preparation diagnosis" script {|  "$DEST" doctor|};
+  assert_contains "separate MCP clients remain an advanced step" script
+    "Advanced setup and separate MCP clients:"
 ;;
 
 let test_installer_fetches_deployment_preflight_companions () =
@@ -940,21 +942,9 @@ let test_binary_checks_use_install_environment () =
     script
     {|if masc_responds_to_version "$DEST"; then|};
   assert_contains
-    "start hint preserves explicit runtime events override"
+    "interactive journey inherits operator environment without smoke overrides"
     script
-    {|runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "|};
-  assert_contains
-    "start hint selects installed assets and omits runtime events default"
-    script
-    {|start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
-  assert_contains
-    "start hint documents dual base path env"
-    script
-    "let the binary's default-on contract apply";
-  assert_not_contains
-    "start hint does not disable runtime events by default"
-    script
-    {|start_env="MASC_RUNTIME_EVENTS=\"${MASC_RUNTIME_EVENTS:-0}\" MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""|};
+    {|with_terminal_input "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT"|};
   assert_contains
     "smoke reads reported version through install env"
     script
@@ -1828,9 +1818,9 @@ let () =
             `Quick
             test_quickstart_writes_worker_bearer_env
         ; test_case
-            "installer prints authenticated MCP next steps"
+            "installer prints owner journey next steps"
             `Quick
-            test_installer_prints_authenticated_mcp_next_step
+            test_installer_prints_owner_journey_next_steps
         ; test_case
             "binary checks use install environment"
             `Quick

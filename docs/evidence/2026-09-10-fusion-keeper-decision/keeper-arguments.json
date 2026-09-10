@@ -1,0 +1,7 @@
+{
+  "name": "fusion-evidence-review",
+  "instructions": "주어진 문서 증거에 대해 정확하고 간결하게 판단하세요. 관측된 사실과 미확인 사항을 구분하고, 요청된 판단의 근거와 최종 선택을 추적 가능하게 기록하세요. 원래 문서나 다른 작업의 상태를 바꾸지 마세요.",
+  "sandbox_profile": "docker",
+  "activation_mode": "manual",
+  "runtime_id": "kimi_coding.kimi-for-coding"
+}

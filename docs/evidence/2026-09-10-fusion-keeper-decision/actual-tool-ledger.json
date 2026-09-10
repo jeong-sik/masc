@@ -1,0 +1,320 @@
+[
+  {
+    "ts": 1788998877.212492,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_tasks_list",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 1,
+    "trace_id": "trace-1788998630329-00000",
+    "execution_id": "exec-1788998877212-0001"
+  },
+  {
+    "ts": 1788998877.213637,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_goal_list",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 1,
+    "trace_id": "trace-1788998630329-00000",
+    "execution_id": "exec-1788998877213-0002"
+  },
+  {
+    "ts": 1788998883.927508,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_task_claim",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 1,
+    "trace_id": "trace-1788998630329-00000",
+    "execution_id": "exec-1788998883927-0003"
+  },
+  {
+    "ts": 1788998883.931522,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_memory_search",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 1,
+    "trace_id": "trace-1788998630329-00000",
+    "execution_id": "exec-1788998883931-0004"
+  },
+  {
+    "ts": 1788998908.339485,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_tool_search",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998908339-0005",
+    "input": {
+      "names": [
+        "masc_fusion",
+        "masc_run_init",
+        "masc_run_plan"
+      ]
+    },
+    "output": "now callable:\n- masc_fusion: Run an out-of-band panel+judge deliberation.\n- masc_run_init: Create an execution memory directory to track the run plan.\nnot in the list: masc_run_plan"
+  },
+  {
+    "ts": 1788998913.368843,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_run_init",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998913368-0006"
+  },
+  {
+    "ts": 1788998929.741327,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_fusion",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998929741-0007",
+    "input": {
+      "prompt": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.",
+      "task_id": "task-001",
+      "goal_id": "g-fusion-evidence-review-20260910",
+      "decision_context": "Goal 성공 조건: 서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 함. 과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분해야 함. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않아야 함. 원래 PDF나 다른 Task를 수정하지 않음.",
+      "topology": "refine"
+    },
+    "output": "{\"ok\":true,\"status\":\"fusion_started\",\"run_id\":\"kmsg-cd179ef2b1978a75c96df4c82478c260\",\"delivery\":\"async: you will be woken with the result when deliberation completes; the conclusion or failure remains durable. No need to poll masc_fusion_status.\"}"
+  },
+  {
+    "ts": 1788998936.199701,
+    "keeper": "fusion-evidence-review",
+    "tool": "Execute",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998936199-0008"
+  },
+  {
+    "ts": 1788998939.372867,
+    "keeper": "fusion-evidence-review",
+    "tool": "Execute",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998939372-0009"
+  },
+  {
+    "ts": 1788998950.476087,
+    "keeper": "fusion-evidence-review",
+    "tool": "Execute",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998950476-000a"
+  },
+  {
+    "ts": 1788998963.761167,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_tool_search",
+    "success": false,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998963761-000b",
+    "input": {
+      "names": [
+        "masc_run_plan"
+      ]
+    },
+    "output": "not in the list: masc_run_plan"
+  },
+  {
+    "ts": 1788998970.900106,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_run_get",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998970900-000c"
+  },
+  {
+    "ts": 1788998973.253941,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_tool_search",
+    "success": false,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998973253-000d",
+    "input": {
+      "names": [
+        "masc_run_plan"
+      ]
+    },
+    "output": "not in the list: masc_run_plan"
+  },
+  {
+    "ts": 1788998975.550429,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_run_get",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998975550-000e"
+  },
+  {
+    "ts": 1788998977.986075,
+    "keeper": "fusion-evidence-review",
+    "tool": "Execute",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 2,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788998977986-000f"
+  },
+  {
+    "ts": 1788999194.45895,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_board_post_get",
+    "success": false,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999194458-0010"
+  },
+  {
+    "ts": 1788999200.149458,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_board_list",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999200149-0011"
+  },
+  {
+    "ts": 1788999202.733293,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_board_post_get",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999202733-0012"
+  },
+  {
+    "ts": 1788999205.318486,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_board_post_get",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999205318-0013"
+  },
+  {
+    "ts": 1788999224.859863,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_task_done",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999224859-0014",
+    "input": {
+      "evidence_refs": [
+        "note:Fusion deliberation run kmsg-cd179ef2b1978a75c96df4c82478c260 — board post p-d3729e4249c8b0fd9485ff28e75fecee: 패널 최종 판단 (B) 제출 증거 연결 보강. 근거: 독립 시각 검토 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 PDF(주장 SHA 163518c8…, 실제 제출본, pdftotext/pdfinfo 출력·PNG 렌더·해시 영수증 부재)는 서로 다른 SHA를 가진 별개 문서. 충돌의 본질은 문서 식별 문제로, (C) 판정 이전과 (A) 재생성 정당성을 모두 차단. (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택.",
+        "note:과거 source commit 97b6477f29 고정 기록 SHA256: README.md 5646db1c76f02730874bc9f49770899e75714669e97418374fa00d5de25eedd3; task-verdict-rejected.json fdf173637f78d3e57dd3609a21d57a8c3bdf75e438b943b5f4a1b6aa59a129b1",
+        "note:Task 계약 준수: 서로 다른 PDF SHA를 같은 파일로 간주하지 않음. 과거 관측 사실(README/verdict-json)과 현재 미확인 상태(워크스페이스에 PDF 파일 없음)를 구분. 원래 PDF Task/Goal 완료 미선언. 별도 검토(fusion) 활용 — 패널 권고와 자체 최종 선택 일치."
+      ],
+      "notes": "충돌 분석: 독립 시각 검토(README.md)는 Rev3 PDF(SHA 74a24bed…)에 대해 \"한글/다이어그램 가독, 겹침·리터럴 강조 해소\"를 확인했으나, 이는 \"문서 시각 검증\"이지 Task/Goal 완료 판정이 아님. 시스템 판정(verifier_exact)은 실제 제출 PDF(memory_proposal_guide.pdf, 주장 SHA 163518c8…)에 대해 증거 부재(실행 출력·렌더 이미지·해시 영수증)로 거절. 두 PDF는 서로 다른 SHA이므로 동일 문서가 아님. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제. 이것이 (C) 완료 판정의 전제를 차단하고, (A) 문서 재생성의 정당성(왜 다시 만들어야 하는지)을 훼손. (B) 제출 증거 연결 보강은 실제 제출 PDF를 정확히 식별하고 독립 시각 검토 문서와의 관계를 명확히 하는 저비용 조치로, 후속 조치의 방향성을 결정하는 정보를 제공.",
+      "result": "과거 PDF 검증 기록의 충돌 분석 완료. 독립 시각 검토 PDF(SHA 74a24bed…)와 시스템 거절 대상 PDF(주장 SHA 163518c8…)는 서로 다른 문서로 확인됨. 충돌의 본질은 문서 식별 문제이므로, 다음 조치로 (B) 제출 증거 연결 보강을 최종 선택함. (A) 재생성은 불필요할 가능성이 높고 (C) 완료 판정은 식별 전에 무의미함. Fusion 패널(run kmsg-cd179ef2b1978a75c96df4c82478c260)의 권고와 일치.",
+      "task_id": "task-001"
+    },
+    "output": "{\"disposition\":\"completed\",\"result\":\"task-001 in_progress → awaiting_verification\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+  },
+  {
+    "ts": 1788999235.708447,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_board_post",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 3,
+    "trace_id": "trace-1788998630329-00000",
+    "execution_id": "exec-1788999235708-0015",
+    "input": {
+      "content": "**task-001 완료 — 다음 조치: (B) 제출 증거 연결 보강**\n\n## 분석 결과\n\n독립 시각 검토(README.md)와 시스템 Task 판정(verdict.json)이 서로 다른 PDF를 다루고 있음을 확인:\n\n| 구분 | SHA-256 | 근거 |\n|---|---|---|\n| 독립 시각 검토 대상 | 74a24bed…131c0 | 3페이지, 한글/다이어그램 가독·겹침 해소 확인 |\n| 시스템 거절 대상 | 163518c8… (주장) | 실제 제출본, 실행 출력·PNG·해시 영수증 부재 |\n\n## 최종 선택: (B) 제출 증거 연결 보강\n\n- **(A) 재생성**: 실제 제출본이 무엇인지 모르는 상태에서 재생성하면 불필요한 작업이거나 동일 문제를 반복할 위험\n- **(B) 제출 증거 연결 보강**: 실제 제출 PDF 식별 + 독립 검토 문서와의 관계 명확화 → 후속 방향 결정에 필요한 정보 획득\n- **(C) 완료 판정**: 어느 문서가 실제 제출본인지 불명확한 상태에서 판정하면 근거 없는 선언이 됨\n\nFusion 패널(run `kmsg-cd179ef2b1978a75c96df4c82478c260`) 권고와 일치. 원래 PDF Task/Goal 완료 미선언.",
+      "hearth": "research",
+      "title": "task-001 판단 기록: 다음 조치 = (B) 제출 증거 연결 보강"
+    },
+    "output": "{\"id\":\"p-15c1796c44f8b385636be20d5dd3f348\",\"author\":\"fusion-evidence-review\",\"title\":\"task-001 판단 기록: 다음 조치 = (B) 제출 증거 연결 보강\",\"body\":\"**task-001 완료 — 다음 조치: (B) 제출 증거 연결 보강**\\n\\n## 분석 결과\\n\\n독립 시각 검토(README.md)와 시스템 Task 판정(verdict.json)이 서로 다른 PDF를 다루고 있음을 확인:\\n\\n| 구분 | SHA-256 | 근거 |\\n|---|---|---|\\n| 독립 시각 검토 대상 | 74a24bed…131c0 | 3페이지, 한글/다이어그램 가독·겹침 해소 확인 |\\n| 시스템 거절 대상 | 163518c8… (주장) | 실제 제출본, 실행 출력·PNG·해시 영수증 부재 |\\n\\n## 최종 선택: (B) 제출 증거 연결 보강\\n\\n- **(A) 재생성**: 실제 제출본이 무엇인지 모르는 상태에서 재생성하면 불필요한 작업이거나 동일 문제를 반복할 위험\\n- **(B) 제출 증거 연결 보강**: 실제 제출 PDF 식별 + 독립 검토 문서와의 관계 명확화 → 후속 방향 결정에 필요한 정보 획득\\n- **(C) 완료 판정**: 어느 문서가 실제 제출본인지 불명확한 상태에서 판정하면 근거 없는 선언이 됨\\n\\nFusion 패널(run `kmsg-cd179ef2b1978a75c96df4c82478c260`) 권고와 일치. 원래 PDF Task/Goal 완료 미선언.\",\"post_kind\":\"automation\",\"visibility\":\"internal\",\"created_at\":1788999235.70176,\"updated_at\":1788999235.70176,\"expires_at\":0.0,\"votes_up\":0,\"votes_down\":0,\"reply_count\":0,\"pinned\":false,\"hearth\":\"research\",\"meta\":{\"source\":\"masc_board_post\"}}"
+  },
+  {
+    "ts": 1788999418.701929,
+    "keeper": "fusion-evidence-review",
+    "tool": "Write",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 4,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999418701-0016"
+  },
+  {
+    "ts": 1788999423.489203,
+    "keeper": "fusion-evidence-review",
+    "tool": "keeper_tool_search",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 5,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999423489-0017",
+    "input": {
+      "names": [
+        "masc_fusion_decision"
+      ]
+    },
+    "output": "now callable:\n- masc_fusion_decision: Record your adopted, rejected or modified decision after a Fusion deliberation. ..."
+  },
+  {
+    "ts": 1788999447.738832,
+    "keeper": "fusion-evidence-review",
+    "tool": "masc_fusion_decision",
+    "success": true,
+    "runtime_profile": "kimi_coding.kimi-for-coding",
+    "keeper_turn_id": 5,
+    "trace_id": "trace-1788998630329-00000",
+    "task_id": "task-001",
+    "execution_id": "exec-1788999447738-0018",
+    "input": {
+      "choice": "(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.",
+      "decision": "adopted",
+      "reason": "패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+      "run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+      "task_id": "task-001"
+    },
+    "output": "{\"ok\":true,\"decision\":{\"fusion_evidence_sha256\":\"3b871d4372b27ba16cf75878526d03ffefcf7bd79499ce1bc54a3e772e75a8d0\",\"type\":\"fusion_decision\",\"decision_id\":\"08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e\",\"fusion_run_id\":\"kmsg-cd179ef2b1978a75c96df4c82478c260\",\"fusion_post_id\":\"p-d3729e4249c8b0fd9485ff28e75fecee\",\"task\":\"task-001\",\"goal_ids\":[\"g-fusion-evidence-review-20260910\"],\"agent\":\"fusion-evidence-review\",\"actor_kind\":\"keeper\",\"turn_ref\":\"trace-1788998630329-00000#5\",\"decision\":\"adopted\",\"choice\":\"(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.\",\"reason\":\"패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \\\"어느 PDF가 실제 제출본인가\\\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.\",\"notes\":\"Fusion adopted: (B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다. — 패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \\\"어느 PDF가 실제 제출본인가\\\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.\",\"ts\":\"2026-09-10T00:17:27Z\"},\"cleanup_warning\":null}"
+  }
+]

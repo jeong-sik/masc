@@ -24,6 +24,7 @@ type config = {
   max_total_idle    : int;
   idle_ttl_seconds  : float;
   connect_timeout_seconds : float;
+  connect_failure_cooldown_seconds : float;
 }
 
 let default_config = {
@@ -31,6 +32,11 @@ let default_config = {
   max_total_idle    = 256;
   idle_ttl_seconds  = 60.0;
   connect_timeout_seconds = 5.0;
+  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. 5 s caps
+     connect attempts against a dead host at one per 5 s (was: 9 per
+     2 s), while a restarted server is picked up again within one
+     operator-perceptible delay. *)
+  connect_failure_cooldown_seconds = 5.0;
 }
 
 (* ── Host_key ──────────────────────────────────────────────────── *)

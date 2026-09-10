@@ -1,3 +1,4 @@
+import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
@@ -1339,6 +1340,7 @@ export function SettingsSurface() {
   }
 
   async function finishRuntimeRoutingWrite(): Promise<void> {
+    await resumeSavedModelSetup()
     await refreshRuntimeSettingsSnapshot()
     await refreshRuntimeConfigConsumers()
   }

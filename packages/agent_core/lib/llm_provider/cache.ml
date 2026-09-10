@@ -35,6 +35,7 @@ let request_fingerprint
                      ; provider_id
                      ; model_id
                      ; base_url
+                     ; auth_scheme
                      ; api_key
                      ; headers
                      ; request_path
@@ -96,6 +97,16 @@ let request_fingerprint
       ; "provider_id", opt_json (fun s -> `String s) provider_id
       ; "model_id", `String model_id
       ; "base_url", `String base_url
+        (* Which header carries the credential. The identity below says whose
+           credential it is, not how it is presented, and a provider that
+           accepts one presentation and refuses the other would otherwise be
+           answered from a response the other one earned. Over-separating costs
+           a cache hit; this is the side the comment above puts that on. *)
+      ; ( "auth_scheme"
+        , `String
+            (match auth_scheme with
+             | Provider_config.Provider_default -> "provider_default"
+             | Provider_config.Bearer_token -> "bearer_token") )
       ; ( "api_key_identity"
         , opt_json (fun id -> `Int (Secret.hash_identity id)) (Secret.identity api_key) )
       ; ( "headers"

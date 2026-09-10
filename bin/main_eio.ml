@@ -590,6 +590,19 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   Server_base_path_guard.exit_on_violation
     (Server_base_path_guard.enforce
        { resolved_base_path with normalized_base_path = canonical_base_path });
+  (* An explicit start is the operator naming this workspace, so it becomes the
+     default for later commands the same way `masc init` does. Only explicit
+     sources: re-recording what the record itself supplied is a no-op, and the
+     implicit default never reaches here. *)
+  (match resolved_base_path.resolution_source with
+   | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
+     (match Env_config.record_default_base_path canonical_base_path with
+      | Env_config.Recorded _ -> ()
+      | Env_config.No_record_location | Env_config.Record_failed _ ->
+        (* Not fatal, and not worth a line on every boot: the server is
+           starting on a path the operator just supplied. *)
+        ())
+   | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =

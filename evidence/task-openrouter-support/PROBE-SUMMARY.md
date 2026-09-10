@@ -204,3 +204,33 @@ sent as an actual `max_tokens` rather than only read. `probe8-*`,
 | `google/gemini-3.8-flash` | 65536 | 200, `OK` |
 
 No endpoint refused its own declared ceiling.
+
+## End-to-end proof through masc's own streaming path
+
+The SSE parser tests feed a hand-pasted delta, so on their own they prove the
+parser reads the shape they were handed. `openrouter_live_proof.ml`
+(`OPENROUTER_LIVE=1 dune exec
+packages/agent_core/test/openrouter_live_proof.exe`) drives the real catalog
+row through the real dialect to the real gateway instead.
+
+Run on 2026-09-10, `openai/gpt-5.5`, `enable_thinking` on at effort `high`,
+prompt "Work out 4177 * 3391 step by step, then state the product.":
+
+```
+resolved streaming dialect: delta_field_and_details:reasoning
+sse events: 359
+readable thinking chars: 0
+reasoning details: 113
+  reasoning.encrypted x1
+  reasoning.summary x112
+PASS: the encrypted reasoning item survived the streaming path
+```
+
+The reply was correct (14,164,207). Three things are settled here that no
+unit test settles: the provider-scoped row resolves for this provider/model
+pair, the declared effort is encodable on this dialect, and the encrypted
+item reaches the parsed content blocks. Under the previous axis the row could
+only have declared `delta:reasoning`, and `delta_reasoning_details` would have
+been `None` for all 359 events — the `reasoning.encrypted` entry would have
+been dropped. `test_plain_delta_field_drops_openrouter_details` pins that
+counterfactual at the parser level.

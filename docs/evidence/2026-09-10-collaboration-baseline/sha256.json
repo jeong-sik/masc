@@ -1,10 +1,18 @@
 {
   "scenario-input.json": "c9a6ed096affabcbc02fd412b6c0ab886a70d9fd8c6fdb41131a7f4737e9e40e",
   "goal.json": "48646616967f9db155861813a5ea1ebe80ca634d8dd3daf613c6b09a85cde41c",
+  "operator-answer-response.json": "b2700514c1e60f93f51885c8e90b29ac79bb3dfea8e1e7b20aa76f1f9c9af704",
+  "operator-answer-intent.json": "acb6795c62c97ae13d13fff39fc9a5f80e1c4aecf04e824b5af0457fe7f68796",
   "task.json": "fa9f2f29ac3790a6a0113314852b4090a16991cfb3e4b76f71ce44eef58ded16",
-  "README.md": "8aa5f4530b2d1fb0bed7e149a4f0fb1bbb4564cf681a293093c92bf4243feff3",
+  "gate-resolution-response.json": "597e68105941c45dac2bb95a49121a1c5ca0c3636718e64f82f090935665ac41",
+  "ask-and-delegation.json": "09cc211a1cc4af26a62852cddc9941a61dd0325426793fc2b417ad5aaaacd16e",
+  "README.md": "333bb374b0e34f85418d25b83d300668f09b0f50aa8e1780540062bc38ae5abe",
+  "quarantined-environment-check.json": "4786a9a85dab3f5fb87f21a92c185332f9f7379ff54fb7a9b4801ff4ad044b11",
+  "gate-resolution-intent.json": "83095b3a6f72ed22aa933c6b241d33037423507913d46b9441e2266d675f41d5",
   "exhibit-designer-up.json": "ddd66be0821203d301465e806b21eb41ca8141ae2fa1654058d63d2fc15a6dc5",
   "exhibit-editor-up.json": "7832ba0e1694f34d13f63aac2630dd534b349d0c7add04190ace19183fd01db1",
   "initial-message.json": "a19b4209f61a8cfb9f73155bd788d33be7fee170e0d847d1305c932913f6fba7",
-  "admission.json": "fdc2ff360ccde6729be6eec755950f6cea92efe2a19dc151f87843a7643870a8"
+  "admission.json": "fdc2ff360ccde6729be6eec755950f6cea92efe2a19dc151f87843a7643870a8",
+  "operator-second-answer-intent.json": "935a1ef3f1b08bdba5055ba93d9f339e6cc1199aed7868eb3ed358c865e55af4",
+  "operator-second-answer-response.json": "6aedc6099fb1a7ebc9eee8c205f69d2b36b918d295a0153f3ea857e80f09b397"
 }

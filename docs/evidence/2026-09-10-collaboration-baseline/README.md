@@ -31,3 +31,19 @@ privately. Next observation must use the operation ID in admission.json.
 No output, semantic approval, browser result, shared-memory reuse, sustained
 autonomy, or whole-product acceptance is claimed by this preparation. All 18
 requirements remain in scope.
+
+## First live behavior
+
+The editor called masc_ask for event information and delegated a scoped design
+request to exhibit-designer. The designer began executing tools. The first ask
+was answered by the scenario operator and read back as answered; a duplicate
+wait/proceed question remained open and was answered separately with reference
+to the original answer. HTTP says both answers were recorded and delivered.
+Actual incorporation into the document is still unproven.
+
+Several environment inspections were automatically approved and their replay
+artifacts read by the editor. The initial compound environment check remained
+quarantined with domain_invalid_output from the Kimi Auto Judge. The operator
+reviewed its exact read-only command and explicitly approved that single request.
+This is a manual intervention, not automatic recovery or completed execution.
+The failure receipt is retained for diagnosis after this work advances.

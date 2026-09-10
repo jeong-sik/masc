@@ -270,6 +270,13 @@ let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
     Ok registry
 ;;
 
+let unpublish () =
+  with_publication_lock (fun () ->
+    match !active_reservation with
+    | Some _ -> Error Publication_busy
+    | None -> Atomic.set published None; Ok ())
+;;
+
 let current () =
   with_publication_lock
   @@ fun () ->

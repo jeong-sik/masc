@@ -1067,34 +1067,32 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  let runtime_config_path =
-    match Runtime.config_path () with
-    | None ->
-      raise (Owner_initialization_failed Runtime_config_path_unavailable)
-    | Some config_path -> config_path
-  in
+  let runtime_config_path = Runtime.config_path () in
   let runtime_config_observation =
-    match Runtime.load_config_observation ~runtime_config_path () with
-    | Ok observation -> observation
-    | Error detail ->
-      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
+    match runtime_config_path with
+    | None -> Error Runtime_startup_state.Config_missing
+    | Some runtime_config_path ->
+      Runtime.load_config_observation ~runtime_config_path ()
+      |> Result.map_error (fun _ -> Runtime_startup_state.Config_unreadable)
   in
-  (match Runtime.init_default_degraded_observation runtime_config_observation with
-   | Ok Runtime.Initialized ->
-     Log.Server.info
-       "Runtime default initialized: %s"
-       (Runtime.get_default_runtime_id ())
+  let runtime_initialization = match runtime_config_observation with
+    | Error reason -> Error reason
+    | Ok observation ->
+      Runtime.init_default_degraded_observation observation
+      |> Result.map_error (fun _ -> Runtime_startup_state.Config_invalid)
+  in
+  (match runtime_initialization with
+   | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
    | Ok (Runtime.Initialized_degraded degradation) ->
-     Log.Server.warn
-       "Runtime default initialized in degraded catalog mode: %s"
-       (Runtime.startup_degradation_to_string degradation);
-     Log.Server.warn
-       "Runtime degraded effective default: %s"
-       (Runtime.get_default_runtime_id ())
-   | Error error ->
-     raise
-       (Owner_initialization_failed
-          (Runtime_default_initialization_failed error)));
+     Log.Server.warn "Runtime initialized in degraded catalog mode: %s"
+       (Runtime.startup_degradation_to_string degradation)
+   | Error reason ->
+     Runtime.enter_setup_required ~reason ();
+     Log.Server.warn "%s Owner-authenticated settings remain available."
+       (Runtime_startup_state.message reason));
+  (match runtime_config_observation with
+   | Error _ -> ()
+   | Ok runtime_config_observation ->
   (match
      Server_skill_snapshot_runtime.refresh_from_observation
        ~base_path
@@ -1127,7 +1125,7 @@ let initialize_owner_state_blocking
         Log.Server.error
           "Skill snapshot config unreadable at boot: snapshot_revision=%s"
           (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)));
+           |> Skill_catalog_snapshot.snapshot_revision_to_string))));
   (* masc#28404. Boot refuses only over runtimes something actually routes to,
      which is right — an unassigned runtime is not a reason to stay down. But
      the blocked ones then started silently, and the answer to "why can I not
@@ -1140,9 +1138,12 @@ let initialize_owner_state_blocking
         runtime.id
         reason)
     (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
-  configure_exact_output_registry
-    ~config_root:(Filename.dirname runtime_config_path)
-    ();
+  (match runtime_initialization, runtime_config_path with
+   | Ok _, Some path ->
+     (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
+      | Env_config_core.Config_error _ ->
+        Log.Server.warn "Exact-output authority unavailable; conversational runtime remains available. Configure internal lanes to enable affected features.")
+   | Error _, _ | Ok _, None -> ());
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;
@@ -1485,6 +1486,36 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
 let start_goal_verifier ~sw (state : Mcp_server.server_state) =
   Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
 
+let resume_model_configuration () =
+  match Runtime.config_path () with
+  | None -> Error Server_model_setup_resume.Configuration_unavailable
+  | Some path ->
+    let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
+      let catalog_ready =
+        try ignore (configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()); true
+        with Env_config_core.Config_error _ -> false
+      in
+      if not catalog_ready then Error "configuration unavailable" else
+      match Runtime.init_default_degraded_report ~config_path:path with
+      | Error _ -> Error "configuration unavailable"
+      | Ok _ ->
+        let authority_available =
+          try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
+          with Env_config_core.Config_error _ -> false
+        in
+        let withdrawn =
+          if authority_available then Ok ()
+          else Runtime_exact_output_registry.unpublish ()
+        in
+        match withdrawn with
+        | Error _ -> Error "authority publication busy"
+        | Ok () ->
+          Runtime_startup_state.set Available;
+          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          Ok authority_available)
+    in
+    Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
+
 let start_post_ready_owner_lanes
       ~sw
       ~clock
@@ -1494,8 +1525,19 @@ let start_post_ready_owner_lanes
   (* Keep the transport-neutral post-readiness order in one place. Both HTTP
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
-  start_completion_authority ~sw ~clock state;
-  start_goal_verifier ~sw state;
+  Server_model_setup_resume.install ~sw
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    ~resume:resume_model_configuration;
+  let start_authority () =
+    start_completion_authority ~sw ~clock state;
+    start_goal_verifier ~sw state
+  in
+  if Runtime_startup_state.requires_setup () then
+    Eio.Fiber.fork ~sw (fun () ->
+      Runtime_startup_state.await_available ();
+      start_authority ())
+  else start_authority ();
+
   start_microvm_guest_maintenance ~sw
     ~sweep:(fun () -> startup_sweep_microvm_guests state);
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state

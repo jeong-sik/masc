@@ -1072,7 +1072,14 @@ let test_an_ordinary_program_is_untouched () =
 ;;
 
 (* The tap hands back the typed finding, because a caller that wants to tell
-   the writer what to do needs the reason and not its name. *)
+   the writer what to do needs the reason and not its name.
+
+   The script is a substitution in program position. [cat $(echo foo)] used to
+   serve here and no longer does: the $( ) series parses a substituted
+   *argument* into [Shell_ir.Subst], so that script is now representable and
+   this case read "got 1" while the count was never the problem. A substituted
+   program name is the arm bash.ml documents as staying refused, so it is the
+   one that does not move under the same series. *)
 let test_a_finding_carries_its_rewrite () =
   let module Costume = Keeper_tooling.Shell_costume in
   let module Rewrite = Keeper_tooling.Subset_rewrite in
@@ -1081,7 +1088,7 @@ let test_a_finding_carries_its_rewrite () =
       ~sandbox:host
       (parse_json_exn
          (`Assoc
-             [ "argv", `List [ `String "sh"; `String "-c"; `String "cat $(echo foo)" ] ]))
+             [ "argv", `List [ `String "sh"; `String "-c"; `String "$(echo cat) foo" ] ]))
   with
   | [ (_, Costume.Outside_the_subset reason) ] ->
     let advice = Rewrite.to_string (Rewrite.of_reason reason) in
@@ -1091,8 +1098,8 @@ let test_a_finding_carries_its_rewrite () =
       (String.length advice > 0)
   | other ->
     Alcotest.failf
-      "expected one outside-the-subset finding, got %d"
-      (List.length other)
+      "expected one outside-the-subset finding, got [%s]"
+      (String.concat "; " (List.map (fun (_, f) -> Costume.finding_tag f) other))
 ;;
 
 let test_a_representable_costume_has_nothing_to_say () =

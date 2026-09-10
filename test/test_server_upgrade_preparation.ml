@@ -45,6 +45,12 @@ let test_drain_requires_lease_and_port_release () =
       | _ -> Alcotest.fail "loopback fixture port" in
     (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
      | Ok Port_busy -> () | _ -> Unix.close socket; Alcotest.fail "occupied port was restart-ready");
+    let suggested = match Server_upgrade_preparation.suggest_loopback_port () with
+      | Ok value -> value | Error _ -> Unix.close socket; Alcotest.fail "no alternate loopback port" in
+    Alcotest.check Alcotest.bool "suggestion avoids occupied port" true (suggested <> port);
+    (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port:suggested with
+     | Ok Replacement_can_start -> ()
+     | _ -> Unix.close socket; Alcotest.fail "suggested port retained a hidden reservation");
     Unix.close socket;
     (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
      | Ok Replacement_can_start -> () | _ -> Alcotest.fail "released owner/port not observed"))

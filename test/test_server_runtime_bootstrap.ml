@@ -3891,6 +3891,9 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      (* Select this fixture explicitly: installer evidence may have a saved
+         workspace, which correctly takes precedence over the current cwd. *)
+      with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
       let resolved =
@@ -3912,6 +3915,9 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      (* Select this fixture explicitly: installer evidence may have a saved
+         workspace, which correctly takes precedence over the current cwd. *)
+      with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
       let resolved =

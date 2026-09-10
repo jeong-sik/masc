@@ -433,6 +433,81 @@ let test_workspace_producer_gets_owned_read_surface () =
          (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
+(* The live PDF and PNG lookups returned binary text slices. Exercise the
+   descriptor/owned-file path, then the same observation persistence and API
+   projection used by the completion reviewer. No model verdict is simulated. *)
+let test_binary_lookup_failures_survive_observation_replay () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "binary-evidence-producer" in
+  let playground = workspace_producer_playground config producer_name in
+  let surface =
+    match VAT.create ~config ~producer:producer_name with
+    | Ok surface -> surface
+    | Error detail -> Alcotest.fail detail
+  in
+  let module Registry = Masc.Verification_run_registry in
+  let journal = Filename.concat dir "binary-review.jsonl" in
+  let registry = Registry.create ~path:journal () in
+  let verification_id = "vrf-binary-lookups" in
+  Registry.register_running registry ~verification_id ~task_id:"task-binary"
+    ~producer:producer_name ~authority_kind:"system_llm_agent"
+    ~authority_actor:"verifier_exact" ~started_at:1.0;
+  let fixtures =
+    [ "booklet.pdf", "%PDF-1.3\n%\147\140\139\158\n1 0 obj\n<<>>\nendobj\n"
+    ; "page.png", Base64.decode_exn
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+    ]
+  in
+  let tools = List.map (fun (name, bytes) ->
+    Out_channel.with_open_bin (Filename.concat playground name)
+      (fun channel -> output_string channel bytes);
+    let input = `Assoc [ "file_path", `String name; "limit", `Int 5 ] in
+    let detail = match VAT.dispatch surface ~name:"tool_read_file" ~args:input with
+      | Ok _ -> Alcotest.fail "binary text lookup must not succeed"
+      | Error detail -> detail
+    in
+    Alcotest.(check bool) "error is UTF-8" true (String_util.is_valid_utf8 detail);
+    let json = Yojson.Safe.from_string detail in
+    Alcotest.(check string) "explicit encoding failure"
+      "lookup_output_invalid_utf8"
+      Yojson.Safe.Util.(json |> member "code" |> to_string);
+    Alcotest.(check bool) "failure retains output size" true
+      (Yojson.Safe.Util.(json |> member "output_bytes" |> to_int) > 0);
+    Alcotest.(check int) "failure retains output digest" 64
+      (String.length Yojson.Safe.Util.(json |> member "output_sha256" |> to_string));
+    Registry.observe_tool_result ~input ~finished_at:2.0
+      (Tool_result.error ~failure_class:Tool_result.Runtime_failure
+         ~tool_name:"tool_read_file" ~start_time:(Time_compat.now ()) detail)
+  ) fixtures in
+  Registry.mark_completed registry ~verification_id
+    ~outcome:(Registry.Rejected { reason = "lookup text unavailable" })
+    ~tools ~elapsed_s:1.0 ();
+  let persisted = In_channel.with_open_bin journal In_channel.input_all in
+  Alcotest.(check bool) "journal is UTF-8" true (String_util.is_valid_utf8 persisted);
+  let replayed = Registry.replay journal in
+  let run = match Registry.get replayed ~verification_id with
+    | Some run -> run
+    | None -> Alcotest.fail "review must survive replay"
+  in
+  let api_json = Registry.run_to_yojson run in
+  Alcotest.(check bool) "API projection is UTF-8" true
+    (String_util.is_valid_utf8 (Yojson.Safe.to_string api_json));
+  match run.status with
+  | Registry.Completed { tools; _ } ->
+    Alcotest.(check int) "both failures retained" 2 (List.length tools);
+    List.iter (fun (tool : Registry.tool_observation) ->
+      match tool.disposition with
+      | Tool_result.Failed () -> ()
+      | _ -> Alcotest.fail "binary lookup was falsely recorded as successful") tools
+  | Registry.Running -> Alcotest.fail "completion lost on replay"
+;;
+
 let make_checkout root relative =
   let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
   let rec mkdir_p path =
@@ -691,6 +766,8 @@ let () =
             `Quick test_search_refuses_a_call_without_its_required_pattern
         ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
             test_workspace_producer_gets_owned_read_surface
+        ; Alcotest.test_case "binary lookup failure persists as valid UTF-8" `Quick
+            test_binary_lookup_failures_survive_observation_replay
         ; Alcotest.test_case "keeper surface uses effective sandbox root" `Quick
             test_keeper_surface_uses_the_effective_sandbox_root
         ] )

@@ -4857,6 +4857,7 @@ let frozen_capability_surface () =
       ~detail:"dispatch boundary test has no Skill sources"
   in
   Masc.Keeper_capability_surface.create
+    ~tool_deny:[]
     ~skill_names:None
     ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)

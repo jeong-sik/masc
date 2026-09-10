@@ -7939,11 +7939,40 @@ let test_edit_manifest_through_model_projection () =
 
 let test_peer_artifact_materializes_exact_binary () =
   with_exec_fixture "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
-    let peer = { meta with name = "receiving-peer" } in
+    let sender = { meta with sandbox_profile = Masc.Keeper_types_profile_sandbox.Docker;
+      sandbox_image = Some "alpine:peer-fixture" } in
+    let peer = { sender with name = "receiving-peer" } in
     let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
     let store = Tool_blob_store.create ~base_path:config.base_path in
-    let reference = Tool_blob_store.put_durable store ~bytes ~mime:"image/png" in
+    let source_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config sender in
+    Fs_compat.mkdir_p source_root;
+    let source = Filename.concat source_root "generated.png" in
+    Fs_compat.save_file source bytes;
+    let docker = Filename.concat config.base_path "docker" in
+    let script = Printf.sprintf
+      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+      (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root sender.name) "generated.png"))
+      (Filename.quote source) in
+    Fs_compat.save_file docker script; Unix.chmod docker 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    let previous_fake = Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" in
+    Unix.putenv "PATH" (config.base_path ^ ":" ^ previous_path);
+    Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" docker;
+    Fun.protect ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value ~default:"" previous_fake)) (fun () ->
+    let exported = Masc.Keeper_peer_artifact.handle ~config ~meta:sender
+        ~turn_sandbox_factory:None ~write:(fun _ -> fail "export attempted a write")
+        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"]) in
+    check bool "sender export completed" true (exported.disposition = Tool_result.Completed ());
+    let exported_json = Yojson.Safe.Util.member "artifact" (parse_json exported.raw_output) in
+    let request = match Masc.Keeper_invocation_contract.request_of_json
+        (`Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
+                 "prompt", `String "Reuse this PNG"; "artifacts", `List [exported_json]]) with
+      | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
+    let reference = match Masc.Keeper_invocation_contract.artifacts request with
+      | [reference] -> reference | _ -> fail "delegation lost reference" in
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
@@ -7956,7 +7985,7 @@ let test_peer_artifact_materializes_exact_binary () =
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
     let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.sha256 0 2)) reference.sha256 in
     Fs_compat.save_file blob "corrupted";
-    check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ()))
+    check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();

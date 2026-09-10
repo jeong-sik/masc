@@ -13,7 +13,7 @@ val revision_to_string : revision -> string
 val revision_of_string : string -> (revision,error) result
 val observe : base_path:string -> (revision,error) result
 (** Must run inside an Eio scope, like the server and native setup CLI. *)
-val configure : binary:string -> base_path:string -> expected_revision:revision ->
+val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> binary:string -> base_path:string -> expected_revision:revision ->
   specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
   default_runtime_id:string -> verify:bool -> unit -> (receipt,error) result
 (** The selected default is placed first. Existing provider and unrelated
@@ -22,7 +22,9 @@ val configure : binary:string -> base_path:string -> expected_revision:revision 
     overlay dependency before runtime.toml; each replacement is atomic, the pair
     is not a filesystem transaction. Reported failures restore prior bytes;
     [Rollback_failed] requires operator inspection. Successful save is not owner
-    activation or sandbox readiness. *)
+    activation or sandbox readiness. Pending credential handles are retained
+    immediately after publication in the same cancellation-protected phase,
+    before config-lock settlement can interrupt the caller. *)
 val receipt_json : receipt -> Yojson.Safe.t
 
 module For_testing : sig

@@ -17,14 +17,20 @@ done < suite/mini-suite.txt
 
 for arm in ${ARMS_CSV//,/ }; do
   job="arm-${arm}-${TS}"
+  # Same wall-clock budget for every arm (smoke-proven values): without the
+  # agent timeout multiplier harbor's default kills MASC's 2400s episodes
+  # from the outside and they record as exceptions instead of a clean
+  # Timeout state.
   if [[ "$arm" == "a" ]]; then
     uv run harbor run -d terminal-bench@2.0 --agent terminus-2 \
       --model "$MODEL" -k "$K" -n "${CONCURRENCY:-2}" \
+      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
       -o results/jobs --job-name "$job" "${TASK_ARGS[@]}"
   else
     uv run harbor run -d terminal-bench@2.0 \
       --agent agents.masc_agent:MascAgent --model "$MODEL" \
       --ak "arm=$arm" -k "$K" -n "${CONCURRENCY:-2}" \
+      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
       -o results/jobs --job-name "$job" "${TASK_ARGS[@]}"
   fi
 done

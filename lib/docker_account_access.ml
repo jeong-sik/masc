@@ -32,6 +32,7 @@ let inspect_snapshot ~host (snapshot:snapshot) =
 let inspect ~host = let* value = snapshot () in inspect_snapshot ~host value
 let to_json (observation:observation) = `Assoc ["schema",`String "masc.docker_account_access.v1";
   "account",`String observation.account;"uid",`Int observation.uid;
+  "grant_label",`String grant_label;"grant_detail",`String grant_detail;
   "status",`String (match observation.state with Group_missing -> "docker_group_missing"
     | Membership_required -> "membership_required" | Session_refresh_required -> "reauthentication_required"
     | Group_active -> "group_active");"service_readiness",`String "not_checked"]

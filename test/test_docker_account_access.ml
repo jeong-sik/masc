@@ -21,7 +21,7 @@ let test_selected_grant_rereads_real_membership () =
   let read () = match !reads with value::rest -> reads := rest; Ok value | [] -> fail "unexpected account reread" in
   let commands = ref [] in
   let run argv = commands := argv :: !commands; Ok () in
-  match A.For_testing.grant ~host ~distribution:Sandbox_prerequisites.Debian ~read ~run with
+  match A.For_testing.grant ~host ~distribution:Masc.Sandbox_prerequisites.Debian ~read ~run with
   | Error error -> fail (A.error_message error)
   | Ok result ->
     check (list (list string)) "only current Unix account changed, no sudo docker"
@@ -32,13 +32,13 @@ let test_selected_grant_rereads_real_membership () =
 let test_failed_grant_never_claims_access () =
   let run _ = Ok () in
   check bool "command success without database membership is failure" true
-    (A.For_testing.grant ~host ~distribution:Sandbox_prerequisites.Ubuntu
+    (A.For_testing.grant ~host ~distribution:Masc.Sandbox_prerequisites.Ubuntu
       ~read:(fun () -> Ok initial) ~run = Error A.Grant_failed);
   check bool "existing persisted membership does not rerun sudo" true
-    (Result.is_ok (A.For_testing.grant ~host ~distribution:Sandbox_prerequisites.Debian
+    (Result.is_ok (A.For_testing.grant ~host ~distribution:Masc.Sandbox_prerequisites.Debian
       ~read:(fun () -> Ok waiting) ~run:(fun _ -> fail "unnecessary sudo")));
   check bool "unsupported distro never guesses a command" true
-    (A.For_testing.grant ~host ~distribution:Sandbox_prerequisites.Other
+    (A.For_testing.grant ~host ~distribution:Masc.Sandbox_prerequisites.Other
       ~read:(fun () -> Ok initial) ~run:(fun _ -> fail "unsupported mutation") = Error A.Unsupported_distribution)
 let test_child_requires_matching_uid_and_actual_service () =
   let never _ = fail "invalid child attempted Docker" in

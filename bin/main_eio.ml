@@ -2563,7 +2563,9 @@ let runtime_discover_models_cmd =
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
-  let run model client =
+  let provider = Arg.(value & opt (some string) None & info ["provider"]
+    ~doc:"Limit exact catalog metadata to this provider identity; no endpoint or model-name inference.") in
+  let run model client provider =
     match Llm_provider.Model_catalog.load_default () with
     | Error message -> prerr_endline message; 1
     | Ok catalog ->
@@ -2571,16 +2573,16 @@ let runtime_model_info_cmd =
         | None -> Llm_provider.Model_catalog.model_entries catalog
         | Some client -> wizard_model_entries client catalog
       in
-      (* A generic family prefix is not evidence for the context of a model
-         the installer does not know. Include provider-scoped exact rows, and
-         reject conflicting declarations rather than pick a convenient one. *)
-      match wizard_model_context model entries with
+      let context = match provider with
+        | None -> wizard_model_context model entries
+        | Some provider_id -> Runtime_model_context_metadata.find ~provider_id ~model entries in
+      match context with
       | Some context ->
         print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
       | None -> 1
   in
   Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read an exact model's declared context size from the installed catalog.")
-    Term.(const run $ model $ client)
+    Term.(const run $ model $ client $ provider)
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in

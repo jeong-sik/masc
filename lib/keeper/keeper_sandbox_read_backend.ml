@@ -266,10 +266,10 @@ let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
         | Remote_ssh -> Ok Remote_dispatch))
 ;;
 
-let run_command_with_status ?turn_sandbox_factory
+let run_command_with_capture ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
-    ~(command_argv : string list) ~(max_bytes : int)
+    ~(command_argv : string list) ~(max_bytes : int option)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   if command_argv = [] then
     Error "run_command_with_status: command_argv is empty"
@@ -281,7 +281,7 @@ let run_command_with_status ?turn_sandbox_factory
       run_endpoint_command_with_status
         ~acquire_endpoint:(fun ~cwd ->
           Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
-        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
     | Ok Attached_guest ->
       (* The guest is not probed before the call: a stopped one fails the exec
          on its own, and probing first would spend a second subprocess on
@@ -291,7 +291,7 @@ let run_command_with_status ?turn_sandbox_factory
          run_endpoint_command_with_status
            ~acquire_endpoint:(fun ~cwd:_ ->
              Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ())
-           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
+           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
        with
        | Ok _ as ok -> ok
        | Error message ->
@@ -302,8 +302,10 @@ let run_command_with_status ?turn_sandbox_factory
           | Some reason -> Error reason
           | None -> Error message))
     | Ok (Turn_runtime { runtime; _ }) ->
-      Keeper_turn_sandbox_runtime.run_command_with_status
-        ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
+      (match max_bytes with
+       | Some max_bytes -> Keeper_turn_sandbox_runtime.run_command_with_status
+           ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
+       | None -> Error "Complete capture requires an endpoint or Docker fallback")
     | Ok Docker_fallback ->
       let image =
         (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
@@ -354,23 +356,45 @@ let run_command_with_status ?turn_sandbox_factory
               ~secret_args:secret_projection.docker_args
               ~command_argv
           in
-          let st, out =
+          let captured =
             Eio_guard.protect
               ~finally:secret_projection.cleanup
               (fun () ->
                  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-                   Process_eio.run_argv_with_status
-                     ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                     ~cwd:(Config_dir_resolver.current_working_dir ())
-                     ~timeout_sec
-                     argv))
+                   match max_bytes with
+                   | Some _ -> Ok (Process_eio.run_argv_with_status
+                       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                       ~cwd:(Config_dir_resolver.current_working_dir ()) ~timeout_sec argv)
+                   | None ->
+                     let capture_dir = Keeper_execute_output_files.capture_directory ~base_path:config.base_path in
+                     let ((status, _, _), files) = Process_output_capture.with_capture ~capture_dir
+                         (fun output_capture -> Process_eio.run_argv_with_status_split_streaming
+                           ~output_capture ~on_stdout_chunk:(fun _ -> ()) ~on_stderr_chunk:(fun _ -> ())
+                           ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                           ~cwd:(Config_dir_resolver.current_working_dir ()) ~timeout_sec argv) in
+                     match files.stdout with
+                     | Process_output_capture.Complete_file {path; byte_length} ->
+                       (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
+                        | Ok (Some bytes) when String.length bytes = byte_length ->
+                          Unix.unlink path;
+                          (match files.stderr with
+                           | Process_output_capture.Complete_file {path; _} -> Unix.unlink path
+                           | Process_output_capture.Incomplete_file _ | Process_output_capture.Capture_failed _ -> ());
+                          Ok (status, bytes)
+                        | Ok _ -> Error "Complete binary capture changed or disappeared"
+                        | Error _ -> Error "Complete binary capture could not be read with ownership")
+                     | Process_output_capture.Incomplete_file _ -> Error "Binary stdout did not reach authoritative EOF"
+                     | Process_output_capture.Capture_failed {message; _} -> Error message))
           in
+          let ( let* ) = Result.bind in
+          let* st, out = captured in
           (match st with
            | Unix.WEXITED code
              when List.exists (fun ok_code -> ok_code = code) ok_exit_codes ->
              let body =
-               if String.length out > max_bytes then String.sub out 0 max_bytes
-               else out
+               match max_bytes with
+               | Some limit when String.length out > limit -> String.sub out 0 limit
+               | Some _ | None -> out
              in
              Ok (st, body)
            | Unix.WEXITED code ->
@@ -385,6 +409,11 @@ let run_command_with_status ?turn_sandbox_factory
            | Unix.WSTOPPED n ->
              Error
                (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
+
+let run_command_with_status ?turn_sandbox_factory ?(ok_exit_codes=[0])
+    ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+  run_command_with_capture ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
+    ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
 
 let run_command ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ~command_argv ~max_bytes ~timeout_sec () =
@@ -446,7 +475,7 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
              (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
                 operation argument (Unix.error_message error)))
 
-let read_complete_endpoint_file ~config ~meta ~host_path ~timeout_sec () =
+let read_complete_endpoint_file ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
   let ( let* ) = Result.bind in
   let* backend_path = container_path_of_host ~config ~meta ~host_path in
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
@@ -460,4 +489,15 @@ let read_complete_endpoint_file ~config ~meta ~host_path ~timeout_sec () =
           Keeper_sandbox_remote_lane.endpoint ~config ~meta ~cwd ()
         | Keeper_types_profile_sandbox.Docker -> Error "Docker is not an endpoint-owned tree")
       ~config ~meta ~command_argv:["cat"; backend_path] ~max_bytes:None ~timeout_sec () in
+    Ok bytes
+
+let read_complete_file ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+    read_complete_endpoint_file ~config ~meta ~host_path ~timeout_sec ()
+  | Keeper_types_profile_sandbox.Shared_mount ->
+    let ( let* ) = Result.bind in
+    let* path = container_path_of_host ~config ~meta ~host_path in
+    let* _, bytes = run_command_with_capture ~config ~meta ~command_argv:["cat"; path]
+        ~max_bytes:None ~timeout_sec () in
     Ok bytes

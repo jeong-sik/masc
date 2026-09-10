@@ -140,3 +140,8 @@ val run_command :
 val read_complete_endpoint_file : config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta -> host_path:string -> timeout_sec:float -> unit ->
   (string, string) result
+
+(** Raw complete endpoint or Docker read. Docker requires authoritative process
+    capture EOF; completion-only fallback is refused rather than returning previews. *)
+val read_complete_file : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  host_path:string -> timeout_sec:float -> unit -> (string, string) result

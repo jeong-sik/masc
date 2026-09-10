@@ -1543,6 +1543,14 @@ val decode_keeper_gate_settings :
     operator reading one for the other is the reason both are named in
     full. *)
 
+type runtime_param_surface =
+  { rps_order : int  (** Catalog position, so groups render in registry order. *)
+  ; rps_id : string
+  ; rps_description : string
+  }
+(** Which surface claims a param, from the [surfaces] array
+    [/api/v1/runtime/params] returns beside [parameters]. *)
+
 type runtime_param_row =
   { rpr_key : string
   ; rpr_current_json : string
@@ -1556,6 +1564,10 @@ type runtime_param_row =
     (** The closed set of values this param accepts, when it has one. Empty
         for a param whose value the reader types. A partly closed domain
         lists its named values here and still accepts the rest. *)
+  ; rpr_surface : runtime_param_surface option
+    (** [None] rather than a placeholder surface: a param no surface claims is
+        a real state the screen has to show, and inventing a group for it would
+        hide that the registry never filed it. *)
   }
 
 val decode_runtime_params :

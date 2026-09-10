@@ -116,6 +116,7 @@ let runtime_row ~value_type ~current =
   ; rpr_min_json = None
   ; rpr_max_json = None
   ; rpr_choices = []
+  ; rpr_surface = None
   }
 
 let test_friendly_runtime_param_editing () =

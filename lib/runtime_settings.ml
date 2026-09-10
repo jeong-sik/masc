@@ -388,6 +388,9 @@ let surfaces =
       param_keys = [
         "keeper.turn.temperature";
         "keeper.turn.batch_limit";
+        "keeper.turn.enable_thinking";
+        "keeper.turn.max_tool_rounds";
+        "keeper.tool_search.carry_window";
       ];
     };
     {
@@ -396,6 +399,31 @@ let surfaces =
       param_keys = [
         "keeper.proactive.warmup_sec";
         "keeper.proactive.stagger_step_sec";
+        "keeper.bootstrap.retry_interval_sec";
+      ];
+    };
+    {
+      id = "keeper_world_observation";
+      description =
+        "What a keeper turn is told about the world — board posts, fleet \
+         messages, its own past tool calls, and the briefing's share of the \
+         request body";
+      param_keys = [
+        "keeper.board.own_recent.max";
+        "keeper.fleet.messages.max";
+        "keeper.own_actions.turns.max";
+        "keeper.context.briefing.share_percent";
+      ];
+    };
+    {
+      id = "keeper_hitl";
+      description =
+        "What the HITL judgment bundle carries and how many judgments a keeper \
+         runs at once";
+      param_keys = [
+        "keeper.hitl.thinking_blocks";
+        "keeper.hitl.observation_stderr_bytes";
+        "keeper.hitl.max_concurrent_per_keeper";
       ];
     };
     {

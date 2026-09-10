@@ -348,6 +348,50 @@ let () =
       surfaces
   in
 
+  (* The other direction, and the one the screen depends on: every registered
+     param is named by some surface. The Config -> params screen groups by
+     surface, so a param nothing claims renders under an "(unfiled)" heading --
+     visible, but filed nowhere the reader can reason about. This turns that
+     into a red test at registration time instead. *)
+  let test_every_registered_param_has_a_surface () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let surfaced =
+      List.concat_map
+        (fun (surface : Runtime_settings.surface) -> surface.param_keys)
+        Runtime_settings.surfaces
+    in
+    let unfiled =
+      List.filter_map
+        (fun (key, _, _, _, _) ->
+          (* This suite registers its own "test." params to exercise the store;
+             they are not product surface and never reach the screen. *)
+          if String.starts_with ~prefix:"test." key then None
+          else if List.exists (String.equal key) surfaced then None
+          else Some key)
+        entries
+    in
+    Alcotest.(check (list string))
+      "every registered param is named by a surface"
+      [] (List.sort compare unfiled)
+  in
+
+  (* A key claimed twice would draw the same param under two headings. *)
+  let test_no_param_is_claimed_twice () =
+    let surfaced =
+      List.concat_map
+        (fun (surface : Runtime_settings.surface) -> surface.param_keys)
+        Runtime_settings.surfaces
+    in
+    let duplicated =
+      List.filter
+        (fun key -> List.length (List.filter (String.equal key) surfaced) > 1)
+        (List.sort_uniq compare surfaced)
+    in
+    Alcotest.(check (list string)) "no key is claimed by two surfaces" []
+      duplicated
+  in
+
   let test_dashboard_params_registered () =
     Runtime_settings.ensure_init ();
     let entries = Runtime_params.registry () in
@@ -600,6 +644,10 @@ let () =
           Alcotest.test_case "dashboard params registered" `Quick
             test_dashboard_params_registered;
           Alcotest.test_case "dashboard surface" `Quick test_dashboard_surface;
+          Alcotest.test_case "every registered param has a surface" `Quick
+            test_every_registered_param_has_a_surface;
+          Alcotest.test_case "no param is claimed by two surfaces" `Quick
+            test_no_param_is_claimed_twice;
         ] );
       ( "keeper_lifecycle",
         [

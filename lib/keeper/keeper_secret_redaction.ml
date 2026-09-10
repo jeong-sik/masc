@@ -123,6 +123,66 @@ let redact_text t text =
   in
   Observability_redact.redact_text text
 
+(* Keep streaming redaction line-oriented so secrets split across process read
+   boundaries are never published piecemeal.  The pending line is capped: a
+   command can otherwise force quadratic copying (and unbounded retention) by
+   printing a very large line without a newline.  Oversized lines are omitted
+   wholesale because publishing any prefix could disclose a secret whose
+   suffix has not arrived yet. *)
+type stream_state =
+  { pending : Buffer.t
+  ; mutable dropping_oversized_line : bool
+  }
+
+let max_stream_line_bytes = max_secret_file_bytes
+let oversized_line_marker = "[REDACTED: oversized output line]\n"
+
+let create_stream_state () =
+  { pending = Buffer.create 256; dropping_oversized_line = false }
+
+let redact_stream_chunk t state chunk =
+  let output = Buffer.create (String.length chunk) in
+  let flush_line () =
+    if state.dropping_oversized_line
+    then state.dropping_oversized_line <- false
+    else (
+      Buffer.add_char state.pending '\n';
+      Buffer.add_string output (redact_text t (Buffer.contents state.pending)));
+    Buffer.clear state.pending
+  in
+  let append_segment start len =
+    if not state.dropping_oversized_line
+    then
+      if Buffer.length state.pending + len > max_stream_line_bytes
+      then (
+        Buffer.clear state.pending;
+        state.dropping_oversized_line <- true;
+        Buffer.add_string output oversized_line_marker)
+      else Buffer.add_substring state.pending chunk start len
+  in
+  let rec consume start pos =
+    if pos = String.length chunk
+    then append_segment start (pos - start)
+    else if Char.equal chunk.[pos] '\n'
+    then (
+      append_segment start (pos - start);
+      flush_line ();
+      consume (pos + 1) (pos + 1))
+    else consume start (pos + 1)
+  in
+  consume 0 0;
+  Buffer.contents output
+
+let redact_stream_finish t state =
+  if state.dropping_oversized_line
+  then (
+    state.dropping_oversized_line <- false;
+    "")
+  else (
+    let contents = Buffer.contents state.pending in
+    Buffer.clear state.pending;
+    if String.equal contents "" then "" else redact_text t contents)
+
 let rec redact_json_exact t = function
   | `String s -> `String (redact_text t s)
   | `Assoc fields ->

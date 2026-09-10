@@ -397,11 +397,12 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
-          (* Chunks reach the dashboard's live view unredacted; the model- and
-             storage-facing copies are redacted below by [redact_execute_output].
-             The removed per-chunk redactor re-copied and re-scanned its whole
-             held buffer on every 4KB read, so output whose newlines are far
-             apart cost O(n^2) inside the turn slot. *)
+          let stdout_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
+          let stderr_redact_state =
+            Keeper_secret_redaction.create_stream_state ()
+          in
           let on_output_chunk chunk =
             if stream_dispatch
             then (
@@ -409,6 +410,14 @@ let handle_tool_execute_typed
                 match chunk with
                 | `Stdout s -> `Stdout, s
                 | `Stderr s -> `Stderr, s
+              in
+              let data =
+                Keeper_secret_redaction.redact_stream_chunk
+                  output_redaction
+                  (match stream with
+                   | `Stdout -> stdout_redact_state
+                   | `Stderr -> stderr_redact_state)
+                  data
               in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
@@ -477,9 +486,19 @@ let handle_tool_execute_typed
             in
             if stream_dispatch
             then (
-              (* No end-of-stream flush: chunks are forwarded as they are read,
-                 so nothing is held back waiting for a line terminator. *)
+              let flush stream state =
+                let data =
+                  Keeper_secret_redaction.redact_stream_finish
+                    output_redaction state
+                in
+                if not (String.equal data "")
+                then
+                  Keeper_keepalive_signal.record_execute_stream_chunk
+                    ~keeper_name:meta.name ~stream data
+              in
               try
+                flush `Stdout stdout_redact_state;
+                flush `Stderr stderr_redact_state;
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name
                   ~task_id

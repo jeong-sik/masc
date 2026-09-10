@@ -151,6 +151,30 @@ let test_execute_output_redaction_uses_keeper_snapshot () =
   contains "stdout marker present" stdout "[REDACTED]";
   contains "stderr marker present" stderr "[REDACTED]"
 
+let test_stream_redacts_secret_split_across_chunks () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "stream" in
+  let secret = "split.secret!" in
+  let root = secret_root_default ~base ~keeper_name in
+  write_file (Filename.concat (Filename.concat root "env") "TOKEN") secret;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let state = R.create_stream_state () in
+  let first = R.redact_stream_chunk redaction state "token=split." in
+  let second = R.redact_stream_chunk redaction state "secret!\n" in
+  Alcotest.(check string) "partial line is held" "" first;
+  not_contains "split secret hidden" second secret;
+  contains "stream marker present" second "[REDACTED]"
+
+let test_stream_bounds_unbroken_lines () =
+  let state = R.create_stream_state () in
+  let huge = String.make ((64 * 1024) + 1) 'x' in
+  let output = R.redact_stream_chunk R.empty state huge in
+  contains "oversized line replaced" output "[REDACTED: oversized output line]";
+  Alcotest.(check string) "oversized content discarded" ""
+    (R.redact_stream_finish R.empty state)
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -165,5 +189,9 @@ let () =
             test_json_redaction_preserves_shape;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
             test_execute_output_redaction_uses_keeper_snapshot;
+          Alcotest.test_case "redacts secrets split across stream chunks" `Quick
+            test_stream_redacts_secret_split_across_chunks;
+          Alcotest.test_case "bounds unbroken stream lines" `Quick
+            test_stream_bounds_unbroken_lines;
         ] )
     ]

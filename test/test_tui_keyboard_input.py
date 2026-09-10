@@ -385,6 +385,26 @@ def read_available(master_fd: int, output: bytearray) -> None:
         output.extend(chunk)
 
 
+# A needle the screen already drew before the keypress is a different failure
+# from one it never drew, and the two read identically in a timeout message.
+# The TUI refreshes an open surface on its own cadence, so a scenario that
+# mutates a fixture and then presses a key races that refresh: the earlier
+# draw lands before send_and_wait takes its offset, and the wait that follows
+# looks for bytes that are already behind it.
+def _needle_before_start(
+    output: bytearray, needle: Needle, start: int
+) -> str:
+    if start <= 0:
+        return ""
+    earlier = find_needle(output, needle, 0)
+    if earlier < 0 or earlier >= start:
+        return ""
+    return (
+        f" (drawn at offset {earlier}, before this wait started at {start}:"
+        " a refresh got there first)"
+    )
+
+
 def wait_for_output(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -401,7 +421,10 @@ def wait_for_output(
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
         if remaining <= 0.0:
-            raise AssertionError(f"timed out waiting for {needle!r}: {bytes(output)!r}")
+            raise AssertionError(
+                f"timed out waiting for {needle!r}"
+                f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+            )
         select.select([master_fd], [], [], min(0.1, remaining))
 
 

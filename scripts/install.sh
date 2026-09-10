@@ -578,7 +578,12 @@ update_runtime_default() {
 
   local lane_args=()
   [ "$CONFIG_PREEXISTING" -eq 1 ] || lane_args=(--setup-lanes)
-  if ! "$DEST" runtime-default-set --base-path "$base_path" "$runtime_id" "${lane_args[@]}" >/dev/null; then
+  # macOS ships bash 3.2, where `set -u` treats an empty array's expansion as
+  # unbound. This array is empty on exactly the path an existing workspace
+  # takes, so the plain form aborts the installer there. Same guard as the
+  # companion/runtime args below.
+  if ! "$DEST" runtime-default-set --base-path "$base_path" "$runtime_id" \
+    ${lane_args[@]+"${lane_args[@]}"} >/dev/null; then
     warn "failed to update $runtime_file through masc runtime-default-set"
     return 1
   fi

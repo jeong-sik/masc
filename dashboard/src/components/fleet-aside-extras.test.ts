@@ -326,6 +326,10 @@ describe('FleetAsideActions (fl-actbar / fl-btn / fl-noact)', () => {
     container.remove()
   })
 
+  // purge is offered in every phase on purpose: #34700 made canPurge
+  // unconditional because the confirmed request performs a durable shutdown
+  // before cleanup, so a running Keeper is a valid target. It asks before it
+  // acts, which is why it can sit next to shutdown here.
   it('renders only the actions keeperActionVisibility opens for a running keeper', async () => {
     await act(async () => {
       render(html`<${FleetAsideActions} keeper=${makeKeeper()} />`, container)
@@ -335,7 +339,7 @@ describe('FleetAsideActions (fl-actbar / fl-btn / fl-noact)', () => {
     const keys = Array.from(
       container.querySelectorAll('[data-testid="fleet-aside-actions"] .fl-btn'),
     ).map(el => (el as HTMLElement).dataset.action)
-    expect(keys).toEqual(['pause', 'wakeup', 'shutdown'])
+    expect(keys).toEqual(['pause', 'wakeup', 'shutdown', 'purge'])
     // 종료는 danger arm — 디자인의 a.danger 와 같은 자리.
     const shutdown = container.querySelector('.fl-btn[data-action="shutdown"]')
     expect(shutdown?.classList.contains('danger')).toBe(true)

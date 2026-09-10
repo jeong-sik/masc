@@ -308,7 +308,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
           ~parameters:[ marker_param ]
           (fun input ->
             observed := input;
-            Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+            Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
       in
       let dynamic_context = "ANTIGRAVITY_DYNAMIC_SYSTEM\nsecond line" in
       let hooks =

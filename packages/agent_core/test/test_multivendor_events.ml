@@ -36,7 +36,7 @@ let stub_api_response : Types.api_response =
   }
 ;;
 
-let stub_tool_result : Types.tool_result = Ok { Types.content = "ok"; _meta = None }
+let stub_tool_result : Types.tool_result = Ok { Types.content = "ok"; content_blocks = None; _meta = None }
 
 let invocation ?(tool_use_id = "tu-test") ?(turn = 0) ?(planned_index = 0) () =
   let schedule : Tool_contract.schedule =

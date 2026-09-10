@@ -101,7 +101,7 @@ is-default = true
   let input = Keeper_chat_operation.canonical_json input |> require "canonical input" in
   let source = Keeper_chat_operation.canonical_json source |> require "canonical source" in
   let tool = Agent_core.Tool.create ~name:"record_effect" ~description:"Record one effect"
-      ~parameters:[] (fun _ -> incr effects; Ok {content="effect receipt: already completed"; _meta=None}) in
+      ~parameters:[] (fun _ -> incr effects; Ok {content="effect receipt: already completed"; content_blocks = None; _meta = None}) in
   let seen_operations = ref [] in
   let run_phase ~resume =
     Eio.Switch.run @@ fun owner_sw ->

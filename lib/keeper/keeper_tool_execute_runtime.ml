@@ -716,7 +716,7 @@ let handle_tool_execute_typed
              model-visible text is the serialized [data]
              ([Tool_result.message]); [_meta] is a separate field, and every
              read of it in agent_core discards it -- [agent_tools.ml] answers
-             [Ok { content; _meta = _ }] at the point a tool result becomes
+             [Ok { content; _ }] at the point a tool result becomes
              conversation.  Metadata reaches dispatch observers and an MCP wire
              client; it does not reach the keeper this sentence is written for.
              A field beside the others leaves [ok], the status and the streams

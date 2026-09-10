@@ -93,12 +93,12 @@ let%test "make_handoff_tool uses exact target name and real delegate" =
     make_handoff_tool
       ~delegate:(fun prompt ->
         seen := Some prompt;
-        Ok { Types.content = "delegated"; _meta = None })
+        Ok { Types.content = "delegated"; content_blocks = None; _meta = None })
       inline_test_target
   in
   tool.schema.name = "researcher"
   && Tool.execute tool (`Assoc [ "prompt", `String "inspect" ])
-     = Ok { Types.content = "delegated"; _meta = None }
+     = Ok { Types.content = "delegated"; content_blocks = None; _meta = None }
   && !seen = Some "inspect"
 ;;
 
@@ -108,7 +108,7 @@ let%test "make_handoff_tool rejects missing prompt without invoking delegate" =
     make_handoff_tool
       ~delegate:(fun _ ->
         invoked := true;
-        Ok { Types.content = "unexpected"; _meta = None })
+        Ok { Types.content = "unexpected"; content_blocks = None; _meta = None })
       inline_test_target
   in
   match Tool.execute tool (`Assoc []) with

@@ -629,7 +629,7 @@ let run_handoff_target ~sw ?clock agent (target : Handoff.handoff_target) prompt
     ~elapsed:(Unix.gettimeofday () -. started_at);
   match result with
   | Ok response ->
-    Ok { Types.content = Types.visible_text_of_response response; _meta = None }
+    Ok { Types.content = Types.visible_text_of_response response; content_blocks = None; _meta = None }
   | Error error ->
     Error
       { message =

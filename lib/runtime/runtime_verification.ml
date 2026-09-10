@@ -256,7 +256,7 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
               let handler input =
                 let result = tool.call ~call_id:"readiness" input in
                 if result.success
-                then Ok { Agent_core.Types.content = result.content; _meta = None }
+                then Ok { Agent_core.Types.content = result.content; content_blocks = None; _meta = None }
                 else
                   Error
                     { Agent_core.Types.message = result.content

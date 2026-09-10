@@ -14,6 +14,7 @@
  (public_name masc)
  (package masc)
  (libraries
+  masc.workspace_connection
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -1179,6 +1180,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.workspace_connection
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

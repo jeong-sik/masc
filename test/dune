@@ -5598,3 +5598,5 @@
  (name test_runtime_model_context_metadata)
  (modules test_runtime_model_context_metadata)
  (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))
+
+(include stanzas/test_workspace_connection.inc)

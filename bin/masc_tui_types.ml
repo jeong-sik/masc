@@ -6834,6 +6834,7 @@ type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
   | Palette_msx
+  | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6939,6 +6940,7 @@ let palette_entries (state : state) =
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

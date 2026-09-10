@@ -16212,6 +16212,9 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state
+                 | Some (_, Masc_tui_types.Palette_lane_addons) ->
+                     launch_lane_addons state ~mailbox:async_messages
+                       Masc_tui_lane_addons.Inspect
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->

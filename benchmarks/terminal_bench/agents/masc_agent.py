@@ -67,12 +67,14 @@ class MascAgent(BaseInstalledAgent):
         return env
 
     async def install(self, environment: BaseEnvironment) -> None:
-        binary = BENCH_ROOT / "dist" / "masc"
-        if not binary.exists():
-            raise RuntimeError("run image/fetch_masc.sh first")
+        binaries = [BENCH_ROOT / "dist" / "masc", BENCH_ROOT / "dist" / "masc-exec-shim"]
+        for binary in binaries:
+            if not binary.exists():
+                raise RuntimeError("run image/fetch_masc.sh first")
         config_dir = render_arm(self.arm, self.runtime_id, self.effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
-        await environment.upload_file(binary, f"{REMOTE}/bin/masc")
+        for binary in binaries:
+            await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
         await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
         await environment.upload_dir(config_dir, f"{REMOTE}/config")
         await self.exec_as_root(

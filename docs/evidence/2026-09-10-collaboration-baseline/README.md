@@ -1,0 +1,33 @@
+# One collaboration scenario, before completion
+
+A copied installed 0.35.3 binary starts a fresh HOME-visible base on port 18951.
+Its SHA256 matches the observed production health response. This is installed
+binary provenance, not a newly downloaded CI artifact or a release certification.
+No production process or original PDF task was restarted.
+
+The operator created two on-demand Keepers, one Goal, and task-001 with an explicit
+goal_id. Both Keepers use real Kimi, with a Kimi+GLM Fusion preset available and
+image-capable Kimi verification. Each runtime lane has a single candidate: no
+failover claim is made. The creative Docker image was already installed.
+
+The initial request asks the editor to complete a fictional exhibition booklet
+and poster. It exposes a design collaborator and an operator contact, but does
+not name tools or dictate a sequence of calls. This is prompted work, not proof
+of spontaneous task initiation. Operator event facts are withheld until asked;
+that controlled information gap is part of the scenario, not a missing user reply.
+
+The five artifact acceptance criteria are in task.json and goal.json. Behavior
+is evaluated separately: initiated delegation and useful returned work; a concrete
+operator question followed by use of its answer; work-linked important decisions;
+actual artifacts and semantic verification; original Task completion; Goal proof
+and real final human confirmation; matching Dashboard history. These behaviors
+have NOT passed merely because the scenario was admitted.
+
+The authenticated observation of the original operation is Running. Do not send
+a replacement message or restart this server on a read timeout. The helper
+scripts/fusion-decision-live.py records pending effect intent and exact responses
+privately. Next observation must use the operation ID in admission.json.
+
+No output, semantic approval, browser result, shared-memory reuse, sustained
+autonomy, or whole-product acceptance is claimed by this preparation. All 18
+requirements remain in scope.

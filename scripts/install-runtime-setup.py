@@ -479,7 +479,8 @@ def catalog_models(binary, choice):
         # API catalog capacities do not establish a Codex client window. Keep
         # names as suggestions, but require client metadata or advanced input.
         return [dict(id=row['id'], label=row.get('label', row['id']),
-                     context=None if choice == 'codex' else row['max_context'])
+                     context=None if choice == 'codex' else row['max_context'],
+                     release=row.get('release'))
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
@@ -675,6 +676,8 @@ def connection_sources(inventory):
         if not any(item['choice'] == choice for item in sources) and shutil.which(command):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
                                 command=command, api_key_env='', rows=[]))
+    for source in sources:
+        source['model_release_catalog'] = inventory.get('model_release_catalog')
     return sources
 
 
@@ -961,10 +964,75 @@ def native_serving_context(binary, source, model, timeout, load=False):
     return observation
 
 
-def source_models(binary, source, timeout):
+def release_metadata(source, model_id):
+    # Transport compatibility does not establish model publisher identity.
+    publisher = None
+    if source.get('provider_kind') == 'glm':
+        publisher = 'zai'
+    elif not source.get('endpoint') and not source.get('provider_kind'):
+        publisher = {'codex': 'openai', 'claude_code': 'anthropic'}.get(source.get('choice'))
+    catalog = source.get('model_release_catalog')
+    if not publisher or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.model_release_catalog.v1':
+        return None
+    matches = [row.get('release') for row in catalog.get('models', [])
+               if isinstance(row, dict) and row.get('publisher') == publisher and row.get('model_id') == model_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def recently_released(model):
+    evidence = model.get('release')
+    return (isinstance(evidence, dict) and evidence.get('status') == 'official_release'
+            and evidence.get('recency') == 'within_three_calendar_months'
+            and evidence.get('kind') == 'general_availability')
+
+
+def model_choice_label(model):
+    evidence = model.get('release')
+    label = model['label'] + (' — existing connection' if model.get('existing') else '')
+    if not isinstance(evidence, dict) or evidence.get('status') != 'official_release':
+        return label + ' — release date unknown'
+    released = evidence.get('released_on')
+    kind = {'general_availability': 'released', 'limited_release': 'limited release', 'preview': 'preview'}.get(evidence.get('kind'))
+    if not model_text(released) or not kind:
+        return label + ' — release date unknown'
+    suffix = ' · recent release' if recently_released(model) else ''
+    return label + ' — ' + kind + ' ' + released + suffix
+
+
+def refresh_codex_models(binary, source):
+    result = subprocess.run([str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
+    try:
+        receipt = json.loads(result.stdout)
+        if (receipt.get('schema') != 'masc.codex_model_refresh.v1'
+                or receipt.get('source') not in ('isolated_cli_cache', 'cli_list_without_context_cache')
+                or not isinstance(receipt.get('models'), list)):
+            raise ValueError('invalid refresh')
+        rows = receipt['models']
+        for row in rows:
+            if (not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label'))
+                    or (row.get('context') is not None and not positive_integer(row['context']))):
+                raise ValueError('invalid model')
+        source_text = ('Codex refreshed model list and isolated CLI context cache' if receipt['source'] == 'isolated_cli_cache'
+                       else 'Codex model list without refreshed context; offline or bundled metadata may be in use')
+        return rows, source_text
+    except (ValueError, TypeError, KeyError):
+        raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
+
+
+def source_models(binary, source, timeout, refresh=False):
     choice = source['choice']
     can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
-    if choice == 'antigravity' and source.get('credential_file'):
+    if refresh and choice == 'codex':
+        try:
+            observed, origin = refresh_codex_models(binary, source)
+        except SetupError as error:
+            observed, fallback = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
+                                                  command=source.get('command') or 'codex')
+            origin = str(error) + ' ' + fallback
+    elif choice == 'antigravity' and source.get('credential_file'):
         observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
     elif can_discover and CHOICES[choice][1] is None:
         observed, origin = native_discover_models(binary, source, timeout)
@@ -997,6 +1065,11 @@ def source_models(binary, source, timeout):
         for model in catalog_models(binary, choice):
             if not any(item['id'] == model['id'] for item in rows):
                 rows.append(dict(model, existing=None))
+    for row in rows:
+        # Rejoin even catalog suggestions through this connection's publisher;
+        # never retain evidence from an unrelated transport-compatible source.
+        row['release'] = release_metadata(source, row['id'])
+    rows.sort(key=lambda row: (not bool(row.get('existing')), not recently_released(row)))
     return rows, origin
 
 
@@ -1120,10 +1193,12 @@ def select_connections(binary, inventory, timeout, credentials=None):
         else:
             source = sources[index]
         source = prepare_connection(source, credentials)
+        refresh_models = False
         while True:
-            models, origin = source_models(binary, source, timeout)
+            models, origin = source_models(binary, source, timeout, refresh=refresh_models)
+            refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
-            options = [item['label'] + (' — existing connection' if item.get('existing') else '') for item in models]
+            options = [model_choice_label(item) for item in models]
             actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
             can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
             if can_replace_key:
@@ -1136,6 +1211,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
                     continue
                 action = commands[0] - len(models)
                 if action == 0:
+                    refresh_models = True
                     continue
                 if action == 1:
                     raise SetupError('returned to connection selection')

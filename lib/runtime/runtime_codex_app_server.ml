@@ -618,6 +618,41 @@ let probe_protocol io =
   Ok { subscription; user_agent }
 ;;
 
+type listed_model = { id : string; model : string; display_name : string; is_default : bool }
+
+let model_list_protocol io =
+  let* _ = probe_protocol io in
+  let stage = "model/list" in
+  let parse_model json =
+    let* fields = assoc_at stage json in
+    let* id = required_string stage "id" fields in
+    let* model = required_string stage "model" fields in
+    let* display_name = required_string stage "displayName" fields in
+    match List.assoc_opt "isDefault" fields with
+    | Some (`Bool is_default) -> Ok {id; model; display_name; is_default}
+    | _ -> protocol_error stage "invalid default marker"
+  in
+  let rec page request_id cursor seen rows =
+    let params = ["includeHidden", `Bool false] @
+      (match cursor with None -> [] | Some value -> ["cursor", `String value]) in
+    send_request io ~id:request_id ~method_:stage ~params:(`Assoc params);
+    let* response = await_response io ~id:request_id ~method_:stage in
+    let* fields = assoc_at stage response in
+    let* items = match List.assoc_opt "data" fields with
+      | Some (`List items) -> Ok items | _ -> protocol_error stage "missing model data" in
+    let* rows = List.fold_left (fun acc item ->
+      let* rows = acc in let* row = parse_model item in
+      if List.exists (fun existing -> existing.id = row.id || existing.model = row.model) rows
+      then protocol_error stage "duplicate model identity" else Ok (row :: rows)) (Ok rows) items in
+    match List.assoc_opt "nextCursor" fields with
+    | None | Some `Null -> Ok (List.rev rows)
+    | Some (`String next) when next <> "" && not (List.mem next seen) ->
+      page (request_id + 1) (Some next) (next :: seen) rows
+    | _ -> protocol_error stage "invalid or repeated model cursor"
+  in
+  page 3 None [] []
+;;
+
 let parse_thread_response ~stage result =
   let* fields = assoc_at stage result in
   let* thread_json = required_member stage "thread" fields in
@@ -1660,7 +1695,7 @@ let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prom
   |> Result.map (fun _ -> ())
 ;;
 
-let probe_subscription ~mgr ~clock ~cwd config =
+let probe_metadata ~mgr ~clock ~cwd config protocol =
   let result =
     let* () = validate_process_config config in
     let* _ = native_cwd cwd in
@@ -1671,7 +1706,7 @@ let probe_subscription ~mgr ~clock ~cwd config =
         ~cwd
         ~initial_timeout_s:(Some config.admission_timeout_s)
         config
-        probe_protocol
+        protocol
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds ->
@@ -1687,6 +1722,14 @@ let probe_subscription ~mgr ~clock ~cwd config =
        "Codex app-server subscription probe failed (kind=%s)"
        (error_kind error));
   result
+;;
+
+let probe_subscription ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config probe_protocol
+;;
+
+let list_models ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config model_list_protocol
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd

@@ -2515,7 +2515,10 @@ let runtime_model_list_cmd =
         |> List.filter_map (fun model ->
           Option.map (fun context -> `Assoc [ "id", `String model
                                             ; "label", `String model
-                                            ; "max_context", `Int context ])
+                                            ; "max_context", `Int context
+                                            ; "release", Model_release_evidence.default_model_json
+                                                ~publisher:(match client with Wizard_claude_code -> "anthropic" | Wizard_codex -> "openai")
+                                                ~model_id:model ])
             (wizard_model_context model entries))
       in
       print_endline (Yojson.Safe.to_string (`Assoc [
@@ -2526,6 +2529,12 @@ let runtime_model_list_cmd =
   in
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
     Term.(const run $ client)
+
+let runtime_codex_models_cmd =
+  let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let run cli_path = Masc_cli_codex_models.run ~cli_path ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
+    Term.(const run $ cli)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
@@ -2929,6 +2938,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
+    ; runtime_codex_models_cmd
     ; runtime_discover_models_cmd
     ; runtime_store_credential_cmd
     ; runtime_serving_context_cmd

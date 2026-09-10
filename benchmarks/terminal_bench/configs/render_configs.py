@@ -306,11 +306,14 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     else:
         thinking_control = ""
     # kimi-for-coding accepts only temperature=1 ("invalid temperature: only
-    # 1 is allowed for this model"); the repo's own overlay handles this by
-    # dropping the sampling fields from the wire entirely.
+    # 1 is allowed for this model"), and Anthropic under adaptive thinking
+    # answers "temperature may only be set to 1 when thinking is enabled or
+    # in adaptive mode" (observed v0.35.6 smoke, turn_failed at 12s — after
+    # the oneOf projection fix let the request through). Both are handled the
+    # repo's own way: drop the sampling fields from the wire entirely.
     sampling_lines = (
         'ignored_sampling_parameters = ["temperature", "top_p"]\n'
-        if pcfg["capabilities_base"] == "kimi" else "")
+        if pcfg["capabilities_base"] in ("kimi", "anthropic") else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
         provider=provider, model_alias=model_alias,
         thinking_control=thinking_control,

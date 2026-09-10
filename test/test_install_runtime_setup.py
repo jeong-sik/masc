@@ -37,6 +37,11 @@ def spec(choice='vllm'):
 
 
 class ModelSelection(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        self.renderer = renderer.start()
+        self.addCleanup(renderer.stop)
+
     def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
         inventory = dict(runtimes=[], integrations=[dict(
             id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
@@ -135,17 +140,6 @@ class ModelSelection(unittest.TestCase):
         self.assertEqual(selected['credential_file'], '/private/saved-key')
         self.assertNotIn('api_key_env', selected)
 
-    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
-        import tomllib
-        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
-        _, runtime, overlay = SETUP.render(configured)
-        self.assertNotIn(b'hidden-secret', runtime + overlay)
-        catalog = tomllib.loads(overlay.decode())
-        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
-        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
-        providers = tomllib.loads(runtime.decode())['providers']
-        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
-
     def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
@@ -236,153 +230,110 @@ class ModelSelection(unittest.TestCase):
                 SETUP.select_model('/fixture/masc','claude_code')
 
 
-class RuntimeSetup(unittest.TestCase):
+class RuntimeSetupAdapter(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='runtime-setup-test-')
+        self.temp = tempfile.TemporaryDirectory(prefix='native-setup-adapter-')
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
-        self.config = self.base / '.masc/config'
-        self.config.mkdir(parents=True)
-        self.runtime = self.config / 'runtime.toml'
-        self.overlay = self.config / 'agent-core-models-overlay.toml'
-        self.runtime.write_bytes(b'# operator comment\n[runtime]\ndefault = "original.model"\n')
-        self.overlay.write_bytes(b'# operator overlay\n')
-        self.originals = (self.runtime.read_bytes(), self.overlay.read_bytes())
-        self.binary = self.base / 'fixture-masc'
+        self.revision = 'a' * 64
+        self.requests = []
+        self.transports = []
 
-    def validator(self, code):
-        self.binary.write_text('#!' + sys.executable + '\nimport sys,json\nfrom pathlib import Path\n' + \
-            "if sys.argv[1] == 'runtime-wizard-catalog':\n print(json.dumps({'runtimes':[{'id':'original.model'}]})); sys.exit(0)\n" + code)
-        self.binary.chmod(0o755)
+    def native(self, argv, **kwargs):
+        command = argv[1]
+        self.assertEqual(argv[0], '/fixture/masc')
+        self.transports.append(command)
+        payload = None
+        if command != 'runtime-setup-inventory':
+            path = Path(argv[-1])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn('operator/model-exact', str(argv))
+            payload = json.loads(path.read_text())
+            self.requests.append((path, payload))
+        if command == 'runtime-setup-render':
+            value = dict(runtime_id='native.' + payload['model'], runtime_toml='native runtime', model_overlay_toml='native overlay')
+        elif command == 'runtime-setup-inventory':
+            value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
+        elif command == 'runtime-setup-batch':
+            value = dict(runtime_id=payload['default_runtime_id'], runtime_ids=payload['runtime_ids'],
+                         configured=True, validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
+        else:
+            self.fail('Unexpected native command: ' + command)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), '')
 
-    def test_selected_transport_uses_only_operator_model_and_capabilities(self):
-        for choice in SETUP.CHOICES:
-            with self.subTest(choice=choice):
-                identity, runtime, overlay = SETUP.render(spec(choice))
-                self.assertIn('setup_' + choice, identity)
-                self.assertIn(b'operator/model-exact', runtime)
-                self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
-                    self.assertIn(('"provider_name" = ' + SETUP.toml(identity.split('.')[0])).encode(), overlay)
-                    self.assertIn(b'"supports_tools" = true', overlay)
-                    self.assertIn(b'"supports_reasoning" = false', overlay)
-                    self.assertIn(b'"supports_native_streaming" = false', overlay)
-                    self.assertNotIn(b'max_output_tokens', overlay)
-                else:
-                    self.assertEqual(overlay, b'')
+    def test_native_identity_and_private_transport_are_used_without_local_rendering(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            identity, runtime, overlay = SETUP.render(spec(), '/fixture/masc')
+        self.assertEqual((identity, runtime, overlay), ('native.operator/model-exact', b'native runtime', b'native overlay'))
+        self.assertFalse(self.requests[0][0].exists())
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.render(spec(), None)
 
-    def test_empty_api_key_env_means_no_credentials(self):
-        _, runtime, _ = SETUP.render(dict(spec(), api_key_env=''))
-        self.assertNotIn(b'credentials', runtime)
-
-    def test_invalid_or_secret_bearing_spec_is_rejected(self):
-        for changed in (dict(spec(), model=''), dict(spec(), max_context=True),
-                        dict(spec(), tools='true'), dict(spec(), api_key_env='bad-key'), dict(spec(), api_key='secret-value'),
-                        dict(spec('antigravity'), timeout_s=float('inf')),
-                        dict(spec(), endpoint='https://user:secret@example.org/v1'),
-                        dict(spec('antigravity'), credential_file='relative-token')):
-            with self.subTest(spec=changed), self.assertRaises(SETUP.SetupError) as caught:
-                SETUP.render(changed)
-            self.assertNotIn('secret-value', str(caught.exception))
-
-    def test_failed_validator_preserves_both_files_and_reports_the_reason(self):
-        self.validator("print('model alias is absent from the capability catalog', file=sys.stderr)\nsys.exit(1)\n")
-        with self.assertRaises(SETUP.SetupError) as caught:
-            SETUP.configure(self.binary, self.base, spec())
-        self.assertIn('model alias is absent from the capability catalog', str(caught.exception))
-        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
-
-    def test_success_validates_stage_and_preserves_existing_bytes(self):
-        self.validator('''assert sys.argv[1] == 'runtime-default-set'
-base = Path(sys.argv[3])
-assert base != Path(''' + repr(str(self.base)) + ''')
-runtime = base / '.masc/config/runtime.toml'
-assert 'setup_vllm' in runtime.read_text()
-runtime.write_text(runtime.read_text().replace('original.model', sys.argv[4]))
-''')
-        result = SETUP.configure(self.binary, self.base, spec())
-        self.assertEqual(result['readiness'], 'not_probed')
-        self.assertTrue(self.runtime.read_bytes().startswith(b'# operator comment\n'))
-        self.assertIn(result['runtime_id'].encode(), self.runtime.read_bytes())
-        self.assertTrue(self.overlay.read_bytes().startswith(self.originals[1]))
-
-    def test_http_exact_target_uses_same_endpoint_model_and_credential(self):
-        import tomllib
-        runtime_id, _, overlay = SETUP.render(dict(spec(), api_key_env='MY_MODEL_KEY'))
-        catalog = tomllib.loads(overlay.decode())
-        provider = catalog['providers'][0]
-        target = catalog['targets'][0]
-        self.assertEqual(provider['base_url'], spec()['endpoint'])
-        self.assertEqual(provider['api_key_env'], 'MY_MODEL_KEY')
-        self.assertEqual(target, dict(id=runtime_id, provider_ref=provider['id'], model_id=spec()['model']))
-
-    def test_changed_snapshot_is_not_overwritten(self):
-        self.validator('Path(' + repr(str(self.runtime)) + ").write_text('operator concurrent update')\n")
-        with self.assertRaisesRegex(SETUP.SetupError, 'changed during validation'):
-            SETUP.configure(self.binary, self.base, spec())
-        self.assertEqual(self.runtime.read_text(), 'operator concurrent update')
-        self.assertEqual(self.overlay.read_bytes(), self.originals[1])
-
-    def test_second_file_publish_failure_rolls_back_overlay(self):
-        self.validator('sys.exit(0)\n')
-        original_write = SETUP.atomic_write
-        def failing_write(path, content, mode):
-            if path == self.runtime.resolve():
-                raise OSError('simulated disk error')
-            return original_write(path, content, mode)
-        with patch.object(SETUP, 'atomic_write', side_effect=failing_write):
-            with self.assertRaisesRegex(OSError, 'simulated disk error'):
-                SETUP.configure(self.binary, self.base, spec())
-        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
-
-    def test_multiple_connections_keep_identity_default_and_fallback_order(self):
-        first, second = spec(), dict(spec(), model='another-owned-model')
-        first_id, second_id = SETUP.render(first)[0], SETUP.render(second)[0]
-        self.validator('''assert sys.argv[1] == 'runtime-default-set'
-assert sys.argv[4:] == ''' + repr([second_id, '--setup-lanes', '--setup-imp', '--fallback-runtime', 'original.model', '--fallback-runtime', first_id]) + '''
-runtime = Path(sys.argv[3]) / '.masc/config/runtime.toml'
-runtime.write_text(runtime.read_text().replace('default = "original.model"', 'default = ' + json.dumps(sys.argv[4])))
-''')
-        result = SETUP.configure_many(self.binary, self.base, [first, second],
-                                      ['original.model', first_id, second_id], default_id=second_id)
-        self.assertEqual(result['runtime_ids'], [second_id, 'original.model', first_id])
-        self.assertTrue(self.overlay.read_bytes().startswith(self.originals[1]))
-        self.assertIn(b'another-owned-model', self.runtime.read_bytes())
-        self.assertIn(b'operator/model-exact', self.runtime.read_bytes())
-        self.assertNotEqual(first_id, second_id)
-        self.assertNotEqual(first_id, SETUP.render(dict(first, endpoint='http://another.invalid/v1'))[0])
-
-    def test_any_failed_selected_model_preserves_all_connections(self):
-        self.validator('''if sys.argv[1] == 'runtime-verify':
- print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
-                   'status':'failed','checks':{'response':True,'tool_roundtrip':False}}))
- sys.exit(1)
-''')
-        with self.assertRaises(SETUP.VerificationError):
-            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
-        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
-
-    def test_real_verification_receipt_must_join_selected_identity(self):
-        self.validator('''if sys.argv[1] == 'runtime-verify':
- print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':'another.runtime',
-                   'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
-''')
-        with self.assertRaises(SETUP.VerificationError):
-            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
-        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
-
-    def test_successful_model_verification_is_required_before_publish(self):
-        self.validator('''if sys.argv[1] == 'runtime-verify':
- assert Path(sys.argv[3]) != Path(''' + repr(str(self.base)) + ''')
- print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
-                   'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
-''')
-        result = SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+    def test_multi_selection_uses_original_revision_and_native_default_order(self):
+        first, second = spec(), dict(spec(), model='other-model')
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            result = SETUP.configure_many('/fixture/masc', self.base, [first, second],
+                ['original.model', 'native.operator/model-exact', 'native.other-model'],
+                default_id='native.other-model', verify=True, expected_revision=self.revision)
+        self.assertNotIn('runtime-setup-inventory', self.transports)
+        request = self.requests[-1][1]
+        self.assertEqual(request['expected_revision'], self.revision)
+        self.assertEqual(request['runtime_ids'], ['native.other-model', 'original.model', 'native.operator/model-exact'])
         self.assertEqual(result['readiness'], 'verified')
-        self.assertEqual(len(result['verifications']), 1)
+        self.assertEqual(request['connections'], [first, second])
+
+    def test_noninteractive_configuration_observes_before_rendering(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            SETUP.configure('/fixture/masc', self.base, spec())
+        self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
+
+    def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.VerificationError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertEqual(error.exception.runtime_id, 'failed.runtime')
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_changed_configuration_is_not_reobserved_to_silently_accept_stale_choices(self):
+        def cli(argv, **kwargs):
+            if argv[1] == 'runtime-setup-batch':
+                return subprocess.CompletedProcess(argv, 1, json.dumps(dict(schema='masc.runtime_setup_error.v1',
+                    kind='changed_configuration', error='Configuration changed; refresh the selection before saving.')), '')
+            return self.native(argv, **kwargs)
+        with patch.object(SETUP.subprocess, 'run', side_effect=cli), self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
+            SETUP.configure_many('/fixture/masc', self.base, [spec()], expected_revision=self.revision)
+        self.assertNotIn('runtime-setup-inventory', self.transports)
+
+    def test_unjoined_success_receipt_is_refused(self):
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=dict(runtime_id='wrong.model', runtime_ids=['wrong.model'],
+                    configured=True, validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
+            SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
+
+    def test_lost_commit_receipt_does_not_delete_selected_credentials(self):
+        key = self.base / 'pending-key'
+        key.write_text('fixture-only-private-key')
+        key.chmod(0o600)
+        selected = dict(spec(), credential_file=str(key))
+        with SETUP.PendingCredentials('/fixture/masc') as credentials, \
+                patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision=self.revision)), \
+                patch.object(SETUP, 'select_connections', return_value=(['native.model'], [selected], {'native.model':'Selected model'})), \
+                patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
+                patch.object(SETUP, 'configure_many', side_effect=SETUP.SetupError('receipt lost')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            credentials.register_account_reference(str(key))
+            SETUP.wizard_with_credentials('/fixture/masc', self.base, 10, credentials)
+        self.assertTrue(key.exists())
 
 
 class MultipleSelection(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        self.renderer = renderer.start()
+        self.addCleanup(renderer.stop)
+
     def terminal_choice(self, keys, expected):
         master, slave = pty.openpty()
         original = termios.tcgetattr(slave)
@@ -461,8 +412,8 @@ class MultipleSelection(unittest.TestCase):
         self.assertEqual(configured['max_context'], 16384)
         self.assertIs(configured['tools'], True)
         self.assertEqual(requests.call_args_list[1].args[-1], {'model':'owned-qwen','stream':False})
-        self.assertIn(b'"num-ctx" = 16384', SETUP.render(configured)[1])
-        self.assertEqual(identity, SETUP.render(configured)[0])
+        self.renderer.assert_called_once_with(configured, None)
+        self.assertEqual(identity, 'fixture.native-model')
 
     def test_wizard_ollama_context_uses_native_private_reference(self):
         source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
@@ -569,6 +520,42 @@ class InstalledModelCatalog(unittest.TestCase):
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
 class CompiledRuntimeSetup(unittest.TestCase):
+    def test_native_fractional_identity_survives_json_transport(self):
+        selected = dict(spec('antigravity'), timeout_s=824.844977148233)
+        first = SETUP.render(selected, BINARY)
+        second = SETUP.render(dict(selected, timeout_s=824.8449771482331), BINARY)
+        self.assertEqual(first, second)
+        self.assertIn(b'operator/model-exact', first[1])
+
+    def test_selection_revision_detects_later_workspace_edit_before_any_publish(self):
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='runtime-native-cas-') as directory:
+            base = Path(directory)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
+                (config / name).write_bytes((fixture / name).read_bytes())
+            env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ, env, clear=True):
+                original_selection = SETUP.configured_inventory(BINARY, base)
+                runtime = config / 'runtime.toml'
+                runtime.write_bytes(runtime.read_bytes() + b'\n# later operator edit\n')
+                before = [p.read_bytes() for p in (runtime, config / 'agent-core-models-overlay.toml')]
+                with self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
+                    SETUP.configure_many(BINARY, base, [spec()], expected_revision=original_selection['setup_revision'])
+                self.assertEqual(before, [p.read_bytes() for p in (runtime, config / 'agent-core-models-overlay.toml')])
+
+    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
+        import tomllib
+        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
+        _, runtime, overlay = SETUP.render(configured, BINARY)
+        self.assertNotIn(b'hidden-secret', runtime + overlay)
+        catalog = tomllib.loads(overlay.decode())
+        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
+        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
+        providers = tomllib.loads(runtime.decode())['providers']
+        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
+
     def test_multiple_models_bind_imp_and_reselection_preserves_both_connections(self):
         import tomllib
         fixture = ROOT / 'scripts/fixtures/release-evidence'
@@ -579,7 +566,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
             for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
                 (config / name).write_bytes((fixture / name).read_bytes())
             models = [spec(), dict(spec(), model='second-owned-model')]
-            ids = [SETUP.render(model)[0] for model in models]
+            ids = [SETUP.render(model, BINARY)[0] for model in models]
             env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
             with patch.dict(os.environ,env,clear=True):
                 SETUP.configure_many(BINARY,base,models,ids,default_id=ids[1])

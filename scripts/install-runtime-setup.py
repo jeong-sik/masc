@@ -6,9 +6,7 @@ The wizard requires real response/tool verification; --spec stays offline unless
 --verify is supplied. Offline configuration validation is not inference proof.
 """
 import argparse
-import fcntl
 import getpass
-import hashlib
 import json
 import math
 import os
@@ -36,15 +34,6 @@ CHOICES = {
     'codex': ('codex-app-server', 'codex'),
     'antigravity': ('antigravity-cli', 'agy'),
 }
-UNVERIFIED_CAPABILITIES = (
-    'supports_tool_choice', 'supports_required_tool_choice', 'supports_named_tool_choice',
-    'supports_parallel_tool_calls', 'supports_reasoning',
-    'supports_response_format_json', 'supports_structured_output',
-    'supports_multimodal_inputs', 'supports_image_input', 'supports_audio_input',
-    'supports_video_input', 'supports_document_input',
-    'supports_prompt_caching', 'supports_top_k', 'supports_min_p',
-    'supports_seed',
-)
 
 
 class SetupError(Exception):
@@ -58,137 +47,41 @@ class VerificationError(SetupError):
         super().__init__('The selected model did not pass response and tool verification. Configuration was preserved.')
 
 
-def text(spec, key):
-    value = spec.get(key)
-    if not isinstance(value, str) or not value or value != value.strip() or any(ord(c) < 32 for c in value):
-        raise SetupError(key + ' must be a nonempty single-line string without surrounding whitespace')
-    return value
-
-
-def toml(value):
-    # JSON string escaping is also valid for the single-line TOML values used
-    # here; ensure_ascii=False avoids JSON surrogate-pair escapes in TOML.
-    return json.dumps(value, ensure_ascii=False)
-
-
-def table(path, fields, array=False):
-    header = '.'.join(toml(part) for part in path)
-    return '\n' + ('[[' + header + ']]' if array else '[' + header + ']') + '\n' + ''.join(
-        toml(key) + ' = ' + toml(value) + '\n' for key, value in fields.items())
-
-
-def render(spec):
-    if not isinstance(spec, dict):
-        raise SetupError('spec must be a JSON object')
-    choice = text(spec, 'choice')
-    if choice not in CHOICES:
-        raise SetupError('unsupported runtime choice')
-    protocol, default_command = CHOICES[choice]
-    allowed = {'choice', 'model', 'max_context', 'tools', 'streaming'}
-    allowed |= {'endpoint', 'api_key_env', 'credential_file', 'provider_kind', 'request_path'} if default_command is None else {'command'}
-    if choice == 'antigravity':
-        allowed |= {'credential_file', 'timeout_s'}
-    if set(spec) - allowed:
-        raise SetupError('unexpected setup fields: ' + ', '.join(sorted(set(spec) - allowed)))
-    model = text(spec, 'model')
-    context = spec.get('max_context')
-    if type(context) is not int or context <= 0:
-        raise SetupError('max_context must be a positive integer supplied by the operator')
-    for key in ('tools', 'streaming'):
-        if type(spec.get(key)) is not bool:
-            raise SetupError(key + ' must be an explicitly declared boolean')
-    # A connection/model is an identity, not a singleton slot per CLI kind.
-    # Include explicit capabilities and limits so changed operator settings do
-    # not silently mutate a runtime another Keeper may already use.
-    identity = hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=False,
-                                        separators=(',', ':')).encode()).hexdigest()
-    provider = 'setup_' + choice + '_' + identity
-    model_key = provider + '_model'
-    fields = {'display-name': choice + ' / ' + model, 'protocol': protocol}
-    if default_command is None:
-        endpoint = text(spec, 'endpoint')
-        try:
-            url = urlsplit(endpoint)
-            valid = url.scheme in ('http', 'https') and url.hostname and not (url.username or url.password or url.query or url.fragment)
-            _ = url.port
-        except ValueError:
-            valid = False
-        if not valid:
-            raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
-        fields['endpoint'] = endpoint
-    else:
-        fields.update(command=text(spec, 'command') if 'command' in spec else default_command,
-                      **{'is-non-interactive': True})
-    if choice == 'antigravity':
-        timeout = spec.get('timeout_s')
-        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
-            raise SetupError('Antigravity timeout_s must be an explicit positive number')
-        fields['timeout-s'] = float(timeout)
-    runtime = table(('providers', provider), fields)
-    if default_command is None:
-        runtime += table(('providers', provider, 'healthcheck'), {'path': '/api/tags' if choice == 'ollama' else '/models'})
-        if spec.get('credential_file') and spec.get('api_key_env'):
-            raise SetupError('choose one credential reference for the connection')
-        if 'credential_file' in spec:
-            credential = Path(text(spec, 'credential_file'))
-            if not credential.is_absolute():
-                raise SetupError('credential_file must be an absolute private file reference')
-            runtime += table(('providers', provider, 'credentials'), {'type': 'file', 'path': str(credential)})
-        if 'api_key_env' in spec and spec['api_key_env'] != '':
-            key = text(spec, 'api_key_env')
-            if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
-                raise SetupError('api_key_env must name an environment variable, not a credential value')
-            runtime += table(('providers', provider, 'credentials'), {'type': 'env', 'key': key})
-    elif choice == 'antigravity':
-        credential = Path(text(spec, 'credential_file')).expanduser()
-        if not credential.is_absolute():
-            raise SetupError('Antigravity credential_file must be an absolute path')
-        runtime += table(('providers', provider, 'credentials'), {'type': 'file', 'path': str(credential)})
-    runtime += table(('models', model_key), {'api-name': model, 'max-context': context,
-                                           'tools-support': spec['tools'], 'streaming': spec['streaming']})
-    binding = {'wizard-default': True}
-    if choice == 'ollama':
-        # Discovery reads the configured/loaded window, not the architectural
-        # maximum. Keep request-side context and MASC's window in agreement.
-        binding['num-ctx'] = context
-    runtime += table((provider, model_key), binding)
-    overlay = ''
-    if default_command is None:
-        kind = spec.get('provider_kind') or ('ollama' if choice == 'ollama' else 'openai_compat')
-        accepted = ('anthropic', 'kimi') if choice == 'messages' else ('ollama',) if choice == 'ollama' else ('openai_compat', 'glm')
-        if kind not in accepted:
-            raise SetupError('the provider kind does not match the selected HTTP protocol')
-        base_capabilities = {'anthropic':'anthropic', 'kimi':'kimi', 'ollama':'ollama', 'glm':'glm', 'openai_compat':'openai_chat'}[kind]
-        request_path = spec.get('request_path') or ('/api/chat' if choice == 'ollama' else '/v1/messages' if choice == 'messages' else '/chat/completions')
-        parsed_path = urlsplit(request_path)
-        if not request_path.startswith('/') or parsed_path.scheme or parsed_path.netloc or parsed_path.query or parsed_path.fragment or not model_text(request_path):
-            raise SetupError('request_path must be an API path without credentials or a server address')
-        caps = {'id_prefix': model, 'provider_name': provider, 'base': base_capabilities,
-                'max_context_tokens': context, 'supports_tools': spec['tools'],
-                'supports_native_streaming': spec['streaming']}
-        caps.update({key: False for key in UNVERIFIED_CAPABILITIES})
-        caps.update(thinking_control_format='none', reasoning_streaming_format='none')
-        overlay = table(('models',), caps, array=True)
-        # Exact-output lanes resolve through this same provider/model pair.
-        # A runtime binding alone is not an Agent Core target declaration.
-        overlay += table(('providers',), {
-            'id': provider, 'kind': kind, 'base_url': endpoint,
-            'request_path': request_path, 'api_key_env': spec.get('api_key_env', ''),
-            'capabilities_base': base_capabilities}, array=True)
-        overlay += table(('targets',), {
-            'id': provider + '.' + model_key, 'provider_ref': provider,
-            'model_id': model}, array=True)
-    return provider + '.' + model_key, runtime.encode(), overlay.encode()
-
-
-def snapshot(path):
+def native_setup_command(binary, command, payload=None, arguments=()):
+    # The compiled renderer is the only identity authority. This helper handles
+    # terminal interaction and private IPC; it never renders or edits TOML.
+    if not binary:
+        raise SetupError('Runtime setup requires the installed MASC executable')
+    with tempfile.TemporaryDirectory(prefix='masc-setup-request-') as directory:
+        argv = [str(binary), command] + list(arguments)
+        if payload is not None:
+            path = Path(directory) / 'request.json'
+            atomic_write(path, json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), 0o600)
+            argv += ['--spec' if command == 'runtime-setup-render' else '--request', str(path)]
+        result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return None
-    if not stat.S_ISREG(info.st_mode):
-        raise SetupError('configuration must be a regular file: ' + str(path))
-    return (info.st_dev, info.st_ino, info.st_mtime_ns, stat.S_IMODE(info.st_mode), path.read_bytes())
+        receipt = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        raise SetupError('MASC did not return a setup result. Inspect the workspace before retrying.')
+    if not isinstance(receipt, dict):
+        raise SetupError('MASC returned an invalid setup result')
+    if result.returncode:
+        if receipt.get('schema') == 'masc.runtime_setup_error.v1':
+            if receipt.get('kind') == 'verification_failed' and model_text(receipt.get('runtime_id')):
+                raise VerificationError(receipt['runtime_id'])
+            if model_text(receipt.get('error')):
+                raise SetupError(receipt['error'])
+        raise SetupError('Runtime setup did not finish. Inspect the workspace before retrying.')
+    return receipt
+
+
+def render(spec, binary):
+    rendered = native_setup_command(binary, 'runtime-setup-render', spec)
+    if (not model_text(rendered.get('runtime_id'))
+            or not isinstance(rendered.get('runtime_toml'), str)
+            or not isinstance(rendered.get('model_overlay_toml'), str)):
+        raise SetupError('MASC returned an invalid runtime specification')
+    return rendered['runtime_id'], rendered['runtime_toml'].encode(), rendered['model_overlay_toml'].encode()
 
 
 def atomic_write(path, content, mode):
@@ -206,12 +99,9 @@ def atomic_write(path, content, mode):
 
 
 def configured_inventory(binary, base_path):
-    result = subprocess.run([str(binary), 'runtime-wizard-catalog', '--base-path', str(base_path), '--json', '--private-credentials'],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if result.returncode:
-        raise SetupError('cannot read the workspace runtime inventory; configuration was not changed')
-    inventory = json.loads(result.stdout)
-    if not isinstance(inventory, dict) or not isinstance(inventory.get('runtimes'), list):
+    inventory = native_setup_command(binary, 'runtime-setup-inventory',
+                                     arguments=['--base-path', str(base_path)])
+    if not isinstance(inventory.get('runtimes'), list) or not setup_revision(inventory.get('setup_revision')):
         raise SetupError('invalid workspace runtime inventory')
     ids = [row.get('id') for row in inventory['runtimes'] if isinstance(row, dict)]
     if len(ids) != len(inventory['runtimes']) or not all(model_text(value) for value in ids) or len(set(ids)) != len(ids):
@@ -219,102 +109,42 @@ def configured_inventory(binary, base_path):
     return inventory
 
 
+def setup_revision(value):
+    return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+
+
 def configure(binary, base_path, spec):
     return configure_many(binary, base_path, [spec])
 
 
-def configure_many(binary, base_path, specs, selected_ids=None, verify=False, default_id=None):
+def configure_many(binary, base_path, specs, selected_ids=None, verify=False, default_id=None,
+                   expected_revision=None):
     if not isinstance(specs, list):
         raise SetupError('connections must be a list')
     if selected_ids is not None and (not isinstance(selected_ids, list) or not all(model_text(value) for value in selected_ids)):
         raise SetupError('runtime_ids must be a list of runtime identifiers')
     if default_id is not None and not model_text(default_id):
         raise SetupError('default_runtime_id must be a runtime identifier')
-    rendered = [render(spec) for spec in specs]
+    if expected_revision is None:
+        expected_revision = configured_inventory(binary, base_path)['setup_revision']
+    if not setup_revision(expected_revision):
+        raise SetupError('Refresh the connection list before saving')
+    rendered = [render(spec, binary) for spec in specs]
     selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
     if not selected:
         raise SetupError('select at least one runtime')
-    if default_id is None:
-        default_id = selected[0]
+    default_id = selected[0] if default_id is None else default_id
     if default_id not in selected:
         raise SetupError('the default must be one of the selected runtimes')
     selected = [default_id] + [value for value in selected if value != default_id]
-    base = Path(base_path).expanduser().resolve()
-    config = base / '.masc/config'
-    paths = [config / 'runtime.toml', config / 'agent-core-models-overlay.toml']
-    if not config.is_dir():
-        raise SetupError('initialize the selected workspace before runtime setup')
-    # The existing OCaml config writer uses POSIX lockf on this same path.
-    with open(str(paths[0]) + '.lock', 'a+b') as lock:
-        fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        originals = [snapshot(path) for path in paths]
-        if originals[0] is None:
-            raise SetupError('runtime.toml is missing; initialize the workspace first')
-        inventory = configured_inventory(binary, base)
-        existing_ids = {row['id'] for row in inventory['runtimes']}
-        additions = {}
-        for runtime_id, runtime_text, overlay_text in rendered:
-            if runtime_id not in existing_ids:
-                additions[runtime_id] = (runtime_text, overlay_text)
-        if not set(selected) <= existing_ids | set(additions):
-            raise SetupError('a selected runtime disappeared; refresh the list and choose again')
-        addition = b''.join(row[0] for row in additions.values())
-        overlay_addition = b''.join(row[1] for row in additions.values())
-        contents = [originals[0][-1] + (b'\n' + addition if addition else b''),
-                    (originals[1][-1] if originals[1] else b'') + overlay_addition]
-        with tempfile.TemporaryDirectory(prefix='masc-runtime-setup-') as stage:
-            stage_config = Path(stage) / '.masc/config'
-            stage_config.mkdir(parents=True)
-            for path, content in zip(paths, contents):
-                (stage_config / path.name).write_bytes(content)
-            env = dict(os.environ, MASC_BASE_PATH=stage, MASC_CONFIG_DIR=str(stage_config))
-            command = [str(Path(binary).resolve()), 'runtime-default-set', '--base-path', stage, default_id, '--setup-lanes', '--setup-imp']
-            for runtime_id in selected[1:]:
-                command += ['--fallback-runtime', runtime_id]
-            result = subprocess.run(command, env=env,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if result.returncode:
-                diagnostic = result.stderr.decode(errors='replace').strip() or 'validator produced no stderr'
-                raise SetupError('runtime validation failed; original configuration preserved:\n' + diagnostic)
-            contents[0] = (stage_config / paths[0].name).read_bytes()
-            verifications = []
-            if verify:
-                for runtime_id in selected:
-                    probe = subprocess.run([str(Path(binary).resolve()), 'runtime-verify', '--base-path', stage, runtime_id],
-                                           env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    try:
-                        receipt = json.loads(probe.stdout)
-                    except ValueError:
-                        raise SetupError('runtime verification did not return a result; configuration was preserved')
-                    checks = receipt.get('checks') if isinstance(receipt, dict) else None
-                    if (not isinstance(receipt, dict) or not isinstance(checks, dict) or probe.returncode or receipt.get('schema') != 'masc.runtime_verification.v1'
-                            or receipt.get('runtime_id') != runtime_id or receipt.get('status') != 'verified'
-                            or checks.get('response') is not True
-                            or checks.get('tool_roundtrip') is not True):
-                        raise VerificationError(runtime_id, receipt.get('failure') if isinstance(receipt, dict) else None)
-                    verifications.append(receipt)
-        if [snapshot(path) for path in paths] != originals:
-            raise SetupError('configuration changed during validation; rerun setup against the new snapshot')
-        written = []
-        try:
-            # Publish the dependency first and its default-runtime reference
-            # last. Each replace is atomic; the pair is protected by the lock
-            # and rolled back on a reported error, not a filesystem-wide swap.
-            for index in (1, 0):
-                if index == 1 and not overlay_addition:
-                    continue
-                atomic_write(paths[index], contents[index], originals[index][3] if originals[index] else 0o600)
-                written.append(index)
-        except BaseException:
-            for index in reversed(written):
-                if originals[index] is None:
-                    paths[index].unlink()
-                else:
-                    atomic_write(paths[index], originals[index][-1], originals[index][3])
-            raise
-    return {'runtime_id': default_id, 'runtime_ids': selected, 'configured': True, 'validation': 'passed',
-            'readiness': 'verified' if verify else 'not_probed', 'verifications': verifications,
-            'models': [spec['model'] for spec in specs]}
+    result = native_setup_command(binary, 'runtime-setup-batch', dict(
+        connections=specs, runtime_ids=selected, default_runtime_id=default_id,
+        expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)])
+    if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
+            or result.get('configured') is not True or result.get('validation') != 'passed'
+            or result.get('readiness') != ('verified' if verify else 'not_probed')):
+        raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
+    return result
 
 
 def positive_integer(value):
@@ -694,7 +524,7 @@ def source_label(source):
 
 
 class PendingCredentials:
-    """Own only files created by this wizard, until a config commit retains them."""
+    """Own new private references until their selected configuration may be committed."""
     def __init__(self, binary, base_path=None):
         self.binary = binary
         self.base_path = base_path
@@ -1065,7 +895,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec['command'] = source['command']
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
-    return render(spec)[0], spec
+    return render(spec, binary)[0], spec
 
 
 def pick_connection_sources(sources):
@@ -1159,8 +989,8 @@ def select_connections(binary, inventory, timeout, credentials=None):
     return selected, specs, names
 
 
-def login_command(runtime_id, specs, inventory):
-    spec = next((spec for spec in specs if render(spec)[0] == runtime_id), None)
+def login_command(binary, runtime_id, specs, inventory):
+    spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
     if spec:
         choice, command = spec['choice'], spec.get('command') or CHOICES[spec['choice']][1]
     else:
@@ -1200,9 +1030,13 @@ def wizard_with_credentials(binary, base_path, timeout, credentials):
                 try:
                     # Excluding a failed connection must also exclude its new
                     # declaration from the transaction, not just from the lane.
-                    active_specs = [spec for spec in specs if render(spec)[0] in ordered]
-                    result = configure_many(binary, base_path, active_specs, ordered, verify=True)
+                    active_specs = [spec for spec in specs if render(spec, binary)[0] in ordered]
+                    # Once the effectful native child starts, loss of its receipt
+                    # cannot prove that it did not commit. Keep selected private
+                    # credentials before crossing that process boundary.
                     credentials.retain(active_specs)
+                    result = configure_many(binary, base_path, active_specs, ordered, verify=True,
+                                            expected_revision=inventory['setup_revision'])
                     result['base_path'] = str(base_path)
                     return result
                 except VerificationError as error:
@@ -1216,7 +1050,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials):
                         print(terminal_text(error.failure['code']) + ': ' + terminal_text(error.failure['message']), file=sys.stderr)
                     if model_text(error.failure.get('detail')):
                         print('  ' + terminal_text(error.failure['detail']), file=sys.stderr)
-                    login = login_command(error.runtime_id, specs, inventory)
+                    login = login_command(binary, error.runtime_id, specs, inventory)
                     actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
                     if login:
                         actions.append('Sign in with the official CLI, then retry these choices')

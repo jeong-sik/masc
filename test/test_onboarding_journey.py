@@ -31,6 +31,11 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        renderer.start()
+        self.addCleanup(renderer.stop)
+
     def test_antigravity_context_observation_avoids_numeric_input(self):
         source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
                       credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
@@ -382,7 +387,7 @@ class Journey(unittest.TestCase):
         spec = dict(choice='claude_code', command='/owned/claude', model='account-model',
                     max_context=100000, tools=True, streaming=False)
         runtime = SETUP.render(spec)[0]
-        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[])), \
+        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision="a" * 64)), \
                 patch.object(SETUP, 'select_connections', return_value=([runtime], [spec], {runtime: 'Claude'})) as select, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [4]]), \
                 patch.object(SETUP, 'configure_many', side_effect=[SETUP.VerificationError(runtime), dict(readiness='verified')]) as verify, \

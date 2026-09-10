@@ -800,7 +800,7 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
 
 (** Parse command line arguments *)
 let parse_args () =
-  let port = ref (Env_config_core.masc_http_port_int ()) in
+  let port = ref None in
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
@@ -815,7 +815,7 @@ let parse_args () =
         | Some commit -> print_endline commit; exit 0
         | None -> prerr_endline "build commit is not embedded"; exit 1),
       "Print the Git commit embedded at build time and exit");
-    ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
+    ("--port", Arg.Int (fun value -> port := Some value), "MASC server port (otherwise environment or saved workspace port)");
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ( "--base-path",
@@ -843,6 +843,11 @@ let parse_args () =
     else Config_dir_resolver.base_path_or_cwd ()
   in
 
+  let resolved_port = match Workspace_connection.resolve ~base_path:(Some base) ~cli:!port
+    ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key) with
+    | Ok value -> Workspace_connection.to_int value
+    | Error error -> prerr_endline (Workspace_connection.error_message error); exit 1 in
+
   (* Resolve workspace *)
   let r = if !workspace <> "" then !workspace
     else match Env_config_core.cluster_name_opt () with
@@ -869,7 +874,7 @@ let parse_args () =
   ( base_path_input
   , base
   , r
-  , !port
+  , resolved_port
   , !refresh
   , reasoning_visibility
   , tool_visibility )

@@ -33,8 +33,8 @@ let run ~base_path ~port ~resume ~sandbox_step =
         try Sys.remove path with Sys_error _ -> ()) (fun () ->
         output_string channel Embedded_setup.script;
         close_out channel;
-        let argv = [python; "-B"; path; "--binary"; binary; (if sandbox_step then "--sandbox-step" else "--journey");
-                    "--port"; string_of_int port]
+        let argv = [python; "-B"; path; "--binary"; binary; (if sandbox_step then "--sandbox-step" else "--journey")]
+          @ (match port with None -> [] | Some port -> ["--port"; string_of_int port])
           @ (if resume then ["--resume"] else [])
           @ (match base_path with Some path -> ["--base-path"; path] | None -> []) in
         Unix.create_process python (Array.of_list argv) Unix.stdin Unix.stdout Unix.stderr

@@ -13,6 +13,7 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc.workspace_connection
   masc.owner_process_identity
   masc
   masc.sse_wire

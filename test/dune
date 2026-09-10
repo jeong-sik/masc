@@ -5581,3 +5581,5 @@
  (modules test_runtime_setup_batch)
  (libraries alcotest yojson unix eio eio_main masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 (include stanzas/test_docker_account_access.inc)
+
+(include stanzas/test_workspace_connection.inc)

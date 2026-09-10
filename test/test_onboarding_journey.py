@@ -36,6 +36,37 @@ class Journey(unittest.TestCase):
         renderer.start()
         self.addCleanup(renderer.stop)
 
+    def test_final_workspace_owns_port_resolution_before_server_contact(self):
+        events = []
+        def check(*_):
+            events.append('workspace'); return dict(base_path='/chosen-new')
+        def port(binary, base, requested, save=False):
+            self.assertEqual(base, '/chosen-new')
+            events.append('save' if save else 'port'); return 19300
+        def server(binary, base, selected):
+            self.assertEqual((base, selected), ('/chosen-new', 19300))
+            events.append('server'); return 19301
+        with patch.object(SETUP, 'onboarding_status', return_value=observation('/old')), \
+                patch.object(SETUP, 'pick', return_value=[0]), \
+                patch.object(SETUP, 'workspace_check', side_effect=check), \
+                patch.object(SETUP, 'workspace_port', side_effect=port) as connection, \
+                patch.object(SETUP, 'select_setup_server', side_effect=server), \
+                patch.object(SETUP, 'wizard', return_value=dict(readiness='deferred')), \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/owned/masc', None, None, 10), 0)
+        self.assertEqual(events, ['workspace', 'port', 'server', 'save'])
+        self.assertEqual(connection.call_args.args, ('/owned/masc', '/chosen-new', 19301))
+        self.assertTrue(connection.call_args.kwargs['save'])
+
+    def test_current_owner_history_quick_open_still_observes_identity(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
+            read_only=True, status='same_workspace', installed_version='0.35.5', server_version='0.35.5')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, patch.object(SETUP, 'pick') as pick:
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 19301, resume_existing=True), 19301)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'setup-server', '--base-path', '/saved', '--port', '19301'])
+        pick.assert_not_called()
+
     def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
@@ -430,6 +461,7 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
                     patch.object(SETUP, 'select_setup_server', return_value=9876), \
+                    patch.object(SETUP, 'workspace_port', return_value=9876), \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
                     patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
@@ -447,10 +479,13 @@ class Journey(unittest.TestCase):
     def test_persisted_history_resumes_without_model_reselection(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945) as owner, \
                 patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
                 patch.object(SETUP, 'pick') as picker:
             self.assertEqual(SETUP.journey('/bin/masc', None, 8945, 10, resume=True), 0)
         opened.assert_called_once_with('/bin/masc', '/workspace', 8945)
+        owner.assert_called_once_with('/bin/masc', '/workspace', 8945, resume_existing=True)
         picker.assert_not_called()
 
     def test_declaration_alone_never_skips_first_preparation(self):
@@ -466,6 +501,7 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
                 patch.object(SETUP, 'select_setup_server', return_value=8945), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
                 patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \

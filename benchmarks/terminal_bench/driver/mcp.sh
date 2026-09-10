@@ -51,8 +51,13 @@ mcp_call() { # id tool args_json timeout_sec -> tool result json (stdout)
     '{jsonrpc:"2.0",id:$id,method:"tools/call",params:{name:$name,arguments:$a}}')"
   resp="$(_mcp_post "$body" "$timeout")"
   payload="$(_mcp_extract "$resp")"
-  if ! printf '%s' "$payload" | jq -e '.error == null and (.result.isError // false) == false' >/dev/null 2>&1; then
-    echo "mcp_call ${tool} failed: ${payload}" >&2
+  # Collapse multi-line / multi-value payloads (NDJSON bodies, repeated SSE
+  # events) to the last JSON value first: jq -e on a multi-value payload only
+  # judges the last value, and without this the unwrapped result below comes
+  # out multi-line, which later breaks jq --argjson in run_episode.sh.
+  payload="$(printf '%s' "$payload" | jq -c '.' 2>/dev/null | tail -n 1)"
+  if [[ -z "$payload" ]] || ! printf '%s' "$payload" | jq -e '.error == null and (.result.isError // false) == false' >/dev/null 2>&1; then
+    echo "mcp_call ${tool} failed: ${payload:-<empty response>}" >&2
     return 1
   fi
   printf '%s' "$payload" | jq -c 'try (.result.content[0].text | fromjson) catch .result'

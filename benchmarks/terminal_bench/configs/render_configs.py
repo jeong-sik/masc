@@ -43,6 +43,16 @@ ARMS: dict[str, dict] = {
 # (keeper_run_tools_setup.ml: Keeper_identity_tool_allow.apply 대상 확인).
 COMPOSITION_FENCE = "```toml composition"
 
+# Canonical bench keeper instructions. Rendered into every keeper profile TOML
+# (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
+# the same text on the keeper_up call.
+KEEPER_INSTRUCTIONS = (
+    "You are an autonomous engineering agent inside a Linux container. "
+    "Complete the task by running shell commands (your tool calls execute in "
+    "this container as root). Work directly; do not ask questions. "
+    "When the task is verifiably done, finish."
+)
+
 
 def _skill_names() -> list[str]:
     return sorted(
@@ -67,6 +77,16 @@ def instruction_skill_names() -> list[str]:
     return [name for name in _skill_names() if name not in composition]
 
 
+def _strip_one_of_blocks(text: str) -> str:
+    lines, out, skipping = text.splitlines(), [], False
+    for line in lines:
+        if line.startswith("[["):
+            skipping = line.startswith("[[one_of]]")
+        if not skipping:
+            out.append(line)
+    return "\n".join(out) + "\n"
+
+
 RUNTIME_TOML = """\
 [runtime]
 default = "{runtime_id}"
@@ -80,11 +100,25 @@ endpoint = "{endpoint}"
 type = "env"
 key = "{api_key_env}"
 
-[models.{model_alias}]
-reasoning-effort = "{effort}"
+[models."{model_alias}"]
+{effort_lines}
 
-[{runtime_id}]
+[{provider}."{model_alias}"]
 max-concurrent = {max_concurrent}
+
+# Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
+# lanes): hitl_auto_judge and board_attention_exact must be declared with
+# non-empty slots or cli_slots. slots would need AGENT_CORE exact-output
+# catalog target refs the bench overlay does not carry; cli_slots are admitted
+# verbatim and are only walked by the HITL-summary / board-attention lanes,
+# which a bench episode never triggers (autonomous orchestration is off).
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = []
+cli_slots = ["{runtime_id}"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = []
+cli_slots = ["{runtime_id}"]
 
 [exec.ssh.endpoints.local]
 host = "127.0.0.1"
@@ -98,23 +132,76 @@ enabled = {fusion}
 """
 
 OVERLAY_TOML = """\
+# messages-http bindings are materialized only when the provider id has an
+# AGENT_CORE provider registry entry (runtime_adapter.ml: "messages-http
+# requires registry kind SSOT"). The registry is built from the catalog's
+# [[providers]] rows, and the embedded catalog carries no anthropic row, so
+# the bench provider must be declared here.
+[[providers]]
+id = "{provider}"
+kind = "{kind}"
+base_url = "{endpoint}"
+request_path = "{request_path}"
+api_key_env = "{api_key_env}"
+capabilities_base = "{capabilities_base}"
+
 [[models]]
+# provider_name is required: a runtime with a declared provider_id resolves
+# capabilities only through a provider-scoped row (allow_bare_fallback=false,
+# provider_config.ml capabilities_for_config_model), and lookup_for_provider
+# matches id_prefix by exact (normalized) equality, not prefix. The
+# provider-wide capabilities_base is unreachable here anyway — "anthropic" is
+# a wire-kind label, which provider_entry_for_label refuses to resolve
+# (model_catalog.ml wire_kind_labels).
+provider_name = "{provider}"
 id_prefix = "{model_alias}"
-supports_parallel_tool_calls = {parallel}
+base = "{capabilities_base}"
+supports_reasoning = true
+supports_tools = true
+supports_native_streaming = true
+# Without an accepted_reasoning_efforts contract the request validator rejects
+# any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+{thinking_control}{sampling_lines}supports_parallel_tool_calls = {parallel}
 """
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
 PROVIDERS = {
     "anthropic": dict(protocol="messages-http",
                       endpoint="https://api.anthropic.com",
-                      api_key_env="ANTHROPIC_API_KEY"),
+                      api_key_env="ANTHROPIC_API_KEY",
+                      kind="anthropic",
+                      request_path="/v1/messages",
+                      capabilities_base="anthropic"),
     "openai": dict(protocol="openai-compatible-http",
                    endpoint="https://api.openai.com/v1",
-                   api_key_env="OPENAI_API_KEY"),
+                   api_key_env="OPENAI_API_KEY",
+                   kind="openai_compat",
+                   request_path="/chat/completions",
+                   capabilities_base="openai"),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
-                        api_key_env="KIMI_API_KEY"),
+                        api_key_env="KIMI_API_KEY",
+                        kind="openai_compat",
+                        request_path="/chat/completions",
+                        capabilities_base="kimi"),
 }
+
+# reasoning-effort / thinking-support in [models.X] seed the keeper turn's
+# reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
+# keeper_turn_driver.attempt_inference_policy). Emit them only where the
+# provider wire can carry effort:
+# - anthropic: thinking-support=true + adaptive policy (without it the keeper
+#   default enable_thinking=false reaches
+#   backend_anthropic.validate_thinking_controls, which rejects
+#   reasoning_effort + enable_thinking=false outright).
+# - openai: chat-completions carries reasoning_effort only under the
+#   reasoning_effort thinking-control dialect (see the overlay emitter).
+# - kimi: capabilities_base"kimi" declares thinking_control_format =
+#   No_thinking_control, so any reasoning_effort is rejected by
+#   reasoning_dialect.validate_request_control_inputs. K2.7-code thinks
+#   always-on anyway (supports_thinking_type="only").
+EFFORT_CAPABLE_BASES = {"anthropic", "openai"}
 
 
 def seed_skills_block() -> str:
@@ -139,6 +226,11 @@ def keeper_toml(arm: str, index: int) -> str:
         "always_allow = true",
         'sandbox_profile = "remote_ssh"',
         'remote_endpoint = "local"',
+        # keeper_up rejects a profile without non-empty keeper.instructions,
+        # even when the call itself carries instructions.
+        'instructions = """',
+        KEEPER_INSTRUCTIONS,
+        '"""',
     ]
     if not spec["skills"]:
         # 명시적 빈 배열 = skills 없음 (키 생략은 "전부"라 반대 의미).
@@ -177,6 +269,9 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         runtime_id=runtime_id, provider=provider, model_alias=model_alias,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
+        effort_lines=(
+            f'reasoning-effort = "{effort}"\nthinking-support = true\n'
+            if pcfg["capabilities_base"] in EFFORT_CAPABLE_BASES else ""),
         **pcfg)
     if spec["skills"]:
         # skills=True arm만 seed의 [skills]/[[skills.sources]] 블록을 보존한다.
@@ -184,8 +279,32 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         # 로드되지 않는다 (keeper TOML의 skills.names = []와 같은 방향).
         runtime_toml += "\n" + seed_skills_block()
     (root / "runtime.toml").write_text(runtime_toml)
+    # Anthropic-kind backends refuse an explicit enable_thinking without a
+    # catalog-declared thinking policy
+    # (backend_anthropic.validate_nonexact_thinking_controls).
+    # adaptive_default = the wire gets {"type":"adaptive"} when thinking is on
+    # and {"type":"disabled"} when off; the model decides depth.
+    # OpenAI chat-completions carries effort only when the model row declares
+    # the reasoning_effort thinking-control dialect
+    # (reasoning_dialect.validate_request_control_inputs:
+    # Chat_completions + Reasoning_effort is the admitted pair).
+    if pcfg["capabilities_base"] == "anthropic":
+        thinking_control = 'anthropic_thinking_control = "adaptive_default"\n'
+    elif pcfg["capabilities_base"] == "openai":
+        thinking_control = 'thinking_control_format = "reasoning_effort"\n'
+    else:
+        thinking_control = ""
+    # kimi-for-coding accepts only temperature=1 ("invalid temperature: only
+    # 1 is allowed for this model"); the repo's own overlay handles this by
+    # dropping the sampling fields from the wire entirely.
+    sampling_lines = (
+        'ignored_sampling_parameters = ["temperature", "top_p"]\n'
+        if pcfg["capabilities_base"] == "kimi" else "")
     (root / "agent-core-models-overlay.toml").write_text(OVERLAY_TOML.format(
-        model_alias=model_alias, parallel=str(spec["parallel"]).lower()))
+        provider=provider, model_alias=model_alias,
+        thinking_control=thinking_control,
+        sampling_lines=sampling_lines,
+        parallel=str(spec["parallel"]).lower(), **pcfg))
 
     # skills=True arm은 skill source tree를 함께 싣는다. bootstrap.sh가 이를
     # $MASC_BASE_PATH/.masc/skills/로 옮겨 [[skills.sources]]가 resolve한다.
@@ -193,6 +312,18 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # skills=False이면 디렉터리 자체를 만들지 않는다.
     if spec["skills"]:
         shutil.copytree(REPO_ROOT / "skills", root / "skills")
+
+    if provider == "anthropic":
+        # Anthropic's Messages API rejects top-level oneOf/anyOf/allOf in a
+        # tool input_schema, and the agent-core Anthropic backend has no
+        # conformant-schema projection (tool_schema_conformance is only
+        # consumed by backend_openai_request.ml). The seed's tool_execute.toml
+        # expresses argv-xor-script as top-level [[one_of]], which 400s every
+        # turn (observed smoke attempt 15). Strip the in-schema contract for
+        # anthropic arms; the description still states the exclusivity.
+        te = root / "tools" / "tool_execute.toml"
+        if te.exists():
+            te.write_text(_strip_one_of_blocks(te.read_text()))
 
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)

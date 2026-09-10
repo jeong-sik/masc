@@ -54,11 +54,17 @@ class MascAgent(BaseInstalledAgent):
         key = os.environ.get(key_env)
         if not key:
             raise RuntimeError(f"{key_env} not set in harbor process env")
-        return {
+        env = {
             key_env: key,
             "BENCH_RUNTIME_ID": self.runtime_id,
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
         }
+        # keeper_up preflight (remote_ssh) runs `gh auth status` and refuses
+        # without a GitHub identity (remote_github_identity_missing);
+        # run_episode.sh seeds hosts.yml from GH_TOKEN when present.
+        if os.environ.get("GH_TOKEN"):
+            env["GH_TOKEN"] = os.environ["GH_TOKEN"]
+        return env
 
     async def install(self, environment: BaseEnvironment) -> None:
         binary = BENCH_ROOT / "dist" / "masc"
@@ -108,10 +114,12 @@ class MascAgent(BaseInstalledAgent):
             return
         data = json.loads(result_path.read_text())
         final = data.get("final") or {}
-        usage = final.get("usage") or {}
-        context.n_input_tokens = usage.get("input_tokens")
-        context.n_cache_tokens = usage.get("cache_tokens")
-        context.n_output_tokens = usage.get("output_tokens")
+        fallback = final.get("usage") or {}
+        # run_episode.sh emits episode-summed usage at the top level (from the
+        # keeper_chat_events journal); final.usage.* is the older fallback.
+        context.n_input_tokens = data.get("input_tokens", fallback.get("input_tokens"))
+        context.n_cache_tokens = data.get("cache_tokens", fallback.get("cache_tokens"))
+        context.n_output_tokens = data.get("output_tokens", fallback.get("output_tokens"))
         context.metadata = {
             **(context.metadata or {}),
             "masc_state": data.get("state"),

@@ -42,6 +42,20 @@ fi
 
 for i in $(seq 1 "${KEEPER_COUNT}"); do
   k="bench-${i}"
+  # remote_ssh preflight (keeper_sandbox_remote.perform_preflight) requires
+  # the keeper root <remote_root>/<name> to already exist; the bench endpoint
+  # is this same container with remote_root=/root.
+  mkdir -p "/root/${k}"
+  # Preflight also runs `gh auth status` with GH_CONFIG_DIR=<keeper root>/
+  # .config/gh and refuses keeper_up without a GitHub identity
+  # (remote_github_identity_missing). Seed hosts.yml from the GH_TOKEN env
+  # passed into the container.
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    install -d -m 0700 "/root/${k}/.config/gh"
+    printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' \
+      "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
+    chmod 600 "/root/${k}/.config/gh/hosts.yml"
+  fi
   mcp_call $((100+i)) masc_keeper_up "$(jq -cn \
     --arg name "$k" --arg ins "$KEEPER_INSTRUCTIONS" --arg rid "$RUNTIME_ID" \
     '{name:$name, instructions:$ins, runtime_id:$rid, activation_mode:"manual"}')" 90 >/dev/null
@@ -98,14 +112,65 @@ if [[ -d "$tool_log_dir" ]]; then
     | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')"
 fi
 
+# --- token usage: episode-summed from the agent-core trace dumps ---
+# Each .masc/traces/<session>/trace-*.json carries a cumulative top-level
+# `usage` block (total_input_tokens / total_output_tokens /
+# total_cache_creation_input_tokens / total_cache_read_input_tokens /
+# api_calls). A session dir can hold several per-turn dumps, so keep the dump
+# with the most api_calls per session, then sum across sessions. The sibling
+# agent-core-snapshot-*.json repeats the same block and is excluded to avoid
+# double counting. Emits null when no traces exist.
+usage_json='null'
+traces_dir="$MASC_BASE_PATH/.masc/traces"
+if [[ -d "$traces_dir" ]]; then
+  usage_json="$(find "$traces_dir" -type f -name 'trace-*.json' -print0 2>/dev/null \
+    | xargs -0 jq -c '{s:(input_filename|split("/")[-2]), u:(.usage // {}), a:(.usage.api_calls // 0)}' 2>/dev/null \
+    | jq -sc '
+        if length == 0 then null
+        else
+          (group_by(.s) | map(max_by(.a) | .u)) as $us
+          | { input_tokens: ($us | map(.total_input_tokens // 0) | add),
+              output_tokens: ($us | map(.total_output_tokens // 0) | add),
+              cache_tokens: ($us | map((.total_cache_creation_input_tokens // 0)
+                                       + (.total_cache_read_input_tokens // 0)) | add) }
+        end' 2>/dev/null)" || usage_json='null'
+fi
+if ! printf '%s' "$usage_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  usage_json='null'
+fi
+
+# Belt-and-suspenders: --argjson needs each value to be exactly one JSON text.
+# A multi-line/invalid `final` (or a non-numeric counter) must degrade to a
+# placeholder instead of killing the episode with jq's exit 2.
+final="$(printf '%s' "$final" | jq -c 'if type=="object" then . else {} end' 2>/dev/null | tail -n 1)" || true
+[[ -n "$final" ]] || final='{}'
+[[ "$tool_calls" =~ ^[0-9]+$ ]] || tool_calls=0
+[[ "$dup_calls" =~ ^[0-9]+$ ]] || dup_calls=0
+
+echo "run_episode: state=$state tool_calls=$tool_calls dup=$dup_calls final_len=${#final}" >&2
+
+# NOTE: pass `final` via --slurpfile, not --argjson: the select() keeps the
+# last object if the text ever holds multiple values, and a file read keeps
+# jq-1.7 (ubuntu:24.04) away from any argument-length quirks.
+# Never write this as ${final:-{}}: bash closes the expansion at the first
+# '}', so the default's second '}' becomes a literal suffix and corrupts the
+# payload. The guard above already pins final to '{}' when empty.
+final_file="$(mktemp)"
+printf '%s' "$final" > "$final_file"
 jq -n \
   --arg state "$state" \
   --argjson duration_ms $(( (end_epoch - start_epoch) * 1000 )) \
   --argjson tool_calls "${tool_calls:-0}" \
   --argjson duplicate_tool_calls "${dup_calls:-0}" \
-  --argjson final "${final:-{}}" \
+  --argjson usage "$usage_json" \
+  --slurpfile final_raw "$final_file" \
   '{state:$state, duration_ms:$duration_ms, tool_calls:$tool_calls,
-    duplicate_tool_calls:$duplicate_tool_calls, final:$final}' \
+    duplicate_tool_calls:$duplicate_tool_calls,
+    input_tokens:($usage.input_tokens // null),
+    output_tokens:($usage.output_tokens // null),
+    cache_tokens:($usage.cache_tokens // null),
+    final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$RESULT_JSON"
+rm -f "$final_file"
 cat "$RESULT_JSON"
 [[ "$state" == "Succeeded" ]]

@@ -36,8 +36,16 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-  openssh-server jq curl ca-certificates \
+  openssh-server jq curl ca-certificates git gh ripgrep \
   libffi8 libgmp10 libsqlite3-0 libssl3t64 libzstd1 zlib1g >/dev/null
+
+# The remote_ssh exec lane runs `masc-exec-shim` on the remote PATH; the
+# "remote" here is this same container, so install the static binary system-wide.
+install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim
+# The shim refuses to run without its config (exec_shim.mli): remote_root must
+# match the endpoint's remote_root in the rendered runtime.toml (/root).
+printf 'remote_root=/root\n' > /etc/masc-exec-shim.conf
+chmod 644 /etc/masc-exec-shim.conf
 
 # --- sshd on localhost, root key auth (keeper remote_ssh endpoint target) ---
 install -d -m 0755 /run/sshd
@@ -50,6 +58,13 @@ install -m 0600 "$BENCH/ssh/id_ed25519.pub" /root/.ssh/authorized_keys
   echo 'PubkeyAuthentication yes'
 } >> /etc/ssh/sshd_config
 pgrep -x sshd >/dev/null || /usr/sbin/sshd
+# MASC's ssh lane uses strict host-key checking against the endpoint's
+# known_hosts_file (default <base>/.masc/ssh/known_hosts.d/<name>); pin the
+# freshly started sshd's host key there.
+install -d -m 0700 "$MASC_BASE_PATH/.masc/ssh/known_hosts.d"
+ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null \
+  > "$MASC_BASE_PATH/.masc/ssh/known_hosts.d/local"
+chmod 600 "$MASC_BASE_PATH/.masc/ssh/known_hosts.d/local"
 ssh -i "$BENCH/ssh/id_ed25519" \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   root@127.0.0.1 true

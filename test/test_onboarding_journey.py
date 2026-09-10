@@ -149,6 +149,22 @@ class Journey(unittest.TestCase):
             elif status == 'failed':
                 self.assertIn('did not finish', output.getvalue())
 
+    def test_prerequisite_failure_keeps_safe_reason_visible(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[dict(
+            id='install', label='Install', requires_admin=True,
+            detail='Verify package', source_url='https://example.org/install')])
+        for reason, expected in [('Package publisher mismatch\x1b[2J', 'Package publisher mismatch'),
+                                 (None, 'The selected step did not finish')]:
+            receipt = dict(schema='masc.prerequisite_action_result.v1', status='failed',
+                           readiness='not_checked', reason=reason)
+            responses = [subprocess.CompletedProcess([], 0, json.dumps(catalog)),
+                         subprocess.CompletedProcess([], 1, json.dumps(receipt))]
+            with self.subTest(reason=reason), patch.object(SETUP.subprocess, 'run', side_effect=responses), \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'apple_container'))
+            self.assertIn(expected, output.getvalue())
+            self.assertNotIn('\x1b', output.getvalue())
+
     def test_prerequisite_refresh_and_back_never_execute(self):
         catalog = dict(schema='masc.prerequisite_actions.v1', actions=[])
         response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')

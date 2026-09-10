@@ -3,6 +3,7 @@ type verified_artifact = {release:release; path:string}
 type error = Unsupported_host | Invalid_release | Download_failed | Invalid_file
   | Digest_mismatch | Signature_rejected | Publisher_mismatch | Installer_failed
 type runner = string list -> (string, unit) result
+type terminal_runner = string list -> (unit, unit) result
 let ( let* ) = Result.bind
 let expected_publisher = "Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)"
 (* Publisher identity observed from Apple's official 1.4.1 signed package:
@@ -94,14 +95,14 @@ let acquire ~host ~run =
           Ok artifact)
      with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file)
   | _ -> Error Unsupported_host
-let install ~executable_path ~run artifact =
+let install ~executable_path ~run ~elevate artifact =
   let* verified = verify ~run ~release:artifact.release ~path:artifact.path in
   try
     let executable_path = Unix.realpath executable_path in
-    run ["/usr/bin/sudo";executable_path;"sandbox-install-apple-verified";
+    elevate ["/usr/bin/sudo";executable_path;"sandbox-install-apple-verified";
       "--source";verified.path;"--sha256";verified.release.digest;
       "--size";string_of_int verified.release.size]
-    |> Result.map (fun _ -> ()) |> Result.map_error (fun () -> Installer_failed)
+    |> Result.map_error (fun () -> Installer_failed)
   with Unix.Unix_error _ -> Error Installer_failed
 let install_staged ~temp_dir ~run ~source ~sha256 ~size =
   if size <= 0 || String.length sha256 <> 64

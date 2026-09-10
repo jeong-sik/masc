@@ -52,7 +52,44 @@ let test_stale_connection_never_receives_key () =
     Runtime_setup_credentials.remove_uncommitted pending;
     check bool "uncommitted key removed" false (Sys.file_exists (Runtime_setup_credentials.reference_path pending)))
 
+let test_applied_key_is_retained () =
+  with_home (fun home ->
+    let path = Filename.concat home "runtime.toml" in
+    let original = {|[providers."fixture-http"]
+display-name = "Fixture HTTP"
+protocol = "openai-compatible-http"
+endpoint = "https://fixture.invalid/v1"
+[providers."fixture-http".credentials]
+type = "inline"
+value = "previous-fixture-key"
+[models.chat]
+api-name = "fixture-chat"
+max-context = 1024
+["fixture-http".chat]
+[runtime]
+default = "fixture-http.chat"
+|} in
+    Out_channel.with_open_bin path (fun out -> output_string out original);
+    let expected = Runtime.config_observation ~path original in
+    let pending = match Runtime_setup_credentials.save ~secret:"committed-fixture-key" () with
+      | Ok pending -> pending | Error error -> fail (Runtime_setup_credentials.error_message error) in
+    (match Runtime_setup_credentials.apply_to_provider ~runtime_config_path:path
+      ~provider_id:"fixture-http" ~expected_source_revision:(Runtime.config_source_revision_to_string expected.source_revision) pending with
+     | Ok _ -> () | Error error -> fail (Runtime_setup_credentials.error_message error));
+    Runtime_setup_credentials.remove_uncommitted pending;
+    let reference = Runtime_setup_credentials.reference_path pending in
+    check bool "actual apply retains the pending file" true (Sys.file_exists reference);
+    let config = match Runtime_toml.parse_string (In_channel.with_open_text path In_channel.input_all) with
+      | Ok config -> config | Error error -> fail error in
+    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "fixture-http") config.providers in
+    (match provider.credentials with
+     | Some (Runtime_schema.File actual) -> check string "committed exact file reference" reference actual
+     | _ -> fail "committed provider must use the private file");
+    check string "committed raw credential remains usable" "committed-fixture-key"
+      (In_channel.with_open_text reference In_channel.input_all))
+
 let () = run "private setup credentials" ["storage", [
+  test_case "applied provider retains its file" `Quick test_applied_key_is_retained;
   test_case "private pending and retained files" `Quick test_private_key_lifecycle;
   test_case "credential document rejected" `Quick test_document_rejected_without_storage;
   test_case "stale provider configuration rejected" `Quick test_stale_connection_never_receives_key]]

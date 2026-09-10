@@ -229,6 +229,8 @@ wizard-default = true
       [ "openrouter"; "glm-coding"; "codex"; "claude-code"; "ollama"
       ; "vllm"; "rapid-mlx"; "llama-cpp"; "unsloth" ];
     let antigravity = integration prototypes "antigravity" in
+    check string "official Antigravity executable" "agy"
+      (antigravity |> member "command" |> to_string);
     check string "unsupported verification is not ready" "unsupported"
       (antigravity |> member "verification_support" |> to_string);
     List.iter (fun id ->

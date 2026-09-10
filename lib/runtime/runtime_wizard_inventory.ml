@@ -103,7 +103,7 @@ let integrations_json (config : Runtime_schema.config) =
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
-    ; "antigravity", "Antigravity", "antigravity-cli", Some "antigravity", false
+    ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", false
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
     ; "llama-cpp", "llama.cpp", "openai-compatible-http", None, true

@@ -598,7 +598,9 @@ let run_cmd host port cli_base_path accept_store_quarantine =
    | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
      (match Env_config.record_default_base_path canonical_base_path with
       | Env_config.Recorded _ -> ()
-      | Env_config.No_record_location | Env_config.Record_failed _ ->
+      | Env_config.No_record_location
+      | Env_config.Refused_under_test
+      | Env_config.Record_failed _ ->
         (* Not fatal, and not worth a line on every boot: the server is
            starting on a path the operator just supplied. *)
         ())
@@ -1324,7 +1326,14 @@ let init_cmd_exit base_path force skills_only =
       Printf.printf
         "default workspace not recorded: could not write %s (%s); pass --base-path \
          to later commands\n"
-        record reason);
+        record reason
+    | Env_config.Refused_under_test ->
+      (* Says so rather than staying silent: a suite that expected a default
+         to exist should fail on the missing default, not on its absence
+         being invisible. *)
+      Printf.printf
+        "default workspace not recorded: a test executable does not write the \
+         operator's default\n");
   if result.failed > 0 then 1 else 0
 
 let init_cmd =

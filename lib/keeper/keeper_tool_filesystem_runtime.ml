@@ -330,6 +330,17 @@ let read_sandbox_bytes ?turn_sandbox_factory ?cwd ~config ~meta ~path ~max_bytes
   |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
 ;;
 
+let read_complete_sandbox_bytes ~config ~meta ~path ?cwd () =
+  let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
+  let* target =
+    resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    |> Result.map_error (function Read_path_error detail -> detail)
+  in
+  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  Keeper_sandbox_read_runner.read_complete_file ~config ~meta ~host_path:target
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
+;;
+
 let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)

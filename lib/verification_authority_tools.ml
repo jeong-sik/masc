@@ -336,8 +336,17 @@ let image_result t tool ~name ~args ~start_time =
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
-           Keeper_tool_filesystem_runtime.read_sandbox_bytes
-             ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()
+           (* The bounded probe identifies the format only. Its potentially
+              text-projected body never becomes image input or hash evidence. *)
+           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+                    ~config:t.config ~meta ~path ?cwd
+                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
+            | Error _ as error -> error
+            | Ok probe ->
+              (match Keeper_vision_tool.sniff_image_media_type probe with
+               | Error _ -> Ok probe
+               | Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
+                   ~config:t.config ~meta ~path ?cwd ()))
          | Workspace_producer ->
            Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) ()

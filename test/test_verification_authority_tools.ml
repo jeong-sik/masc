@@ -127,11 +127,11 @@ let write_runtime_toml ~base_path =
            }))
 ;;
 
-let with_fake_ssh f =
+let with_fake_ssh ?(script = fake_ssh_script) f =
   let dir = temp_dir () in
   let ssh_path = Filename.concat dir "ssh" in
   Out_channel.with_open_text ssh_path (fun channel ->
-    output_string channel fake_ssh_script);
+    output_string channel script);
   Unix.chmod ssh_path 0o755;
   Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override (Some ssh_path);
   Fun.protect
@@ -150,7 +150,7 @@ let with_fake_ssh f =
    so a read routed through it fails there for a reason that is not about the
    verifier. Micro_vm needs Apple's container CLI, so it cannot run on Linux
    at all. Tests that are about the Docker route ask for it by name. *)
-let with_surface ?(sandbox_profile = "remote_ssh") f =
+let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -197,7 +197,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") f =
     (* The bootstrap preflight ends in [gh auth status], which a fixture
        endpoint cannot answer; the read path under test never needed it. *)
     with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
-      with_fake_ssh run))
+      with_fake_ssh ?script:ssh_script run))
   else run ()
 ;;
 
@@ -759,6 +759,31 @@ let test_web_fetch_refuses_a_private_target () =
     | Error _ -> ())
 ;;
 
+let test_keeper_endpoint_read_preserves_png_bytes () =
+  let fixture = Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
+      "test/fixtures/verifier-image-lookup.png" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let trailer = Exec_ssh_protocol.render_trailer
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false; shim_error=None } in
+  let ssh_script = Printf.sprintf
+      "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat %s\nprintf '%%s' %s >&2\nexit 0\n"
+      (Filename.quote fixture) (Filename.quote trailer) in
+  with_surface ~ssh_script (fun config surface ->
+    ignore (producer_playground config producer);
+    let result = VAT.dispatch surface ~name:"tool_read_file"
+        ~args:(`Assoc [ "file_path", `String "endpoint-only.png" ]) in
+    match result with
+    | Tool_result.Completed { content_blocks=Some blocks; data; _ } ->
+      Alcotest.(check bool) "remote complete byte count" true
+        (Yojson.Safe.Util.member "bytes" data = `Int (String.length bytes));
+      Alcotest.(check bool) "remote raw PNG reaches model unchanged" true
+        (List.exists (function
+          | Llm_provider.Types.Image { data; _ } -> Base64.decode_exn data = bytes
+          | _ -> false) blocks)
+    | _ -> Alcotest.fail (Tool_result.message result))
+;;
+
 let test_goal_and_task_read_deliver_full_png () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -863,6 +888,8 @@ let () =
     ; ( "dispatch"
       , [ Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
             test_goal_and_task_read_deliver_full_png
+        ; Alcotest.test_case "Keeper endpoint read keeps exact PNG bytes" `Quick
+            test_keeper_endpoint_read_preserves_png_bytes
         ; Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
         ; Alcotest.test_case "web fetch is offered and dispatches" `Quick

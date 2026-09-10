@@ -193,6 +193,26 @@ val hitl_replay_yield_request
     with the runtime deliverability predicate (approval left the pending map,
     grant durably unspent). *)
 
+val connector_attention_preemption_request
+  :  now:float
+  -> Keeper_event_queue.t
+  -> Keeper_agent_run.autonomous_yield_request option
+(** Pure post-tool boundary decision (#20849): yield the in-flight [Woken]
+    source when a pending [Connector_attention] stimulus — an ambient
+    connector conversation message — is waiting. The owner-operation probe
+    above already covers a person's direct address; this covers the ambient
+    class, which had no mid-turn preemption before. Any pending
+    [Connector_attention] preempts: the source's own wake payloads were
+    consumed by selection, so what remains arrived after the source
+    started. *)
+
+val connector_attention_waiting
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+(** [connector_attention_preemption_request] over the keeper's durable queue
+    snapshot. *)
+
 
 val continuation_channel_of_wake :
   Keeper_registry.wake_reason -> Keeper_continuation_channel.t option

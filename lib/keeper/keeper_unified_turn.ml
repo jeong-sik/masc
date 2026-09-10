@@ -284,6 +284,76 @@ let hitl_replay_yield_request ~base_path ~keeper_name =
     Ok request
 ;;
 
+(* #20849: mid-turn preemption for ambient connector conversations. A [Woken]
+   turn is the event-queue input already selected for this turn; while it runs,
+   a NEW ambient conversation message (Slack/Discord/…) lands as a
+   [Connector_attention] stimulus. Before this, the running turn never looked:
+   the owner-operation probe covers a person's DIRECT address (mentions and
+   DMs dispatch through [Keeper_owner_registry.submit_operation] and the chat
+   lane's claimed operations — already probed above), the HITL probe covers
+   approved Gate resolutions (#28809), and an ambient conversation message
+   waiting behind a multi-hour autonomous run reproduced the measured 17+ min
+   priority inversion. Pure decision, mirroring
+   [hitl_replay_preemption_request] above: any pending [Connector_attention]
+   payload preempts. Self-exclusion is unnecessary for a different reason than
+   HITL's — the wake payloads of the source turn were consumed by selection,
+   so anything still in the queue arrived after this turn started. *)
+let connector_attention_preemption_request ~now pending =
+  let stimuli = Keeper_event_queue.to_list pending in
+  match
+    List.find_opt
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Connector_attention _ -> true
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _
+         | Keeper_event_queue.Composition_completed _ ->
+           false)
+      stimuli
+  with
+  | None -> None
+  | Some selected ->
+    let summary = Keeper_agent_run.durable_stimulus_summary ~now pending in
+    Some
+      Keeper_agent_run.
+        { reason =
+            Durable_stimulus_waiting
+              { summary with
+                head = Some selected
+              ; head_age_sec = Float.max 0. (now -. selected.arrived_at)
+              }
+        }
+;;
+
+let connector_attention_waiting ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok pending ->
+    let request =
+      connector_attention_preemption_request ~now:(Time_compat.now ()) pending
+    in
+    Option.iter
+      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+         match request.reason with
+         | Keeper_agent_run.Operation_queued -> ()
+         | Keeper_agent_run.Durable_stimulus_waiting summary ->
+           Log.Keeper.info
+             ~keeper_name
+             "autonomous source turn yields to an external conversation: %s"
+             (Keeper_agent_run.durable_stimulus_summary_to_string summary))
+      request;
+    Ok request
+;;
+
 let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
@@ -298,7 +368,11 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
       (match chat_yield_request ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
-       | Ok None -> hitl_replay_yield_request ~base_path ~keeper_name)
+       | Ok None ->
+         (match hitl_replay_yield_request ~base_path ~keeper_name with
+          | Error _ as error -> error
+          | Ok (Some _) as request -> request
+          | Ok None -> connector_attention_waiting ~base_path ~keeper_name))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
   (* Not reachable: [~wake] here originates in [run_keeper_cycle], which the

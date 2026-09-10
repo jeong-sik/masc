@@ -159,6 +159,78 @@ let hitl_stimulus ~arrived_at ~approval_id =
     ~payload:(Q.Hitl_resolved resolution)
 ;;
 
+(* #20849 / #25898: the ambient connector conversation yield. *)
+let connector_stimulus ~arrived_at ~event_id =
+  stimulus
+    ~post_id:("connector-" ^ event_id)
+    ~urgency:Q.Low
+    ~arrived_at
+    ~payload:(Q.Connector_attention { event_id; channel = unrouted })
+;;
+
+let test_connector_attention_preempts_source () =
+  let source = Q.Bootstrap in
+  let connector = connector_stimulus ~arrived_at:990. ~event_id:"evt-ambient" in
+  let request =
+    Keeper_unified_turn.connector_attention_preemption_request
+      ~now:1000.
+      (queue_of
+         [ stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:source
+         ; connector
+         ])
+  in
+  match request with
+  | Some
+      { Keeper_agent_run.reason = Keeper_agent_run.Durable_stimulus_waiting summary } ->
+    check int "both durable stimuli remain visible" 2 summary.pending_count;
+    (match summary.head with
+     | Some selected ->
+       check string
+         "yield names the ambient connector message as the next source"
+         "connector-evt-ambient"
+         selected.post_id
+     | None -> fail "connector preemption lost its selected source");
+    check (float 0.001) "selected-source age is exact" 10. summary.head_age_sec
+  | Some { reason = Keeper_agent_run.Operation_queued } ->
+    fail "connector preemption was mislabeled as chat"
+  | None ->
+    fail "pending connector attention did not preempt the in-flight source"
+;;
+
+let test_no_connector_attention_no_yield () =
+  check bool
+    "only non-connector payloads pending: no yield"
+    true
+    (Option.is_none
+       (Keeper_unified_turn.connector_attention_preemption_request
+          ~now:1000.
+          (queue_of
+             [ stimulus
+                 ~post_id:"hitl-only"
+                 ~urgency:Q.Immediate
+                 ~arrived_at:990.
+                 ~payload:
+                   (Q.Hitl_resolved
+                      { approval_id = "appr-other"
+                      ; decision = Q.Hitl_approved
+                      ; channel = unrouted
+                      })
+             ; stimulus ~post_id:"board" ~urgency:Q.Low ~arrived_at:995. ~payload:Q.Bootstrap
+             ])))
+;;
+
+let test_connector_attention_alone_preempts () =
+  (* Even with nothing else pending — the minimal ambient-only wait — the
+     source must yield. *)
+  check bool
+    "connector attention alone preempts"
+    true
+    (Option.is_some
+       (Keeper_unified_turn.connector_attention_preemption_request
+          ~now:1000.
+          (queue_of [ connector_stimulus ~arrived_at:998. ~event_id:"evt-only" ])))
+;;
+
 let test_deliverable_resolution_preempts_source () =
   let source =
     stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:Q.Bootstrap
@@ -620,6 +692,18 @@ let () =
             "queue without a resolution never preempts"
             `Quick
             test_queue_without_resolution_never_preempts
+        ; test_case
+            "pending connector attention preempts the in-flight source"
+            `Quick
+            test_connector_attention_preempts_source
+        ; test_case
+            "no connector attention pending: no yield"
+            `Quick
+            test_no_connector_attention_no_yield
+        ; test_case
+            "connector attention alone preempts"
+            `Quick
+            test_connector_attention_alone_preempts
         ; test_case
             "yield request tracks durable grant consumption"
             `Quick

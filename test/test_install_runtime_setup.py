@@ -48,6 +48,28 @@ class ModelSelection(unittest.TestCase):
         self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
         self.assertEqual(source['rows'], [])
 
+    def test_integration_only_private_auth_is_preserved_or_explicitly_protected(self):
+        for kind in ('file', 'inline'):
+            integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
+                               endpoint='https://example.com/v1', origin='runtime_config',
+                               setup_support='new_connection', credential_kind=kind)
+            if kind == 'file':
+                integration['credential_file'] = '/private/owned-api-key'
+            source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
+            self.assertEqual(source['credential_kind'], kind)
+            if kind == 'file':
+                with patch.object(SETUP, 'native_discover_models', return_value=([], 'server')) as discover:
+                    SETUP.source_models('/fixture', source, 10)
+                self.assertEqual(discover.call_args.args[1]['credential_file'], '/private/owned-api-key')
+                _, selected = SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+                self.assertEqual(selected['credential_file'], '/private/owned-api-key')
+                self.assertNotIn('api_key_env', selected)
+            else:
+                with patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('anonymous request')):
+                    self.assertEqual(SETUP.source_models('/fixture', source, 10)[0], [])
+                with self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
+                    SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+
     def test_private_key_is_piped_and_removed_when_setup_does_not_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             key = Path(directory, 'pending-key')

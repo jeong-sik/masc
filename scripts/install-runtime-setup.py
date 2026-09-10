@@ -658,7 +658,9 @@ def connection_sources(inventory):
         sources.append(dict(provider_id=integration['id'], label=integration['display_name'],
                             choice=PROTOCOL_CHOICES.get(integration.get('protocol')),
                             endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
-                            api_key_env=integration.get('api_key_env') or '', credential_kind='env' if integration.get('api_key_env') else 'none',
+                            api_key_env=integration.get('api_key_env') or '',
+                            credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
+                            credential_file=integration.get('credential_file'),
                             provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
                             origin=integration['origin'], setup_support=integration['setup_support'], rows=[]))
     # These are local server connection suggestions, never guessed model IDs.

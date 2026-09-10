@@ -5,15 +5,16 @@
     that does not stand up a server, and so the set of sections it reads is
     one value rather than a list of arguments. *)
 
-val cached_field_names : string list
-(** The fields the background snapshot worker keeps. Everything else in the
-    full-health payload is recomputed by the probe pass on each request, and
-    the two sets are disjoint, which is why the response carries no duplicate
-    key. [overall_status] is in here, so the rollup runs in the snapshot pass
-    and can only read what that pass keeps. *)
-
 val is_cached : string -> bool
-(** [is_cached name] is whether the snapshot worker keeps that field. *)
+(** [is_cached name] is whether the background snapshot worker keeps that
+    field. Everything else in the full-health payload is recomputed by the
+    probe pass on each request, and the two sets are disjoint, which is why
+    the response carries no duplicate key. [overall_status] is one of the kept
+    fields, so the rollup runs in the snapshot pass and can only read what
+    that pass keeps.
+
+    The list itself stays inside the module: it is the rollup's own reach, and
+    an export with no caller is one the dead-surface ratchet counts. *)
 
 val operator_summary :
   sections:(string * Yojson.Safe.t) list ->

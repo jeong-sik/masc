@@ -1,0 +1,43 @@
+{
+  "goal": {
+    "id": "goal-1789000433949-245cd91d",
+    "criterion_revision": "da3eb9d3012ad3845d050ee3ecbae3b6",
+    "title": "Synthetic marker inspection",
+    "metric": "marker count in fixture/evidence.txt",
+    "target_value": "1",
+    "due_date": null,
+    "priority": 3,
+    "phase": "completed",
+    "last_review_note": null,
+    "last_review_at": "2026-09-10T00:33:54Z",
+    "created_at": "2026-09-10T00:33:53Z",
+    "updated_at": "2026-09-10T00:33:54Z"
+  },
+  "verification": {
+    "goal_id": "goal-1789000433949-245cd91d",
+    "completion": {
+      "state": "human_confirmed",
+      "verdict": {
+        "outcome": "proven",
+        "reason": null,
+        "request_id": "a2605902f6e23e27e3a1452298f7020c",
+        "criterion": {
+          "revision": "da3eb9d3012ad3845d050ee3ecbae3b6",
+          "title": "Synthetic marker inspection",
+          "metric": "marker count in fixture/evidence.txt",
+          "target_value": "1"
+        },
+        "verification_run_id": "01a088bc-414f-7000-8991-88566eadfa96",
+        "authority": {
+          "kind": "system_llm_agent",
+          "actor": "verifier_exact"
+        },
+        "evidence": "Synthetic verifier read the real fixture file and observed exactly one marker.",
+        "recorded_at": "2026-09-10T00:33:54Z"
+      },
+      "operator_id": "admin",
+      "confirmed_at": "2026-09-10T00:33:54Z"
+    },
+    "updated_at": "2026-09-10T00:33:54Z"
+  }
+}

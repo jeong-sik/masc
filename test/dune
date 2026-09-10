@@ -5569,3 +5569,4 @@
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_prerequisite_terminal.inc)
+(include stanzas/test_docker_account_access.inc)

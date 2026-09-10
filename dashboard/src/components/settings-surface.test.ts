@@ -1,3 +1,5 @@
+import * as coreApi from '../api/core'
+import { modelSetupResumeState } from '../lib/model-setup-resume'
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
@@ -425,6 +427,9 @@ describe('SettingsSurface', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    modelSetupResumeState.value = { kind: 'idle' }
+    vi.spyOn(coreApi, 'post').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
     container = document.createElement('div')
     document.body.appendChild(container)
     apiMock.fetchDashboardConfig.mockReset()
@@ -1669,6 +1674,9 @@ describe('SettingsSurface shell route', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    modelSetupResumeState.value = { kind: 'idle' }
+    vi.spyOn(coreApi, 'post').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
     container = document.createElement('div')
     document.body.appendChild(container)
     apiMock.fetchDashboardConfig.mockReset()

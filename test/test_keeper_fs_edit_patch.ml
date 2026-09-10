@@ -231,6 +231,53 @@ let with_turn_sandbox_factory ~enabled ~config ~meta f =
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
+let test_identical_edit_preserves_file_and_records_no_change () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "unchanged.ml" in
+  Fs_compat.save_file path "let x = 1\n";
+  Unix.utimes path 100. 100.;
+  let before = Unix.stat path in
+  let run old_string = handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(`Assoc ["path", `String path; "mode", `String "patch";
+        "old_string", `String old_string; "new_string", `String old_string]) () in
+  let result = run "let x = 1" in
+  let data = parse result.raw_output in
+  Alcotest.(check bool) "successful no change" true (parse_ok result.raw_output);
+  Alcotest.(check bool) "changed false" false (Json.member "changed" data |> Json.to_bool);
+  Alcotest.(check (option int)) "zero bytes written" (Some 0) (parse_int result.raw_output "bytes_written");
+  Alcotest.(check (option int)) "validated matched occurrence" (Some 1) (parse_int result.raw_output "occurrences");
+  Alcotest.(check bool) "no change evidence" true (Option.is_none result.file_change_evidence);
+  Alcotest.(check bool) "no before/after snapshots" true (Json.member "edit_snapshots" data = `Null);
+  let after = Unix.stat path in
+  Alcotest.(check int) "inode unchanged" before.st_ino after.st_ino;
+  Alcotest.(check (float 0.)) "mtime unchanged" before.st_mtime after.st_mtime;
+  Alcotest.(check string) "bytes unchanged" "let x = 1\n" (Fs_compat.load_file path);
+  Alcotest.(check bool) "equal strings do not excuse a missing match" false (parse_ok (run "absent").raw_output)
+;;
+
+let test_patch_rejection_recovers_with_corrected_arguments () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "recover.ml" in
+  Fs_compat.save_file path "x = 1\nx = 1\n";
+  let edit old_string replace_all = handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(`Assoc ["path", `String path; "mode", `String "patch";
+        "old_string", `String old_string; "new_string", `String "x = 2";
+        "replace_all", `Bool replace_all]) () in
+  List.iter (fun old ->
+    let rejected = edit old false in
+    Alcotest.(check bool) "patch rejection is actionable workflow failure" true
+      (rejected.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+    Alcotest.(check bool) "no change evidence on rejection" true
+      (Option.is_none rejected.file_change_evidence)) ["stale"; "x = 1"];
+  Alcotest.(check string) "failed edits did not write" "x = 1\nx = 1\n" (Fs_compat.load_file path);
+  let corrected = edit "x = 1" true in
+  Alcotest.(check bool) "corrected arguments succeed" true
+    (corrected.disposition = Tool_result.Completed ());
+  Alcotest.(check string) "corrected patch applied" "x = 2\nx = 2\n" (Fs_compat.load_file path)
+;;
+
 let test_patch_unique_match () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
@@ -1610,6 +1657,8 @@ let () =
     [
       ( "patch-mode",
         [
+          Alcotest.test_case "patch rejection recovers with corrected arguments" `Quick test_patch_rejection_recovers_with_corrected_arguments;
+          Alcotest.test_case "identical edit is an observed no change" `Quick test_identical_edit_preserves_file_and_records_no_change;
           Alcotest.test_case "unique match replaces" `Quick
             test_patch_unique_match;
           Alcotest.test_case "snapshot store failure preserves successful edit" `Quick

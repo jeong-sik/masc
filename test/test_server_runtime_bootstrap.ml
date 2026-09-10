@@ -650,10 +650,25 @@ let merge_env_overrides overrides =
 let main_eio_test_admin_token = "main-eio-test-admin-token"
 let main_eio_auth_header = "Authorization: Bearer " ^ main_eio_test_admin_token
 
+(* A spawned main_eio does not know it is inside a test, so the library-side
+   refusal (which keys on the executable being a test binary) does not reach
+   it. Without a config home of its own, `masc init` records the sandbox
+   workspace as the operator's default in ~/.config/masc/default-base-path,
+   and the next process resolves its base path there until that directory
+   vanishes -- two Server_runtime_bootstrap cases went red exactly that way on
+   2026-09-10. One temp dir for the whole run: nothing here reads it back. *)
+let spawned_config_home =
+  lazy
+    (let dir = Filename.temp_file "masc-test-config-home" "" in
+     Sys.remove dir;
+     Unix.mkdir dir 0o700;
+     dir)
+
 let main_eio_env_overrides overrides =
   merge_env_overrides
     (("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
      :: ("MASC_INTERNAL_MCP_TOKEN", "")
+     :: ("XDG_CONFIG_HOME", Lazy.force spawned_config_home)
      :: overrides)
 
 let curl_health_status ~port =
@@ -3589,7 +3604,7 @@ let test_startup_state_json () =
     (List.sort String.compare
        [ "phase"; "state_ready"; "pending_lazy_tasks"; "last_error";
          "path_diagnostics"; "config_resolution"; "elapsed_sec";
-         "watchdog_timeout_sec"; "product" ])
+         "watchdog_timeout_sec"; "product"; "model_runtime" ])
     (json |> json_assoc |> List.map fst |> List.sort String.compare);
   let product = List.assoc "product" (json_assoc json) in
   Alcotest.(check (list string))

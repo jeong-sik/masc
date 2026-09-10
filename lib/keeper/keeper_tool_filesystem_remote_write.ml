@@ -214,12 +214,21 @@ let handle_with_endpoint
                          (match
                             Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
                           with
-                          | Error message -> failure ~target message
+                          | Error message ->
+                            failure ~class_:Tool_result.Workflow_rejection ~target message
+                          | Ok application when String.equal current application.updated ->
+                            Keeper_tool_execution.success_data
+                              (success_payload ~target ~meta
+                                 [ "mode", `String "patch"; "changed", `Bool false
+                                 ; "occurrences", `Int application.occurrence_count
+                                 ; "replace_all", `Bool replace_all
+                                 ; "bytes_written", `Int 0 ])
                           | Ok application ->
                             write ~content_mode:Replace_whole ~mode_label:"patch"
                               ~body:application.updated
                               ~extra_fields:
-                                [ "occurrences", `Int application.occurrence_count
+                                [ "changed", `Bool true
+                                ; "occurrences", `Int application.occurrence_count
                                 ; "replace_all", `Bool replace_all
                                 ]
                               ~evidence:(Some (Keeper_tool_patch.file_change_evidence application)))

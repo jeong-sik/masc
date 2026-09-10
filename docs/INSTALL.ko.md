@@ -153,33 +153,46 @@ CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를
 
 ## `imp`와 첫 대화 (0.35.5)
 
-이 경로는 `masc setup`이 포함된 **0.35.5 설치 계약**입니다. 다운로드 전에
+이 문서는 0.35.5 설치 계약입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
-1. 모델 선택 화면을 열기 전에 보유한 런타임을 준비합니다. Claude Code·Codex는
-   CLI를 설치하고 로그인한 뒤 이 터미널에서 응답하는지 확인합니다.
-   API 방식은 인증 환경변수(Z.AI는 `ZAI_API_KEY`)를 이 터미널에서 설정합니다.
-   로컬 모델은 서버를 시작하고 도구 호출이 가능한 모델을 로드합니다.
-   MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
-2. 설치기를 `--base-path "$HOME/masc-workspace"`로 실행하고 연결을 여러 개
-   선택할 수 있습니다. imp의 기본 모델과 대체 순서를 고르면 실제 응답·도구
-   검사를 거쳐 저장합니다. 내부 보조 lane은 기본 모델을 사용하므로 별도
-   모델 구독이 필요하지 않습니다.
-3. macOS에서는 [Docker Desktop 설치 안내](https://docs.docker.com/desktop/setup/install/mac-install/),
-   Linux에서는 [Docker Engine 설치 안내](https://docs.docker.com/engine/install/)를 따라 설치하고 시작합니다.
-   현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
+`masc`를 실행하세요. `MASC_BASE_PATH`를 export할 필요는 없습니다. 저장된 작업 공간이
+없으면 제안된 `~/MASC`를 Enter로 선택하거나 다른 경로를 고릅니다. 선택 후에만
+디렉터리를 만듭니다. 명시적인 `--base-path`와 기존 환경 설정은 저장된 기본값보다
+우선합니다.
+
+이어서 모델 연결과 sandbox를 선택합니다. 여러 모델과 대체 순서를 고를 수 있습니다.
+Claude Code나 Codex 연결 검사가 실패하면 공식 로그인 후 같은 선택으로 재시도합니다.
+선택한 모델 모두 실제 응답과 도구 호출 검사를 통과해야 저장됩니다.
+
+sandbox 화면에는 서비스 상태, 누락된 준비 사항과 고급 선택지가 표시됩니다.
+서비스가 실행 중이어도 이미지 준비와 imp 시작은 별도로 필요합니다. 새 backend의
+빠른 설정은 guest 명령의 인터넷 접근을 허용합니다. 기존 backend를 선택하면 설정된
+네트워크 정책을 보존하며 고급 설정에서 변경할 수 있습니다. guest 네트워크를 끄는
+설정은 sandbox 명령에 적용됩니다. 모델 연결과 WebFetch는 별도 서버 정책을 따릅니다.
 
 ```bash
-masc setup --base-path "$HOME/masc-workspace"
+masc setup                     # 모델 연결과 sandbox 선택 다시 열기
+masc doctor                    # 읽기 전용 준비 상태 보고
+masc sandbox-catalog           # 이 컴퓨터의 sandbox 선택지를 JSON으로 확인
 ```
 
-`setup`은 누락된 설정을 시드하고 Docker 확인, 기본 샌드박스 이미지 빌드,
-같은 작업 공간의 서버 시작·연결, `local-admin` 로그인, 기존 `imp` 시작을 거쳐
-TUI를 엽니다. Keeper 설정 파일은 보존합니다. 기본 `imp` 설정은
-`activation_mode = "manual"`, `sandbox_profile = "docker"`,
-`network_mode = "inherit"`입니다. 다른 작업 공간이 포트를 쓰고 있으면
-`--port 8936`처럼 빈 포트를 지정하세요. 종료할 때 setup이 직접 시작한 서버도
-종료합니다. 서버를 계속 실행하려면 `--no-tui`를 사용하고 별도로 접속하세요.
+준비 과정은 선택한 backend를 검증한 뒤 설정을 저장하고 같은 작업 공간의 서버를
+시작하거나 연결합니다. 로컬 운영자 인증을 만들고 imp를 시작합니다. 이후 `masc`는
+모델을 다시 선택하지 않고 저장된 imp 대화를 엽니다. 현재 서버와 실행 상태는 UI에서
+별도로 확인하며, 저장된 대화만으로 현재 인증이나 sandbox 사용 가능 여부를 판단하지 않습니다.
+
+자동화에서는 작업 공간과 선택값을 명시하세요.
+
+```bash
+masc setup --base-path "$HOME/masc-workspace" --no-tui \
+  --sandbox-profile docker --network-mode inherit
+```
+
+설정 화면을 나가도 준비된 서버는 계속 실행됩니다. 다른 작업 공간이 포트를 사용하면
+`--port 8936`처럼 다른 포트를 선택하세요. 현재 마법사 안에서는 로그인과 재시도 사이에
+모델 선택이 유지됩니다. Finish later는 반영된 설정을 보존하며, 검증하지 않은 선택은
+아직 저장되지 않습니다.
 
 TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세요.
 

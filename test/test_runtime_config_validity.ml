@@ -702,6 +702,58 @@ let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
             Printf.sprintf "%s: %s" runtime.id reason)
          (Runtime.keeper_dispatch_blocked runtimes))
 
+(* `runtime-default-set --setup-lanes` writes the runtime the install wizard
+   picked into the exact-output lanes' `slots`, and those admit against the
+   AGENT_CORE catalog, not against runtime.toml. A wizard choice with no target
+   row there leaves the mandatory lanes empty and the server refuses to boot,
+   which is what a fresh v0.35.2 install did on its own default (#35022). The
+   installer's own setup path already writes both halves together
+   (install-runtime-setup.py `render`); this holds the seed to the same pair. *)
+let seed_overlay_target_ids () =
+  let path =
+    Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml"
+  in
+  match Otoml.Parser.from_file_result path with
+  | Error msg -> failf "seed overlay should parse: %s" msg
+  | Ok toml ->
+    (match Otoml.find_opt toml (Otoml.get_array Fun.id) [ "targets" ] with
+     | None | Some [] -> fail "seed overlay should declare [[targets]]"
+     | Some targets ->
+       List.filter_map (fun target -> Otoml.find_opt target Otoml.get_string [ "id" ]) targets)
+;;
+
+let test_repo_seed_wizard_choices_have_an_exact_output_target () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime_toml.parse_file path with
+  | Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
+  | Ok (cfg : Runtime_schema.config) ->
+    let target_ids = seed_overlay_target_ids () in
+    let offered =
+      List.filter_map
+        (fun (provider : Runtime_schema.provider) ->
+           if not provider.enabled
+           then None
+           else (
+             match Runtime_wizard_inventory.binding_for_provider cfg provider with
+             (* A provider the wizard will not guess a binding for is not a
+                choice it can offer, so it owes no target. *)
+             | Error _ -> None
+             | Ok binding ->
+               (match provider.transport with
+                (* A CLI runtime reaches its lane through cli_slots, which are
+                   runtime ids, so the catalog never sees it. *)
+                | Runtime_schema.Cli _ -> None
+                | Runtime_schema.Http _ -> Some (Runtime_schema.binding_key binding))))
+        cfg.providers
+    in
+    check bool "the seed offers the wizard at least one HTTP runtime" true (offered <> []);
+    check
+      (list string)
+      "every runtime the wizard can pick has a seed overlay [[targets]] row"
+      []
+      (List.filter (fun runtime_id -> not (List.mem runtime_id target_ids)) offered)
+;;
+
 let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
   let rows =
@@ -5239,6 +5291,9 @@ let () =
         ; test_case
             "edit_config_text edits the file's own text and commits it"
             `Quick test_edit_config_text_reads_the_file_and_commits_the_edit
+        ; test_case
+            "every wizard choice has a seed exact-output target"
+            `Quick test_repo_seed_wizard_choices_have_an_exact_output_target
         ] )
     ; ( "lsp servers"
       , [ test_case "reads a command per language" `Quick test_lsp_servers_reads_a_command_per_language

@@ -77,5 +77,6 @@
   "task-after-verification.json": "e30190656cdc2df2125beec2d88a4aa2c3efe6e4123942c43418cb478c474091",
   "task.json": "fa9f2f29ac3790a6a0113314852b4090a16991cfb3e4b76f71ce44eef58ded16",
   "upgrade-observation-check.json": "0d085c2714949ecd3b875d421a652fbfb266698203d646229c68302a3076e5a9",
+  "verifier-binary-lookup-diagnostic.json": "230c77bcb4bcdd1b7933efb732158a45418cfce317155bdd70d64a8ffb44fa92",
   "vision-and-repeated-ask.json": "1ecfb7b0c8ac2adf0a02b3f91e0fe9c8b9447180c5db25eb1ec87aba4124c431"
 }

@@ -11,7 +11,7 @@ instructions = "Remember the user's context and ask before publishing."
 autoboot_enabled = %b
 proactive_enabled = %b
 sandbox_profile = "microvm"
-microvm_backend = "apple_container"
+microvm_backend = "docker"
 [keeper.tools]
 native = "read"
 |}

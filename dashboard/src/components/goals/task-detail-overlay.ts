@@ -109,7 +109,7 @@ function TaskEventsSection() {
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <span class="text-xs font-medium text-text-strong">${evt.label}</span>
                 ${evt.agent ? html`<span class="text-3xs text-accent-fg">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
               </div>
@@ -474,7 +474,7 @@ export function TaskDetailOverlay() {
       ` : null}
 
       ${'' /* Body */}
-      <div class="flex flex-col gap-5 p-6">
+      <div class="flex flex-col gap-5 p-6 [overflow-wrap:anywhere]">
         ${!showingActivity ? details.kind === 'loading'
           ? html`<${LoadingState}>작업 상세 불러오는 중...<//>`
           : details.kind === 'error'

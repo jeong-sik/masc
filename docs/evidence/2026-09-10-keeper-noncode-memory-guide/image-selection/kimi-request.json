@@ -1,0 +1,15 @@
+{
+  "isError": false,
+  "structuredContent": {
+    "operation_id": "kmsg-ceac33bade997261de37b919b7ba0e0a",
+    "state": "queued",
+    "queued_count": 1,
+    "existing": false
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"operation_id\":\"kmsg-ceac33bade997261de37b919b7ba0e0a\",\"state\":\"queued\",\"queued_count\":1,\"existing\":false}"
+    }
+  ]
+}

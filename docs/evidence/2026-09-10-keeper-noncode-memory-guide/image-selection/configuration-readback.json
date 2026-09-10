@@ -1,0 +1,5 @@
+{
+  "keeper": "memory-guide-proof",
+  "sandbox_image": "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64",
+  "runtime_assignment": "deepseek.deepseek-v4-pro"
+}

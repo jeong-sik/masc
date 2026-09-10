@@ -17,7 +17,7 @@ val keeper_bootstrap_retry_interval_sec : unit -> int
 val keeper_batch_limit : unit -> int
 val keeper_unified_temperature : unit -> float
 val keeper_status_fast_default : unit -> bool
-val keeper_enable_thinking : unit -> bool
+val keeper_enable_thinking : unit -> bool option
 val ensure_runtime_params_init : unit -> unit
 type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =

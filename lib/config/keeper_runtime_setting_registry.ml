@@ -266,7 +266,7 @@ let all =
       ~env_name:"MASC_KEEPER_ENABLE_THINKING"
       ~exposure:(Toml_and_env "turn.enable_thinking")
       ~value_kind:Boolean
-      ~default:"false"
+      ~default:"unset (provider default)"
       ~consumers:[ "Keeper_config.keeper_enable_thinking"; "Keeper_agent_run" ]
       ~category:"turn"
       "Pass the thinking-mode request to the selected runtime"

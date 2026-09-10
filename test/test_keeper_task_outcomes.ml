@@ -1090,22 +1090,24 @@ let test_done_rejects_malformed_notes () =
       | Tool_result.Completed () | Tool_result.Deferred () -> fail "malformed note was accepted"))
     [ `Null; `Int 7; `Bool false; `List [] ]
 
-(* task-540: an oversized artifact: evidence list must be refused at the
-   keeper_task_done boundary with the byte count and the note: escape hatch,
-   not submitted as a truncated prefix that stalls the completion authority.
-   A same-size list under the limit must still submit. *)
-let test_done_refuses_oversized_artifact_evidence () =
+(* Three complete rendered pages remain artifact evidence through real task_done
+   submission. The configured provider owns request admission, not a separate
+   aggregate submitter gate that encourages dropping image bytes into notes. *)
+let test_done_submits_three_rendered_pages () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       (* This scenario inspects real snapshots, so install the production
+          submission persistence hooks rather than the outcome-only stub. *)
+       Masc.Workspace_metric_hooks.install ();
        let config = Masc.Workspace.default_config base_path in
        let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        ignore
          (Masc.Workspace.add_task
             config
-            ~title:"Oversized evidence refusal"
+            ~title:"Three rendered pages"
             ~priority:2
             ~description:"");
        ignore
@@ -1125,9 +1127,6 @@ let test_done_refuses_oversized_artifact_evidence () =
         | Error error ->
           fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
        let meta = keeper_meta () in
-       (* Producer playground fixture: the artifact size check resolves
-          [artifact:<path>] against the agent's sandbox root, so the file
-          must exist there for the byte count to be measurable at all. *)
        let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
        Fs_compat.mkdir_p keepers_dir;
        Out_channel.with_open_text (Filename.concat keepers_dir (agent_name ^ ".toml"))
@@ -1148,7 +1147,7 @@ let test_done_refuses_oversized_artifact_evidence () =
        in
        mkdir_p producer_root;
        let run_done evidence =
-         Task.handle_keeper_task_tool
+         Task.handle_keeper_task_tool_with_outcome
            ~config
            ~meta
            ~name:"keeper_task_done"
@@ -1159,36 +1158,30 @@ let test_done_refuses_oversized_artifact_evidence () =
                ; "evidence_refs", `List evidence
                ])
        in
-       let expected_limit = 50 * 1024 in
-       let expected_total = expected_limit + 1 in
-       let big_artifact =
-         Filename.concat producer_root (Printf.sprintf "big-%d.txt" expected_total)
-       in
-       Out_channel.with_open_text big_artifact (fun oc ->
-         output_string oc (String.make expected_total 'x'));
-       let payload =
-         run_done
-           [ `String
-               (Printf.sprintf "artifact:big-%d.txt" expected_total)
-           ]
-       in
-       let json = Yojson.Safe.from_string payload in
-       check bool "oversized submit is not ok" false
-         (json |> U.member "ok" |> U.to_bool);
-       check bool "rejection names the measured total" true
-         (String_util.contains_substring
-            payload
-            (Printf.sprintf "artifact total size %d bytes" expected_total));
-       check bool "rejection names the limit" true
-         (String_util.contains_substring
-            payload
-            (Printf.sprintf "exceeds limit %d bytes" expected_limit));
-       check bool "rejection names the note: escape hatch" true
-         (String_util.contains_substring payload "use note:");
-       check bool "task stays claimed, not submitted" true
-         (match Masc.Workspace.get_tasks_raw config with
-          | [ { task_status = Masc_domain.Claimed _; _ } ] -> true
-          | _ -> false))
+       let png = Fs_compat.load_file "fixtures/verifier-images/page.png" in
+       let names = ["page1.png"; "page2.png"; "page3.png"] in
+       List.iter (fun name -> Fs_compat.save_file (Filename.concat producer_root name) png) names;
+       let refs = List.map (fun name -> `String ("artifact:" ^ name)) names in
+       let result = run_done refs in
+       (match result.Masc.Keeper_tool_execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () | Tool_result.Failed _ ->
+          fail ("three rendered pages were not submitted: " ^ result.raw_output));
+       let verification_id = match Masc.Workspace.get_tasks_raw config with
+         | [{ task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ }] -> verification_id
+         | _ -> fail "submission must await an independent verifier" in
+       let evidence = Workspace_verification_store.inspect_submitted_evidence_for_authority
+           ~base_path ~request_id:verification_id ~task_id:"task-001" ~task_worker:agent_name
+           ~authority:(Masc_domain.Human_operator { operator_id = "fixture" }) in
+       match evidence with
+       | Workspace_verification_store.Evidence_available { items; _ } ->
+         let images = List.filter_map (function
+           | Workspace_verification_store.Evidence_artifact_binary image -> Some image.reference
+           | _ -> None) items in
+         check (list string) "all three remain binary artifacts"
+           (List.map (fun name -> "artifact:" ^ name) names) images
+       | _ -> fail "submitted evidence unavailable")
+
 ;;
 
 (* Without an Eio fs context the workspace backend falls back to Memory
@@ -1371,8 +1364,8 @@ let () =
         ; test_case "default done submits for verification"
             `Quick test_default_done_is_terminal
         ; test_case
-            "done refuses oversized artifact evidence (task-540)"
-            `Quick test_done_refuses_oversized_artifact_evidence
+            "done submits three rendered pages"
+            `Quick test_done_submits_three_rendered_pages
         ; test_case
             "release frees the Keeper to claim different work"
             `Quick test_release_frees_the_keeper_to_claim_again

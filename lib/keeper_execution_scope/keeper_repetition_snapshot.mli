@@ -32,3 +32,7 @@ val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result
 (** Exact v1 codec shared with the session checkpoint projection. Invalid
     present data never becomes an empty or newly admitted scope. *)
+
+(** Restore one waiting invocation without replacing other scopes. Existing
+    conflicting observations are rejected; no history or effects are replayed. *)
+val restore_scope : scope:Keeper_execution_scope_id.t -> source:t -> target:t -> (t, error) result

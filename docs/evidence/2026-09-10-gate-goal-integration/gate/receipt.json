@@ -1,0 +1,26 @@
+{
+  "scope": "real durable Gate and same-operation continuation with synthetic provider; no semantic LLM acceptance",
+  "expected_commit": "0415aba5b2239db6344ce67e8b66749fde06c8c8",
+  "base_path": "/Users/dancer/.masc-integration/direct-gate-0415-1",
+  "port": 18945,
+  "binary_sha256": "d32cfcbda061d131784a6b8176b3b8d6cd1b397c45c6793b0eec86af206bd658",
+  "status": "verified",
+  "limitations": [
+    "synthetic provider, no semantic LLM acceptance",
+    "no attachment or channel-session input in this scenario",
+    "no server restart in this scenario",
+    "does not prove automatic recovery from unavailable Gate authority"
+  ],
+  "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb",
+  "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+  "waiting_input_sha256": "580a77ed1df79179d3e463688aed6ff9d8ca5ad09eb65870824aecc7b1384c86",
+  "checkpoint": {
+    "sha256": "67605a482bac6d17965ddeb6557ef56f98113a5bc118868ba68d394d22710414",
+    "trace_id": "trace-1788997657847-00000",
+    "turn_count": 1
+  },
+  "input_sha256": "580a77ed1df79179d3e463688aed6ff9d8ca5ad09eb65870824aecc7b1384c86",
+  "provider_requests": 4,
+  "effect_exists": true,
+  "effect_bytes": "one real gate effect\n"
+}

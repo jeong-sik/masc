@@ -9,5 +9,5 @@ additional_properties = false
 [[params]]
 name = "phase"
 type = "string"
-enum = ["executing", "verifying", "completed", "dropped"]
+enum = ["executing", "verifying", "awaiting_confirmation", "completed", "dropped"]
 description = "Optional explicit Goal lifecycle phase filter"

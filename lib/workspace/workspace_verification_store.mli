@@ -144,6 +144,9 @@ val scan_utf8 : string -> utf8_scan
     reader classifies its bytes with the same scan the store applies, rather
     than a second opinion ({#33816}, RFC-0436 §4.1). *)
 
+val binary_format_of_path : string -> string
+(** Canonical lowercase file extension without the leading dot. *)
+
 val image_media_type_of_binary_format : string -> string option
 (** Whether a binary artifact's [format] is an image a runtime accepts as
     attached input, and as which media type (RFC-0436 §4.3). The format
@@ -184,18 +187,6 @@ val snapshot_submitted_evidence_json :
     is set by the projection cap. Bare and absolute references are persisted as
     a payload-free typed invalid-reference item. *)
 
-val artifact_reference_size :
-  ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
-  base_path:string ->
-  worker:string ->
-  string ->
-  int option
-(** Real byte size of an artifact reference, measured on the same validated
-    descriptor the snapshot reads, without materializing content. [None] for
-    non-artifact references, invalid paths, and files that cannot be read —
-    the snapshot layer owns those failure shapes. Used by the
-    keeper_task_done boundary to refuse oversized evidence before it stalls
-    a completion authority (task-540). *)
 
 val submitted_evidence_identity_lines :
   Yojson.Safe.t -> (string list, string) result

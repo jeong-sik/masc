@@ -413,7 +413,13 @@ export interface LatencyBucket {
   count: number
 }
 
+export type RuntimeCostLedgerRead =
+  | { state: 'pending' }
+  | { state: 'available'; malformed_rows: number | null; schema_violation_rows: number | null; identity_conflict_rows: number | null }
+  | { state: 'unavailable'; detail: string | null }
+
 export interface DashboardRuntimeModelMetricsResponse {
+  cost_ledger_read?: RuntimeCostLedgerRead | null
   window_minutes?: number
   bucket_minutes?: number
   total_entries?: number
@@ -937,8 +943,21 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
 }
 
 function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelMetricsResponse | null {
-  if (!isRecord(raw)) return null
+  if (!isRecord(raw) || !Array.isArray(raw.models)) return null
+  const models = raw.models.map(decodeRuntimeModelMetric)
+  if (models.some(model => model === null)) return null
+  const ledger = isRecord(raw.cost_ledger_read) ? raw.cost_ledger_read : null
+  const costLedgerRead: RuntimeCostLedgerRead | null = ledger?.state === 'pending'
+    ? { state: 'pending' }
+    : ledger?.state === 'available'
+    ? { state: 'available', malformed_rows: asNumber(ledger.malformed_rows) ?? null,
+        schema_violation_rows: asNumber(ledger.schema_violation_rows) ?? null,
+        identity_conflict_rows: asNumber(ledger.identity_conflict_rows) ?? null }
+    : ledger?.state === 'unavailable'
+      ? { state: 'unavailable', detail: asNullableString(ledger.detail) }
+      : null
   return {
+    cost_ledger_read: costLedgerRead,
     window_minutes: asNumber(raw.window_minutes),
     bucket_minutes: asNumber(raw.bucket_minutes),
     total_entries: asNumber(raw.total_entries),
@@ -952,9 +971,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
             count: asNumber(b.n) ?? 0,
           }))
       : null,
-    models: asRecordArray(raw.models)
-      .map(metric => decodeRuntimeModelMetric(metric))
-      .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
+    models: models.filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
   }
 }
 

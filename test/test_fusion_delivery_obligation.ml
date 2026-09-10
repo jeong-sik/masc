@@ -82,6 +82,7 @@ let payload ?(prompt = "compare implementations") () : Obligation.accepted_paylo
   { keeper_name = "delta"
   ; submitted_by = "delta"
   ; prompt
+  ; source_context = None
   ; preset = "council"
   ; web_tools = false
   ; topology = Fusion_types.Judge_of_judges

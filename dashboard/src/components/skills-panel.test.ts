@@ -487,6 +487,25 @@ describe('labels', () => {
 })
 
 describe('SkillsPanel rejection observability', () => {
+  it('reads exact instructions directly from the catalog row without entering edit mode', async () => {
+    editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(readyPayload([intake], [instructionSurface(intake)])))
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null,
+    })
+    const source = '---\nname: work-intake\n---\nAsk for the missing evidence.\n'
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready', reference: reference(intake), snapshot_revision: 'snapshot-revision', source_text: source, access: 'read_only',
+    })
+    const view = render(html`<${SkillsPanel} />`)
+    const read = await view.findByRole('button', { name: 'Read instructions for work-intake' })
+    expect(editorApiMocks.readSkillSource).not.toHaveBeenCalled()
+    fireEvent.click(read)
+    await waitFor(() => expect(view.getByLabelText('Exact Skill source').textContent).toBe(source))
+    expect(read.getAttribute('aria-expanded')).toBe('true')
+    expect(view.queryByTestId('skill-source-editor')).toBeNull()
+    expect(editorApiMocks.saveSkillSource).not.toHaveBeenCalled()
+    expect(editorApiMocks.previewSkillSource).not.toHaveBeenCalled()
+  })
   it('renders typed rejection rows when no valid Skill exists', async () => {
     const rejection: SkillSnapshotRejection = {
       source_index: 0,

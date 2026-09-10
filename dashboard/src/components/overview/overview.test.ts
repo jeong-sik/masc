@@ -34,6 +34,11 @@ import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolu
 import type { Goal } from '../../types/core'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 
+vi.mock('../../api/dashboard-runtime', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api/dashboard-runtime')>(),
+  fetchRuntimeModelMetrics: async () => ({ models: [] }),
+}))
+
 const overviewMocks = vi.hoisted(() => ({
   scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
 }))

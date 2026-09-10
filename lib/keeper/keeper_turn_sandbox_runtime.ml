@@ -256,9 +256,13 @@ let create
   }
 ;;
 
-(* One container per keeper, not per turn: the name is stable, an already
+let resolve_image (t : t) =
+  (Env_config_sandbox.Runtime.resolve_image t.meta.sandbox_image).tag
+;;
+
+(* One container per keeper configuration, not per turn: the name is stable, an already
    running container is adopted instead of created (amortising the container
-   start and the image preflight to once per keeper), and turn cleanup leaves
+   start and image preflight across turns), and turn cleanup leaves
    it running. State accumulated inside the container between turns belongs
    to the same keeper. Teardown is [teardown_keeper_sandbox_by_name], which
    shutdown finalization runs after the registry unregister succeeds -- the
@@ -268,8 +272,11 @@ let create
    The network mode is part of the name because it is part of [docker run]:
    a keeper whose network config changed must not adopt a container wired to
    the old network. That orphan is collected by the keeper's teardown, which
-   lists by label rather than by name. *)
-let keeper_docker_container_name (t : t) =
+   lists by label rather than by name. The resolved image reference is also
+   part of the coordinate: a newly configured tag must not adopt the old
+   image. This distinguishes references, not mutations behind the same tag.
+   Existing turn runtimes keep their cached container until that turn ends. *)
+let docker_container_name_for_image (t : t) ~image =
   let net_suffix =
     match t.network_mode with
     | Network_none -> "none"
@@ -281,10 +288,15 @@ let keeper_docker_container_name (t : t) =
     | Network_policy -> "policy"
   in
   Printf.sprintf
-    "masc-keeper-docker-%s-%s-%s"
+    "masc-keeper-docker-%s-%s-%s-%s"
     (Workspace_utils.safe_filename t.meta.name)
     net_suffix
     (String.sub (Keeper_sandbox_runtime.base_path_hash t.config.base_path) 0 8)
+    (Digestif.SHA256.(digest_string image |> to_hex))
+;;
+
+let keeper_docker_container_name t =
+  docker_container_name_for_image t ~image:(resolve_image t)
 ;;
 
 module For_testing = struct
@@ -730,10 +742,6 @@ let failed_exec_state_probe_error ~status ~output detail =
     (Keeper_sandbox_exec_failure.status_label status)
     (Keeper_sandbox_runtime.docker_failure_output_for_log output)
     detail
-;;
-
-let resolve_image (t : t) =
-  (Env_config_sandbox.Runtime.resolve_image t.meta.sandbox_image).tag
 ;;
 
 (* A microvm guest mounts its work volume, the shim, runtime config, and its
@@ -1511,7 +1519,8 @@ let start_container ?timeout_sec (t : t) =
   if is_microvm t
   then start_microvm_container ?timeout_sec t
   else
-  let container_name = keeper_docker_container_name t in
+  let image = resolve_image t in
+  let container_name = docker_container_name_for_image t ~image in
   let probe_state () =
     Keeper_sandbox_runtime.probe_container_state_optional
       ~container_name
@@ -1538,7 +1547,6 @@ let start_container ?timeout_sec (t : t) =
   (* Creation is the only path that needs the image, the runtime hardening
      args, and the projections; adoption amortises all of it. *)
   let create () =
-    let image = resolve_image t in
     if String.trim image = ""
     then Error "keeper sandbox docker image is not configured"
     else (

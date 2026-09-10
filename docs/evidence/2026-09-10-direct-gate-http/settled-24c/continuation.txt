@@ -1,0 +1,4 @@
+[2026-09-10 08:08:07] [INFO] [Keeper/direct-gate-http-proof] hitl resolution committed approval=appr_01a0886d-ba8a-7000-977d-2bee99e89d63 signal=signaled phase=running
+[2026-09-10 08:08:08] [INFO] [Keeper] gate replay approval=appr_01a0886d-ba8a-7000-977d-2bee99e89d63 applied operation=tool_execute journal=recorded output_bytes=655 output_sha256=64956a6e4b4c6c404a8c10bd8c213f352887437438f74b85d69621d2ab564462
+[2026-09-10 08:08:08] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0886d-ba8a-7000-977d-2bee99e89d63
+[2026-09-10 08:08:09] [INFO] [Keeper] turn entry: acknowledged spent Gate grant replay without a turn keeper=direct-gate-http-proof

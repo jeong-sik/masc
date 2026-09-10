@@ -5,9 +5,11 @@ type tool_ref = {
   args_fragments : string list;
 }
 
+type content_channel = Public_text | Provider_reasoning
+
 type block_state =
   | Active_tool of tool_ref
-  | Occupied_non_tool_block
+  | Occupied_non_tool_block of content_channel option
   | Invalid_tool_block of
       { failed_tool_call_id : string option
       ; quarantined_occurrence : Keeper_chat_events.tool_stream_occurrence option
@@ -139,9 +141,10 @@ let remove_block bridge_state index =
     blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index
   }
 
-let occupy_non_tool_index bridge_state index =
+let occupy_non_tool_index ?channel bridge_state index =
   match stream_block_for_index bridge_state index with
-  | None -> replace_block bridge_state index Occupied_non_tool_block
+  | None | Some (Occupied_non_tool_block None) ->
+      replace_block bridge_state index (Occupied_non_tool_block channel)
   | Some _ -> bridge_state
 
 let tool_start_is_replay existing tool =
@@ -170,7 +173,7 @@ let occurrence_is_quarantined state occurrence =
           | Invalid_tool_block { quarantined_occurrence = Some recorded; _ } ->
             same_occurrence recorded occurrence
           | Active_tool _
-          | Occupied_non_tool_block
+          | Occupied_non_tool_block _
           | Invalid_tool_block { quarantined_occurrence = None; _ }
           | Invalid_media_block
           | Active_media _ -> false)
@@ -195,7 +198,7 @@ let first_quarantine_kind state occurrence =
              }
            when same_occurrence recorded occurrence -> Some kind
          | Active_tool _
-         | Occupied_non_tool_block
+         | Occupied_non_tool_block _
          | Invalid_tool_block _
          | Invalid_media_block
          | Active_media _ -> None)
@@ -278,7 +281,7 @@ let tools_in_current_scope state =
     |> List.filter_map (fun (_, block) ->
       match block with
       | Active_tool tool -> Some tool
-      | Occupied_non_tool_block
+      | Occupied_non_tool_block _
       | Invalid_tool_block _
       | Active_media _
       | Invalid_media_block -> None)
@@ -324,7 +327,7 @@ let poison_scope state ~kind ~reason =
                ; quarantined_occurrence = Some tool.occurrence
                ; quarantine_kind = Some kind
                } )
-         | Occupied_non_tool_block
+         | Occupied_non_tool_block _
          | Invalid_tool_block _
          | Active_media _
          | Invalid_media_block -> index, block)
@@ -410,7 +413,7 @@ let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
               Keeper_chat_events.Tool_delta_invalid_kind
           ]
       }
-  | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) -> None
+  | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) -> None
   | None ->
     let occurrence : Keeper_chat_events.tool_stream_occurrence =
       { stream_scope
@@ -497,7 +500,7 @@ let close_open_content_blocks ~redact_text ~base_dir state =
          }
        | Active_media { media_type; source_type; chunks; encoded_bytes } ->
          { bridge_state =
-             replace_block bridge_state index Occupied_non_tool_block
+             replace_block bridge_state index (Occupied_non_tool_block None)
          ; chat_events =
              chat_events
              @ finalize_media_block
@@ -505,7 +508,7 @@ let close_open_content_blocks ~redact_text ~base_dir state =
                  ~redact_text ~base_dir ~index ~media_type ~source_type
                  ~chunks ~encoded_bytes
          }
-       | Occupied_non_tool_block
+       | Occupied_non_tool_block _
        | Invalid_tool_block _
        | Invalid_media_block ->
          { bridge_state = replace_block bridge_state index block; chat_events })
@@ -563,7 +566,7 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
               ~reason:"tool argument event arrived after invalid tool block start"
               Tool_args_without_start ]
       }
-  | Some Occupied_non_tool_block ->
+  | Some (Occupied_non_tool_block _) ->
       { bridge_state
       ; chat_events =
           [ protocol_error ~index
@@ -662,6 +665,27 @@ let reject_quarantined_content_event ~stream_scope state
      | None -> None)
 ;;
 
+let declared_channel = function
+  | "text" -> Some Public_text
+  | "thinking" | "reasoning" | "reasoning_details" | "redacted_thinking" -> Some Provider_reasoning
+  | _ -> None
+
+let event_channel_conflicts state = function
+  | Agent_core.Types.ContentBlockDelta {index; delta} ->
+    let incoming = match delta with
+      | Agent_core.Types.TextDelta _ | TextSnapshot _ -> Some Public_text
+      | ThinkingDelta _ | ReasoningDetailsDelta _ | RedactedThinkingSnapshot _
+      | ThinkingSignatureDelta _ -> Some Provider_reasoning
+      | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None in
+    (match stream_block_for_index state index, incoming with
+     | Some (Occupied_non_tool_block (Some expected)), Some actual -> expected <> actual
+     | _ -> false)
+  | Agent_core.Types.ContentBlockStart {index; content_type; _} ->
+    (match stream_block_for_index state index, declared_channel content_type with
+     | Some (Occupied_non_tool_block (Some expected)), Some actual -> expected <> actual
+     | _ -> false)
+  | _ -> false
+
 let translate ~redact_text ~base_dir ~stream_scope bridge_state
     (evt : Agent_core.Types.sse_event) =
   let open Agent_core.Types in
@@ -677,6 +701,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
     poison_scope bridge_state ~kind:Keeper_chat_events.Stream_event_after_terminal
       ~reason:"content event arrived after the provider content became terminal"
   | None, Some rejected -> rejected
+  | None, None when event_channel_conflicts bridge_state evt ->
+      poison_scope bridge_state ~kind:Keeper_chat_events.Sse_parse_failed
+        ~reason:"content delta or header conflicts with the declared block channel"
   | None, None ->
   match evt with
   | Connected ->
@@ -773,7 +800,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       with
       | Some rejected -> rejected
       | None ->
-        let bridge_state = occupy_non_tool_index bridge_state index in
+        let bridge_state = occupy_non_tool_index ~channel:Public_text bridge_state index in
         { bridge_state =
             { bridge_state with
               current_message_has_text =
@@ -788,7 +815,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events =
              [ Agent_core_thinking_delta { index; delta = redact_text text } ]
          })
@@ -803,7 +830,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         let bridge_state = occupy_non_tool_index bridge_state index in
+         let bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
          let text =
            Agent_core.Types.reasoning_details_text ~reasoning_content ~details
          in
@@ -820,7 +847,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        | None ->
          (* Canonical history owns the opaque carrier; there is no new visible
             text or signature to publish on the chat surface. *)
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events = []
          })
   | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
@@ -830,7 +857,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        with
        | Some rejected -> rejected
        | None ->
-         { bridge_state = occupy_non_tool_index bridge_state index
+         { bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index
          ; chat_events =
              [ Agent_core_thinking_signature_delta
                  { index; signature_bytes = String.length signature }
@@ -870,7 +897,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                    ~reason:"media delta metadata changed for active media block"
                    Media_delta_invalid_block ]
            }
-       | Some Occupied_non_tool_block ->
+       | Some (Occupied_non_tool_block _) ->
          { bridge_state
          ; chat_events =
              [ protocol_error ~index
@@ -952,7 +979,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                         tname)
                    Tool_start_duplicate_index ]
            }
-       | Some Occupied_non_tool_block ->
+       | Some (Occupied_non_tool_block _) ->
          { bridge_state =
              invalidate_block
                ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
@@ -1048,7 +1075,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                  { failed_tool_call_id; quarantined_occurrence; _ }) ->
              invalidate ?quarantined_occurrence
                ?tool_call_id:failed_tool_call_id ()
-           | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+           | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
              invalidate ()
            | None ->
              let occurrence =
@@ -1084,7 +1111,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               (Invalid_tool_block
                 { failed_tool_call_id; quarantined_occurrence; _ }) ->
             quarantined_occurrence, failed_tool_call_id
-          | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+          | Some (Occupied_non_tool_block _ | Active_media _ | Invalid_media_block) ->
             None, incoming_tool_call_id
           | None ->
             (match finalized_tool_for_occurrence bridge_state occurrence with
@@ -1130,7 +1157,11 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          conflict ?quarantined_occurrence
            ?tool_call_id:failed_tool_call_id
            "non-tool content block header reused an invalid index"
-       | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+       | Some (Occupied_non_tool_block None) ->
+         { bridge_state = replace_block bridge_state index
+             (Occupied_non_tool_block (declared_channel content_type))
+         ; chat_events = [ block_start ] }
+       | Some (Occupied_non_tool_block (Some _) | Active_media _ | Invalid_media_block) ->
          { bridge_state; chat_events = [ block_start ] }
        | None ->
          let occurrence =
@@ -1146,7 +1177,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
             then { bridge_state; chat_events = [ block_start ] }
             else
               { bridge_state =
-                  replace_block bridge_state index Occupied_non_tool_block
+                  replace_block bridge_state index (Occupied_non_tool_block (declared_channel content_type))
               ; chat_events = [ block_start ]
               }))
   | ContentBlockDelta { index; delta = InputJsonDelta args } ->
@@ -1170,7 +1201,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                   }
               ]
           }
-      | Some Occupied_non_tool_block ->
+      | Some (Occupied_non_tool_block _) ->
         { bridge_state; chat_events = [ block_stop ] }
       | Some
           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
@@ -1191,7 +1222,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              persist to the media store, and emit the reader-facing URL (not a
              byte count). *)
           { bridge_state =
-              replace_block bridge_state index Occupied_non_tool_block
+              replace_block bridge_state index (Occupied_non_tool_block None)
           ; chat_events =
               block_stop
               :: finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes

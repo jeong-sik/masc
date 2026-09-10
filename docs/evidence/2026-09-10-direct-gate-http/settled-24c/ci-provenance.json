@@ -1,0 +1,35 @@
+{
+  "run_id": 34414355454,
+  "head_sha": "24c00e3536d940113a0be47b051673b62e6715fc",
+  "artifact": {
+    "id": 10128768952,
+    "node_id": "MDg6QXJ0aWZhY3QxMDEyODc2ODk1Mg==",
+    "name": "runtime-probe-macos-arm64-24c00e3536d940113a0be47b051673b62e6715fc-attempt-1",
+    "size_in_bytes": 49569387,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10128768952",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10128768952/zip",
+    "expired": false,
+    "digest": "sha256:5cdd27979458f82a97575c5eedcf58ca441e9b3c7a23ecc9a2b244d61c62e32a",
+    "created_at": "2026-09-09T23:03:36Z",
+    "updated_at": "2026-09-09T23:03:36Z",
+    "expires_at": "2026-09-16T23:03:30Z",
+    "workflow_run": {
+      "id": 34414355454,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "fix/direct-gate-unresolved-binding",
+      "head_sha": "24c00e3536d940113a0be47b051673b62e6715fc"
+    }
+  },
+  "manifest": {
+    "commit": "24c00e3536d940113a0be47b051673b62e6715fc",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "f9e8afd794f310a8528d87c04ca4bff0c3ea8039e0c15705b5a352dacd1c3cad",
+      "masc_tui.exe": "8d79eb32cda1a2fe43361813af76bcfe56b0dfed7f8f5ec9a8db9e84faf878c4",
+      "masc_browser_host.exe": "692599b1d2d7666b51f4f036acb8bb5c31daaf0ca51da185013b7218ab0498a3"
+    }
+  }
+}

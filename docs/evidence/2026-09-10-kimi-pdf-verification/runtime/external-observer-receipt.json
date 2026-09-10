@@ -1,0 +1,17 @@
+{
+  "status": "observed",
+  "semantic_verdict": "approved",
+  "verification_id": "vrf-e98a49e8b919f2e8d0b3b7d180861d83",
+  "operation_id": "kmsg-d88421644c25a0079fceb3f3b3e0cd0c",
+  "operation_observation_file": "http-411.json",
+  "criteria": [
+    "PDF 정확히 3페이지",
+    "본문과 흐름도 모든 한글이 누락 glyph 없이 읽힘",
+    "텍스트 겹침과 잘림 없음",
+    "synthetic 예시와 실제 검증의 구분 유지"
+  ],
+  "observer_correction": "Original harness assumed ref order. Contract canonicalized same six artifact refs; exact multiset, all image bytes, Task, committed verdict and runtime terminal joined independently. No model rerun.",
+  "verifier_reason": "제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수행으로 표기, 권장 결론을 보류로 유지해 저장된 주장과 검증된 사실을 구분. 참고: live lookup 도구는 live_lookup이 존재한다고 명시한 경로들을 모두 'No such file or directory'로 읽지 못해 런타임 실패 상태였으나, 이는 조회 표면의 오류이며 제출 시점 스냅샷 증거만으로 계약이 충족됨.",
+  "server_pid": 22068,
+  "cleanup_basis": "Primary Task done, authenticated observed operation Succeeded, exact verifier registry approved and committed event joined before SIGTERM."
+}

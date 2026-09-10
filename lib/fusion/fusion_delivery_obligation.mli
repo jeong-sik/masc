@@ -11,6 +11,7 @@ type accepted_payload =
   { keeper_name : string
   ; submitted_by : string
   ; prompt : string
+  ; source_context : Fusion_request_context.t option
   ; preset : string
   ; web_tools : bool
   ; topology : Fusion_types.fusion_topology

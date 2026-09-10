@@ -187,7 +187,7 @@ let with_ws name fn =
                  ~finally:(fun () ->
                    Atomic.set Workspace_hooks.verification_submitted_fn submitted)
                  (fun () ->
-                   fn ~clock ~config ~meta ~publication_recovery
+                   fn ~sw ~net:(Eio.Stdenv.net env) ~clock ~config ~meta ~publication_recovery
                      ~ctx_work:(make_ctx ())))))
 
 let outcome_label = function
@@ -296,7 +296,7 @@ let check_submitted_evidence config verification_id expected =
 (* Test A — non-owner completion is denied (RFC-0262 axis-2 ownership gate). *)
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
-    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"foreign-owned task" ~priority:1
@@ -349,7 +349,7 @@ let test_completion_denied_for_non_owner () =
 (* Test B — completion of an unclaimed (Todo) task is denied. *)
 let test_completion_denied_when_unclaimed () =
   with_ws "completion_trust_unclaimed"
-    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"never claimed" ~priority:1
@@ -385,7 +385,7 @@ let test_completion_denied_when_unclaimed () =
 (* Local note length and evidence shape never decide completion. *)
 let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
-    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
@@ -419,9 +419,99 @@ let test_short_notes_without_evidence_follow_llm_approval () =
     | None -> fail "task-001 missing after completion")
 
 
+(* Synthetic provider receipt, not a visual-quality verdict: real task dispatch
+   and the authority daemon must deliver the persisted rendering through the
+   production OpenAI-compatible HTTP encoder. *)
+let test_rendered_image_reaches_verifier_http_request () =
+  with_ws "completion_rendered_image"
+    (fun ~sw ~net ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+      let png_base64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+      in
+      let png = Base64.decode_exn png_base64 in
+      let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      let source = Filename.concat root "render.PNG" in
+      Fs_compat.save_file source png;
+      let captured = ref None in
+      let socket = Eio.Net.listen net ~sw ~backlog:1
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+      let port = match Eio.Net.listening_addr socket with
+        | `Tcp (_, port) -> port | _ -> fail "fixture requires TCP" in
+      let server = Cohttp_eio.Server.make ~callback:(fun _ _ body ->
+        captured := Some (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all)
+                          |> Yojson.Safe.from_string);
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~body:{|{"id":"fixture","object":"chat.completion","model":"fixture-vision","choices":[{"index":0,"message":{"role":"assistant","content":"received"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}|} ()) () in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        Cohttp_eio.Server.run socket server ~on_error:raise);
+      let previous = Atomic.get AR.run_llm_reviewer_fn in
+      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+          ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+          ~on_runtime_attempt_error:_ () =
+        match goal_blocks with
+        | None -> Error (Agent_core.Error.Internal "rendering missing from verifier input")
+        | Some blocks ->
+          (* Replacing the producer file cannot alter the submitted evidence. *)
+          Fs_compat.save_file source "changed after submission";
+          let provider = Llm_provider.Provider_config.make
+              ~kind:Llm_provider.Provider_config.OpenAI_compat
+              ~model_id:"fixture-vision"
+              ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+              ~request_path:"/v1/chat/completions"
+              ~model_capabilities_override:
+                { Llm_provider.Capabilities.openai_compat_chat_capabilities with
+                  supports_image_input = true }
+              () in
+          (match Llm_provider.Complete.complete ~sw ~net ~config:provider
+                   ~messages:[Agent_core.Types.user_msg_blocks blocks] () with
+           | Ok _ -> Ok (Some (AR.Approve "synthetic image delivery receipt only"))
+           | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed"))
+      in
+      Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous)
+        (fun () ->
+          Atomic.set AR.run_llm_reviewer_fn http_reviewer;
+          ignore (Workspace.add_task config ~title:"rendered image evidence"
+            ~priority:1 ~description:"Verify attachment transport, not image semantics");
+          ignore (claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
+            ~task_id:"task-001");
+          let result = attempt_done ~config ~meta ~publication_recovery ~ctx_work
+              ~task_id:"task-001" ~result:"Rendered fixture attached"
+              ~evidence_refs:["artifact:render.PNG"] () in
+          check string "real submission accepted" "success"
+            (outcome_label result.KTE.disposition);
+          (match await_authority_verdict ~clock config "task-001" with
+           | Some { task_status = Masc_domain.Done _; _ } -> ()
+           | _ -> fail "synthetic provider receipt did not commit");
+          let request = match !captured with
+            | Some request -> request | None -> fail "no provider HTTP request" in
+          let open Yojson.Safe.Util in
+          let parts = request |> member "messages" |> to_list
+            |> List.concat_map (fun message -> match member "content" message with
+                 | `List parts -> parts | _ -> []) in
+          let images = List.filter (fun part -> member "type" part = `String "image_url") parts in
+          check int "one actual attached image" 1 (List.length images);
+          check string "exact PNG bytes and MIME reached HTTP provider"
+            ("data:image/png;base64," ^ png_base64)
+            (List.hd images |> member "image_url" |> member "url" |> to_string);
+          let body_path = Filename.concat (Workspace.masc_root_dir config)
+              ("evidence/" ^ single_submission () ^ "/0.bin") in
+          check string "immutable snapshot body" png (Fs_compat.load_file body_path);
+          check string "producer file changed independently" "changed after submission"
+            (Fs_compat.load_file source);
+          let module Store = Workspace_verification_store in
+          Fs_compat.save_file source
+            (png ^ String.make Store.verification_evidence_max_bytes 'x');
+          let oversized = Store.snapshot_submitted_evidence_json
+              ~request_id:"vrf-oversized-image" ~base_path:config.base_path
+              ~worker:meta.name ["artifact:render.PNG"] in
+          let oversized_item = oversized |> to_list |> List.hd in
+          check string "partial host image is explicitly unreadable"
+            "artifact_unreadable" (oversized_item |> member "kind" |> to_string)))
+
+
 let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs"
-    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict (AR.Approve "");
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
@@ -464,7 +554,7 @@ let test_completion_with_evidence_refs_succeeds () =
    submits changed evidence through the same tool dispatch. *)
 let test_rejection_delivery_then_changed_submission_completes () =
   with_ws "completion_llm_reject_then_approve"
-    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.add_task config ~title:"Reviewed completion" ~priority:1
       ~description:"completion follows the evaluator verdict");
     let claim = claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work
@@ -545,7 +635,7 @@ let test_rejection_delivery_then_changed_submission_completes () =
    what must never happen is the task reaching Done without one. *)
 let test_unavailable_evaluator_keeps_task_active () =
   with_ws "completion_llm_unavailable"
-    (fun ~clock ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"unavailable evaluator" ~priority:1
@@ -598,7 +688,7 @@ let test_unavailable_evaluator_keeps_task_active () =
    accepted on the same dispatch path. *)
 let test_legitimate_claim_succeeds () =
   with_ws "completion_trust_positive_claim"
-    (fun ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
+    (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
     ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"claimable task" ~priority:1
@@ -634,6 +724,8 @@ let () =
             test_completion_denied_when_unclaimed
         ; test_case "short notes reach committed controlled approval"
             `Quick test_short_notes_without_evidence_follow_llm_approval
+        ; test_case "rendered image submission reaches verifier HTTP request"
+            `Quick test_rendered_image_reaches_verifier_http_request
         ; test_case "submitted evidence reaches committed controlled approval"
             `Quick test_completion_with_evidence_refs_succeeds
         ; test_case "delivered rejection, changed resubmission, committed approval"

@@ -1,0 +1,52 @@
+{
+  "scope": "read-only Docker bind-mount visibility check, no server/verifier/model invocation",
+  "argv": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--read-only",
+    "--mount",
+    "type=bind,source=/Users/dancer/.masc-integration/pdf-lookup-visible-probe,target=/home/keeper/playground/pdf-proof-producer,readonly",
+    "--entrypoint",
+    "sha256sum",
+    "masc-sandbox:general",
+    "/home/keeper/playground/pdf-proof-producer/memory_proposal_guide.pdf",
+    "/home/keeper/playground/pdf-proof-producer/verify_summary.txt",
+    "/home/keeper/playground/pdf-proof-producer/renders/page1.png",
+    "/home/keeper/playground/pdf-proof-producer/renders/page2.png",
+    "/home/keeper/playground/pdf-proof-producer/renders/page3.png"
+  ],
+  "exit_code": 0,
+  "stdout": "bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86  /home/keeper/playground/pdf-proof-producer/memory_proposal_guide.pdf\n25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1  /home/keeper/playground/pdf-proof-producer/verify_summary.txt\ncb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af  /home/keeper/playground/pdf-proof-producer/renders/page1.png\nb4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2  /home/keeper/playground/pdf-proof-producer/renders/page2.png\n38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d  /home/keeper/playground/pdf-proof-producer/renders/page3.png\n",
+  "stderr": "",
+  "source_files": [
+    {
+      "relative": "memory_proposal_guide.pdf",
+      "bytes": 136937,
+      "sha256": "bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86"
+    },
+    {
+      "relative": "verify_summary.txt",
+      "bytes": 6115,
+      "sha256": "25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1"
+    },
+    {
+      "relative": "renders/page1.png",
+      "bytes": 166776,
+      "sha256": "cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af"
+    },
+    {
+      "relative": "renders/page2.png",
+      "bytes": 190109,
+      "sha256": "b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2"
+    },
+    {
+      "relative": "renders/page3.png",
+      "bytes": 134793,
+      "sha256": "38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d"
+    }
+  ],
+  "same_as_actual_pdf_review": true
+}

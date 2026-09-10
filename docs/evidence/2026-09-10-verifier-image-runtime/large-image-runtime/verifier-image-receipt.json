@@ -1,0 +1,11 @@
+{
+  "runtime": "image_fixture.vision",
+  "model": "image-verifier",
+  "supports_image_input": true,
+  "received_count": 3,
+  "sha256": [
+    "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+    "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+    "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0"
+  ]
+}

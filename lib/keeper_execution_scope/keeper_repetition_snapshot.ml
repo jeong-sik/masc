@@ -136,3 +136,11 @@ let equal a b =
        && Option.equal String.equal a.input_fingerprint b.input_fingerprint
        && Option.equal String.equal a.output_fingerprint b.output_fingerprint))
        a.scopes b.scopes
+
+let restore_scope ~scope ~source ~target =
+  match Scopes.find_opt scope source.scopes with
+  | None -> Error (Unknown_scope scope)
+  | Some observations ->
+    match Scopes.find_opt scope target.scopes with
+    | Some current when current <> observations -> Error Restore_target_conflict
+    | Some _ | None -> Ok {active=Some scope; scopes=Scopes.add scope observations target.scopes}

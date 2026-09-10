@@ -1,0 +1,48 @@
+{
+  "started_at": "2026-09-09T20:00:23.484706+00:00",
+  "status": "passed",
+  "checks": [
+    "expected_binary_commit",
+    "exact_independent_readback",
+    "idempotent_publication_and_inventory"
+  ],
+  "write_attempted": true,
+  "semantic_verification": "not_performed",
+  "keeper_reuse": "not_measured",
+  "build": {
+    "release_version": "0.35.2",
+    "binary_version": "0.35.2",
+    "repo_version": "0.35.2",
+    "commit": "c08357ea1f78f1a04564cc96dbd2f38eb8c4e857",
+    "commit_source": "embedded",
+    "binary_commit": "c08357ea1f78f1a04564cc96dbd2f38eb8c4e857",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "78aac0493a966a3ef5dee3c7aecb973e7ea0d4ed2d3d07d3036076dcc0005452",
+    "binary_commit_unix_ts": 1788982991.0,
+    "binary_commit_age_seconds": 1032,
+    "repo_head_commit": "36b78fd092",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788983672.0,
+    "repo_head_commit_age_seconds": 351,
+    "executable_path": "/private/tmp/masc-memory-candidate-probe-c083/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-memory-candidate-probe-c083",
+    "repo_root": "/private/tmp/masc-workspace-memory-roundtrip",
+    "runtime_instance_id": "01a087c1-92f0-7000-bdf9-840e0758122f",
+    "started_at": "2026-09-09T20:00:05Z",
+    "uptime_seconds": 18
+  },
+  "paths": {
+    "effective_base_path": "/private/tmp/masc-memory-roundtrip-c083",
+    "effective_masc_root": "/private/tmp/masc-memory-roundtrip-c083/.masc"
+  },
+  "proposal_bytes_sha256": "871f379a131b95c5d80a154523b83639910814fead20bc358685234a17570f05",
+  "write_intent": {
+    "request": "repeated-post-response",
+    "path": "/api/v1/dashboard/workspace-memory-proposals",
+    "body_sha256": "d0420c0c2fbcca66a97f27d2152351dc9544e288601ea21962b7235e8ec3395f",
+    "outcome": "response_recorded"
+  },
+  "proposal_id": "d0420c0c2fbcca66a97f27d2152351dc9544e288601ea21962b7235e8ec3395f",
+  "finished_at": "2026-09-09T20:00:23.521685+00:00"
+}

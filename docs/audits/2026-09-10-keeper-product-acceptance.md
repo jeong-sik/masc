@@ -47,15 +47,113 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
   Exact evidence disclosure, retry, empty state and mobile overflow were checked.
   Its running-server integration and Keeper reuse are not yet demonstrated.
 
+## Delivery update at 2026-09-09T19:32Z
+
+- #34939, #34940 and #34941 are now merged. #34941's exact source
+  `790323dccdb291fa13390acf1f1f43408efd7ac3` passed CI and its six
+  proposal-storage scenarios in run 34393840993. #34940's publication CLI
+  passed all twelve scenarios with its declared jsonschema dependency.
+- The isolated CI-built runtime exposed 1,710 sources from 23 copied snapshots
+  across 18 Keeper identities. Production remains a separate deployment; this
+  does not establish that its context/proposal endpoints are available.
+- The full single-request input measured 518,293 native tokenizer tokens against
+  a loaded context of 262,144. The Keeper-group pass is now receiving its first
+  group's stream; final synthesis, semantic assessment and publication remain
+  open. See [aggregate evidence](../evidence/2026-09-10-workspace-memory-pass/README.md).
+- #34943 Keeper retrieval is still open. The TUI exhaustive-match failure was
+  repaired and the rebased source is undergoing CI. Overview statistics are
+  implemented in a separate worktree; review found a pending-cache loading issue
+  that is being repaired before browser verification.
+
+## Verified update at 2026-09-09T22:27Z
+
+- #34960, #34963, #34967, #34972 and #34974 are merged. The isolated
+  17b9 candidate includes Edit result persistence, image configuration and image
+  adoption. It does not include the later thinking-presence or Gate continuation
+  work, and it is not the production deployment.
+- The actual Keeper selected the configured creative image while its old
+  container remained running. ReportLab, CairoSVG, Nanum and Poppler were
+  independently observed. PyMuPDF and pypdf are absent; an inaccurate operator
+  instruction was corrected. The PDF remains the rejected 15,691-byte file
+  with SHA256 `3b7534e691b1a8cb53b9049a9d931e5a5c8fa37466f62d836aea492d26829e0e`.
+  See [image adoption](../evidence/2026-09-10-image-adoption/README.md).
+- The real Keeper Edit returned success and a durable manifest with both
+  historical snapshots; all three hashes/lengths were checked. Evidence is
+  submitted in #34977. This is not yet the corresponding live chat diff or LSP proof.
+- #34972 has CI-built browser evidence for the actual IDE heartbeat panel with
+  synthetic inputs, including four states and a 390px viewport. It removes
+  unsupported saved/conflict claims; it does not establish memo persistence or
+  full IDE behavior. See [browser evidence](../evidence/2026-09-10-ide-heartbeat/README.md).
+- Goal creation already requires nonblank metric and target fields. Actual
+  isolated MCP accepted a declared criterion, rejected a missing target, and
+  returned only the accepted Goal with its original criterion revision.
+  Completion proof is wired; creation feasibility and human final confirmation
+  remain separate. #34976 is open and has failed compilation/type checks under
+  repair; no completed human-confirmation runtime is claimed.
+- Fusion already persists deliberation results to Board/chat and exposes runs.
+  Missing behavior is work attribution and the Keeper's adopted/rejected choice
+  with reasons, rather than absence of result storage. A separate implementation
+  is in progress; no autonomous decision-use proof exists yet.
+- The local whole-corpus process was still live when polled. Its first group
+  reported 72,047 chunks, 215,838 thinking characters and zero content characters
+  at 22:23:47Z. There is no completed whole-corpus synthesis to accept. The live
+  process was not restarted because of elapsed time or slow output.
+
+## Measured continuation at 2026-09-09T23:05Z
+
+- The same whole-corpus process handle remained live. Its first Keeper group
+  finished at 22:33:59Z with 75,340 chunks, 4,562 content characters and
+  219,399 thinking characters. The 4,563-byte result has SHA-256
+  `09438670ab80d991bab0cc8a9b80efc869a45401c875d312767dba13e01a6b83`;
+  its parsed structure contains two shared claims, one excluded source and no
+  conflicts. These are structural observations, not semantic acceptance.
+  The second group was receiving at 23:05:33Z; one of eighteen groups had
+  completed. No whole-workspace synthesis or publication is claimed.
+- The isolated PDF Keeper's previous operation was independently read as
+  `Succeeded`, but its script still used `re.search` without importing `re`.
+  Script SHA-256 was
+  `b13c313f35c6d92ca0a4505defdcb22f23e8988f6b96767d919b816d8b639feb`.
+  A correction request was admitted as
+  `kmsg-e4bbdde95378d90cc8d90f8e459d32e3`; admission is not a repaired PDF.
+- #34980 contains twelve completed operator-initiated Kimi turns and actual
+  final recall of the initial home and time after ten intervening turns.
+  This short, single-runtime observation does not prove autonomous behavior,
+  failover, compaction or hour-scale continuity. Its recorder was subsequently
+  corrected to reject evidence directories bound to a different scenario.
+
+## Verified delivery and artifact update at 2026-09-09T23:30Z
+
+- Goal confirmation core #34976, UI #34979, and actual API proof #34982 are
+  merged. Their reviewed heads passed PR checks. The isolated API proof used a
+  synthetic verifier provider with a real file-read tool, then real authenticated
+  confirmation POST/GET and exact binding checks. It does not prove semantic
+  LLM judgment or the production deployment. Browser evidence uses CI-built UI
+  with synthetic HTTP fixtures, separately from the actual backend proof.
+- #34980 is merged: twelve operator-initiated Kimi turns and scoped recall
+  evidence, not an hour-scale or autonomous continuity result.
+- The actual Keeper produced a readable three-page PDF; all three v4 pages were
+  independently rendered and read, then reviewed by a second coding agent.
+  Its hash is `74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0`.
+  See [PDF evidence and historical failures](../evidence/2026-09-10-keeper-pdf-review/README.md).
+  The real Task verifier rejected an earlier submission for missing evidence.
+  A subsequent run persisted a new PDF, verification summary and three PNGs;
+  request `vrf-29d7aa6e465b7e1b5acd86f7305120f0` was observed awaiting verification.
+  Its snapshot contains the summary but names PDF/PNG only in notes, so complete
+  evidence transfer and Task/Goal completion remain unproven.
+- Fusion decision attribution #34981 and original input context #34983 remain
+  open. Source review confirms Task contracts and Goal criteria are captured,
+  original turn is retained, and the question is no longer duplicated in model
+  input. No real autonomous Fusion decision-use result is claimed.
+
 ## Acceptance matrix
 
 | # | Requirement | Evidence needed to close | Current state / next work |
 |---|---|---|---|
 | 1 | Goal/Task focus | Autonomous action receipts linked to assigned goal and remaining acceptance criteria across turns | Prompt section found in measured agent input (#34938); autonomous scenario still needed |
-| 2 | Important decisions use Fusion and are recorded | Real decision request, durable run, result, adopted/rejected reasons linked to work | Handler and result fragments exist; behavior unverified |
-| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context merged (#34909/#34919); live recovery/continuity scenarios pending |
-| 4 | Keepers do non-code work | Research and creative tasks completed with independent verification | No current scenario proof |
-| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Prompt intervention; tool availability and real outputs pending |
+| 2 | Important decisions use Fusion and are recorded | Real decision request, durable run, result, adopted/rejected reasons linked to work | Durable deliberation runs exist; originating work and Keeper decision-use attribution are missing; implementation and behavior proof pending |
+| 3 | Goals guide work without deadlock/repetition | Success criteria in context; blocked dependency with independent progress; rejection recovery and human-confirmed completion | Criteria context, actual creation/readback and authenticated final confirmation API proven within their fixtures; #34976/#34979/#34982 merged; real semantic judgment, autonomous recovery and long continuity pending |
+| 4 | Keepers do non-code work | Research and creative tasks completed with independent verification | Actual Keeper PDF independently rendered/read; Task evidence rejection and resubmission observed; full completion and broader research scenarios pending |
+| 5 | Multiple expressive file formats | Useful original artifacts, correct MIME/format, open/render/play proof for requested document/image/audio/video formats | Creative image tools and actual image adoption proven (#34974); one readable three-page Keeper PDF proven; Task evidence delivery and other document/image/audio/video outputs remain incomplete |
 | 6 | Initiative | Role-appropriate autonomous work initiated and advanced without repeated user nudges | Prompt intervention; live sequence pending |
 | 7 | Requests to owner/operator | Specific actionable ask, answer, resumed dependent work, independent progress while waiting | Prompt intervention; live ask lifecycle pending |
 | 8 | Keeper delegation | Scoped assignment, recipient action, evidence returned and integrated, no duplicate ownership | Prompt intervention; two-Keeper scenario pending |
@@ -66,7 +164,7 @@ No row is complete. A prompt change is an intervention, not behavioral proof.
 | 13 | Configuration feedback | Edit/save/reload shows effective source/value and verifies next request changed; errors visible | Keeper override save/readback/editor and measured input join proven (#34938); other settings and behavioral feedback pending |
 | 14 | Preset prompt inspection | Full preset content preview and effective selected prompt visible before/after application | Full preset/effective preview and CI-built browser proof in #34912; deployed current screen verification pending |
 | 15 | Chat diffs and LSP | Real autonomous edit yields linked diff; actual LSP availability and diagnostics accurately shown | #34924 stores patch originals; #34927 verifies and displays their diff. Component and CI-built browser scenarios pass (synthetic HTTP records, actual worker); full ChatTranscript scenarios also passed; deployed autonomous edit, remote edit coverage and LSP diagnostics remain pending |
-| 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Source and rendered audit pending |
+| 16 | Workspace, comments, memo/history | Repository-scoped accumulated work, notes and comments survive switch/reload and link to changes | Unsupported saved/conflict labels removed with actual-component browser proof (#34972); repository-scoped history/comments/memo persistence still pending |
 | 17 | Shared memory agent/lane | Cross-Keeper evidence consolidated with attribution/deduplication and retrieved in subsequent work | Local standalone curator exists; proposal store/readback/UI in #34940/#34941/#34942; actual Keeper retrieval and live consolidation pending |
 | 18 | Local LLM roles | Configured local verifier/judge/librarian role produces useful checked results with measured runtime identity | Local 8B failures and 27B useful synthetic results measured; broad quality, live role integration and provider/runtime comparisons pending |
 
@@ -83,7 +181,8 @@ At each boundary use CI, then keep working on an independent slice instead of
 watching CI. Review implementation and compare deployed bytes before claiming
 runtime behavior. Capture logs and browser screenshots. Run continuity scenarios
 for 10+ turns and 1h/2h/4h/24h across available runtimes, including failover and
-memory of earlier actions. None of those longitudinal checks has run in this pass.
+memory of earlier actions. A short twelve-turn single-runtime recall observation
+is recorded in #34980; hour-scale and cross-runtime checks remain unproven.
 
 Reference: [Anthropic, Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
 describes dynamically scoped delegation and result synthesis. The intervention

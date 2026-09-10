@@ -7,6 +7,7 @@ val handle :
   keeper:string ->
   now_unix:float ->
   policy:Fusion_policy.t ->
+  ?source_context:Fusion_request_context.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   args:Yojson.Safe.t ->
   unit ->
@@ -19,6 +20,7 @@ val handle_result :
   keeper:string ->
   now_unix:float ->
   policy:Fusion_policy.t ->
+  ?source_context:Fusion_request_context.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?registry:Fusion_run_registry.t ->
   args:Yojson.Safe.t ->
@@ -43,6 +45,7 @@ module For_test : sig
     keeper:string ->
     now_unix:float ->
     policy:Fusion_policy.t ->
+    ?source_context:Fusion_request_context.t ->
     ?continuation_channel:Keeper_continuation_channel.t ->
     ?registry:Fusion_run_registry.t ->
     args:Yojson.Safe.t ->

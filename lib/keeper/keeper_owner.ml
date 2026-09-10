@@ -94,6 +94,7 @@ type error =
   | Owner_closed
 
 type operation_execution =
+  | Operation_deferred
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
       { kind : Chat_operation.failure_kind
@@ -141,6 +142,28 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Direct_runtime_retry : Operation_id.t ->
+      (Keeper_semantic_execution.runtime_retry option, error) result command
+  | Defer_direct_runtime_retry :
+      { operation_id : Operation_id.t; execution_digest : string;
+        continuation : Keeper_semantic_execution.runtime_retry } ->
+      (Chat_operation.t, error) result command
+  | Resume_direct_runtime_retry :
+      { operation_id : Operation_id.t; observed : Keeper_semantic_execution.runtime_retry } ->
+      (unit, error) result command
+  | Direct_gate_waits : ((Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result command
+  | Discharge_direct_gate : {operation_id:Operation_id.t; obligation:Keeper_semantic_execution.gate_obligation} -> (unit, error) result command
+  | Direct_gate_state : Operation_id.t -> (Keeper_semantic_execution.gate_wait_state option, error) result command
+  | Direct_gate_binding : Operation_id.t -> (Keeper_semantic_execution.gate_binding option, error) result command
+  | Direct_gate_obligations : Operation_id.t -> (Keeper_semantic_execution.gate_obligation list, error) result command
+  | Defer_direct_gate_reconciliation : {operation_id:Operation_id.t; execution_digest:string;
+      binding:Keeper_semantic_execution.gate_binding; diagnostic:string} -> (Chat_operation.t, error) result command
+  | Defer_direct_gate : {operation_id:Operation_id.t; execution_digest:string;
+      waiting:Keeper_semantic_execution.gate_wait} -> (Chat_operation.t, error) result command
+  | Resolve_direct_gate : {operation_id:Operation_id.t; resolution:Keeper_semantic_execution.gate_resolution} ->
+      (Chat_operation.t, error) result command
+  | Resume_direct_gate : {operation_id:Operation_id.t; waiting:Keeper_semantic_execution.gate_wait;
+      resolution:Keeper_semantic_execution.gate_resolution} -> (unit, error) result command
   | Interrupt_running_operation :
       Operation_id.t -> (operation_interrupt_result, error) result command
   | Submit_operation :
@@ -681,6 +704,29 @@ let start
     let finish_operation_child claimed_operation_id execution =
       match claimed_operation_id, execution with
       | None, _ -> Ok ()
+      | Some operation_id, Operation_deferred ->
+        run_operation_read t ~label:"confirm deferred Keeper chat operation" (fun () ->
+          match Chat_operation_store.get t.operation_store operation_id with
+          | Error error -> Error error
+          | Ok None -> Error (Chat_operation_store.Unknown_operation operation_id)
+          | Ok (Some operation) ->
+            (match operation.state with
+             | Chat_operation.Queued ->
+               (match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
+                | Ok (Some _) -> Ok ()
+                | Ok None ->
+                  (match Chat_operation_store.direct_gate_state t.operation_store ~operation_id with
+                   | Ok (Some _) -> Ok ()
+                   | Ok None ->
+                     (match Chat_operation_store.direct_gate_binding t.operation_store ~operation_id with
+                      | Ok (Some _) -> Ok ()
+                      | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                      | Error error -> Error error)
+                   | Error error -> Error error)
+                | Error error -> Error error)
+             | Chat_operation.Cancelled _ -> Ok ()
+             | Chat_operation.Running _ | Chat_operation.Succeeded _ | Chat_operation.Failed _ ->
+               Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
       | Some operation_id, Operation_succeeded { outcome_ref } ->
         run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
           Chat_operation_store.succeed_running
@@ -711,7 +757,11 @@ let start
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        if inventory.queued_count > 0 && Option.is_none inventory.running_operation_id
+        let claimable = if inventory.queued_count = 0 then false else
+          match run_operation_read t ~label:"read claimable Keeper operations"
+              (fun () -> Chat_operation_store.has_claimable_queued t.operation_store) with
+          | Ok ready -> ready | Error _ -> false in
+        if claimable && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
           publish_turn_in_flight
@@ -845,6 +895,66 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Direct_runtime_retry operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct runtime continuation" (fun () ->
+            Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Defer_direct_runtime_retry {operation_id; execution_digest; continuation}, resolve) ->
+          let response = run_operation_command t ~label:"defer direct runtime continuation" (fun () ->
+            Chat_operation_store.defer_direct_runtime_retry t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~continuation) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Resume_direct_runtime_retry {operation_id; observed}, resolve) ->
+          let response = run_operation_command t ~label:"resume direct runtime continuation" (fun () ->
+            Chat_operation_store.resume_direct_runtime_retry t.operation_store ~now:(t.now ())
+              ~operation_id ~observed) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Direct_gate_waits, resolve) ->
+          let response = run_operation_read t ~label:"read waiting direct Gate operations" (fun () ->
+            Chat_operation_store.direct_gate_waits t.operation_store) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Discharge_direct_gate {operation_id; obligation}, resolve) ->
+          let response = run_operation_command t ~label:"record admitted Gate evidence" (fun () ->
+            Chat_operation_store.discharge_direct_gate t.operation_store ~now:(t.now ()) ~operation_id ~obligation)
+            |> Result.map fst in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Direct_gate_state operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct Gate wait" (fun () ->
+            Chat_operation_store.direct_gate_state t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Direct_gate_binding operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read unresolved Gate binding" (fun () ->
+            Chat_operation_store.direct_gate_binding t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Direct_gate_obligations operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct Gate obligations" (fun () ->
+            Chat_operation_store.direct_gate_obligations t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Defer_direct_gate_reconciliation {operation_id; execution_digest; binding; diagnostic}, resolve) ->
+          let response = run_operation_command t ~label:"retain direct Gate reconciliation" (fun () ->
+            Chat_operation_store.defer_direct_gate_reconciliation t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~binding ~diagnostic) |> Result.map fst in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Defer_direct_gate {operation_id; execution_digest; waiting}, resolve) ->
+          let response = run_operation_command t ~label:"suspend direct Gate operation" (fun () ->
+            Chat_operation_store.defer_direct_gate t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~waiting) |> Result.map fst in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Resolve_direct_gate {operation_id; resolution}, resolve) ->
+          let response = run_operation_command t ~label:"resolve direct Gate obligation" (fun () ->
+            Chat_operation_store.resolve_direct_gate t.operation_store ~now:(t.now ())
+              ~operation_id ~resolution) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
+        | Command (Resume_direct_gate {operation_id; waiting; resolution}, resolve) ->
+          let response = run_operation_command t ~label:"resume direct Gate operation" (fun () ->
+            Chat_operation_store.resume_direct_gate t.operation_store ~now:(t.now ())
+              ~operation_id ~waiting ~resolution) |> Result.map fst in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
         | Command (Interrupt_running_operation expected, resolve) ->
           let inventory = Atomic.get t.operation_projection in
           let response =
@@ -1174,6 +1284,12 @@ let start
 
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
+let direct_runtime_retry t ~operation_id = request t (Direct_runtime_retry operation_id)
+let defer_direct_runtime_retry t ~operation_id ~execution_digest ~continuation =
+  request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation})
+let resume_direct_runtime_retry t ~operation_id ~observed =
+  request t (Resume_direct_runtime_retry {operation_id; observed})
+
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)
@@ -1239,3 +1355,18 @@ module For_testing = struct
       Fun.protect ~finally:observer previous);
     Eio.Switch.on_release sw (fun () -> install_state_change_observer previous)
 end
+
+let direct_gate_state t ~operation_id = request t (Direct_gate_state operation_id)
+let direct_gate_obligations t ~operation_id = request t (Direct_gate_obligations operation_id)
+let defer_direct_gate t ~operation_id ~execution_digest ~waiting =
+  request t (Defer_direct_gate {operation_id; execution_digest; waiting})
+let resolve_direct_gate t ~operation_id ~resolution = request t (Resolve_direct_gate {operation_id; resolution})
+let resume_direct_gate t ~operation_id ~waiting ~resolution = request t (Resume_direct_gate {operation_id; waiting; resolution})
+
+let direct_gate_waits t = request t Direct_gate_waits
+let discharge_direct_gate t ~operation_id ~obligation = request t (Discharge_direct_gate {operation_id; obligation})
+
+let defer_direct_gate_reconciliation t ~operation_id ~execution_digest ~binding ~diagnostic =
+  request t (Defer_direct_gate_reconciliation {operation_id; execution_digest; binding; diagnostic})
+
+let direct_gate_binding t ~operation_id = request t (Direct_gate_binding operation_id)

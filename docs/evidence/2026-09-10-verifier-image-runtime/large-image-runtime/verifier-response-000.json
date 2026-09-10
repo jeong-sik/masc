@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "raw": "{\"id\": \"verifier-fixture\", \"model\": \"image-verifier\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"verifier-0\", \"type\": \"function\", \"function\": {\"name\": \"report_review_verdict\", \"arguments\": \"{\\\"verdict\\\": \\\"APPROVE\\\", \\\"reason\\\": \\\"Synthetic HTTP fixture received three exact PNG data URIs; byte transport only, no visual quality judgement.\\\"}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 10, \"completion_tokens\": 10, \"total_tokens\": 20}}"
+}

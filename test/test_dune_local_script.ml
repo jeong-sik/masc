@@ -810,7 +810,7 @@ let pin_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts")
     "opam-pin-external-deps.sh"
 
-let setup_repo_for_pin_check base =
+let setup_repo_for_pin_check ?(reported_ocaml_version = "5.5.1") base =
   let scripts_dir = Filename.concat base "scripts" in
   let bin_dir = Filename.concat base "bin" in
   mkdir_p scripts_dir;
@@ -837,11 +837,11 @@ case "$1 $2" in
 ' %s; exit 0 ;;
   "pin list") cat %s; exit 0 ;;
 esac
-if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '5.5.1
-'; exit 0; fi
+if [ "$1" = "exec" ] && [ "$3" = "ocamlc" ]; then printf '%%s
+' %s; exit 0; fi
 exit 0
 |}
-       (quote base) (quote table_path));
+       (quote base) (quote table_path) (quote reported_ocaml_version));
   (bin_dir, table_path)
 
 let run_pin_check base bin_dir =
@@ -945,6 +945,50 @@ let test_pin_check_tells_a_local_checkout_from_drift () =
     check_contains "it names the directory" stderr checkout;
     check_contains "it says what actually links" stderr
       "whatever is in that directory right now")
+
+(* A switch on the wrong compiler is where a dropped pin hides, and the check
+   used to exit at the version and never read a pin. Measured 2026-09-10: this
+   machine sat on 5.5.0 with no 5.5.1 switch, so every --check since had
+   returned before comparing anything while cohttp-eio was missing from the
+   switch and corrupting provider SSE. Pinning still refuses a drifted switch;
+   only reading continues. *)
+let test_pin_check_reads_pins_on_a_drifted_compiler () =
+  with_temp_dir "opam-pin-check-drifted-ocaml" (fun dir ->
+    let bin_dir, _table =
+      setup_repo_for_pin_check ~reported_ocaml_version:"5.5.0" dir
+    in
+    let code, _stdout, stderr = run_pin_check dir bin_dir in
+    check int "a drifted compiler fails the check" 1 code;
+    check_contains "the report names the compiler drift" stderr
+      "OCaml 5.5.0 detected";
+    check_contains "it says it kept reading" stderr
+      "continuing to the pin comparison";
+    check_contains "and it still names the absent pin" stderr
+      "cohttp-eio: not pinned")
+
+(* The same switch with every pin in place is still not a switch to build on,
+   so the check says so rather than reporting success. *)
+let test_pin_check_fails_a_satisfied_switch_on_a_drifted_compiler () =
+  with_temp_dir "opam-pin-check-drifted-satisfied" (fun dir ->
+    let bin_dir, table_path =
+      setup_repo_for_pin_check ~reported_ocaml_version:"5.5.0" dir
+    in
+    let _code, _stdout, stderr = run_pin_check dir bin_dir in
+    let expectations =
+      String.split_on_char '\n' stderr |> List.filter_map expectation_of_line
+    in
+    check bool "the empty run stated some expectations" true (expectations <> []);
+    let rows =
+      List.map
+        (fun (package, target) ->
+          Printf.sprintf "%s.0.0    git    git+%s    (at deadbeef)" package target)
+        expectations
+    in
+    write_file table_path (String.concat "\n" rows ^ "\n");
+    let code, _stdout, stderr = run_pin_check dir bin_dir in
+    check int "satisfied pins do not excuse the compiler" 1 code;
+    check_contains "the report says which half is wrong" stderr
+      "on the wrong compiler")
 
 (* The wiring for the passing case. dune-local reads the check's stderr and
    used to throw it away unless the check failed, so a build linking somebody's
@@ -1217,6 +1261,10 @@ let () =
             test_pin_check_tells_a_local_checkout_from_drift;
           test_case "a local pin reaches the screen on a passing build" `Quick
             test_a_local_pin_reaches_the_screen_on_a_passing_build;
+          test_case "pins are still read on a drifted compiler" `Quick
+            test_pin_check_reads_pins_on_a_drifted_compiler;
+          test_case "a drifted compiler fails even with every pin in place"
+            `Quick test_pin_check_fails_a_satisfied_switch_on_a_drifted_compiler;
         ] );
       ( "ocaml_version_guard",
         [

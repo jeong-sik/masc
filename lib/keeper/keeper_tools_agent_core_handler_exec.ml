@@ -156,6 +156,7 @@ let execute_with_observers_with_authority
         Tool_result.make_err
           ~tool_name:name
           ~class_:failure_class
+          ~effect_disposition:result.failure_effect_disposition
           ~start_time:t0
           ~data:(producer_payload ~raw:raw_result producer_data)
           ?metadata:producer_metadata

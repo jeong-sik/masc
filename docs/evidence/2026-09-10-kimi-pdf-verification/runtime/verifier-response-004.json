@@ -1,0 +1,7 @@
+{
+  "upstream": "https://api.kimi.com/coding/v1/chat/completions",
+  "request_sha256": "8ac7837d975c8bd269b25c1a0b6d0301662ecb8d7c4042fee539d5559ad185bb",
+  "status": 200,
+  "content_type": "application/json; charset=utf-8",
+  "raw": "{\"id\":\"chatcmpl-gwVSqbyBlls4vT2WdKLUlzs3\",\"object\":\"chat.completion\",\"created\":1788999636,\"model\":\"kimi-for-coding\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"rg with x^ returns nothing (exit 1 = no matches), but doesn't list files. I can't list directories directly with search tool. Try reading memory_proposal_guide.pdf at root (as listed).\",\"tool_calls\":[{\"index\":0,\"id\":\"tool_XFt9mFMfVHCd1BSbvQq9nJll\",\"type\":\"function\",\"function\":{\"name\":\"tool_read_file\",\"arguments\":\"{\\\"file_path\\\":\\\"memory_proposal_guide.pdf\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":14365,\"completion_tokens\":99,\"total_tokens\":14464,\"cached_tokens\":14080,\"completion_tokens_details\":{\"reasoning_tokens\":42},\"prompt_tokens_details\":{\"cached_tokens\":14080}}}"
+}

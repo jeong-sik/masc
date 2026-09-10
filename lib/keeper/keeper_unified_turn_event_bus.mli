@@ -27,6 +27,13 @@ val drain
 val integrity_error : t -> Agent_core.Error.t option
 val tool_completed_count : t -> int
 
+(** Current pending-tool count. [> 0] ⇔ the turn FSM is in
+    [Awaiting_tool_result] — the count is the authoritative FSM value (see
+    {!drain}). Terminal paths read this to record their exit transition
+    from the state the turn was actually in, instead of assuming
+    [Streaming]. *)
+val pending_tool_count : t -> int
+
 val start_background_drain
   :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> t

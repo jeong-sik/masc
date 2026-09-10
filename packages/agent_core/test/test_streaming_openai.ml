@@ -1652,6 +1652,39 @@ let test_ollama_idless_complete_calls_are_distinct_across_chunks () =
   | Error _ -> Alcotest.fail "expected complete id-less occurrences to finalize"
 ;;
 
+let test_rejected_chunk_preserves_inline_framing () =
+  let check prefix rejected continuation =
+    let state = S.create_openai_stream_state ~inline_reasoning:true () in
+    let feed content tool terminal =
+      let delta = ["content", `String content] @
+        (match tool with
+         | None -> []
+         | Some id ->
+             let fields = ["index", `Int 0; "function", `Assoc
+               ["name", `String "fixture"; "arguments", `String ""]] @
+               (match id with None -> [] | Some id -> ["id", `String id]) in
+             ["tool_calls", `List [`Assoc fields]]) in
+      let wire = `Assoc ["id", `String "fixture-response"; "model", `String "fixture";
+        "choices", `List [`Assoc ["delta", `Assoc delta; "finish_reason",
+          (if terminal then `String "stop" else `Null)]]] |> Yojson.Safe.to_string in
+      fst (S.openai_sse_parse_result_to_events state (S.parse_openai_sse_chunk wire))
+    in
+    let before = feed prefix (Some None) false in
+    let invalid = feed rejected (Some (Some "late-provider-id")) false in
+    Alcotest.(check bool) "rejected chunk exposes only a typed parse failure" true
+      (match invalid with [SSEParseFailed _] -> true | _ -> false);
+    let after = feed continuation None true in
+    let payloads = List.filter_map (function
+      | ContentBlockDelta {delta = TextDelta text; _} -> Some ("text", text)
+      | ContentBlockDelta {delta = ThinkingDelta text; _} -> Some ("thinking", text)
+      | _ -> None) (before @ after) in
+    Alcotest.(check (list (pair string string))) "accepted bytes retain their channel"
+      ["thinking", "private"; "text", "reply"] payloads
+  in
+  check "<thi" "nk>discarded</think>" "nk>private</think>reply";
+  check "<think>private</thi" "nk>discarded" "nk>reply"
+;;
+
 let () =
   let open Alcotest in
   run
@@ -1711,6 +1744,7 @@ let () =
             `Quick
             test_parse_minimax_split_malformed_detail_item_fails_closed
         ] )
+    ; ( "inline_transaction_rollback", [test_case "rejected chunk preserves framing" `Quick test_rejected_chunk_preserves_inline_framing] )
     ; ( "openai_chunk_to_events"
       , [ test_case "text first chunk" `Quick test_events_text_first_chunk
         ; test_case "text subsequent" `Quick test_events_text_subsequent

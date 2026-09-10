@@ -4,6 +4,7 @@ module Operation = Keeper_chat_operation
 
 type command =
   | Start of { started_at : float }
+  | Requeue_runtime_retry
   | Edit_queued of
       { input : Yojson.Safe.t
       ; execution_digest : string
@@ -21,6 +22,7 @@ type command =
 
 type persistence_intent =
   | Persist_running
+  | Persist_runtime_retry
   | Persist_queued_edit
   | Persist_queued_move
   | Persist_terminal

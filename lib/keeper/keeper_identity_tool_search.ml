@@ -232,19 +232,39 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
            | None -> Either.Right name)
         requested
     in
-    (match found with
-     | [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
-     | _ :: _ ->
-       (match load_found ~agent ~usage ~receipts ~invocation found with
-        | Error _ as error -> error
-        | Ok loaded ->
-          let content =
-            match unknown with
-            | [] -> loaded
-            | _ :: _ ->
-              Printf.sprintf "%s\nnot in the list: %s" loaded (String.concat ", " unknown)
-          in
-          Ok { Agent_core.Types.content; _meta = None }))
+    let callable, unknown =
+      List.partition_map
+        (fun name ->
+           match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
+           | Some tool ->
+             Either.Left
+               (Printf.sprintf "- %s: %s" name
+                  (summary_of tool.Agent_core.Tool.schema.description))
+           | None -> Either.Right name)
+        unknown
+    in
+    match found, callable with
+    | [], [] -> refusal (Printf.sprintf "not in the list: %s" (String.concat ", " unknown))
+    | _ ->
+      let loaded = match found with
+        | [] -> Ok []
+        | _ :: _ ->
+          load_found ~agent ~usage ~receipts ~invocation found
+          |> Result.map (fun content -> [content])
+      in
+      Result.map
+        (fun loaded ->
+           let available = match callable with
+             | [] -> []
+             | _ -> ["already callable:\n" ^ String.concat "\n" callable]
+           in
+           let missing = match unknown with
+             | [] -> []
+             | _ -> ["not in the list: " ^ String.concat ", " unknown]
+           in
+           { Agent_core.Types.content = String.concat "\n" (loaded @ available @ missing)
+           ; _meta = None })
+        loaded
 ;;
 
 (* Same tool, and it also says it ran. The wrapper keeps the descriptor so

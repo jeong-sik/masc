@@ -1435,6 +1435,138 @@ let test_setclear_coverage () =
   Printf.printf "%s" report
 ;;
 
+(* ── INV-11: recovery/close closed set (#25859) ───────── *)
+
+(** Representative conditions that derive each phase (same
+    construction the INV-9 builder uses, lifted to a total function
+    so Stopped is included). *)
+let conditions_for_phase (phase : SM.phase) : SM.conditions =
+  match phase with
+  | SM.Offline -> { SM.default_conditions with launch_pending = true }
+  | SM.Running -> running_conditions
+  | SM.Failing -> { running_conditions with heartbeat_healthy = false }
+  | SM.Draining ->
+    { running_conditions with stop_requested = true; drain_complete = false }
+  | SM.Paused -> { running_conditions with operator_paused = true }
+  | SM.Crashed -> { SM.default_conditions with fiber_alive = false }
+  | SM.Restarting ->
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = true
+    }
+  | SM.Stopped ->
+    { running_conditions with stop_requested = true; drain_complete = true }
+;;
+
+(** Every event variant with representative payloads, including the
+    operator escape hatch. Mirrors the INV-9 / setclear lists; kept
+    separate so this invariant stays true even if those test-local
+    lists are trimmed. *)
+let all_representative_events : SM.event list =
+  [ SM.Heartbeat_ok
+  ; SM.Heartbeat_failed { consecutive = 5 }
+  ; SM.Turn_succeeded
+  ; SM.Turn_failed { consecutive = 3 }
+  ; SM.Operator_pause
+  ; SM.Operator_resume
+  ; SM.Operator_stop { remove_meta = false }
+  ; SM.Stop_requested
+  ; SM.Drain_complete
+  ; SM.Fiber_started
+  ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+  ; SM.Supervisor_restart_attempt { attempt = 1 }
+  ; SM.Credential_archived
+  ; SM.Operator_clear_requested { preserve_system = true; reason = "test" }
+  ]
+;;
+
+(** INV-11 (issue #25859, cluster recovery-reachable-closed-fsm):
+    from every phase, under the conditions that produce it, some
+    sequence of [apply_event] steps reaches Running (recovery) or
+    Stopped (orderly close).
+
+    The 2026-09 stuck-state cluster (#25332 #25688 #25725 #25735
+    #25741 #25823 #25824) shared one shape: a state whose recovery
+    path depended on the very resource that had failed. The FSM core
+    answers that class structurally (sparse-match exhaustive phases)
+    and must answer it behaviorally: no phase may be stranded without
+    a real event chain back to Running or on to Stopped.
+
+    Bounded breadth-first search over [apply_event] — actual
+    transitions, not [can_transition] lookups — so a future
+    derive_phase or matrix edit that strands a phase fails here with
+    the phase named. Running and Stopped satisfy the goal at depth 0
+    (Stopped is itself the close; terminal permanence is INV-2's
+    business). *)
+let test_invariant_recovery_closed_set () =
+  let max_depth = 7 in
+  let goal p = p = SM.Running || p = SM.Stopped in
+  let witness_for start =
+    let start_node = (start, conditions_for_phase start) in
+    let rec loop visited frontier depth =
+      if List.exists (fun (p, _) -> goal p) frontier then Some depth
+      else if depth >= max_depth then None
+      else
+        let next =
+          List.concat_map
+            (fun (phase, conds) ->
+               List.filter_map
+                 (fun ev ->
+                    match
+                      SM.apply_event
+                        ~current_phase:phase
+                        ~conditions:conds
+                        ~event:ev
+                        ~now:1000.0
+                    with
+                    | Ok tr -> Some (tr.new_phase, tr.updated_conditions)
+                    | Error _ -> None)
+                 all_representative_events)
+            frontier
+        in
+        let fresh = List.filter (fun n -> not (List.mem n visited)) next in
+        match fresh with
+        | [] -> None
+        | _ -> loop (List.rev_append fresh visited) fresh (depth + 1)
+    in
+    loop [ start_node ] [ start_node ] 0
+  in
+  let results =
+    List.map (fun p -> (p, witness_for p)) SM.all_phases
+  in
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n--- INV-11 recovery/close closed set ---\n";
+  List.iter
+    (fun (phase, witness) ->
+       Buffer.add_string buf
+         (Printf.sprintf "  %-10s %s\n"
+            (SM.phase_to_string phase)
+            (match witness with
+             | Some d ->
+               Printf.sprintf
+                 "OK: Running|Stopped reachable in %d apply_event step(s)"
+                 d
+             | None -> "STRANDED: no Running/Stopped reachable")))
+    results;
+  Buffer.add_string buf "--- End INV-11 ---\n";
+  let report = Buffer.contents buf in
+  let stranded =
+    List.filter_map
+      (fun (phase, witness) ->
+         match witness with None -> Some phase | Some _ -> None)
+      results
+  in
+  if stranded <> []
+  then
+    fail
+      (Printf.sprintf
+         "Phases with no recovery/close path (stuck-forever risk, \
+          #25859 class): [%s]%s"
+         (String.concat ", " (List.map SM.phase_to_string stranded))
+         report);
+  Printf.printf "%s" report
+;;
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -1611,6 +1743,10 @@ let () =
             `Quick
             test_invariant_derive_matches_matrix
         ; test_case "INV-10: priority chain ordering" `Quick test_invariant_priority_chain
+        ; test_case
+            "INV-11: recovery/close closed set (#25859)"
+            `Quick
+            test_invariant_recovery_closed_set
         ] )
     ; ( "setclear_coverage"
       , [ test_case

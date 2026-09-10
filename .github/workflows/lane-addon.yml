@@ -1,6 +1,8 @@
 name: Lane Add-on v0
 
 on:
+  push:
+    branches: ['codex/lane-addon-*']
   pull_request:
     paths:
       - 'addons/**'

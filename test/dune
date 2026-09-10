@@ -5582,3 +5582,8 @@
  (name test_model_release_evidence)
  (modules test_model_release_evidence)
  (libraries masc.runtime alcotest yojson))
+
+(test
+ (name test_runtime_model_context_metadata)
+ (modules test_runtime_model_context_metadata)
+ (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))

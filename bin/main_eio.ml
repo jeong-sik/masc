@@ -2600,18 +2600,10 @@ let runtime_model_info_cmd =
         | None -> Llm_provider.Model_catalog.model_entries catalog
         | Some client -> wizard_model_entries client catalog
       in
-      let entries = match provider with
-        | None -> entries
-        | Some provider -> (match Agent_core.Provider_runtime_binding.find provider with
-          | None -> []
-          | Some binding -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-              match entry.provider_name with
-              | None -> true
-              | Some name -> name = binding.id || List.mem name binding.aliases) entries) in
-      (* A generic family prefix is not evidence for the context of a model
-         the installer does not know. Include provider-scoped exact rows, and
-         reject conflicting declarations rather than pick a convenient one. *)
-      match wizard_model_context model entries with
+      let context = match provider with
+        | None -> wizard_model_context model entries
+        | Some provider_id -> Runtime_model_context_metadata.find ~provider_id ~model entries in
+      match context with
       | Some context ->
         print_endline (Yojson.Safe.to_string (`Assoc ["model", `String model; "max_context", `Int context])); 0
       | None -> 1

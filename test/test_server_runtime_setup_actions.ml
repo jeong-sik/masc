@@ -1,7 +1,7 @@
 module Actions = Server_runtime_setup_actions
 let save path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
 let get = function Ok value -> value | Error e -> Alcotest.fail (Actions.error_message e)
-let fixture test = Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+let fixture test = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let base=Filename.temp_dir "masc-web-setup-test-" "" |> Unix.realpath in
   let previous=Sys.getenv_opt "XDG_CONFIG_HOME" in
   Unix.putenv "XDG_CONFIG_HOME" base;
@@ -19,6 +19,9 @@ let fixture test = Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
   save binary ("#!" ^ python ^ {|
 import json,sys
 args=sys.argv[1:]
+if args[0]=='runtime-codex-models':
+    print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
+    sys.exit(0)
 assert args[1]=='--base-path'
 if args[0]=='runtime-default-set':
     assert args[4:6]==['--setup-lanes','--setup-imp']
@@ -27,7 +30,7 @@ elif args[0]=='runtime-verify':
       'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
 else: raise AssertionError(args)
 |}); Unix.chmod binary 0o700;
-  test base runtime binary))
+  test base runtime binary (Eio.Stdenv.net env)))
 let request base source =
   let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
   `Assoc ["revision",`String revision;
@@ -35,7 +38,7 @@ let request base source =
       `Assoc ["id",`String "selected-model";"context",`Int 1024;"streaming",`Bool true]]]];
     "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]]
 let source fields = `Assoc (["integration_id",`String "vllm";"endpoint",`String "http://127.0.0.1:19001/v1"] @ fields)
-let test_private_key () = fixture (fun base runtime binary ->
+let test_private_key () = fixture (fun base runtime binary _net ->
   let receipt=get (Actions.save ~binary ~base_path:base (request base (source ["api_key",`String "fixture-secret-key"]))) in
   let config=Runtime_toml.parse_file runtime |> Result.get_ok in
   let paths=List.filter_map (fun (p:Runtime_schema.provider) -> match p.credentials with
@@ -49,13 +52,25 @@ let test_private_key () = fixture (fun base runtime binary ->
   let keys=receipt |> to_assoc |> List.map fst |> List.sort String.compare in
   Alcotest.check (Alcotest.list Alcotest.string) "safe receipt fields only"
     (List.sort String.compare ["runtime_id";"runtime_ids";"models";"configured";"validation";"readiness"]) keys)
-let test_forbidden_reference () = fixture (fun base runtime binary ->
+let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   let before=In_channel.with_open_bin runtime In_channel.input_all in
   List.iter (fun fields ->
     Alcotest.check Alcotest.bool "browser cannot supply private files or commands" true
       (Actions.save ~binary ~base_path:base (request base (source fields)) = Error Actions.Invalid_request))
     [["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
   Alcotest.check Alcotest.string "invalid request preserves configuration" before (In_channel.with_open_bin runtime In_channel.input_all))
+let test_native_client_metadata () = fixture (fun base _runtime binary net ->
+  Eio.Switch.run (fun sw ->
+    let json=get (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String "codex"])) in
+    let open Yojson.Safe.Util in
+    Alcotest.check Alcotest.string "native selected-account model source" "codex_isolated_account_model_list"
+      (json |> member "source" |> to_string);
+    Alcotest.check Alcotest.bool "metadata does not claim account invocation verification" false
+      (json |> member "account_availability_verified" |> to_bool);
+    let model=json |> member "models" |> to_list |> List.hd in
+    Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
+    Alcotest.check Alcotest.bool "child private field not projected" true (json |> member "credential_file" = `Null)))
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
-  Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference]]
+  Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
+  Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata]]

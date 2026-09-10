@@ -3,6 +3,7 @@
 type resolution_source =
   | Explicit_cli
   | Explicit_env
+  | Persisted_default
   | Implicit_default
 
 type resolved = {
@@ -22,6 +23,7 @@ type canonicalization_error =
 let resolution_source_label = function
   | Explicit_cli -> "explicit_cli"
   | Explicit_env -> "explicit_env"
+  | Persisted_default -> "persisted_default"
   | Implicit_default -> "implicit_base_path"
 
 let non_blank value =
@@ -34,15 +36,27 @@ let non_blank value =
 let normalize raw =
   Env_config.normalize_masc_base_path_input raw
 
-let resolve_startup_base_path ?(getenv = Sys.getenv_opt) ~cli_base_path
-    ~default_base_path () =
+(* The workspace `masc setup` / `masc init` recorded, if it still holds a
+   .masc directory. This is not the implicit default the guard exists to
+   refuse: the implicit default is the process cwd, which nobody chose, while
+   this path was named on an earlier command line and is re-checked here. *)
+let recorded_default () =
+  match Env_config.persisted_default_base_path () with
+  | Env_config.Usable { base_path; _ } -> Some base_path
+  | Env_config.No_record | Env_config.Stale _ -> None
+
+let resolve_startup_base_path ?(getenv = Sys.getenv_opt)
+    ?(persisted_default = recorded_default) ~cli_base_path ~default_base_path () =
   let raw_base_path, resolution_source =
     match non_blank cli_base_path with
     | Some raw -> raw, Explicit_cli
     | None -> (
         match non_blank (getenv "MASC_BASE_PATH") with
         | Some raw -> raw, Explicit_env
-        | None -> default_base_path (), Implicit_default)
+        | None -> (
+            match non_blank (persisted_default ()) with
+            | Some raw -> raw, Persisted_default
+            | None -> default_base_path (), Implicit_default))
   in
   { raw_base_path;
     normalized_base_path = normalize raw_base_path;
@@ -52,7 +66,7 @@ let resolve_startup_base_path ?(getenv = Sys.getenv_opt) ~cli_base_path
 let enforce resolved =
   match resolved.resolution_source with
   | Implicit_default -> Error (Implicit_base_path resolved)
-  | Explicit_cli | Explicit_env -> Ok ()
+  | Explicit_cli | Explicit_env | Persisted_default -> Ok ()
 
 let canonicalize_existing base_path =
   match Unix.realpath base_path with

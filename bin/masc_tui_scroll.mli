@@ -21,6 +21,13 @@ val normalize : count:int -> height:int -> int -> int
 val down : count:int -> height:int -> int -> int
 val up : count:int -> height:int -> int -> int
 
+val page_down : count:int -> height:int -> int -> int
+val page_up : count:int -> height:int -> int -> int
+(** A whole window, less one row kept from the window being left. Reading a
+    long list one page at a time otherwise drops the row the reader stopped on:
+    it sits just past the new edge and nothing reports it. Same bound and same
+    stale-value rule as {!down} and {!up}. *)
+
 (** A row cursor over the same list. The cursor names a row, the scroll names
     a window; a keypress moves the cursor and the window follows with
     {!ensure_visible}. The same stale-value rule applies: moving normalises

@@ -3,6 +3,10 @@
 type resolution_source =
   | Explicit_cli
   | Explicit_env
+  | Persisted_default
+      (** The workspace an earlier [masc setup] / [masc init] recorded,
+          re-checked for its [.masc] directory at resolution time. Accepted:
+          it was named on a command line once, unlike the implicit default. *)
   | Implicit_default
 
 type resolved = {
@@ -23,10 +27,15 @@ val resolution_source_label : resolution_source -> string
 
 val resolve_startup_base_path :
   ?getenv:(string -> string option) ->
+  ?persisted_default:(unit -> string option) ->
   cli_base_path:string option ->
   default_base_path:(unit -> string) ->
   unit ->
   resolved
+(** Order: [--base-path] > [MASC_BASE_PATH] > the recorded default >
+    [default_base_path ()]. Only the last is refused by {!enforce}.
+    [persisted_default] defaults to the recorded workspace and is a parameter
+    so a test can supply one without writing to the operator's config dir. *)
 
 val enforce : resolved -> (unit, violation) result
 (** Require an explicit caller-selected base path. The guard does not inspect

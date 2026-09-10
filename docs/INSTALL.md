@@ -2,9 +2,9 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.35.4**. Check tag and asset
+This document is the installation contract for **0.35.5**. Check tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
-The download commands below select `v0.35.4` and its matching installer.
+The download commands below select `v0.35.5` and its matching installer.
 
 If you use the 0.35.2 installer, refer to that tag's documentation. Multi-selection requires 0.35.2 or later.
 
@@ -46,7 +46,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 ```bash
-TAG=v0.35.4
+TAG=v0.35.5
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -125,7 +125,7 @@ change existing Keeper configurations in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.4 binary** installs one `imp` with `activation_mode = "manual"` and the
+The **0.35.5 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
@@ -164,9 +164,9 @@ store. This wizard does not install provider CLIs, model weights, or Docker and
 does not sign you in. **Configure later** defers model setup; imp does not start
 automatically.
 
-## First conversation with `imp` (0.35.4)
+## First conversation with `imp` (0.35.5)
 
-This is the 0.35.4 installation contract. Check the release tag and asset
+This is the 0.35.5 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
 1. Prepare the runtime you own before opening the model wizard. For Claude Code
@@ -425,7 +425,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.35.4` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.5` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

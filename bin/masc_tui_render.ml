@@ -8517,11 +8517,13 @@ let render_keeper_logs (state : state) =
         box_empty buf cols
       done
     end else begin
-      for i = 0 to content_height - 1 do
-        let idx = i + scroll in
-        if idx < total_entries then begin
-          let e = List.nth state.log_entries idx in
-          (* Extract just the time portion from ts *)
+      let visible =
+        Metrics_tail.visible ~entries:state.log_entries ~content_height ~scroll
+      in
+      let drawn = ref 0 in
+      List.iter
+        (fun (e : Tui_decode.log_entry) ->
+          incr drawn;
           let time_str = Terminal_text.clock_timestamp e.le_ts in
           let tool_names = Terminal_text.single_lines e.le_tools_used in
           let tools_str =
@@ -8541,9 +8543,10 @@ let render_keeper_logs (state : state) =
             Observation_layout.plain_log_row ~time:time_str terminal_entry
             ^ tools_str
           in
-          box_line buf cols line
-        end else
-          box_empty buf cols
+          box_line buf cols line)
+        visible;
+      for _ = !drawn to content_height - 1 do
+        box_empty buf cols
       done
     end;
 
@@ -8551,8 +8554,11 @@ let render_keeper_logs (state : state) =
        reads, so one glance answers both how far and how much is left -- a
        bare "scroll N" said the offset but not the distance either way. *)
     if total_entries > content_height then begin
+      (* Counted back from the newest, because that is the direction the rows
+         are drawn in: row 1 is the last thing that happened. A bare
+         "rows 1-20 of 300" read as the start of the file. *)
       let indicator =
-        Printf.sprintf "rows %d-%d of %d" (scroll + 1)
+        Printf.sprintf "newest %d-%d of %d" (scroll + 1)
           (min total_entries (scroll + content_height))
           total_entries
       in

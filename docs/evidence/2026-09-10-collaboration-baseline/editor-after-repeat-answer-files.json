@@ -1,0 +1,22 @@
+{
+  "booklet.pdf": {
+    "bytes": 118186,
+    "mtime": 1789043104.3080966,
+    "sha256": "b4dbe93e87b176772144c9535cc4f6e2824cac4e9725d9b781187439aca09eb6"
+  },
+  "poster.png": {
+    "bytes": 93730,
+    "mtime": 1789043104.7150376,
+    "sha256": "e0455dde3457ffeb2c041f6ca816865836f5a7f0355485370e630cc2a375a392"
+  },
+  "evidence.json": {
+    "bytes": 791,
+    "mtime": 1789043105.4139783,
+    "sha256": "b1f13cf20c1be3d7945639dc1b8016e95f240343dd664c75ed9a3793ad244a8e"
+  },
+  "build_publication.py": {
+    "bytes": 12871,
+    "mtime": 1789044542.3621151,
+    "sha256": "3889d21ea8582b8fd58c5c7c4a5176d3eca46e46e9ae6b3d140bbd803d30f864"
+  }
+}

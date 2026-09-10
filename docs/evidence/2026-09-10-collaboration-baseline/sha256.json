@@ -1,10 +1,12 @@
 {
-  "README.md": "d1ec68e10bb14d167e064e53a49f2352f5a1441a1b5f605888c0bd402cc4ff03",
+  "README.md": "e91ee8cfdad012f5db811af4271a2ef87d68ecd76d26bc9f3e717d07b946b937",
   "activation-update-result.json": "6d0b5f7de0c5b69338c6f213d48308939268e744b94b97a865629f43ee45738d",
   "admission.json": "fdc2ff360ccde6729be6eec755950f6cea92efe2a19dc151f87843a7643870a8",
   "answer-recognition.json": "4e18b4238d87c7f584a91d4aad28dc06fc30b627079e340ac7fe50cf1e6ec8f5",
   "ask-and-delegation.json": "09cc211a1cc4af26a62852cddc9941a61dd0325426793fc2b417ad5aaaacd16e",
   "designer-admin-operation.json": "b8e046e127afcc227eb4e5f07a7dddbe85eada4bd9d4a3601581714eb93d0092",
+  "designer-terminal-operation.json": "499b58806b667e5659dddbdc4ddebda0b5611708c6297f89b8157584016ecde9",
+  "editor-after-repeat-answer-files.json": "6141b660c5d6bc6d112f66cad0960919930416fdcd249373a22475f71ddc6d3f",
   "editor-autonomous.json": "79070d2a4c425de6a49af56567b080eeffbb675b4bf5fbcd9e35066efeb1062c",
   "exhibit-designer-up.json": "ddd66be0821203d301465e806b21eb41ca8141ae2fa1654058d63d2fc15a6dc5",
   "exhibit-editor-up.json": "7832ba0e1694f34d13f63aac2630dd534b349d0c7add04190ace19183fd01db1",

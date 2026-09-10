@@ -113,3 +113,14 @@ Source inspection found that Ask answer rows only entered ephemeral dynamic
 context while the ordinary persisted wake input contained just the wake prompt.
 That explains a concrete missing retention path; actual recovery on a fixed
 binary has not been measured. PR35110 fixes the separate 480-byte answer cut.
+
+The designer operation subsequently read back as Succeeded, completed at
+1789043505.517689. This does not certify its poster or the parent task. After
+repeated answers, the editor revised build_publication.py to include the
+operator date and venue. The PDF/poster bytes had not yet changed at this
+observation; the script still contained a malformed free-entry phrase.
+
+Follow-up PR35114 puts Ask answer rows into ordinary durable user input. Its
+checkpoint serialization test appends ten wake inputs, not ten real model
+turns. Independent review identified a remaining Ask+Gate co-delivery path
+that can skip this input; fixed-runtime acceptance remains outstanding.

@@ -5555,7 +5555,7 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio_main masc.server masc.fs_compat))
+ (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
 
 (test
  (name test_runtime_antigravity_context)
@@ -5580,3 +5580,4 @@
  (name test_runtime_setup_batch)
  (modules test_runtime_setup_batch)
  (libraries alcotest yojson unix eio eio_main masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+(include stanzas/test_docker_account_access.inc)

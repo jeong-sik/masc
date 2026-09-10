@@ -108,6 +108,7 @@ let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approva
   match obligations with
   | [] -> Ok false
   | _ ->
+    let prepare () =
     let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
     let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
@@ -125,7 +126,18 @@ let suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approva
     | Some operation ->
       let* _ = Owner.defer_direct_gate ~base_path ~keeper_name ~operation_id
         ~execution_digest:operation.execution_digest ~waiting |> owner in
-      Ok true
+      Ok true in
+    match prepare () with
+    | Ok _ as confirmed -> confirmed
+    | Error diagnostic ->
+      let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
+      (match operation with
+       | None -> Error "original Gate operation disappeared during checkpoint reconciliation"
+       | Some operation ->
+         let* _ = Owner.defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id
+           ~execution_digest:operation.execution_digest ~obligations ~diagnostic |> owner in
+         Log.Keeper.warn "Gate operation retained for checkpoint reconciliation: %s" diagnostic;
+         Ok true)
 
 let denial_input (selected : Semantic.gate_resolution) =
   match selected.decision with
@@ -203,3 +215,23 @@ let load ~config ~meta ~operation_id ~session_dir =
          let* _ = Owner.defer_direct_gate ~base_path ~keeper_name ~operation_id
            ~execution_digest:operation.execution_digest ~waiting:state.waiting |> owner in
          Error detail)
+
+type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Checkpoint_reconciliation
+let pending ~base_path ~keeper_name ~operation_id =
+  let* retry = Owner.direct_runtime_retry ~base_path ~keeper_name ~operation_id |> owner in
+  match retry with
+  | Some retry -> Ok (Some (Bound_checkpoint retry.Semantic.checkpoint))
+  | None ->
+    let* state = Owner.direct_gate_state ~base_path ~keeper_name ~operation_id |> owner in
+    match state with
+    | Some state -> Ok (Some (Bound_checkpoint state.Semantic.waiting.checkpoint))
+    | None ->
+      let* obligations = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
+      if obligations = [] then Ok None
+      else
+        let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
+        match operation with
+        | Some {Keeper_chat_operation.state=Keeper_chat_operation.Queued; _} -> Ok (Some Checkpoint_reconciliation)
+        | Some {Keeper_chat_operation.state=(Keeper_chat_operation.Running _ | Keeper_chat_operation.Succeeded _
+            | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _); _}
+        | None -> Ok None

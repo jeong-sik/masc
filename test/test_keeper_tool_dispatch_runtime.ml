@@ -7669,7 +7669,7 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
-let test_direct_gate_current_history_resume decision () =
+let test_direct_gate_current_history_resume ?(checkpoint_failure=false) decision () =
   with_exec_fixture "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -7711,11 +7711,28 @@ let test_direct_gate_current_history_resume decision () =
         messages=[Agent_core.Types.user_msg "Finish the original research";
           Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
       Checkpoint.save_agent_core_classified ~session_dir original |> require "original checkpoint" |> ignore;
+      if checkpoint_failure then (
+        let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
+        output_string channel "retention destination is not a directory";
+        close_out channel);
       check bool "actual yield parks the same operation" true
         (Gate.suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id]
          |> require "suspend");
       check bool "unresolved request is not claimable" true
         ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
+      if checkpoint_failure then (
+        let original = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
+        check bool "retention failure preserves original input" true
+          (match original with Some operation -> operation.input=Some canonical | None -> false);
+        check bool "unconfirmed checkpoint is explicit nonterminal state" true
+          ((Gate.pending ~base_path ~keeper_name ~operation_id |> require "pending reconciliation")
+           = Some Gate.Checkpoint_reconciliation);
+        Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+          ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "resolved despite retention failure" |> ignore;
+        Gate.reconcile ~config ~meta |> require "do not invent checkpoint";
+        check bool "approval cannot authorize missing checkpoint replay" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None))
+      else (
       (* A different completed turn appends history while the original waits. *)
       let newer = {original with Agent_core.Checkpoint.messages=original.messages @
         [Agent_core.Types.user_msg "Independent newer user context"]} in
@@ -7770,7 +7787,8 @@ let test_direct_gate_current_history_resume decision () =
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
-        |> require "same operation completion" |> ignore)
+        |> require "same operation completion" |> ignore))
+
 let test_edit_manifest_through_model_projection () =
   List.iter (fun fail_manifest ->
     with_exec_fixture ~always_allow:true "edit-model-manifest"
@@ -7827,12 +7845,15 @@ let test_edit_manifest_through_model_projection () =
         let bytes = List.map (fetch_artifact_exn ~base_path:config.base_path) refs in
         check (slist string String.compare) "snapshots retain exact before and after"
           ["before\n"; "after\n"] bytes)) [false; true]
+
 ;;
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("direct_gate_resume", [
+      test_case "checkpoint retention failure preserves nonterminal original input" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "approved Gate resumes same input with newer history and exact replay" `Quick
         (test_direct_gate_current_history_resume Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "denied Gate resumes same input with authoritative denial" `Quick

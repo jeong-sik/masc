@@ -744,3 +744,7 @@ let resume_direct_gate ~base_path ~keeper_name ~operation_id ~waiting ~resolutio
   with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.resume_direct_gate owner ~operation_id ~waiting ~resolution)
 let discharge_direct_gate ~base_path ~keeper_name ~operation_id ~obligation =
   with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.discharge_direct_gate owner ~operation_id ~obligation)
+
+let defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id ~execution_digest ~obligations ~diagnostic =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_gate_reconciliation owner ~operation_id ~execution_digest ~obligations ~diagnostic)

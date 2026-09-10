@@ -19514,11 +19514,11 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None)
-  else if Option.is_some state.lane_addons then
-    let view = Option.get state.lane_addons in
+  else match state.lane_addons with
+  | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None)
-  else if state.palette_open then
+  | None -> if state.palette_open then
     let frame, clamped = render_palette state in
     (frame, clamped, None)
   else if state.context_inspector_open then

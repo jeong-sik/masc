@@ -648,6 +648,7 @@ let run_candidates_outcome
 let run_vision
     ?complete
     ?runtime_id
+    ?(exclude_runtime_ids = [])
     ~sw
     ~clock
     ~net
@@ -671,7 +672,29 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              let candidates = vision_runtime_candidates ~now:(Eio.Time.now clock) in
+              let all_candidates =
+                vision_runtime_candidates ~now:(Eio.Time.now clock)
+              in
+              (* Candidates the caller's own walk already spent this turn. The
+                 quota window pushes a candidate that answered a hard rejection
+                 behind the live ones but keeps it in the list, so without this
+                 the delegation calls the accounts that just refused to pay one
+                 more time before the text fallback starts (#34829). *)
+              let candidates =
+                match exclude_runtime_ids with
+                | [] -> all_candidates
+                | excluded ->
+                  List.filter
+                    (fun (id, _, _) -> not (List.mem id excluded))
+                    all_candidates
+              in
+              if List.is_empty candidates && not (List.is_empty all_candidates)
+              then
+                (* Distinct from "none configured": there are capable runtimes
+                   and the walk has already asked all of them. *)
+                Vo_no_runtime
+                  "every capable image runtime was already attempted in this turn"
+              else
               let selected = match runtime_id with
                 | None -> Ok candidates
                 | Some requested ->

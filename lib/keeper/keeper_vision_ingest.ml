@@ -121,13 +121,16 @@ let raw_bytes_of_image_data data =
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
    emits an unread placeholder. Provider cancellation, when configured, is
    owned by the shared Provider boundary. *)
-let eager_read ~media_type ~bytes : (string, string) result option =
+let eager_read ?(exclude_runtime_ids = []) ~media_type ~bytes
+  : (string, string) result option
+  =
   match
     Eio_context.get_net_opt (), Eio_context.get_switch_opt (), Eio_context.get_clock_opt ()
   with
   | Some net, Some sw, Some clock ->
     (match
        Keeper_vision_tool.run_vision
+         ~exclude_runtime_ids
          ~sw
          ~clock
          ~net
@@ -285,7 +288,7 @@ type image_projection =
   ; delegated_images : int
   }
 
-let fallback_projector_with_read ~read ~keeper_name () =
+let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name () =
   let cached = Hashtbl.create 8 in
   let eager_budget = ref max_eager_reads_per_turn in
   let project_image ~mode block =
@@ -302,7 +305,10 @@ let fallback_projector_with_read ~read ~keeper_name () =
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image file ID: %s; this runtime cannot view the image]" data)
-        | _ -> evict_block ~read ~mode ~keeper_name ~eager_budget block
+        | _ ->
+          evict_block
+            ~read:(read ~exclude_runtime_ids)
+            ~mode ~keeper_name ~eager_budget block
       in
       Hashtbl.add cached (mode, block) projected;
       projected
@@ -330,7 +336,8 @@ let fallback_projector_with_read ~read ~keeper_name () =
   project
 ;;
 
-let fallback_projector = fallback_projector_with_read ~read:eager_read
+let fallback_projector ?exclude_runtime_ids ~keeper_name () =
+  fallback_projector_with_read ?exclude_runtime_ids ~read:eager_read ~keeper_name ()
 
 module For_testing = struct
   let fallback_projector = fallback_projector_with_read

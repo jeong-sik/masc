@@ -22,7 +22,7 @@ type output_wire =
 type streaming_reasoning =
   | No_streaming_reasoning
   | Delta_field of string
-  | Delta_reasoning_details
+  | Delta_field_and_details of string
   | Template_parser
 [@@deriving show, eq, yojson]
 

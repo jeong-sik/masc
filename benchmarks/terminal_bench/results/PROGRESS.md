@@ -62,3 +62,9 @@
 - **baseline 블로커**: terminus-2 + `openai/kimi-for-coding`은 27턴째 `assistant must not be empty` 400 (litellm↔Kimi wire 비호환, MASC 버스 아님). anthropic 스모크가 통과하면 매트릭스 전체를 `anthropic/claude-fable-5`로 돌려 same-model 비교를 만족시키는 방향.
 - **kimi MASC 레인 검증됨**: phase0-arm-b 48 tool calls, 토큰 계측 정상, 40분 Timeout(state 기록됨) — gpt2-codegolf는 난 task.
 - 진행 중: `phase0-arm-b-anthropic3` 스모크 (v0.35.7 바이너리).
+
+## 2026-09-11 v0.35.8 — 네 번째 제품 갭 픽스
+
+- **갭 3 검증 + 갭 4 발견** (phase0-arm-b-anthropic3, v0.35.7): temperature 400 해소 확인(요청 통과, 2 tool calls, 토큰 계측 정상). 136s에 신규 실패 `turn_failed: cannot set reasoning_effort "high" when enable_thinking=false`. 체인: thinking-on 첫 시도가 max_tokens truncation → truncation_recovery의 Retry_without_thinking이 enable_thinking만 뒤집고 candidate의 reasoning_effort 잔류 → validate_thinking_controls 정당 거부.
+- **픽스**: #35195 (retry 시 candidate에서 reasoning_effort strip, For_testing 노출 + 알고테스트) merged → #35196 bump merged → **v0.35.8 태그**. bench fetch 기본값 0.35.8. CI에서 For_testing re-export 누락 1회 실패 후 수정(로컬 dune 금지 룰의 blind spot).
+- 관찰: thinking-on + max_tokens 16k에서 truncation 실제 발생 → 매트릭스 때 anthropic 레인 max_tokens 상향 검토.

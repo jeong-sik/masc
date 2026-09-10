@@ -1636,6 +1636,18 @@ let add_routes ~sw ~clock router =
              | Ok json -> Http.Response.json_value ~request:req json reqd
              | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/antigravity" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.import_account ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/context" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

@@ -505,7 +505,11 @@ let keepers_json
     match Keeper_meta_store.persisted_keeper_names_result config with
     | Error _ -> [] (* A failed read cannot establish that a Keeper never started. *)
     | Ok persisted_names ->
-      Keeper_declared_roster.missing ~base_path:config.base_path ~persisted_names
+      (* A metadata row may have been removed after this projection read it.
+         Keep its initial name reserved until the next snapshot, so the same
+         response cannot contain both its runtime and declaration rows. *)
+      Keeper_declared_roster.missing ~base_path:config.base_path
+        ~persisted_names:(List.sort_uniq String.compare (names @ persisted_names))
       |> List.map Keeper_declared_roster.to_json
   in
   let rows = rows @ declarations in

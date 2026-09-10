@@ -92,10 +92,10 @@ let original_home = Sys.getenv_opt "HOME"
 let original_masc_base_path = Sys.getenv_opt "MASC_BASE_PATH"
 
 (** Run a test function with a temporary MASC_BASE_PATH containing library dirs. *)
-let with_temp_base_path f =
+let with_temp_base_path ?(prepare_library=true) f =
   let base_path = temp_dir () in
   Unix.putenv "MASC_BASE_PATH" base_path;
-  let _ = setup_library_dirs base_path in
+  if prepare_library then ignore (setup_library_dirs base_path);
   let ctx : Tool_library.context = { agent_name = "test-agent" } in
   Fun.protect ~finally:(fun () ->
     (match original_masc_base_path with
@@ -111,6 +111,21 @@ let dispatch_exn ctx ~name ~args =
   match Tool_library.dispatch ctx ~name ~args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> failwith ("dispatch returned None for " ^ name)
+
+let test_add_on_fresh_base () =
+  List.iter (fun title ->
+    with_temp_base_path ~prepare_library:false (fun ctx ->
+      Alcotest.(check bool) "library initially absent" false
+        (Sys.file_exists (Tool_library.library_root ()));
+      let ok, _ = dispatch_exn ctx ~name:"masc_library_add"
+          ~args:(`Assoc ["title", `String title; "content", `String "fresh base evidence"]) in
+      Alcotest.(check bool) "first add succeeds" true ok;
+      let ok, content = dispatch_exn ctx ~name:"masc_library_read"
+          ~args:(`Assoc ["topic", `String title]) in
+      Alcotest.(check bool) "saved document readable" true ok;
+      Alcotest.(check bool) "exact content retained" true
+        (Masc.String_util.contains_substring content "fresh base evidence")))
+    ["Fresh library"; "새 도서관"]
 
 (* ============================================================
    Dispatch routing tests
@@ -425,6 +440,7 @@ let () =
       Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
     ]);
     ("library_add", [
+      Alcotest.test_case "fresh base creates library and reads document" `Quick test_add_on_fresh_base;
       Alcotest.test_case "missing title" `Quick test_add_missing_title;
       Alcotest.test_case "missing content" `Quick test_add_missing_content;
       Alcotest.test_case "invalid source" `Quick test_add_invalid_source;

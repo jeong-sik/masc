@@ -169,7 +169,13 @@ let test_approval_has_no_repair_obligation () =
     check_pending config 0;
     reconcile config ~delivered:0 ~retained:0;
     Alcotest.(check int) "approval has no rejection stimulus" 0
-      (List.length (queue config));
+      (List.length
+         (List.filter
+            (fun stimulus ->
+               match stimulus.Keeper_event_queue.payload with
+               | Keeper_event_queue.Task_outcome _ -> false
+               | _ -> true)
+            (queue config)));
     (* The approval still reaches the producer in its own right: the twin wake
        carries the typed outcome, with no repair obligation behind it. *)
     Alcotest.(check (list string)) "approval wake carries the exact verification"

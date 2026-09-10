@@ -158,6 +158,14 @@ SOURCES
   # test_blocker_class_mirror, which extracts the blocker class list straight
   # out of lib/keeper/keeper_meta_contract.ml.
   #
+  # Every changed file, not the .ml subset the name mapping needs. A guard over
+  # a shell script or a config file names it exactly the same way. The asset
+  # and tool triggers above stay: they fire for any file under a directory,
+  # which a named literal cannot say.
+  # Measured 2026-09-10: 44 non-.ml files are named by a suite and exist --
+  # 28 .sh, 3 .json, 2 .py, 2 .toml, 1 .ts, 1 .c -- the widest being
+  # config/runtime.toml at 9 suites, inside the max_suites bound.
+  #
   # Measured 2026-09-10: 132 source files are named this way across 78 suites;
   # 110 of them by exactly one suite, and bin/masc_tui_render.ml by the most, 8.
   # The per-module cap above does not apply -- it guards against a name that is
@@ -180,7 +188,7 @@ SOURCES
     [ -n "${watchers}" ] || continue
     declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watchers}")
   done <<DECLARED
-  ${changed_sources}
+  ${changed}
 DECLARED
 
   declared_suites=$( { printf '%s\n' "${declared_suites}" \
@@ -297,8 +305,18 @@ self_test() {
   check "a package source selects its suites in both test roots" \
     "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
     "packages/agent_core/lib/event_bus.ml"
-  check "a doc-only change selects nothing" "" \
-    "docs/x.md"
+  # The path matters: "docs/x.md" used to be the fixture here and stopped
+  # meaning "no suite names this" -- test_tui_memory_facts_explorer carries it
+  # as a source-fact path in its own fixture data. That is the coincidence any
+  # literal match pays for, and it is one extra suite, not a wrong verdict.
+  check "a doc no suite names selects nothing" "" \
+    "docs/no-suite-names-this.md"
+  # A guard can watch a document. Four do, among them the RFC-0086 namespace
+  # invariant and this one, and before the declared mapping took every changed
+  # path they were selected by nothing.
+  check "a document a suite reads selects that suite" \
+    "test/test_tui_render_memory.ml" \
+    "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
   check "a tool definition reaches every guard over it" \

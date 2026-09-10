@@ -136,6 +136,9 @@ stand in for installing or authenticating them.
 
 ## Choosing a model connection
 
+AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
+They are outside the 0.35.5 installation and verification scope.
+
 Select existing API providers, Claude Code, Codex, or local Ollama models.
 Use **Add another server URL** for llama.cpp, vLLM, another OpenAI-compatible
 server, or Ollama on another computer. Existing Antigravity connections remain

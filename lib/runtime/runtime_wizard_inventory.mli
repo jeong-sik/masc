@@ -7,7 +7,10 @@
     verification support describe adapter capability, never account access or
     measured readiness. Unsupported protocols remain visible with null protocol
     or unsupported status. Catalog endpoint credentials are also redacted. *)
-val to_json : Runtime_schema.config -> Yojson.Safe.t
+val to_json : ?include_credential_references:bool -> Runtime_schema.config -> Yojson.Safe.t
+(** [include_credential_references] is for the local setup CLI only. It adds
+    file references, never secret values, so new model bindings can preserve
+    protected credentials. HTTP callers leave it false. *)
 
 val binding_for_provider
   :  Runtime_schema.config

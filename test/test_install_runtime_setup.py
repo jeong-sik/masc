@@ -27,14 +27,88 @@ MODULE.loader.exec_module(SETUP)
 
 def spec(choice='vllm'):
     result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
+        if choice == 'messages':
+            result['provider_kind'] = 'anthropic'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
     return result
 
 
 class ModelSelection(unittest.TestCase):
+    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
+        inventory = dict(runtimes=[], integrations=[dict(
+            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
+            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
+            origin='agent_core_catalog', setup_support='new_connection', provider_kind='openai_compat')])
+        rows = SETUP.connection_sources(inventory)
+        source = next(row for row in rows if row['provider_id'] == 'openrouter')
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['rows'], [])
+
+    def test_private_key_is_piped_and_removed_when_setup_does_not_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory, 'pending-key')
+            def save(argv, **kwargs):
+                self.assertEqual(argv, ['/fixture/masc', 'runtime-store-credential'])
+                self.assertEqual(kwargs['input'], 'hidden-secret')
+                self.assertNotIn('hidden-secret', str(argv))
+                key.write_text(kwargs['input'])
+                key.chmod(0o600)
+                return subprocess.CompletedProcess(argv, 0, json.dumps(dict(
+                    schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', side_effect=save), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                self.assertEqual(credentials.save(), str(key))
+                self.assertTrue(key.exists())
+            self.assertFalse(key.exists())
+
+    def test_successfully_committed_key_remains_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory, 'committed-key')
+            key.write_text('hidden-secret')
+            key.chmod(0o600)
+            result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+                schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', return_value=result), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                path = credentials.save()
+                credentials.retain([dict(credential_file=path)])
+            self.assertTrue(key.exists())
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+
+    def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
+        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
+                      api_key_env='', credential_file='/private/saved-key', credential_kind='file',
+                      credential_replaced=True, rows=[dict(id='old.binding', model='same-model',
+                      max_context=8192, tools=True)])
+        with patch.object(SETUP, 'native_discover_models', return_value=(
+                [dict(id='same-model', label='Model', context=None)], 'server')):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual(len(models), 1)
+        self.assertIsNone(models[0]['existing'])
+        runtime, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertNotEqual(runtime, 'old.binding')
+        self.assertEqual(selected['credential_file'], '/private/saved-key')
+        self.assertNotIn('api_key_env', selected)
+
+    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
+        import tomllib
+        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
+        _, runtime, overlay = SETUP.render(configured)
+        self.assertNotIn(b'hidden-secret', runtime + overlay)
+        catalog = tomllib.loads(overlay.decode())
+        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
+        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
+        providers = tomllib.loads(runtime.decode())['providers']
+        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
+
     def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
@@ -151,7 +225,7 @@ class RuntimeSetup(unittest.TestCase):
                 self.assertIn('setup_' + choice, identity)
                 self.assertIn(b'operator/model-exact', runtime)
                 self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
+                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
                     self.assertIn(('"provider_name" = ' + SETUP.toml(identity.split('.')[0])).encode(), overlay)
                     self.assertIn(b'"supports_tools" = true', overlay)
                     self.assertIn(b'"supports_reasoning" = false', overlay)
@@ -338,7 +412,7 @@ class MultipleSelection(unittest.TestCase):
     def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
                       rows=[dict(id='glm.model', model='glm-5.3', max_context=200000, tools=True)])
-        with patch.object(SETUP, 'discover_models', return_value=([
+        with patch.object(SETUP, 'native_discover_models', return_value=([
                 dict(id='glm-5.3',label='GLM',context=None), dict(id='different-model',label='Other',context=None)], 'server')):
             rows, _ = SETUP.source_models('/fixture/masc', source, 10)
         self.assertEqual(rows[0]['context'], 200000)
@@ -352,7 +426,7 @@ class MultipleSelection(unittest.TestCase):
         source = dict(choice='openai_compatible', endpoint='http://localhost:8080/v1', api_key_env='', rows=[
             dict(id='provider.small', model='same-model', max_context=8192, tools=True),
             dict(id='provider.large', model='same-model', max_context=16384, tools=True)])
-        with patch.object(SETUP, 'discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
+        with patch.object(SETUP, 'native_discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
             models, _ = SETUP.source_models('/fixture', source, 10)
         self.assertEqual([row['existing']['id'] for row in models], ['provider.small','provider.large'])
         self.assertEqual([row['context'] for row in models], [8192,16384])

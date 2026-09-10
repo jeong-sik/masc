@@ -174,3 +174,15 @@ it('cancels its pending model discovery when the settings surface unmounts', asy
   await waitFor(() => expect(observed).toBeDefined())
   view.unmount(); expect(observed?.aborted).toBe(true)
 })
+
+it('does not mistake cancelled account import for missing authentication', async () => {
+  vi.mocked(postControlPlane).mockImplementation((_path, _body, _headers, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+  }))
+  const accounts = { ...inventory, integrations: [{ id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${accounts} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'antigravity' } })
+  fireEvent.click(screen.getByText('서버의 로그인된 Antigravity 계정 사용')); fireEvent.click(await screen.findByText('요청 대기 취소'))
+  await screen.findByText(/계정 가져오기 응답 대기를 취소했습니다/)
+  expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
+})

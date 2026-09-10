@@ -37,7 +37,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
       const imported = await importAntigravityAccount(integration.id, { signal: controller.signal })
       setModels(imported.models); setSource(imported.source); setDiscoveryRevision(revision)
       setNotice(imported.models.length ? '계정을 가져왔습니다. 사용할 모델을 선택하세요. 응답·도구 검증은 저장할 때 진행합니다.' : '계정을 가져왔지만 모델 목록을 확인하지 못했습니다. CLI 로그인 상태를 확인한 뒤 다시 가져오세요.')
-    } catch { setNotice('계정을 가져오지 못했습니다. 이 MASC 서버의 터미널에서 masc setup으로 CLI 설치·로그인을 마친 뒤 다시 시도하세요.') }
+    } catch { setNotice(controller.signal.aborted ? '계정 가져오기 응답 대기를 취소했습니다. 계정 저장이 완료되었을 수 있으므로 상태를 다시 확인하세요.' : '계정을 가져오지 못했습니다. 이 MASC 서버의 터미널에서 masc setup으로 CLI 설치·로그인을 마친 뒤 다시 시도하세요.') }
     finally { endRequest(controller); setBusy(false) }
   }
   async function discover() {
@@ -47,7 +47,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     const revision = inventory.setup_revision ?? null
     const selected: Source = { integration_id: integration.id, ...(http ? { endpoint: integration.endpoint ?? endpoint } : {}), ...(http && key ? { api_key: key } : {}) }
     try { setModels(await discoverSetupModels(selected, { signal: controller.signal })); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
-    catch { setModels([]); setSource(null); setNotice(http ? '모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.' : '설치된 CLI와 로그인 상태를 확인한 뒤 모델 목록을 새로고침하세요.') }
+    catch { setModels([]); setSource(null); setNotice(controller.signal.aborted ? '모델 목록 응답 대기를 취소했습니다. 필요할 때 다시 확인하세요.' : http ? '모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.' : '설치된 CLI와 로그인 상태를 확인한 뒤 모델 목록을 새로고침하세요.') }
     finally { endRequest(controller); setBusy(false) }
   }
   function addModels() {
@@ -75,7 +75,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     try {
       const prepared = await prepareSetupModel(source, model, integration?.protocol === 'ollama-http', { signal: controller.signal })
       setModels(current => current.map(row => row.id === prepared.id ? prepared : row)); setNotice('실행 context를 확인했습니다. 모델을 선택해 추가하세요.')
-    } catch { setNotice('이 모델의 실행 context를 확인하지 못했습니다. 연결이나 모델 상태를 확인하고 목록을 새로고침하세요.') }
+    } catch { setNotice(controller.signal.aborted ? '모델 준비 응답 대기를 취소했습니다. 모델이 로드되었을 수 있으므로 상태를 다시 확인하세요.' : '이 모델의 실행 context를 확인하지 못했습니다. 연결이나 모델 상태를 확인하고 목록을 새로고침하세요.') }
     finally { endRequest(controller); setBusy(false) }
   }
   async function save() {

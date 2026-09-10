@@ -978,10 +978,40 @@ def model_choice_label(model):
     return label + ' — ' + kind + ' ' + released + suffix
 
 
-def source_models(binary, source, timeout):
+def refresh_codex_models(binary, source):
+    result = subprocess.run([str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
+    try:
+        receipt = json.loads(result.stdout)
+        if (receipt.get('schema') != 'masc.codex_model_refresh.v1'
+                or receipt.get('source') not in ('isolated_cli_cache', 'cli_list_without_context_cache')
+                or not isinstance(receipt.get('models'), list)):
+            raise ValueError('invalid refresh')
+        rows = receipt['models']
+        for row in rows:
+            if (not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label'))
+                    or (row.get('context') is not None and not positive_integer(row['context']))):
+                raise ValueError('invalid model')
+        source_text = ('Codex refreshed model list and isolated CLI context cache' if receipt['source'] == 'isolated_cli_cache'
+                       else 'Codex model list without refreshed context; offline or bundled metadata may be in use')
+        return rows, source_text
+    except (ValueError, TypeError, KeyError):
+        raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
+
+
+def source_models(binary, source, timeout, refresh=False):
     choice = source['choice']
     can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
-    if choice == 'antigravity' and source.get('credential_file'):
+    if refresh and choice == 'codex':
+        try:
+            observed, origin = refresh_codex_models(binary, source)
+        except SetupError as error:
+            observed, fallback = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
+                                                  command=source.get('command') or 'codex')
+            origin = str(error) + ' ' + fallback
+    elif choice == 'antigravity' and source.get('credential_file'):
         observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
     elif can_discover and CHOICES[choice][1] is None:
         observed, origin = native_discover_models(binary, source, timeout)
@@ -1140,8 +1170,10 @@ def select_connections(binary, inventory, timeout, credentials=None):
         else:
             source = sources[index]
         source = prepare_connection(source, credentials)
+        refresh_models = False
         while True:
-            models, origin = source_models(binary, source, timeout)
+            models, origin = source_models(binary, source, timeout, refresh=refresh_models)
+            refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
             options = [model_choice_label(item) for item in models]
             actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
@@ -1156,6 +1188,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
                     continue
                 action = commands[0] - len(models)
                 if action == 0:
+                    refresh_models = True
                     continue
                 if action == 1:
                     raise SetupError('returned to connection selection')

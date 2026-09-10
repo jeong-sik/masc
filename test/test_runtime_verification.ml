@@ -205,6 +205,35 @@ wizard-default = true
       [ Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak" ];
     let json = Runtime_wizard_inventory.to_json config in
     let open Yojson.Safe.Util in
+    let integrations = json |> member "integrations" |> to_list in
+    let integration rows id =
+      List.find (fun row -> row |> member "id" |> to_string = id) rows
+    in
+    let declared = integration integrations "cloud" in
+    check (list string) "configured provider retains both selected models"
+      [ "cloud.first"; "cloud.second" ]
+      (declared |> member "configured_runtime_ids" |> to_list |> List.map to_string);
+    check string "configured connection remains distinct" "runtime_config"
+      (declared |> member "origin" |> to_string);
+    let empty_config = { config with providers = []; bindings = []; default_runtime_id = None } in
+    let empty_inventory = Runtime_wizard_inventory.to_json empty_config in
+    check int "no runtime bindings invented" 0
+      (empty_inventory |> member "runtimes" |> to_list |> List.length);
+    let prototypes = empty_inventory |> member "integrations" |> to_list in
+    List.iter (fun id ->
+      let row = integration prototypes id in
+      check (list string) "unconfigured catalog entry has no runtime" []
+        (row |> member "configured_runtime_ids" |> to_list |> List.map to_string);
+      check bool "catalog is not account verification" false
+        (row |> member "account_availability_verified" |> to_bool))
+      [ "openrouter"; "glm-coding"; "codex"; "claude-code"; "ollama"
+      ; "vllm"; "rapid-mlx"; "llama-cpp"; "unsloth" ];
+    let antigravity = integration prototypes "antigravity" in
+    check string "unsupported verification is not ready" "unsupported"
+      (antigravity |> member "verification_support" |> to_string);
+    let gemini = integration prototypes "gemini" in
+    check string "missing native Gemini protocol is explicit" "unsupported"
+      (gemini |> member "setup_support" |> to_string);
     let rows = json |> member "runtimes" |> to_list in
     check int "all bindings, not one per provider" 2 (List.length rows);
     List.iter

@@ -26,12 +26,14 @@ REMOTE = "/opt/masc-bench"
 
 class MascAgent(BaseInstalledAgent):
     def __init__(self, logs_dir, model_name=None, arm="b",
-                 runtime_id=None, effort="high", **kwargs):
+                 runtime_id=None, effort="high", episode_timeout_sec=2400,
+                 **kwargs):
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         if arm not in ARMS:
             raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
         self.arm = arm
         self.effort = effort
+        self.episode_timeout_sec = episode_timeout_sec
         if runtime_id:
             self.runtime_id = runtime_id
         elif model_name and "/" in model_name:
@@ -58,6 +60,9 @@ class MascAgent(BaseInstalledAgent):
             key_env: key,
             "BENCH_RUNTIME_ID": self.runtime_id,
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
+            # Must fire before harbor's agent timeout (task default 900s x
+            # multiplier) or the exec is killed and result.json never lands.
+            "EPISODE_TIMEOUT_SEC": str(self.episode_timeout_sec),
         }
         # keeper_up preflight (remote_ssh) runs `gh auth status` and refuses
         # without a GitHub identity (remote_github_identity_missing);

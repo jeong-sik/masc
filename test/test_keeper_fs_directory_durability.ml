@@ -11,10 +11,6 @@ exception Synthetic_observer_cancel
    quick-suite-wide 35 minute watchdog. *)
 let coordination_watchdog_seconds = 5.0
 
-type owner_fault =
-  | Ordinary_failure
-  | Cancellation
-
 type owner_outcome =
   | Owner_error of KF.durable_write_error
   | Owner_cancelled
@@ -563,7 +559,7 @@ let test_concurrent_owned_writers_share_uncached_preparation () =
          (Atomic.get preparation_count))
 ;;
 
-let run_owner_fault_wakes_waiter fault () =
+let test_owner_cancellation_wakes_waiter () =
   Eio_main.run
   @@ fun _env ->
   with_eio_guard
@@ -590,10 +586,7 @@ let run_owner_fault_wakes_waiter fault () =
                  ~before_stage:(fun _ -> ())
                  ~before_directory_fsync:
                    (block_once hook (fun () ->
-                      match fault with
-                      | Ordinary_failure -> raise Synthetic_owner_failure
-                      | Cancellation ->
-                        raise (Eio.Cancel.Cancelled (Failure "synthetic owner cancel"))))
+                      raise (Eio.Cancel.Cancelled (Failure "synthetic owner cancel"))))
                  path
                  (`Assoc [])
              with
@@ -620,37 +613,99 @@ let run_owner_fault_wakes_waiter fault () =
          (fun () ->
             Eio.Promise.await waiter_started;
             release_blocking_hook hook;
-            (match fault, Eio.Promise.await owner_result with
-             | Ordinary_failure, Owner_error { stage = KF.Directory_prepare; _ } -> ()
-             | Cancellation, Owner_cancelled -> ()
-             | Ordinary_failure, Owner_error error ->
+            (match Eio.Promise.await owner_result with
+             | Owner_cancelled -> ()
+             | Owner_error error ->
+               failf
+                 "owner cancellation was converted to an error: %s"
+                 (KF.durable_write_error_to_string error));
+            require_durable_ok "waiter takeover" (Eio.Promise.await waiter_result);
+            check bool "cancelled owner permits waiter retry" true
+              (Atomic.get waiter_prepared)))
+;;
+
+(* An ordinary owner failure is shared with whoever is already parked on that
+   preparation; a claimant that arrives after the owner released the chain
+   legitimately becomes the next owner and prepares it itself. The two answers
+   differ, so the arrangement has to be pinned before the owner fails.
+
+   [after_validation] is the only boundary that pins it. It runs between the
+   cache observation and the claim, so once the waiter has signalled from
+   there, that fiber runs on through [claim] and parks on the owner's
+   completion before this fiber is scheduled again -- [claim] takes the
+   preparation mutex only to touch the table, and the owner holds it across
+   nothing.
+
+   Without that ordering the assertion recorded which fiber won a race, and it
+   lost often enough to sit in ci-known-failures.txt reading as a behaviour
+   claim (masc#35016). The waiter takes the directory boundary rather than the
+   save path because the claim ordering is only observable there; the save
+   path's own translation of a shared failure is what the owner assertion
+   below covers. *)
+let test_parked_waiter_shares_the_owners_ordinary_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let contended = Filename.concat base "contended" in
+       let path = Filename.concat contended "request.json" in
+       let hook = blocking_hook base in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let waiter_claiming, resolve_waiter_claiming = Eio.Promise.create () in
+       let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+       let waiter_first_validation = Atomic.make true in
+       let waiter_prepared = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(fun _ -> ())
+             ~before_directory_fsync:
+               (block_once hook (fun () -> raise Synthetic_owner_failure))
+             path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_owner_result outcome);
+       Eio.Promise.await hook.entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KDD.For_testing.ensure
+             ~after_validation:(fun () ->
+               if Atomic.compare_and_set waiter_first_validation true false
+               then Eio.Promise.resolve resolve_waiter_claiming ())
+             ~before_prepare:(fun () -> Atomic.set waiter_prepared true)
+             ~before_directory_fsync:(fun _ -> ())
+             contended
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Eio.Promise.await waiter_claiming;
+       Fun.protect
+         ~finally:(fun () -> release_blocking_hook hook)
+         (fun () ->
+            release_blocking_hook hook;
+            (match Eio.Promise.await owner_result with
+             | Error { KF.stage = KF.Directory_prepare; _ } -> ()
+             | Error error ->
                failf
                  "owner failed at unexpected stage: %s"
                  (KF.durable_write_error_to_string error)
-             | Cancellation, Owner_error error ->
-               failf
-                 "owner cancellation was converted to an error: %s"
-                 (KF.durable_write_error_to_string error)
-             | Ordinary_failure, Owner_cancelled ->
-               fail "ordinary owner failure propagated as cancellation");
-            (match fault, Eio.Promise.await waiter_result with
-             | Ordinary_failure, Error { stage = KF.Directory_prepare; _ } ->
-               check bool "permanent failure is shared without retry" false
-                 (Atomic.get waiter_prepared)
-             | Ordinary_failure, Error error ->
-               failf
-                 "waiter observed the wrong shared failure: %s"
-                 (KF.durable_write_error_to_string error)
-             | Ordinary_failure, Ok () ->
-               fail "waiter retried a permanent owner failure"
-             | Cancellation, result ->
-               require_durable_ok "waiter takeover" result;
-               check bool "cancelled owner permits waiter retry" true
-                 (Atomic.get waiter_prepared))))
+             | Ok () -> fail "faulted owner unexpectedly succeeded");
+            match Eio.Promise.await waiter_result with
+            | Error _ ->
+              check
+                bool
+                "a parked waiter does not prepare the chain itself"
+                false
+                (Atomic.get waiter_prepared)
+            | Ok _ -> fail "a parked waiter took over a failed preparation"))
 ;;
 
-let test_owner_failure_wakes_waiter = run_owner_fault_wakes_waiter Ordinary_failure
-let test_owner_cancellation_wakes_waiter = run_owner_fault_wakes_waiter Cancellation
 
 let test_owner_context_cancellation_wakes_waiter () =
   Eio_main.run
@@ -1243,9 +1298,9 @@ let () =
             `Quick
             test_concurrent_owned_writers_share_uncached_preparation
         ; test_case
-            "owner failure is shared without retry storm"
+            "a parked waiter shares the owner's ordinary failure"
             `Quick
-            test_owner_failure_wakes_waiter
+            test_parked_waiter_shares_the_owners_ordinary_failure
         ; test_case
             "owner cancellation wakes waiter takeover"
             `Quick

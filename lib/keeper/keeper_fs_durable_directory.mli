@@ -3,7 +3,15 @@
     The module owns the process-local durability cache and coordinates only
     overlapping cold paths. Independent suffixes do not share a filesystem-I/O
     critical section. Callers that enforce an ownership root validate that
-    boundary before entering this durability cache. *)
+    boundary before entering this durability cache.
+
+    A caller parked on someone else's preparation receives that preparation's
+    outcome: an ordinary failure is returned as its own error and the parked
+    caller does not prepare the chain again, while a cancelled preparation
+    releases its waiters to prepare it themselves. A caller that claims after
+    the owner released the chain finds no preparation outstanding and becomes
+    the next owner, so an ordinary failure is shared with the callers that
+    were already waiting for it -- not with every later one. *)
 
 type chain_error =
   | Non_directory_ancestor of { path : string }

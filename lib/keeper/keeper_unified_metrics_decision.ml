@@ -129,6 +129,18 @@ let append_decision_record
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
         ("tool_surface", tool_surface_json result);
+        ( "tool_call_count",
+          match result with
+          | Some result -> `Int (Keeper_agent_result.tool_call_count result)
+          | None -> `Null );
+        ( "tools_used",
+          match result with
+          | Some result ->
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   (Keeper_agent_result.tool_names result))
+          | None -> `Null );
         ("approval_queue_state", approval_queue_state);
         ("pending_approval_count", pending_approval_count);
         ( "channel",

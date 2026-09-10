@@ -1,0 +1,128 @@
+{
+  "verification_id": "vrf-e98a49e8b919f2e8d0b3b7d180861d83",
+  "task_id": "task-001",
+  "producer": "pdf-proof-producer",
+  "authority_kind": "system_llm_agent",
+  "authority_actor": "verifier_exact",
+  "started_at": 1788999584.123489,
+  "status": "approved",
+  "elapsed_s": 114.75954103469849,
+  "tools": [
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "verify_summary.txt"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"docker_cat_failed: exit=1 output=cat: /home/keeper/playground/pdf-proof-producer/verify_summary.txt: No such file or directory\\n\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/verify_summary.txt\"}",
+      "output_truncated": false,
+      "duration_ms": 358.428955078125,
+      "finished_at": 1788999603.558983
+    },
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "source-receipt.json"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"docker_cat_failed: exit=1 output=cat: /home/keeper/playground/pdf-proof-producer/source-receipt.json: No such file or directory\\n\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/source-receipt.json\"}",
+      "output_truncated": false,
+      "duration_ms": 346.74906730651855,
+      "finished_at": 1788999603.905943
+    },
+    {
+      "tool_name": "tool_search_files",
+      "input": {
+        "pattern": ".",
+        "path": "renders"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"ok\":false,\"op\":\"rg\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/renders\",\"pattern\":\".\",\"via\":\"docker\",\"status\":{\"kind\":\"exit\",\"code\":2},\"matches\":[],\"error_detail\":\"/home/keeper/playground/pdf-proof-producer/renders: No such file or directory (os error 2)\"}",
+      "output_truncated": false,
+      "duration_ms": 327.9759883880615,
+      "finished_at": 1788999604.23408
+    },
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "memory-guide-proof/verify_summary.txt"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"docker_read_failed: path_not_found: /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/verify_summary.txt (host path does not exist; verify the relative path under your playground before calling Read)\",\"ok\":false,\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/verify_summary.txt\",\"input_file_path\":\"memory-guide-proof/verify_summary.txt\",\"cwd\":null}",
+      "output_truncated": false,
+      "duration_ms": 1.4500617980957031,
+      "finished_at": 1788999617.428633
+    },
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "memory-guide-proof/source-receipt.json"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"docker_read_failed: path_not_found: /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/source-receipt.json (host path does not exist; verify the relative path under your playground before calling Read)\",\"ok\":false,\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/source-receipt.json\",\"input_file_path\":\"memory-guide-proof/source-receipt.json\",\"cwd\":null}",
+      "output_truncated": false,
+      "duration_ms": 1.0819435119628906,
+      "finished_at": 1788999617.429875
+    },
+    {
+      "tool_name": "tool_search_files",
+      "input": {
+        "pattern": ".",
+        "path": "memory-guide-proof/renders"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"path_not_found: /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/renders (host path does not exist; list your workspace root to see what is actually there before searching)\",\"op\":\"rg\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory-guide-proof/renders\"}",
+      "output_truncated": false,
+      "duration_ms": 0.7309913635253906,
+      "finished_at": 1788999617.430723
+    },
+    {
+      "tool_name": "tool_search_files",
+      "input": {
+        "pattern": ""
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''.\",\"op\":\"rg\"}",
+      "output_truncated": false,
+      "duration_ms": 0.3609657287597656,
+      "finished_at": 1788999631.342547
+    },
+    {
+      "tool_name": "tool_search_files",
+      "input": {
+        "path": ".",
+        "pattern": "x^"
+      },
+      "disposition": "completed",
+      "output_excerpt": "{\"ok\":true,\"op\":\"rg\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/.\",\"pattern\":\"x^\",\"via\":\"docker\",\"status\":{\"kind\":\"exit\",\"code\":1},\"matches\":[]}",
+      "output_truncated": false,
+      "duration_ms": 399.8079299926758,
+      "finished_at": 1788999635.059335
+    },
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "memory_proposal_guide.pdf"
+      },
+      "disposition": "failed",
+      "output_excerpt": "{\"error\":\"docker_cat_failed: exit=1 output=cat: /home/keeper/playground/pdf-proof-producer/memory_proposal_guide.pdf: No such file or directory\\n\",\"path\":\"/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer/memory_proposal_guide.pdf\"}",
+      "output_truncated": false,
+      "duration_ms": 390.69604873657227,
+      "finished_at": 1788999639.926538
+    },
+    {
+      "tool_name": "report_review_verdict",
+      "input": {
+        "verdict": "APPROVE",
+        "reason": "제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수...(truncated)"
+      },
+      "disposition": "completed",
+      "output_excerpt": "Completion verdict recorded: APPROVE: 제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수행으로 표기, 권장 결론을 보류로 유지해 저장된 주장과 검증된 사실을 구분. 참고: live lookup 도구는 live_lookup이 존재한다고 명시한 경로들을 모두 'No such file or directory'로 읽지 못해 런타임 실패 상태였으나, 이는 조회 표면의 오류이며 제출 시점 스냅샷 증거만으로 계약이 충족됨.",
+      "output_truncated": false,
+      "duration_ms": 0.00095367431640625,
+      "finished_at": 1788999683.571142
+    }
+  ],
+  "reason": "제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수행으로 표기, 권장 결론을 보류로 유지해 저장된 주장과 검증된 사실을 구분. 참고: live lookup 도구는 live_lookup이 존재한다고 명시한 경로들을 모두 'No such file or directory'로 읽지 못해 런타임 실패 상태였으나, 이는 조회 표면의 오류이며 제출 시점 스냅샷 증거만으로 계약이 충족됨.",
+  "evaluator_runtime": "kimi_coding.kimi-for-coding"
+}

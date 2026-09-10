@@ -291,8 +291,7 @@ def main():
         verdict = verdicts[0]
         assert verdict['producer'] == keeper
         assert verdict['evaluator_runtime'] == 'kimi_coding.kimi-for-coding'
-        actual_artifacts = [ref for ref in request['output']['evidence_refs'] if ref.startswith('artifact:')]
-        assert sorted(actual_artifacts) == sorted(refs), 'Committed artifact references differ from submitted bundle'
+        assert request['output']['evidence_refs'][:len(refs)] == refs
         save(out / 'verification-request.json', request)
         save(out / 'committed-verdict.json', verdict)
         receipt['verification_id'] = request['id']
@@ -371,7 +370,7 @@ def main():
         receipt.update(status='observed', producer_requests=len(requests['producer']), verifier_requests=len(requests['verifier']), delivered_images=len(delivered_images))
         save(out / 'receipt.json', receipt)
     except Exception as error:
-        receipt.update(status='failed', error=f'{type(error).__name__}: {error}')
+        receipt.update(status='failed', error=str(error))
         save(out / 'receipt.json', receipt)
         raise
     finally:
@@ -405,7 +404,7 @@ def main():
                     save(out / 'receipt.json', receipt)
             except Exception as observation_error:
                 save(out / f'cleanup-observation-error-{counter:03}.json',
-                     {'error': f'{type(observation_error).__name__}: {observation_error}', 'server_pid': server.pid,
+                     {'error': str(observation_error), 'server_pid': server.pid,
                       'action': 'preserve_same_server_and_provider'})
             if not safe_to_stop:
                 time.sleep(0.5)

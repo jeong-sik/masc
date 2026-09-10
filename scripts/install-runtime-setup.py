@@ -958,20 +958,35 @@ def select_sandbox(binary, base_path):
             print(terminal_text(row['reason']), file=sys.stderr)
             continue
         arguments = list(row['setup_args'])
+        configured = catalog.get('configured_selection')
+        same_backend = isinstance(configured, dict) and configured.get('backend') == row['id']
         modes = row['capabilities']['network_modes']
+        if same_backend and not advanced:
+            print('Keeping the configured guest network policy. MASC model connections and WebFetch have separate server-side controls.', file=sys.stderr)
+            return arguments
         if advanced:
-            # Policy requires declared destinations; never invent an empty
-            # allowlist while promising that online tools can work.
+            # A declared policy can be kept; creating a new one also needs its
+            # destination configuration, so it is not synthesized here.
             modes = [mode for mode in modes if mode in ('inherit', 'none')]
             modes.sort(key=lambda mode: mode != 'inherit')
-            labels = [('Internet access — model APIs and WebFetch' if mode == 'inherit'
-                       else 'Offline guest — WebFetch unavailable') for mode in modes]
-            mode = modes[pick('Sandbox network access', labels)[0]]
+            labels = [('Allow internet access for guest commands' if mode == 'inherit'
+                       else 'Disable networking for guest commands') for mode in modes]
+            if same_backend:
+                labels.insert(0, 'Keep configured guest network policy (' + terminal_text(configured['network_mode']) + ')')
+            print('Guest networking controls sandbox commands. MASC model connections and WebFetch run through separate server-side controls.', file=sys.stderr)
+            choice = pick('Sandbox guest network access', labels)[0]
+            if same_backend:
+                if choice == 0:
+                    return arguments
+                choice -= 1
+            mode = modes[choice]
         else:
             if 'inherit' not in modes:
                 raise SetupError('This sandbox needs advanced network configuration for the first conversation.')
             mode = 'inherit'
+            print('The new sandbox allows internet access for guest commands. MASC model connections and WebFetch have separate server-side controls; Advanced choices can disable guest networking.', file=sys.stderr)
         return arguments + ['--network-mode', mode]
+
 
 
 def journey(binary, base_path, port, timeout, resume=False):

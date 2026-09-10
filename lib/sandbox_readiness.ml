@@ -159,7 +159,7 @@ let selection_of_contents ~host ~path ~contents ~profile:requested ~microvm_back
   Ok {backend; network_mode; remote_endpoint}
 let inspect ~base_path =
   let host = detect_host ~run:system_runner in
-  let configured, configuration_error = match base_path with
+  let configured_selection, configuration_error = match base_path with
     | None -> None, None
     | Some base_path ->
       let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
@@ -167,14 +167,19 @@ let inspect ~base_path =
         let contents = In_channel.with_open_text path In_channel.input_all in
         match selection_of_contents ~host ~path ~contents ~profile:None
                 ~microvm_backend:None ~network_mode:None with
-        | Ok selection -> Some selection.backend, None
+        | Ok selection -> Some selection, None
         | Error _ -> None, Some "imp's sandbox declaration needs repair before it can be prepared."
        with Sys_error _ -> None, Some "imp's sandbox declaration could not be read. Initialize or repair the workspace.") in
   let entries = List.map (probe ~host ~run:system_runner
     ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
     ~require_userns:(Env_config_sandbox.Hardening.require_userns ())) all in
+  let configured = Option.map (fun (selection : selection) -> selection.backend) configured_selection in
   match catalog_json ~host ~configured entries with
-  | `Assoc fields -> `Assoc (("configuration_error",
+  | `Assoc fields -> `Assoc (("configured_selection", (match configured_selection with
+      | None -> `Null
+      | Some selection -> `Assoc ["backend", `String (backend_id selection.backend);
+          "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string selection.network_mode)]))
+      :: ("configuration_error",
       (match configuration_error with None -> `Null | Some message -> `String message)) :: fields)
   | json -> json
 

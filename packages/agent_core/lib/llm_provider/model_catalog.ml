@@ -874,18 +874,16 @@ let catalog_of_toml_lenient toml =
 ;;
 
 let parse_catalog_with ~source parse catalog_of =
-  let parse_res =
-    try Ok (parse ()) with
-    | Sys_error msg ->
-      Error (Printf.sprintf "cannot read model catalog %s: %s" source msg)
-    | Otoml.Parse_error (_pos, msg) ->
-      Error (Printf.sprintf "model catalog TOML parse error in %s: %s" source msg)
-    | Otoml.Type_error _ ->
-      Error (Printf.sprintf "model catalog TOML type error in %s" source)
-  in
-  match parse_res with
-  | Error _ as e -> e
-  | Ok toml -> catalog_of toml
+  try
+    let toml = parse () in
+    catalog_of toml
+  with
+  | Sys_error msg ->
+    Error (Printf.sprintf "cannot read model catalog %s: %s" source msg)
+  | Otoml.Parse_error (_pos, msg) ->
+    Error (Printf.sprintf "model catalog TOML parse error in %s: %s" source msg)
+  | Otoml.Type_error _ ->
+    Error (Printf.sprintf "model catalog TOML type error in %s" source)
 ;;
 
 let parse_catalog ~source parse = parse_catalog_with ~source parse catalog_of_toml
@@ -972,6 +970,18 @@ let%test "of_toml_string_lenient skips every poisoned row without failing the lo
 
 let%test "of_toml_string_lenient keeps whole-file TOML breakage fail-closed" =
   match of_toml_string_lenient ~source:"fixture" "not toml" with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let%test "of_toml_string_lenient reports a non-array models key as an error, not an exception" =
+  match of_toml_string_lenient ~source:"fixture" "models = 42" with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let%test "of_toml_string reports a non-array models key as an error, not an exception" =
+  match of_toml_string ~source:"fixture" "models = 42" with
   | Error _ -> true
   | Ok _ -> false
 ;;

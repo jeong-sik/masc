@@ -123,7 +123,10 @@ type skipped_entry =
     hand-written and outlive the binary that wrote them, so one stale field
     must not block every other row. Whole-file failures — unreadable input,
     broken TOML, or duplicate identities among surviving rows — remain [Error]:
-    skipping must never turn a contradiction into a silent winner. *)
+    skipping must never turn a contradiction into a silent winner. A skipped
+    row's identity falls back to the embedded catalog row, if any — the
+    deployment's intended delta for that row is dropped with only the skip
+    report as signal. *)
 val of_toml_string_lenient
   :  source:string
   -> string

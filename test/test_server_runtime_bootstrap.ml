@@ -400,16 +400,38 @@ let test_model_catalog_overlay_skips_poisoned_entries () =
        id_prefix = \"lenient-stale-model\"\n\
        supports_extended_thinking = true\n";
     let installed = ref None in
+    let console_lines = ref [] in
+    Console_sink.For_testing.reset ();
     let result =
-      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
-        ~config_root
-        ~set_overlay:(fun catalog -> installed := Some catalog)
-        ()
+      Fun.protect
+        ~finally:Console_sink.For_testing.reset
+        (fun () ->
+          Console_sink.For_testing.set_writer
+            (Some (fun line -> console_lines := line :: !console_lines));
+          Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+            ~config_root
+            ~set_overlay:(fun catalog -> installed := Some catalog)
+            ())
     in
     (match result with
      | None -> Alcotest.fail "expected config-root overlay resolution"
      | Some path ->
        Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
+    let skip_warns =
+      List.filter
+        (fun line -> String_util.contains_substring line "skipping entry")
+        !console_lines
+    in
+    Alcotest.(check int) "one skip WARN per poisoned row" 1 (List.length skip_warns);
+    let skip_warn = List.hd skip_warns in
+    Alcotest.(check bool)
+      "skip WARN names the poisoned row"
+      true
+      (String_util.contains_substring skip_warn "lenient-stale-model");
+    Alcotest.(check bool)
+      "skip WARN names the skip reason"
+      true
+      (String_util.contains_substring skip_warn "unknown field(s)");
     match !installed with
     | None -> Alcotest.fail "expected the surviving overlay rows to install"
     | Some catalog ->

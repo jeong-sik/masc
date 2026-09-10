@@ -118,16 +118,23 @@ let configure_agent_core_model_catalog_overlay
      | Ok (overlay, skipped) ->
        List.iter
          (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
-            Log.Misc.warn
-              "model_catalog: overlay %s skipping entry %s: %s"
+            Log.Runtime.warn
+              "model_catalog: overlay %s skipping entry %S: %s"
               path
               skip.entry_label
               skip.skip_reason)
          skipped;
        set_overlay overlay;
-       Log.Misc.info
-         "model_catalog: deployment overlay %s installed onto embedded catalog"
-         path;
+       (match skipped with
+        | [] ->
+          Log.Misc.info
+            "model_catalog: deployment overlay %s installed onto embedded catalog"
+            path
+        | _ ->
+          Log.Runtime.warn
+            "model_catalog: deployment overlay %s installed onto embedded catalog with %d skipped row(s)"
+            path
+            (List.length skipped));
        Some path
      | Error detail ->
        raise

@@ -31,7 +31,6 @@ let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
-let uuid = Uuidm.v4_gen (Random.State.make_self_init ())
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
@@ -375,7 +374,7 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
       let promise, resolver = Eio.Promise.create () in
-      let e = { instance_id = Uuidm.to_string (uuid ()); run_id; package; binding;
+      let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
         phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
         stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
         running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;

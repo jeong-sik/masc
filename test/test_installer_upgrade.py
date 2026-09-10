@@ -49,6 +49,10 @@ while [ "$#" -gt 0 ]; do
     --base-path) seed_base="$2"; shift 2 ;;
     --skills-only) skills_only=1; shift ;;
     --force) force_seed=1; shift ;;
+    # The installer's seed asks for this; `masc init` does not record a
+    # default workspace without it. Accepted and ignored: what this fake
+    # stands in for is the config seed, not the record.
+    --record-default) shift ;;
     *) echo "unexpected init argument: $1" >&2; exit 2 ;;
   esac
 done

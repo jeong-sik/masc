@@ -266,6 +266,41 @@ jobs:
       # "by 1516" in this step's own log, and both merged green. #35004
       # repaired the ceiling the next morning. The trigger worked; nothing
       # was answerable for the verdict.
+      - name: Build the Keeper sandbox image the sandboxed suites read through
+        # Four suites read a file through a Keeper's Docker sandbox. Without the
+        # image the read answers "image_not_found: keeper sandbox image
+        # masc-sandbox:general is not available" and the suite is red for a
+        # reason the pull request had no part in. test.yml builds it before it
+        # runs anything; this lane did not, so one suite had two verdicts
+        # depending on which lane ran it. Measured on main 2026-09-10 by
+        # dispatching both suites the release PR #35073 selected:
+        # test_keeper_visible_path_projection is OK in the Test lane and red
+        # here, on the same commit.
+        #
+        # MASC_TEST_ALLOW_REAL_DOCKER goes with it. A fixture whose keeper runs
+        # a command starts a persistent container, and
+        # Keeper_sandbox_runtime_setup refuses that under a test executable
+        # unless the run says it wants the real daemon -- the guard is there so
+        # a developer's daemon does not collect containers named for temp
+        # workspaces. This runner is thrown away with its daemon, and a fixture
+        # that started a container removes it in its own teardown
+        # (Masc_test_deps.teardown_fixture_sandbox). Without the variable the
+        # cases that used to fail on the missing image fail on the guard
+        # instead, so the image alone would move the error, not remove it.
+        #
+        # The recipe is compiled from its own module rather than linked out of
+        # bin/main_eio.exe, which is a minute of linking to print a string.
+        # Measured in the sandbox-image lane on 2026-09-09: 3s for the printer
+        # (14s there, including an apt-get this lane does not need) and 49s for
+        # the docker build.
+        run: |
+          set -euo pipefail
+          cp lib/keeper_sandbox_image/keeper_sandbox_image.ml "$RUNNER_TEMP/recipe.ml"
+          printf '\nlet () = print_string dockerfile\n' >> "$RUNNER_TEMP/recipe.ml"
+          opam exec -- ocamlc -o "$RUNNER_TEMP/print-recipe" "$RUNNER_TEMP/recipe.ml"
+          "$RUNNER_TEMP/print-recipe" | docker build -t masc-sandbox:general -
+          docker image inspect masc-sandbox:general --format '{{.Id}}'
+
       - name: Run the tests this pull request edits
         # Bounded twice, because a hung suite must not read as a break: the
         # deadline below ends the step, and the script gives each suite its
@@ -274,6 +309,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
+          MASC_TEST_ALLOW_REAL_DOCKER: "1"
         run: |
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}"

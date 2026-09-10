@@ -599,11 +599,28 @@ let base_path () =
 type record_outcome =
   | Recorded of string
   | No_record_location
+  | Refused_under_test
   | Record_failed of { record : string; reason : string }
+
+(* A test executable must not write the operator's own default. One did: a
+   suite that seeds a workspace under a dune sandbox left that temp path in
+   ~/.config/masc/default-base-path, and the next process resolved its base
+   path there until the directory vanished.
+
+   Scoped to a record under the process HOME, the way
+   [sanitize_inherited_test_base_path_opt] scopes its own stripping: a suite
+   that points XDG_CONFIG_HOME at a temp dir is exercising this function and
+   writes nowhere the operator will see. *)
+let record_is_the_operators record =
+  match home_dir_opt () with
+  | Some home -> String.starts_with ~prefix:(home ^ Filename.dir_sep) record
+  | None -> false
 
 let record_default_base_path path =
   match default_base_path_record_path_opt () with
   | None -> No_record_location
+  | Some record when running_under_test_executable () && record_is_the_operators record ->
+    Refused_under_test
   | Some record ->
     let normalized = normalize_masc_base_path_input path in
     if normalized = ""

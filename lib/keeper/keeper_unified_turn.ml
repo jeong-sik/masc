@@ -314,6 +314,7 @@ let connector_attention_preemption_request ~now pending =
          | Keeper_event_queue.Ask_answered _
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Task_outcome _
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _ ->

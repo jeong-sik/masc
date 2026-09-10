@@ -216,8 +216,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
       let* paths = acc in
       let* path = mount_argument mount in
       Ok (paths @ [ "--mount"; path ])) (Ok []) mounts in
-  let name = "masc-lane-" ^ Uuidm.to_string
-      (Uuidm.v4_gen (Random.State.make_self_init ()) ()) in
+  let name = "masc-lane-" ^ Random_id.uuid_v7 () in
   let run = run_control ~mgr ~docker_command
       ~max_bytes:package.resources.max_reply_bytes in
   let identity = ref None in
@@ -340,11 +339,14 @@ let observe t ~binding ~sources =
             ~arguments:(`Assoc [ "binding", binding; "sources", sources ])
           |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
         if t.stopping then Error Stopped
-        else if Option.value ~default:false result.Mcp_protocol.Mcp_types.is_error then
-          Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
-        else match result.structured_content with
-          | None -> Error (Invalid_observation "lane_observe must return structuredContent")
-          | Some json -> output_of_json json |> Result.map_error (fun detail -> Invalid_observation detail)
+        else match result.Mcp_protocol.Mcp_types.is_error with
+          | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
+          (* MCP permits omission of isError; only an explicit true reports
+             tool failure. Structured observation validation remains required. *)
+          | Some false | None ->
+              match result.structured_content with
+              | None -> Error (Invalid_observation "lane_observe must return structuredContent")
+              | Some json -> output_of_json json |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _

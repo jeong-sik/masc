@@ -1,0 +1,12 @@
+{
+  "error": "keeper_turn_in_flight",
+  "keeper": "exhibit-editor",
+  "block": {
+    "kind": "turn_busy",
+    "holder": {
+      "lane": "autonomous",
+      "started_at": 1789043504.530098
+    }
+  },
+  "message": "keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane."
+}

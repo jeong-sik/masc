@@ -77,3 +77,24 @@ not supply the optional autonomous-yield callback and its direct observation
 has empty pending messages/events. This supports investigating delayed input
 during a long direct operation. It does not prove permanent answer loss, and
 no speculative runtime patch or forced restart was applied.
+
+## Further incomplete behavior
+
+Both workers tried keeper_analyze_image with sandbox image paths, then the
+designer tried raw file SHA256 values. Those calls failed: the tool accepts
+only handles already stored in its vision artifact store. Generated sandbox
+files did not acquire those handles. No successful visual model inspection is
+claimed from these calls.
+
+The designer's stdin-exec request had no supplied code and remained awaiting
+a human. The operator rejected only that request with a concrete reason.
+
+The editor manifest was changed from on_demand to autonomous to permit
+spontaneous continuation. The update returned keeper_turn_in_flight because
+a new event turn had already started; TOML readback confirms the metadata was
+saved, and no restart was performed. That new turn began before this change,
+so its actions must not be attributed to enabling autonomous mode.
+
+The editor then asked again for dates and venue already present in the original
+recorded answer. This is new evidence that answer-content retention needs
+inspection, beyond the earlier observation of delayed wake delivery.

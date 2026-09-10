@@ -1,0 +1,1 @@
+{"id": "appr_01a08b46-7dec-7000-b188-ff4f8ceda545", "decision": "reject", "reason": "이 요청은 python3 -c exec(open(/dev/stdin).read())만 있으며 실행할 표준입력 코드가 없습니다. 이미 저장한 스크립트 파일을 명시해 실행하거나 실제 코드가 포함된 요청으로 진행하세요. 같은 빈 stdin 요청을 반복하지 마세요."}

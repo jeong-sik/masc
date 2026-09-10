@@ -12,7 +12,7 @@ export function SandboxSetupCatalog() {
   async function refresh() {
     setBusy(true); setError('')
     try { setCatalog(await fetchSandboxCatalog()) }
-    catch { setCatalog(null); setError('sandbox 상태를 확인하지 못했습니다. 소유자로 로그인한 뒤 다시 확인하세요.') }
+    catch { setCatalog(null); setError('sandbox 상태를 확인하지 못했습니다. 서버 연결과 sandbox 실행 도구의 상태를 확인한 뒤 다시 시도하세요.') }
     finally { setBusy(false) }
   }
   useEffect(() => { void refresh() }, [])

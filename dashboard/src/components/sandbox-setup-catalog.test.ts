@@ -55,3 +55,13 @@ it('refuses an unrecognized readiness receipt and hides raw failures', async () 
   await screen.findByText(/sandbox 상태를 확인하지 못했습니다/)
   expect(document.body.textContent).not.toContain('private-server-diagnostic')
 })
+
+it('lets a timed-out observation retry without inferring an authentication failure', async () => {
+  vi.mocked(get).mockRejectedValueOnce(new Error('Request timed out')).mockResolvedValueOnce(catalog())
+  render(html`<${SandboxSetupCatalog} />`)
+  await screen.findByText(/서버 연결과 sandbox 실행 도구의 상태를 확인한 뒤 다시 시도하세요/)
+  expect(document.body.textContent).not.toContain('로그인')
+  fireEvent.click(screen.getByText('sandbox 상태 새로고침'))
+  await screen.findByText(/서비스 감지됨 · guest 준비와 실행 확인 필요/)
+  expect(screen.queryByText(/sandbox 상태를 확인하지 못했습니다/)).toBeNull()
+})

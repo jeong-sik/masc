@@ -2529,12 +2529,15 @@ let setup_validate_runtime base_path =
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
-let setup_cmd_exit base_path port no_tui =
+let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+    ~sandbox_profile ~microvm_backend
     ~initialize:(fun () -> init_cmd_exit base_path false false)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
-    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok None))
+    (* The image builder already takes a backend; setup passed None, which
+       means Docker, whatever profile imp was on. *)
+    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok microvm_backend))
     ~login:(fun () ->
       match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
@@ -2556,11 +2559,68 @@ let setup_preflight_cmd =
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
 
+(* cmdliner cannot fail a flag on the value of another flag, so the pairing
+   rule (a backend only means something under microvm) is checked here and
+   reported as a usage error rather than being silently ignored. *)
+let setup_sandbox_selection sandbox_profile microvm_backend =
+  match sandbox_profile, microvm_backend with
+  | None, Some _ ->
+    `Error
+      (false,
+       "--microvm-backend requires --sandbox-profile microvm")
+  | Some profile, backend ->
+    (match Keeper_sandbox_config.sandbox_profile_of_string profile with
+     | None ->
+       `Error
+         (false,
+          Printf.sprintf "--sandbox-profile takes one of: %s"
+            (String.concat ", " Keeper_sandbox_config.valid_sandbox_profile_strings))
+     | Some Keeper_sandbox_config.Micro_vm ->
+       (match backend with
+        | None -> `Ok (Some Keeper_sandbox_config.Micro_vm, None)
+        | Some raw ->
+          (match Keeper_microvm_backend.of_string raw with
+           | None ->
+             `Error
+               (false,
+                Printf.sprintf "--microvm-backend takes one of: %s"
+                  (String.concat ", " Keeper_microvm_backend.valid_strings))
+           | Some backend -> `Ok (Some Keeper_sandbox_config.Micro_vm, Some backend)))
+     | Some profile ->
+       (match backend with
+        | None -> `Ok (Some profile, None)
+        | Some _ ->
+          `Error (false, "--microvm-backend requires --sandbox-profile microvm")))
+  | None, None -> `Ok (None, None)
+
 let setup_cmd =
   let no_tui = Arg.(value & flag & info ["no-tui"]
     ~doc:"Prepare imp and leave the server running without opening the terminal UI.") in
-  Cmd.v (Cmd.info "setup" ~doc:"Prepare the default Docker sandbox, start imp, and open its workspace.")
-    Term.(const setup_cmd_exit $ base_path $ port $ no_tui)
+  let sandbox_profile =
+    let doc =
+      Printf.sprintf
+        "Sandbox imp runs its turns on (%s). Recorded in imp's keeper TOML, and          setup checks what that profile needs on this host. Omitted, setup uses          the profile imp already declares."
+        (String.concat ", " Keeper_sandbox_config.valid_sandbox_profile_strings)
+    in
+    Arg.(value & opt (some string) None & info [ "sandbox-profile" ] ~docv:"PROFILE" ~doc)
+  in
+  let microvm_backend =
+    let doc =
+      Printf.sprintf
+        "MicroVM runtime (%s), valid only with --sandbox-profile microvm."
+        (String.concat ", " Keeper_microvm_backend.valid_strings)
+    in
+    Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
+  in
+  let run base_path port no_tui sandbox_profile microvm_backend =
+    match setup_sandbox_selection sandbox_profile microvm_backend with
+    | `Error _ as error -> error
+    | `Ok (profile, backend) -> `Ok (setup_cmd_exit base_path port no_tui profile backend)
+  in
+  Cmd.v
+    (Cmd.info "setup"
+       ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
+    Term.(ret (const run $ base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling

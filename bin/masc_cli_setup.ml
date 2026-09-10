@@ -218,7 +218,71 @@ let prepare_server ~base_path ~port ~owned =
         | Ok () -> ()
         | Error `Timeout -> fail "Server is not ready yet; inspect its logs and rerun setup.")))
 
-let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~start_keeper ~open_tui =
+(* --sandbox-profile has to reach the keeper's own TOML, because that file is
+   what the server reads when it boots imp. Written through the line editor so
+   the seed's comments above the key survive. *)
+let record_imp_sandbox_profile ~base_path ~profile =
+  let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
+  match (try Some (In_channel.with_open_text path In_channel.input_all) with Sys_error _ -> None) with
+  | None ->
+    Printf.eprintf "Could not read %s to record the sandbox profile.\n%!" path;
+    1
+  | Some contents ->
+    let next =
+      Toml_line_editor.edit_table_scalar
+        contents
+        ~path:"keeper"
+        ~key:"sandbox_profile"
+        ~value:(Some (Keeper_sandbox_config.sandbox_profile_to_string profile))
+    in
+    (try
+       let temp = path ^ ".partial" in
+       Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_trunc ] 0o600 temp
+         (fun channel -> Out_channel.output_string channel next);
+       Sys.rename temp path;
+       0
+     with
+     | Sys_error reason ->
+       Printf.eprintf "Could not write %s: %s\n%!" path reason;
+       1)
+
+(* What a profile needs on the host before a keeper can run a turn on it, and
+   how to ask. Docker was the only answer here, hardwired, and it was asked for
+   even when the keeper's own TOML named another profile. *)
+type sandbox_readiness =
+  | Needs_command of { label : string ; argv : string list }
+  | Needs_nothing_on_this_host of string
+
+let sandbox_readiness ~profile ~microvm_backend =
+  match (profile : Keeper_sandbox_config.sandbox_profile) with
+  | Docker ->
+    Needs_command
+      { label =
+          "Docker (install and start Docker Desktop on macOS, or Docker Engine \
+           on Linux), or choose another sandbox with --sandbox-profile"
+      ; argv = [ "docker"; "info"; "--format"; "{{.OSType}}" ]
+      }
+  | Micro_vm ->
+    (match microvm_backend with
+     | None ->
+       Needs_nothing_on_this_host
+         "microvm without an explicit --microvm-backend: the server picks and \
+          validates the runtime"
+     | Some backend ->
+       let cli = Masc.Keeper_microvm_backend.cli_name backend in
+       Needs_command
+         { label = Printf.sprintf "MicroVM runtime %s (install it, or choose another --microvm-backend)" cli
+         ; argv = [ cli; "--version" ]
+         })
+  | Remote_ssh ->
+    (* The endpoint lives in runtime.toml and the server validates it; there is
+       no host binary for this profile to look for. *)
+    Needs_nothing_on_this_host
+      "remote_ssh: the endpoint under [exec.ssh.endpoints.<name>] is validated \
+       by the server"
+
+let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
+    ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =
   let owned = ref None in
   Fun.protect
     ~finally:(fun () ->
@@ -234,9 +298,31 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
         let base_path = Unix.realpath base_path in
         Printf.printf "Preparing imp in %s\n%!" base_path;
         require_ok "Model connection" validate_runtime;
+        (* The profile imp will actually run on: what --sandbox-profile asked
+           for, else what its own TOML already declares. Before this the check
+           was Docker regardless, so a keeper seeded on another profile was
+           asked for a dependency it does not use. *)
+        let profile =
+          match sandbox_profile with
+          | Some profile ->
+            require_ok
+              (Printf.sprintf "Recording sandbox_profile = %S for imp"
+                 (Keeper_sandbox_config.sandbox_profile_to_string profile))
+              (fun () -> record_imp_sandbox_profile ~base_path ~profile);
+            profile
+          | None -> Keeper_sandbox_config.sandbox_profile_of_agent ~base_path ~agent_name:"imp"
+        in
         (* A reused port is checked before credentials or Keeper state change. *)
-        require_ok "Docker (install and start Docker Desktop on macOS, or Docker Engine on Linux)"
-          (fun () -> run_process ["docker"; "info"; "--format"; "{{.OSType}}"]);
+        (match sandbox_readiness ~profile ~microvm_backend with
+         | Needs_command { label; argv } ->
+           (* run_process raises Unix_error when the executable is absent, and
+              the handler at the bottom printed that raw ("create_process
+              docker: No such file or directory") instead of this label. *)
+           require_ok label (fun () ->
+             try run_process argv with
+             | Unix.Unix_error (Unix.ENOENT, _, _) -> 1)
+         | Needs_nothing_on_this_host note ->
+           Printf.printf "Sandbox: %s\n%!" note);
         require_ok "Sandbox image preparation" prepare_image;
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;

@@ -1,5 +1,5 @@
 open Alcotest
-module R = Masc.Model_release_evidence
+module R = Model_release_evidence
 
 let date value =
   match R.date_of_string value with

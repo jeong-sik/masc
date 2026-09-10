@@ -5518,4 +5518,4 @@
 (test
  (name test_model_release_evidence)
  (modules test_model_release_evidence)
- (libraries masc alcotest yojson))
+ (libraries masc.runtime alcotest yojson))

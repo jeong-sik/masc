@@ -3259,6 +3259,31 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_parallel_tool_calls = true
 
+# DeepSeek v4.1 Flash, probed 2026-09-10 alongside the twelve rows above
+# (evidence/task-openrouter-v4-1-flash/). Same window and output ceiling as
+# deepseek-v4-flash, and it takes image input where that row is text-only --
+# so this row lowers no modality. The price is the trade: $0.15/$0.60 against
+# $0.0886/$0.177, so it is not a cheaper replacement for the v4 flash row and
+# both stay. The disable rung is real here: reasoning_effort "none" answered
+# 200 with 0 reasoning tokens billed, and all seven rungs answered 200.
+# tool_choice required answered with finish_reason tool_calls on the second
+# attempt -- the first was HTTP 429 from the upstream provider, a rate limit
+# rather than a refusal, so the row claims the base's tool_choice support.
+[[models]]
+id_prefix = "deepseek/deepseek-v4.1-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 384000
+input_per_million = 0.15
+output_per_million = 0.6
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+
 [[models]]
 id_prefix = "deepseek/deepseek-v4-flash"
 provider_name = "openrouter"

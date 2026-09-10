@@ -1424,6 +1424,19 @@ let persist_dropped_response
       }
 ;;
 
+(* Effort is a thinking modifier: the wires that admit it at all reject the
+   pair enable_thinking=false + reasoning_effort
+   (backend_anthropic.validate_thinking_controls fails the request), so the
+   no-thinking retry below must strip it from the candidate — otherwise the
+   retry dies in request validation instead of continuing the turn it was
+   meant to rescue. *)
+let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runtime_candidate.t =
+  Runtime_candidate.of_provider_config
+    { (Runtime_candidate.provider_cfg candidate) with
+      Llm_provider.Provider_config.reasoning_effort = None
+    }
+;;
+
 let run_try_provider_with_truncation_recovery
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
@@ -1451,7 +1464,7 @@ let run_try_provider_with_truncation_recovery
     run_try_provider
       ~continuation_checkpoint
       { ctx with enable_thinking = Some false; preserve_thinking = Some false }
-      candidate
+      (candidate_without_reasoning_effort candidate)
   | Drop_rejected_response cut ->
     let persisted =
       persist_dropped_response

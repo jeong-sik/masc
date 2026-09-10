@@ -12,6 +12,9 @@ val error_message : error -> string
 val revision_to_string : revision -> string
 val revision_of_string : string -> (revision,error) result
 val observe : base_path:string -> (revision,error) result
+val observe_inventory : base_path:string -> (revision * Runtime.config_observation,error) result
+(** One paired-file observation supplies both the private runtime text and its
+    setup revision, so a menu cannot join stale rows to a newer revision. *)
 (** Must run inside an Eio scope, like the server and native setup CLI. *)
 val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> binary:string -> base_path:string -> expected_revision:revision ->
   specs:Runtime_setup_spec.t list -> runtime_ids:string list ->

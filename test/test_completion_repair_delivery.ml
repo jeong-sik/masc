@@ -15,6 +15,10 @@ let workspace_ok = function
   | Error error -> Alcotest.fail (D.masc_error_to_string error)
 
 let with_workspace_runtime f =
+  (* The verdict hook is part of the contract under test: the approval twin
+     wake reaches the producer queue through the installed runtime adapter
+     (Workspace_metric_hooks), not through any test-local stub. *)
+  Masc.Workspace_metric_hooks.install ();
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let base_path = Filename.temp_dir "masc-completion-repair-" "" in

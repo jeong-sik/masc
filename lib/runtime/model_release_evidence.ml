@@ -214,3 +214,26 @@ let to_json ~as_of release =
        ; "account_availability", `String "not_checked"
        ])
 ;;
+
+let catalog_to_json ~as_of entries =
+  `Assoc ["schema", `String "masc.model_release_catalog.v1";
+    "status", `String "available";
+    "as_of", `String (date_to_string as_of);
+    "models", `List (List.map (fun entry ->
+      `Assoc ["publisher", `String entry.publisher; "model_id", `String entry.model_id;
+        "release", to_json ~as_of entry.release]) entries)]
+
+let current_date () =
+  let now = Unix.gmtime (Unix.gettimeofday ()) in
+  {year = now.tm_year + 1900; month = now.tm_mon + 1; day = now.tm_mday}
+
+let default_catalog_json () =
+  match load_default () with
+  | Ok entries -> catalog_to_json ~as_of:(current_date ()) entries
+  | Error _ -> `Assoc ["schema", `String "masc.model_release_catalog.v1";
+      "status", `String "unavailable"; "models", `List []]
+
+let default_model_json ~publisher ~model_id =
+  let release = match load_default () with
+    | Ok entries -> lookup entries ~publisher ~model_id | Error _ -> Unknown in
+  to_json ~as_of:(current_date ()) release

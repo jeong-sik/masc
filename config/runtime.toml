@@ -1300,3 +1300,156 @@ through an ADVERSARIAL lens: actively try to refute each answer's key claims, \
 keep only what survives refutation, and prefer the most defensible resolution. \
 Respond with ONLY the requested JSON object, no prose and no code fences.
 """
+
+# ── OpenRouter ───────────────────────────────────────────────────────────────
+# One OpenAI-compatible endpoint in front of many vendors. Per-model
+# capabilities and prices live in the AGENT_CORE catalog as provider-scoped rows
+# (packages/agent_core/models.toml, "OpenRouter Models"), so the model entries
+# below carry only what the runtime layer owns and do not restate them.
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "https://openrouter.ai/api/v1"
+
+[providers.openrouter.healthcheck]
+path = "/models"
+
+[providers.openrouter.credentials]
+type = "env"
+key = "OPENROUTER_API_KEY"
+
+# OpenRouter identifies the calling app by these two headers and attributes
+# usage to it. Both were accepted (HTTP 200) on all twelve probed models.
+[providers.openrouter.headers]
+HTTP-Referer = "https://github.com/jeong-sik/masc"
+X-Title = "MASC"
+
+
+# ── OpenRouter models ────────────────────────────────────────────────────────
+# Twelve ids probed live on 2026-09-10; every one answered HTTP 200 on a plain
+# completion and eleven of twelve on tool_choice=required (the exception,
+# qwen3.8-max, is declared in the catalog row, not here). Evidence:
+# evidence/task-openrouter-support/PROBE-SUMMARY.md.
+#
+# Each entry declares reasoning-effort because these rows resolve to the
+# reasoning_effort thinking dialect, whose only wire control *is* the effort
+# value. With the key absent an enable_thinking turn has nothing to encode and
+# is refused as Enable_not_encodable — the same trap the ollama.com rows above
+# avoid by declaring no dialect at all. "high" is the value probed live
+# (probe4-*-effort-only.json: gpt-5.5 returned reasoning.summary +
+# reasoning.encrypted, deepseek-v4-flash returned reasoning.text).
+#
+# No entry claims wizard-default and the fleet default above is unchanged:
+# these are dispatchable runtimes, not a new house model.
+#
+# No entry pins max-context either: the catalog row already carries the
+# window and resolve_max_context_of_runtime reads it when runtime.toml
+# states none, so restating it here would only be a second copy to drift.
+
+[models.openrouter-claude-opus-5]
+api-name = "anthropic/claude-opus-5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-opus-5]
+
+[models.openrouter-claude-sonnet-5]
+api-name = "anthropic/claude-sonnet-5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-sonnet-5]
+
+[models.openrouter-gpt-5-5]
+api-name = "openai/gpt-5.5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-5]
+
+[models.openrouter-gpt-5-6-sol]
+api-name = "openai/gpt-5.6-sol"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-sol]
+
+[models.openrouter-gemini-3-8-flash]
+api-name = "google/gemini-3.8-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gemini-3-8-flash]
+
+[models.openrouter-grok-4-6]
+api-name = "x-ai/grok-4.6"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-grok-4-6]
+
+[models.openrouter-kimi-k3]
+api-name = "moonshotai/kimi-k3"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-kimi-k3]
+
+[models.openrouter-glm-5-3-flash]
+api-name = "z-ai/glm-5.3-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3-flash]
+
+[models.openrouter-glm-5-3]
+api-name = "z-ai/glm-5.3"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3]
+
+[models.openrouter-deepseek-v4-flash]
+api-name = "deepseek/deepseek-v4-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-flash]
+
+[models.openrouter-deepseek-v4-pro]
+api-name = "deepseek/deepseek-v4-pro"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-pro]
+
+[models.openrouter-qwen3-8-max]
+api-name = "qwen/qwen3.8-max-0902"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-qwen3-8-max]

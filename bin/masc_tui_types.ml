@@ -1626,6 +1626,7 @@ type planning_rollup = Tui_decode.planning_rollup
   = {
   pr_active: int;
   pr_verifying: int;
+  pr_awaiting_confirmation: int;
   pr_done: int;
   pr_dropped: int;
 }

@@ -5561,3 +5561,10 @@
  (name test_runtime_antigravity_context)
  (modules test_runtime_antigravity_context)
  (libraries alcotest masc.runtime masc.masc_process masc.fs_compat unix yojson))
+
+(test
+ (name test_keeper_declared_roster)
+ (modules test_keeper_declared_roster)
+ (libraries masc_test_deps))
+
+(include stanzas/test_docker_desktop_install.inc)

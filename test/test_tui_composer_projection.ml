@@ -5,7 +5,7 @@ module Projection = Masc_tui_composer_projection
 module Tui_types = Masc_tui_types
 
 let keeper : Tui_types.keeper =
-  { k_name = "analyst"
+  { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = "analyst"
   ; k_trace_id = "trace-current"
   ; k_paused = false
   ; k_current_task_id = None

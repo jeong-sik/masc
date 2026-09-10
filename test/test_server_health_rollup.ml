@@ -215,11 +215,15 @@ let test_a_warning_section_leaves_a_line_without_demanding_action () =
     [ "keeper_event_queue:runnable_backlog=18" ]
     (status_lines ~sections ())
 
+(* A cached section: dashboard_surface would have been the natural example and
+   is the wrong one, because the rollup cannot see it at all -- it is
+   probe-only, which is the fact the .mli spells out. Naming it here made this
+   case fail on nothing. *)
 let test_a_section_with_no_reasons_is_named_by_its_status () =
   check (list string) "the status stands in for a missing reason"
-    [ "dashboard_surface:unknown" ]
+    [ "keeper_identity_drift:unavailable" ]
     (status_lines
-       ~sections:[ section "dashboard_surface" "unknown" ]
+       ~sections:[ section "keeper_identity_drift" "unavailable" ]
        ())
 
 let test_an_ok_section_leaves_no_line () =

@@ -1650,6 +1650,13 @@ python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
 BUNDLE_TRANSACTION_ACTIVE=0
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
+# without the setup journey's interactive env (runtime events stay off unless
+# the operator asks for them). The smoke helper env isolation stays the single
+# place runtime events defaults are pinned.
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+if [ -n "$catalog_hint" ]; then
+  start_env="$start_env AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\""
+fi
 
 cat <<EOF
 
@@ -1662,7 +1669,7 @@ Installed:
   browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
 
 Start or resume your workspace:
-  "$DEST"
+  $start_env "$DEST"
 
 Choose model connections and prepare imp's sandbox:
   "$DEST" setup
@@ -1672,6 +1679,9 @@ Inspect what still needs attention:
 
 Advanced setup and separate MCP clients:
   https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
+
+  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
+  See: https://github.com/$REPO#mcp-client-setup
 
 EOF
 

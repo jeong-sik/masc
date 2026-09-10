@@ -720,7 +720,7 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
              | Some buffer -> Some ((fun chunk ->
                  (match !binary_capture_failure with
                   | Some _ -> ()
-                  | None -> (try Buffer.add_string buffer chunk with exn -> binary_capture_failure := Some exn));
+                  | None -> (try Buffer.add_string buffer chunk with (Out_of_memory | Invalid_argument _) as exn -> binary_capture_failure := Some exn));
                  Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =

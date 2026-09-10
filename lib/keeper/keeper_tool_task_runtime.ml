@@ -298,7 +298,7 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
       Some
         (fun ~worker ~relative ->
            let module Store = Workspace_verification_store in
-           match Keeper_sandbox_read_backend.read_complete_endpoint_file ~config ~meta
+           match Keeper_sandbox_read_backend.read_complete_file ~config ~meta
                ~host_path:relative ~timeout_sec:30. () with
            | Error reason -> Error (Store.Evidence_read_error
                (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))

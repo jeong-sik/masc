@@ -780,7 +780,8 @@ let payload_of_complete_bytes ~path content =
       | Utf8_incomplete_at index -> String.sub preview 0 index
       | Utf8_valid | Utf8_invalid -> preview in
     Text_payload (preview, bytes, truncated)
-  | _ -> Binary_payload {data=content; bytes=String.length content; format;
+  | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid)
+  | false, (Utf8_incomplete_at _ | Utf8_invalid) -> Binary_payload {data=content; bytes=String.length content; format;
       sha256=Digestif.SHA256.(digest_string content |> to_hex)}
 
 let read_regular_file_prefix ~ownership_root path =

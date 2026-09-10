@@ -2,14 +2,34 @@ module Discovery = Runtime_model_discovery
 type source = Running_model | Configured_model | Serving_endpoint | Not_reported
 type observation = { model : string; context : int option; source : source; tools : bool option }
 let ( let* ) = Result.bind
+let fields_of_object = function
+  | `Assoc fields when not (List.mem_assoc "error" fields) ->
+    let names = List.map fst fields in
+    if List.length names = List.length (List.sort_uniq String.compare names)
+    then Ok fields else Error Discovery.Invalid_response
+  | _ -> Error Discovery.Invalid_response
 let object_fields body =
-  try match Yojson.Safe.from_string body with
-    | `Assoc fields when not (List.mem_assoc "error" fields) -> Ok fields
-    | _ -> Error Discovery.Invalid_response
+  try fields_of_object (Yojson.Safe.from_string body)
   with Yojson.Json_error _ -> Error Discovery.Invalid_response
-let positive = function `Int value when value > 0 -> Some value | _ -> None
-let one_context values = match List.sort_uniq Int.compare values with
+let optional_context = function
+  | None -> Ok None
+  | Some (`Int value) when value > 0 -> Ok (Some value)
+  | Some _ -> Error Discovery.Invalid_response
+let one_context = function
   | [] -> Ok None | [value] -> Ok (Some value) | _ -> Error Discovery.Invalid_response
+let running_context ~model models =
+  let* selected = List.fold_left (fun result row ->
+    let* selected = result in
+    let* fields = fields_of_object row in
+    let* name = match List.assoc_opt "name" fields, List.assoc_opt "model" fields with
+      | Some (`String name), None | None, Some (`String name) when name <> "" -> Ok name
+      | Some (`String name), Some (`String same) when name <> "" && name = same -> Ok name
+      | _ -> Error Discovery.Invalid_response in
+    if name <> model then Ok selected else
+    let* context = optional_context (List.assoc_opt "context_length" fields) in
+    Ok (context :: selected)) (Ok []) models in
+  match selected with
+  | [] -> Ok None | [context] -> Ok context | _ -> Error Discovery.Invalid_response
 let configured_context = function
   | None -> Ok None
   | Some (`String parameters) ->
@@ -56,13 +76,7 @@ let observe_with ~get ~post (connection : Discovery.connection) ~model ~load =
     let* running = object_fields running in
     let* models = match List.assoc_opt "models" running with
       | Some (`List models) -> Ok models | _ -> Error Discovery.Invalid_response in
-    let contexts = models |> List.filter_map (function
-      | `Assoc fields ->
-        let name = match List.assoc_opt "name" fields with None -> List.assoc_opt "model" fields | name -> name in
-        if name = Some (`String model) then Option.bind (List.assoc_opt "context_length" fields) positive
-        else None
-      | _ -> None) in
-    let* running = one_context contexts in
+    let* running = running_context ~model models in
     let context, source = match running, configured with
       | Some value, _ -> Some value, Running_model
       | None, Some value -> Some value, Configured_model
@@ -76,9 +90,11 @@ let observe_with ~get ~post (connection : Discovery.connection) ~model ~load =
         String.sub base_path 0 (String.length base_path - 3) else base_path in
       let* props = get ~url:(Uri.to_string (Uri.with_path base (root ^ "/props"))) in
       let* props = object_fields props in
-      let context = match List.assoc_opt "default_generation_settings" props with
-        | Some (`Assoc settings) -> Option.bind (List.assoc_opt "n_ctx" settings) positive
-        | _ -> None in
+      let* context = match List.assoc_opt "default_generation_settings" props with
+        | None -> Ok None
+        | Some settings ->
+          let* settings = fields_of_object settings in
+          optional_context (List.assoc_opt "n_ctx" settings) in
       Ok {model; context; source=(if context = None then Not_reported else Serving_endpoint); tools=None}
     | _ -> Ok {model; context=None; source=Not_reported; tools=None}
 let to_json observation =

@@ -706,7 +706,8 @@ let run_keeper_cycle
                  | Error (Keeper_playground_checkouts.Root_missing _) -> []
                  | Error
                      ((Keeper_playground_checkouts.Root_not_directory _
-                      | Keeper_playground_checkouts.Root_unreadable _) as
+                      | Keeper_playground_checkouts.Root_unreadable _
+                      | Keeper_playground_checkouts.Root_probe_unreachable _) as
                       scan_error) ->
                    Log.Keeper.warn
                      "repository freshness scan unavailable keeper=%s: %s"

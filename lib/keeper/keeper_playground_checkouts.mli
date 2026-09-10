@@ -65,6 +65,21 @@ type scan_error =
       { root : string
       ; detail : string
       }
+  | Root_probe_unreachable of
+      { root : string
+      ; reason : string
+      }
+(** [Root_probe_unreachable] is the transport failing before the probe
+    produced a result -- an endpoint-owned root whose remote payload timed
+    out, for instance. It says nothing about the root itself, which is why
+    it is not [Root_unreadable]: the probe never got far enough to read it.
+
+    The distinction is not academic. On 2026-09-10 the live log carried 54
+    lines reading "workspace root unreadable: /masc-work/<keeper>" whose own
+    detail said the payload had exceeded a 5.00s remote timeout, because the
+    probe collapsed its runner's typed [Transport_failed] into [WEXITED 1]
+    and every non-zero exit landed here. The first move that log invites --
+    check the permissions on that path -- is the wrong one. *)
 
 type discovery =
   | Complete of checkout list

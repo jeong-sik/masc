@@ -143,3 +143,5 @@ let render spec =
   {runtime_id;runtime_toml=runtime;model_overlay_toml=overlay}
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml;
   "model_overlay_toml",`String value.model_overlay_toml]
+
+let model_id spec = spec.model

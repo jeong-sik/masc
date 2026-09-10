@@ -7,6 +7,13 @@
 - Branch: `bench/harness-design`
 - Task 1-8 완료. **Task 9 완료** (Phase 0 harbor 스모크, 아래 요약). 다음은 Task 10 (Phase 1 매트릭스: `./run_matrix.sh a,b,c,e,f,h 3`).
 
+## 제품 픽스 2건 (2026-09-10, 별도 worktree/브랜치 — 벤치 발견사항의 upstream 수정)
+
+- **PR #35168** (`fix/anthropic-tool-schema-oneof`, origin/main 기반): `backend_anthropic.ml`에 Anthropic-kind 전용 top-level oneOf/anyOf/allOf projection 추가 (OpenAI #34054와 같은 층). Kimi kind은 통과(해당 엔드포인트는 top-level 허용, 라이브 검증). combinator-only 스키마는 `type:object` 합성. 적대적 리뷰 통과(블로커 0). **merge + release 후 anthropic 레인 재개 가능.**
+- **PR #35169** (`fix/keeper-capability-gate`, origin/main 기반): keeper TOML `[keeper.tools] deny = [...]` 추가 — model-visible 이름으로 built-in tool을 capability surface에서 완전 제거(dispatch bundle/digest 포함, frozen-surface admission이 dispatch 거부). 적대적 리뷰 통과(블로커 0). **merge + release 후 arm c/d 렌더러가 skills.names 외에 `tools.deny = ["keeper_spawn","keeper_spawn_read","keeper_spawn_wait","keeper_spawn_stop","masc_keeper_delegate","masc_keeper_delegate_status","masc_keeper_delegate_cancel"]`를 추가로 쏘도록 renderer 갱신 필요** — 그 전까지 arm c는 composition skill 2개만 게이트되고 spawn/delegate는 전 arm에서 visible(단 우리 토폴로지에서 spawn-Start는 remote_ssh profile이라 어차피 Policy_rejection).
+- spawn의 실제 모델 이름은 `keeper_spawn`(start) — `keeper_spawn_start` 아님.
+- 벤치가 쓰는 release 바이너리(v0.35.2)엔 두 픽스 모두 없음. matrix 전에 release 포함 여부를 결정할 것: 포함되면 arm c/d 정직해지고 anthropic 레인 복귀, 안 되면 현재 한계를 리포트에 명시.
+
 ## Task 9 결과 요약 (상세: results/phase0-notes.md)
 
 - install-only 성공 (0 exceptions, bootstrap exit 0): `results/jobs/phase0-install-check/`

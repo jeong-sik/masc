@@ -1505,10 +1505,9 @@ let test_dispatch_rejects_missing_declared_env_credential () =
   in
   check_unavailable
     (Runtime_schema.Inline "")
-    Agent_core.Error.InlineCredential;
-  check_unavailable
-    (Runtime_schema.File "/operator/credential")
-    Agent_core.Error.FileCredential
+    Agent_core.Error.InlineCredential
+  (* File credentials now fail during materialization, before a dispatchable
+     runtime exists; the file materialization case above covers that boundary. *)
 
 let test_dispatch_accepts_transformed_or_credential_free_provider () =
   let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_TRANSFORM_0187ABCE" in

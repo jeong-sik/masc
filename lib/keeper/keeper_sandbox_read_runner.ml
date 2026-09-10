@@ -108,7 +108,8 @@ end
 module Docker_backend = struct
   let should_route_read = Keeper_sandbox_read_backend.should_route_read
   let container_path_of_host = Keeper_sandbox_read_backend.container_path_of_host
-  let read_complete_file = Keeper_sandbox_read_backend.read_complete_file
+  let read_complete_file ~config ~meta ~host_path ~timeout_sec () =
+    Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path ~timeout_sec ()
   let read_file = Keeper_sandbox_read_backend.read_file
   let run_command_with_status =
     Keeper_sandbox_read_backend.run_command_with_status

@@ -7944,6 +7944,9 @@ let test_peer_artifact_materializes_exact_binary () =
     let peer = { sender with name = "receiving-peer" } in
     let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let chunk = "/masc-work/receiving-peer/image\000\255" in
+    let limit = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
+    let bytes = bytes ^ String.concat "" (List.init (limit / String.length chunk + 1) (fun _ -> chunk)) in
     let store = Tool_blob_store.create ~base_path:config.base_path in
     let source_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config sender in
     Fs_compat.mkdir_p source_root;

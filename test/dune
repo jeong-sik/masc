@@ -5512,3 +5512,9 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+
+(rule
+ (alias runtest-test_model_independent_owner)
+ (deps test_model_independent_owner.py ../bin/main_eio.exe)
+ (action
+  (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))

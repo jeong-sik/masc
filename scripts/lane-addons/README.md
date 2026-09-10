@@ -50,6 +50,21 @@ reviewing baseline, then rerun the same workload with those criteria separately.
 Even a successful script exit means measurements were collected, not that the
 Goal or all v0 scenarios passed.
 
+`browser-proof.mjs` operates the real candidate Dashboard after packages have
+attached. It refreshes two packages, drags a Lane × time interval, submits that
+slice, preserves selected evidence and captures screenshots plus API receipts.
+It does not intercept or mock responses. Pass the actual candidate URL and an
+empty output directory; use `--token-env` for an existing private token variable.
+Keeper delivery requires explicit `--keeper`. An accepted delivery remains
+distinct from reading the evidence and taking a corrective action.
+
+```sh
+node scripts/lane-addons/browser-proof.mjs \
+  --url http://127.0.0.1:8935/dashboard#/monitoring/lane-addons \
+  --out /operator/evidence/browser-proof \
+  --expected-addon web-project --expected-addon msx-observer
+```
+
 ## Existing source bindings
 
 Web `binding.sources` may combine:

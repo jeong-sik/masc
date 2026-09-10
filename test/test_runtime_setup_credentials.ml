@@ -80,7 +80,7 @@ default = "fixture-http.chat"
     let reference = Runtime_setup_credentials.reference_path pending in
     check bool "actual apply retains the pending file" true (Sys.file_exists reference);
     let config = match Runtime_toml.parse_string (In_channel.with_open_text path In_channel.input_all) with
-      | Ok config -> config | Error error -> fail error in
+      | Ok config -> config | Error errors -> fail (String.concat "; " (List.map Runtime_toml.show_parse_error errors)) in
     let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "fixture-http") config.providers in
     (match provider.credentials with
      | Some (Runtime_schema.File actual) -> check string "committed exact file reference" reference actual

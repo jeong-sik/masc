@@ -1,0 +1,1526 @@
+{
+  "observed_at": "2026-09-10T00:17:51.054Z",
+  "scope": "Actual Keeper decision read from the isolated backend and rendered by exact CI preview; not production deployment or original PDF Task completion",
+  "preview_manifest": {
+    "checkout_commit": "744ac395b801aff1f16c2a3e1211b839e1501ae5",
+    "pr_head_commit": "81066b198c7e04f9bef03d5f2af8882113fffb30",
+    "run_id": "34418566609",
+    "run_attempt": "1",
+    "files": {
+      ".build-identity.json": "83ec9a698cb1da7f788549bb6f7ee3fe002274ac42f0c2983d8265922f2fbabb",
+      ".build-stamp": "5e7a5e977df8070946cbcbe1aca65fb509157548c9d5fae6a05ae9af5a5a7e4f",
+      "assets/Middleware-DvffHn_b.js": "3949217361c41e07e4155efb97af809b742a8bb3081b8d648d9ce61772f4ca80",
+      "assets/Middleware-DvffHn_b.js.map": "375653db755cb99b22a7de63e1b306823d68c0c6d33a0fac775d016ce570e046",
+      "assets/_commonjsHelpers-CqkleIqs.js": "4c81dcd54e7e877a79145c4c6fde30ac0e8d857f412b73f48f6970e5d7eab938",
+      "assets/_commonjsHelpers-CqkleIqs.js.map": "954398b4770f409e2d7aed71300366f7b48d2b6283df408dfa80ae6f43ab0cec",
+      "assets/actions-DM98CJ7b.js": "c3e4394620e3968dbaddaf89365dc78036a8c2fb79865f54f396054e35315500",
+      "assets/actions-DM98CJ7b.js.map": "8301e11a9557a2a885115d15ae834cbc50147fbb89035f095a11d63b3c98afdc",
+      "assets/agent-avatar-Bn4tBxor.js": "105f55de5ce5aaef56162da3dcc9fdc4b8880ee726af0e7479808bf5bcad177f",
+      "assets/agent-avatar-Bn4tBxor.js.map": "00705fd8ce5a442e3823cdaeacdb5bf8a7b83da5d227cc01295c60c4b29f6b32",
+      "assets/agent-core-runtime-store-Bl5mVQpL.js": "390fbe8959fd69deb2a9396ea3a55a0bbf70287b15be00620f27393b90ce90f1",
+      "assets/agent-core-runtime-store-Bl5mVQpL.js.map": "a383285bfe57a5b28384c0b1b87d3bb6d2c2a63f2a2d10701f833764edcf2c23",
+      "assets/agent-detail-YrgxtMEc.js": "8b8bb9c9a3c2a60bb00bfd000256a1a4cba89af063d2732a76990e0b300bd30e",
+      "assets/agent-detail-YrgxtMEc.js.map": "1cfd0216f3c5689dbbacf13879d6d7d33c40c6e53bfc4b61df8b78794cb5d2e2",
+      "assets/agent-detail-state-C7TByuty.js": "6a9b20870130ea5d8b06d8b8924c609c39b9518b3ddc77b45bf4f2b39fb18f71",
+      "assets/agent-detail-state-C7TByuty.js.map": "5eed11b1217cb110104e6ffa7c68e73e23c02f031cbf82c75c9e663ed7941dff",
+      "assets/agent-relations-Cs5IMWSb.js": "d22b3fea5471197b9578089f510e1a9d0434a4ebe327959455b13f37dc3a814f",
+      "assets/agent-relations-Cs5IMWSb.js.map": "0a957fdf31811aad79aa3a65f21ed8253f5a205389ba1601b35ad6889f9ec993",
+      "assets/agent-timeline-BaicZF4F.js": "334a1f759fc5a42a54ab9501c0185f1486b0a46d202cb6dc0b5b90a2ceff5cf2",
+      "assets/agent-timeline-BaicZF4F.js.map": "f11120b750f6c9600b3796e47c2b6324cd55ef24629931a5c732cc22e4684697",
+      "assets/agents-unified-D4mJ9H2V.js": "832518a634d40a7a410c74a1c4ea5a3cddc526f22b0b06e475d0d726c0cb7e0c",
+      "assets/agents-unified-D4mJ9H2V.js.map": "33d6fe1c3a4654ebc3c7afafa9342d9966505fa96709243db9064baacb9d4fe0",
+      "assets/approvals-surface-DqN6Q-bP.js": "083b3489449d3c714f6f43eb83bba18ce3dc1ce44aaf3873a0d77b8ffeeacc6c",
+      "assets/approvals-surface-DqN6Q-bP.js.map": "5cb2c1e7cec5f43e33ab3eb7a3c3db815cb1d66bb7684319d686a73fb18b58cd",
+      "assets/arrow-right-DxvJ7LGQ.js": "9b7764f19ea0e2c4e6f26aae3a27bb9b53b67f1c7ab52082a5dc28eb4d008795",
+      "assets/arrow-right-DxvJ7LGQ.js.map": "a1b13cbcc1eb54e7f236bebd3c279f83474d673c071e71289daa1c1ab3c2e564",
+      "assets/artifact-panel-C1Vu-Kib.js": "d2d7b3757f809c3fd92d37996fa34502db51ce6ce6b159c45f000f88cde07b02",
+      "assets/artifact-panel-C1Vu-Kib.js.map": "f3e39c5f492efb2c38a9c1318d834298987c6262624b64886c55f2d80f1cbfaf",
+      "assets/auto-refresh-CUMjcdg_.js": "e4b8c8c0e4cfedd213cb62e163bedee26fd8ff2484d4e9fa49c8ffb7307f8e75",
+      "assets/auto-refresh-CUMjcdg_.js.map": "408b4f95a51a91d1fb6bc1bad97acb3987c15c4eb3568763e3d88e0625cb5391",
+      "assets/bash-Yzrsuije.js": "6a7311ff85af4098e170435bf140299e6be66e458e51d97ff91b2cea51300438",
+      "assets/bash-Yzrsuije.js.map": "546c71917e23f4c1efb08bca6a88b1fc2f05705f224a71645aeb403b917ed7ed",
+      "assets/board-surface-6U_mHKlt.js": "d1c37bab210386f2fff4e881302258ecc4094a99f88ab74524e87fe7f4be8f1b",
+      "assets/board-surface-6U_mHKlt.js.map": "780a650a91be7724ed36093d1c1b5eb9129584838f9791c58e4854ab67dc4636",
+      "assets/brain-Cs75xdad.js": "62d7cb179eb0fab1ae0d760163e6521b7b8a1c0c219a3477216f72e22df46da4",
+      "assets/brain-Cs75xdad.js.map": "c463b366bd09b43c023c4ac237d916f3f0422d2b1e0fb5c74523685b441b229b",
+      "assets/channel-BZr7UVwE.js": "5a433df2229bc129abce503795f5355dfaf1452a1f74b358955d0c522c1f4f6b",
+      "assets/channel-BZr7UVwE.js.map": "8a5eb6ab9f9bbe3b5b5f2f2ffc1e40f46ab05dc543f67010330b748724f9bd87",
+      "assets/checkbox-DxW4XMAV.js": "998144813ea51c7e3d12161fc4ce9a5aeb85ed681148a09423e788e9131a65a7",
+      "assets/checkbox-DxW4XMAV.js.map": "c3bb7b8c303d51fea42a4527361f505d9bc2d334d5281a5932423dcba3aab427",
+      "assets/chevron-left-YOmZz94q.js": "9a6482b39a90c3f9d775ea39965262efbc6725bc1b8a3c0b546528b0b5f8dad7",
+      "assets/chevron-left-YOmZz94q.js.map": "e6dd7f0cc912471960991ab6736182d13cf4994c9db556a2b838149836ae833d",
+      "assets/chevron-right-lpXz7ppH.js": "a4c0b9c02a2628f6dedc0dc27d706516def6052cf11d1e6a9308c347a9c941ec",
+      "assets/chevron-right-lpXz7ppH.js.map": "65bee01411bc40bc8a30575c2d6ea45e3694716527e70d6606bc18a28bd9ce13",
+      "assets/cockpit-DyPivXUn.js": "521163c4e51a8f2a55ec62d8f0d336cf6940b1bb46af0793b1739e136305cbe0",
+      "assets/cockpit-DyPivXUn.js.map": "c794b0f260727e017648358066029eb981f342b3d9f810b8fa6b8398be30f737",
+      "assets/collapsible-BMvJwKiW.js": "db07aaad120754041fda15c1429249350d16d7b1d3e051b4335c1bf8bd383889",
+      "assets/collapsible-BMvJwKiW.js.map": "d9b9ac1f00a4333e96a1a4e889338a00fb6e84e3a5e55f6bf336b5f2a6ccb7e0",
+      "assets/command-palette-BKfQ--e9.js": "bd9d52c1cb9deefcf37111fa46a55ea7eee18c3962edce8a9943f2e58d2234db",
+      "assets/command-palette-BKfQ--e9.js.map": "de0166d8be97afddd7fe6e9d5d30ad6f1364d5f1b99fde3213325239c5a861d6",
+      "assets/composer-v2-ISOohvxj.js": "56d4bf49caee6baa3daad6d4102149b8d50c077f4eca1e47a3d9e319173ac09c",
+      "assets/composer-v2-ISOohvxj.js.map": "7eb90d979a131f154003d97481963f704b5a572e5674fcc0ac1919a66de68dcc",
+      "assets/config-resolution-panel-BxzAwSzA.js": "2afa42c35685cbb16cb5c1cc3dcb42a5ac16cee70739371074ba0327f007ca3d",
+      "assets/config-resolution-panel-BxzAwSzA.js.map": "5978e30bfe3578efd9948e70ac87ac13c402b9deda8b7527279fc21c55690399",
+      "assets/connector-status-CHiV4vpd.js": "4b04206200e1277be6d22762b12a8c240b5cfecd06f2d500ce05e04027ab0f0a",
+      "assets/connector-status-CHiV4vpd.js.map": "78a76d5474bd308048ae3e71c498b59ea65b6b3cfcb75e459a6f0971b9307797",
+      "assets/core-BFrQxKZo.js": "6c90013fbe38900f75e2d74276df8e64f00fe6eb51db3919a2617cfec3188ea8",
+      "assets/core-BFrQxKZo.js.map": "a636fd94d7c0a082d8f9bc07b4f0bdfb92b5c4b529b7fc237ab9fc000c60ffba",
+      "assets/cost-types-C7iUt7Ax.js": "0fb2c48757ea911615f780afb99bc53fc2cbf6792f664402dd2cf9e16ae5bb4b",
+      "assets/cost-types-C7iUt7Ax.js.map": "d8b16deef6c18e96357a280c38f34dd2a4be1860b8638c17ee4c709848fb67f4",
+      "assets/css-CLj8gQPS.js": "2848016b846e4595ae4798cb70305f259eb0e8d297b0cc9fa4ac5b0b612a3166",
+      "assets/css-CLj8gQPS.js.map": "d969d18408cb3bb48cbf7cd86b011f4882fc51f2fdeb1fd56df25e0e0206077b",
+      "assets/cytoscape-CQT7hIPL.js": "51a646601f68fb17df88246d438ae24077dd2f51a5ebc5927d1dd432467ea339",
+      "assets/cytoscape-CQT7hIPL.js.map": "14fe43c16f65cef34603306452069daa004704cbd3ca8fa7e01f9a2a2b5aabc3",
+      "assets/dashboard-CnGGFbhy.css": "843b34ce4eae0949b15e8d7d0013116c214ea669debed92e41556e7f4e2d066b",
+      "assets/dashboard-D2MZQ2dX.js": "6832ba1b8ad801518fa9fdbf8e72c1ba6cae4f4695ab7c42e4a717b8182e8ad1",
+      "assets/dashboard-D2MZQ2dX.js.map": "18d365e1504468336c6444d9ec9d81ff0556ee7b92bdd294faee85eb0ee1c66d",
+      "assets/dashboard-config-Dxr20ElK.js": "57f254d8145f685c1813f4eb1c4e414564a114da3d66339ada0fbd1f113172c3",
+      "assets/dashboard-config-Dxr20ElK.js.map": "d5472bf612036d67d766072fcafbfa2d1661495b4e536e51ca9c3871c3e2f493",
+      "assets/dashboard-execution-DOpcdvoW.js": "24e74452e69777b69af9c4a3d8da7ee3b3215d14eff900835d7c99a466470e52",
+      "assets/dashboard-execution-DOpcdvoW.js.map": "5da72d56bf6fea824b69be21e35b55aa0060cec724a9d578c2f8b48051f5081c",
+      "assets/dashboard-feed-source-strip-D2UAa3hf.js": "64292a6fd1aae6004912c72149e5de9be3517a40760dddb831a3adfcfe514804",
+      "assets/dashboard-feed-source-strip-D2UAa3hf.js.map": "e3be2d4639237cb7d48cbc63adf9a3541d97c2c49a776612a50435b92375495b",
+      "assets/dashboard-fusion-Cz0Y2Rsf.js": "6b9b34a1cfaf4f453a3fa094e6a8aca2fa6de5a8f6f768511be0e62404934a68",
+      "assets/dashboard-fusion-Cz0Y2Rsf.js.map": "c4d43638482a495b099d74db113e19dca9817c8dd4ff1d4ac62ffe0ac18dd933",
+      "assets/dashboard-keeper-cost-DdVNClKq.js": "964f7e41ac04605108dec21dbb84da1537896598d7538678c050f06d6ad56270",
+      "assets/dashboard-keeper-cost-DdVNClKq.js.map": "a0a054aa00300676f47681c737d02d6331e30ac1cea82a85d46399846f5d2d20",
+      "assets/dashboard-misc-B1oT5vey.js": "64b05f5357574191264ec1a7e4d7cb67f21f31da39fb6ce6cd30ff99700abe12",
+      "assets/dashboard-misc-B1oT5vey.js.map": "bf379cfdb6c84e39d696b465bdc96eb6f18e4ccf89f623717946849ba82bcd18",
+      "assets/dashboard-mission-Cn0wFVpA.js": "6f703be8321620f241cbf795a93b17fa1a44e8d929b6f47c9f4f11f0657902c7",
+      "assets/dashboard-mission-Cn0wFVpA.js.map": "3bbeacac75840711594246fa745efe2d7479f4f75eb3cacc31bef6a4085f60dc",
+      "assets/dashboard-runtime-BvwlVs8X.js": "e552716611220f3f76a42437ac86820aa077df5a3c451f8b1ec5eef4a70cd85d",
+      "assets/dashboard-runtime-BvwlVs8X.js.map": "e6d1473541b682d19a860e988fec80be94d6f812d35be9af84f0eeb2339bde50",
+      "assets/dashboard-turn-records-C2QtEnw0.js": "cdc3b07b4646117a9a252cfe3d0551efd9934f75f47a2e67713c29ced5ef54e6",
+      "assets/dashboard-turn-records-C2QtEnw0.js.map": "94c7bbaee52b07d8e2ccfe25e29bf0c9349e27cea8c57a7c0603a2d2e50be847",
+      "assets/dashboard-verification-runs-BDZB3gPz.js": "2834f46290f447b2591e497eb0f6b66bba1283a62980ba4f06d13496f81b518d",
+      "assets/dashboard-verification-runs-BDZB3gPz.js.map": "914927a2aaf3715211aea78552c9760bba9324c7019c939baa947d26d80788c9",
+      "assets/dashboard-workspace-B8-IXvMH.js": "7500b3a385b75f356a7b0726a7ed7dde7d0aa317427c8b4696638375b28f8045",
+      "assets/dashboard-workspace-B8-IXvMH.js.map": "f103598514d40b13a7d4fd0f861e8cb7ca441691894422f996c2e323e51c3562",
+      "assets/dashboard-ws.worker-D13RKXg1.js": "00b1270f279f83d437cf00c6de5fdaa104595a574b34c9e6b42421578fcd95d1",
+      "assets/dashboard-ws.worker-D13RKXg1.js.map": "764428917cbc12db7725704f49d599a598e7c7b65f735da912833cd1f45367b2",
+      "assets/dayjs.min-Dh4us8EF.js": "166224e3e89c8c4e2b42f4070b522d3cadba00a3c78a67bcaf8b793cdbffa83f",
+      "assets/dayjs.min-Dh4us8EF.js.map": "9b14559b2374c14528e2fb4013c0f7b2e4a7649b95ea24d59b8edb21fab5d543",
+      "assets/diff-D97Zzqfu.js": "071f6c7f36d51227bb0701147c7508f96a0f342ba5df808ed83a820ee486c17b",
+      "assets/diff-D97Zzqfu.js.map": "1537e6dab72442b1670ea63c1bfafcf57a51a4c5d039930f763beec25296253b",
+      "assets/dompurify-DkZSzPUi.js": "b80fcd1c23487e732f5ab18152e1058d70fd555b7e79ad974a51849cd1e41e96",
+      "assets/dompurify-DkZSzPUi.js.map": "bff2fea3d90d6fb3b2147a2fd99c20d31a0cad694f6d70cd70e99abef77a11db",
+      "assets/drift-error-CZJcdoWU.js": "e09f6e1bbbf03f078f4587792a8687dab83c05579c9029d2398100df2e5ef57d",
+      "assets/drift-error-CZJcdoWU.js.map": "938dd5735e2a04963c9232faa0e8f5908a633b38921b8bde158bc856e80daf54",
+      "assets/edit-snapshot-diff.worker-lXf_9trE.js": "de308f05bd46a136c18f52ed2fc0b0b35d1768fedf63f7a201477dbe8b144b01",
+      "assets/edit-snapshot-diff.worker-lXf_9trE.js.map": "0bab113fad8ce04ac189cd3c8dda55d2f71a3b732694ce69020f666f997f3633",
+      "assets/editSnapshots-COQjBWz5.js": "db7ed38daf02d4999a91aedda3f65d5d4fa89032d962cc2a54c64da126f01407",
+      "assets/editSnapshots-COQjBWz5.js.map": "d71f47cd89bd00bef61c52c4e921fc76faea3f8618362c474e0690075d268bb8",
+      "assets/effect-http-DMwKM3FI.js": "d7f3f4b1bae8cbc14522d793047c0c5296301df19f2054116d9407efe53ccd00",
+      "assets/effect-http-DMwKM3FI.js.map": "57db81e2d4087c2b44a7a2a98a692141bd9a5865566614dd10563da419ecf926",
+      "assets/effect-resource-Dw82qkaa.js": "cc092c3a57f1ca37043c11376ad31f939b917b31d0363a3f23a608522f6bd231",
+      "assets/effect-resource-Dw82qkaa.js.map": "8086f037ec863aa54d473161410da6be188488605423f45408523d7b37e0fc44",
+      "assets/effect-runtime-DjIgh6kR.js": "530e9333be76f41f683cf916c94ff83954315a0bcd4287f096a8d8c569fc83fa",
+      "assets/effect-runtime-DjIgh6kR.js.map": "d77729108e8dfd7580d8bb4f468ed8297dbb6215b9be2800b62191e681b456c1",
+      "assets/engine-javascript-VDndaYWP.js": "c56cceb8d0f0196223b621545f7e2a04c106b5eeb5a6c62650af36b7b0ec4ded",
+      "assets/engine-javascript-VDndaYWP.js.map": "e236856c986a60a5533120c929848eca775750b150ea30d1d1feac781c1d3145",
+      "assets/error-notification-0B1oGqko.js": "e5a62b942ae1902322a281abf13d51eee348390f899be588e24e015513e3edf2",
+      "assets/error-notification-0B1oGqko.js.map": "80d84c0c0c3531121127b9d4dc87265f622881b4cfbaec1225b7e95122863474",
+      "assets/feature-health-C9_PesRM.js": "f7e0c8c87d560618ece0acda40878360ac3712793d9314a7b0f417a25729eb93",
+      "assets/feature-health-C9_PesRM.js.map": "b67a52ed399b3f4f633745d01399533e58de16588fc1a4580e2f12567614d106",
+      "assets/feedback-state-BWTzu4y4.js": "fd85be909d6abf89e715926abe502d6d8b2cd1e96d5aefcc87ef326ab24f41ef",
+      "assets/feedback-state-BWTzu4y4.js.map": "fff3a7a7aa7d5c52ed3b32a809accb8e824538ae52d4c86ff6407122f9cedc08",
+      "assets/file-text-BWWxcqGi.js": "cda75a8c3a41f408cec42e54dda61b971dcf755b92995932f5e7eece7e646a22",
+      "assets/file-text-BWWxcqGi.js.map": "a0fb2882cba41cef4625318f1c252e6a6f1ebf275cc8286f9017d271a896fa4d",
+      "assets/folder-B6HMsgEh.js": "c3acee141bfc92c2ff92a88380e79a99f3f683607365c84935be741af4f82777",
+      "assets/folder-B6HMsgEh.js.map": "bb504c7c5b933448b6cbb257d78bab4f173f570d421cb667df6df05bab7d75da",
+      "assets/fonts/Cinzel-OFL.txt": "f5a242cf68ad6ebd0603b3359a74c593ca080318a681035be5296ba2c6b04ae6",
+      "assets/fonts/Cinzel-Regular.ttf": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34",
+      "assets/fonts/EBGaramond-400-latin.woff2": "68fd4b247dde89984ee835d99953d235e4927be2b1b732ad81173b519869cee8",
+      "assets/fonts/EBGaramond-400-latinext.woff2": "c2fa6862b03629214873944b171b0df1189420be52aabd82142d45f96fdce588",
+      "assets/fonts/EBGaramond-400i-latin.woff2": "078bb1c082255b93ded45a05e4009221edb4727f64a77d4f19c9d4715d02e297",
+      "assets/fonts/EBGaramond-400i-latinext.woff2": "7fdb1b14f26257aba07fe939dba821f08be945c976e5657a1a770a813f4c2874",
+      "assets/fonts/EBGaramond-OFL.txt": "b921242b4a54e7dbb2744fd44cc008f8b421d0585f8b902360a9300e00cb48b8",
+      "assets/fonts/JetBrainsMono-400-latin.woff2": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4",
+      "assets/fonts/JetBrainsMono-400-latinext.woff2": "9c38cb2d0d2d93c1ee6e21fa78db76f13ea7e15e15cc64214c7ca89b6aaa35c4",
+      "assets/fonts/JetBrainsMono-OFL.txt": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+      "assets/fonts/NotoSansKR-400-0.woff2": "0a59c0768cd7abe21711fdfc3624f97a5311ae49f0a5cbc49c670760d65802f6",
+      "assets/fonts/NotoSansKR-400-1.woff2": "78613e416d52b09dfa55a50715a2fab9c650c3e85b004628e8e18227ae036b37",
+      "assets/fonts/NotoSansKR-400-10.woff2": "0ca7933101d79d2dfd097d757bc10da0ff5b08f18ba49d63cfeda8f64fe503a3",
+      "assets/fonts/NotoSansKR-400-100.woff2": "182c3a89c922e2237510ca82c4dc867790d2aad3a40542a6911c95ad00f6782e",
+      "assets/fonts/NotoSansKR-400-101.woff2": "6349313e6c3ba551d7ae45ccd871dd9a17bb61f3d8c88dd36bd5c9ed40ec2314",
+      "assets/fonts/NotoSansKR-400-102.woff2": "317c6d57b06a76e04eb213541b1d490e78b240a770c325805c4cbe1f11f82bd0",
+      "assets/fonts/NotoSansKR-400-103.woff2": "8e5f236bf493a9af95a2cb9db373ee846144ad821634785654a5dcf180a0d1e9",
+      "assets/fonts/NotoSansKR-400-104.woff2": "b0bf9a93c6542a98a6b6e452d40d202644dc20a5f6d7adda5b6e698fc62c2944",
+      "assets/fonts/NotoSansKR-400-105.woff2": "120423813669c4943e90b31a1f4051ea954bbf5e17ea82c452c6e1a6bee2d69b",
+      "assets/fonts/NotoSansKR-400-106.woff2": "9a00cb77a5426fb62a97e72af34550d76d3c6f9deed12c814a76b31d42196b01",
+      "assets/fonts/NotoSansKR-400-107.woff2": "74dee26bd44d7ef81e0bf839afbc4d5f9c73f9bcf4caf98f84f21aa75a2d0d21",
+      "assets/fonts/NotoSansKR-400-108.woff2": "70b946e9c71306d7109c25f2c88d4f85414d3fb2183f4df8585ee8d2e32cd6cc",
+      "assets/fonts/NotoSansKR-400-109.woff2": "fe94b8bb12395b3ae8b2af3949c9e7728d2a4166af989481e07f1ba1558c5b0c",
+      "assets/fonts/NotoSansKR-400-11.woff2": "f48c859c2ba40b15e8c21e6733f0df2893962874e492f295e8eee581775cff79",
+      "assets/fonts/NotoSansKR-400-110.woff2": "bcd2f60fc886a27757d803cdaaf2cd6c68c357127dcda6979f6737c9ebd0e72d",
+      "assets/fonts/NotoSansKR-400-111.woff2": "01c12e158ee141ecc24a7a240d316690d91b856e434258ad791e51b1d2026f6d",
+      "assets/fonts/NotoSansKR-400-112.woff2": "bd4ba71c927a5394c7e4488d6e36a6f79b85fa5829d22a459e2e658819788934",
+      "assets/fonts/NotoSansKR-400-113.woff2": "78b1216a934a85e788a0f22cb4d8c73a681111edbe121e3d34428ab85209dadf",
+      "assets/fonts/NotoSansKR-400-114.woff2": "746cbcb44fd668936a78967f7f7bd8bb9fe0e891a378487c8d0d99c563c9590e",
+      "assets/fonts/NotoSansKR-400-115.woff2": "cfa10935430d3a4f42fe20bc87c7c00a0db62f9c1c5232ca78dab85c7582e2fc",
+      "assets/fonts/NotoSansKR-400-116.woff2": "afc33bf7e12515219591d71d3adbb65f167652833878dc0e8da579884c7d6c39",
+      "assets/fonts/NotoSansKR-400-117.woff2": "e89faf36222bbb664dd5c28e8969d6817faaf100d1ca532f294084591cc9c9b7",
+      "assets/fonts/NotoSansKR-400-118.woff2": "0136b09150b3ef19b74dd55e2fc73a9e267a4da4ed3615542a191485da5afbf4",
+      "assets/fonts/NotoSansKR-400-119.woff2": "994289a67b5f65801130b59217ecc8ce98e963cd1c34bbe56c984e829db71a1f",
+      "assets/fonts/NotoSansKR-400-12.woff2": "253fa411f1d1a1c45d802f80f9410bc37c07e940516420c10600b4d37227279c",
+      "assets/fonts/NotoSansKR-400-13.woff2": "7ea59c30a52f07bf7eb84540195513a3af6145afde0ef97872ba46aaa37d4e79",
+      "assets/fonts/NotoSansKR-400-14.woff2": "301f0f59c4d9cfbde453b41991288d0c1bb2d7b40968f06bb67ceef50abd1284",
+      "assets/fonts/NotoSansKR-400-15.woff2": "1dad6da2e53e0df77443fb40c37f65eec6689c2f3dfd2dbddaf41fcb037ca117",
+      "assets/fonts/NotoSansKR-400-16.woff2": "e16f82fb61af8b825f6a55e27695656568f160b579f852358482871f82d36aff",
+      "assets/fonts/NotoSansKR-400-17.woff2": "8d46d4be7b66f97d68748070c1d64364b878303c68fc71e311be80220cd1a163",
+      "assets/fonts/NotoSansKR-400-18.woff2": "252a73a53a76b8bc54756bd1b7a6531ba6f01771d0c258432df5ca16932473bc",
+      "assets/fonts/NotoSansKR-400-19.woff2": "3cb24b0490fbc80983292f01998544ffdf4396cafe33f7c8010c6e85cc09c4d6",
+      "assets/fonts/NotoSansKR-400-2.woff2": "d0efb136f31397303fdc754e3f04f093fa8a33536e44fd4ef617e16e68a99053",
+      "assets/fonts/NotoSansKR-400-20.woff2": "c9180f63c1b58ce0e867a2a80bb1c1980b8bbac006dd704c3a106645d5b86a22",
+      "assets/fonts/NotoSansKR-400-21.woff2": "6ddb3f55eb982d4fb05a42f0fac93b31499f43b8a7715295022e56d540615039",
+      "assets/fonts/NotoSansKR-400-22.woff2": "36b789465c8ce6ebc07a56c47649542d5ad3e7e2073a7265c398fecc6d0fa0d6",
+      "assets/fonts/NotoSansKR-400-23.woff2": "70c09ee875de99a9d545308f62bdbb9c8f2da6aaa3f68dfc946339fbb4434790",
+      "assets/fonts/NotoSansKR-400-24.woff2": "6704301fafc4e6a503e79cba089f199edfa93b18eef47a27be5012877dd0b66d",
+      "assets/fonts/NotoSansKR-400-25.woff2": "e2d6301304d9f8c100ab549eda074f7d4cab4bf5ee72108515ef00bbf0139081",
+      "assets/fonts/NotoSansKR-400-26.woff2": "511bb2d1fe37914b978d818152c9dbaf69c6e578468f79c52c8b292dbaeb2f22",
+      "assets/fonts/NotoSansKR-400-27.woff2": "a972dbd67222d64533288cd536a78f853f2f2eff50227d6bc58b84f23d5e7d85",
+      "assets/fonts/NotoSansKR-400-28.woff2": "64c8870a3f8305bebc0c252ce85330d6993deed4184a56bd01d2db389dcb6c64",
+      "assets/fonts/NotoSansKR-400-29.woff2": "32bdc653fa55fa926a554249c2f68d599319e3f2d2323fb9cd27651a4213cfc1",
+      "assets/fonts/NotoSansKR-400-3.woff2": "553da204aadcb0563404ebff8b400f256a152f985011c087959574462e1a3c26",
+      "assets/fonts/NotoSansKR-400-30.woff2": "7115a7686f592772bfb00ff152c1217a46668ce15a76d45914462effedf36e11",
+      "assets/fonts/NotoSansKR-400-31.woff2": "93b8180cd9da5d40695b8145d91729bbb797e45f8f0c7ef3fdc27208ad61636c",
+      "assets/fonts/NotoSansKR-400-32.woff2": "f3a9fbae4b297564d11b59c8cd3b82c4b39eface00dd34190a64f2b930bbaa53",
+      "assets/fonts/NotoSansKR-400-33.woff2": "411b248641041d438e03844e43fc2586b1aca9bad6fdf597e7adcb250745d0a9",
+      "assets/fonts/NotoSansKR-400-34.woff2": "f4727533eb4c52d93396ab8d836f1b835fab02c03ce4a11e1c90127a78372315",
+      "assets/fonts/NotoSansKR-400-35.woff2": "dc3291edf8af106b6bf1cd6f2f723ea1f26f528402cc0a9009d7a608e54cdb16",
+      "assets/fonts/NotoSansKR-400-36.woff2": "b40d29e9b337137ee39e899f445e136728f564728daa970dd222dc604324e32e",
+      "assets/fonts/NotoSansKR-400-37.woff2": "e667b130aa15b6bb1e6feeac1159c5b6d6d236c0b0e5a56cd73f61fbb6ba9f6f",
+      "assets/fonts/NotoSansKR-400-38.woff2": "3b83f84d5d926062f34e3556d3e7c272190ef693ff137fd8c8617755969f1f3f",
+      "assets/fonts/NotoSansKR-400-39.woff2": "0d8cf8cb09ab579627c8980ee39809f3bd6dec8e40710c9c7f47f4ecb9593126",
+      "assets/fonts/NotoSansKR-400-4.woff2": "b4d80b118b99f91ecf16d743fdd5aa534811baf05396cd037c32096a8c8d2769",
+      "assets/fonts/NotoSansKR-400-40.woff2": "287e3736d91288db13ac3fa7e55e1edb8673b01e1276447f283aa01aee292cff",
+      "assets/fonts/NotoSansKR-400-41.woff2": "ff59c6a5c9a4b2c2b1a7e74159916bd2e0ac0536033d8199c080b220f0320dd9",
+      "assets/fonts/NotoSansKR-400-42.woff2": "69ab107328952f7ba8d3e2dcd29df2ba656fabf1416c804dca6eb06d2a641064",
+      "assets/fonts/NotoSansKR-400-43.woff2": "2920a24f34cfe40b36d84dd4b5e9b487dddbf8970c009279dd984ea82184edde",
+      "assets/fonts/NotoSansKR-400-44.woff2": "52a8f3fae4c09ec529d0f601cba273beaed09ebee3456c9f848a35b4d7268731",
+      "assets/fonts/NotoSansKR-400-45.woff2": "5b458121e5a50901834c3379e5c64613efd555467acf5d25c940f3bbfab3f7cf",
+      "assets/fonts/NotoSansKR-400-46.woff2": "29e4c47ea429a0dece1381da1364eeaaa9101f450864815912cfd0d8a111c3c0",
+      "assets/fonts/NotoSansKR-400-47.woff2": "839f4ab4fc3a1d62cdfdc816d46d6140b94642d3d5a8224591a715b57277cfc1",
+      "assets/fonts/NotoSansKR-400-48.woff2": "fae80edc273d487424a6ed23119023ed30061f17498aa8a8120a3f484bfdde1b",
+      "assets/fonts/NotoSansKR-400-49.woff2": "39cf38bad303a4afc209c609a705028d7c8fedbb029e15898d24b574334376f5",
+      "assets/fonts/NotoSansKR-400-5.woff2": "9d4a37e575c264fc513a950535bfb3fe46303e9f4baf1bea3bdc1c1aa4655b0f",
+      "assets/fonts/NotoSansKR-400-50.woff2": "25b7c33271a240bfcce6967893b4a6de8fae3795a2ecb68ee778f43a272ffdbf",
+      "assets/fonts/NotoSansKR-400-51.woff2": "895261a0db1c266614f9f3dee7affd367cd7a2d8b079af5b3359cc5903aaf108",
+      "assets/fonts/NotoSansKR-400-52.woff2": "cca5f9b4740ab40913bed2046b77791774f66a453a9c95c8612982fedc45d28c",
+      "assets/fonts/NotoSansKR-400-53.woff2": "abd3f29727cdd40435eaa73a98a550b1072c2b3212a46636e7c13930d909f23f",
+      "assets/fonts/NotoSansKR-400-54.woff2": "a39ac5d69cce7986f1c84b4987b154e9ef8a046ab6f245413187a32d2d23e666",
+      "assets/fonts/NotoSansKR-400-55.woff2": "ae076eae40546def112a1aefb74b11da073ba40fa1b55bd679148518287a1440",
+      "assets/fonts/NotoSansKR-400-56.woff2": "189e45e4353217fb7eeb0d81176e5e6bdaa330feac43ed108f3e84f6e577f05a",
+      "assets/fonts/NotoSansKR-400-57.woff2": "cedd01af36754679bf1a06c005bee7dd79b335f8eb1bca5e3615865492fee651",
+      "assets/fonts/NotoSansKR-400-58.woff2": "e41789f2d0929993e2a95eb8fe8e6a30485ca0d31625b7eb71a69699174cc043",
+      "assets/fonts/NotoSansKR-400-59.woff2": "066013a2b1241c2c8e65a674ef22781a110d4e8fd04dc7aa050240d134906fb7",
+      "assets/fonts/NotoSansKR-400-6.woff2": "669c7f0ea890819a5cfbd8a537fb2f61712bd6a56c91e4e15bd2515e7ed48c96",
+      "assets/fonts/NotoSansKR-400-60.woff2": "83eacdf3658e302f80e62eb3139866d6c1395fa82b50a730926e70d534cb0161",
+      "assets/fonts/NotoSansKR-400-61.woff2": "76f52b9b6f2309cba226e82e5b7557e6fdb1b348119822d4450f19dafca92955",
+      "assets/fonts/NotoSansKR-400-62.woff2": "662ccae9765cc9637e2e5e6dbaa752de3c9759e62713eda33357d1eee13cba19",
+      "assets/fonts/NotoSansKR-400-63.woff2": "5e69443cbe91c7348600aa900498890d99e67692743006ad3dd97db15b153e42",
+      "assets/fonts/NotoSansKR-400-64.woff2": "5b25ee2bcd32bdbb1b88cc07773ce123881e92f0e6de275731e0af84dc199b4f",
+      "assets/fonts/NotoSansKR-400-65.woff2": "7c5b68b16a7384e30cbc0bf30a4c5ae49c549abb8b2cc80522a7c8892efb8cca",
+      "assets/fonts/NotoSansKR-400-66.woff2": "bf6faa147b700191c52e0a00f38845eb1332b373c075922fe63ed58e32cf8938",
+      "assets/fonts/NotoSansKR-400-67.woff2": "34d635671e068feb663cb62d5af11328fb9b8af6b638b6198b4855aea89fc48c",
+      "assets/fonts/NotoSansKR-400-68.woff2": "3e927035c0e5f0585ceebf8865c74a6f74ee1d2d2af208dba765e1b8ba321593",
+      "assets/fonts/NotoSansKR-400-69.woff2": "eb1015ca33cfb482edd26523af215230df6450a65f87e097b306a3918838cbc2",
+      "assets/fonts/NotoSansKR-400-7.woff2": "c42222228781f4b1475543830c3419b64a70d1d6ed745c566941b2f8d37eee6c",
+      "assets/fonts/NotoSansKR-400-70.woff2": "3a286332700af772c7e918b7706d694ff5b459ab693c7244ae266c140825e38b",
+      "assets/fonts/NotoSansKR-400-71.woff2": "e78e8dc66076ef2cf15e02fdcadbb455303cfe19d89016709c1442618db12052",
+      "assets/fonts/NotoSansKR-400-72.woff2": "79ef74abc82140d0dcda27c02bf3758ef9c88d2ea0fb6bbb21e6d44e2c9cbeb7",
+      "assets/fonts/NotoSansKR-400-73.woff2": "17a3c264ed352d432b648230cdce121d279b325aff7f9f0284a3bcaafa202791",
+      "assets/fonts/NotoSansKR-400-74.woff2": "c1628a9e3b118d89faadd3f4d2bf56a13c15d41464b914ec8aefda765b7d43d2",
+      "assets/fonts/NotoSansKR-400-75.woff2": "d33ae457c7f21de97f70c16f937d5abc4bda308d85e11a49832d2f1659a07b89",
+      "assets/fonts/NotoSansKR-400-76.woff2": "e6dad8caa96f4227ae4989847f41de7e199791ca68b6d1567075069b961ab5ea",
+      "assets/fonts/NotoSansKR-400-77.woff2": "4646549c6c860aff7846270112a0efae2771b89cb3bc6ff341966e936a4c91cd",
+      "assets/fonts/NotoSansKR-400-78.woff2": "ed5bca383fcc80f6f7f8180f71c886e08b78ed0b44d45ee27c0e269e6b2666ec",
+      "assets/fonts/NotoSansKR-400-79.woff2": "908959df6d7b8d3ede8d4d8e9cc7d07884aac954aae6a07e73235f14d9a049bc",
+      "assets/fonts/NotoSansKR-400-8.woff2": "9c0b6929f881533fa0999377a3fd2d62a805d9cbf8e24a9dc3076f8f47acbb27",
+      "assets/fonts/NotoSansKR-400-80.woff2": "cce056a533a7c564ad7c2bd499aa55bf220797689f702cab2a9202b83fe33cc7",
+      "assets/fonts/NotoSansKR-400-81.woff2": "d8dedc8d1126a7f1aef66ef2b93a19d4dfd7ef8ee7652f5d33e93efd79404870",
+      "assets/fonts/NotoSansKR-400-82.woff2": "ca8e131d3fd817d106b24cfb3dca7344ec3df725805932f2becd24fbdd5301bd",
+      "assets/fonts/NotoSansKR-400-83.woff2": "7723364741bb11b62d59a89353b488824663b16b34bc90d7493ccc49a817a285",
+      "assets/fonts/NotoSansKR-400-84.woff2": "4a7ce2c100ddfc980725b2308a51cf3e1ba4849ec54c642a6cb94d0849a69516",
+      "assets/fonts/NotoSansKR-400-85.woff2": "840b1ef09f02469eeea900e2f34aacd721d8d0c7cbf1b5dd7fc8e0de45de9d74",
+      "assets/fonts/NotoSansKR-400-86.woff2": "6d68061bc688ef83dc10817a054c14ae57d68450c4e0ba24c479870b24a32d6e",
+      "assets/fonts/NotoSansKR-400-87.woff2": "10b21f92de4dab8b6c8cdbf9c4b211f77be4eeebda94eafc6f443441284fdf21",
+      "assets/fonts/NotoSansKR-400-88.woff2": "85a73fa2e958e753f51a702c4e4e44bb4a9cdb15a005d0af50c74d8de38a2c8d",
+      "assets/fonts/NotoSansKR-400-89.woff2": "eb005a5000057683643990a411875c9bb1c0952763cb4dec725f88f6389399f0",
+      "assets/fonts/NotoSansKR-400-9.woff2": "f0965eb129d109a2c40b2982487a1faea02bed0cfb87d4b21ae7d5a46cfe3420",
+      "assets/fonts/NotoSansKR-400-90.woff2": "9a1c75422cd09a48872286387aac279ca2b24fca3d6cbaac291085f1e49b80de",
+      "assets/fonts/NotoSansKR-400-91.woff2": "e9493ba73cb3be761ff597fc18fd3dcd3d2cff421ab1a4c07ad4f6d8ea4bdb9e",
+      "assets/fonts/NotoSansKR-400-92.woff2": "1c38c935c2e37e303e52ce80b203decc78666ef30f911e2daeb0cd79840e57aa",
+      "assets/fonts/NotoSansKR-400-93.woff2": "69cb1e353c2eab2d60244946657ab77f794e478cc051229fb7ec62ee69182218",
+      "assets/fonts/NotoSansKR-400-94.woff2": "7da477baa0143a78091f793c55900114c154d6ca6a351f85b263c5b9bc49220e",
+      "assets/fonts/NotoSansKR-400-95.woff2": "34188a76ca19731e9a7b7e1f1334cdd87ef9f9726d4bb0c74c65991b1a8c9585",
+      "assets/fonts/NotoSansKR-400-96.woff2": "aef244f8aff4261bd4fc130444e28bbe0aace87f2cd6b923031b15a1861b3a05",
+      "assets/fonts/NotoSansKR-400-97.woff2": "29e39ea1167fa707284a134746bdb4255a19b5b73089c8d5209ccc22ccf5d177",
+      "assets/fonts/NotoSansKR-400-98.woff2": "1398f9e025188301142d3ee01db91185db0091a26d9c56ce5decbf120e2dd9e8",
+      "assets/fonts/NotoSansKR-400-99.woff2": "0ad9814ec2b80cf29bea8fd81ab58f577ea296278c3ab18233d03e2f4a11927e",
+      "assets/fonts/NotoSansKR-400-latin.woff2": "bac96aa8ad7a3bb3473080f818b120005596fdd771af15692484d9c468ca1bc3",
+      "assets/fonts/NotoSansKR-400-latinext.woff2": "0dc284327277c1762c4b5301d4ab0c5da815f86c4092d9dd2b2dfacd7ec5231f",
+      "assets/fonts/NotoSansKR-OFL.txt": "babcfe66c8a098b2fa279bc724a3a342f8124f77ce18941fbcc1bbb39823cded",
+      "assets/fsm-hub-BnkMjJZU.js": "aea7025ce9d450a44b17f99482add19a00b9fcf5300c25b6aa666c24dc4b91ca",
+      "assets/fsm-hub-BnkMjJZU.js.map": "f2b74299093fb55586766007d7c7d7cfdc3ef1b050c9e844ee8a4e981a6e2455",
+      "assets/fsm-hub-types-CYTJ_Zjx.js": "4938ca2b3e0cfbfaa916c9272bc184ead1fa2761ad47413ecee7b1f025c132b4",
+      "assets/fsm-hub-types-CYTJ_Zjx.js.map": "6693df72ce9f77af83b903cafb9d412eabb2547e4f11b14abbc075e81689f575",
+      "assets/fusion-constants-4XyMnNgK.js": "63562fa284445ba0d9a5f4ba03abcf6f27f10341cb577d4e353c12791ea393e9",
+      "assets/fusion-constants-4XyMnNgK.js.map": "4cea3550ca3c01b82a035e30472576158003d90d9738ed3859e831fc7592b7dc",
+      "assets/fusion-judge-format-BSXFEB4q.js": "e6c677148eb36bd2d1eabaa3bd970449c79512ff6b430ec89185e061b0007572",
+      "assets/fusion-judge-format-BSXFEB4q.js.map": "c45280893758388eac470b7e9d2821b578e4cb3f84b349fa8cab0ad71787d607",
+      "assets/fusion-meta-Cd-bDZqR.js": "0f72b55426331fa0e7fe2b15e05651724276d4bdd12e2b880d24c3e11f772df3",
+      "assets/fusion-meta-Cd-bDZqR.js.map": "7546385dfba7d2322516de09c4919535b286f562b25c7ef7f91161e6108e4ce2",
+      "assets/fusion-surface-DnBywxTv.js": "28a19c83ffea9e7e98529b11e199d88d342ee4cf435260ee5213d1c51fa664c8",
+      "assets/fusion-surface-DnBywxTv.js.map": "3da3db7265d4d54ad31abdfcf20112aa22748bafe48e7111289d1cbb8c9ea1b3",
+      "assets/gate-keepers-C5DekV8C.js": "18a012ebc12bbeffb32f0422b909db008839cb84af344503d976db825a49cd19",
+      "assets/gate-keepers-C5DekV8C.js.map": "f46b6b37f64b80a251ef908a3ce27fb0c5c6b143f0bce5f469103d335beae611",
+      "assets/gate-refresh-B1aQK6wA.js": "423332ca5ea5238a786a0132ec19801a1c5cd02ae8ea8da2446597af5823d4ed",
+      "assets/gate-refresh-B1aQK6wA.js.map": "3a27f5ca8fb6d3e575bbbaabe6b465961e1a559d89edc98c83c5a7580ad54b17",
+      "assets/git-branch-D8zDKO2m.js": "f560fe19401bff58f9d91cb98e5e321f1ddf70db224773089394393517ea2c30",
+      "assets/git-branch-D8zDKO2m.js.map": "8b50c2ee2e3ccb03fe4fe6f6cefdef2c3291ad378d6a433e608c34dcc424a788",
+      "assets/go-C27-OAKa.js": "46ec75c1455e917fb6e0b1b4aa0f0b15686386aba0c8e3ca3615984ae9be696e",
+      "assets/go-C27-OAKa.js.map": "1c711ed19ccbea2eb6e6f67af312dbe10b8847578ce6c53a4907839c360a65cb",
+      "assets/goal-helpers-jtcdYsE4.js": "e5d5007d86059bf75653ccbc0ee55d05196a9dacbacdc72e5a8c78465eb233ff",
+      "assets/goal-helpers-jtcdYsE4.js.map": "65cca043585853e1ac84b886a5a3b2eec87dbe401bb20f1b7cb2a772987a3c9e",
+      "assets/harness-health-state-SFp_hYVX.js": "80442b235b22e2fe86efbe08324cf5e5911e630968edc8deffad768d7a31cddd",
+      "assets/harness-health-state-SFp_hYVX.js.map": "187f586f6416a22fa92a1024a835698bd63d9cb260b91a735100d4d5b50d55a8",
+      "assets/html-DoddmNeG.js": "0f07897667470a2d1a2b26cb0fe6e3527d28263ebcf1264fd7d93d21c56d2903",
+      "assets/html-DoddmNeG.js.map": "70a61d48cecf3837f32661ed7b309812a22ae3d976239774afeab01187c6198d",
+      "assets/html-pp8916En.js": "ebe4cd4e01fd2bea09e62bc3e6117f98e0c50876ecc95aa142a3660f12a0bc53",
+      "assets/html-pp8916En.js.map": "695e9b9086c307dc8c66f34a0d9a89b25c376f2a0e2c89e01f71396922afff0b",
+      "assets/ide-context-lens-DPJpiKpS.js": "9da55c21b2becc2477c006d227968bf7e930278c4eed1e653acbd56dbef34d96",
+      "assets/ide-context-lens-DPJpiKpS.js.map": "62a53ac6e7ce3f0c4a185c4386f53cd7bd1ab95566a7a64f05ef6f001bbff0d9",
+      "assets/ide-persistence-panel-D_3FTAja.js": "05a3609757bc71abbbfd1cd33565647f4b923c362cfb405db37700ceb1a00a02",
+      "assets/ide-persistence-panel-D_3FTAja.js.map": "b22ba97a5f68d226fe626f2fc31044110c70be9bdafd905b723fbcac4743c23c",
+      "assets/ide-shell-DZUTealV.js": "736af60e8d4e8cc072b560266c1a0809bd542898bed4cab457626d8c00d8691a",
+      "assets/ide-shell-DZUTealV.js.map": "4312e71fca4b680da60774dab2aa2961d9c14785758a6a4ee386f835eb7b6291",
+      "assets/ideHeartbeat-CA55A2C3.js": "ae72e269765555822d9fff8c7b2032cc999b29a21e43bb89db64814d63c30574",
+      "assets/ideHeartbeat-CA55A2C3.js.map": "ceb6dbcc7457960d97abbfaa5def5d663c7ad88a73cdc6cde64f2e1dc95805b9",
+      "assets/index-B4NHhxW0.js": "2682cd9e28b2d062c2e06d414568a6eaf1dc59ce953029b63696d5a57c0d2423",
+      "assets/index-B4NHhxW0.js.map": "7e11b400685695a749c518fc9e49360da78cb99991db782842d206af8f190f8f",
+      "assets/index-BFxLBEQl.js": "03d36f7abc0736126b8a12ba681bf45c83e2063233e593ccdf44136a1a9f4039",
+      "assets/index-BFxLBEQl.js.map": "97443211f93b1ab5b85688b9edc1fef452cd7c6dd38b1421a5ad658297f1273b",
+      "assets/index-BRY-tKTo.js": "f74c64696ab21d0d1b29c87f6c1e6e64693c49a9158bcf4b9db5cc6b31caa55a",
+      "assets/index-BRY-tKTo.js.map": "fbff229a17aa5ccde78e15c2014b7bdd21e3771da65ccf95dcf850df520a93cc",
+      "assets/index-BxTaO_Pb.js": "3f73ad677623351a4af7eb94d8a5fe82276f7e1e8937934b0259fde757e10334",
+      "assets/index-BxTaO_Pb.js.map": "9cddb14aeb4ebf2b051f49d8d18b545dfb6bfdbdee13c1d4f82cd465dfa5d058",
+      "assets/index-ByVqQEYx.js": "409eaf0dc66a3c75b41837b7ef2c41453f1a94c1246e25a128c726660972e15d",
+      "assets/index-ByVqQEYx.js.map": "ff94ca84c1139d0115dc8286341ea6f8907e8a96c5e125abc0c09a2436158da2",
+      "assets/index-CHHrGzDU.js": "57b02c513cfb908b9d5ced64905a50aa872ab61ea913fe12687d0abb5928d913",
+      "assets/index-CHHrGzDU.js.map": "a1945ba7a26c515ad255be5a7ff2236d06a2ea7f1b4036cd8fffa0d0b03a4e2f",
+      "assets/index-CUpgORI2.js": "1cc7f7d9b94087e416efabba6be9c5e694f46c1a60f8ad84a9bc8d8bf8651950",
+      "assets/index-CUpgORI2.js.map": "69bc673cfe561debee387f45fb2738c5b1d4de1554eda37456687f0a505e6d9d",
+      "assets/index-CwNcbkkA.js": "a862bb40d7e33025c3a00772045269254011364175c4af2b631690bbf416aa09",
+      "assets/index-CwNcbkkA.js.map": "697190bba804d7f6216b64ba77f56621bf87354e079759722cc63e4c7a39f8e5",
+      "assets/index-D3KiHiJC.js": "33be8994713d46fd9c561502f23aef73ab458049bcc6d8c7b19ca87581712995",
+      "assets/index-D3KiHiJC.js.map": "95ba5f5675aab415533782e6bd8822a6fe86ca24b91d99dcdbb2a494de739c73",
+      "assets/index-DnZQc2RQ.js": "051cf3675b533b224514cd886ed5da1239859c049ce0aa4c896ac937434edff6",
+      "assets/index-DnZQc2RQ.js.map": "624e61f8189a2ff502619ce22963164d0078083f620641996cb2aa8a791fe6ea",
+      "assets/index-OQ7HkjF4.js": "f37ef54b0190dd617b3d7ad47f0cdf28e8712f21bfa6d1dc7f63684f51d0df26",
+      "assets/index-OQ7HkjF4.js.map": "e450e34572302540f6ff86d5b6dcd0bce61d9bbd683c4d8d22552a4aee2cd783",
+      "assets/index-cNQb7dPA.js": "9bf60a356dae7276c823665a242dec93d9a1fc8b9115cc816da615c6d93485aa",
+      "assets/index-cNQb7dPA.js.map": "b3b618523decb1ddd24f3378badf51ec927e6dc64a2adcbcdbb52297fcb638de",
+      "assets/index-f4ZPLnhW.js": "2ec005ad68952d82a43d2bc42063b81e3bcbeb34d1cbbb8d09548334e6f08d8b",
+      "assets/index-f4ZPLnhW.js.map": "fb47430fe268523dcb79b389f01eeff663496e74e382918e970f83124546d0d0",
+      "assets/internal-agents-monitor-Dyj6GeXQ.js": "62a6e6437088a7081a48ffa1ee7f2906a9f688880bacdf51406df679a8e327af",
+      "assets/internal-agents-monitor-Dyj6GeXQ.js.map": "7775ec27b6866315e1e35d0d2944b42daa3b188a097aad8986f6357515bc5b88",
+      "assets/invert-bpIwAhrV.js": "74c0da6893fdb12c0d0ea1cd92201c671461b89e88e828435c375e6e26a17b43",
+      "assets/invert-bpIwAhrV.js.map": "868a1ddcfeb2238ef9ea0f61e87768eee7131fccd6a73368fe96e3424c149c86",
+      "assets/javascript-wDzz0qaB.js": "a4a56cc72c7d0f1ecbbeb1ba6bf5f532193c8d13fc3de19910f8d64c70aec4e9",
+      "assets/javascript-wDzz0qaB.js.map": "794a90371d1f443262d459a343b38edfd9946eb87de883344faea21e27b4eeba",
+      "assets/journey-v2-BIR4aaWt.js": "ab568443334c022ad526b2566c72e99e08f467b239a1637c69442c68e0f53179",
+      "assets/journey-v2-BIR4aaWt.js.map": "5c0694766eddc2e0000054ff29fbd0d5728a43f26da6300163d59ec4e917410f",
+      "assets/json-B8j_umyE.js": "5093d70a3e3767fa054f24c1f88de5f5b4709bded8526a9aec4d1ab580c93699",
+      "assets/json-B8j_umyE.js.map": "e9798156433a022cd30d04d026b2d733286d83a4ce47e762557ead0f2ec3142e",
+      "assets/json-Cp-IABpG.js": "ca32840cab9c2eb61da2afd6581e7a22c9937229f6b1a47115eea432794e7740",
+      "assets/json-Cp-IABpG.js.map": "2dfe2aa250c7823d18194200dca01f66f200b60fec1b87bc3330be8303bf162c",
+      "assets/json-viewer-BDLmQOM-.js": "b110372f50216d7c37794a88c2cdf6210ae9c91bd4d4c61ef8ae37dc54d30305",
+      "assets/json-viewer-BDLmQOM-.js.map": "617e71bb9bccceae328298406c55a4f0882a7a31084030d623351f793927b366",
+      "assets/katex-HP8lGamR.js": "0b89c21cb463fd8180e300cb79a3e9e538accb78df5bdec67f0cbba4bdb7949e",
+      "assets/katex-HP8lGamR.js.map": "71c13bcf1cf5fb30b5b2747824c6fd705886387ee67eb18d6177dbb9a9fb40bf",
+      "assets/keeper-attention-labels-DZq4KIC6.js": "ccff4d8b8fa468068d1245c56bfedb717fa6f23b9dff9460079d196c623a563d",
+      "assets/keeper-attention-labels-DZq4KIC6.js.map": "c6a2db6becbfdafc803b5fb7e8ab89f077b331f5bebc96edfe62fbb1f9f06ddb",
+      "assets/keeper-chat-delivery-provenance-DJU-4ZLu.js": "e5353de1ed9379b43478c6ee0f5b0bbca683587209241849eb1acf555757aef1",
+      "assets/keeper-chat-delivery-provenance-DJU-4ZLu.js.map": "cc25e5ff7b53f95d4cfc7b88f3a6ed138920f9f8b1cfb45ad7cc6faead278b8b",
+      "assets/keeper-chat-history-2IbDxI9c.js": "b58e0aa253f8f4738c81386d4a9de13b70e3772717dc051e3ccce47631945647",
+      "assets/keeper-chat-history-2IbDxI9c.js.map": "4ba32446ba0d7378b4aa453305077a8cd1b59d3adbfa71b78b694d7b493d2093",
+      "assets/keeper-classifiers-BH5bjVlF.js": "b5bcba2a97718f45be1ea82836f033211eac43139e92bdab5fe1ef671da80441",
+      "assets/keeper-classifiers-BH5bjVlF.js.map": "0da21ad096726c6a7bab019b48dd7d6e0263ed9ba733833a984f965203c13bfc",
+      "assets/keeper-composite-DlPc1TKj.js": "3262132d54a5dbc725405af3a9abe0ffb206d1db5506ab1945089d9e8da5ac83",
+      "assets/keeper-composite-DlPc1TKj.js.map": "6c26f05bd73eaf70b4ff46a075b1aafda07c8e9ef1a249cf0cae36b873e2d607",
+      "assets/keeper-composite-lookup-BkEMofyR.js": "8bf75d8d6e135fb0365f5ac73d16ae43d30bc153c7ee3ec21f60955a3a1fdb03",
+      "assets/keeper-composite-lookup-BkEMofyR.js.map": "5c3cba401822946b14349b2a3d7effdc63eb46ab636de6926df712da8f79c94b",
+      "assets/keeper-config-panel-DyItinAl.js": "4c18792ceb354c06e3e0b2e370e31433e584a2e0cf7a42d8e4eb1823836d15a0",
+      "assets/keeper-config-panel-DyItinAl.js.map": "bfc28479bc0f003988ee8d4cb1a75de21ac6ef271b2973578965c76df387e532",
+      "assets/keeper-detail-body-DFGuUQ_P.js": "beec8045063b247f781e33b6793c414e6bbf6d9962d198081f1bdbbec2b0db77",
+      "assets/keeper-detail-body-DFGuUQ_P.js.map": "bca9fe3fc0bf9d9a3b2ad512e7cbec6c2ec6de1c3553d395879cd73500b37a35",
+      "assets/keeper-detail-page-uWe4fMx-.js": "36de8d377aec6e90d8b2f0da67ec84f49fb2d695c73027c09d8a165905c7459a",
+      "assets/keeper-detail-page-uWe4fMx-.js.map": "cdd69dd4817fef6a77fb0cfd31e0ea9a9561202efa5bb9a572b93da80e5f12b3",
+      "assets/keeper-lane-strip-bBhqo77w.js": "cbfa9b000606821ea58fbdfa4187233c21ba32db20d29f4b9861f7e52cfc6cd5",
+      "assets/keeper-lane-strip-bBhqo77w.js.map": "5113488f1c00640d5b54dda9c0f10974b0bdffbe3f507ef661bc7db719658814",
+      "assets/keeper-runtime-BglaMZKQ.js": "7a062c7f07eb9656a0241bd9a3096675ef55b3205152c99cb5640b28aad099f2",
+      "assets/keeper-runtime-BglaMZKQ.js.map": "bd6197e8ea9921f5da3aed3cd8e1ee4c323e35c14918cbc66be472121e6b71e3",
+      "assets/keeper-runtime-trace-B6M0eXkP.js": "2f359a6f3159b3c83d10773fd946add92c0720ac4b9a74326ba4273494583649",
+      "assets/keeper-runtime-trace-B6M0eXkP.js.map": "8d72e3b25c4522a97b8804fdb55735d5adffb729d4cf8e5962278d9bd55feb7c",
+      "assets/keeper-transitions-CpjWcgXF.js": "7ed449712a153f3e7da1eff4463209ea25eeaca6de7e78b4db352f5b7726d098",
+      "assets/keeper-transitions-CpjWcgXF.js.map": "139ceeab6ba37202b0dd761e8a80dc85a24a973aa21c06088d06a5924810dfd6",
+      "assets/keeper-turn-inspector-BVNX4cB5.js": "dc3c6719ac740bc9c7f87275342b8e384d80d3c2ff50d4304b3357bf3a2f5c3a",
+      "assets/keeper-turn-inspector-BVNX4cB5.js.map": "f576c013c50ddbb3274b0c7729dfd6a71c8c4207dff63599d7b1aaaae60a1b5c",
+      "assets/keeper-turn-inspector-drawer-BvUzJkEJ.js": "892cef54ba79a4c779fd63c2a90cd40c6e381ef3aac589a0d5dae8ee1df95c42",
+      "assets/keeper-turn-inspector-drawer-BvUzJkEJ.js.map": "0a871c9df4c0866a5ef7aedd107d7188e3fa0ae74d287060ab65fe00bd4b8c90",
+      "assets/keeper-turn-inspector-panel-iZOA_6Tk.js": "44b215a7d655a091bbcae66b2128b1f9b19b19e38322aa917c7e186438ef09ad",
+      "assets/keeper-turn-inspector-panel-iZOA_6Tk.js.map": "4249f4965558cdd4cf3a952c19ebd76f1ceb1c9438686f06b4704d78b15e0706",
+      "assets/keeper-utils-B_KSPN0m.js": "148864defe61443e3fcf221fec7eaffad5f65ce1dbf1036652aad4d7eb2c4f53",
+      "assets/keeper-utils-B_KSPN0m.js.map": "0c0177ec25d0085aed8b8292f4721ff350ad2773d4e9b577e9f177ec23e97454",
+      "assets/keeper-workspace-CmMvTHcQ.js": "06963ae4322362a7d984b664fba8e9cf36a1d5ca19431fddf1bf306c6528a9b7",
+      "assets/keeper-workspace-CmMvTHcQ.js.map": "503b5d7e49b54c2963b0ead9deea4475ea2c75bb802708f32211fb13fccb0436",
+      "assets/keeper-workspace-EO-6ZmCL.css": "9f8490797e457deb6ecbb319fd001f3ce8178bc8b972ac475d81d6cd22548213",
+      "assets/keeper-workspace-shared-D4c_2mg4.js": "73ea112649237bc83d47f068924b668d1158a49d9e1c3158e574ce232ddbad37",
+      "assets/keeper-workspace-shared-D4c_2mg4.js.map": "62f818d31d1f7103d37bdac7fc51f42355bfa24a8237674819480ff5995a39fc",
+      "assets/kpi-strip-view-DQ-uwlxu.js": "1d811d02253cc32a9657fc6fd7f903009902777f1bf96e41f5cf163fae2c95c7",
+      "assets/kpi-strip-view-DQ-uwlxu.js.map": "ce44cf1e13342e98602e73a4b4bb715abab3fec823792900109d92250929a07b",
+      "assets/lab-CaB1Ik0w.js": "6e72a94d8e8cdbe33b6b41c4d04c609a399a60fe851d6fff1450c1d27291eea5",
+      "assets/lab-CaB1Ik0w.js.map": "4d44eea82380569ff134efcba5ffe2ef09f893a80edf7f669fec00df6d375c15",
+      "assets/lane-queue-panel-BkxjhQHj.js": "09b9b14ad9d7c1f268ecf1f44f17f3d77566484826add04d4a167a63294b7fe0",
+      "assets/lane-queue-panel-BkxjhQHj.js.map": "a103e9382fa473ceba78c0bd1bbddeb4cea819881135d507a57a74d954dd8b4d",
+      "assets/layout-DjofGb8N.js": "729674aeca252c7b7ce70572f1d14dc01c123579697f7bad367a2fe16c0cae8c",
+      "assets/layout-DjofGb8N.js.map": "c6fa6c97f559a7719cbf617f4ec57e4f00f34cee6d3ca0cb5b223767452f7c93",
+      "assets/line-dabmJrYa.js": "1f4406fc045bb98f8147ac22265393ea8802b0bcc0f184e3240b52f7e139a63f",
+      "assets/line-dabmJrYa.js.map": "f47f56800da8420c3c259953db9880b9577df4f7883e68f8ed19fb71cdce5eec",
+      "assets/log-classification-CEcyGnNe.js": "c12f63ab41f1a9d8a5ee3eb27cf6222583e6c6a0f0d3b82fe40a0f73d3d7baf3",
+      "assets/log-classification-CEcyGnNe.js.map": "078c17f24616c390b701cfc87d36de6528d97567d6d0410f44f497dc83988214",
+      "assets/log-filter-Bo-GUfuG.js": "e63f6046ed89574663c0d42a59a706caced22249c7a09f1516f5cb067fef95c2",
+      "assets/log-filter-Bo-GUfuG.js.map": "d9718119468f6eee9b183cb7285e15fd2e501868440ce81785449e516446d14e",
+      "assets/logs-Dj7wSxzV.js": "e03c71eca9f1903fa47fa79c88efb7daf6b84a696ac11378800570bb5c394394",
+      "assets/logs-Dj7wSxzV.js.map": "099c16d6efcf4ff03c8dea9eaa01b112fd01d755cfa357572cb76dd8e5f05604",
+      "assets/markdown-CSQuRyW_.js": "f694af701764ec1ecb194c372ccb29309cf7f382fc55b657b641f01512ff936f",
+      "assets/markdown-CSQuRyW_.js.map": "520622e428d8355358dfe1837d3923c27be7f93f568fbcac323367f198c2b354",
+      "assets/markdown-Cvjx9yec.js": "ce6a8b1a6ed9b803b1847231214ba37621c2fa51611ec3037d38b561b360c278",
+      "assets/markdown-Cvjx9yec.js.map": "bf6fb32979e78da571b78abb5ccb402c516023484e5d7f51616577b9efab6027",
+      "assets/markdown-blocks-CRZzq4BW.js": "8a55d1ff70bc880a481fc15fd797140c10d795154214604393c83afa33858774",
+      "assets/markdown-blocks-CRZzq4BW.js.map": "238b10429834307f164c98e21918b0d447615563fb9619ed833b21d05b0c94f8",
+      "assets/markdown-renderer-DVJ7gP--.js": "76954b1e48f90d3dd554b5b2098e4753c6947394ead9f579053195808cde7a62",
+      "assets/markdown-renderer-DVJ7gP--.js.map": "168dc7e2b139729e9cb27f9559380a98fe94134e287eaa2c4b4433e0a16898a9",
+      "assets/marked.esm-BFoLNhrf.js": "f72ab9a642dbecd4550be9d7eb9c7f7f1111413405c302a3363341e93a8aae26",
+      "assets/marked.esm-BFoLNhrf.js.map": "c89069b7a18d073d530750c2451466e441943ee5415711b256743c77df8f30fd",
+      "assets/memory-inspector-rVINd08H.js": "29bb298027ec109445e621c75c9a33e7c98ce27ff748d32926d8b42e410e1b14",
+      "assets/memory-inspector-rVINd08H.js.map": "160a1ca859c4e5a265175cfc0d4d976ca96083a68b43be2f0b2ca6486ecacb1b",
+      "assets/merge-CqmLUt1O.js": "8f9c71d4902f18519ee5288469c0f0bb19fd489bf3e8c63d5bf60f11cfb80a06",
+      "assets/merge-CqmLUt1O.js.map": "caefb046e79cb1efd96878faab0530e2223a1c9748d74b3d7f5017edb5598586",
+      "assets/mermaid-abnfDiagram-N423BO3Z-DSUjE_p9.js": "6af140aeead4ba7c90578f48d3fec99d7cc9c6c0a5ac1133ed7a1e25115082b2",
+      "assets/mermaid-abnfDiagram-N423BO3Z-DSUjE_p9.js.map": "3d4af7afb7e7da827afd7a6f0f710b8a052094e3bfaeeb5392b32a00ba995623",
+      "assets/mermaid-architectureDiagram-T3A2C74G-IcGsZAiw.js": "cbc49941f1293beee799c337131c8e9002d75d06e9688931cd75b42b79507e5a",
+      "assets/mermaid-architectureDiagram-T3A2C74G-IcGsZAiw.js.map": "fc24b81fe70d2ada89eb83e50843388c6bb4e050ca61a664721db2440bb8ea66",
+      "assets/mermaid-blockDiagram-VBNYF7ZC-Dixorm4A.js": "e68d0c795b2096cd3c36c1722e6b420c5c555c112a2be435aa2c3e90752d9615",
+      "assets/mermaid-blockDiagram-VBNYF7ZC-Dixorm4A.js.map": "3a3ec255633babccf86b7dc10dc22cbf556a4817fd6197b9ddb33b8a6ad1836b",
+      "assets/mermaid-c4Diagram-5PPSVZJV-CTlyStqU.js": "65b94e22eae489709dbb97446604a4de838e97e43c5506f6fa72e701ac1835ba",
+      "assets/mermaid-c4Diagram-5PPSVZJV-CTlyStqU.js.map": "1aec814963243430608d0adcaa1d81360a5e860ca9ee2d570d07f5c75507a6ad",
+      "assets/mermaid-chunk-2GRJ4B5K-Bx5Gbsbd.js": "743f3271d4a166f94bdf05e8776d6f1b352bafb461da21796ca5f0f18ee150cb",
+      "assets/mermaid-chunk-2GRJ4B5K-Bx5Gbsbd.js.map": "81c522f1ae1d5bb33ef38fc114d770595921690c2970ff58b2bc0b30e614bfe6",
+      "assets/mermaid-chunk-2Q5K7J3B-BacGNAi0.js": "ed9fd3c5419e6be31d73194d490f94d1d0fa33f983c845f6a10a5cc0dbfc6c96",
+      "assets/mermaid-chunk-2Q5K7J3B-BacGNAi0.js.map": "c768f3a3aa861db59877d94f69cbedb3b6a3ee70df8fbcdedc66b5324d2c0727",
+      "assets/mermaid-chunk-3NCLNEKW-Cu5-3c4o.js": "4f9b092b9a8e8f5326c4679488bcef8b8d1d881ed6a4aaaa1704b02d46bb2c3d",
+      "assets/mermaid-chunk-3NCLNEKW-Cu5-3c4o.js.map": "af9b14aedc30130014b3db03583f6389e0a55493a3bc90093c4cccd5331a2907",
+      "assets/mermaid-chunk-4I5QYGJK-CqOfCdRP.js": "b2f7e3c867e6be3de2aa277743c1ea89a280c5941e7935355925fbb254b26557",
+      "assets/mermaid-chunk-4I5QYGJK-CqOfCdRP.js.map": "67847e2009d26556a74808e39884ee50cd51ba282364d7934d412187f499fffb",
+      "assets/mermaid-chunk-5RXB4S5H-DBt6calo.js": "995aa10c17f89eb90ea1b7d65c7c44e52a6f31f871ad5fa04690b527cf8d6918",
+      "assets/mermaid-chunk-5RXB4S5H-DBt6calo.js.map": "334ab4c2c756a544d5001f2d3854a493e853ec2e9c5581e41af2d93bf024144c",
+      "assets/mermaid-chunk-5VM5RSS4-DhwXbkrc.js": "4ea93091e5d0ee10bc72622295ab0462ecadbc71a2ba88c444e6265472b86de4",
+      "assets/mermaid-chunk-5VM5RSS4-DhwXbkrc.js.map": "8e4e8d5fac426eba76c7cf29c67c2efe126b7b2463e2f0f4cd5bb80649a909c3",
+      "assets/mermaid-chunk-6Q2QTUOP-BcbXGIYb.js": "065483b489656445f3f4b2c45c740ae58883b1c33d8d80d0ded4dcdf5ffbb84e",
+      "assets/mermaid-chunk-6Q2QTUOP-BcbXGIYb.js.map": "b8ac384ae2ec3809cc6d7cfe306bc9d5c91b0e62942a236e60a92a0d0ddb2050",
+      "assets/mermaid-chunk-7BUUIJ7U-B4_aTk5o.js": "19b612b3185c7ab9ef9b3f7dec49ca8c2f687feff13a92b9471961ff5f8ef73c",
+      "assets/mermaid-chunk-7BUUIJ7U-B4_aTk5o.js.map": "824be8e1c80721507b11291896db0d0ed0b18ecc6c05df2a607d1a34d2e72ca3",
+      "assets/mermaid-chunk-7Z6QIM7H-Bi5T9oZ3.js": "f73af53e2bc919508f6d23fb024f861cbc1d6346d96f6d82a6cb8640dd1e9b2a",
+      "assets/mermaid-chunk-7Z6QIM7H-Bi5T9oZ3.js.map": "bef7117be317d9730708f69aa424d90d59b728ba50592393eace768d573d01e5",
+      "assets/mermaid-chunk-GF5L2VYU-P_qIUO7u.js": "18a465ecae6eafc71eda6e9c47b299fe3166144623aec9221e0b7bc5791eef68",
+      "assets/mermaid-chunk-GF5L2VYU-P_qIUO7u.js.map": "155c428b3e9afc63a4ab7e9f365f56f5cde82228523a4a4f4a865d3242963eea",
+      "assets/mermaid-chunk-I66GZJ75-DccykXtE.js": "b989452024a483639f843f51fb074918f1d611b58c3b992d4a91d9895a8abf55",
+      "assets/mermaid-chunk-I66GZJ75-DccykXtE.js.map": "e33cfef85b0775a92198cf5dd323fc263417d10fe74a1eb0db6f197e86f853d9",
+      "assets/mermaid-chunk-J7OUQ5F2-6Ls0laC5.js": "07b7e7578bf4ddeb3185fadcb7afbaf121014c3845500f3c238ffe827057598f",
+      "assets/mermaid-chunk-J7OUQ5F2-6Ls0laC5.js.map": "53de500b25e368a5720f2ddd53238ddc2499bce62b2db3deca732b83a75897bf",
+      "assets/mermaid-chunk-JQJVKLGR-DIAEhuQH.js": "57992ccd426a1c817ce28ab13ac52c1c440e7860203fe7f47f95ac8caf065e50",
+      "assets/mermaid-chunk-JQJVKLGR-DIAEhuQH.js.map": "053551f0b5bae5d5d52d96a955f948d7f422fca014ff0dd8c65aa878ed439ed5",
+      "assets/mermaid-chunk-JWPE2WC7-D-rewUmV.js": "a56f9bd6150c4145f77e3e72cbdac0cc389aefa56f49b404c3a1ef523f4c14c1",
+      "assets/mermaid-chunk-JWPE2WC7-D-rewUmV.js.map": "a6a4ffb1c24f40c230215e0e80fbbebe0c6ffa8792d2c6789b4b9b285d9fbb92",
+      "assets/mermaid-chunk-KBJHAD2P-Da-yGkCs.js": "b006ce9916e81818d341406b7d7582b6791aadcce1332864837db55f82a00ece",
+      "assets/mermaid-chunk-KBJHAD2P-Da-yGkCs.js.map": "003f61d70d0534fdbcd0586c48e87fbd7103641cc04b96d2d6366314eaa1ebf9",
+      "assets/mermaid-chunk-NSK5VX7P-Dzvn3LDJ.js": "4ffd932fbf4da3f857255ff1b9ff97cea24f7ddcf2bef7f082718d89b6f3d461",
+      "assets/mermaid-chunk-NSK5VX7P-Dzvn3LDJ.js.map": "a20f7a86e08b5cd28e02d4079e0f7858b24d542f710c362ffae4eb3ceab1df4b",
+      "assets/mermaid-chunk-QR6OTTB3-CVVK_zbm.js": "bb9fdffeee06e4a7a7039189b47a3f1e4859e8b0dbf936b721b8c6f00cfa2bd1",
+      "assets/mermaid-chunk-QR6OTTB3-CVVK_zbm.js.map": "3291bf615cb7a12de2c18c3b66cb665a5eadb5cdeec5456b9457aefe329ce7a7",
+      "assets/mermaid-chunk-RYQCIY6F--Tg2F8sw.js": "71d3ba03944046ed7c533a7b78e1bdd4106548abad9ca9611a52823df4612e83",
+      "assets/mermaid-chunk-RYQCIY6F--Tg2F8sw.js.map": "044d25a92c297a35b42b51bb646e5bdb2104f0dbd803030dee4bee223849be14",
+      "assets/mermaid-chunk-UBXNYLIW-CWBpg-v2.js": "92b4228f068a9111af9f940373e75fb5b34a184340decbb82f1ff61bc98f7e2a",
+      "assets/mermaid-chunk-UBXNYLIW-CWBpg-v2.js.map": "fce8bdd0b2e6f162bb104a652d1a62ec3906750331ed22116194458de678a24d",
+      "assets/mermaid-chunk-W5SLKNZC-u96eQ_3K.js": "57c15650eed168d255042cf7f26fd6c0238c9f14eaa8d240d52d55bc08b998f1",
+      "assets/mermaid-chunk-W5SLKNZC-u96eQ_3K.js.map": "2e6177808b0f38289957b1d0976ccd264cf4e22cf6616456e20f1660f43f6209",
+      "assets/mermaid-chunk-WRU74C26-nERcMucX.js": "307a301a19aa0cea9dbbe504af98aa6ef231de4bc94e8d2e4e626ef003adde78",
+      "assets/mermaid-chunk-WRU74C26-nERcMucX.js.map": "845d861d4d37fb680f1d1af4470b74cba1e2255b4a76baa55c03cdd4258e9616",
+      "assets/mermaid-chunk-X3CZISLH-DJaZZmp-.js": "d56164a6a75e0b813c1b9f7cf302ac514e4d62169e81838335c9208a6213dbf8",
+      "assets/mermaid-chunk-X3CZISLH-DJaZZmp-.js.map": "35e2ffea52c515d115c629e264f29119249feb1909801258d517b70161f24b56",
+      "assets/mermaid-chunk-XXDRQBXY-U4SK7V1M.js": "a47d42ea56359fb3e379995b014cfd97b10bdf4c3d4516154e09b8d9579dde6d",
+      "assets/mermaid-chunk-XXDRQBXY-U4SK7V1M.js.map": "fb98322c2c5a8131f750b12f29b661830c018e56b3bbcb2a09837851c17a4ca2",
+      "assets/mermaid-chunk-Y2CYZVJY-DM6BcmAw.js": "9653de4875f96ed59d8a2ed36f33453ed4dfeb9f5dc001713445526764b0a006",
+      "assets/mermaid-chunk-Y2CYZVJY-DM6BcmAw.js.map": "77cf9cb07171054eb9df87c854fde16eabdd68f5d4b3a4a78a00f18c3dac55f2",
+      "assets/mermaid-chunk-ZIRB5QZD-CjBtAHTO.js": "67464cefc47e7e4e25469001300fff35a051c7c3951ec424320b1e3e1f8cbe41",
+      "assets/mermaid-chunk-ZIRB5QZD-CjBtAHTO.js.map": "38d1d0f8b692e42e9558c798d216c91c6e5de470f3bbafb79bc5b0536ca6ea1c",
+      "assets/mermaid-classDiagram-JCYQIIEL-CJReSrCu.js": "6365a0806bc6b0b620edabbf90d02becf26c43ec40a57f6fc1f5e668891d95a5",
+      "assets/mermaid-classDiagram-JCYQIIEL-CJReSrCu.js.map": "e6a74ddab725cb5c5c249c295a2490db1702585403912044e4c25db98f67c35c",
+      "assets/mermaid-classDiagram-v2-OCEON4UE-CJReSrCu.js": "6365a0806bc6b0b620edabbf90d02becf26c43ec40a57f6fc1f5e668891d95a5",
+      "assets/mermaid-classDiagram-v2-OCEON4UE-CJReSrCu.js.map": "a62bb46184d9c60a846fb42ad74d1b2c7febaed6a1ce1b3bbc49b959e312b07b",
+      "assets/mermaid-core-m6iXKykR.js": "04dcedc9fe3beb9249daa3869717905905ed2a5a5c1298b8e365f78517228c2d",
+      "assets/mermaid-core-m6iXKykR.js.map": "6e9618debd11dbd9233bd54cb824af18c199dbaeb0af2197cbce9ff8dfe1f0fa",
+      "assets/mermaid-cose-bilkent-JH36ORCC-vC__zUqa.js": "168e885c30b1017afcfd8ee2f78671bf535b752233db844fe507b413c7ee3af1",
+      "assets/mermaid-cose-bilkent-JH36ORCC-vC__zUqa.js.map": "6a2ea3cc4e3733b3049042a7b06551b3b2fb80c1e32cb94c60c7d23c0aea4531",
+      "assets/mermaid-cose-layout-BiveFA4e.js": "adc89d93a0d486872bbfa72adbca6c74aa88aef8f76ed252c15d536fb4f5c31d",
+      "assets/mermaid-cose-layout-BiveFA4e.js.map": "3d620290c92094df4099573952537e3566ef2e2db5f3b82a1f4dc88a7dd878d8",
+      "assets/mermaid-cynefinDiagram-MW4NZA55-CQuMt9vl.js": "b607d96a7b4c2598e1e1d5f8b98b491004736d5ef19aac497e823c2cefeed8e3",
+      "assets/mermaid-cynefinDiagram-MW4NZA55-CQuMt9vl.js.map": "3ffbf394a937b3020ec5e7a7519e2884e838266b2d198ab2b63e976fd3c46a28",
+      "assets/mermaid-dagre-VZM6K2ZE-ydl9nQsn.js": "8ed9dcb752f70f8bd1c6126e02cad3b7d0a4f3a9101858f846ad5e91df251dc5",
+      "assets/mermaid-dagre-VZM6K2ZE-ydl9nQsn.js.map": "629d90a3a1c4b016c4589d419c008f1b61883eccf29cef9e4efe936045c55c97",
+      "assets/mermaid-diagram-7IWD3JNH-Bl2LPyFd.js": "2fd9fec670c7e4072b74f9ab74f096b6cddc7afef726ac4a340a8569f56b2c9e",
+      "assets/mermaid-diagram-7IWD3JNH-Bl2LPyFd.js.map": "234d49c133a29f790d9ae66cec45723521f2e8f5046e1cf69bd7baca142b18e1",
+      "assets/mermaid-diagram-B4RE2ZJO-Dw8FhKVN.js": "406bde876fea1d97f25a89e9db172a6c70d8be3c19029f71ca57c320b0efc832",
+      "assets/mermaid-diagram-B4RE2ZJO-Dw8FhKVN.js.map": "33e05f8d0bf765bc66a7fc25e0e4c56b3aa4050672f6a6fa93bdd59ee004cbf2",
+      "assets/mermaid-diagram-LBJQPF4R-Dig7jJVf.js": "f3653dffd0ee1a3bb1ca42e1130a049cf0fd003116882462667e937de889ffe0",
+      "assets/mermaid-diagram-LBJQPF4R-Dig7jJVf.js.map": "adf2e58341ac7bb946b8e8737d27cfcafd7623d2bb83ec57f0f5c6e21bc21c57",
+      "assets/mermaid-diagram-Q27KOJAE-Cma9hMEf.js": "7c469c1fcc8f9cce4e45035afbe5184c33af6268f2d3bb473e87809410a1a285",
+      "assets/mermaid-diagram-Q27KOJAE-Cma9hMEf.js.map": "ed52bbc4b718f06a0fe156f0a804bd4b866773a174e59d7141dc01d129a62fbc",
+      "assets/mermaid-diagram-UB23O5K3-BmbRav0d.js": "8a6664bee9bfe8d93f723fd1a15cb093ddc57f1d5c497c0018ad9985635f1cf5",
+      "assets/mermaid-diagram-UB23O5K3-BmbRav0d.js.map": "85a6d30e13f3b3d14f5a9940525dbe7d8bc70152395faf2346845e8378315a21",
+      "assets/mermaid-ebnfDiagram-BXEA7PRR-DsJjtjTX.js": "9e27fe0e3e1b2619dc90aa1addaa0311cc56cf7dd5f42cddbd0dbda3d2212af2",
+      "assets/mermaid-ebnfDiagram-BXEA7PRR-DsJjtjTX.js.map": "b575151aeee2f98df27ea31578224438cac149857a22685abf8a8c7eae733301",
+      "assets/mermaid-erDiagram-JOGREHBK-B-5ha_wZ.js": "74b2d6cce34711bf3612f63f5af656e4457704181c5b08ef5141d23ff443d3eb",
+      "assets/mermaid-erDiagram-JOGREHBK-B-5ha_wZ.js.map": "d97d35ccfbd8db675c8c34c1ed370f5d93c9c23634a663f60cd2a2eb79258512",
+      "assets/mermaid-flowDiagram-UKHOOZJN-DxEC6Vnn.js": "4fad390f6012f22315746fe73c676edc4e135c0999ffb2ed31c47e7e2cc3dc77",
+      "assets/mermaid-flowDiagram-UKHOOZJN-DxEC6Vnn.js.map": "4180074c1a4824d73b3177359e7659e42739cad119a77b89d404bd3eb383044e",
+      "assets/mermaid-ganttDiagram-PKOTCBZU-C-SHW68s.js": "e3ebab2722eabadea5dc85608fb786085fe82bc7cf0ac7202c5de3f2eb9c7b67",
+      "assets/mermaid-ganttDiagram-PKOTCBZU-C-SHW68s.js.map": "9f0c918a81d7587bc86d0aab64d1b4dc4fdf84e524d3361a549bc475e7e0bc25",
+      "assets/mermaid-gitGraphDiagram-DS77QQ5N-BcAfnMmY.js": "e6bc9cab9ef27b95be476a34288a209441ea10ad72f25fc0a326d89a753b1d26",
+      "assets/mermaid-gitGraphDiagram-DS77QQ5N-BcAfnMmY.js.map": "9e930efe23fe4d5abd1bb3a9a3a9eb47462b7eb1123d642f808f276f18eb6283",
+      "assets/mermaid-graph-CZArWUtZ.js": "1e60232894b91433f116701985a210ac17d6a0df4c7fbf6c730b8c3c9983940d",
+      "assets/mermaid-graph-CZArWUtZ.js.map": "46623c8faa21521bdd4b7b8387fdb3b88a85adb0424e579a1c4b260e4a002098",
+      "assets/mermaid-infoDiagram-6WML65LV-Dl1ct2Qu.js": "03556af763c49d3c2cfc87f64e408d6607b05d4f0fb9119ce54794693f53ee54",
+      "assets/mermaid-infoDiagram-6WML65LV-Dl1ct2Qu.js.map": "03c863acfd193c7dc45b522f776e414655f6b5aafe46f051b653e8af5f3f3b0e",
+      "assets/mermaid-ishikawaDiagram-WSZJBQD7-Bk72hSOj.js": "f94d188e0909022a4989dfa7d49f1b999aaba183d60df78e9cb8ee288891e07f",
+      "assets/mermaid-ishikawaDiagram-WSZJBQD7-Bk72hSOj.js.map": "cdd156ab87a7d5fafe8623804a8af82761e4bd782aeae52e34fd95781ec40251",
+      "assets/mermaid-journeyDiagram-NVQOT4AX-D7PyB2aM.js": "f8134d9aba744cf0107a792b7f47d8ff1443f2f3b63dcf7c3436ca810a6c2303",
+      "assets/mermaid-journeyDiagram-NVQOT4AX-D7PyB2aM.js.map": "ca5a6b1313aa1293852fd3bbfffc887f0d08c001a6d4ee9e91f7553093d36111",
+      "assets/mermaid-kanban-definition-27J2QSJJ-C14O9qKe.js": "d6d32a6dc36cf7328f6dc115ea59bc3b8cffc846724399bfe12f8cb5b0aae7cd",
+      "assets/mermaid-kanban-definition-27J2QSJJ-C14O9qKe.js.map": "34679a66ddec181cb688b5e4d3cf50ce6dd1becf1a0c138b1f76da02d02c9261",
+      "assets/mermaid-mindmap-definition-FAOFIHXS-VwMYRbqk.js": "78848e0290c90ab9c8ae4f60163ae495a9b434d7b09358699fd23f9efc658e2d",
+      "assets/mermaid-mindmap-definition-FAOFIHXS-VwMYRbqk.js.map": "e6b1780a3a9c09e3890e18fc0a1d130bb8e7d96c4716cad9de992913420bcf46",
+      "assets/mermaid-parser-B_cVgLWe.js": "e68a826446dd44d609b930145ef26c4bbbdefee62226f4639ec3232ba6084541",
+      "assets/mermaid-parser-B_cVgLWe.js.map": "acba7a5e7330f6cc7594ac88a833154b116ec5d23be43cde2cc0e95862a8b6f7",
+      "assets/mermaid-pegDiagram-VL7TDLO6-B6d2c9V5.js": "2af294b41ed4fd16be20bd4885c2a74f4ae8dfe8fff9c70588fe837b2c9f5597",
+      "assets/mermaid-pegDiagram-VL7TDLO6-B6d2c9V5.js.map": "63dcd77fe6da1dd16bac7804fe67d19a3ca2705e86100684928181a1c7688af2",
+      "assets/mermaid-pieDiagram-7S7Q4E2Y-Bte31U7R.js": "827ce5c38f9998067aa1376d432491ff937985eaf64e05dfc6d3e4951d77abbc",
+      "assets/mermaid-pieDiagram-7S7Q4E2Y-Bte31U7R.js.map": "b5889c53b6eeb92275648d0624891222e2d9c2dbb6e71081046373a2ac291430",
+      "assets/mermaid-quadrantDiagram-CIZ2JOQS-DU2jvd4Z.js": "fe7baf95f4c5625b0f2185fa99693c3b5e979adef011fb846f99674875508afe",
+      "assets/mermaid-quadrantDiagram-CIZ2JOQS-DU2jvd4Z.js.map": "47e60cee1210d687f532e7c101a878c6d115d77975b1d46c45453292cc51a31f",
+      "assets/mermaid-railroadDiagram-AXF67PYL-C_WX4h_u.js": "884b1c8357f8fbff223e269a98a4c61d2393c422a9c00c23ef969aa344c77ebe",
+      "assets/mermaid-railroadDiagram-AXF67PYL-C_WX4h_u.js.map": "e9a2e67abf20c6aaab46926ce93923a38a2756b08887dc37ff98ea99adcab5a8",
+      "assets/mermaid-requirementDiagram-LRYGKXZP-D7K3RzP5.js": "04ff811f5800297130ca0d769eaaf2dac98aca6ccd90e9d2e7d69633c73010c2",
+      "assets/mermaid-requirementDiagram-LRYGKXZP-D7K3RzP5.js.map": "17c5bfb4ca7ff286ee7970ce7e8399e88e178f86639f6c8a102228d884cb6529",
+      "assets/mermaid-sankeyDiagram-W5VNT64P-BFU7qb42.js": "3ea27c0f9b8cee03102c6a631cdec3c039d993b2d311713b36954c930371e712",
+      "assets/mermaid-sankeyDiagram-W5VNT64P-BFU7qb42.js.map": "6a8f6d7b374770622b652e67b3fc3ae8ed4e3435cb4379d7baefd9a3f630f79d",
+      "assets/mermaid-sequenceDiagram-SI44F4Z6-BK_ehrVf.js": "ead956dc4a6174e8c3bc79ff815c79ffb82f720a0313a57ec0effa114d415608",
+      "assets/mermaid-sequenceDiagram-SI44F4Z6-BK_ehrVf.js.map": "1f47605601c4bb3885d29dfe99ff060a7c7efe63da2660cdfb16b02fd816d4ab",
+      "assets/mermaid-sizeCapture-X5ZJPWSS-PVmft3JE.js": "9cb9393b8c33bdff79cc167191af945d6d507b3a8f5b030c1bbe54a7fbea9cbb",
+      "assets/mermaid-sizeCapture-X5ZJPWSS-PVmft3JE.js.map": "aea087da1b8e746f45203a5c4aca5575da88b5e45afef8540db3f716ef16ed89",
+      "assets/mermaid-stateDiagram-OKZ733FA-C2FLzvg3.js": "d636f9e28d41d9017a9eeb03a3f23b2434242cd3c8577397a05ceceef5aaaf2d",
+      "assets/mermaid-stateDiagram-OKZ733FA-C2FLzvg3.js.map": "88272b73686d75f7ed07366adaba3e41af0ab0cbe68f877ae46e1b14bc0fee9a",
+      "assets/mermaid-stateDiagram-v2-UEYNNEHI-qwel0tJ_.js": "989038d4e3d71e820a54a0c2aa14b2cdd09041a8f4030890d5461c330347fad6",
+      "assets/mermaid-stateDiagram-v2-UEYNNEHI-qwel0tJ_.js.map": "09343358181fdceb868359ba489ac87074406de759696554bbcabe0811d8b84c",
+      "assets/mermaid-swimlanes-SLNWSIFB-D-wIF3z5.js": "8257f62a8df22e96acf95fbbc75343537784cf48bbc59efe2af7d6caf6e37fc2",
+      "assets/mermaid-swimlanes-SLNWSIFB-D-wIF3z5.js.map": "9328d7c82d7fc67cb3e3586941d4713ad1b56c7a209ca6d48f47b4cfa25e7de4",
+      "assets/mermaid-swimlanesDiagram-ULZ7WXOC-BcAmtQ1D.js": "182508b490d6ed062f1bf6b47ba37d05206dc37fbb07773cfd4ee80a7434560d",
+      "assets/mermaid-swimlanesDiagram-ULZ7WXOC-BcAmtQ1D.js.map": "2ccdc2abf392f3aa305f91af41c981f3323fdc930bc761716aad2bb3f4695e72",
+      "assets/mermaid-timeline-definition-Z64GVDOM-DjWHfMEb.js": "f9fc4d61df000ac375e00f733e1a83ee373dfeb393767abd974f6d55bb7004b4",
+      "assets/mermaid-timeline-definition-Z64GVDOM-DjWHfMEb.js.map": "a2760d77c040b979324843861df600d4da98499fc4f8c0cebaa169574b03dfd8",
+      "assets/mermaid-vennDiagram-T6HMQDX7-BGbedNDZ.js": "640ef3a6a2464cafce9f9bbfe9df4ff87582d9168c68da927136002201120cef",
+      "assets/mermaid-vennDiagram-T6HMQDX7-BGbedNDZ.js.map": "cf3dba3c70c9be28ac97f8588ac7cfa2d6ede3c0bbf5a94f4d7cec9819e44cb8",
+      "assets/mermaid-wardleyDiagram-T6FBY63Y-B0Wy4Cdd.js": "979a4511d8407bb9530adfb5d9ae7c8edd34fb23960966d215644f23fd5e04aa",
+      "assets/mermaid-wardleyDiagram-T6FBY63Y-B0Wy4Cdd.js.map": "763f65cf1682f4947b8820da2cac856543b31fd3ef3f6803436c579cb909aff6",
+      "assets/mermaid-xychartDiagram-ELKLHX3M-DPxgqt6V.js": "679db49249658cbeac3888c5cdf591ceafa11f73ae6dfefee3d6f22a3f9841b6",
+      "assets/mermaid-xychartDiagram-ELKLHX3M-DPxgqt6V.js.map": "811dfc5c18164535e3778ea388a526c627c9ab3f19477b111e0fb37b9fc95a3c",
+      "assets/message-square-vdyyWlsc.js": "b89875fa4ad4a02952b546812e93a745f33bbd84ed957c5f6bb494a3012ca682",
+      "assets/message-square-vdyyWlsc.js.map": "3ad5f5b275c6fb32afb1c4416c27a6912b5617135e8511abad983bb17695d3b8",
+      "assets/mission-actions-Dp1Zry5n.js": "7c2dd102843d3615fa3af8ffb799dde1ddbfd29b4777ba15ae533cee98d3e52a",
+      "assets/mission-actions-Dp1Zry5n.js.map": "3bfce0e4a9412981d847b6facf12bcac6f585ea646f04317313d3dcebe6f19da",
+      "assets/mission-signals-D3t06VBH.js": "957ed6376a93b092334edab244269568d825d9072321f40d043fbb3ed4153b9a",
+      "assets/mission-signals-D3t06VBH.js.map": "a60576d0ecb8d3d76b4e82a5573112e7f81232d50456dcc2a4dd4453a26972fb",
+      "assets/now-signal-BgRyy1Ta.js": "7e00369390e065fe3a1fa97577b806b513284f8c825a990966c5edd5140a5afa",
+      "assets/now-signal-BgRyy1Ta.js.map": "c088c4fe57c53d6832ab4fa7f6c34a6f12f84f2bd27929b86990b8810b98b35b",
+      "assets/observatory-C85_MUrn.js": "5743191c332c32cbc07c6aae5aa534a4aeebe4efb97fc52bba43793ee084c1cf",
+      "assets/observatory-C85_MUrn.js.map": "91cf84a49578cc5cbbe8cc90b6e84aa31a6bf65832953c9b2ab78efc06927051",
+      "assets/ocaml-C0hk2d4L.js": "eb5a88927867a33e866a8fea38c91799b28739c6038264e5a3560519951d1dc3",
+      "assets/ocaml-C0hk2d4L.js.map": "a4f8e30fddabdb377828a8fa55b1a7515bd654a92ef0c0891f6f576aa456ee3b",
+      "assets/operations-panel-CTVJYm77.js": "4ab985d19ae725066ed003e29a518b001edc134a0a615af731d767a7ad93a802",
+      "assets/operations-panel-CTVJYm77.js.map": "322cc99861f2c9a7c69679ca2ebe9c6ed5f15de0687bb4296e698b6250a7251b",
+      "assets/operator-action-DCpYIl4v.js": "fdf7d7011027b75b9a26986d3264de95fa056aa9796d7922a594da5ec8fdf9cc",
+      "assets/operator-action-DCpYIl4v.js.map": "3a66821d100d9b294ab3ee582d1f9e6624b9ac0c8b8913118aa2ba5092218691",
+      "assets/operator-actions-bLT6W8uM.js": "ec0a8641e865632f5e33900bca70217e3c3a94c3e60ef68f7cebceb4d6e26812",
+      "assets/operator-actions-bLT6W8uM.js.map": "7beec4edb8ce6423efa020f5420ea6eab9acb9ba2bdc7e05419a59d2b7c28154",
+      "assets/overview-nbMvMSFg.js": "f2860f4d2bd1afd14f9cda4123a28105399ed9ce64a4a67260209e4a08d1cca5",
+      "assets/overview-nbMvMSFg.js.map": "5782d46061ae5496d16e6a436338679bf2ec92641b4369daa4db2d357afbe445",
+      "assets/preload-helper-cC-D59TZ.js": "a0fe96b42dde4d53a567a44fbb1a4be77056bcf2fe4826166d0809bb1cefe465",
+      "assets/preload-helper-cC-D59TZ.js.map": "3bf9eee6db474318cb7c19bdf0c03e9babf1d410ae922e144c59a23e97b4598a",
+      "assets/primitives-CIvEhoCR.js": "9cfbcbc0eca0080f893cb475ea066ff370832dbf8dfcb20a3c25287a44888552",
+      "assets/primitives-CIvEhoCR.js.map": "d1cd0e7cb46ccfbcaa92eff0e03cb1857e6b976b82af3606ddf13db6c03923cd",
+      "assets/purify.es-P3vI1IgJ.js": "f64478476a43c91f82d5e4b69ba20003400de4d3ac79fae234ceb19235bce845",
+      "assets/purify.es-P3vI1IgJ.js.map": "f5c55b23129f14314786d5f9ea8ec019d6ffccb43c435526a30997a39c73b41d",
+      "assets/python-B6aJPvgy.js": "7652ab863f920a5959c4aa52d6decb8c11d23fd590773977ce8aa0fbb3c555c4",
+      "assets/python-B6aJPvgy.js.map": "23d7a75cb398edd601f49cdf62fd74e675dcf47e6550c573c620f26695685133",
+      "assets/queue-drain-status-BHUoeI3x.js": "ba91239e39b1ff986d345199b6a4ff9992ce0c55ab9469c1c6def7b8260ac899",
+      "assets/queue-drain-status-BHUoeI3x.js.map": "5ed6846870145f99282c583de0f1ca1e80b476142c403863409194dc0c8b9a90",
+      "assets/refresh-cw-Xmp6AhQ1.js": "e3fb4a9f6a0edd1d53cded620eacdb3e2f7789e938fe68b0170fcd925439b3e1",
+      "assets/refresh-cw-Xmp6AhQ1.js.map": "3a9cdab44dbde880395220c203e5cfb76e0a4acefb6db724e6fa29bf71f40fd2",
+      "assets/registry-surface-BPStMG1I.js": "26e4ba352e3a7c9a4d0281d8cdc7ad6d32a207a5179d0c2483aeed59a830d684",
+      "assets/registry-surface-BPStMG1I.js.map": "8fb1e5fa5541feba214100f5eb9a70d2720c8a5cae5c8d1f1a87960dfec778c6",
+      "assets/repositories-CtVN81oO.js": "f2feb2481f621295553ed4f9bd4ade029789a6307710ee62beb9626b939dd8dc",
+      "assets/repositories-CtVN81oO.js.map": "84674fd90f11703cb55145341d3ce8123c82a036a9fc9944b4feed44fa021dd4",
+      "assets/repository-management-BK8QUMoI.js": "cf732d78942a044a43979d516eed9c623566d0e6e19b0e8cb81c818dfb033566",
+      "assets/repository-management-BK8QUMoI.js.map": "12a533c0d90fc0e73e876f7052455a82a8793863a37187afd15d8e7ddf80186e",
+      "assets/rich-content-DYqZjZWA.js": "80ac59ec0821e5f48af8ae0a8088ae37506295b5711099813675a4a0edbdd32f",
+      "assets/rich-content-DYqZjZWA.js.map": "923c1b1ec54f858a0c41ff3fb2daa163c0520bafb3eeffe8f8f4cb6dc9855dba",
+      "assets/rough.esm-CycZv-lV.js": "8c99ec9024f37b02518333f66903460d8484c9bd85d210c3c98e5fc405ef148d",
+      "assets/rough.esm-CycZv-lV.js.map": "d06186ae968298c1a55cea532feb605c0357a719ad8d16ceddffd7ef64a9e552",
+      "assets/router-4e2NzEH6.css": "d12549f706b8154c4831e1745ae0f15a4a28cc001d1d827b236d5e4a14ec5030",
+      "assets/router-K1xhRCYX.js": "d274d0c9b9298813e440845249701e11e925576ea8959146c1cef70c9258bb76",
+      "assets/router-K1xhRCYX.js.map": "90700f2d09108a068e8c6d63a258325a6b8f1b74eca87094d3aa81776676b085",
+      "assets/runtime-defaults-CcOTIHg7.js": "f28e4b0c6a86b5ca505761f658884a50eeb009d8f5724f7fbf48d9ea5cd0be42",
+      "assets/runtime-defaults-CcOTIHg7.js.map": "d0a3dc7f0c919d849a05f38b8931e165f32c069da2c7f9040a50c283c284913f",
+      "assets/runtime-panel-BStI4Qr6.js": "5f230aa79f1d0a60b9751e23a4fb508a4930133dd6ec6b76de7801550f97484e",
+      "assets/runtime-panel-BStI4Qr6.js.map": "8949e236ee506ea24235b38783a3bf39f3d327b29357cdad5932b8bd6f2d5a8a",
+      "assets/runtime-probe-BjvQwUa-.js": "e7fd1b47fb2385ac13ce97326a03c4483b40305ae1ce93cacaf42fa8033b4bea",
+      "assets/runtime-probe-BjvQwUa-.js.map": "afb6add0a109196b24301df3317c02d702213009d0c26568aff0d9f89f1db0a4",
+      "assets/runtime-provider-summary-BDmhKAYQ.js": "c790922d2a79a23acf32c09959469d64c9b23939f4d7a0cefaee0677b5b99376",
+      "assets/runtime-provider-summary-BDmhKAYQ.js.map": "7b892b9f8eec3372a35eacd1b6fccf8c095a67f970a488fa2b9c4e13a54c222d",
+      "assets/runtime-resolved-resource-CiBr3EK5.js": "1072872ad505582eedb3b96cb15ffaeafe13e205f65a1c9a9f1c44060b5ac0c0",
+      "assets/runtime-resolved-resource-CiBr3EK5.js.map": "58bdea9821a95e6e7d31e05f102a38313232928d0a700b25bc0e4657d3ced52e",
+      "assets/runtime-resolved-sZv89RFb.js": "40b65cfc0b8249c62ecf02704a319743abdf0db8065d6d199de4e1f2bdf9fa42",
+      "assets/runtime-resolved-sZv89RFb.js.map": "38253c8f11886e63deab3dfa3a47e23be3ea5a5648a24f971e5f81dd3b4b3c2a",
+      "assets/runtime-toml-editor-DXHESg1t.js": "7722f3bf35f661fb4b0ff203d4d4b9f3e9c4ae42e31f3c009525caa7d812d5be",
+      "assets/runtime-toml-editor-DXHESg1t.js.map": "8662128f46b982419c4c61b3f90d795668d00bc6123dc24eeb57a6d521781efb",
+      "assets/rust-B1yitclQ.js": "c48161f6b21740ac415d982a627f24bb81081225f7405632784f667cf915d985",
+      "assets/rust-B1yitclQ.js.map": "9e4b84262dfac667a98a1bcede676e34e3566a1f32190f710058e10179d34e4e",
+      "assets/save-BJWKvk6y.js": "6c1283001f76c6b16469ce400066fb8a13ba8eee9261d336239576e256665556",
+      "assets/save-BJWKvk6y.js.map": "637bb76003918234d468b859a0ce6928ea2395f1435ef7543865d9d85ef2ba45",
+      "assets/schedule-constants-Dd9SPFzP.js": "6fd04080d44746d806b81bae7304c5db5595e19ac4c9a85518434eeea4ebfc59",
+      "assets/schedule-constants-Dd9SPFzP.js.map": "d72d5a7c3e88844c0ae4a830f8678d32c6f2fb8c1b1c11a1f3eab79a8f64856e",
+      "assets/schedule-state-CYZ0W6W4.js": "a3b3fc3b4c2b52bf862c4059858a71cb1af80af39404e60be74cb87cb66c015f",
+      "assets/schedule-state-CYZ0W6W4.js.map": "f16cb8c4ce3392616170a4aa76a7742e0d3c3f1b7421a54b27703aa5801258c7",
+      "assets/schedule-surface-Czlmv57b.js": "ac412762ccbd8f199ce29cc20612e1c55558b66e2eb6968d0a0d544afbc7e7b7",
+      "assets/schedule-surface-Czlmv57b.js.map": "f3b918985ff824e3e1b64ea446f693493e075b4b4d85614cab0db9c4fdb20d1f",
+      "assets/search-BgOd_xCC.js": "c24f09822ce5422e0be95a1851625c82db1906de5115c599d3a82b65256fd0ba",
+      "assets/search-BgOd_xCC.js.map": "6ecc325c1dc96de8a7d49af3e8affe75d83ec9ad2cfac79912eda366725d1211",
+      "assets/section-header-CowWHdSN.js": "2cdbacdc3556e3cbfbaf9b0340d56be57c5bf66dde72ea49ef36f173e2f736bc",
+      "assets/section-header-CowWHdSN.js.map": "82c0095a8fe9dfb307fd6035b4eb42dc61d2f02f6d149c26bfc2446ee0825df0",
+      "assets/section-nav-DX6235rk.js": "5bcab163644798da95c7d3cf2713a2e8998aa5a3e813caaf1970e85ac9002b57",
+      "assets/section-nav-DX6235rk.js.map": "6467a28042bbfd23b0a6fd9e5073a8b1a8bbeb4060dcc429a5aa707e6740c814",
+      "assets/server-config-D5VBzWSz.js": "0d31729a3cb2547e9d556ea21186ebbb354c2cc397f940ca5308468e268fe7fd",
+      "assets/server-config-D5VBzWSz.js.map": "7fee408ce666e13f496361450b51a176779a4343356d5688425e740e786fec22",
+      "assets/session-trace-view-Bfeoqa-s.js": "2fd2520c68d2431c31824cc352203d17b88ddf9f273af4c1751fd11e8f83772e",
+      "assets/session-trace-view-Bfeoqa-s.js.map": "f4966a0be54ab9d792ae83f85a55c9b859c17a89d7f75afdea9c1548a819450e",
+      "assets/settings-CTIz1Jz6.js": "7f9770cd2de6672556628bdc6cfa86a3fe2515c85611b0b707e63acd70ef948d",
+      "assets/settings-CTIz1Jz6.js.map": "4395e7ac2937e413f4640e16f476ca02859b91300ccfe610722fc20c7bb9532a",
+      "assets/settings-surface-DhNd6DRJ.js": "6a5c815ab64b489e2dc119b6c1234477133dd286ae76119c7711598eca47ecb2",
+      "assets/settings-surface-DhNd6DRJ.js.map": "c779240e010cb7acc64d72d0369563c191cb71eccc2cf35671582bb2a3a6299a",
+      "assets/setup-guide-card-zh9s0rEW.js": "370b89aa7c32833c9abd6f124e1db04e4c4ab9de953f61053815397d26feabab",
+      "assets/setup-guide-card-zh9s0rEW.js.map": "246d6f170d6bfffd0c3f5ac5fadfeb96ddf9b0748ae52665a2fdffb9d6ce2ba6",
+      "assets/shiki-highlighter-BbACCbzM.js": "31b22904f4d061f2aa58ac8632570388bfc21b1bf741f1e825e1382de88922ef",
+      "assets/shiki-highlighter-BbACCbzM.js.map": "32dea65b987104e1b26d35f89747b763e9f2eb5beb72318ed4d40a79f739d286",
+      "assets/skills-panel-xXshCIN_.js": "347094b39fa40aca7007d66aa37f1d21c3abadb144f7f0b6e0625ffde7da55f5",
+      "assets/skills-panel-xXshCIN_.js.map": "5a4287a7b35f54dfb69cc1a9ccfbf7e4b36408e9fd6dd6d3d7cfbba0cf6773e9",
+      "assets/sql-BLtJtn59.js": "e2621cd8e6d6bc3aad625e5da5afd16b8f1c64a40c77649ac6948a4b306174e5",
+      "assets/sql-BLtJtn59.js.map": "ea2f5a55d0592e467437eb5384993bddc72d5c0f5a3810c3130c67de038da7b2",
+      "assets/status-Bkq4T2tS.js": "f352c4486ef72c239fff30539a78cc9d42a8b0b4e07adbb1e13b7e82fbfdd1f9",
+      "assets/status-Bkq4T2tS.js.map": "aa83cbf416e680b867405e04af7832b03450a140f71cd1d27c352b9d557e4c3a",
+      "assets/status-dot-Cb40cvDN.js": "e380f4bdae10d8d54afcf331828284b7b5caea4b857a6242b1d08822a4402091",
+      "assets/status-dot-Cb40cvDN.js.map": "d8a0067e6e7bfb44a31d54ac35128421222ad48e3147494e55b18fca85d89efc",
+      "assets/surface-header-D4RhGRhM.js": "887bef629217ff92f3582eec7e68f6b46ce300f800de5a7097d51ae9a59fb5e8",
+      "assets/surface-header-D4RhGRhM.js.map": "d5b4d637cd0ae6c05d1f8bca6972d207d53caac77a7f8cc64a099fc9876800c1",
+      "assets/tab-refresh-3A-x-G1h.js": "b641a07bda909efa0ebf4635a32012093927f2e2e40623f871c7dcaf0f11c4a0",
+      "assets/tab-refresh-3A-x-G1h.js.map": "c2ccfba3d27beb225618ccb8f26ab847ccf45770e2a4563d36516303737ba901",
+      "assets/task-detail-overlay-BFAI1mlb.js": "c504957d52d1b50b5e353b744390a05f16f4f4307549268db33742dbea56f692",
+      "assets/task-detail-overlay-BFAI1mlb.js.map": "7aadde4bca5741034c8ae8c5ace86eec6e75e9bcb53cabdbd1517e4f7b55c480",
+      "assets/task-detail-state-DE4E-kcO.js": "9e454863225782f1538db87d0bb17db7cd8217f85c644b9d81ca91e792c9c820",
+      "assets/task-detail-state-DE4E-kcO.js.map": "c4dca69b4697911ae4f44c11052f92a2207484923061f7ebdb028df0acc73a96",
+      "assets/task-search-text-Cls4IjhD.js": "80d0f606d549a504fa57aba1785d536b274b4e912a15abed6e9ff35958268d70",
+      "assets/task-search-text-Cls4IjhD.js.map": "412104ae9274372e7678c930a7d60341963864e25e917f5770a7a7142b8aa547",
+      "assets/tk-CimDVtvE.js": "19a4188a1e94e180604d6f30d99dc8204f871dc1b742ad3c07f3c38d6ddbadbe",
+      "assets/tk-CimDVtvE.js.map": "b3399d09ddd2768a8cb4ba36f0d2ea947c59e4ccb58d9bd4ea633e82022eed73",
+      "assets/tool-blob-CWyjWt8X.js": "9072c2267c65e4a13774fc8e915c93f28f7bc1375bd429ed3131957ed75d5aef",
+      "assets/tool-blob-CWyjWt8X.js.map": "11691b797b5dfe9cebd1ab2ef8ee2de349a6d7a784d28adb6e7a8e1f72aadeab",
+      "assets/tool-blob-marker-CqwdCiCG.js": "162b9641742d9716cc561bb99f65b222c00f78541856af3301bc33bfeccaf454",
+      "assets/tool-blob-marker-CqwdCiCG.js.map": "54314696ee4c9a109793fbf32a6c8ee2a216aed8f7a191323e8a7340c1601541",
+      "assets/tool-state-C5g26zXj.js": "4a5257fc60dfa2940b3148cb621909e38296a00706e7d563f088162aecb6cd11",
+      "assets/tool-state-C5g26zXj.js.map": "6543e24e6d6eea4c22e8bcd906d27b08d5d364da2557e9a0e4e80c58734171e0",
+      "assets/transform-PcMyGowt.js": "cf3a405b0f40cd3e35c7c0e8d29594852d5965db8a0f59d9138127cd6edc4bcb",
+      "assets/transform-PcMyGowt.js.map": "1d9cc7ba23c59ebcc7987b1ccdf0b78edbcd474747d249bb229a73c1f480ce04",
+      "assets/transport-health-sbf7Bh6z.js": "64c03c16af548b109137bdeb5b0810699c84111752580bde9b6afee002d173b4",
+      "assets/transport-health-sbf7Bh6z.js.map": "b81d71cbb64397a1b4c8b14079e6f8a115b58934f77d4db6f6b74506f96c017a",
+      "assets/trash-2-69eQimyb.js": "3b0049733edd2e955bc3a837965178a7461a3e0ab3a7082f91f05d343df23d52",
+      "assets/trash-2-69eQimyb.js.map": "c37611ce7e478c1ddc696845084d127ec6b20c4f25d54ea08a80768741b34a9f",
+      "assets/typescript-BPQ3VLAy.js": "fcdcca54a7ccb637627d4dba50774a3dc7a5bae93a9f0a43c7748114b1d1d75f",
+      "assets/typescript-BPQ3VLAy.js.map": "3cfbc5a6766041dad60d2cb3244194188fa2c64947cea53404be5fca0a93f725",
+      "assets/user-round-DKNDQmJf.js": "46ecf8b53270cd30c6d451b92a8be14530967538636b72dde1aa1f84eeedf303",
+      "assets/user-round-DKNDQmJf.js.map": "f0ae0956f1ba9bc33484af47871f54209690dc99d723396066f584776cd291d4",
+      "assets/vendor-Dd31PCZi.js": "541de837dd8f4f9d5ae1d42c538f4226a537caf0768a0ca351a7803e4140d23d",
+      "assets/vendor-Dd31PCZi.js.map": "a2af5e4c7551f67c20fee60f0842e3f7b84702c42beb61ae35012dad526c691b",
+      "assets/venn.esm-BGi7IpaM.js": "32b9964fac0653626aadd2b74a2754e6d0d326ee433399ff0dcf65cac81fef2a",
+      "assets/venn.esm-BGi7IpaM.js.map": "0798f1a6527f9a96edb39182d59259ebbd2e631e75e576016aecda6fe8eef130",
+      "assets/virtual-list-d8fdcRkk.js": "6998638b53b4112b68b3d81a858337456875cbf88a49b29b5aa4559056bae87e",
+      "assets/virtual-list-d8fdcRkk.js.map": "3bf8ed2e39417b8bc3974ffc431591e9dbd1a40c4d7b45c2ea44768f206c356d",
+      "assets/vitesse-dark-D0r3Knsf.js": "f3a4064c8e89ebd2349cf3dbf3e211d73b05d11cbd9bbc00feefa1820d74990b",
+      "assets/vitesse-dark-D0r3Knsf.js.map": "497b94779a1f957942538dd01b2c5c4a995ed6471cf0669b1d59f1bb9eb212ba",
+      "assets/voice-input-CLzpzB2f.js": "93eb731cb20a5fd850a4caf35f5058ba957c81b1be36765b7781be294ff32140",
+      "assets/voice-input-CLzpzB2f.js.map": "43e082845df1a1aa3581f91f18c0c2f0cca7dc735f59604e9e76317223fb3a27",
+      "assets/work-1u835Zjz.js": "ec2407eaa7bc043e76f61da613a040d8b28049833480dcedca015e335f3fa4d8",
+      "assets/work-1u835Zjz.js.map": "1d98bb709f3365a01f5defc7804e67a195a70dec26151429c29718d1df087f36",
+      "assets/yaml-Buea-lGh.js": "a7a8b4fc14fa7ba338598f61185a3a13e49d7450830af367407ae61b9634bede",
+      "assets/yaml-Buea-lGh.js.map": "5ba99975b37b8334df5d2b0c22f9f61ca06b723db2bb21720ca055e8f38b461c",
+      "dev-fixtures/chat-edit-snapshots.html": "874cbc36e1f2206a45da5e8a06d1a44709b9d71f0245b2f0322c16f2f46da552",
+      "dev-fixtures/ide-heartbeat.html": "df400901d4bd1fca0ccd860bc009d8953965214a08d5c32f1c942b40db64f10a",
+      "index.html": "4d7f1a8660bc26277fc5636df486b7d6221ab26f8b4a09b5ef652d0f2bc087dd"
+    }
+  },
+  "health": {
+    "build": {
+      "release_version": "0.35.2",
+      "binary_version": "0.35.2",
+      "commit": "81066b198c7e04f9bef03d5f2af8882113fffb30",
+      "commit_source": "embedded",
+      "binary_commit": "81066b198c7e04f9bef03d5f2af8882113fffb30",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "68507dd89a2614b1cf9c4766309977f96a3fb3d41875c8b98ba11695a0d91ac4",
+      "binary_commit_unix_ts": 1788997730,
+      "binary_commit_age_seconds": 1738,
+      "executable_path": "/private/tmp/masc-fusion-runtime-probe-81066/main_eio.exe",
+      "executable_dir": "/private/tmp/masc-fusion-runtime-probe-81066",
+      "runtime_instance_id": "01a088a3-ba54-7000-b14a-12e35038eaaf",
+      "started_at": "2026-09-10T00:07:06Z",
+      "uptime_seconds": 641
+    },
+    "paths": {
+      "cwd": "/Users/dancer/.masc-integration/fusion-decision-81066",
+      "effective_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+      "effective_masc_root": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc",
+      "current_task_path": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+      "env_masc_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+      "resolution_source": "explicit_cli"
+    },
+    "startup": {
+      "phase": "ready",
+      "state_ready": true,
+      "pending_lazy_tasks": [],
+      "last_error": null,
+      "path_diagnostics": {
+        "cwd": "/Users/dancer/.masc-integration/fusion-decision-81066",
+        "effective_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+        "effective_masc_root": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc",
+        "current_task_path": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc/current_task",
+        "current_task_shape": "absent",
+        "effective_has_masc_dir": true,
+        "roots_diverge": false,
+        "strict_mode_requested": false,
+        "startup_rejected": false,
+        "startup_abort_eligible": false,
+        "input_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+        "env_masc_base_path": "/Users/dancer/.masc-integration/fusion-decision-81066",
+        "resolution_source": "explicit_cli"
+      },
+      "config_resolution": {
+        "status": "ready",
+        "warnings": [],
+        "config_root": {
+          "path": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc/config",
+          "exists": true,
+          "source": "local_masc"
+        },
+        "prompts": {
+          "path": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc/config/prompts",
+          "exists": true,
+          "source": "local_masc"
+        },
+        "keepers": {
+          "path": "/Users/dancer/.masc-integration/fusion-decision-81066/.masc/config/keepers",
+          "exists": true,
+          "source": "local_masc"
+        }
+      },
+      "elapsed_sec": 640.8200860023499,
+      "watchdog_timeout_sec": 240,
+      "product": {
+        "lifecycle": "serving",
+        "lazy_tasks": "complete",
+        "readiness": "ready",
+        "last_error": null,
+        "flat_phase": "ready"
+      }
+    },
+    "dashboard_surface": {
+      "schema": "masc.dashboard_surface.v1",
+      "installed_release": null,
+      "status": "missing",
+      "source_provenance": "unknown",
+      "index_present": false,
+      "assets_root": "/assets",
+      "dashboard_asset_root": "/assets/dashboard",
+      "dashboard_manifest_root": null,
+      "build_stamp_path": "/assets/dashboard/.build-stamp",
+      "index_sha256": null,
+      "asset_tree_sha256": null,
+      "asset_file_count": null,
+      "build_input_sha256": null,
+      "build_source_commit": null,
+      "build_head_tree": null,
+      "build_index_tree": null,
+      "build_input_file_count": null,
+      "build_input_matches_head": null,
+      "build_lock_sha256": null,
+      "build_environment_profile_sha256": null,
+      "build_environment_path_identity_sha256": null,
+      "build_environment_path_executable_sha256": null,
+      "build_environment_path_executable_count": null,
+      "build_producer": null,
+      "build_runtime": null,
+      "recovery": {
+        "kind": "install_matching_ci_artifacts",
+        "reason": "unbound_assets_missing",
+        "restart_required": false
+      }
+    }
+  },
+  "decision": {
+    "fusion_evidence_sha256": "3b871d4372b27ba16cf75878526d03ffefcf7bd79499ce1bc54a3e772e75a8d0",
+    "type": "fusion_decision",
+    "decision_id": "08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e",
+    "fusion_run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+    "fusion_post_id": "p-d3729e4249c8b0fd9485ff28e75fecee",
+    "task": "task-001",
+    "goal_ids": [
+      "g-fusion-evidence-review-20260910"
+    ],
+    "agent": "fusion-evidence-review",
+    "actor_kind": "keeper",
+    "turn_ref": "trace-1788998630329-00000#5",
+    "decision": "adopted",
+    "choice": "(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.",
+    "reason": "패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+    "notes": "Fusion adopted: (B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다. — 패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+    "ts": "2026-09-10T00:17:27Z"
+  },
+  "history": [
+    {
+      "fusion_evidence_sha256": "3b871d4372b27ba16cf75878526d03ffefcf7bd79499ce1bc54a3e772e75a8d0",
+      "type": "fusion_decision",
+      "decision_id": "08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e",
+      "fusion_run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+      "fusion_post_id": "p-d3729e4249c8b0fd9485ff28e75fecee",
+      "task": "task-001",
+      "goal_ids": [
+        "g-fusion-evidence-review-20260910"
+      ],
+      "agent": "fusion-evidence-review",
+      "actor_kind": "keeper",
+      "turn_ref": "trace-1788998630329-00000#5",
+      "decision": "adopted",
+      "choice": "(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.",
+      "reason": "패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+      "notes": "Fusion adopted: (B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다. — 패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+      "ts": "2026-09-10T00:17:27Z"
+    },
+    {
+      "type": "task_completion_verdict",
+      "from_status": "awaiting_verification",
+      "to_status": "in_progress",
+      "ts": "2026-09-10T00:16:20Z",
+      "task_id": "task-001",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "producer": "fusion-evidence-review",
+      "verification_id": "vrf-d4e9beb1502f3970ffb8ecc22075dd11",
+      "evaluator_runtime": "glm-coding.glm-5-3",
+      "verdict": "rejected",
+      "reason": "REJECT. 확인 결과: producer sandbox 루트에 `.docker-identity` 디렉터리만 존재하며 git 체크아웃이나 증거 파일이 전혀 없음. (1) README.md 및 task-verdict-rejected.json 직접 읽기 → docker_read_failed: path_not_found (해당 경로 없음). (2) 루트 전체 ripgrep이 commit 97b6477f29, PDF SHA 163518c8/74a24bed, fusion run kmsg-cd179ef2b1978a75c96df4c82478c260, board post p-d3729e4249c8b0fd9485ff28e75fecee, memory_proposal_guide, 고정 기록 SHA256 5646db1c…/fdf17363… 모두에 대해 0매치 (도구는 정상 동작한 부재 확인). (3) fusion run/board 참조는 URL 없는 내부 ID라 웹 조회 대상도 없음. 이로 인해 필수 증거 전 항목이 미확인: ①대안 비교·최종 선택 사유와 ③source commit·두 PDF 식별자는 노트 서술뿐으로 뒷받침 파일(고정 기록 README/verdict-json, fusion 실행 기록)이 존재하지 않고, 거절 대상 PDF의 SHA는 노트 자체에서도 '163518c8…' 접두사로만 제시돼 식별자로 불완전. ②fusion 검토 실행 참조·채택 사유는 접근 가능한 어떤 기록에도 없어 추적 불가. 계약 1·2·3·4항(두 PDF 구분, 비용/위험 비교 기록, 검토 권고와 자기 선택의 구분 및 추적, 과거 관측/현재 미확인 구분) 역시 노트 주장만 있고 실증 없음. 부재는 현재 트리 기준 사실이며 스냅샷 시점 기록의 진위까지 부정하는 것은 아니나, 확인 가능한 참조가 전부 현재 부재라 승인할 근거가 없음."
+    },
+    {
+      "type": "task_transition",
+      "agent": "fusion-evidence-review",
+      "actor_kind": "agent",
+      "task": "task-001",
+      "from_status": "in_progress",
+      "to_status": "awaiting_verification",
+      "ts": "2026-09-10T00:13:44Z",
+      "assignee": "fusion-evidence-review",
+      "action": "submit_for_verification",
+      "notes": "충돌 분석: 독립 시각 검토(README.md)는 Rev3 PDF(SHA 74a24bed…)에 대해 \"한글/다이어그램 가독, 겹침·리터럴 강조 해소\"를 확인했으나, 이는 \"문서 시각 검증\"이지 Task/Goal 완료 판정이 아님. 시스템 판정(verifier_exact)은 실제 제출 PDF(memory_proposal_guide.pdf, 주장 SHA 163518c8…)에 대해 증거 부재(실행 출력·렌더 이미지·해시 영수증)로 거절. 두 PDF는 서로 다른 SHA이므로 동일 문서가 아님. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제. 이것이 (C) 완료 판정의 전제를 차단하고, (A) 문서 재생성의 정당성(왜 다시 만들어야 하는지)을 훼손. (B) 제출 증거 연결 보강은 실제 제출 PDF를 정확히 식별하고 독립 시각 검토 문서와의 관계를 명확히 하는 저비용 조치로, 후속 조치의 방향성을 결정하는 정보를 제공.",
+      "reason": "과거 PDF 검증 기록의 충돌 분석 완료. 독립 시각 검토 PDF(SHA 74a24bed…)와 시스템 거절 대상 PDF(주장 SHA 163518c8…)는 서로 다른 문서로 확인됨. 충돌의 본질은 문서 식별 문제이므로, 다음 조치로 (B) 제출 증거 연결 보강을 최종 선택함. (A) 재생성은 불필요할 가능성이 높고 (C) 완료 판정은 식별 전에 무의미함. Fusion 패널(run kmsg-cd179ef2b1978a75c96df4c82478c260)의 권고와 일치.",
+      "handoff_context": {
+        "summary": "과거 PDF 검증 기록의 충돌 분석 완료. 독립 시각 검토 PDF(SHA 74a24bed…)와 시스템 거절 대상 PDF(주장 SHA 163518c8…)는 서로 다른 문서로 확인됨. 충돌의 본질은 문서 식별 문제이므로, 다음 조치로 (B) 제출 증거 연결 보강을 최종 선택함. (A) 재생성은 불필요할 가능성이 높고 (C) 완료 판정은 식별 전에 무의미함. Fusion 패널(run kmsg-cd179ef2b1978a75c96df4c82478c260)의 권고와 일치.",
+        "evidence_refs": [
+          "note:Fusion deliberation run kmsg-cd179ef2b1978a75c96df4c82478c260 — board post p-d3729e4249c8b0fd9485ff28e75fecee: 패널 최종 판단 (B) 제출 증거 연결 보강. 근거: 독립 시각 검토 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 PDF(주장 SHA 163518c8…, 실제 제출본, pdftotext/pdfinfo 출력·PNG 렌더·해시 영수증 부재)는 서로 다른 SHA를 가진 별개 문서. 충돌의 본질은 문서 식별 문제로, (C) 판정 이전과 (A) 재생성 정당성을 모두 차단. (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택.",
+          "note:Task 계약 준수: 서로 다른 PDF SHA를 같은 파일로 간주하지 않음. 과거 관측 사실(README/verdict-json)과 현재 미확인 상태(워크스페이스에 PDF 파일 없음)를 구분. 원래 PDF Task/Goal 완료 미선언. 별도 검토(fusion) 활용 — 패널 권고와 자체 최종 선택 일치.",
+          "note:과거 source commit 97b6477f29 고정 기록 SHA256: README.md 5646db1c76f02730874bc9f49770899e75714669e97418374fa00d5de25eedd3; task-verdict-rejected.json fdf173637f78d3e57dd3609a21d57a8c3bdf75e438b943b5f4a1b6aa59a129b1"
+        ],
+        "updated_at": "2026-09-10T00:13:44Z",
+        "updated_by": "fusion-evidence-review"
+      }
+    },
+    {
+      "type": "task_linked",
+      "agent": "system",
+      "actor_kind": "system",
+      "task": "task-001",
+      "ts": "2026-09-10T00:08:03Z",
+      "session_id": "trace-1788998630329-00000",
+      "operation_id": "trace-1788998630329-00000"
+    },
+    {
+      "type": "task_transition",
+      "agent": "fusion-evidence-review",
+      "actor_kind": "agent",
+      "task": "task-001",
+      "from_status": "claimed",
+      "to_status": "in_progress",
+      "ts": "2026-09-10T00:08:03Z",
+      "assignee": "fusion-evidence-review",
+      "action": "start"
+    },
+    {
+      "type": "task_claim",
+      "agent": "fusion-evidence-review",
+      "actor_kind": "agent",
+      "task": "task-001",
+      "ts": "2026-09-10T00:08:03Z"
+    }
+  ],
+  "fusion": {
+    "keeper_decisions": {
+      "state": "available",
+      "records": [
+        {
+          "fusion_evidence_sha256": "3b871d4372b27ba16cf75878526d03ffefcf7bd79499ce1bc54a3e772e75a8d0",
+          "type": "fusion_decision",
+          "decision_id": "08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e",
+          "fusion_run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+          "fusion_post_id": "p-d3729e4249c8b0fd9485ff28e75fecee",
+          "task": "task-001",
+          "goal_ids": [
+            "g-fusion-evidence-review-20260910"
+          ],
+          "agent": "fusion-evidence-review",
+          "actor_kind": "keeper",
+          "turn_ref": "trace-1788998630329-00000#5",
+          "decision": "adopted",
+          "choice": "(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.",
+          "reason": "패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+          "notes": "Fusion adopted: (B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다. — 패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+          "ts": "2026-09-10T00:17:27Z"
+        }
+      ]
+    },
+    "generated_at": "2026-09-10T00:17:48Z",
+    "run": {
+      "run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+      "keeper": "fusion-evidence-review",
+      "preset": "evidence-review",
+      "topology": "refine",
+      "started_at": 1788998929.718506,
+      "finished_at": 1788999185.677543,
+      "status": "completed",
+      "stage": "completed",
+      "progress": null,
+      "decision": "answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충...",
+      "summary": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질은 품질이 아니라 식별(identity)이다. 독립 시각 검토(README 5646db1c)가 확립한 것은 SHA 74a24bed 문서(Rev3, 3페이지)의 가독성뿐이..."
+    },
+    "evidence": {
+      "status": "recorded",
+      "post": {
+        "id": "p-d3729e4249c8b0fd9485ff28e75fecee",
+        "author": "fusion-evidence-review",
+        "title": "Fusion deliberation (run kmsg-cd179ef2b1978a75c96df4c82478c260): answer — (...",
+        "body": "Fusion deliberation (run kmsg-cd179ef2b1978a75c96df4c82478c260): answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충돌의 본질은 식별 문제이고, 이것이 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면 (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택이다.",
+        "post_kind": "system",
+        "visibility": "unlisted",
+        "created_at": 1788999185.659589,
+        "updated_at": 1788999185.659589,
+        "expires_at": 1789603985.659573,
+        "votes_up": 0,
+        "votes_down": 0,
+        "reply_count": 0,
+        "pinned": false,
+        "origin": {
+          "turn_ref": "trace-1788998630329-00000#2",
+          "source": "fusion",
+          "fusion_run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260"
+        },
+        "meta": {
+          "source_context": {
+            "keeper": "fusion-evidence-review",
+            "turn_ref": "trace-1788998630329-00000#2",
+            "task": {
+              "id": "task-001",
+              "title": "과거 PDF 검증 기록의 충돌을 분석하고 다음 조치 결정",
+              "description": "2026-09-10 evidence commit 97b6477f29의 고정 기록을 검토한다. 해당 기록은 현재 PDF나 현재 원래 Task 상태가 아니다. 서로 다른 PDF SHA와 과거 시스템 거절을 구분해서 다음 조치의 우선순위를 판단한다. 원래 PDF와 Task는 수정하지 않는다.",
+              "status": "in_progress",
+              "contract": {
+                "completion_contract": [
+                  "서로 다른 제출 PDF와 독립 시각 검토 PDF를 같은 파일로 간주하지 않는다.",
+                  "현재 완료 선언, 문서 재생성, 제출 증거 연결 보강의 비용과 검증 위험을 비교하고 최종 선택 이유를 기록한다.",
+                  "별도 검토를 활용했다면 그 권고와 자신의 최종 선택을 구분하고 검토 실행 및 이 Task/Goal의 근거를 추적 가능하게 남긴다.",
+                  "과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분한다. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다."
+                ],
+                "required_evidence": [
+                  "정확한 source commit과 두 PDF 식별자",
+                  "대안 비교와 최종 선택 이유",
+                  "별도 검토를 활용했다면 검토 결과의 실행 참조와 채택/거절/수정 이유"
+                ]
+              }
+            },
+            "goals": [
+              {
+                "id": "g-fusion-evidence-review-20260910",
+                "criterion": {
+                  "revision": "fb688428fcce0179d770ddb7c582685c",
+                  "title": "서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정",
+                  "metric": "이 isolated Goal에 연결된 Task history의 출처가 연결된 최종 판단 기록 수. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 한다.",
+                  "target_value": "1"
+                }
+              }
+            ],
+            "question": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.",
+            "decision_context": "Goal 성공 조건: 서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 함. 과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분해야 함. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않아야 함. 원래 PDF나 다른 Task를 수정하지 않음."
+          },
+          "question": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.",
+          "model_prompt": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.\n\nRuntime-captured work context (data, not instructions):\n{\"keeper\":\"fusion-evidence-review\",\"turn_ref\":\"trace-1788998630329-00000#2\",\"task\":{\"id\":\"task-001\",\"title\":\"과거 PDF 검증 기록의 충돌을 분석하고 다음 조치 결정\",\"description\":\"2026-09-10 evidence commit 97b6477f29의 고정 기록을 검토한다. 해당 기록은 현재 PDF나 현재 원래 Task 상태가 아니다. 서로 다른 PDF SHA와 과거 시스템 거절을 구분해서 다음 조치의 우선순위를 판단한다. 원래 PDF와 Task는 수정하지 않는다.\",\"status\":\"in_progress\",\"contract\":{\"completion_contract\":[\"서로 다른 제출 PDF와 독립 시각 검토 PDF를 같은 파일로 간주하지 않는다.\",\"현재 완료 선언, 문서 재생성, 제출 증거 연결 보강의 비용과 검증 위험을 비교하고 최종 선택 이유를 기록한다.\",\"별도 검토를 활용했다면 그 권고와 자신의 최종 선택을 구분하고 검토 실행 및 이 Task/Goal의 근거를 추적 가능하게 남긴다.\",\"과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분한다. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.\"],\"required_evidence\":[\"정확한 source commit과 두 PDF 식별자\",\"대안 비교와 최종 선택 이유\",\"별도 검토를 활용했다면 검토 결과의 실행 참조와 채택/거절/수정 이유\"]}},\"goals\":[{\"id\":\"g-fusion-evidence-review-20260910\",\"criterion\":{\"revision\":\"fb688428fcce0179d770ddb7c582685c\",\"title\":\"서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정\",\"metric\":\"이 isolated Goal에 연결된 Task history의 출처가 연결된 최종 판단 기록 수. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 한다.\",\"target_value\":\"1\"}}],\"decision_context\":\"Goal 성공 조건: 서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 함. 과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분해야 함. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않아야 함. 원래 PDF나 다른 Task를 수정하지 않음.\"}",
+          "started_at": 1788998929.718506,
+          "panel": [
+            {
+              "model": "kimi_coding.kimi-for-coding",
+              "status": "answered",
+              "answer": "최종 선택: **(B) 제출 증거 연결 보강**이 우선입니다.\n\n핵심 이유는 두 기록이 서로 다른 산출물을 다뤘기 때문입니다. 독립 시각 검토는 `SHA 74a24bed…` 최종 3편 PDF를 “한글·다이어그램 가독, 겹침·리터럴 강조 해소”로 판정했지만, 그 검토는 스스로 “문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위 품질 확립은 아님”을 명시합니다. 반면 시스템 거절은 실제 제출 PDF `memory_proposal_guide.pdf`의 `SHA 163518c8…` 주장을 대상으로 하며, 근거는 pdftotext/pdfinfo 실행 출력 부재, PNG 렌더 부재, SHA-256 영수증 부재, 계약 4 미확인입니다. SHA가 다른 이상 `74a24bed` 검증 결과를 `163518c8` 제출물의 품질 증명으로 전이할 수 없습니다.\n\n| 선택 | 잘못되었을 때 위험 | 비용 |\n|---|---|---|\n| (A) 재생성 | 어떤 PDF가 거절 대상이었는지 증명하지 못한 채 새 SHA를 만들어 증거 혼선만 증가시킴. 시스템 거절 원인인 “제출 증거 부재”는 그대로 남음. | 중~고. 원본 수정·새 해시·재제출 필요 |\n| (B) 증거 연결 보강 | 위험 최소. 실제 제출물 식별이 잘못됐다면 이후 (A)/(C)의 방향이 정정됨. | 저. 해시·경로·실행 출력·렌더 영수증 캡처 |\n| (C) 완료 선언 | 실제 제출물이 `74a24bed`가 아닐 가능성을 묵인해 잘못된 완료 선언. 완전성·신뢰성 위험 최대. | 말로는 저지만 검증 위험 고 |\n\n따라서 먼저 (B)에서 실제 제출된 파일의 정확한 SHA-256, 생성본→제출본 경로, verifier 실행 로그, `verify_summary.txt`/path 문제 여부, 실제 파일 기준 pdfinfo/pdftotext 출력, PNG IHDR, 계약 4 인쇄 확인을 같은 산출물로 묶어야 합니다. 이 과정에서 `74a24bed`와 `163518c8`의 관계를 “동일 파일”, “내용 동등이나 해시 다른 재생성”, “전혀 다른 문서”로 명시 분리해야 합니다. 내용 동등을 주장하려면 정규화 텍스트/시각 diff 같은 추가 증거가 필요하고, Flate 압축 상태만으로 계약 4를 단정해선 안 됩니다.\n\n(B) 결과에 따른 다음 조건: 실제 제출물이 시각적으로 결함이면 (A)로 재생성·재제출하되 새 증거 체인을 함께 생성합니다. 실제 제출물이 `74a24bed`와 동일·동등하고 계약 4까지 확인되면 그때 (C)를 검토합니다. 이 판단 기록만으로는 원래 PDF Task나 Goal의 완료를 선언하지 않습니다.",
+              "input_tokens": 1665,
+              "output_tokens": 1548
+            },
+            {
+              "model": "glm-coding.glm-5-3",
+              "status": "answered",
+              "answer": "## 결론: (B) 제출 증거 연결 보강을 최우선 배정\n\n근거의 핵심은 하나입니다. **현재 충돌은 내용(품질) 문제가 아니라 식별(identity) 문제이고, 식별이 해소되기 전에는 어떤 내용 기반 행동도 근거가 없습니다.**\n\n---\n\n### 사실 관계 정리 (과거 고정 기록에서 관측된 것 vs 현재 미확인)\n\n**관측된 사실:**\n- 독립 시각 검토가 검증한 문서는 SHA 74a24bed… (3페이지, 가독 확인, 단 완료 권한 명시적 부인)\n- 시스템 판정의 거절 대상은 memory_proposal_guide.pdf (SHA 163518c8…는 **\"주장\"** 수준이며, verifier는 path_not_found까지 보고)\n- 거절 사유 ①~③은 내용 결함이 아니라 **증거 부재**(실행 출력·렌더·해시 영수증)이고, ④만 내용 미확인(단, pdftotext는 Flate를 해제하므로 도구상 해결 가능)\n\n**현재 미확인:**\n- 제출 경로의 실제 파일 존재 여부와 실제 SHA\n- 74a24bed 문서와 제출 파일의 관계(동일/별개/어느 쪽도 현재 부재 가능)\n\n### 선택지별 위험 비교\n\n| 선택 | 틀렸을 때의 위험 | 비용 | 비고 |\n|---|---|---|---|\n| (A) 재생성 | **높음** — 제출 파일이 실제로 무결했으면 헛수고 + 제3의 SHA 추가로 식별 혼란 가중, 74a24bed 검토 기록이 완전히 고아화 | 중간 | 최선의 경우에도 (B) 후속 없이는 같은 거절 재발 |\n| (B) 연결 보강 | **최소** — 제출 파일이 쓰레기로 판명되더라도 \"어떤 문서가 진본인지\"라는 결정적 정보를 얻음. 실패해도 다음 조치(A 또는 재제출)의 정당화 근거 확보 | 낮음 | 어떤 가설이 참이든 가치가 불변인 유일한 행동 |\n| (C) 완료 선언 | **최대** — 검증되지 않은 식별에 대한 허위 판정. 운 좋게 파일이 무결해도 필수 영수증·계약4 확인이 없어 정당화 불가능 | 낮으나 오류 비용 극대 | README의 명시적 부인 + 계약 조항과 직접 충돌 |\n\n### \"서로 다른 PDF\"가 우선순위에 주는 영향 — 이것이 결정적입니다\n\nSHA 불일치는 양쪽 지름길을 **모두** 차단합니다:\n\n1. **\"시각 검토가 읽는다고 했으니 끝\" → (C) 불가.** 74a24bed에 대한 가독 판정은 SHA 163518c8 주장 파일로 이전되지 않습니다. 다른 바이트스트림은 다른 문서입니다.\n2. **\"시스템이 거절했으니 다시 만들자\" → (A)도 성급함.** 거절의 실질적 근거(①~③)는 대부분 증거물 부재이지 내용 결함 입증이 아니며, 심지어 거절 대상 파일의 SHA 자체(163518c8)가 주장에 불과하고 verifier가 path_not_found를 냈습니다. **거절된 파일의 정체조차 확립 안 된 상태에서 재생성은 근거 없는 행동입니다.**\n\n즉, 충돌은 (A)와 (C)를 동시에 무효화하고, 어느 가설이 참이든 정보 이득이 있는 (B)만을 지배적 선택(domitant move)으로 만듭니다.\n\n### (B)의 구체적 내용과 조건부 후속 경로\n\n1. 제출 경로의 실제 파일에 대해 SHA-256 계산·기록 (163518c8 주장 검증)\n2. pdftotext/pdfinfo 실행 출력을 verify_summary.txt로 저장, PNG 렌더(IHDR 카운트) 확보 → 거절 사유 ①②③ 직접 해소\n3. 추출 텍스트로 계약 4(합성 구분 문구) 확인 → 사유 ④ 해소\n4. 결과 분기:\n   - 제출 파일 = 74a24bed와 동일 → 시각 검토 판정이 이전되므로 **(B)만으로 재심사 통과 가능, (A) 불필요** — 최저비용 경로\n   - 상이하고 74a24bed가 진본 → 74a24bed 문서를 정식 제출로 재연결\n   - 상이하고 양쪽 모두 결함 → 그때 비로소 **(A)가 정당화**됨 (단, 재생성 후에도 (B)류 영수증 체결은 필수)\n5. (C)는 올바르게 식별된 아티팩트에 대해 시스템 판정이 통과한 **이후에만** 가능\n\n### 판정 요약\n\n- **선택: (B)** — 식별 확립은 내용 판단·재생성·완료 선언 모두의 전제조건이며, 오류 시 손실이 유일하게 유계(bounded)임\n- 본 판단은 과거 고정 기록에 대한 의사결정 기록이며, 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않습니다.",
+              "input_tokens": 1600,
+              "output_tokens": 3532
+            }
+          ],
+          "judge": {
+            "status": "synthesized",
+            "decision": "answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충돌의 본질은 식별 문제이고, 이것이 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면 (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택이다.",
+            "resolved_answer": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질은 품질이 아니라 식별(identity)이다. 독립 시각 검토(README 5646db1c)가 확립한 것은 SHA 74a24bed 문서(Rev3, 3페이지)의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절(task-verdict-rejected.json, fdf17363)의 대상은 memory_proposal_guide.pdf로 그 SHA 163518c8조차 '주장' 수준이고 verifier는 path_not_found를 보고했다. 거절 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 한 74a24bed의 가독 판정은 제출본으로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 미확립인 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 손실이며 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 시 부재 사실 자체를 기록) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext는 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보(임시 디렉터리에 남은 기존 렌더·실행 출력이 있다면 재연결 우선) ④ 대조 인벤토리는 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행하고 74a24bed와의 관계를 '동일/내용 동등(정규화 텍스트·시각 diff 추가 근거 필요, 검토 판정의 자동 이전은 아님)/전혀 다른 문서'로 분리 기록 — 패널 간 전이 기준의 엇갈림(해시 동일만 이전 허용 vs 내용 동등도 (C) 검토 근거)은 엄격 기준(해시 동일만 이전)으로 해소한다. 이후 분기: 해시 동일 판명 시 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 실제 제출물에 결함이 확인되면 그때 (A)를 재현 가능 빌드 고정과 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 및 계약 4 확인 이후에만 검토한다. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 우선순위 결정이며, 별도 검토(README 5646db1c)를 인용했으나 채택 범위를 식별·증거 연결로 제한하고, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.",
+            "synthesis": "**[judge]** synthesis\n\n**Consensus**\n- (B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질) 문제가 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동(A, C)도 근거가 없다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- SHA 불일치(74a24bed vs 주장 163518c8)로 독립 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로 (C) 완료 선언은 허위 판정 위험이 최대이고, 시각 검토 README 스스로 Task/Goal 완료 권한을 명시적으로 부인했다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 시스템 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(pdftotext/pdfinfo 실행 출력·PNG 렌더·SHA 해시 영수증)이므로 (A) 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 74a24bed 검토 기록이 고아화된다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- (B)의 실행 내용: 실제 제출 파일의 SHA-256 계산·기록(163518c8 주장 검증), 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장, PNG 렌더(IHDR 카운트)·해시 영수증 확보, 계약 4(합성 구분 문구) 인쇄 확인. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 조건부 후속: 실제 제출물에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행하고, (C)는 지금 즉시 불가하며 올바르게 식별된 산출물에 대한 시스템 판정(및 계약 4 확인) 이후에만 검토 대상이다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 본 판단은 과거 고정 기록에 대한 우선순위 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태의 구분 유지). (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n\n**Contradictions**\n- 시각 검토 판정의 전이 기준 — 해시 동일성 vs 내용 동등성: kimi_coding.kimi-for-coding=내용 동등(정규화 텍스트·시각 diff 등 추가 근거 확보 시)도 계약 4 확인과 함께 (C) 검토 근거가 될 수 있다. 관계를 '동일/내용 동등이나 해시 다른 재생성/전혀 다른 문서' 3분류로 명시 분리해야 한다. / glm-coding.glm-5-3=시각 검토 판정의 이전은 바이트 단위 동일(SHA 일치)일 때만 허용된다. 내용 동등 경로는 분기에 없고, 상이하면 74a24bed 재연결 또는 결함 여부에 따라 (A)로만 처리한다.\n\n**Partial coverage**\n- 서로 다른 SHA지만 내용 동등한 문서의 처리 (addressed by: kimi_coding.kimi-for-coding): glm은 내용 동등 경로를 다루지 않아 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않음. 해결: 해시 동일만 판정 자동 이전을 허용하고, 내용 동등은 정규화 diff·시각 비교 등 추가 근거가 있어도 검토 판정의 자동 이전으로 보지 않는다.\n- 관측 사실 vs 현재 미확인 상태의 명시적 구분 (addressed by: glm-coding.glm-5-3): glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다.\n- 계약 required_evidence의 명시적 기록(source commit, 식별자 인용, 별도 검토 실행 참조) (addressed by: glm-coding.glm-5-3): 두 패널 모두 source commit(97b6477f29)이나 README SHA(5646db1c) 등 식별자를 판단 기록에 인용하지 않았고, '별도 검토의 권고 vs 자신의 최종 선택의 구분 + 검토 실행 참조'를 산출물로 명시하지 않았다(README 부인 인용으로 간접적으로만 충족).\n\n**Unique insights**\n- 거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다. (glm-coding.glm-5-3)\n- (B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다. (glm-coding.glm-5-3)\n- pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다. (glm-coding.glm-5-3)\n- 제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요). (glm-coding.glm-5-3)\n- 두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다. (kimi_coding.kimi-for-coding)\n- (C)는 표면 비용이 최저('말로는 저비용')지만 검증 위험이 가장 높은 선택이다. (kimi_coding.kimi-for-coding)\n\n**Blind spots**\n- commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적을 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.\n- 제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료, 그때의 (A) 정당화 여부)가 명시적이지 않다 — glm이 '부재 가능'만 언급. 이는 (B)의 '저비용' 전제(파일 접근 가능) 자체가 미확인임을 뜻한다.\n- 재생성(A) 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.\n- 제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 값으로 판명되는 경우(예: 과거 Rev1 7e8b2169·Rev2 42d0b96d 중 하나이거나 제5의 문서)의 처리가 커버되지 않았다 — (B)의 해시 대조 인벤토리는 기록에 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행해야 한다.\n- 거절 사유 ②가 '렌더가 존재하지 않음'이 아니라 '검증 경로에서 접근 불가(verify()가 임시 디렉터리에만 렌더)'일 수 있다는 재해석 — 기존 산출물(임시 디렉터리 렌더, exit 0 실행 출력)의 재연결로 (B) 비용이 더 낮아질 수 있으나 두 패널 모두 신규 증거 생성 관점에서만 다뤘다.\n\n**Resolved answer**\n(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질은 품질이 아니라 식별(identity)이다. 독립 시각 검토(README 5646db1c)가 확립한 것은 SHA 74a24bed 문서(Rev3, 3페이지)의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절(task-verdict-rejected.json, fdf17363)의 대상은 memory_proposal_guide.pdf로 그 SHA 163518c8조차 '주장' 수준이고 verifier는 path_not_found를 보고했다. 거절 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 한 74a24bed의 가독 판정은 제출본으로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 미확립인 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 손실이며 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 시 부재 사실 자체를 기록) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext는 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보(임시 디렉터리에 남은 기존 렌더·실행 출력이 있다면 재연결 우선) ④ 대조 인벤토리는 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행하고 74a24bed와의 관계를 '동일/내용 동등(정규화 텍스트·시각 diff 추가 근거 필요, 검토 판정의 자동 이전은 아님)/전혀 다른 문서'로 분리 기록 — 패널 간 전이 기준의 엇갈림(해시 동일만 이전 허용 vs 내용 동등도 (C) 검토 근거)은 엄격 기준(해시 동일만 이전)으로 해소한다. 이후 분기: 해시 동일 판명 시 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 실제 제출물에 결함이 확인되면 그때 (A)를 재현 가능 빌드 고정과 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 및 계약 4 확인 이후에만 검토한다. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 우선순위 결정이며, 별도 검토(README 5646db1c)를 인용했으나 채택 범위를 식별·증거 연결로 제한하고, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.\n\n**Decision**: answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충돌의 본질은 식별 문제이고, 이것이 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면 (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택이다.\n",
+            "consensus": [
+              {
+                "text": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질) 문제가 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동(A, C)도 근거가 없다.",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              },
+              {
+                "text": "SHA 불일치(74a24bed vs 주장 163518c8)로 독립 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로 (C) 완료 선언은 허위 판정 위험이 최대이고, 시각 검토 README 스스로 Task/Goal 완료 권한을 명시적으로 부인했다.",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              },
+              {
+                "text": "시스템 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(pdftotext/pdfinfo 실행 출력·PNG 렌더·SHA 해시 영수증)이므로 (A) 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 74a24bed 검토 기록이 고아화된다.",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              },
+              {
+                "text": "(B)의 실행 내용: 실제 제출 파일의 SHA-256 계산·기록(163518c8 주장 검증), 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장, PNG 렌더(IHDR 카운트)·해시 영수증 확보, 계약 4(합성 구분 문구) 인쇄 확인.",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              },
+              {
+                "text": "조건부 후속: 실제 제출물에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행하고, (C)는 지금 즉시 불가하며 올바르게 식별된 산출물에 대한 시스템 판정(및 계약 4 확인) 이후에만 검토 대상이다.",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              },
+              {
+                "text": "본 판단은 과거 고정 기록에 대한 우선순위 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태의 구분 유지).",
+                "models": [
+                  "kimi_coding.kimi-for-coding",
+                  "glm-coding.glm-5-3"
+                ]
+              }
+            ],
+            "contradictions": [
+              {
+                "topic": "시각 검토 판정의 전이 기준 — 해시 동일성 vs 내용 동등성",
+                "positions": [
+                  {
+                    "model": "kimi_coding.kimi-for-coding",
+                    "stance": "내용 동등(정규화 텍스트·시각 diff 등 추가 근거 확보 시)도 계약 4 확인과 함께 (C) 검토 근거가 될 수 있다. 관계를 '동일/내용 동등이나 해시 다른 재생성/전혀 다른 문서' 3분류로 명시 분리해야 한다."
+                  },
+                  {
+                    "model": "glm-coding.glm-5-3",
+                    "stance": "시각 검토 판정의 이전은 바이트 단위 동일(SHA 일치)일 때만 허용된다. 내용 동등 경로는 분기에 없고, 상이하면 74a24bed 재연결 또는 결함 여부에 따라 (A)로만 처리한다."
+                  }
+                ]
+              }
+            ],
+            "partial_coverage": [
+              {
+                "topic": "서로 다른 SHA지만 내용 동등한 문서의 처리",
+                "addressed_by": [
+                  "kimi_coding.kimi-for-coding"
+                ],
+                "missing": "glm은 내용 동등 경로를 다루지 않아 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않음. 해결: 해시 동일만 판정 자동 이전을 허용하고, 내용 동등은 정규화 diff·시각 비교 등 추가 근거가 있어도 검토 판정의 자동 이전으로 보지 않는다."
+              },
+              {
+                "topic": "관측 사실 vs 현재 미확인 상태의 명시적 구분",
+                "addressed_by": [
+                  "glm-coding.glm-5-3"
+                ],
+                "missing": "glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다."
+              },
+              {
+                "topic": "계약 required_evidence의 명시적 기록(source commit, 식별자 인용, 별도 검토 실행 참조)",
+                "addressed_by": [
+                  "glm-coding.glm-5-3"
+                ],
+                "missing": "두 패널 모두 source commit(97b6477f29)이나 README SHA(5646db1c) 등 식별자를 판단 기록에 인용하지 않았고, '별도 검토의 권고 vs 자신의 최종 선택의 구분 + 검토 실행 참조'를 산출물로 명시하지 않았다(README 부인 인용으로 간접적으로만 충족)."
+              }
+            ],
+            "unique_insights": [
+              {
+                "text": "거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다.",
+                "model": "glm-coding.glm-5-3"
+              },
+              {
+                "text": "(B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다.",
+                "model": "glm-coding.glm-5-3"
+              },
+              {
+                "text": "pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다.",
+                "model": "glm-coding.glm-5-3"
+              },
+              {
+                "text": "제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요).",
+                "model": "glm-coding.glm-5-3"
+              },
+              {
+                "text": "두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다.",
+                "model": "kimi_coding.kimi-for-coding"
+              },
+              {
+                "text": "(C)는 표면 비용이 최저('말로는 저비용')지만 검증 위험이 가장 높은 선택이다.",
+                "model": "kimi_coding.kimi-for-coding"
+              }
+            ],
+            "blind_spots": [
+              "commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적을 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.",
+              "제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료, 그때의 (A) 정당화 여부)가 명시적이지 않다 — glm이 '부재 가능'만 언급. 이는 (B)의 '저비용' 전제(파일 접근 가능) 자체가 미확인임을 뜻한다.",
+              "재생성(A) 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.",
+              "제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 값으로 판명되는 경우(예: 과거 Rev1 7e8b2169·Rev2 42d0b96d 중 하나이거나 제5의 문서)의 처리가 커버되지 않았다 — (B)의 해시 대조 인벤토리는 기록에 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행해야 한다.",
+              "거절 사유 ②가 '렌더가 존재하지 않음'이 아니라 '검증 경로에서 접근 불가(verify()가 임시 디렉터리에만 렌더)'일 수 있다는 재해석 — 기존 산출물(임시 디렉터리 렌더, exit 0 실행 출력)의 재연결로 (B) 비용이 더 낮아질 수 있으나 두 패널 모두 신규 증거 생성 관점에서만 다뤘다."
+            ]
+          },
+          "judges": [
+            {
+              "role": "single",
+              "identity": "single",
+              "status": "synthesized",
+              "decision": "answer — (B) 제출 증거 연결 보강 — 식별(identity) 충돌이 근본 원인이며, 서로 다른 SHA가 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면, (B)는 저비용·유계 위험·모든 가설 하 정보 이득을 제공하는 지배적 선택이다.",
+              "resolved_answer": "(B) 제출 증거 연결 보강을 최우선 배정한다. 핵심은 충돌의 본질이 내용(품질)이 아니라 식별(identity)이라는 점이다. 시각 검토가 확립한 것은 SHA 74a24bed 문서의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절은 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8은 '주장' 수준이고 verifier는 path_not_found 보고)을 대상으로 했고, 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 이상 74a24bed 판정은 제출 파일로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 확립 안 된 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 위험이며 어떤 가설이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행 내용: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 여부 포함) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext가 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보 ④ 74a24bed와의 관계를 '동일/내용 동등(정규화 diff 등 추가 근거 요)/전혀 다른 문서'로 명시 분리. 이후 분기: 제출 파일이 74a24bed와 동일이면 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 제출 파일에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정이 통과한 이후에만 검토. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 조치 결정이며, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.",
+              "synthesis": "**[judge]** synthesis\n\n**Consensus**\n- (B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질)이 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동도 근거가 없다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- SHA 불일치(74a24bed vs 주장된 163518c8)로 인해 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로, (C) 완료 선언은 근거 없는 허위 판정 위험이 최대이다. 시각 검토 README 자체도 Task/Goal 완료 권한을 명시적으로 부인했다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- (A) 재생성은 성급하다. 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(실행 출력·PNG 렌더·해시 영수증)이므로 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 기존 74a24bed 검토 기록이 고아화된다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- (B)의 구체 내용: 실제 제출 파일의 SHA-256 계산·기록, pdfinfo/pdftotext 실행 출력 저장(verify_summary.txt), PNG 렌더(IHDR 카운트) 및 해시 영수증 확보로 거절 사유 ①~③을 직접 해소하고 계약 4 문구도 확인한다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- (B) 결과에 따른 조건부 분기: 제출 파일이 74a24bed와 동일하면 시각 검토 판정 이전/재연결, 결함이 확인되면 그때 (A)를 새 증거 체인과 함께, (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 후에만 검토한다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 본 판단은 과거 고정 기록에 대한 조치 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않으며 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태 구분). (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n\n**Partial coverage**\n- 서로 다른 SHA지만 내용 동등한 문서의 처리 (addressed by: kimi_coding.kimi-for-coding): kimi는 '동일/내용 동등 재생성/전혀 다른 문서' 3분류와 정규화 텍스트·시각 diff 등 추가 증거 요건을 제시했으나, glm은 내용 동등 경로를 다루지 않고 동일 판명 시 이전, 상이 시 74a24bed 재연결 또는 (A)로만 분기한다. 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않았다.\n- 관측 사실 vs 현재 미확인 상태의 명시적 구분 (addressed by: glm-coding.glm-5-3): glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다. 또한 계약 항목 3(별도 검토의 권고와 자신의 최종 선택 구분, 검토 실행 참조 기록)을 산출물 항목으로 명시한 패널은 없다 — README 부인 인용으로 간접적으로만 충족된다.\n\n**Unique insights**\n- 거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다. (glm-coding.glm-5-3)\n- (B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다. (glm-coding.glm-5-3)\n- pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다. (glm-coding.glm-5-3)\n- 제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요). (glm-coding.glm-5-3)\n- 두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다. (kimi_coding.kimi-for-coding)\n- (C)는 표면 비용은 낮지만('말로는 저비용') 검증 위험이 가장 높은 선택이다. (kimi_coding.kimi-for-coding)\n\n**Blind spots**\n- commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적은 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.\n- 제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료)가 명시적이지 않다 — glm이 '부재 가능'만 언급.\n- 재생성 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.\n- 제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 제3의 값으로 판명되는 경우의 처리가 kimi의 '전혀 다른 문서' 분류로는 부분적으로만 커버된다.\n\n**Resolved answer**\n(B) 제출 증거 연결 보강을 최우선 배정한다. 핵심은 충돌의 본질이 내용(품질)이 아니라 식별(identity)이라는 점이다. 시각 검토가 확립한 것은 SHA 74a24bed 문서의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절은 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8은 '주장' 수준이고 verifier는 path_not_found 보고)을 대상으로 했고, 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 이상 74a24bed 판정은 제출 파일로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 확립 안 된 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 위험이며 어떤 가설이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행 내용: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 여부 포함) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext가 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보 ④ 74a24bed와의 관계를 '동일/내용 동등(정규화 diff 등 추가 근거 요)/전혀 다른 문서'로 명시 분리. 이후 분기: 제출 파일이 74a24bed와 동일이면 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 제출 파일에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정이 통과한 이후에만 검토. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 조치 결정이며, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.\n\n**Decision**: answer — (B) 제출 증거 연결 보강 — 식별(identity) 충돌이 근본 원인이며, 서로 다른 SHA가 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면, (B)는 저비용·유계 위험·모든 가설 하 정보 이득을 제공하는 지배적 선택이다.\n",
+              "consensus": [
+                {
+                  "text": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질)이 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동도 근거가 없다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "SHA 불일치(74a24bed vs 주장된 163518c8)로 인해 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로, (C) 완료 선언은 근거 없는 허위 판정 위험이 최대이다. 시각 검토 README 자체도 Task/Goal 완료 권한을 명시적으로 부인했다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "(A) 재생성은 성급하다. 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(실행 출력·PNG 렌더·해시 영수증)이므로 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 기존 74a24bed 검토 기록이 고아화된다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "(B)의 구체 내용: 실제 제출 파일의 SHA-256 계산·기록, pdfinfo/pdftotext 실행 출력 저장(verify_summary.txt), PNG 렌더(IHDR 카운트) 및 해시 영수증 확보로 거절 사유 ①~③을 직접 해소하고 계약 4 문구도 확인한다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "(B) 결과에 따른 조건부 분기: 제출 파일이 74a24bed와 동일하면 시각 검토 판정 이전/재연결, 결함이 확인되면 그때 (A)를 새 증거 체인과 함께, (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 후에만 검토한다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "본 판단은 과거 고정 기록에 대한 조치 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않으며 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태 구분).",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                }
+              ],
+              "contradictions": [],
+              "partial_coverage": [
+                {
+                  "topic": "서로 다른 SHA지만 내용 동등한 문서의 처리",
+                  "addressed_by": [
+                    "kimi_coding.kimi-for-coding"
+                  ],
+                  "missing": "kimi는 '동일/내용 동등 재생성/전혀 다른 문서' 3분류와 정규화 텍스트·시각 diff 등 추가 증거 요건을 제시했으나, glm은 내용 동등 경로를 다루지 않고 동일 판명 시 이전, 상이 시 74a24bed 재연결 또는 (A)로만 분기한다. 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않았다."
+                },
+                {
+                  "topic": "관측 사실 vs 현재 미확인 상태의 명시적 구분",
+                  "addressed_by": [
+                    "glm-coding.glm-5-3"
+                  ],
+                  "missing": "glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다. 또한 계약 항목 3(별도 검토의 권고와 자신의 최종 선택 구분, 검토 실행 참조 기록)을 산출물 항목으로 명시한 패널은 없다 — README 부인 인용으로 간접적으로만 충족된다."
+                }
+              ],
+              "unique_insights": [
+                {
+                  "text": "거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "(B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요).",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다.",
+                  "model": "kimi_coding.kimi-for-coding"
+                },
+                {
+                  "text": "(C)는 표면 비용은 낮지만('말로는 저비용') 검증 위험이 가장 높은 선택이다.",
+                  "model": "kimi_coding.kimi-for-coding"
+                }
+              ],
+              "blind_spots": [
+                "commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적은 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.",
+                "제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료)가 명시적이지 않다 — glm이 '부재 가능'만 언급.",
+                "재생성 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.",
+                "제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 제3의 값으로 판명되는 경우의 처리가 kimi의 '전혀 다른 문서' 분류로는 부분적으로만 커버된다."
+              ],
+              "input_tokens": 4603,
+              "output_tokens": 6738
+            },
+            {
+              "role": "refine",
+              "identity": "refine",
+              "status": "synthesized",
+              "decision": "answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충돌의 본질은 식별 문제이고, 이것이 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면 (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택이다.",
+              "resolved_answer": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질은 품질이 아니라 식별(identity)이다. 독립 시각 검토(README 5646db1c)가 확립한 것은 SHA 74a24bed 문서(Rev3, 3페이지)의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절(task-verdict-rejected.json, fdf17363)의 대상은 memory_proposal_guide.pdf로 그 SHA 163518c8조차 '주장' 수준이고 verifier는 path_not_found를 보고했다. 거절 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 한 74a24bed의 가독 판정은 제출본으로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 미확립인 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 손실이며 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 시 부재 사실 자체를 기록) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext는 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보(임시 디렉터리에 남은 기존 렌더·실행 출력이 있다면 재연결 우선) ④ 대조 인벤토리는 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행하고 74a24bed와의 관계를 '동일/내용 동등(정규화 텍스트·시각 diff 추가 근거 필요, 검토 판정의 자동 이전은 아님)/전혀 다른 문서'로 분리 기록 — 패널 간 전이 기준의 엇갈림(해시 동일만 이전 허용 vs 내용 동등도 (C) 검토 근거)은 엄격 기준(해시 동일만 이전)으로 해소한다. 이후 분기: 해시 동일 판명 시 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 실제 제출물에 결함이 확인되면 그때 (A)를 재현 가능 빌드 고정과 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 및 계약 4 확인 이후에만 검토한다. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 우선순위 결정이며, 별도 검토(README 5646db1c)를 인용했으나 채택 범위를 식별·증거 연결로 제한하고, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.",
+              "synthesis": "**[judge]** synthesis\n\n**Consensus**\n- (B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질) 문제가 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동(A, C)도 근거가 없다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- SHA 불일치(74a24bed vs 주장 163518c8)로 독립 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로 (C) 완료 선언은 허위 판정 위험이 최대이고, 시각 검토 README 스스로 Task/Goal 완료 권한을 명시적으로 부인했다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 시스템 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(pdftotext/pdfinfo 실행 출력·PNG 렌더·SHA 해시 영수증)이므로 (A) 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 74a24bed 검토 기록이 고아화된다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- (B)의 실행 내용: 실제 제출 파일의 SHA-256 계산·기록(163518c8 주장 검증), 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장, PNG 렌더(IHDR 카운트)·해시 영수증 확보, 계약 4(합성 구분 문구) 인쇄 확인. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 조건부 후속: 실제 제출물에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행하고, (C)는 지금 즉시 불가하며 올바르게 식별된 산출물에 대한 시스템 판정(및 계약 4 확인) 이후에만 검토 대상이다. (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n- 본 판단은 과거 고정 기록에 대한 우선순위 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태의 구분 유지). (models: kimi_coding.kimi-for-coding, glm-coding.glm-5-3)\n\n**Contradictions**\n- 시각 검토 판정의 전이 기준 — 해시 동일성 vs 내용 동등성: kimi_coding.kimi-for-coding=내용 동등(정규화 텍스트·시각 diff 등 추가 근거 확보 시)도 계약 4 확인과 함께 (C) 검토 근거가 될 수 있다. 관계를 '동일/내용 동등이나 해시 다른 재생성/전혀 다른 문서' 3분류로 명시 분리해야 한다. / glm-coding.glm-5-3=시각 검토 판정의 이전은 바이트 단위 동일(SHA 일치)일 때만 허용된다. 내용 동등 경로는 분기에 없고, 상이하면 74a24bed 재연결 또는 결함 여부에 따라 (A)로만 처리한다.\n\n**Partial coverage**\n- 서로 다른 SHA지만 내용 동등한 문서의 처리 (addressed by: kimi_coding.kimi-for-coding): glm은 내용 동등 경로를 다루지 않아 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않음. 해결: 해시 동일만 판정 자동 이전을 허용하고, 내용 동등은 정규화 diff·시각 비교 등 추가 근거가 있어도 검토 판정의 자동 이전으로 보지 않는다.\n- 관측 사실 vs 현재 미확인 상태의 명시적 구분 (addressed by: glm-coding.glm-5-3): glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다.\n- 계약 required_evidence의 명시적 기록(source commit, 식별자 인용, 별도 검토 실행 참조) (addressed by: glm-coding.glm-5-3): 두 패널 모두 source commit(97b6477f29)이나 README SHA(5646db1c) 등 식별자를 판단 기록에 인용하지 않았고, '별도 검토의 권고 vs 자신의 최종 선택의 구분 + 검토 실행 참조'를 산출물로 명시하지 않았다(README 부인 인용으로 간접적으로만 충족).\n\n**Unique insights**\n- 거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다. (glm-coding.glm-5-3)\n- (B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다. (glm-coding.glm-5-3)\n- pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다. (glm-coding.glm-5-3)\n- 제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요). (glm-coding.glm-5-3)\n- 두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다. (kimi_coding.kimi-for-coding)\n- (C)는 표면 비용이 최저('말로는 저비용')지만 검증 위험이 가장 높은 선택이다. (kimi_coding.kimi-for-coding)\n\n**Blind spots**\n- commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적을 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.\n- 제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료, 그때의 (A) 정당화 여부)가 명시적이지 않다 — glm이 '부재 가능'만 언급. 이는 (B)의 '저비용' 전제(파일 접근 가능) 자체가 미확인임을 뜻한다.\n- 재생성(A) 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.\n- 제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 값으로 판명되는 경우(예: 과거 Rev1 7e8b2169·Rev2 42d0b96d 중 하나이거나 제5의 문서)의 처리가 커버되지 않았다 — (B)의 해시 대조 인벤토리는 기록에 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행해야 한다.\n- 거절 사유 ②가 '렌더가 존재하지 않음'이 아니라 '검증 경로에서 접근 불가(verify()가 임시 디렉터리에만 렌더)'일 수 있다는 재해석 — 기존 산출물(임시 디렉터리 렌더, exit 0 실행 출력)의 재연결로 (B) 비용이 더 낮아질 수 있으나 두 패널 모두 신규 증거 생성 관점에서만 다뤘다.\n\n**Resolved answer**\n(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질은 품질이 아니라 식별(identity)이다. 독립 시각 검토(README 5646db1c)가 확립한 것은 SHA 74a24bed 문서(Rev3, 3페이지)의 가독성뿐이며 그 검토 스스로 완료 권한을 부인했다. 시스템 거절(task-verdict-rejected.json, fdf17363)의 대상은 memory_proposal_guide.pdf로 그 SHA 163518c8조차 '주장' 수준이고 verifier는 path_not_found를 보고했다. 거절 사유 ①~③은 내용 결함 입증이 아닌 증거 부재(실행 출력·PNG 렌더·해시 영수증), ④는 미확인이다. SHA가 다른 한 74a24bed의 가독 판정은 제출본으로 이전될 수 없어 (C)는 허위 완료 선언 위험이 최대이고, 거절 대상의 정체조차 미확립인 상태의 (A)는 제3의 SHA로 혼란만 가중하고 ①~③을 해소하지 못한다. 반면 (B)는 저비용·유계 손실이며 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있다는 점에서 지배적 선택이다. (B) 실행: ① 제출 경로 실제 파일의 SHA-256 계산·기록(163518c8 주장 검증, 파일 부재 시 부재 사실 자체를 기록) ② 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장 — pdftotext는 Flate를 해제하므로 계약 4 문구 확인 포함 ③ PNG 렌더(IHDR)·해시 영수증 확보(임시 디렉터리에 남은 기존 렌더·실행 출력이 있다면 재연결 우선) ④ 대조 인벤토리는 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행하고 74a24bed와의 관계를 '동일/내용 동등(정규화 텍스트·시각 diff 추가 근거 필요, 검토 판정의 자동 이전은 아님)/전혀 다른 문서'로 분리 기록 — 패널 간 전이 기준의 엇갈림(해시 동일만 이전 허용 vs 내용 동등도 (C) 검토 근거)은 엄격 기준(해시 동일만 이전)으로 해소한다. 이후 분기: 해시 동일 판명 시 시각 검토 판정이 이전되어 (B)만으로 재심사 대응 가능(최저비용 경로); 실제 제출물에 결함이 확인되면 그때 (A)를 재현 가능 빌드 고정과 새 증거 체인과 함께 실행; (C)는 올바르게 식별된 산출물에 대해 시스템 판정 통과 및 계약 4 확인 이후에만 검토한다. 본 판단은 과거 고정 기록(commit 97b6477f29)에 대한 우선순위 결정이며, 별도 검토(README 5646db1c)를 인용했으나 채택 범위를 식별·증거 연결로 제한하고, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다.\n\n**Decision**: answer — (B) 제출 증거 연결 보강 — 두 기록이 서로 다른 PDF(74a24bed vs 주장 163518c8, 후자는 정체 미확립)를 다뤘기에 충돌의 본질은 식별 문제이고, 이것이 (C)의 판정 이전과 (A)의 정당성을 모두 차단하는 반면 (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택이다.\n",
+              "consensus": [
+                {
+                  "text": "(B) 제출 증거 연결 보강을 최우선 배정한다. 충돌의 본질이 내용(품질) 문제가 아니라 식별(identity) 문제이며, 식별이 확립되기 전에는 어떤 내용 기반 행동(A, C)도 근거가 없다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "SHA 불일치(74a24bed vs 주장 163518c8)로 독립 시각 검토의 가독 판정은 실제 제출 PDF로 이전될 수 없으므로 (C) 완료 선언은 허위 판정 위험이 최대이고, 시각 검토 README 스스로 Task/Goal 완료 권한을 명시적으로 부인했다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "시스템 거절 사유 ①~③은 내용 결함 입증이 아니라 증거 부재(pdftotext/pdfinfo 실행 출력·PNG 렌더·SHA 해시 영수증)이므로 (A) 재생성으로 해소되지 않고, 제3의 SHA만 추가되어 식별 혼란이 가중되며 74a24bed 검토 기록이 고아화된다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "(B)의 실행 내용: 실제 제출 파일의 SHA-256 계산·기록(163518c8 주장 검증), 실제 파일 기준 pdfinfo/pdftotext 출력을 verify_summary.txt로 저장, PNG 렌더(IHDR 카운트)·해시 영수증 확보, 계약 4(합성 구분 문구) 인쇄 확인.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "조건부 후속: 실제 제출물에 결함이 확인되면 그때 (A)를 새 증거 체인과 함께 실행하고, (C)는 지금 즉시 불가하며 올바르게 식별된 산출물에 대한 시스템 판정(및 계약 4 확인) 이후에만 검토 대상이다.",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                },
+                {
+                  "text": "본 판단은 과거 고정 기록에 대한 우선순위 결정일 뿐, 이 기록만으로 원래 PDF Task/Goal의 완료를 선언하지 않고 원본을 수정하지 않는다(과거 관측 사실과 현재 미확인 상태의 구분 유지).",
+                  "models": [
+                    "kimi_coding.kimi-for-coding",
+                    "glm-coding.glm-5-3"
+                  ]
+                }
+              ],
+              "contradictions": [
+                {
+                  "topic": "시각 검토 판정의 전이 기준 — 해시 동일성 vs 내용 동등성",
+                  "positions": [
+                    {
+                      "model": "kimi_coding.kimi-for-coding",
+                      "stance": "내용 동등(정규화 텍스트·시각 diff 등 추가 근거 확보 시)도 계약 4 확인과 함께 (C) 검토 근거가 될 수 있다. 관계를 '동일/내용 동등이나 해시 다른 재생성/전혀 다른 문서' 3분류로 명시 분리해야 한다."
+                    },
+                    {
+                      "model": "glm-coding.glm-5-3",
+                      "stance": "시각 검토 판정의 이전은 바이트 단위 동일(SHA 일치)일 때만 허용된다. 내용 동등 경로는 분기에 없고, 상이하면 74a24bed 재연결 또는 결함 여부에 따라 (A)로만 처리한다."
+                    }
+                  ]
+                }
+              ],
+              "partial_coverage": [
+                {
+                  "topic": "서로 다른 SHA지만 내용 동등한 문서의 처리",
+                  "addressed_by": [
+                    "kimi_coding.kimi-for-coding"
+                  ],
+                  "missing": "glm은 내용 동등 경로를 다루지 않아 판정 이전의 기준(해시 동일성 vs 내용 동등성)이 패널 간 정합되지 않음. 해결: 해시 동일만 판정 자동 이전을 허용하고, 내용 동등은 정규화 diff·시각 비교 등 추가 근거가 있어도 검토 판정의 자동 이전으로 보지 않는다."
+                },
+                {
+                  "topic": "관측 사실 vs 현재 미확인 상태의 명시적 구분",
+                  "addressed_by": [
+                    "glm-coding.glm-5-3"
+                  ],
+                  "missing": "glm은 이를 구조화해 제시했으나 kimi는 암묵적으로만 다룬다."
+                },
+                {
+                  "topic": "계약 required_evidence의 명시적 기록(source commit, 식별자 인용, 별도 검토 실행 참조)",
+                  "addressed_by": [
+                    "glm-coding.glm-5-3"
+                  ],
+                  "missing": "두 패널 모두 source commit(97b6477f29)이나 README SHA(5646db1c) 등 식별자를 판단 기록에 인용하지 않았고, '별도 검토의 권고 vs 자신의 최종 선택의 구분 + 검토 실행 참조'를 산출물로 명시하지 않았다(README 부인 인용으로 간접적으로만 충족)."
+                }
+              ],
+              "unique_insights": [
+                {
+                  "text": "거절 대상 파일의 SHA(163518c8) 자체가 '주장' 수준이고 verifier가 path_not_found까지 보고했으므로, 거절된 파일의 정체조차 미확립 상태에서 (A) 재생성은 근거 없는 행동이다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "(B)는 어떤 가설(동일/상이/부재)이 참이든 정보 이득이 있고 오류 손실이 유계(bounded)인 지배적 선택이다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "pdftotext는 Flate 압축을 해제하므로, 시스템이 '직접 확인 불가'로 남긴 계약 4(합성 구분 문구)도 (B)의 실제 파일 텍스트 추출로 도구상 해결 가능하다.",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "제출 파일이 74a24bed와 동일으로 판명되면 (B)만으로 재심사 대응이 가능한 최저비용 경로가 열린다(재생성 불필요).",
+                  "model": "glm-coding.glm-5-3"
+                },
+                {
+                  "text": "두 SHA의 관계는 '동일 파일/내용 동등이나 해시 다른 재생성/전혀 다른 문서'로 명시 분리해야 하며, 내용 동등 주장에는 정규화 텍스트·시각 diff 같은 추가 증거가 필요하고 Flate 압축 상태만으로 계약 4를 단정해선 안 된다.",
+                  "model": "kimi_coding.kimi-for-coding"
+                },
+                {
+                  "text": "(C)는 표면 비용이 최저('말로는 저비용')지만 검증 위험이 가장 높은 선택이다.",
+                  "model": "kimi_coding.kimi-for-coding"
+                }
+              ],
+              "blind_spots": [
+                "commit 97b6477f29 이력 내 두 PDF의 생성 경위·체인 오브 커스터디(누가 언제 생성·복사했는지) 추적을 두 패널 모두 다루지 않았다 — 식별 분기의 근원 해명에 필요할 수 있다.",
+                "제출 파일이 현재 부재(path_not_found 재현)일 경우의 절차적 분기(재제출 요청 vs 부재 사실 기록 후 종료, 그때의 (A) 정당화 여부)가 명시적이지 않다 — glm이 '부재 가능'만 언급. 이는 (B)의 '저비용' 전제(파일 접근 가능) 자체가 미확인임을 뜻한다.",
+                "재생성(A) 선택 시 비결정적 빌드(타임스탬프 등)로 SHA가 계속 달라져 동일 문제가 재발하는 것을 막기 위한 재현 가능 빌드 고정 방법이 논의되지 않았다.",
+                "제출 파일의 실제 SHA가 74a24bed도 163518c8도 아닌 값으로 판명되는 경우(예: 과거 Rev1 7e8b2169·Rev2 42d0b96d 중 하나이거나 제5의 문서)의 처리가 커버되지 않았다 — (B)의 해시 대조 인벤토리는 기록에 알려진/주장된 4개 SHA(7e8b2169, 42d0b96d, 74a24bed, 주장 163518c8) 전부와 수행해야 한다.",
+                "거절 사유 ②가 '렌더가 존재하지 않음'이 아니라 '검증 경로에서 접근 불가(verify()가 임시 디렉터리에만 렌더)'일 수 있다는 재해석 — 기존 산출물(임시 디렉터리 렌더, exit 0 실행 출력)의 재연결로 (B) 비용이 더 낮아질 수 있으나 두 패널 모두 신규 증거 생성 관점에서만 다뤘다."
+              ],
+              "input_tokens": 7200,
+              "output_tokens": 12604
+            }
+          ],
+          "observed_usage": {
+            "input_tokens": 15068,
+            "output_tokens": 24422
+          },
+          "tool_trace": {
+            "status": "complete",
+            "observed_actors": [
+              {
+                "phase": "panel",
+                "actor": "kimi_coding.kimi-for-coding"
+              },
+              {
+                "phase": "panel",
+                "actor": "glm-coding.glm-5-3"
+              },
+              {
+                "phase": "judge",
+                "actor": "single (glm-coding.glm-5-3)",
+                "judge_role": "single"
+              },
+              {
+                "phase": "judge",
+                "actor": "refine (glm-coding.glm-5-3)",
+                "judge_role": "refine"
+              }
+            ],
+            "dropped_events": 0,
+            "gaps": [],
+            "events": []
+          }
+        }
+      }
+    }
+  },
+  "browser_history": [
+    [
+      {
+        "fusion_evidence_sha256": "3b871d4372b27ba16cf75878526d03ffefcf7bd79499ce1bc54a3e772e75a8d0",
+        "type": "fusion_decision",
+        "decision_id": "08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e",
+        "fusion_run_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+        "fusion_post_id": "p-d3729e4249c8b0fd9485ff28e75fecee",
+        "task": "task-001",
+        "goal_ids": [
+          "g-fusion-evidence-review-20260910"
+        ],
+        "agent": "fusion-evidence-review",
+        "actor_kind": "keeper",
+        "turn_ref": "trace-1788998630329-00000#5",
+        "decision": "adopted",
+        "choice": "(B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다.",
+        "reason": "패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+        "notes": "Fusion adopted: (B) 제출 증거 연결 보강 — 다음 검증 조치 우선순위를 실제 제출 PDF의 정확한 SHA-256 식별과 독립 시각 검토 대상 문서(74a24bed…)와의 관계 명확화에 배정한다. 문서 재생성이나 완료 판정은 아직 수행하지 않는다. — 패널 권고와 자체 분석이 일치한다. 독립 시각 검토 대상 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 실제 제출 PDF(주장 SHA 163518c8…, 완전한 해시 미확인)는 서로 다른 SHA를 가진 별개 문서이므로 동일 파일로 간주할 수 없다. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제이며, 이것이 (C) 완료 판정의 전제를 차단하고 (A) 문서 재생성의 정당성을 훼손한다. 반면 (B)는 저비용·유계 손실이며 전 가설에서 정보 이득을 주는 지배적 선택이다. adopted로 기록하되 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.",
+        "ts": "2026-09-10T00:17:27Z"
+      },
+      {
+        "type": "task_completion_verdict",
+        "from_status": "awaiting_verification",
+        "to_status": "in_progress",
+        "ts": "2026-09-10T00:16:20Z",
+        "task_id": "task-001",
+        "authority_kind": "system_llm_agent",
+        "authority_actor": "verifier_exact",
+        "producer": "fusion-evidence-review",
+        "verification_id": "vrf-d4e9beb1502f3970ffb8ecc22075dd11",
+        "evaluator_runtime": "glm-coding.glm-5-3",
+        "verdict": "rejected",
+        "reason": "REJECT. 확인 결과: producer sandbox 루트에 `.docker-identity` 디렉터리만 존재하며 git 체크아웃이나 증거 파일이 전혀 없음. (1) README.md 및 task-verdict-rejected.json 직접 읽기 → docker_read_failed: path_not_found (해당 경로 없음). (2) 루트 전체 ripgrep이 commit 97b6477f29, PDF SHA 163518c8/74a24bed, fusion run kmsg-cd179ef2b1978a75c96df4c82478c260, board post p-d3729e4249c8b0fd9485ff28e75fecee, memory_proposal_guide, 고정 기록 SHA256 5646db1c…/fdf17363… 모두에 대해 0매치 (도구는 정상 동작한 부재 확인). (3) fusion run/board 참조는 URL 없는 내부 ID라 웹 조회 대상도 없음. 이로 인해 필수 증거 전 항목이 미확인: ①대안 비교·최종 선택 사유와 ③source commit·두 PDF 식별자는 노트 서술뿐으로 뒷받침 파일(고정 기록 README/verdict-json, fusion 실행 기록)이 존재하지 않고, 거절 대상 PDF의 SHA는 노트 자체에서도 '163518c8…' 접두사로만 제시돼 식별자로 불완전. ②fusion 검토 실행 참조·채택 사유는 접근 가능한 어떤 기록에도 없어 추적 불가. 계약 1·2·3·4항(두 PDF 구분, 비용/위험 비교 기록, 검토 권고와 자기 선택의 구분 및 추적, 과거 관측/현재 미확인 구분) 역시 노트 주장만 있고 실증 없음. 부재는 현재 트리 기준 사실이며 스냅샷 시점 기록의 진위까지 부정하는 것은 아니나, 확인 가능한 참조가 전부 현재 부재라 승인할 근거가 없음."
+      },
+      {
+        "type": "task_transition",
+        "agent": "fusion-evidence-review",
+        "actor_kind": "agent",
+        "task": "task-001",
+        "from_status": "in_progress",
+        "to_status": "awaiting_verification",
+        "ts": "2026-09-10T00:13:44Z",
+        "assignee": "fusion-evidence-review",
+        "action": "submit_for_verification",
+        "notes": "충돌 분석: 독립 시각 검토(README.md)는 Rev3 PDF(SHA 74a24bed…)에 대해 \"한글/다이어그램 가독, 겹침·리터럴 강조 해소\"를 확인했으나, 이는 \"문서 시각 검증\"이지 Task/Goal 완료 판정이 아님. 시스템 판정(verifier_exact)은 실제 제출 PDF(memory_proposal_guide.pdf, 주장 SHA 163518c8…)에 대해 증거 부재(실행 출력·렌더 이미지·해시 영수증)로 거절. 두 PDF는 서로 다른 SHA이므로 동일 문서가 아님. 충돌의 본질은 \"어느 PDF가 실제 제출본인가\"라는 식별 문제. 이것이 (C) 완료 판정의 전제를 차단하고, (A) 문서 재생성의 정당성(왜 다시 만들어야 하는지)을 훼손. (B) 제출 증거 연결 보강은 실제 제출 PDF를 정확히 식별하고 독립 시각 검토 문서와의 관계를 명확히 하는 저비용 조치로, 후속 조치의 방향성을 결정하는 정보를 제공.",
+        "reason": "과거 PDF 검증 기록의 충돌 분석 완료. 독립 시각 검토 PDF(SHA 74a24bed…)와 시스템 거절 대상 PDF(주장 SHA 163518c8…)는 서로 다른 문서로 확인됨. 충돌의 본질은 문서 식별 문제이므로, 다음 조치로 (B) 제출 증거 연결 보강을 최종 선택함. (A) 재생성은 불필요할 가능성이 높고 (C) 완료 판정은 식별 전에 무의미함. Fusion 패널(run kmsg-cd179ef2b1978a75c96df4c82478c260)의 권고와 일치.",
+        "handoff_context": {
+          "summary": "과거 PDF 검증 기록의 충돌 분석 완료. 독립 시각 검토 PDF(SHA 74a24bed…)와 시스템 거절 대상 PDF(주장 SHA 163518c8…)는 서로 다른 문서로 확인됨. 충돌의 본질은 문서 식별 문제이므로, 다음 조치로 (B) 제출 증거 연결 보강을 최종 선택함. (A) 재생성은 불필요할 가능성이 높고 (C) 완료 판정은 식별 전에 무의미함. Fusion 패널(run kmsg-cd179ef2b1978a75c96df4c82478c260)의 권고와 일치.",
+          "evidence_refs": [
+            "note:Fusion deliberation run kmsg-cd179ef2b1978a75c96df4c82478c260 — board post p-d3729e4249c8b0fd9485ff28e75fecee: 패널 최종 판단 (B) 제출 증거 연결 보강. 근거: 독립 시각 검토 PDF(SHA 74a24bed2977316e1ca028e91163ed890c303d02c1da6141e2d891512df131c0, 3페이지, 한글/다이어그램 가독 확인)와 시스템 거절 대상 PDF(주장 SHA 163518c8…, 실제 제출본, pdftotext/pdfinfo 출력·PNG 렌더·해시 영수증 부재)는 서로 다른 SHA를 가진 별개 문서. 충돌의 본질은 문서 식별 문제로, (C) 판정 이전과 (A) 재생성 정당성을 모두 차단. (B)는 저비용·유계 손실·전 가설에서 정보 이득을 주는 지배적 선택.",
+            "note:Task 계약 준수: 서로 다른 PDF SHA를 같은 파일로 간주하지 않음. 과거 관측 사실(README/verdict-json)과 현재 미확인 상태(워크스페이스에 PDF 파일 없음)를 구분. 원래 PDF Task/Goal 완료 미선언. 별도 검토(fusion) 활용 — 패널 권고와 자체 최종 선택 일치.",
+            "note:과거 source commit 97b6477f29 고정 기록 SHA256: README.md 5646db1c76f02730874bc9f49770899e75714669e97418374fa00d5de25eedd3; task-verdict-rejected.json fdf173637f78d3e57dd3609a21d57a8c3bdf75e438b943b5f4a1b6aa59a129b1"
+          ],
+          "updated_at": "2026-09-10T00:13:44Z",
+          "updated_by": "fusion-evidence-review"
+        }
+      },
+      {
+        "type": "task_linked",
+        "agent": "system",
+        "actor_kind": "system",
+        "task": "task-001",
+        "ts": "2026-09-10T00:08:03Z",
+        "session_id": "trace-1788998630329-00000",
+        "operation_id": "trace-1788998630329-00000"
+      },
+      {
+        "type": "task_transition",
+        "agent": "fusion-evidence-review",
+        "actor_kind": "agent",
+        "task": "task-001",
+        "from_status": "claimed",
+        "to_status": "in_progress",
+        "ts": "2026-09-10T00:08:03Z",
+        "assignee": "fusion-evidence-review",
+        "action": "start"
+      },
+      {
+        "type": "task_claim",
+        "agent": "fusion-evidence-review",
+        "actor_kind": "agent",
+        "task": "task-001",
+        "ts": "2026-09-10T00:08:03Z"
+      }
+    ]
+  ],
+  "checks": [
+    "exact_ci_asset_hashes",
+    "exact_runtime_commit",
+    "same_task_run_decision_in_two_readbacks",
+    "actual_task_history_render"
+  ],
+  "page_errors": [],
+  "blocked_requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event",
+      "off_origin": false
+    },
+    {
+      "method": "POST",
+      "path": "/mcp",
+      "off_origin": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures",
+      "off_origin": false
+    }
+  ],
+  "mobile_dialog": {
+    "width": 343,
+    "scrollWidth": 503
+  }
+}

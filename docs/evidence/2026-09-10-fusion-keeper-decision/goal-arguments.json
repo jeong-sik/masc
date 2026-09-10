@@ -1,0 +1,6 @@
+{
+  "id": "g-fusion-evidence-review-20260910",
+  "title": "서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정",
+  "metric": "이 isolated Goal에 연결된 Task history의 출처가 연결된 최종 판단 기록 수. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 한다.",
+  "target_value": "1"
+}

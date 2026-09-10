@@ -51,15 +51,25 @@ let submit_error_result ~tool_name error =
 ;;
 
 let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
-      ~policy ?continuation_channel ?(registry = Fusion_run_registry.global ()) ~args () =
+      ~policy ?source_context ?continuation_channel ?(registry = Fusion_run_registry.global ()) ~args () =
   let tool_name = "masc_fusion" in
-  let prompt = Tool_args.get_string args "prompt" "" in
+  let prompt = match source_context with
+    | Some context -> Fusion_request_context.render context
+    | None -> Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
   let default_topology =
     Fusion_types.fusion_topology_to_string Fusion_types.Simple
   in
   let topology_wire = Tool_args.get_string args "topology" default_topology in
+  let context_matches = match source_context with
+    | None -> true
+    | Some context -> Fusion_request_context.keeper context = keeper
+        && Fusion_request_context.question context = Tool_args.get_string args "prompt" "" in
+  if not context_matches then
+    status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+      ["error", `String "source context differs from the calling Keeper or question"]
+  else
   match String.equal (String.trim prompt) "", Fusion_types.fusion_topology_of_string topology_wire with
   | true, _ ->
     status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
@@ -87,6 +97,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
          { keeper_name = keeper
          ; submitted_by = keeper
          ; prompt
+         ; source_context
          ; preset
          ; web_tools
          ; topology
@@ -148,7 +159,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
            ])
 ;;
 
-let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel
+let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?source_context ?continuation_channel
       ?(registry = Fusion_run_registry.global ()) ~args () =
   (* base_dir 를 여기서 부분 적용한다. [compute_runner] 계약을 넓히지 않으면서
      official-client 패널리스트가 spawn 될 디렉터리를 orchestrator 아래로
@@ -163,23 +174,23 @@ let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_cha
       ~on_progress ()
   in
   handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
-    ~policy ?continuation_channel ~registry ~args ()
+    ~policy ?source_context ?continuation_channel ~registry ~args ()
 ;;
 
-let handle ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?continuation_channel
+let handle ~sw ~net ~base_dir ~keeper ~now_unix ~policy ?source_context ?continuation_channel
       ~args () =
   Tool_result.message
     (handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~policy
-       ?continuation_channel ~args ())
+       ?source_context ?continuation_channel ~args ())
 ;;
 
 module For_test = struct
   type nonrec compute_runner = compute_runner
 
   let handle_with_compute ~compute ~sw ~net ~base_dir ~keeper ~now_unix ~policy
-        ?continuation_channel ?registry ~args () =
+        ?source_context ?continuation_channel ?registry ~args () =
     Tool_result.message
       (handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
-         ~policy ?continuation_channel ?registry ~args ())
+         ~policy ?source_context ?continuation_channel ?registry ~args ())
   ;;
 end

@@ -65,3 +65,16 @@ meta-judge reconciles them (requires the preset to configure >= 2 judges). \
 meta-judge, then a final meta-judge reconciles the stage results (requires \
 at least two exact groups; ragged counts are rejected). Unknown values are \
 rejected."""
+
+[[params]]
+name = "task_id"
+type = "string"
+description = "Optional assigned Task to deliberate for. The runtime captures its actual title, description and linked Goal criteria before starting the panel."
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Optional Goal whose current criterion is captured. When task_id is also supplied, it must be linked to that Task."
+[[params]]
+name = "decision_context"
+type = "string"
+description = "Current evidence, competing alternatives and constraints relevant to the decision. This is caller-supplied context, kept separate from runtime-validated Task/Goal snapshots."

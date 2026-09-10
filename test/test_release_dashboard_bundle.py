@@ -204,9 +204,8 @@ class Distribution(unittest.TestCase):
         companions = [(name, self.binary) for name in sorted(bundle.COMPANIONS)]
         runtime = None
         stage = None
-        if self.arch.startswith("macos-"):
-            runtime, stage = self.runtime_fixture()
-            shutil.copy2(runtime, mirror / runtime.name)
+        runtime, stage = self.runtime_fixture()
+        shutil.copy2(runtime, mirror / runtime.name)
         self.package(self.binary, self.assets, COMMIT, self.asset, self.archive,
                        companions, runtime, stage)
         shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))

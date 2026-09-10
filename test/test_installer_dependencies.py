@@ -125,5 +125,75 @@ class PortableBootstrap(unittest.TestCase):
         self.assertFalse((self.fixture.prefix / 'masc').exists())
 
 
+class LinuxPortableBootstrap(unittest.TestCase):
+    run_installer = PortableBootstrap.run_installer
+
+    def setUp(self):
+        import shutil
+        PortableBootstrap.setUp(self)
+        # Only ordinary shell/bootstrap utilities remain. No python3, pip, apt,
+        # or user's bin directory can accidentally satisfy the installation.
+        (self.bin / 'python3').unlink()
+        for name in ('curl', 'chmod', 'mkdir', 'mktemp', 'readlink', 'dirname', 'basename',
+                     'awk', 'tar', 'sha256sum', 'shasum', 'rm', 'mv', 'cp', 'cat', 'grep',
+                     'sed', 'tr', 'cut', 'sort', 'head', 'tail', 'date', 'sleep', 'ln', 'env'):
+            tool = shutil.which(name)
+            if tool:
+                (self.bin / name).symlink_to(tool)
+        self.env['PATH'] = str(self.bin)
+
+    def platform(self, cpu, suffix):
+        (self.bin / 'uname').write_text('#!/bin/sh\ncase "$1" in -m) echo ' + cpu + ' ;; *) echo Linux ;; esac\n')
+        self.fixture.arch = suffix
+        self.fixture.asset = 'masc-' + suffix
+
+    def install(self, cpu, suffix):
+        self.platform(cpu, suffix)
+        mirror = self.fixture.mirror()
+        result = self.run_installer(['--version', 'v9.9.9', '--no-seed', '--no-guest-shim', '--no-wizard'], mirror)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = (self.fixture.prefix / 'masc').resolve().parent
+        fixtures.bundle.verify_tree(installed, self.fixture.asset)
+        self.assertTrue((installed / 'python/bin/python3').is_file())
+
+    def test_x64_installs_without_host_python(self):
+        self.install('x86_64', 'linux-x64')
+
+    def test_arm64_installs_without_host_python(self):
+        self.install('aarch64', 'linux-arm64')
+
+    def test_dry_run_needs_no_python_or_download(self):
+        self.platform('aarch64', 'linux-arm64')
+        result = self.run_installer(['--version', 'v9.9.9', '--dry-run', '--no-seed', '--no-guest-shim'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('bundled Linux Python', result.stdout)
+
+    def test_wrong_architecture_has_no_fallback(self):
+        self.platform('riscv64', 'linux-arm64')
+        result = self.run_installer(['--version', 'v9.9.9', '--no-seed', '--no-guest-shim'])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unsupported', result.stderr)
+
+    def test_missing_linux_runtime_checksum_has_no_unverified_fallback(self):
+        self.platform('x86_64', 'linux-x64')
+        mirror = self.fixture.mirror()
+        sums = mirror / 'SHA256SUMS'
+        sums.write_text(''.join(line for line in sums.read_text().splitlines(True) if 'masc-runtime-linux-x64' not in line))
+        result = self.run_installer(['--version', 'v9.9.9', '--allow-unverified', '--no-seed', '--no-guest-shim'], mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('bundled Python checksum missing', result.stderr)
+        self.assertFalse((self.fixture.prefix / 'masc').exists())
+
+    def test_tampered_linux_runtime_never_executes_even_with_override(self):
+        self.platform('aarch64', 'linux-arm64')
+        mirror = self.fixture.mirror()
+        runtime = mirror / 'masc-runtime-linux-arm64.tar.gz'
+        runtime.write_bytes(runtime.read_bytes() + b'tampered')
+        result = self.run_installer(['--version', 'v9.9.9', '--allow-unverified', '--no-seed', '--no-guest-shim'], mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('bundled Python checksum differs', result.stderr)
+        self.assertFalse((self.fixture.prefix / 'masc').exists())
+
+
 if __name__ == '__main__':
     unittest.main()

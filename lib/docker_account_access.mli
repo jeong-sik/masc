@@ -6,7 +6,6 @@ type error = Unsupported_host | Unsupported_distribution | Invalid_account
   | Account_read_failed | Grant_failed | Invalid_resume | Session_not_active
   | Service_unavailable of Sandbox_readiness.entry
 val error_message : error -> string
-val grant_label : string
 val grant_detail : string
 val inspect : host:Sandbox_readiness.host -> (observation, error) result
 val to_json : observation -> Yojson.Safe.t

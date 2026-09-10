@@ -5514,3 +5514,5 @@
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
 
 (include stanzas/test_sandbox_readiness.inc)
+
+(include stanzas/test_sandbox_prerequisites.inc)

@@ -39,7 +39,6 @@ type trigger_policy_load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
-  | Trigger_policy_env_invalid of { detail : string }
 
 val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 
@@ -49,10 +48,11 @@ val load_trigger_policy_from_toml :
 
 val resolved_trigger_policy :
   unit -> (Discord_gateway_client.trigger_policy, trigger_policy_load_error) result
-(** Env > TOML > default. [MASC_DISCORD_TRIGGER_POLICY] wins when set and
-    valid; an invalid env value is a load error (never a silent default);
-otherwise the [discord.trigger_policy] runtime.toml key applies, and a
-missing file/key yields {!default_trigger_policy}. *)
+(** runtime.toml > default. The [discord.trigger_policy] key answers when
+    present and valid; an invalid value is a load error (never a silent
+    default); a missing file, missing key or blank value yields
+    {!default_trigger_policy}. There is no env plane — which inbound messages
+    start a turn is written in the config file. *)
 
 val request_directory_refresh :
   sw:Eio.Switch.t ->

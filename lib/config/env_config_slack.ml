@@ -34,9 +34,8 @@ let token_opt name =
 
 (* Tokens are unprefixed ([SLACK_APP_TOKEN] / [SLACK_BOT_TOKEN]): this matches
    the Slack SDK convention, the dashboard setup guide, and the Discord
-   precedent ([DISCORD_BOT_TOKEN]). The trigger policy keeps the [MASC_SLACK_]
-   namespace — it is a MASC-internal policy override, not a credential, and
-   mirrors [MASC_DISCORD_TRIGGER_POLICY]. *)
+   precedent ([DISCORD_BOT_TOKEN]). Credentials are all this leaf reads: the
+   trigger policy is a stance the operator writes down, so it comes from
+   [slack.trigger_policy] in runtime.toml and has no env plane. *)
 let app_token_opt () = token_opt "SLACK_APP_TOKEN"
 let bot_token_opt () = token_opt "SLACK_BOT_TOKEN"
-let trigger_policy_opt () = Sys.getenv_opt "MASC_SLACK_TRIGGER_POLICY" |> trim_opt

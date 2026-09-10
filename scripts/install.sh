@@ -659,120 +659,35 @@ ping_provider() {
   return 0
 }
 
-prompt_runtime_source() {
-  local answer
-  printf '\nChoose a model connection (availability is checked separately):\n' >&2
-  printf '  1) Configured API providers / Ollama\n  2) llama.cpp server\n  3) vLLM server\n  4) Claude Code\n  5) Codex\n  6) Antigravity\n  7) Other OpenAI-compatible endpoint\n  8) Configure later\n' >&2
-  while true; do
-    printf '? Model connection [1]: ' >&2
-    IFS= read -r answer || return 1
-    case "$answer" in
-      ''|1) echo configured; return ;;
-      2) echo llama_cpp; return ;;
-      3) echo vllm; return ;;
-      4) echo claude_code; return ;;
-      5) echo codex; return ;;
-      6) echo antigravity; return ;;
-      7) echo openai_compatible; return ;;
-      8) echo later; return ;;
-      *) warn "choose a number from 1 to 8" ;;
-    esac
-  done
-}
-
-runtime_setup_input() {
-  local label="$1" answer
-  printf '? %s: ' "$label" >&2
-  IFS= read -r answer || return 1
-  printf '%s' "$answer"
-}
-
-runtime_setup_yes_no() {
-  local answer
-  while true; do
-    answer=$(runtime_setup_input "$1") || return 1
-    case "$answer" in
-      y|Y|yes|YES) printf y; return 0 ;;
-      ''|n|N|no|NO) printf n; return 0 ;;
-      *) warn "answer y or n" ;;
-    esac
-  done
-}
-
-configure_runtime_source() {
-  local base_path="$1" source="$2" endpoint="" key_env="" credential="" timeout=""
-  local model context tools streaming helper spec receipt selection
-  printf '\nConfigure %s. This connects to your server or CLI; it does not install model weights or authenticate an account.\n' "$source" >&2
-  case "$source" in
-    llama_cpp|vllm|openai_compatible)
-      endpoint=$(runtime_setup_input 'Server API base URL, including /v1') || die "runtime setup cancelled"
-      key_env=$(runtime_setup_input 'API key environment variable name (blank for none; do not enter a key)') || die "runtime setup cancelled"
-      ;;
-    antigravity)
-      credential=$(runtime_setup_input 'OAuth credential file path created by Antigravity') || die "runtime setup cancelled"
-      timeout=$(runtime_setup_input 'Antigravity request timeout in seconds') || die "runtime setup cancelled"
-      ;;
-  esac
-  helper=$(mktemp)
-  PARTIAL_FILES+=("$helper")
-  fetch_bundle_asset install-runtime-setup.py "$helper"
-  selection=$(python3 "$helper" --binary "$DEST" --base-path "$base_path" \
-    --select-model "$source" --endpoint "$endpoint" --credential-env "$key_env" \
-    --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S") || die "model selection cancelled or unavailable"
-  model=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["model"])' <<< "$selection")
-  context=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["max_context"])' <<< "$selection")
-  case "$source" in
-    claude_code|codex)
-      tools=y
-      streaming=y
-      ;;
-    *)
-      tools=$(runtime_setup_yes_no 'Enable tool calling verified for this model? [y/N]') || die "runtime setup cancelled"
-      streaming=$(runtime_setup_yes_no 'Enable streaming supported by this connection? [y/N]') || die "runtime setup cancelled"
-      ;;
-  esac
+run_selection_wizard() {
+  local base_path="$1" helper receipt
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would configure $source with model $model in $base_path/.masc/config"
+    log "[dry-run] would offer multiple connections and verify selected models before saving"
     return 0
   fi
-  spec=$(mktemp); receipt=$(mktemp)
-  PARTIAL_FILES+=("$spec" "$receipt")
-  python3 - "$spec" "$source" "$endpoint" "$key_env" "$credential" "$timeout" "$model" "$context" "$tools" "$streaming" <<'PYRUNTIME'
+  helper=$(mktemp)
+  receipt=$(mktemp)
+  PARTIAL_FILES+=("$helper" "$receipt")
+  fetch_bundle_asset install-runtime-setup.py "$helper"
+  python3 "$helper" --binary "$DEST" --base-path "$base_path" --wizard \
+    --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" > "$receipt" \
+    || die "model setup stopped; existing connections were preserved"
+  python3 - "$receipt" <<'PYRECEIPT'
 import json, sys
-path, choice, endpoint, key_env, credential, timeout, model, context, tools, streaming = sys.argv[1:]
-def yes(value):
-    if value.lower() in ('y', 'yes'): return True
-    if value.lower() in ('', 'n', 'no'): return False
-    raise ValueError('answer y or n for tool calling and streaming')
-try:
-    spec = dict(choice=choice, model=model, max_context=int(context), tools=yes(tools), streaming=yes(streaming))
-    if choice in ('llama_cpp', 'vllm', 'openai_compatible'):
-        spec.update(endpoint=endpoint, api_key_env=key_env)
-    elif choice == 'antigravity':
-        spec.update(credential_file=credential, timeout_s=float(timeout))
-    with open(path, 'w') as target: json.dump(spec, target)
-except ValueError as error:
-    sys.exit('runtime setup: ' + str(error))
-PYRUNTIME
-  python3 "$helper" --binary "$DEST" --base-path "$base_path" --spec "$spec" > "$receipt" \
-    || die "runtime configuration rejected; existing configuration was preserved"
-  log "saved $source connection; installation, authentication and a model response are separate checks"
+result = json.load(open(sys.argv[1]))
+if result.get('readiness') == 'verified':
+    print('Selected model connections passed response and tool checks. Run masc setup to prepare imp and its sandbox.')
+else:
+    print('Model setup deferred. Run the installer with --wizard when your connection is ready.')
+PYRECEIPT
 }
 
 run_wizard() {
   local base_path="$1"
   local provider_idx key source
   if [ -z "$WIZARD_PROVIDER" ] && is_tty; then
-    source=$(prompt_runtime_source) || die "model connection selection cancelled"
-    case "$source" in
-      configured) ;;
-      later) log "model setup deferred; configure a model before starting a Keeper"; return 0 ;;
-      *)
-        configure_runtime_source "$base_path" "$source"
-        [ "$DRY_RUN" -eq 0 ] || return 0
-        WIZARD_PROVIDER="setup_$source"
-        ;;
-    esac
+    run_selection_wizard "$base_path"
+    return
   fi
   load_provider_catalog "$base_path"
   compute_provider_availability
@@ -1531,6 +1446,17 @@ else
     || die "binary/dashboard installation rejected"
   BUNDLE_TRANSACTION_ACTIVE=1
   log "installed verified binary/dashboard: $DEST"
+fi
+
+# Check persisted state before init or Skill seeding can touch an existing workspace.
+if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
+  workspace_helper=$(mktemp)
+  workspace_receipt=$(mktemp)
+  PARTIAL_FILES+=("$workspace_helper" "$workspace_receipt")
+  fetch_bundle_asset install-runtime-setup.py "$workspace_helper"
+  python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
+    || die "workspace check stopped installation; existing workspace data was preserved"
+  BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------

@@ -30,8 +30,16 @@ type tool_observation =
     execution outcome. [Unknown] remains explicit rather than being treated as
     evidence of either success or failure. *)
 
+type goal_context =
+  | No_task
+  | Task_goals of
+      { task_id : string
+      ; criteria : ((string * Goal_phase.t * Goal_store.criterion) list, string) result
+      }
+
 type input =
   { turn_ref : Ids.Turn_ref.t
+  ; goal_context : goal_context
   ; keeper_instructions : string
     (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges
@@ -77,6 +85,8 @@ val wire_field_supersedes : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
 val wire_dropped_fields : string list
+
+val goal_context_to_json : goal_context -> Yojson.Safe.t
 
 val prompt_variables : input -> (string * string) list
 

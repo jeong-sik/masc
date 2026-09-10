@@ -365,6 +365,7 @@ val handle_masc_schedule_with_outcome
 val handle_masc_fusion_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> args:Yojson.Safe.t
   -> unit
@@ -403,7 +404,8 @@ val fusion_status_json
     process-wide [Fusion_run_registry.global] via {!fusion_status_json}, scoped
     to [meta.name]. *)
 val handle_masc_fusion_status
-  :  meta:Keeper_meta_contract.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> unit
   -> string

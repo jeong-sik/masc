@@ -282,16 +282,16 @@ let shell_quote text =
 ;;
 
 let a1 = official_client_runtime
-let a2 = "claude_code.claude-haiku-4-5"
+let a2 = "claude_code.claude-opus-5"
 let b = "agy.gemini"
 
 let quota_fixture ~claude_cli ~agy_cli ~oauth_source =
   let base = fixture ~claude_cli () in
   base ^ Printf.sprintf {|
-[models."claude-haiku-4-5"]
-api-name = "claude-haiku-4-5"
-max-context = 200000
-[claude_code."claude-haiku-4-5"]
+[models."claude-opus-5"]
+api-name = "claude-opus-5"
+max-context = 1000000
+[claude_code."claude-opus-5"]
 [providers.agy]
 protocol = "antigravity-cli"
 command = %S
@@ -314,10 +314,18 @@ let scope runtime_id =
 let claude_script ~marker ~body =
   Printf.sprintf {|#!/bin/sh
 set -eu
-if [ "${1-}" = auth ]; then
-  printf '%%s\n' '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}'
-  exit 0
-fi
+# The client puts its flags ahead of the subcommand, so the probe arrives as
+# `--setting-sources= auth status --json`. Matching the subcommand pair
+# anywhere in argv keeps this answering the probe when a flag is added or
+# moved; pinning a position sends the probe into the turn body below, which
+# answers it with turn output and records a marker line for a call that never
+# asked for one.
+case " $@ " in
+  *" auth status "*)
+    printf '%%s\n' '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}'
+    exit 0
+    ;;
+esac
 session=''
 model=''
 previous=''
@@ -461,12 +469,12 @@ let test_real_quota_reorders_siblings_and_next_walk () =
     | Error failures ->
       check int "exhausted candidates remain eligible" 2 (List.length failures);
       check (list string) "same-account tail retains declaration order"
-        ["A:claude-sonnet-5"; "B"; "B"; "A:claude-sonnet-5"; "A:claude-haiku-4-5"] (calls marker);
+        ["A:claude-sonnet-5"; "B"; "B"; "A:claude-sonnet-5"; "A:claude-opus-5"] (calls marker);
       Runtime_quota_window.note_observed_exhausted ~scope:(scope b);
       write_file ~path:marker ~perm:0o600 "";
       walk_real ~dir [a1; a2; b] |> require_b;
       check (list string) "all scopes exhausted still try every declared candidate"
-        ["A:claude-sonnet-5"; "A:claude-haiku-4-5"; "B"] (calls marker);
+        ["A:claude-sonnet-5"; "A:claude-opus-5"; "B"] (calls marker);
       check bool "separate adapter success clears its observation" false
         (Runtime_quota_window.is_exhausted ~scope:(scope b) ~now:(Time_compat.now ())))
 ;;

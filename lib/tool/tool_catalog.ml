@@ -234,6 +234,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_change_disk", mutating_tool);
     ("masc_msx_press", mutating_tool);
     ("masc_msx_step", mutating_tool);
+    ("masc_msx_step_until_change", mutating_tool);
     ("masc_msx_peek", read_state_tool);
     ("masc_msx_ram_diff", read_state_tool);
     ("masc_agent_card", read_state_tool);
@@ -434,6 +435,7 @@ let explicit_metadata : (string * metadata) list =
         broadcast_tool );
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
+    ("masc_fusion_decision", broadcast_tool);
     ("masc_library_list", read_state_tool);
     ("masc_library_read", read_state_tool);
     ("masc_library_add", broadcast_tool);
@@ -492,6 +494,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_file_list", keeper_shard_read);
     ("masc_file_upload", keeper_shard_write);
     ("masc_file_delete", keeper_shard_write);
+    ("keeper_workspace_memory_read", keeper_shard_read);
     ("keeper_memory_search", keeper_shard_read);
     ("keeper_memory_retract", keeper_shard_write);
     ("keeper_memory_write", keeper_shard_write);

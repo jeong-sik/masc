@@ -449,6 +449,7 @@ type planning_goal = {
 type planning_rollup = {
   pr_active : int;
   pr_verifying : int;
+  pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
 }
@@ -1670,7 +1671,7 @@ let decode_goal_proof json =
        (match string_at completion "state" with
         | Some "stale_criterion" ->
           Proof_stale (verdict_text (member "historical_completion" completion))
-        | Some "proof_proven" -> Proof_proven (verdict_text completion)
+        | Some ("proof_proven" | "human_confirmed") -> Proof_proven (verdict_text completion)
         | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
         | Some "proof_pending" -> Proof_pending
         | Some "idle" -> Proof_idle
@@ -1719,12 +1720,24 @@ let decode_planning_goal json =
       pg_updated_at;
     }
 
+(* One field per Goal_phase constructor, all required: the producer is
+   Goal_store.rollup, whose record has a counter per phase, so a missing key
+   is a wire mismatch rather than an old payload. *)
 let decode_planning_rollup json =
   let* pr_active = required_int_field json "active_count" in
   let* pr_verifying = required_int_field json "verifying_count" in
+  let* pr_awaiting_confirmation =
+    required_int_field json "awaiting_confirmation_count"
+  in
   let* pr_done = required_int_field json "done_count" in
   let* pr_dropped = required_int_field json "dropped_count" in
-  Ok { pr_active; pr_verifying; pr_done; pr_dropped }
+  Ok
+    { pr_active
+    ; pr_verifying
+    ; pr_awaiting_confirmation
+    ; pr_done
+    ; pr_dropped
+    }
 
 let decode_planning_backlog json =
   let* pb_todo = required_int_field json "todo" in
@@ -5335,6 +5348,18 @@ let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
   let decode_row json =
     match member "effective_meta_error" json with
+    | `Null when member "status" json = `String "error" ->
+        let* name = required_string_field json "name" in
+        let* () = match member "health" json with
+          | `Null -> Ok ()
+          | `String raw when Option.is_some (keeper_health_of_string raw) -> Ok ()
+          | `String raw -> Error (Printf.sprintf "keeper %S has unknown health %S" name raw)
+          | bad -> field_type_error "health" "a string or null" bad in
+        let* detail = match member "message" json with
+          | `String message -> Ok message
+          | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
+          | bad -> field_type_error "message" "a string or null" bad in
+        Ok (Error (name, detail))
     | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime json)
     | error ->
         let* name = required_string_field json "name" in

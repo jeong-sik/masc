@@ -581,7 +581,7 @@ export type GoalProofCompletion =
   | { state: 'pending'; criterion: GoalProofCriterion; requestId: string; requestedAt: string }
   | ({ criterion: GoalProofCriterion; requestId: string; runId: string;
        evidence: string; recordedAt: string; actor: string } &
-       ({ state: 'proven' } | { state: 'refuted'; reason: string }))
+       ({ state: 'proven'; confirmation?: { operatorId: string; confirmedAt: string } } | { state: 'refuted'; reason: string }))
 
 export type GoalProof =
   | { state: 'current'; completion: GoalProofCompletion }
@@ -975,6 +975,7 @@ export type ChatBlock =
   | ChatFusionBlock
   | ChatStatusBlock
 export type KeeperConversationStreamState =
+  | 'cancelling'
   | 'opening'
   | 'thinking'
   | 'streaming'

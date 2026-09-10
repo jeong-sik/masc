@@ -83,6 +83,7 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_capability_search
   | Keeper_tool_descriptor.Tool_context_status
   | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
   | Keeper_tool_descriptor.Tool_memory_search
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
@@ -117,6 +118,7 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
   | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_library_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
@@ -271,6 +273,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_capability_search
   | Keeper_tool_descriptor.Tool_context_status
   | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
   | Keeper_tool_descriptor.Tool_memory_search
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
@@ -299,6 +302,7 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
   | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_library_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch

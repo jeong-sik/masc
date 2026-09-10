@@ -371,7 +371,7 @@ let require_anthropic_artifact = function
 ;;
 
 let test_anthropic_catalog_fallback () =
-  let model_id = "claude-sonnet-4-6" in
+  let model_id = "claude-sonnet-5" in
   let ceiling =
     match Capabilities.for_model_id model_id with
     | Some capabilities ->

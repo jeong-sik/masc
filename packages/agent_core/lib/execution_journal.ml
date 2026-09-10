@@ -1164,10 +1164,7 @@ type journal_state =
   ; events_by_seq : Event.t Event_seq_map.t
   }
 
-type snapshot =
-  { scope_id : Store.Scope_id.t
-  ; reducer : Reducer.t
-  }
+type snapshot = { reducer : Reducer.t }
 
 type writer_authority =
   | Unclaimed_writer
@@ -1287,11 +1284,7 @@ let read_page journal ~after ?through ~limit () =
 
 let snapshot journal =
   let reducer = with_read journal (fun state -> state.reducer) in
-  { scope_id = journal.scope_id; reducer }
-;;
-
-let snapshot_cursor (snapshot : snapshot) =
-  make_cursor snapshot.scope_id (Reducer.last_seq snapshot.reducer)
+  { reducer }
 ;;
 
 let snapshot_find_node (snapshot : snapshot) node_id =

@@ -12,14 +12,6 @@ open Agent_types
 
 (** Record a hook invocation in the active raw-trace run (no-op when
     [active_run] is [None]). *)
-val record_hook_invocation
-  :  Raw_trace.active_run option
-  -> ?invocation:Tool_contract.Invocation.t
-  -> hook_name:string
-  -> decision:Hooks.hook_decision
-  -> ?detail:string
-  -> unit
-  -> unit
 
 (** Invoke a hook within a tracing span, recording the decision. *)
 val invoke_hook_with_trace
@@ -84,14 +76,7 @@ val with_raw_trace_run_classified_result
 
 (** Execute [f] within a raw-trace run, handling start/finish recording
     and lifecycle status updates.  [f] receives [Some active_run] when
-    raw-trace is configured, [None] otherwise. *)
-val with_raw_trace_run
-  :  t
-  -> string
-  -> (Raw_trace.active_run option -> (Types.api_response, Error.t) result)
-  -> (Types.api_response, Error.t) result
-
-(** Error-polymorphic form of {!with_raw_trace_run}.  [of_core_error] lifts
+    raw-trace is configured, [None] otherwise.  [of_core_error] lifts
     trace-infrastructure failures into the caller's carrier, while
     [error_to_string] is used only for lifecycle/raw-trace diagnostics.
 

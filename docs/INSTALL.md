@@ -2,9 +2,11 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.35.1**. Check tag and asset
+This document is the installation contract for **0.35.2**. Check tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
-The download commands below select `v0.35.1` and its matching installer.
+The download commands below select `v0.35.2` and its matching installer.
+
+If you use the 0.35.1 installer, refer to that tag's documentation. Multi-selection requires 0.35.2 or later.
 
 ## Platforms and prerequisites
 
@@ -44,7 +46,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 ```bash
-TAG=v0.35.1
+TAG=v0.35.2
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -72,54 +74,43 @@ version's assets, and installer fixes are recorded in the release notes with
 their source commit. The binary tag is not changed. A missing or mismatched
 checksum stops the install.
 
-`--no-wizard` skips model selection. `--provider <id>` selects from the
-provider catalog in `runtime.toml`. The wizard detects the model servers that
-are available and the sign-in state of CLIs, selects `[runtime].default`, and
-stores no API key. Model setup shows numbered choices from the CLI's local
-model list, the HTTP server's `/models` response, or the installed MASC catalog
-when a CLI list is unavailable. Select a number or enter an exact model ID;
-blank input does not select a model. Listed models are suggestions, not proof
-that your account can use them. The wizard fills the context window from the
-selected entry and shows its source; Codex's observed effective context takes
-precedence over a catalog limit. If no limit is known, it asks for the documented
-or server-configured token count. Without a model, installing the server and
-using the status screens still works.
+`--no-wizard` skips model selection. `--provider <id>` selects a configured
+provider for automation. The interactive wizard lets you select several
+connections and models, then choose which imp should try first and the fallback
+order. It stores environment variable names for API credentials, never their values.
 
 ## First-install wizard
 
-The wizard menu shows each provider's name, its current detection state, and
-the ID to use with `--provider`. Choose by number, or press Enter for the
-default shown. An invalid number is asked again, and a closed input cancels
-the selection.
+Use **↑/↓ to move, Space to select several items, and Enter to continue**.
+Single-choice screens use Enter. Press `q` to return or cancel. Terminals without
+cursor support show numbered choices; enter `1,3` to select multiple items.
+
+The model list comes from your CLI cache, HTTP server, existing workspace
+connections, and the installed catalog. Catalog suggestions are checked before
+saving: every selected model must return a response and complete a harmless tool
+call. On failure, retry, exclude that connection, choose again, or configure later.
+Existing connections remain available when you add more models.
 
 | Situation | Behaviour |
 |---|---|
-| First install on a terminal | Shows the provider menu and saves the choice |
-| Piped input/automation, one usable source | Selects that source |
-| Piped input/automation, no usable source or several | Automatic mode leaves the choice pending; with `--wizard` forced, `--provider` is required |
-| `--provider <id>` | Selects that provider, in an existing workspace too |
-| `--no-wizard` | Skips model selection and the connectivity check; cannot be combined with `--provider` |
-| Regular upgrade with existing configuration | Keeps the existing choice; `--wizard` to choose again |
-
-You can choose again with the script of the installed tag. Export a new API
-key in the shell that starts the server, and keep in mind that a server
-already running does not pick it up on its own.
+| First install on a terminal | Multiple connection/model selection and real response/tool verification |
+| Piped input/automation, one usable source | Selects that source; reports a connectivity probe separately |
+| Piped input/automation, no usable source or several | Automatic mode leaves selection pending; forced `--wizard` requires `--provider` |
+| `--provider <id>` | Selects that configured provider, including in an existing workspace |
+| `--no-wizard` | Skips model selection; cannot be combined with `--provider` |
+| Regular upgrade with existing configuration | Preserves selections; use `--wizard` to choose again |
 
 ```bash
 bash /tmp/masc-install.sh --version "$TAG" \
   --base-path "$HOME/masc-workspace" --wizard
 ```
 
-In provider detection, `cloud` proves neither that the API key is valid nor
-that the model answers. A CLI is checked with its own login probe, and an
-unsupported probe is marked separately. HTTP providers call the healthcheck
-declared in the catalog. Without a credential or a healthcheck, the check is
-reported as skipped. Passing the connectivity check is not evidence of actual
-model generation, tool execution, or sustained Keeper runs either. In
-automation, `MASC_INSTALL_NO_PING=1` skips only the post-install connectivity
-check; the wizard's local server detection still runs. To skip all wizard
-detection, use `--no-wizard`. `--sandbox` is used together with `--team` and
-does not change existing Keeper configuration in bulk.
+`masc setup` checks the selected model again before preparing imp. A successful
+model/tool check is not proof that Docker or the full Keeper sandbox is ready;
+setup reports those stages separately. In scripted provider selection,
+`MASC_INSTALL_NO_PING=1` skips the provider connectivity probe. It does not turn a
+model into a verified connection. `--sandbox` is used with `--team` and does not
+change existing Keeper configurations in bulk.
 
 ## Default installed contents
 
@@ -134,7 +125,7 @@ does not change existing Keeper configuration in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.1 binary** installs one `imp` with `activation_mode = "manual"` and the
+The **0.35.2 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
@@ -145,50 +136,49 @@ stand in for installing or authenticating them.
 
 ## Choosing a model connection
 
-Besides the existing API and Ollama settings, the terminal wizard offers
-**llama.cpp, vLLM, Claude Code, Codex, Antigravity** and a generic
-**OpenAI-compatible endpoint**. An option stays on the list even when the
-tool is not installed, and a local server may point at an endpoint on
-another machine.
+Select existing API providers, Claude Code, Codex, or local Ollama models.
+Use **Add another server URL** for llama.cpp, vLLM, another OpenAI-compatible
+server, or Ollama on another computer. Existing Antigravity connections remain
+listed, but a runtime without a supported real verification adapter cannot pass
+the interactive readiness check.
 
-Only the connection you pick is added. Choose a model by number from the
-available list, or enter a custom model ID. The wizard fills known context
-limits and displays their source; an unknown limit needs the documented or
-server-configured value. Claude Code and Codex enable tools and streaming
-without a capability quiz. HTTP connections ask you to confirm that the server
-supports tool calling and streaming. The HTTP capability overlay applies only
-to that provider.
-API credentials are environment variable names, never values; the seeded Z.AI
-connection reads `ZAI_API_KEY` from the shell that starts MASC.
+The wizard reads context windows from model metadata or the exact connection's
+existing declaration. For a fresh Codex home, it reads the installed CLI's bundled
+model catalog without authentication or a model call. API catalog suggestions
+do not supply a Codex context limit; model availability is checked separately. For Ollama it reads the configured or running context and
+loads only selected models when needed; it does not allocate the architectural
+maximum. For a single-model llama.cpp server it can read the configured context
+from `/props`. An unknown limit offers model selection again or an advanced field
+for the documented server limit. No tool-support questionnaire is required.
 
-The setting is written only after it passes the same binary's runtime check
-in a temporary workspace. If that check fails, or the original changes
-underneath, the existing setting is kept. When a connection for the same
-setup already exists, pick that provider or edit the TOML rather than
-creating a duplicate.
+Several models can be registered together. Choose the primary model and each
+fallback in order. This order applies to the conversation lane; internal exact-output
+helper lanes use the primary model. Other Keepers with explicit assignments keep
+their assignments. Selecting the same connection again reuses it; changing its
+model or connection settings creates a separate declaration.
 
-**A validated setting, an installed CLI, a reachable HTTP endpoint, an
-authenticated account, and a model that actually answers are five different
-states.** This wizard installs no model server, model weights, or provider
-CLI, and authenticates no account. Antigravity additionally needs the path
-to the OAuth file its CLI wrote, and a request timeout. `Configure later`
-defers the model connection, and the default Keeper does not start on its
-own. To run this again in an existing workspace, use `--wizard`.
+The same binary validates a staged configuration and verifies every selected
+connection before publishing. Validation or verification failure preserves the
+existing files. API credentials remain in your shell or the CLI's credential
+store. This wizard does not install provider CLIs, model weights, or Docker and
+does not sign you in. **Configure later** defers model setup; imp does not start
+automatically.
 
-## First conversation with `imp` (0.35.1)
+## First conversation with `imp` (0.35.2)
 
-This is the 0.35.1 installation contract. Check the release tag and asset
+This is the 0.35.2 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
-1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
-   the model runtime you own. Runtime setup binds that selection to the helper
-   lanes with `--setup-lanes`; you do not need a second model subscription.
-2. Authenticate that runtime before starting MASC. For Claude Code or Codex,
-   install its CLI and complete its own login, then confirm it can answer a
-   prompt in this terminal. For an API runtime, export the credential variable
-   named by the wizard in this terminal. For a local model, start its server
+1. Prepare the runtime you own before opening the model wizard. For Claude Code
+   or Codex, install its CLI and complete its login, then confirm it can answer a
+   prompt in this terminal. For an API runtime, export its credential variable
+   here (for example, `ZAI_API_KEY` for Z.AI). For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
+2. Run the installer with `--base-path "$HOME/masc-workspace"` and select one or
+   more connections. Choose imp's primary model and fallback order. The wizard
+   checks actual responses and tool use before saving. Helper lanes use your
+   primary model; you do not need a second subscription.
 3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
    or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
    `docker info` must succeed as your current user. Then run:
@@ -435,7 +425,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.35.1` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.2` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.
@@ -471,3 +461,25 @@ bash /tmp/masc-install.sh --uninstall --purge-data \
 
 A `.masc` or distribution-directory symlink that points elsewhere has only
 the link itself deleted.
+
+### Existing workspace needs attention
+
+`masc setup` checks existing Keeper profiles and Goal state before initializing the
+workspace, preparing Docker, signing in, or starting a server. If a file cannot
+be read with the current schema, setup prints its actual path and decoder error
+and stops without rewriting the workspace. A preserved file from an older
+release is not proof that the new version can read it.
+
+Choose one of these paths:
+
+- Start separately: choose an unused directory and run
+  `bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-new-workspace" --wizard`
+  with the verified installer downloaded above. After selecting your runtime, run
+  `masc setup --base-path "$HOME/masc-new-workspace"`. Your original workspace remains available for review.
+- Return without changes: stop setup, keep the original files, and review the
+  reported paths with the `Fresh state required` entry in `CHANGELOG.md`.
+  Existing logs are under the original workspace's `.masc/logs` directory.
+  Rerun setup on that workspace only after you have intentionally repaired it.
+
+Setup does not delete old Goal files, restore recovery mirrors, or silently
+convert Keeper settings. It does not claim readiness for the stopped workspace.

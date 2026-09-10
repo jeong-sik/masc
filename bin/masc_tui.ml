@@ -6683,9 +6683,29 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+(* RFC-msx-surface-focus-mode stage 1: the spectator's pixels ride the
+   InteractiveSurface contract. The poll owns [msx_surface_frame]; the
+   surface's [current] reads it and the renderer asks the surface, so
+   [Masc_tui_msx] never touches the pixel fields of
+   [Masc_tui_types.msx_frame] again. [press] has no consumer yet — stage 2
+   routes driving keys through [handle_input]. *)
+let msx_surface_frame : Masc_tui_types.msx_frame option ref = ref None
+
+let msx_surface =
+  Masc_tui_interactive.msx
+    ~fetch:(fun () -> !msx_surface_frame)
+    ~press:(fun _key -> false)
+;;
+
+let msx_surface_current () =
+  let module S = (val msx_surface) in
+  S.current ()
+;;
+
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   state.msx_frame <-
     Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
+  msx_surface_frame := state.msx_frame;
   (* An explicit fresh observation can rearm polling after a lost tick reply.
      It cannot settle an outstanding request whose result has yet to arrive. *)
   match !msx_pending_poll with
@@ -11869,7 +11889,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
                   else
                     Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                      ~connection:state.connection_status state.msx_frame
+                      ~connection:state.connection_status state.msx_frame (msx_surface_current ())
             | Ok frame ->
                 msx_pending_poll := Poll_idle;
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
@@ -11877,7 +11897,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   state.msx_frame <- frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                    ~connection:state.connection_status state.msx_frame
+                    ~connection:state.connection_status state.msx_frame (msx_surface_current ())
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
   | Keeper_turns_loaded result ->
@@ -14722,7 +14742,7 @@ and is loaded on demand through keeper_skill.
             Masc_tui_msx.render_menu ~write:write_to_terminal state
           else
             Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-              ~connection:state.connection_status state.msx_frame
+              ~connection:state.connection_status state.msx_frame (msx_surface_current ())
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
@@ -14756,7 +14776,7 @@ and is loaded on demand through keeper_skill.
                Masc_tui_msx.render_menu ~write:write_to_terminal state
              else
                Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                 ~connection:state.connection_status state.msx_frame
+                 ~connection:state.connection_status state.msx_frame (msx_surface_current ())
            end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
@@ -14874,7 +14894,7 @@ and is loaded on demand through keeper_skill.
                    Watch arm). *)
                 state.msx_last_poll_ns <- 0L;
                 Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame
+                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
               end
               else begin
                 state.msx_open <- false;
@@ -14885,7 +14905,7 @@ and is loaded on demand through keeper_skill.
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame
+                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
           | (Load cart | Swap_disk cart) as choice -> (
               state.msx_notice <- None;
               match
@@ -14900,7 +14920,7 @@ and is loaded on demand through keeper_skill.
                   observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame
+                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
@@ -14918,7 +14938,7 @@ and is loaded on demand through keeper_skill.
           observe_msx_frame state;
           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
           Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-            ~connection:state.connection_status state.msx_frame
+            ~connection:state.connection_status state.msx_frame (msx_surface_current ())
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -14931,7 +14951,7 @@ and is loaded on demand through keeper_skill.
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
           Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame)
+                ~connection:state.connection_status state.msx_frame (msx_surface_current ()))
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
              then re-fetch so the human sees the result of their own press
@@ -14947,7 +14967,7 @@ and is loaded on demand through keeper_skill.
               observe_msx_frame ~clear_notice:true state;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame
+                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =

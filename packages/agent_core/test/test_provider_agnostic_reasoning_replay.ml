@@ -941,7 +941,7 @@ let test_provider_replay_policy_matrix_pinned () =
     Reasoning_replay_contract.All_assistant_messages
     (cfg
        ~kind:Provider_config.Anthropic
-       ~model_id:"claude-sonnet-4-6"
+       ~model_id:"claude-sonnet-5"
        ~base_url:"https://api.anthropic.com"
        ());
   check
@@ -1099,7 +1099,7 @@ let test_rotation_policy_is_declared_per_dialect () =
     Reasoning_replay_contract.Require_identical_source
     (rotation
        ~kind:Provider_config.Anthropic
-       ~model_id:"claude-sonnet-4-6"
+       ~model_id:"claude-sonnet-5"
        ~base_url:"https://api.anthropic.com"
        ());
   check

@@ -27,7 +27,6 @@ val with_response_format : Types.response_format -> t -> t
 val with_disable_parallel_tool_use : bool -> t -> t
 val with_initial_messages : Types.message list -> t -> t
 val with_cache_system_prompt : bool -> t -> t
-val with_cache_extended_ttl : bool -> t -> t
 
 (** Enable or disable provider-lease release before tool execution.
 
@@ -54,14 +53,7 @@ val with_mcp_clients : Mcp.managed list -> t -> t
 (** {2 Runtime options} *)
 
 val with_hooks : Hooks.hooks -> t -> t
-val with_guardrails_async : Guardrails_async.t -> t -> t
-
-(** Pin LLM requests to a specific llama-server slot for KV cache reuse.
-    @since 0.109.0 *)
-val with_slot_id : int -> t -> t
-
 val with_tracer : Tracing.t -> t -> t
-val with_trace_link : (string * string) option -> t -> t
 val with_raw_trace : Raw_trace.t -> t -> t
 val with_context : Context.t -> t -> t
 val with_context_injector : Hooks.context_injector -> t -> t
@@ -112,13 +104,7 @@ val with_body_timeout : float -> t -> t
 
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
-(** Configure the closed typed approval boundary used only by
-    [Hooks.ElicitToolApproval] at [PreToolUse]. The callback settles
-    synchronously; AGENT_CORE does not install a timeout or durable pause. *)
-val with_tool_approval : Hooks.tool_approval_callback -> t -> t
-
 val with_description : string -> t -> t
-val with_periodic_callback : Agent.periodic_callback -> t -> t
 val with_periodic_callbacks : Agent.periodic_callback list -> t -> t
 
 (** Select an exact typed provider configuration. The Builder carries provider
@@ -175,12 +161,6 @@ val with_contract : Contract.t -> t -> t
 
 val with_skill : Skill_document.t -> t -> t
 val with_skills : Skill_document.t list -> t -> t
-
-(** {2 Logging} *)
-
-val with_log_level : Log.level -> t -> t
-val with_log_sink : Log.sink -> t -> t
-(* with_event_targets removed — was a no-op.  See agent-core boundary. *)
 
 (** {3 Discovery / metadata skill registry}
 

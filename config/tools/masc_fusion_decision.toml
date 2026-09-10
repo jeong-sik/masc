@@ -1,0 +1,29 @@
+name = "masc_fusion_decision"
+description = "Record your adopted, rejected or modified decision after a Fusion deliberation. This records the Keeper's actual choice and reason, not the judge's recommendation. Requires your own durable Fusion result and a task assigned to you; linked Goals and the current turn are captured by the runtime. Read it back through masc_task_history or the Fusion run detail. Same-turn exact retries are idempotent."
+additional_properties = false
+defer_loading = true
+[[params]]
+name = "run_id"
+type = "string"
+required = true
+description = "The exact Fusion run whose advice you reviewed."
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Your assigned task whose decision this records."
+[[params]]
+name = "decision"
+type = "string"
+required = true
+enum = ["adopted", "rejected", "modified"]
+[[params]]
+name = "choice"
+type = "string"
+required = true
+description = "What you actually decided to do."
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = "Why you adopted, rejected or modified the advice, including relevant evidence or objections."

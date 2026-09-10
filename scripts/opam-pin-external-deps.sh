@@ -35,10 +35,12 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # dune-local.sh is already holding when it calls this.
 lease_mode=write
 lease_flag=MASC_OPAM_WRITE_LEASE_HELD
+check_only=false
 for arg in "$@"; do
   if [[ "${arg}" == "--check" ]]; then
     lease_mode=read
     lease_flag=MASC_OPAM_READ_LEASE_HELD
+    check_only=true
   fi
 done
 
@@ -82,10 +84,23 @@ if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
   echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
   exit 1
 fi
+# A switch on the wrong compiler must not be pinned into, so pinning still
+# stops here. Reading is different: a machine whose switch drifted off the
+# required compiler is exactly where a dropped pin hides, and stopping at the
+# version left the pin comparison unreached. Measured 2026-09-10 -- this
+# machine sat on 5.5.0 with no 5.5.1 switch, so every --check since exited
+# before reading a single pin while cohttp-eio was missing from the switch and
+# corrupting provider SSE. --check now reports both and fails at the end.
+ocaml_version_drift=false
 if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
   echo "[opam-pin] ERROR: OCaml ${active_ocaml_version:-unknown} detected; MASC requires exactly ${required_ocaml_version}" >&2
   echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
-  exit 1
+  if ${check_only}; then
+    ocaml_version_drift=true
+    echo "[opam-pin] continuing to the pin comparison; the switch below is the drifted one" >&2
+  else
+    exit 1
+  fi
 fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
@@ -99,7 +114,11 @@ readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # a754105 adds joystick-1 directions, SHIFT/CTRL/GRAPH modifiers (ocaml-msx #22, #23).
 # 3133d7c adds disk HLE boot for Rune Master II (NMS8250 slot layout, page-0
 # vectors, BDOS _DIRIN), the VDP FH/IE1 gate and the Select key (ocaml-msx #26).
-readonly OCAML_MSX_SHA="3133d7c5bff436abf2e7c36ce2b7fa61333f7146"
+# 870e610 keeps the interface ROM unmounted during the warm-up replay: a
+# C-BIOS boot that found it leaked game code into the 720-frame warm-up and
+# the replay landed on that polluted state (Sangokushi II cold-boot stall
+# pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
+readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first
@@ -288,6 +307,10 @@ if $do_check; then
     echo "[opam-pin] to go back to the named commit: bash scripts/opam-pin-external-deps.sh --install" >&2
   fi
   if [[ ${#pin_drift[@]} -eq 0 ]]; then
+    if ${ocaml_version_drift}; then
+      echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place, on the wrong compiler" >&2
+      exit 1
+    fi
     echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place"
     exit 0
   fi

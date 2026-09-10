@@ -1,0 +1,52 @@
+{
+  "candidate_commit": "17b9c982af4ab85d120a4afbca6b59de1fc500eb",
+  "operation_id": "kmsg-47fa0509e8014ff2bedcdec4f1e20208",
+  "execution_id": "exec-1788992186378-0015",
+  "tool_call_id": "tool_niBNt52346U9YgripqW00OYX",
+  "success": true,
+  "output": {
+    "_blob": {
+      "sha256": "e4273dd33760cf581b9a5f9349062bb2417a8d3be4cd2df95b527bd480535e24",
+      "bytes": 1287,
+      "mime": "application/vnd.masc.tool-result-manifest+json",
+      "preview": ""
+    }
+  },
+  "snapshots": {
+    "status": "stored",
+    "before": {
+      "_blob": {
+        "sha256": "0beba5df1300d5f1e8daddfff0d2716b996603fb05ddb2984e2c8b370466aeb3",
+        "bytes": 23842,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    },
+    "after": {
+      "_blob": {
+        "sha256": "a152fe0454b8d81be925d8c038c4017a0c35074f2069bd5e0b840605b359e9c2",
+        "bytes": 23732,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    }
+  },
+  "all_blob_sizes_and_hashes_verified": true,
+  "before_after_differ": true,
+  "file_change_evidence": {
+    "kind": "edit",
+    "occurrence_count": 1,
+    "occurrences": [
+      {
+        "old_range": {
+          "start_line": 239,
+          "end_line": 250
+        },
+        "new_range": {
+          "start_line": 239,
+          "end_line": 248
+        }
+      }
+    ]
+  }
+}

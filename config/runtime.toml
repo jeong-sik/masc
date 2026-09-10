@@ -348,25 +348,24 @@ path = "/api/tags"
 # [mlx_server.mlx-served-model]
 # max-concurrent = 1
 
-# Official Claude Code subscription runtime example. This stays commented so
+# Official Claude Code runtime example. This stays commented so
 # a fresh install does not claim the local CLI is installed or logged in.
-# There is deliberately no credentials table: Claude Code owns its stored
-# claude.ai login, and MASC removes API/token environment fallbacks.
+# Claude Code owns its stored login or supported API/token environment.
+# MASC preserves declared client authentication and isolates unrelated settings.
 #
-# Uncommenting this block alone is not enough to pick it in the wizard. It
-# declares two model bindings, and two enabled bindings without a flag is a
-# real choice the wizard refuses to guess -- it fails rather than install a
-# model nobody named. Put `wizard-default = true` under the one you want.
-# A template with a single binding needs no flag.
+# The interactive wizard lists every enabled binding. For scripted --provider
+# selection with multiple models, set wizard-default on the binding to use.
 # [providers.claude_code]
-# display-name = "Claude Code Subscription"
+# display-name = "Claude Code"
 # protocol = "claude-code"
 # command = "claude"
 # is-non-interactive = true
 #
 # [models.claude-code-sonnet]
-# api-name = "claude-sonnet-4-5"
-# max-context = 200000
+# api-name = "claude-sonnet-5"
+# max-context = 1000000
+# tools-support = true
+# streaming = true
 #
 # Claude Code carries images over the stream-json content-block array, and Codex
 # over its turn/start input list, so a model that reads them says so here. Both
@@ -394,7 +393,7 @@ path = "/api/tags"
 #
 # [claude_code.claude-code-opus-high]
 
-# Codex ChatGPT subscription runtime example, same shape and same reason for
+# Codex account/provider runtime example, same shape and same reason for
 # staying commented. Codex reads images from its turn/start input list, so the
 # image capability key means the same thing here as it does above.
 # [providers.codex_subscription]
@@ -452,7 +451,9 @@ streaming = true
 [models.deepseek-v4-pro.capabilities]
 max-output-tokens = 384000
 supports-tool-choice = true
-thinking-control-format = "reasoning-effort"
+# DeepSeek Chat Completions toggles thinking.type; reasoning_effort is a
+# separate effort control (https://api-docs.deepseek.com/guides/thinking_mode/).
+thinking-control-format = "thinking-object"
 supports-response-format-json = true
 supports-structured-output = false
 
@@ -812,6 +813,12 @@ streaming = true
 [models.ollama-cloud-glm-5-3-flash.capabilities]
 supports-tool-choice = false
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe,
+# 2026-08-29; same contract as the deepseek rows above). thinking-control-format
+# above is the request axis only; without this line the response axis resolves
+# to reading no field and the reasoning is discarded. Mirrors the overlay row
+# (config/agent-core-models-overlay.toml, glm-5.3-flash).
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
 supports-multimodal-inputs = true
 

@@ -446,6 +446,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
+               ; isolated_home = None
                ; model = exec.model
                ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None

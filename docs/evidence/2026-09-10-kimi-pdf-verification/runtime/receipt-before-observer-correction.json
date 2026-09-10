@@ -1,0 +1,63 @@
+{
+  "scope": "actual Kimi PDF semantic review; synthetic producer submission only, unmodified real verifier responses",
+  "status": "observation_required",
+  "harness_sha256": "40625c757f2b0b4cd0426f6594c65c2be3091c67d8c5f6d93e637124d993c06f",
+  "expected_commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+  "base_path": "/private/tmp/masc-pdf-kimi-runtime-4a/base",
+  "port": 18946,
+  "server_pid": 22068,
+  "manifest": {
+    "commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "a44c69c2cb9788817381bc417ec4a789f493038f076d60b6356d4c7205102261",
+      "masc_tui.exe": "d9f4f05644f9d144f5efbdba5a6fd0577e7fdedbf752876c3b74f4a47a351358",
+      "masc_browser_host.exe": "e24029332ccc66759cfdb35fc2746dc8dbb197af10fb854f8a217bcf4f8c8230"
+    }
+  },
+  "source_receipt": {
+    "container": "a193b2f5144a",
+    "root": "/home/keeper/playground/memory-guide-proof",
+    "files": [
+      {
+        "relative": "memory_proposal_guide.pdf",
+        "bytes": 136937,
+        "sha256": "bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86"
+      },
+      {
+        "relative": "verify_summary.txt",
+        "bytes": 6115,
+        "sha256": "25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1"
+      },
+      {
+        "relative": "renders/page1.png",
+        "bytes": 166776,
+        "sha256": "cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af"
+      },
+      {
+        "relative": "renders/page2.png",
+        "bytes": 190109,
+        "sha256": "b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2"
+      },
+      {
+        "relative": "renders/page3.png",
+        "bytes": 134793,
+        "sha256": "38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d"
+      }
+    ]
+  },
+  "criteria": [
+    "PDF 정확히 3페이지",
+    "본문과 흐름도 모든 한글이 누락 glyph 없이 읽힘",
+    "텍스트 겹침과 잘림 없음",
+    "synthetic 예시와 실제 검증의 구분 유지"
+  ],
+  "upstream": "https://api.kimi.com/coding/v1/chat/completions",
+  "verifier_runtime": "kimi_coding.kimi-for-coding",
+  "verifier_model": "kimi-for-coding",
+  "operation_id": "kmsg-d88421644c25a0079fceb3f3b3e0cd0c",
+  "error": "",
+  "action": "preserve_server_and_provider_observe_same_operation"
+}

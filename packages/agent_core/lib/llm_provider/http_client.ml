@@ -1060,19 +1060,6 @@ let%test "timeout_phase_of_stream_idle_state: Awaiting_first_* -> First_token" =
   && timeout_phase_of_stream_idle_state Awaiting_first_delta = First_token
 ;;
 
-(** Detect errors caused by local resource exhaustion (port/FD limits).
-    Cascading to another provider cannot help — the local machine is
-    the bottleneck, not the remote server. *)
-let is_local_resource_exhaustion = function
-  | NetworkError { kind = Local_resource_exhaustion; _ } -> true
-  | TimeoutError _ -> false
-  | AcceptRejected _ -> false
-  | HttpError _ -> false
-  | NetworkError _ -> false
-  | ProviderTerminal _ -> false
-  | ProviderFailure _ -> false
-;;
-
 (* ── Retry-After header parsing (RFC 9110 S10.2.3) ────────── *)
 
 let all_digits s = String.length s > 0 && String.for_all (fun c -> c >= '0' && c <= '9') s
@@ -3284,64 +3271,6 @@ let%test "oversized response is typed without draining" =
       | AcceptRejected _
       | ProviderTerminal _
       | ProviderFailure _ ) -> false
-;;
-
-(* ── is_local_resource_exhaustion tests ──────────────── *)
-
-let%test "resource exhaustion: EADDRNOTAVAIL via Eio" =
-  is_local_resource_exhaustion
-    (NetworkError
-       { message =
-           "Eio.Io Unix_error (Can't assign requested address, \"connect\", \"\"), \
-            connecting to tcp:128.14.69.121:443"
-       ; kind = Local_resource_exhaustion
-       })
-;;
-
-let%test "resource exhaustion: too many open files" =
-  is_local_resource_exhaustion
-    (NetworkError { message = "Too many open files"; kind = Local_resource_exhaustion })
-;;
-
-let%test "resource exhaustion: EMFILE constant" =
-  is_local_resource_exhaustion
-    (NetworkError
-       { message = "Unix.Unix_error(Unix.EMFILE, \"socket\", \"\")"
-       ; kind = Local_resource_exhaustion
-       })
-;;
-
-let%test "resource exhaustion: ENOBUFS" =
-  is_local_resource_exhaustion
-    (NetworkError
-       { message = "No buffer space available"; kind = Local_resource_exhaustion })
-;;
-
-let%test "resource exhaustion: ENFILE constant" =
-  is_local_resource_exhaustion
-    (NetworkError
-       { message = "Unix.Unix_error(Unix.ENFILE, \"socket\", \"\")"
-       ; kind = Local_resource_exhaustion
-       })
-;;
-
-let%test "resource exhaustion: normal connection refused is not" =
-  not
-    (is_local_resource_exhaustion
-       (NetworkError { message = "Connection refused"; kind = Connection_refused }))
-;;
-
-let%test "resource exhaustion: HTTP error is not" =
-  not
-    (is_local_resource_exhaustion
-       (HttpError { code = 500; body = "internal"; retry_after_header = None }))
-;;
-
-let%test "resource exhaustion: DNS failure is not" =
-  not
-    (is_local_resource_exhaustion
-       (NetworkError
-          { message = "failed to resolve hostname: example.com"; kind = Dns_failure }))
 ;;
 
 (* ── typed Eio classification tests ───────────────────── *)

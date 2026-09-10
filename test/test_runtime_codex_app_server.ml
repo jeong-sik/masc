@@ -129,7 +129,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
@@ -163,6 +163,16 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
   read_request ();
+  let remaining_lines =
+    if inject_items then (
+      (* Acknowledge thread/inject_items before reading/capturing turn/start.
+         Sending all replies up front lets the host finish before the fixture
+         has observed the request whose exact bytes the test asserts. *)
+      output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 3) ^ "\n");
+      read_request ();
+      drop 4 lines)
+    else drop 3 lines
+  in
   List.iteri
     (fun index line ->
        if index >= terminal_line_delay_start_index
@@ -172,7 +182,7 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            terminal_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
-    (drop 3 lines);
+    remaining_lines;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     before_final_stdin_drain_s;
@@ -183,11 +193,12 @@ let fixture_script ?(close_before_turn = false) ?capture_path ?initial_line_dela
   path
 ;;
 
-let with_fixture ?close_before_turn ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?before_final_stdin_drain_s lines f =
   let path =
     fixture_script
       ?close_before_turn
+      ?inject_items
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
@@ -233,7 +244,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -244,6 +255,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = [])
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; isolated_home
       ; native
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
@@ -479,7 +491,7 @@ let test_developer_context_preserves_authority_and_history () =
   List.iter (fun (thread_mode, expected_roles) ->
     let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-      with_fixture ~capture_path
+      with_fixture ~capture_path ~inject_items:true
         [ init_result; account_chatgpt; thread_result
         ; {|{"id":4,"result":{}}|}
         ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
@@ -628,7 +640,7 @@ let test_chatgpt_subscription_turn () =
         check string "thread" "thread-1" result.thread_id;
         check string "turn" "turn-1" result.turn_id;
         check string "model" "gpt-fixture" result.model;
-        check string "plan" "pro" result.subscription.plan_type;
+        check (option string) "plan" (Some "pro") (match result.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> Some plan_type | _ -> None);
         check bool "new thread" false result.resumed)
 ;;
 
@@ -796,7 +808,7 @@ let test_subscription_probe_stops_before_thread () =
       match outcome with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok probe ->
-        check string "plan" "pro" probe.subscription.plan_type;
+        check (option string) "plan" (Some "pro") (match probe.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> Some plan_type | _ -> None);
         check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
 ;;
 
@@ -946,17 +958,22 @@ let test_thread_resume_rejects_identity_mismatch () =
        | Ok _ -> fail "thread/resume admitted a different returned thread id")
 ;;
 
-let test_api_key_account_is_rejected () =
-  let api_key_account =
-    {|{"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}}|}
-  in
-  with_fixture
-    [ init_result; api_key_account; thread_result; turn_result; item_completed; turn_completed ]
-    (fun path ->
-      match run_fixture path with
-      | Error (Runtime_codex_app_server.Subscription_required _) -> ()
-      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> fail "API-key account incorrectly admitted as subscription")
+let test_supported_account_modes () =
+  List.iter (fun (account, requires_auth, expected) ->
+    let account_result = Yojson.Safe.to_string (`Assoc
+      [ "id", `Int 2; "result", `Assoc
+        [ "account", account; "requiresOpenaiAuth", `Bool requires_auth ] ]) in
+    with_fixture
+      [ init_result; account_result; thread_result; turn_result; item_completed; turn_completed ]
+      (fun path -> match run_fixture path with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok turn ->
+          check string "authentication" expected
+            (Runtime_codex_app_server.authentication_to_string turn.subscription);
+          check string "actual turn completed" "MASC_SUBSCRIPTION_OK" turn.text))
+    [ `Assoc [ "type", `String "apiKey" ], true, "api_key"
+    ; `Null, false, "provider_managed"
+    ; `Assoc [ "type", `String "amazonBedrock" ], true, "amazon_bedrock" ]
 ;;
 
 let test_malformed_json_fails_closed () =
@@ -1999,6 +2016,76 @@ let test_child_environment_is_allowlisted () =
                  | Error error ->
                    fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> ())))
+;;
+
+let check_declared_provider_environment ~relative =
+  let home = Filename.temp_file ?temp_dir:(if relative then Some "." else None) "codex-auth-home-" "" in
+  let expected_home = if relative then Filename.concat (Sys.getcwd ()) home else home in
+  Sys.remove home; Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let bindings = [ "CODEX_HOME", home; "MASC_FIXTURE_PROVIDER_KEY", "fixture-key";
+    "MASC_FIXTURE_PROVIDER_HEADER", "fixture-header";
+    "MASC_CODEX_SECRET_CANARY", "not-declared" ] in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings in
+  List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (key, value) -> Unix.putenv key (Option.value value ~default:"")) previous;
+    if Sys.file_exists config_path then Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out config_path in
+    output_string output "[model_providers.fixture]\nenv_key = \"MASC_FIXTURE_PROVIDER_KEY\"\nenv_http_headers = { Authorization = \"MASC_FIXTURE_PROVIDER_HEADER\" }\n";
+    close_out output;
+    with_fixture [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "codex-auth-environment-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote expected_home ^ " ] || exit 70\n");
+          output_string output "[ \"$MASC_FIXTURE_PROVIDER_KEY\" = fixture-key ] || exit 71\n";
+          output_string output "[ \"$MASC_FIXTURE_PROVIDER_HEADER\" = fixture-header ] || exit 72\n";
+          output_string output "[ \"${MASC_CODEX_SECRET_CANARY+x}\" != x ] || exit 73\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output; Unix.chmod wrapper 0o700;
+          match run_fixture wrapper with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok turn -> check string "turn completed" "MASC_SUBSCRIPTION_OK" turn.text));
+    let output = open_out config_path in
+    output_string output "[model_providers.fixture]\nenv_key = 42\n"; close_out output;
+    match run_fixture "/not/spawned/invalid-provider-config" with
+    | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ -> fail "malformed credential declaration admitted")
+;;
+
+let test_declared_provider_environment () =
+  check_declared_provider_environment ~relative:false;
+  check_declared_provider_environment ~relative:true
+;;
+
+let test_readiness_home_overrides_inherited_home () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-isolated-wrapper-" ".sh" in
+      let isolated_home = Filename.temp_file "masc-private-readiness-home-" "" in
+      Sys.remove isolated_home;
+      Unix.mkdir isolated_home 0o700;
+      let private_config = Filename.concat isolated_home "config.toml" in
+      let config_output = open_out private_config in
+      output_string config_output "[mcp_servers.dangerous]\nenabled = false\n";
+      close_out config_output;
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper; Sys.remove private_config; Unix.rmdir isolated_home) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\n";
+        output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote isolated_home ^ " ] || exit 73\n");
+        output_string output "case \"$*\" in *'mcp_servers={\"dangerous\"={enabled=false}}'*) ;; *) exit 74;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        match run_fixture ~isolated_home wrapper with
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+        | Ok _ -> ()))
 ;;
 
 let write_fixture_file path content =
@@ -4030,7 +4117,7 @@ let test_live_chatgpt_subscription () =
     | Ok result ->
       check string "live response" "MASC_SUBSCRIPTION_OK" result.text;
       check bool "subscription plan is present" true
-        (String.trim result.subscription.plan_type <> "")
+        (match result.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> String.trim plan_type <> "" | _ -> false)
 ;;
 
 let test_live_dynamic_tool_subscription () =
@@ -4410,10 +4497,15 @@ let () =
             `Quick
             test_native_full_names_the_workspace_profile
         ; test_case
+            "readiness private home overrides inherited home"
+            `Quick
+            test_readiness_home_overrides_inherited_home
+        ; test_case
             "child environment is allowlisted"
             `Quick
             test_child_environment_is_allowlisted
-        ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
+        ; test_case "declared provider environment only" `Quick test_declared_provider_environment
+        ; test_case "supported account modes complete turns" `Quick test_supported_account_modes
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case
             "duplicate object keys fail closed"

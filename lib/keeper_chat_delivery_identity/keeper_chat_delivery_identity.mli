@@ -11,6 +11,7 @@ end
 
 type delivery_key =
   | Operation of Request_id.t
+  | Operation_checkpoint of { operation_id : Request_id.t; checkpoint : Keeper_checkpoint_ref.t }
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t

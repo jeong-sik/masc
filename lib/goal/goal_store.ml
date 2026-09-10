@@ -209,9 +209,12 @@ and goal_of_yojson = function
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 
+let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
+
 type rollup = {
   active_count : int;
   verifying_count : int;
+  awaiting_confirmation_count : int;
   done_count : int;
   dropped_count : int;
 }
@@ -434,12 +437,6 @@ let update_state config f =
 
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
-
-let get_goal_result config ~goal_id =
-  let* json = Workspace_utils.read_json_result config (goals_path config) in
-  let* state = decode_state_result config json in
-  Ok (find_goal state.goals goal_id)
-
 let transact_goal config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let* json = Workspace_utils.read_json_result config (goals_path config) in
@@ -623,7 +620,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     if not criterion_changed then next_goal
                     else
                       let phase = match next_goal.phase with
-                        | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
+                        | Goal_phase.Awaiting_confirmation | Goal_phase.Verifying | Goal_phase.Completed -> Goal_phase.Executing
                         | Goal_phase.Executing | Goal_phase.Dropped as phase -> phase
                       in
                       { next_goal with criterion_revision = Random_id.hex ~bytes:16;
@@ -697,6 +694,7 @@ let compute_rollup goals =
   {
     active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
     verifying_count = count (fun goal -> goal.phase = Goal_phase.Verifying);
+    awaiting_confirmation_count = count (fun goal -> goal.phase = Goal_phase.Awaiting_confirmation);
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }

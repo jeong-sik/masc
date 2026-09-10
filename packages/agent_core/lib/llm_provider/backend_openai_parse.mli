@@ -33,11 +33,20 @@ val parse_error_to_string : parse_error -> string
     on API error; [Error (Empty_completion _)] when the completion has no
     thinking/text/tool_calls (agent-core boundary). Blank text WITH tool_calls stays [Ok]
     (content is non-empty). Use when the caller already holds the parsed JSON to
-    avoid re-parsing. *)
+    avoid re-parsing.
+
+    [content_inline_reasoning] is the catalog-declared contract for reasoning
+    embedded in the content channel; [Think_tags] splits [<think>] markup out of
+    [message.content] into a [Thinking] block, while the default
+    [No_content_inline_reasoning] keeps [content] byte-identical in [Text]. *)
 val parse_openai_response_result_json
-  :  Yojson.Safe.t
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> Yojson.Safe.t
   -> (Types.api_response, parse_error) result
 
 (** Parse an OpenAI-compatible JSON response. See
     {!parse_openai_response_result_json} for the [parse_error] contract. *)
-val parse_openai_response_result : string -> (Types.api_response, parse_error) result
+val parse_openai_response_result
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> string
+  -> (Types.api_response, parse_error) result

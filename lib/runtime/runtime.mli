@@ -572,10 +572,9 @@ val max_output_tokens_of_runtime_id : string -> int option
     default. *)
 
 val thinking_support_of_runtime_id : string -> bool option
-(** [thinking-support] capability of the model bound to runtime [id], or [None]
-    when the id is not configured (e.g. before {!init_default}).  Consumed by
-    {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
-    runtime.toml SSOT. *)
+(** Explicit [thinking-support] policy for the runtime's model. [None] means
+    the field is absent or the runtime is not configured. Consumed by
+    {!Runtime_inference.for_runtime}; absence must not become a disable request. *)
 
 val temperature_of_runtime_id : string -> float option
 (** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)
@@ -771,12 +770,19 @@ val set_runtime_default :
 
 val set_first_run_runtime :
   ?runtime_config_path:string ->
+  ?fallback_runtime_ids:string list ->
+  ?bind_imp:bool ->
   runtime_id:string ->
   unit ->
   (config_commit_receipt, string) result
 (** Atomically select the default runtime and bind the librarian, Board attention,
     Host Gate judge, and verifier exact-output lanes to that same runtime.
-    HTTP runtimes use catalog slots; official clients use CLI slots. Intended
+    The declared lane named after the primary runtime contains that runtime followed
+    by [fallback_runtime_ids], in order. Exact-output lanes remain primary-only:
+    HTTP runtimes use catalog slots; official clients use CLI slots. All candidates
+    must be distinct, enabled, materialized runtime IDs. Keeper assignments are
+    preserved unless [bind_imp] explicitly selects this lane for imp (default false).
+    Other Keeper assignments are always preserved. Intended
     for an explicit first-install setup action, since existing lane choices
     are replaced. Validation failures leave the configuration unchanged. *)
 

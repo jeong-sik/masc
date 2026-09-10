@@ -108,6 +108,7 @@ type runtime_handler =
   | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
+  | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
@@ -143,6 +144,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -236,6 +238,7 @@ let runtime_handler_to_string = function
   | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
   | Tool_artifact_read -> "tool_artifact_read"
+  | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
@@ -271,6 +274,7 @@ let runtime_handler_to_string = function
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_masc_fusion_decision -> "tool_masc_fusion_decision"
   | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
   | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
@@ -455,6 +459,7 @@ let descriptor
       | Tool_capability_search
       | Tool_context_status
       | Tool_artifact_read
+      | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
       | Tool_library_read
@@ -485,6 +490,7 @@ let descriptor
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
+      | Tool_masc_fusion_decision
       | Tool_masc_file_dispatch
       | Tool_masc_library_dispatch
       | Tool_masc_local_runtime_dispatch
@@ -651,6 +657,101 @@ let browser_interact_output_schema = `Assoc ["type",`String "object";
   "required",`List (List.map (fun key -> `String key) ["tabId";"url";"urlBefore";"action"]);
   "additionalProperties",`Bool true]
 
+(* [object_output_schema] sits ahead of [public_descriptors] so the
+   filesystem tool descriptors can name their schemas; the schemas for tools
+   declared later in this file stay next to those declarations. *)
+let object_output_schema ~properties ~required =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun name -> `String name) required)
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+(* Producers: Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+   [payload_of_slice] and handle_owned_read_file_with_outcome
+   (lib/keeper/keeper_tool_filesystem_runtime.ml); the owned lane serves
+   verification_authority_tools.ml, not composition, and always carries
+   [file_bytes] but never [via]. On the dispatch lane [via] marks a
+   backend-routed read and is absent on the host lane; [next_offset] appears
+   only on a truncated window; [file_bytes] only on the host lane;
+   [last_line_partial] only when the window ends mid-line. *)
+let read_file_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "bytes", `Assoc [ "type", `String "integer" ]
+      ; "truncated", `Assoc [ "type", `String "boolean" ]
+      ; "offset", `Assoc [ "type", `String "integer" ]
+      ; "returned_lines", `Assoc [ "type", `String "integer" ]
+      ; "content", `Assoc [ "type", `String "string" ]
+      ; "next_offset", `Assoc [ "type", `String "integer" ]
+      ; "last_line_partial", `Assoc [ "type", `String "boolean" ]
+      ; "file_bytes", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "ok"; "path"; "bytes"; "truncated"; "offset"; "returned_lines"; "content" ]
+;;
+
+(* Producer: Keeper_workspace_read_ops.try_handle_with_outcome, rg lane —
+   the sandbox-routed and host argv branches build the same envelope
+   (lib/keeper/keeper_workspace_read_ops.ml). [error_detail] is failure-side
+   only; composition validation sees Completed nodes, where it is absent. It
+   is declared so a composition may reference /error_detail — not declaring it
+   would reject such a node at plan-create time. *)
+let search_files_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "op", `Assoc [ "type", `String "string" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "pattern", `Assoc [ "type", `String "string" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ; ( "status"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ "kind", `Assoc [ "type", `String "string" ]
+                  ; "code", `Assoc [ "type", `String "integer" ]
+                  ; "signal", `Assoc [ "type", `String "integer" ]
+                  ] )
+            ; "required", `List [ `String "kind" ]
+            ; "additionalProperties", `Bool false
+            ] )
+      ; ( "matches"
+        , `Assoc
+            [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ] )
+      ; "error_detail", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "ok"; "op"; "path"; "pattern"; "via"; "status"; "matches" ]
+;;
+
+(* Producer: Keeper_tool_filesystem_runtime content-write (overwrite/append)
+   and patch-write [Write_succeeded] sites, and
+   Keeper_tool_filesystem_remote_write.success_payload for endpoint-owned
+   trees. [via] is absent on the host lane; the patch operation fields appear
+   only under mode "patch". Shared by tool_write_file and tool_edit_file,
+   which share one handler. *)
+let file_write_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "mode", `Assoc [ "type", `String "string" ]
+      ; "bytes_written", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ; "occurrences", `Assoc [ "type", `String "integer" ]
+      ; "replace_all", `Assoc [ "type", `String "boolean" ]
+      ; "insert_before_line", `Assoc [ "type", `String "integer" ]
+      ; "inserted", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
+;;
+
 let public_descriptors =
   [ (descriptor
       ~capability_identity:Internal_name_identity
@@ -710,6 +811,7 @@ let public_descriptors =
            ; validation = Validate_before_and_after_translation
            })
       ()
+      |> with_composable_output (Json_output { schema = search_files_output_schema })
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
@@ -739,6 +841,7 @@ let public_descriptors =
            ; validation = Validate_before_then_runtime_handler
            })
       ()
+      |> with_composable_output (Json_output { schema = read_file_output_schema })
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
@@ -764,6 +867,7 @@ let public_descriptors =
            ; validation = Validate_before_then_runtime_handler
            })
       ()
+      |> with_composable_output (Json_output { schema = file_write_output_schema })
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
@@ -789,6 +893,7 @@ let public_descriptors =
            ; validation = Validate_before_then_runtime_handler
            })
       ()
+      |> with_composable_output (Json_output { schema = file_write_output_schema })
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
@@ -1099,6 +1204,10 @@ let surface_read_schema = shard_surface_schema "keeper_surface_read"
 let surface_post_schema = shard_surface_schema "keeper_surface_post"
 let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
+let workspace_memory_schema_source, workspace_memory_schema =
+  base_schema_declared "keeper_workspace_memory_read"
+;;
+
 let memory_search_schema_source, memory_search_schema =
   base_schema_declared "keeper_memory_search"
 ;;
@@ -1240,15 +1349,6 @@ let cluster_descriptor ?(polling_read = false) ?ordinary_execution_mode
     ()
 ;;
 
-let object_output_schema ~properties ~required =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc properties
-    ; "required", `List (List.map (fun name -> `String name) required)
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 let board_stats_output_schema =
   object_output_schema
     ~properties:
@@ -1296,8 +1396,9 @@ let msx_screen_output_schema =
       ; "bytes", integer_schema
       ]
     ~required:
+      (* [sprites] rides the response only when the call asked for it. *)
       [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
-      ; "screen_text"; "screen_view"; "tiles"; "sprites"; "artifact"
+      ; "screen_text"; "screen_view"; "tiles"; "artifact"
       ; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
@@ -1512,11 +1613,12 @@ let goal_list_output_schema =
             ~properties:
               [ "active_count", `Assoc [ "type", `String "integer" ]
               ; "verifying_count", `Assoc [ "type", `String "integer" ]
+              ; "awaiting_confirmation_count", `Assoc [ "type", `String "integer" ]
               ; "done_count", `Assoc [ "type", `String "integer" ]
               ; "dropped_count", `Assoc [ "type", `String "integer" ]
               ]
             ~required:
-              [ "active_count"; "verifying_count"; "done_count"
+              [ "active_count"; "verifying_count"; "awaiting_confirmation_count"; "done_count"
               ; "dropped_count" ] )
       ]
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
@@ -2227,6 +2329,18 @@ let internal_descriptors : t list =
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:workspace_memory_schema_source
+      ~id:"keeper.workspace.memory.read"
+      ~name:"keeper_workspace_memory_read"
+      ~description:workspace_memory_schema.description
+      ~input_schema:workspace_memory_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_workspace_memory_read
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_search_schema_source
       ~id:"keeper.memory.search"
       ~name:"keeper_memory_search"
@@ -2356,6 +2470,17 @@ let internal_descriptors : t list =
       (* The explicit [Internal_name] projection makes Fusion available. *)
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.fusion.decision"
+      ~name:Keeper_runtime_schemas_toml.fusion_decision.name
+      ~description:Keeper_runtime_schemas_toml.fusion_decision.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_decision.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_fusion_decision
       ()
     (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
   ; in_process_descriptor_with_schema_source
@@ -2625,6 +2750,8 @@ let internal_descriptors : t list =
      |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
   ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
   ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
+  ; masc_misc_descriptor "msx_step_until_change" "masc_msx_step_until_change"
+      ~readonly:false
   ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
   ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"

@@ -456,6 +456,39 @@ let run_keeper_invocation_turn_admitted_inner
            ~class_:Tool_result.Runtime_failure
            (Agent_core.Error.to_string err)
        | Ok (profile_defaults, meta) ->
+            let base_dir =
+              let root = session_base_dir ctx.config in
+              match channel_session_key with
+              | Some key when direct_reply ->
+                let d = Filename.concat (Filename.concat root "channels") key in
+                let (_ : string) = Keeper_fs.ensure_dir d in
+                d
+              | _ -> root
+            in
+      let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let session_dir = Filename.concat base_dir session_id in
+      (match (match Keeper_direct_gate_continuation.load
+          ~config:ctx.config ~meta ~operation_id ~session_dir with
+        | Error _ as error -> error
+        | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Gate_continuation admission))
+        | Ok None -> Keeper_direct_runtime_continuation.load
+            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+            ~session_dir ~session_id
+            |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission))) with
+       | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+       | Ok direct_resume ->
+      let deferred_lane = ref None in
+      let gate_ids = ref [] in
+      let runtime_resume = match direct_resume with
+        | Some (Keeper_agent_run.Runtime_continuation admission) -> Some admission
+        | Some (Keeper_agent_run.Gate_continuation _) | None -> None in
+      let gate_resume = match direct_resume with
+        | Some (Keeper_agent_run.Gate_continuation admission) -> Some admission
+        | Some (Keeper_agent_run.Runtime_continuation _) | None -> None in
+      let resume_lane = match runtime_resume, gate_resume with
+        | Some admission, _ -> Some (Keeper_direct_runtime_continuation.lane admission)
+        | None, Some admission -> Keeper_direct_gate_continuation.runtime_lane admission
+        | None, None -> None in
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
@@ -466,6 +499,7 @@ let run_keeper_invocation_turn_admitted_inner
          reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
       let user_blocks =
+        if Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~mode:Keeper_vision_ingest.Eager
@@ -493,7 +527,10 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      match resolve_turn_runtime_id meta with
+      let selected_runtime = match resume_lane with
+        | None -> resolve_turn_runtime_id meta
+        | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id in
+      match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
         tool_result_error ~class_:Tool_result.Runtime_failure ("" ^ e)
@@ -521,15 +558,6 @@ let run_keeper_invocation_turn_admitted_inner
 	           Progress.stop_tracking turn_task_id;
 	           tool_result_error ~class_:Tool_result.Runtime_failure (Agent_core.Error.to_string error)
 	         | Ok initial_execution ->
-            let base_dir =
-              let root = session_base_dir ctx.config in
-              match channel_session_key with
-              | Some key when direct_reply ->
-                let d = Filename.concat (Filename.concat root "channels") key in
-                let (_ : string) = Keeper_fs.ensure_dir d in
-                d
-              | _ -> root
-            in
             let live_worktree_change = None in
             (* The direct-message lane used to construct its prompt before it
                read the held task. It still observed the task state later for
@@ -654,6 +682,14 @@ let run_keeper_invocation_turn_admitted_inner
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
 	              Inference_utils.timed (fun () ->
+                      let consume = match runtime_resume with
+                        | None -> Ok ()
+                        | Some admission -> Keeper_direct_runtime_continuation.consume
+                            ~base_path:ctx.config.base_path ~keeper_name:meta.name
+                            ~operation_id admission in
+                      match consume with
+                      | Error detail -> Error (Agent_core.Error.Internal detail)
+                      | Ok () ->
 	                  match Eio_context.get_clock () with
 	                  | Error msg -> Error (Agent_core.Error.Internal msg)
 	                  | Ok clock ->
@@ -771,6 +807,15 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~degraded_retry_runtime ~fallback_reason
 		                                ~runtime_rotation_attempts ->
 			                              Keeper_agent_run.run_turn
+                                      ?direct_resume
+                                      ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
+                                      ~on_gate_deferred:(fun approval_id -> gate_ids := approval_id :: !gate_ids)
+                                      ?on_gate_evidence_admitted:(Option.map (fun admission checkpoint ->
+                                        Keeper_direct_gate_continuation.discharge ~config:ctx.config
+                                          ~keeper_name:meta.name ~operation_id ~user_message:message
+                                          ~checkpoint admission) gate_resume)
+                                      ?deferred_runtime_lane:resume_lane
+                                      ~on_runtime_retry_deferred:(fun lane -> deferred_lane := Some lane)
 			                                ~config:ctx.config
 			                                ~meta
 			                                ~publication_recovery
@@ -801,7 +846,52 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
+                let () = match run_result, gate_resume with
+                  | Ok _, Some admission ->
+                    (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
+                     | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+                     | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+                       Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
+                     | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
+                  | Error _, _ | Ok _, None -> () in
+                let gate_wait = Keeper_direct_gate_continuation.suspend
+                      ?runtime_lane:!deferred_lane
+                      ~config:ctx.config ~keeper_name:meta.name ~operation_id
+                      ~session_dir ~session_id ~approval_ids:!gate_ids () in
+                match gate_wait with
+                | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+                | Ok true ->
+                  let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta with
+                    | Ok () -> ()
+                    | Error detail -> Log.Keeper.warn "direct Gate reconciliation: %s" detail in
+                  restart_keepalive_after_message_turn ctx meta;
+                  Progress.stop_tracking turn_task_id;
+                  Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                    ~start_time:(Time_compat.now ())
+                    ~data:(`Assoc ["reply", `String "";
+                      Keeper_turn_outcome.wire_key, `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
+                      Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
+                      "tool_call_evidence", `List []]) ()
+                | Ok false ->
 		            match run_result with
+            | Error _ when Option.is_some !deferred_lane ->
+              let deferred = match !deferred_lane with
+                | None -> Error "direct runtime continuation was not captured"
+                | Some lane -> Keeper_direct_runtime_continuation.defer
+                    ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                    ~session_dir ~session_id lane in
+              Progress.stop_tracking turn_task_id;
+              (match deferred with
+               | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+               | Ok () ->
+                 Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                   ~start_time:(Time_compat.now ())
+                   ~data:(`Assoc [
+                     "reply", `String "";
+                     Keeper_turn_outcome.wire_key,
+                       `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
+                     Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
+                     "tool_call_evidence", `List []]) ())
             | Error err ->
               let e_str = Agent_core.Error.to_string err in
               let user_message = Keeper_agent_error.user_message_of_core_error err in
@@ -907,7 +997,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               tool_result_ok_data reply_json
 
-))))
+)))))
 
 (* Turn-observation boundary for the chat lane.
 

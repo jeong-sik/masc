@@ -350,6 +350,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          , `String
              (Keeper_types_profile_sandbox.sandbox_profile_to_string
                 m.sandbox_profile) );
+         ("sandbox_image", Json_util.string_opt_to_json m.sandbox_image);
          ( "network_mode"
          , `String
              (Keeper_types_profile_sandbox.network_mode_to_string

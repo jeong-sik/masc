@@ -245,7 +245,11 @@ let glm_parse_error message =
     }
 ;;
 
-let parse_response_result body : (api_response, Backend_openai_parse.parse_error) result =
+let parse_response_result
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      body
+  : (api_response, Backend_openai_parse.parse_error) result
+  =
   (* Parse the body once; a malformed body raises glm_parse_error (matching
      the prior path where check_glm_error swallowed the parse error as None
      and then parse_openai_response_result re-raised it). The consumers below
@@ -269,7 +273,11 @@ let parse_response_result body : (api_response, Backend_openai_parse.parse_error
   | Some err -> raise (Glm_api_error err)
   | None ->
     (try
-       match Backend_openai_parse.parse_openai_response_result_json json with
+       match
+         Backend_openai_parse.parse_openai_response_result_json
+           ~content_inline_reasoning
+           json
+       with
        | Ok resp -> Ok (extract_reasoning_content_json resp json)
        | Error _ as typed -> typed
      with
@@ -283,8 +291,8 @@ let parse_response_result body : (api_response, Backend_openai_parse.parse_error
    pre-#2621 "empty assistant turn" message instead of surfacing its typed
    [stop_reason]). Production paths use [parse_response_result] directly so an
    overflow empty turn's [stop_reason] reaches the overflow classifier. *)
-let parse_response body =
-  match parse_response_result body with
+let parse_response ?content_inline_reasoning body =
+  match parse_response_result ?content_inline_reasoning body with
   | Ok resp -> resp
   | Error (Backend_openai_parse.Provider_error msg) -> raise (glm_parse_error msg)
   | Error (Backend_openai_parse.Empty_completion empty_comp) ->

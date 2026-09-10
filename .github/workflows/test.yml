@@ -242,9 +242,9 @@ jobs:
           # as red for an image nothing here builds. The recipe lives in the
           # binary (Keeper_sandbox_image.dockerfile) so that `masc
           # sandbox-image` works on a host with no checkout; --print is how
-          # it is read without a checkout's copy going stale. Debian slim
-          # plus bash, ripgrep and git, so this is a short build, and it is
-          # shared by full and targeted lanes.
+          # it is read without a checkout's copy going stale. The general
+          # image includes repository and creative-document tools; its build
+          # is shared by full and targeted lanes.
           opam exec -- dune build --root . bin/main_eio.exe
           ./_build/default/bin/main_eio.exe sandbox-image --print \
             | docker build -t masc-sandbox:general -
@@ -424,6 +424,28 @@ jobs:
       # first root @runtest run on 2026-09-05 named its two hung suites and
       # lost every other verdict with it (#33200). Uploaded on every
       # outcome, since a red run is when the file is read.
+      - name: Exercise creative artifacts in the built Keeper image
+        run: |
+          mkdir -p "$RUNNER_TEMP/keeper-creative-proof"
+          chmod 0777 "$RUNNER_TEMP/keeper-creative-proof"
+          docker image inspect masc-sandbox:general --format '{{.Id}}' > "$RUNNER_TEMP/keeper-creative-image-id.txt"
+          docker run --rm --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --user 65532:65532 \
+            --tmpfs /tmp:rw,mode=1777 -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE/scripts:/proof:ro" \
+            -v "$RUNNER_TEMP/keeper-creative-proof:/out" \
+            masc-sandbox:general python3 /proof/verify-sandbox-creative-tools.py /out
+
+      - name: Upload creative artifact proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-creative-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/keeper-creative-proof
+            ${{ runner.temp }}/keeper-creative-image-id.txt
+          if-no-files-found: ignore
+
       - name: Upload the suite runner log
         if: always()
         uses: actions/upload-artifact@v7

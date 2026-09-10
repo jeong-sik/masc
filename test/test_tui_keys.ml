@@ -1062,7 +1062,12 @@ let planning_state () =
           [ planning_goal_row "g-1" "cut the frame budget"
           ; planning_goal_row "g-2" "paste follows the field"
           ]
-      ; pl_rollup = { pr_active = 2; pr_verifying = 0; pr_done = 0; pr_dropped = 0 }
+      ; pl_rollup = { pr_active = 2
+          ; pr_verifying = 0
+          ; pr_awaiting_confirmation = 0
+          ; pr_done = 0
+          ; pr_dropped = 0
+          }
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
           ; pb_cancelled = 0 }

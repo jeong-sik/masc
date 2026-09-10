@@ -1,0 +1,14 @@
+{
+  "type": "task_completion_verdict",
+  "from_status": "awaiting_verification",
+  "to_status": "in_progress",
+  "ts": "2026-09-10T00:02:51Z",
+  "task_id": "task-001",
+  "authority_kind": "system_llm_agent",
+  "authority_actor": "verifier_exact",
+  "producer": "image-producer",
+  "verification_id": "vrf-bead32b7fc6f2b0bfb0960e136b4d239",
+  "evaluator_runtime": "image_fixture.vision",
+  "verdict": "rejected",
+  "reason": "Synthetic image delivery mismatch."
+}

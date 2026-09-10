@@ -564,6 +564,78 @@ let test_reasoning_only_stays_thinking_and_never_reinjected_on_replay () =
     (String.trim content_str)
 ;;
 
+let test_parse_think_tags_split_into_thinking_and_text () =
+  (* Capability-gated inline-reasoning split (the glm/ollama-cloud sync leak):
+     when the resolved catalog contract is [Think_tags], a sync completion whose
+     [content] carries <think>...</think> parses to a [Thinking] block plus a
+     [Text] block holding exactly the post-tag answer. *)
+  let json =
+    response_json ~content:(`String "<think>internal monologue</think>Final answer") ()
+  in
+  let response =
+    match
+      Parse.parse_openai_response_result
+        ~content_inline_reasoning:Capabilities.Think_tags
+        (Yojson.Safe.to_string json)
+    with
+    | Ok r -> r
+    | Error msg ->
+      Alcotest.fail ("unexpected parse error: " ^ Parse.parse_error_to_string msg)
+  in
+  (match response.content with
+   | [ Thinking { content = thinking; signature = None }; Text text ] ->
+     check_string "tagged reasoning becomes a Thinking block" "internal monologue" thinking;
+     check_string "visible answer is exactly the post-tag text" "Final answer" text
+   | content ->
+     Alcotest.failf "expected [Thinking; Text], got %d blocks" (List.length content));
+  let visible_text =
+    response.content
+    |> List.filter_map (function
+         | Text text -> Some text
+         | _ -> None)
+    |> String.concat ""
+  in
+  check_bool
+    "assistant-visible text carries no reasoning"
+    false
+    (contains ~needle:"internal monologue" visible_text)
+;;
+
+let test_parse_unterminated_think_tag_stays_reasoning_only () =
+  (* A cut reply (unterminated <think>) is all reasoning and no visible text —
+     the same contract as the reasoning-only test above: reasoning must never
+     become visible [Text], and the reply is not an empty completion because
+     the [Thinking] block keeps content non-empty. *)
+  let json = response_json ~content:(`String "<think>internal monologue") () in
+  let response =
+    match
+      Parse.parse_openai_response_result
+        ~content_inline_reasoning:Capabilities.Think_tags
+        (Yojson.Safe.to_string json)
+    with
+    | Ok r -> r
+    | Error msg ->
+      Alcotest.fail ("unexpected parse error: " ^ Parse.parse_error_to_string msg)
+  in
+  match response.content with
+  | [ Thinking { content = thinking; signature = None } ] ->
+    check_string "unterminated tag content stays reasoning" "internal monologue" thinking
+  | content ->
+    Alcotest.failf "expected [Thinking] only, got %d blocks" (List.length content)
+;;
+
+let test_parse_think_tags_passthrough_without_capability () =
+  (* Default [No_content_inline_reasoning]: [content] passes through
+     byte-identical, tags included — no heuristic splitting on suspicion. *)
+  let raw = "<think>internal monologue</think>Final answer" in
+  let json = response_json ~content:(`String raw) () in
+  let response = parse_ok json in
+  match response.content with
+  | [ Text text ] -> check_string "content byte-identical without capability" raw text
+  | content ->
+    Alcotest.failf "expected [Text] only, got %d blocks" (List.length content)
+;;
+
 let test_content_parts_cover_modalities () =
   let parts =
     Serialize.openai_content_parts_of_blocks
@@ -2500,6 +2572,18 @@ let () =
             "reasoning-only stays Thinking and is never re-injected on replay"
             `Quick
             test_reasoning_only_stays_thinking_and_never_reinjected_on_replay
+        ; Alcotest.test_case
+            "think_tags capability splits inline reasoning out of content"
+            `Quick
+            test_parse_think_tags_split_into_thinking_and_text
+        ; Alcotest.test_case
+            "unterminated think tag stays reasoning-only"
+            `Quick
+            test_parse_unterminated_think_tag_stays_reasoning_only
+        ; Alcotest.test_case
+            "content is byte-identical without think_tags capability"
+            `Quick
+            test_parse_think_tags_passthrough_without_capability
         ; Alcotest.test_case
             "error default message"
             `Quick

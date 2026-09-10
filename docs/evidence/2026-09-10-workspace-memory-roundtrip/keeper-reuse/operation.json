@@ -1,0 +1,32 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "kmsg-6b7057abb90a24d2561b8d95f6e87fa3",
+  "sequence": "1",
+  "created_at": 1788984358.210845,
+  "execution_digest": "d322624a4989fe25d2df697f3e6f1ed1808388bdbc4eecf651dc035c672b4d78",
+  "source": {
+    "channel": "agent",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:memory-reader-proof"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v1",
+    "submitted_by": "roundtrip-integration",
+    "surface": {
+      "kind": "agent"
+    },
+    "thread_id": "keeper:memory-reader-proof",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Succeeded",
+  "completed_at": 1788984391.222446,
+  "outcome_ref": "trace-1788984267253-00000#2"
+}

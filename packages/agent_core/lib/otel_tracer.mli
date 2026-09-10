@@ -133,13 +133,8 @@ val create_instance_eio
 val inst_start_span : instance -> Tracing.span_attrs -> span
 
 val inst_end_span : instance -> span -> ok:bool -> unit
-val inst_add_event : instance -> span -> string -> unit
-val inst_add_attrs : instance -> span -> (string * string) list -> unit
-val inst_add_link : instance -> span -> trace_id:string -> span_id:string -> unit
 val inst_flush : instance -> span list
-val inst_reset : instance -> unit
 val inst_completed_count : instance -> int
-val inst_active_count : instance -> int
 val inst_current_span : instance -> span option
 val traceparent_of_span : ?sampled:bool -> span -> string
 

@@ -427,9 +427,23 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
          in
          result, admitted_evidence, fresh_serialization
        in
+       (* The mutation has to change something, or freezing the body proves
+          nothing. It used to change validity: a manual_budget row carrying a
+          thinking_budget became an error under always_adaptive. #34801 removed
+          budgets, so the mutation now changes the body instead --
+          always_adaptive omits the thinking field adaptive_default emits. That
+          difference is what makes the digest check below meaningful. *)
        (match fresh_serialization with
-        | Error _ -> ()
-        | Ok _ -> fail "catalog mutation did not invalidate fresh serialization");
+        | Error _ ->
+          fail "catalog mutation broke fresh serialization instead of changing it"
+        | Ok fresh ->
+          check
+            bool
+            "catalog mutation changes what a fresh serialization would send"
+            false
+            (String.equal
+               fresh.Request_wire_observer.body_sha256
+               admitted_evidence.Request_wire_observer.body_sha256));
        (match result with
         | Ok _ -> ()
         | Error _ -> fail "frozen admitted body was reserialized before dispatch");
@@ -620,7 +634,7 @@ let test_prepared_admission_resolves_catalog_context_limit () =
   let result, _captured =
     with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
     @@ fun ~sw ~net ~base_url ->
-    let cfg = { (config base_url) with model_id = "claude-sonnet-4-5" } in
+    let cfg = { (config base_url) with model_id = "claude-sonnet-5" } in
     let expected =
       Option.bind (Provider_config.capabilities_for_config_model cfg) (fun capabilities ->
         capabilities.Capabilities.max_context_tokens)

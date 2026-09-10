@@ -86,7 +86,7 @@ async function runExtension(context) {
       },
     },
   };
-  const extension = vm.createContext({ browser: api });
+  const extension = vm.createContext({ browser: api, setTimeout, clearTimeout });
   vm.runInContext(extensionSource, extension);
   return plain(await extension.pageElements({ tabId: 37 }));
 }

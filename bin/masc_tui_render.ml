@@ -4294,6 +4294,7 @@ let planning_phase_column =
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
   | Goal_phase.Verifying -> Theme.category Theme.Slot_2
+  | Goal_phase.Awaiting_confirmation -> Theme.warn ()
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -4318,10 +4319,11 @@ let planning_stage_rail (phase : Goal_phase.t) =
     planning_phase_color Goal_phase.Dropped
     ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
     ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
-  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed ->
+  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed ->
     String.concat arrow
       [ stop Goal_phase.Executing
       ; stop Goal_phase.Verifying
+      ; stop Goal_phase.Awaiting_confirmation
       ; stop Goal_phase.Completed
       ]
 ;;
@@ -4343,6 +4345,7 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
+  | Goal_phase.Awaiting_confirmation, _ -> (Theme.warn (), "proof passed - operator confirmation required via goal confirmation CLI")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -4521,8 +4524,11 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
+       (* Every phase counts, or the denominator drops the goals waiting on a
+          human and reports a completion share higher than the truth. *)
        let total_goals =
-         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying + p.pl_rollup.pr_done
+         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying
+         + p.pl_rollup.pr_awaiting_confirmation + p.pl_rollup.pr_done
          + p.pl_rollup.pr_dropped
        in
        let progress_pct =
@@ -4539,11 +4545,14 @@ let render_planning_list (state : state) =
        in
        let phase_counters =
          Printf.sprintf
-           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s✓ Done: %d%s  %s✕ Drop: %d%s"
+           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s◇ Conf: %d%s  %s✓ Done: %d%s  \
+            %s✕ Drop: %d%s"
            (planning_phase_color Goal_phase.Executing)
            p.pl_rollup.pr_active Ansi.reset
            (planning_phase_color Goal_phase.Verifying)
            p.pl_rollup.pr_verifying Ansi.reset
+           (planning_phase_color Goal_phase.Awaiting_confirmation)
+           p.pl_rollup.pr_awaiting_confirmation Ansi.reset
            (planning_phase_color Goal_phase.Completed)
            p.pl_rollup.pr_done Ansi.reset
            (planning_phase_color Goal_phase.Dropped)
@@ -4979,6 +4988,7 @@ let render_planning_detail (state : state)
           match row.pg_phase with
           | Goal_phase.Executing -> "[exec]"
           | Goal_phase.Verifying -> "[ver ]"
+          | Goal_phase.Awaiting_confirmation -> "[human]"
           | Goal_phase.Completed -> "[done]"
           | Goal_phase.Dropped -> "[drop]"
         in
@@ -8636,8 +8646,8 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started -> "RUNNING · ARGUMENTS STREAMING"
-  | Keeper_chat_transcript.Awaiting_result -> "RUNNING · AWAITING RESULT"
+  | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
+  | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Failed -> "FAILED"
   | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"
@@ -10421,8 +10431,14 @@ let render_keeper_message (state : state) =
             adjacent in the braille rotation, so the jump did not read as
             turning either. [activity_frame] is the counter that ticker
             advances, and stepping from it means one repaint, one frame. *)
-         let running_mark =
-           Masc_tui_answering.running_glyph ~frame:state.activity_frame
+         let running_mark, progress_heading =
+           match Keeper_chat_transcript.phase live with
+           | Keeper_chat_transcript.Waiting -> "○", "WAITING TO START"
+           | Working ->
+               Masc_tui_answering.running_glyph ~frame:state.activity_frame,
+               "IN PROGRESS"
+           | Stream_ended -> "○", "FINALIZING"
+           | Stream_failed _ -> "!", "REQUEST ERROR"
          in
          (* The age belongs to the progress row, which already ends with it
             (masc #29229 pins that a turn which never started still reports
@@ -10480,7 +10496,7 @@ let render_keeper_message (state : state) =
              (match kind with
               | Keeper_chat_transcript.Progress ->
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
+                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                      ^ " · " ^ text ^ queue_hint)
               | Keeper_chat_transcript.Attention ->

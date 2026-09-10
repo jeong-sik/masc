@@ -2,9 +2,11 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.35.1 설치 계약**입니다. 태그와 자산 제공 여부는
+이 문서는 **0.35.2 설치 계약**입니다. 태그와 자산 제공 여부는
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-아래 다운로드 명령은 `v0.35.1`과 같은 버전의 설치기를 선택합니다.
+아래 다운로드 명령은 `v0.35.2`과 같은 버전의 설치기를 선택합니다.
+
+0.35.1 설치기를 사용 중이라면 해당 태그의 문서를 참고하세요. 다중 선택은 0.35.2부터 지원합니다.
 
 ## 플랫폼과 준비물
 
@@ -43,7 +45,7 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 ## 설치
 
 ```bash
-TAG=v0.35.1
+TAG=v0.35.2
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -68,48 +70,40 @@ export PATH="$HOME/.local/bin:$PATH"
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 
-`--no-wizard`는 모델 선택을 건너뜁니다. `--provider <id>`는
-`runtime.toml`의 공급자 catalog에서 선택합니다. 마법사는 사용 가능한 모델 서버와
-CLI 인증 상태를 탐지하고 `[runtime].default`를 선택하며 API 키는 저장하지 않습니다.
-모델 설정은 CLI의 로컬 모델 목록이나 HTTP 서버의 `/models` 응답을 번호로 보여 줍니다.
-CLI 목록이 없으면 설치된 MASC 모델 catalog를 사용합니다. 번호를 선택하거나 정확한
-모델 ID를 입력하세요. 빈 입력으로 모델을 자동 선택하지 않으며, 목록에 있다는 사실이
-계정의 사용 권한을 보장하지는 않습니다. context window는 선택한 항목에서 자동으로
-채우고 출처를 표시합니다. Codex가 관측한 실제 context 한도가 있으면 catalog 값보다
-우선합니다. 한도를 알 수 없을 때만 문서나 서버 설정에 있는 토큰 수를 묻습니다.
-모델이 없어도 서버 설치와 상태 화면 사용은 가능합니다.
+`--no-wizard`는 모델 선택을 건너뜁니다. 자동화에서는 `--provider <id>`로
+기존 공급자를 선택합니다. 대화형 마법사는 여러 연결과 모델을 함께 고른 뒤 imp의
+기본 연결과 대체 순서를 선택합니다. API 키 값은 저장하지 않고 환경변수 이름만 사용합니다.
 
 ## 첫 설치 마법사
 
-마법사 메뉴에는 공급자 이름, 현재 탐지 상태, `--provider`에 쓸 ID가 함께
-나옵니다. 숫자로 선택하거나 Enter로 표시된 기본값을 선택합니다. 잘못된
-숫자는 다시 입력하고, 입력이 닫히면 선택을 취소합니다.
+**↑/↓로 이동하고 Space로 여러 항목을 선택한 뒤 Enter로 진행**합니다.
+하나를 고르는 화면에서는 Enter로 선택합니다. `q`로 돌아가거나 취소할 수 있습니다.
+커서 조작을 지원하지 않는 터미널은 번호를 표시하며, `1,3`처럼 여러 번호를 입력합니다.
+
+모델 목록은 CLI 캐시, HTTP 서버, 기존 연결, 설치된 catalog에서 읽습니다.
+목록에 있는 모델도 저장 전에 실제 응답과 무해한 도구 호출을 통과해야 합니다.
+실패하면 재시도, 해당 연결 제외, 다시 선택, 나중에 설정 중에서 고릅니다.
+모델을 추가해도 기존 연결은 그대로 남습니다.
 
 | 실행 상황 | 동작 |
 |---|---|
-| 터미널에서 첫 설치 | 공급자 메뉴를 표시하고 선택을 저장 |
-| 입력 파이프/자동화, 사용 가능한 출처가 하나 | 해당 출처를 선택 |
-| 입력 파이프/자동화, 사용 가능한 출처가 없거나 여러 개 | 자동 모드는 선택을 보류; `--wizard`를 강제했다면 `--provider` 요구 |
-| `--provider <id>` | 기존 작업 공간에서도 해당 공급자를 선택 |
-| `--no-wizard` | 모델 선택과 연결 검사를 생략; `--provider`와 함께 사용할 수 없음 |
-| 기존 설정이 있는 일반 업그레이드 | 기존 선택 보존; 다시 선택하려면 `--wizard` |
-
-설치한 태그의 스크립트로 다시 선택할 수 있습니다. 새 API 키는 서버가 시작되는
-shell에서 export하고, 이미 실행 중인 서버에는 자동 반영되지 않는다는 점을 확인합니다.
+| 터미널에서 첫 설치 | 여러 연결·모델 선택 후 실제 응답·도구 검사 |
+| 입력 파이프/자동화, 출처가 하나 | 해당 출처 선택; 연결 probe 결과 별도 표시 |
+| 입력 파이프/자동화, 출처가 없거나 여러 개 | 선택 보류; 강제 `--wizard`는 `--provider` 필요 |
+| `--provider <id>` | 기존 workspace에서도 지정 공급자 선택 |
+| `--no-wizard` | 모델 선택 생략; `--provider`와 함께 사용 불가 |
+| 기존 설정이 있는 일반 업그레이드 | 선택 보존; 다시 고르려면 `--wizard` |
 
 ```bash
 bash /tmp/masc-install.sh --version "$TAG" \
   --base-path "$HOME/masc-workspace" --wizard
 ```
 
-공급자 탐지에서 `cloud`는 API 키의 유효성이나 모델 응답을 증명하지 않습니다.
-CLI는 자체 로그인 probe로 확인하며 probe 미지원은 별도로 표시합니다.
-HTTP 방식은 catalog에 선언된 healthcheck를
-호출합니다. credential 또는 healthcheck가 없으면 검사를 건너뛰었다고 표시합니다.
-연결 검사 통과도 실제 모델 생성·도구 실행·Keeper 연속 실행의 증거는 아닙니다.
-자동화에서 `MASC_INSTALL_NO_PING=1`은 설치 후 연결 검사만 생략하며, 마법사의
-로컬 서버 탐지는 실행합니다. 모든 마법사 탐지를 생략하려면 `--no-wizard`를 씁니다.
-`--sandbox`는 `--team`과 함께 사용하며 기존 Keeper 설정을 일괄 변경하지 않습니다.
+`masc setup`은 imp를 준비하기 전에 선택한 모델을 다시 검사합니다.
+모델·도구 검사 통과와 Docker·Keeper sandbox 준비는 별도 단계로 표시합니다.
+자동화의 `MASC_INSTALL_NO_PING=1`은 공급자 연결 probe만 생략하며 모델 응답을
+검증한 것으로 처리하지 않습니다. `--sandbox`는 `--team`과 함께 사용하며
+기존 Keeper 설정을 일괄 변경하지 않습니다.
 
 ## 기본 설치 내용
 
@@ -124,7 +118,7 @@ HTTP 방식은 catalog에 선언된 healthcheck를
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.1 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.2 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
@@ -132,42 +126,45 @@ Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 �
 
 ## 모델 연결 선택
 
-터미널 마법사는 기존 API/Ollama 설정 외에도 **llama.cpp, vLLM, Claude Code,
-Codex, Antigravity**와 일반 **OpenAI-compatible endpoint**를 선택지로 보여줍니다.
-설치돼 있지 않아도 선택지가 사라지지 않고, 로컬 서버는 다른 컴퓨터의 endpoint를
-가리킬 수도 있습니다.
+Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록에서 context 한도를
+읽습니다. 인증이나 모델 호출은 하지 않으며, API catalog의 최대값을 Codex 한도로
+사용하지 않습니다. 실제 모델 사용 가능 여부는 저장 전 응답·도구 검사로 확인합니다.
 
-고른 연결만 추가합니다. 목록에서 모델 번호를 선택하거나 원하는 모델 ID를 직접
-입력합니다. 알려진 context 한도는 출처와 함께 자동 적용하며, 한도를 모를 때만
-문서나 서버 설정의 값을 입력합니다. Claude Code·Codex는 도구 호출·streaming
-질문을 생략합니다. HTTP 연결은 서버의 도구 호출·streaming 지원 여부를 확인하며,
-capability overlay는 해당 provider에만 적용됩니다. API 키는 값이 아니라
-환경변수 이름을 적습니다. 기본 Z.AI 연결은 MASC를 시작하는 shell의
-`ZAI_API_KEY`를 읽습니다.
+기존 API 공급자, Claude Code, Codex, 로컬 Ollama 모델을 목록에서 선택합니다.
+**Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
+다른 컴퓨터의 Ollama를 연결할 수 있습니다. 기존 Antigravity 연결도 표시되지만
+실제 검증 어댑터가 없는 런타임은 대화형 준비 검사를 통과할 수 없습니다.
 
-설정은 임시 workspace에서 같은 바이너리의 runtime 검사를 통과한 뒤에야 반영됩니다.
-검사가 실패하거나 원본이 그 사이에 바뀌면 기존 설정을 그대로 둡니다. 같은 setup의
-연결이 이미 있으면 새로 만들지 말고 그 공급자를 고르거나 TOML을 고쳐 쓰세요.
+컨텍스트 크기는 모델 메타데이터나 동일한 연결의 기존 설정에서 읽습니다.
+Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실행 중인 컨텍스트를
+사용합니다. 모델 구조상 최대치를 그대로 할당하지 않습니다. 단일 모델 llama.cpp는
+`/props`의 서버 설정값을 읽습니다. 한도를 알 수 없을 때만 다시 선택하거나
+문서에 명시된 서버 한도를 고급 입력으로 지정합니다. 도구 지원 여부 퀴즈는 없습니다.
 
-**설정 검증, CLI 설치, HTTP 접속, 인증, 모델이 실제로 답하는 것은 서로 다른
-다섯 가지 상태입니다.** 이 마법사는 모델 서버·모델 가중치·공급자 CLI를 설치하지
-않고 계정도 인증하지 않습니다. Antigravity는 CLI가 만든 OAuth 파일 경로와 요청
-timeout까지 적어야 합니다. `Configure later`로 모델 연결을 미룰 수 있고, 기본
-Keeper는 알아서 시작하지 않습니다. 기존 workspace에서 다시 설정하려면 `--wizard`를
-쓰세요.
+여러 모델을 함께 등록하고 기본 모델과 대체 순서를 고릅니다. 이 순서는 대화 레인에
+적용되며 내부 보조 판단 레인은 기본 모델을 사용합니다. 다른 Keeper의 명시적
+연결 지정은 유지합니다. 같은 연결을 다시 고르면 재사용하고 모델·연결 설정이
+달라지면 별도 연결로 보존합니다.
 
-## `imp`와 첫 대화 (0.35.1)
+같은 바이너리가 임시 설정을 검증하고 선택한 모델 모두의 응답·도구 호출을
+확인한 후 반영합니다. 검증 실패 시 기존 파일은 보존됩니다. 인증값은 shell이나
+CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를 설치하거나 로그인하지
+않습니다. **Configure later**로 미룰 수 있고 imp는 자동으로 시작하지 않습니다.
 
-이 경로는 `masc setup`이 포함된 **0.35.1 설치 계약**입니다. 다운로드 전에
+## `imp`와 첫 대화 (0.35.2)
+
+이 경로는 `masc setup`이 포함된 **0.35.2 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
-1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
-   런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
-   레인에도 연결합니다. 두 번째 모델 구독은 필요하지 않습니다.
-2. Claude Code·Codex는 CLI를 설치하고 해당 CLI에서 로그인한 뒤 이 터미널에서
-   응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
-   터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
-   모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+1. 모델 선택 화면을 열기 전에 보유한 런타임을 준비합니다. Claude Code·Codex는
+   CLI를 설치하고 로그인한 뒤 이 터미널에서 응답하는지 확인합니다.
+   API 방식은 인증 환경변수(Z.AI는 `ZAI_API_KEY`)를 이 터미널에서 설정합니다.
+   로컬 모델은 서버를 시작하고 도구 호출이 가능한 모델을 로드합니다.
+   MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+2. 설치기를 `--base-path "$HOME/masc-workspace"`로 실행하고 연결을 여러 개
+   선택할 수 있습니다. imp의 기본 모델과 대체 순서를 고르면 실제 응답·도구
+   검사를 거쳐 저장합니다. 내부 보조 lane은 기본 모델을 사용하므로 별도
+   모델 구독이 필요하지 않습니다.
 3. macOS에서는 [Docker Desktop 설치 안내](https://docs.docker.com/desktop/setup/install/mac-install/),
    Linux에서는 [Docker Engine 설치 안내](https://docs.docker.com/engine/install/)를 따라 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
@@ -371,7 +368,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.35.1` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.2` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 
@@ -400,3 +397,26 @@ bash /tmp/masc-install.sh --uninstall --purge-data \
 ```
 
 다른 경로를 가리키는 `.masc` 또는 배포 디렉터리 symlink는 링크 자체만 삭제합니다.
+
+### 기존 workspace의 파일을 읽을 수 없는 경우
+
+`masc setup`은 workspace 초기화, Docker 준비, 로그인, 서버 실행 전에 기존
+Keeper 설정과 Goal 상태를 현재 스키마로 읽을 수 있는지 확인합니다. 읽을 수
+없는 파일은 실제 경로와 파서 오류를 표시하고 기존 파일을 수정하지 않은 채
+중단합니다. 구버전 파일을 보존했다는 사실이 새 버전과의 호환성을 뜻하지는
+않습니다.
+
+다음 중 하나를 선택하세요.
+
+- 별도로 시작하려면 사용하지 않는 디렉터리를 골라
+  앞에서 받은 검증된 installer로
+  `bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-new-workspace" --wizard`를
+  실행해 runtime을 선택합니다. 이어서
+  `masc setup --base-path "$HOME/masc-new-workspace"`를 실행합니다. 원래 workspace는 그대로 남습니다.
+- 원래 workspace를 검토하려면 setup을 중단하고 표시된 파일과
+  `CHANGELOG.md`의 `Fresh state required` 항목을 확인합니다. 기존 로그는
+  원래 workspace의 `.masc/logs`에 있습니다. 사용자가 의도적으로 파일을
+  수정한 뒤에만 같은 workspace에서 setup을 다시 실행하세요.
+
+Setup은 예전 Goal 파일을 삭제하거나 복구 사본을 덮어쓰지 않고, Keeper 설정을
+자동 변환하지도 않습니다. 중단한 workspace가 준비됐다고 표시하지 않습니다.

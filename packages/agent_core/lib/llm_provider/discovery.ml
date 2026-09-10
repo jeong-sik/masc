@@ -273,7 +273,6 @@ let discovered_per_slot_context () = (Atomic.get _discovered_ctx).per_slot_ctx
 
 (** Per-endpoint per-slot context map from last probe.
     Returns [(url, per_slot_ctx)] for each healthy endpoint. *)
-let discovered_endpoint_contexts () = (Atomic.get _discovered_ctx).endpoint_ctxs
 
 (** Look up per-slot context for a specific endpoint URL.
     Returns [None] if the endpoint was not probed or has no props. *)
@@ -861,7 +860,7 @@ let%test "discovered_ctx snapshot: set and read both fields atomically" =
        in
        Atomic.set _discovered_ctx snap;
        discovered_per_slot_context () = Some 4096
-       && discovered_endpoint_contexts () = [ "http://a:8085", 4096 ])
+       && (Atomic.get _discovered_ctx).endpoint_ctxs = [ "http://a:8085", 4096 ])
 ;;
 
 let%test "discovered_ctx snapshot: empty endpoints clears per_slot_ctx" =
@@ -880,7 +879,8 @@ let%test "discovered_ctx snapshot: empty endpoints clears per_slot_ctx" =
        Atomic.set
          _discovered_ctx
          { endpoint_ctxs = []; model_endpoints = []; per_slot_ctx = None };
-       discovered_per_slot_context () = None && discovered_endpoint_contexts () = [])
+       discovered_per_slot_context () = None
+       && (Atomic.get _discovered_ctx).endpoint_ctxs = [])
 ;;
 
 let%test "discovered_ctx snapshot: max across multiple endpoints" =
@@ -895,7 +895,7 @@ let%test "discovered_ctx snapshot: max across multiple endpoints" =
          ; per_slot_ctx = Some 8192
          };
        discovered_per_slot_context () = Some 8192
-       && List.length (discovered_endpoint_contexts ()) = 2)
+       && List.length (Atomic.get _discovered_ctx).endpoint_ctxs = 2)
 ;;
 
 let%test "discovered_context_for_url returns per-endpoint value" =
@@ -950,7 +950,7 @@ let%test "discovered_ctx initial state is empty" =
          _discovered_ctx
          { endpoint_ctxs = []; model_endpoints = []; per_slot_ctx = None };
        discovered_per_slot_context () = None
-       && discovered_endpoint_contexts () = []
+       && (Atomic.get _discovered_ctx).endpoint_ctxs = []
        && discovered_context_for_url "http://any:8085" = None)
 ;;
 

@@ -112,6 +112,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
     (config : Runtime_execution.codex_app_server) =
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
+    ; isolated_home = None
     ; model = config.model
     ; native = Runtime_native_tools.codex_default
     ; developer_instructions = None
@@ -141,12 +142,20 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
       ~model
       ~login:
         (`Assoc
-           [ "status", `String "ready"
-           ; "authenticated", `Bool true
+           [ "status", `String (match measured.subscription with
+               | Runtime_codex_app_server.Provider_managed -> "configured"
+               | _ -> "ready")
+           ; "authenticated", `Bool (match measured.subscription with
+               | Runtime_codex_app_server.Provider_managed -> false
+               | _ -> true)
            ; "evidence_source", `String "configured_executable_self_report"
            ; "identity_verified", `Bool false
-           ; "auth_method", `String "chatgpt"
-           ; "subscription_type", `String measured.subscription.plan_type
+           ; "auth_method", `String (Runtime_codex_app_server.authentication_to_string measured.subscription)
+           ; "subscription_type", (match measured.subscription with
+               | Runtime_codex_app_server.Chatgpt {plan_type; _} -> `String plan_type
+               | Runtime_codex_app_server.Api_key
+               | Runtime_codex_app_server.Provider_managed
+               | Runtime_codex_app_server.Amazon_bedrock -> `Null)
            ; "api_provider", `Null
            ])
       ~client:
@@ -203,9 +212,9 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
            ; "authenticated", `Bool true
            ; "evidence_source", `String "configured_executable_self_report"
            ; "identity_verified", `Bool false
-           ; "auth_method", `String measured.auth_method
-           ; "subscription_type", `String measured.subscription_type
-           ; "api_provider", `String measured.api_provider
+           ; "auth_method", `String (Runtime_claude_code.authentication_to_string measured.authentication)
+           ; "subscription_type", Json_util.string_opt_to_json measured.subscription_type
+           ; "api_provider", `String (Runtime_claude_code.api_provider_to_string measured.api_provider)
            ])
       ~client:empty_client_json
   | Error probe_error ->

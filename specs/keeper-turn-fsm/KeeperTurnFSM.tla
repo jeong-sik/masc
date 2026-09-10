@@ -150,6 +150,19 @@ ToolReturned ==
     /\ turn_state' = "streaming"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
+\* Whole-turn wall-clock ceiling expired while waiting for a tool
+\* result. The runtime's ceiling (Runtime_wall_clock, default 14400s)
+\* terminates a turn whose tool never returns — observed 2026-08-21 as
+\* a 63min+ awaiting_tool dwell (#29230). Symmetric to ProviderTimeout:
+\* the exit is a cancel with a receipt, not an axiom that tools always
+\* return. WF_vars(ToolReturned) alone left this hang unrepresented.
+ToolTimeout ==
+    /\ turn_state = "awaiting_tool"
+    /\ ~stop_signaled
+    /\ turn_state' = "cancelled"
+    /\ receipt_outcome' = "receipt_cancelled"
+    /\ UNCHANGED stop_signaled
+
 \* Stream finishes (no more tool calls / model emitted stop_reason).
 StreamComplete ==
     /\ turn_state = "streaming"
@@ -234,6 +247,7 @@ Next ==
     \/ ProviderTimeout
     \/ StreamYieldsTool
     \/ ToolReturned
+    \/ ToolTimeout
     \/ StreamComplete
     \/ FinishTurn
     \/ ReceiptLost
@@ -258,7 +272,7 @@ Fairness ==
     /\ WF_vars(RuntimeRouted \/ RuntimeUnavailable)
     /\ WF_vars(ProviderResponded \/ ProviderTimeout)
     /\ SF_vars(StreamComplete)
-    /\ WF_vars(ToolReturned)
+    /\ WF_vars(ToolReturned \/ ToolTimeout)
     /\ WF_vars(FinishTurn \/ ReceiptLost)
     /\ WF_vars(HonorStopSignal)
 

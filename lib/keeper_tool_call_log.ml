@@ -103,7 +103,7 @@ let consume_disposition ~invocation () =
     invocation. It must not be reconstructed from the output string at the
     hook boundary. *)
 let pending_file_change_evidence :
-      Keeper_file_change_evidence.t Invocation_table.t
+      (Keeper_file_change_evidence.t * Tool_output.artifact_ref list) Invocation_table.t
   =
   Invocation_table.create 8
 ;;
@@ -117,15 +117,15 @@ let with_pending_file_change_evidence_lock f =
     f
 ;;
 
-let set_file_change_evidence ~invocation ~evidence =
+let set_file_change_evidence ~invocation ~evidence ~artifact_refs =
   with_pending_file_change_evidence_lock (fun () ->
-    Invocation_table.replace pending_file_change_evidence invocation evidence)
+    Invocation_table.replace pending_file_change_evidence invocation (evidence, artifact_refs))
 ;;
 
 let consume_file_change_evidence ~invocation () =
   with_pending_file_change_evidence_lock (fun () ->
     match Invocation_table.find_opt pending_file_change_evidence invocation with
-    | Some evidence ->
+    | Some (evidence, _) ->
       Invocation_table.remove pending_file_change_evidence invocation;
       Some evidence
     | None -> None)
@@ -133,7 +133,14 @@ let consume_file_change_evidence ~invocation () =
 
 let peek_file_change_evidence ~invocation () =
   with_pending_file_change_evidence_lock (fun () ->
-    Invocation_table.find_opt pending_file_change_evidence invocation)
+    Invocation_table.find_opt pending_file_change_evidence invocation |> Option.map fst)
+;;
+
+let peek_file_change_artifact_refs ~invocation () =
+  with_pending_file_change_evidence_lock (fun () ->
+    match Invocation_table.find_opt pending_file_change_evidence invocation with
+    | Some (_, refs) -> refs
+    | None -> [])
 ;;
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
@@ -294,7 +301,9 @@ let carried_entry_answers ~entry_since_ts ~entry_oldest_row_ts ~since_ts ~since 
   && String.equal (iso_date_of_unix entry_since_ts) since
 ;;
 
-let reset_file_change_cache_for_testing () =
+(* Drop every carried tally. Tests that write rows and read them back in one
+   process need the next read to start from an empty window. *)
+let reset_file_change_cache () =
   Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
 ;;
 
@@ -306,7 +315,7 @@ let init ?cluster_name ~base_path () =
   let dir = Filename.concat masc_root "tool_calls" in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   (* A carried tally names rows in the store being replaced. *)
-  reset_file_change_cache_for_testing ();
+  reset_file_change_cache ();
   try
     let retention_days = retention_days () in
     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
@@ -337,7 +346,7 @@ let init ?cluster_name ~base_path () =
 
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
-  reset_file_change_cache_for_testing ();
+  reset_file_change_cache ();
   Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
@@ -604,13 +613,6 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
 ;;
 
-let normalized_artifact_refs_in_typed_data data =
-  Tool_output.normalized_artifact_refs_in_json data
-  |> List.map (fun reference ->
-    Tool_output.with_preview reference ""
-    |> Tool_output.normalized_artifact_ref_to_json)
-;;
-
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -648,6 +650,7 @@ let log_call
       ?typed_result
       ?disposition
       ?file_change_evidence
+      ?(artifact_refs = [])
       ?composition_tool
       ?skill_reference
       ?composition_run_id
@@ -802,23 +805,30 @@ let log_call
           [ "failure_class", `String (Tool_result.tool_failure_class_to_string class_) ]
         | None -> []
       in
+      let artifact_ref_fields =
+        let typed_refs =
+          match typed_result with
+          | Some result -> Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
+          | None -> []
+        in
+        let refs =
+          List.map (fun reference ->
+            Tool_output.with_preview reference ""
+            |> Tool_output.normalized_artifact_ref_to_json)
+            (artifact_refs @ typed_refs)
+          |> List.sort_uniq Stdlib.compare
+        in
+        if refs = [] then [] else [ "artifact_refs", `List refs ]
+      in
       let typed_result_fields =
         match typed_result with
         | Some result ->
-          let artifact_refs =
-            normalized_artifact_refs_in_typed_data (Tool_result.data result)
-          in
           [ "disposition", `String (Tool_result.string_of_disposition result) ]
           @ failure_class_field result
-          @ (if artifact_refs = []
-             then []
-             else [ "artifact_refs", `List artifact_refs ])
         | None ->
-          (* The ordinary path knows the disposition but not the payload, so it
-             cannot supply [typed_result] and cannot name artifact refs. Kept
-             as a separate argument rather than a synthesised result: a made-up
-             payload would put an empty [artifact_refs] on a row that simply
-             does not know. *)
+          (* The ordinary hook carries disposition and producer-owned artifact
+             references separately, without synthesising a full typed payload
+             from the model-facing output text. *)
           (match disposition with
            | Some d ->
              (* This shape carries the class itself as the [Failed] payload.
@@ -970,6 +980,7 @@ let log_call
            @ batch_size_field
            @ execution_mode_field
            @ typed_result_fields
+           @ artifact_ref_fields
            @ file_change_evidence_field
            @ composition_fields
            @ skill_reference_field

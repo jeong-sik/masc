@@ -95,7 +95,6 @@ val discover
 val local_llm_url_env_var : string
 
 (** Environment variable parsed by {!parse_llm_endpoints_env}. *)
-val llm_endpoints_env_var : string
 
 (** Environment variable consulted by {!resolve_ollama_endpoint}. *)
 val ollama_host_env_var : string
@@ -175,7 +174,6 @@ val discovered_per_slot_context : unit -> int option
 (** Per-endpoint per-slot context from last probe.
     Returns [(url, per_slot_ctx)] for each healthy endpoint
     that reported valid slot/context info. *)
-val discovered_endpoint_contexts : unit -> (string * int) list
 
 (** Look up per-slot context for a specific endpoint URL.
     URL is trimmed before lookup.  Returns [None] if not found. *)

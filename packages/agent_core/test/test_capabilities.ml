@@ -188,7 +188,7 @@ let test_lookup_mimo_v25_multimodal () =
 (* ── Model lookup ────────────────────────────────────── *)
 
 let test_lookup_claude_opus () =
-  match Capabilities.for_model_id "claude-opus-4-6" with
+  match Capabilities.for_model_id "claude-opus-5" with
   | Some c ->
     check (option int) "context 1M" (Some 1_000_000) c.max_context_tokens;
     check (option int) "output 128K" (Some 128_000) c.max_output_tokens
@@ -196,9 +196,9 @@ let test_lookup_claude_opus () =
 ;;
 
 let test_lookup_claude_sonnet () =
-  match Capabilities.for_model_id "claude-sonnet-4-6" with
+  match Capabilities.for_model_id "claude-sonnet-5" with
   | Some c ->
-    check (option int) "output 64K" (Some 64_000) c.max_output_tokens;
+    check (option int) "output 128K" (Some 128_000) c.max_output_tokens;
     check bool "parallel tools" true c.supports_parallel_tool_calls
   | None -> fail "should match claude-sonnet"
 ;;
@@ -749,7 +749,7 @@ let test_lookup_unknown () =
 ;;
 
 let test_lookup_case_insensitive () =
-  check bool "uppercase matches" true (Capabilities.for_model_id "Claude-Opus-4-6" <> None)
+  check bool "uppercase matches" true (Capabilities.for_model_id "Claude-Opus-5" <> None)
 ;;
 
 let test_lookup_glm5_text_only () =
@@ -1576,16 +1576,16 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Native_structured_output
       , Replay_every_turn
       , Delta_stream "thinking_delta" )
-    ; ( "Claude Sonnet 4.6"
+    ; ( "Claude Sonnet 5"
       , Native_provider Provider_config.Anthropic
-      , "claude-sonnet-4-6"
+      , "claude-sonnet-5"
       , Extended_thinking
       , Native_structured_output
       , Replay_every_turn
       , Delta_stream "thinking_delta" )
-    ; ( "Claude Opus 4.6"
+    ; ( "Claude Opus 5"
       , Native_provider Provider_config.Anthropic
-      , "claude-opus-4-6"
+      , "claude-opus-5"
       , Extended_thinking
       , Native_structured_output
       , Replay_every_turn
@@ -1746,9 +1746,9 @@ let test_explicit_manifest_lookup_precedes_catalog_fallback () =
         [ "max_context_tokens", "999999"
         ; "supports_tools", "true"
         ]
-      "claude-opus-4"
+      "claude-opus-5"
   in
-  match Capabilities.for_model_id_with_manifest m "claude-opus-4-6" with
+  match Capabilities.for_model_id_with_manifest m "claude-opus-5" with
   | Some c ->
     check (option int) "manifest overrides ctx" (Some 999999) c.max_context_tokens;
     check bool "manifest keeps tools" true c.supports_tools
@@ -1759,7 +1759,7 @@ let test_explicit_manifest_lookup_falls_back_to_catalog () =
   (* Manifest has no entry for claude-opus, so the lookup should fall through to
      the loaded model catalog. *)
   let m = make_manifest "totally-other-model" in
-  match Capabilities.for_model_id_with_manifest m "claude-opus-4-6" with
+  match Capabilities.for_model_id_with_manifest m "claude-opus-5" with
   | Some c ->
     check (option int) "fallback ctx 1M" (Some 1_000_000) c.max_context_tokens
   | None -> fail "should fall through to model catalog"

@@ -15,7 +15,8 @@ val response_format_to_openai_json : Types.response_format -> Yojson.Safe.t opti
     {!Backend_openai_parse.parse_openai_response_result} for the [parse_error]
     contract (agent-core boundary: an all-empty 200 fails closed as [Empty_completion]). *)
 val parse_openai_response_result
-  :  string
+  :  ?content_inline_reasoning:Capabilities.content_inline_reasoning
+  -> string
   -> (Types.api_response, Backend_openai_parse.parse_error) result
 
 val usage_of_openai_json : Yojson.Safe.t -> Types.api_usage option

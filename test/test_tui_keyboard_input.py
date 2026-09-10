@@ -69,7 +69,7 @@ class RequestHttpResponse:
 
     def __init__(
         self,
-        resolve: Callable[[bytes], HttpResponse | RawHttpResponse],
+        resolve: Callable[[bytes], HttpResponse | RawHttpResponse | StreamingHttpResponse],
     ) -> None:
         self.resolve = resolve
 
@@ -385,6 +385,26 @@ def read_available(master_fd: int, output: bytearray) -> None:
         output.extend(chunk)
 
 
+# A needle the screen already drew before the keypress is a different failure
+# from one it never drew, and the two read identically in a timeout message.
+# The TUI refreshes an open surface on its own cadence, so a scenario that
+# mutates a fixture and then presses a key races that refresh: the earlier
+# draw lands before send_and_wait takes its offset, and the wait that follows
+# looks for bytes that are already behind it.
+def _needle_before_start(
+    output: bytearray, needle: Needle, start: int
+) -> str:
+    if start <= 0:
+        return ""
+    earlier = find_needle(output, needle, 0)
+    if earlier < 0 or earlier >= start:
+        return ""
+    return (
+        f" (drawn at offset {earlier}, before this wait started at {start}:"
+        " a refresh got there first)"
+    )
+
+
 def wait_for_output(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -401,7 +421,10 @@ def wait_for_output(
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
         if remaining <= 0.0:
-            raise AssertionError(f"timed out waiting for {needle!r}: {bytes(output)!r}")
+            raise AssertionError(
+                f"timed out waiting for {needle!r}"
+                f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+            )
         select.select([master_fd], [], [], min(0.1, remaining))
 
 
@@ -1125,6 +1148,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                 "rollup": {
                     "active_count": 0,
                     "verifying_count": 0,
+                    "awaiting_confirmation_count": 0,
                     "done_count": 0,
                     "dropped_count": 0,
                 },
@@ -1230,6 +1254,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
+                "awaiting_confirmation_count": 0,
                 "done_count": 0,
                 "dropped_count": 0,
             },
@@ -5203,26 +5228,33 @@ def keeper_chat_error_detail_interaction() -> Interaction:
 
 
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
-    # The turn has to still be running while the scenario types the lines that
-    # queue behind it, so the fixture holds the answer rather than sending one.
+    # Admit the run before holding its terminal reply. Withholding the HTTP
+    # response itself truthfully renders WAITING TO START, never IN PROGRESS.
     gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
 
-    def terminal_response(request_body: bytes) -> RawHttpResponse:
+    def terminal_response(request_body: bytes) -> RawHttpResponse | StreamingHttpResponse:
         with gate.lock:
             call_index = gate.calls
             gate.calls += 1
-        if call_index == 0:
+        response = keeper_chat_succeeded_response(request_body)
+        if call_index != 0:
+            return response
+        blocks = [block for block in response.body.split(b"\n\n") if block]
+        start_index = next(index for index, block in enumerate(blocks)
+                           if json.loads(block.removeprefix(b"data: "))["type"] == "RUN_STARTED")
+
+        def chunks() -> Iterator[bytes]:
+            yield b"\n\n".join(blocks[:start_index + 1]) + b"\n\n"
             gate.requested.set()
             try:
-                if not gate.release.wait(timeout=gate.hold_seconds):
-                    return RawHttpResponse(
-                        504,
-                        json.dumps({"error": "fixture response gate timed out"}).encode(),
-                        content_type="application/json",
-                    )
+                if gate.release.wait(timeout=gate.hold_seconds):
+                    yield b"\n\n".join(blocks[start_index + 1:]) + b"\n\n"
+                # A fixture deadline closes the incomplete stream; it must not
+                # fabricate RUN_FINISHED before the interaction releases it.
             finally:
                 gate.completed.set()
-        return keeper_chat_succeeded_response(request_body)
+
+        return StreamingHttpResponse(chunks)
 
     return {
         "/api/v1/keepers/chat/stream": RequestHttpResponse(terminal_response)
@@ -5275,17 +5307,14 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         # it, and the pane says so itself. Waiting on the fixture's own event
         # instead would stop pumping the terminal, and a TUI whose output
         # nobody reads blocks before it ever posts.
-        # The pane names the running turn "ACTIVE TURN"; the "(sending …)"
-        # spelling this waited on is gone, and the next wait already asks for
-        # the surviving one. Waiting here for the same words keeps the frame
-        # this step captures -- footer_while_sending is read off it -- while
-        # asking for something the pane still draws.
-        sending = send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        # RUN_STARTED is now present in the fixture stream, so the current
+        # Working transcript must render IN PROGRESS before input queues.
+        sending = send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
         wait_for_output(
             process,
             master_fd,
             output,
-            b"ACTIVE TURN",
+            b"IN PROGRESS",
             start=0,
             timeout=5.0,
         )
@@ -5467,7 +5496,7 @@ def chat_steer_interaction(
             b"original",
             composer_showing(b"original"),
         )
-        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
 
         send_and_wait(
             process,
@@ -5632,7 +5661,9 @@ def chat_reconcile_interaction(
         send_and_wait(
             process, master_fd, output, b"uncertain", composer_showing(b"uncertain")
         )
-        send_and_wait(process, master_fd, output, b"\r", b"ACTIVE TURN")
+        # The first connection fails before any RUN_STARTED. Its replacement
+        # is intentionally withheld: assert reconciliation, not a running turn.
+        send_and_wait(process, master_fd, output, b"\r", b"reconciling")
         if not wait_for_fixture_event(
             process,
             master_fd,

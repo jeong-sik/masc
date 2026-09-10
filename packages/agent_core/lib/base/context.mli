@@ -45,7 +45,6 @@ val set : t -> string -> Yojson.Safe.t -> unit
 val delete : t -> string -> unit
 val keys : t -> string list
 val snapshot : t -> (string * Yojson.Safe.t) list
-val scoped_key : scope -> string -> string
 val get_scoped : t -> scope -> string -> Yojson.Safe.t option
 val set_scoped : t -> scope -> string -> Yojson.Safe.t -> unit
 val delete_scoped : t -> scope -> string -> unit

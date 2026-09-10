@@ -18,11 +18,14 @@ type verdict = {
   recorded_at : string;
 }
 
+type confirmation = { operator_id : string; confirmed_at : string }
+
 type completion_state =
   | Completion_idle
   | Proof_pending of { requested_at : string; request_id : string; criterion : Goal_store.criterion }
   | Proof_proven of verdict
   | Proof_refuted of verdict
+  | Human_confirmed of verdict * confirmation
 
 type record = {
   goal_id : string;
@@ -107,6 +110,9 @@ let verdict_of_yojson json =
   Ok { outcome; request_id; criterion; verification_run_id; authority; evidence; recorded_at }
 
 let completion_state_to_yojson = function
+  | Human_confirmed (verdict, confirmation) ->
+      `Assoc ["state", `String "human_confirmed"; "verdict", verdict_to_yojson verdict;
+        "operator_id", `String confirmation.operator_id; "confirmed_at", `String confirmation.confirmed_at]
   | Completion_idle -> `Assoc [ "state", `String "idle" ]
   | Proof_pending { requested_at; request_id; criterion } ->
       `Assoc [ "state", `String "proof_pending"; "requested_at", `String requested_at;
@@ -118,6 +124,14 @@ let completion_state_to_yojson = function
 
 let completion_state_of_yojson json =
   match Json_util.assoc_member_opt "state" json with
+  | Some (`String "human_confirmed") ->
+      let* json = object_fields "goal_verification.confirmed" ["state"; "verdict"; "operator_id"; "confirmed_at"] json in
+      let* verdict = verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) in
+      let* operator_id = required_string json "operator_id" in
+      let* confirmed_at = required_string json "confirmed_at" in
+      (match verdict.outcome with
+       | Proven -> Ok (Human_confirmed (verdict, {operator_id; confirmed_at}))
+       | Refuted _ -> Error "refuted proof cannot be human confirmed")
   | Some (`String "idle") ->
       let* _ = object_fields "goal_verification.idle" [ "state" ] json in
       Ok Completion_idle
@@ -154,7 +168,7 @@ let relation_for_goal ~goal record =
   let bound = match record.completion with
     | Completion_idle -> None
     | Proof_pending pending -> Some pending.criterion
-    | Proof_proven verdict | Proof_refuted verdict -> Some verdict.criterion
+    | Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _) -> Some verdict.criterion
   in
   if not (String.equal record.goal_id goal.Goal_store.id) then Stale_criterion
   else match bound with
@@ -213,6 +227,8 @@ let state_of_yojson = function
       | _ -> Error "goal_verification.state_of_yojson: invalid state")
   | json ->
       Error ("goal_verification.state_of_yojson: " ^ Yojson.Safe.to_string json)
+
+let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
 
 (* {1 Persistence} *)
 
@@ -423,10 +439,10 @@ let reopen_goal config ~goal_id ~actor ~note =
           Ok (updated_goal, (Proof_reset updated, phase_changed))
         in
         match current with
-        | Some ({ completion = Proof_proven _ | Proof_refuted _ | Proof_pending _; _ } as record)
+        | Some ({ completion = Human_confirmed _ | Proof_proven _ | Proof_refuted _ | Proof_pending _; _ } as record)
           when phase_changed -> reset record
         | None | Some { completion = Completion_idle | Proof_pending _
-                       | Proof_proven _ | Proof_refuted _; _ } ->
+                       | Proof_proven _ | Proof_refuted _ | Human_confirmed _; _ } ->
           Ok (updated_goal, (Proof_unchanged current, phase_changed))))
   in
   Ok (goal, outcome, phase_changed)
@@ -441,9 +457,9 @@ let mark_proof_pending config ~goal_id ~criterion =
     in
     match current.completion with
     | Proof_pending pending when Goal_store.criterion_equal pending.criterion criterion -> Ok current
-    | Proof_proven verdict when Goal_store.criterion_equal verdict.criterion criterion ->
+    | Proof_proven verdict | Human_confirmed (verdict, _) when Goal_store.criterion_equal verdict.criterion criterion ->
         Error ("goal_verification: current criterion is already proven for " ^ goal_id)
-    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ -> fresh ())
+    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ -> fresh ())
 
 let same_verdict_payload (stored : verdict) (incoming : verdict) =
   (* A replay may be delivered later. Its observation time cannot rewrite the
@@ -462,5 +478,16 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         let completion = match verdict.outcome with
           | Proven -> Proof_proven verdict | Refuted _ -> Proof_refuted verdict
         in Ok { current with completion }
-    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ ->
+    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
         Error ("goal_verification: verdict does not match the pending request for " ^ goal_id))
+
+let record_human_confirmation config ~goal_id verdict ~operator_id =
+  update_record config ~goal_id (fun current ->
+    if String.trim operator_id = "" then Error "operator identity is required"
+    else match current.completion with
+    | Human_confirmed (stored, _) when same_verdict_payload stored verdict -> Ok current
+    | Proof_proven stored when same_verdict_payload stored verdict ->
+        Ok {current with completion = Human_confirmed (stored,
+          {operator_id; confirmed_at = Masc_domain.now_iso ()})}
+    | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
+        Error "human confirmation does not match the current proven request")

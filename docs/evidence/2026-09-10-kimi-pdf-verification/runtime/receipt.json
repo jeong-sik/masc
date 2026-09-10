@@ -1,0 +1,68 @@
+{
+  "scope": "actual Kimi PDF semantic review; synthetic producer submission only, unmodified real verifier responses",
+  "status": "observed_after_observer_correction",
+  "harness_sha256": "40625c757f2b0b4cd0426f6594c65c2be3091c67d8c5f6d93e637124d993c06f",
+  "expected_commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+  "base_path": "/private/tmp/masc-pdf-kimi-runtime-4a/base",
+  "port": 18946,
+  "server_pid": 22068,
+  "manifest": {
+    "commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "a44c69c2cb9788817381bc417ec4a789f493038f076d60b6356d4c7205102261",
+      "masc_tui.exe": "d9f4f05644f9d144f5efbdba5a6fd0577e7fdedbf752876c3b74f4a47a351358",
+      "masc_browser_host.exe": "e24029332ccc66759cfdb35fc2746dc8dbb197af10fb854f8a217bcf4f8c8230"
+    }
+  },
+  "source_receipt": {
+    "container": "a193b2f5144a",
+    "root": "/home/keeper/playground/memory-guide-proof",
+    "files": [
+      {
+        "relative": "memory_proposal_guide.pdf",
+        "bytes": 136937,
+        "sha256": "bb8687f70944e374fde9492eb845446cbf3f19385dc163bed5abb5a655b93f86"
+      },
+      {
+        "relative": "verify_summary.txt",
+        "bytes": 6115,
+        "sha256": "25b197e2afd6c29292e940f75690798402149854023e071325bb7c823e60f9e1"
+      },
+      {
+        "relative": "renders/page1.png",
+        "bytes": 166776,
+        "sha256": "cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af"
+      },
+      {
+        "relative": "renders/page2.png",
+        "bytes": 190109,
+        "sha256": "b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2"
+      },
+      {
+        "relative": "renders/page3.png",
+        "bytes": 134793,
+        "sha256": "38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d"
+      }
+    ]
+  },
+  "criteria": [
+    "PDF 정확히 3페이지",
+    "본문과 흐름도 모든 한글이 누락 glyph 없이 읽힘",
+    "텍스트 겹침과 잘림 없음",
+    "synthetic 예시와 실제 검증의 구분 유지"
+  ],
+  "upstream": "https://api.kimi.com/coding/v1/chat/completions",
+  "verifier_runtime": "kimi_coding.kimi-for-coding",
+  "verifier_model": "kimi-for-coding",
+  "operation_id": "kmsg-d88421644c25a0079fceb3f3b3e0cd0c",
+  "semantic_verdict": "approved",
+  "verification_id": "vrf-e98a49e8b919f2e8d0b3b7d180861d83",
+  "verifier_reason": "제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수행으로 표기, 권장 결론을 보류로 유지해 저장된 주장과 검증된 사실을 구분. 참고: live lookup 도구는 live_lookup이 존재한다고 명시한 경로들을 모두 'No such file or directory'로 읽지 못해 런타임 실패 상태였으나, 이는 조회 표면의 오류이며 제출 시점 스냅샷 증거만으로 계약이 충족됨.",
+  "observer_correction": "Original harness assumed ref order. Contract canonicalized same six artifact refs; exact multiset, all image bytes, Task, committed verdict and runtime terminal joined independently. No model rerun.",
+  "cleanup_basis": "Primary Task done, authenticated observed operation Succeeded, exact verifier registry approved and committed event joined before SIGTERM.",
+  "server_stopped_after_terminal": true,
+  "original_harness_error": "AssertionError: assumed submission artifact ordering; contract canonicalized the same references"
+}

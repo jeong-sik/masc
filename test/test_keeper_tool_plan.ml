@@ -584,6 +584,55 @@ let test_output_schema_and_consumer_input_are_enforced () =
    | Error _ | Ok _ -> fail "validated output crossed a plan boundary")
 ;;
 
+let test_read_output_feeds_grep_path_input () =
+  let read_id = node_id "read" in
+  let read_node =
+    node ~id:"read" ~tool_name:"Read"
+      (object_template [ "file_path", Plan.Json_template.literal (`String "a.ml") ])
+  in
+  let grep_node =
+    node ~id:"grep" ~tool_name:"Grep"
+      (object_template
+         [ "pattern", Plan.Json_template.literal (`String "probe")
+         ; "path", Plan.Json_template.output ~node_id:read_id ~pointer:(pointer "/path")
+         ])
+  in
+  let plan =
+    match Plan.create ~descriptors:(descriptors ()) [ read_node; grep_node ] with
+    | Ok plan -> plan
+    | Error _ -> fail "Read -> Grep typed chain was rejected"
+  in
+  let run_id = Plan.Run_id.fresh () in
+  let read_output =
+    match Plan.validate_output plan ~run_id ~node_id:read_id
+            (`Assoc
+               [ "ok", `Bool true; "path", `String "/keeper/probe/a.ml"
+               ; "bytes", `Int 4; "truncated", `Bool false; "offset", `Int 0
+               ; "returned_lines", `Int 1; "content", `String "probe" ])
+    with
+    | Ok output -> output
+    | Error _ -> fail "producer-shaped Read output violated its declared schema"
+  in
+  let lookup id = if Plan.Node_id.equal id read_id then Some read_output else None in
+  (match Plan.resolve_input plan ~run_id ~node_id:(node_id "grep") ~lookup with
+   | Ok (`Assoc fields) ->
+     check string "Grep path came from Read output" "/keeper/probe/a.ml"
+       Yojson.Safe.Util.(List.assoc "path" fields |> to_string)
+   | Ok _ | Error _ -> fail "resolved Grep input lost the referenced path");
+  let bad_pointer_node =
+    node ~id:"grep-bad" ~tool_name:"Grep"
+      (object_template
+         [ "pattern", Plan.Json_template.literal (`String "probe")
+         ; ( "path"
+           , Plan.Json_template.output ~node_id:read_id
+               ~pointer:(pointer "/nonexistent") )
+         ])
+  in
+  match Plan.create ~descriptors:(descriptors ()) [ read_node; bad_pointer_node ] with
+  | Error (Plan.Invalid_output_pointer _) -> ()
+  | Error _ | Ok _ -> fail "unreachable Read schema pointer was accepted"
+;;
+
 let test_plan_rejects_invalid_graphs_and_output_edges () =
   let missing = node_id "missing" in
   let with_missing =
@@ -867,7 +916,13 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "Execute"
+    [ "BrowserInteract"
+    ; "BrowserRead"
+    ; "Edit"
+    ; "Execute"
+    ; "Grep"
+    ; "Read"
+    ; "Write"
     ; "keeper_artifact_read"
     ; "keeper_lane_status"
       (* keeper_spawn answers a start with the handle every later spawn call
@@ -1080,10 +1135,16 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ; "updated_at", `String "2026-08-18T00:00:00Z"
                  ]
              ] )
+         (* One counter per Goal_phase constructor, and the declared schema
+            closes the object and requires all of them. A phase added to
+            Goal_phase without its counter here reads as the producer
+            emitting a shape its own schema rejects (#34976 added
+            awaiting_confirmation, #34985 declared its counter). *)
        ; ( "rollup"
          , `Assoc
              [ "active_count", `Int 1
              ; "verifying_count", `Int 0
+             ; "awaiting_confirmation_count", `Int 0
              ; "done_count", `Int 0
              ; "dropped_count", `Int 0
              ] )
@@ -1142,7 +1203,71 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ; "metrics", metrics_value
                  ]
              ] )
-       ])
+       ]);
+  (* Host lane: [file_bytes] present, [via] absent; [next_offset] and
+     [last_line_partial] co-occur on a window cut mid-line. *)
+  accepts
+    "Read"
+    (`Assoc
+       [ "ok", `Bool true
+       ; "path", `String "/keeper/probe/a.ml"
+       ; "bytes", `Int 12
+       ; "truncated", `Bool true
+       ; "offset", `Int 0
+       ; "returned_lines", `Int 3
+       ; "content", `String "let a = 1\n"
+       ; "file_bytes", `Int 4096
+       ; "next_offset", `Int 4
+       ; "last_line_partial", `Bool true
+       ]);
+  (* Backend-routed lane: [via] present, [file_bytes] absent. *)
+  accepts
+    "Read"
+    (`Assoc
+       [ "ok", `Bool true
+       ; "path", `String "/keeper/probe/a.ml"
+       ; "bytes", `Int 12
+       ; "truncated", `Bool true
+       ; "offset", `Int 0
+       ; "returned_lines", `Int 3
+       ; "content", `String "let a = 1\n"
+       ; "next_offset", `Int 4
+       ; "via", `String "backend"
+       ]);
+  rejects "Read" (`Assoc [ "ok", `Bool true; "path", `String "/x" ]);
+  accepts
+    "Grep"
+    (`Assoc
+       [ "ok", `Bool true
+       ; "op", `String "rg"
+       ; "path", `String "/keeper/probe"
+       ; "pattern", `String "probe"
+       ; "via", `String "host"
+       ; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
+       ; "matches", `List [ `String "a.ml:1:probe" ]
+       ]);
+  rejects
+    "Grep"
+    (`Assoc
+       [ "ok", `Bool true; "op", `String "rg"; "path", `String "/p"
+       ; "pattern", `String "p"; "via", `String "host"
+       ; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
+       ; "matches", `List [ `Int 1 ] ]);
+  accepts
+    "Write"
+    (`Assoc
+       [ "ok", `Bool true; "path", `String "/keeper/probe/out.txt"
+       ; "mode", `String "overwrite"; "bytes_written", `Int 5 ]);
+  accepts
+    "Edit"
+    (`Assoc
+       [ "ok", `Bool true; "path", `String "/keeper/probe/out.txt"
+       ; "mode", `String "patch"; "replace_all", `Bool false
+       ; "occurrences", `Int 1; "bytes_written", `Int 9
+       ; "via", `String "remote-ssh" ]);
+  rejects
+    "Edit"
+    (`Assoc [ "ok", `Bool true; "path", `String "/x"; "mode", `String "patch" ])
 ;;
 
 let test_composition_run_id_is_uuid_v7_identity () =
@@ -2415,6 +2540,10 @@ let () =
             "producer and consumer schemas"
             `Quick
             test_output_schema_and_consumer_input_are_enforced
+        ; test_case
+            "Read output feeds Grep path input"
+            `Quick
+            test_read_output_feeds_grep_path_input
         ; test_case
             "keeper_tasks_list output schema admits the page cursor"
             `Quick

@@ -1,0 +1,53 @@
+{
+  "binary_commit": "e95ce5b1e15b19c328db704af72d775ff574bc2d",
+  "binary_sha256": "87ba743751171a3a9bdce79db444aded9cdaab465d729339e4b4fe515dbb3be7",
+  "ci_run": 34412127768,
+  "artifact_id": 10127941785,
+  "harness_commit": "dc3132385e",
+  "operation_result": "same_operation_verified",
+  "postlude": "one additional reactive approval turn observed after operation verification; no repeated effect",
+  "provider_requests_final": 5,
+  "requests": [
+    {
+      "index": 0,
+      "path": "/primary/chat/completions",
+      "response_status": 200,
+      "time": 1788993991.7417731,
+      "request_sha256": "0ff2e2af34f1ba2766aaf90e3a3c57e75389b66cce3ccb0a7e0bea52beec81ef"
+    },
+    {
+      "index": 1,
+      "path": "/primary/chat/completions",
+      "response_status": 429,
+      "time": 1788993991.962471,
+      "request_sha256": "6d24aa963a0ad2b16bb7634d072d260846a8145821e7452fa9a6d1bca042e59b"
+    },
+    {
+      "index": 2,
+      "path": "/alternate/chat/completions",
+      "response_status": 200,
+      "time": 1788993992.846432,
+      "request_sha256": "ab4e259372a5e705ec55f4f3cc9abd664e8275c65d32b497edb883e73dc086d3"
+    },
+    {
+      "index": 3,
+      "path": "/alternate/chat/completions",
+      "response_status": 200,
+      "time": 1788993992.879863,
+      "request_sha256": "a98b84b3a508a1cdddeb26c2c5ad168c7095239be0b3c0290757bbb8827df4fe"
+    },
+    {
+      "index": 4,
+      "path": "/alternate/chat/completions",
+      "response_status": 200,
+      "time": 1788993993.251049,
+      "request_sha256": "aa7ecdf81c0ab467ff12ce92c697a548472bd426c4e765d3d121ee64e3069049"
+    }
+  ],
+  "limitations": [
+    "synthetic provider, no semantic LLM acceptance",
+    "no attachment or channel-session input in this scenario",
+    "no server restart in this scenario",
+    "does not prove automatic recovery from unavailable Gate authority"
+  ]
+}

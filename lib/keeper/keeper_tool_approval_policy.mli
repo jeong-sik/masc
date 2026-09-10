@@ -4,6 +4,10 @@
     durable execution Gate, which owns resolved cwd, sandbox profile and
     grants. Interactive and autonomous Execute calls therefore use the same
     authority. This is not a claim that every Execute input only reads.
+    Write and Edit likewise delegate to their filesystem producer: shared-host
+    writes use confined capabilities and the durable Gate for external effects;
+    endpoint-owned writes admit only their own playground and reject external
+    paths. No other tool's approval authorizes these filesystem calls.
     Other calls retain their descriptor and input-based interactive policy. *)
 
 (** Why a call was or was not put to an operator. Carried rather than reduced

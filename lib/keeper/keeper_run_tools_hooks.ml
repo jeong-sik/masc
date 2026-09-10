@@ -505,7 +505,9 @@ let assemble_hooks
            Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
              meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
-    let on_runtime_attempt attempt =
+    let usage_attempt = ref None in
+    let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+      usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       (* An official-client handoff belongs only to the runtime that produced
          it. A failover candidate must receive the Skill result itself before
          one of its actions can complete that activation's evidence. *)
@@ -521,6 +523,7 @@ let assemble_hooks
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
         ?on_tool_stream_observation:ctx.on_tool_stream_observation
+        ~current_runtime_attempt:(fun () -> !usage_attempt)
         ~on_after_turn_response:
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text
@@ -957,7 +960,7 @@ let assemble_hooks
                    };
                 let thinking_enabled_effective =
                   match current_params.enable_thinking with
-                  | Some b -> b
+                  | Some b -> Some b
                   | None -> Keeper_config.keeper_enable_thinking ()
                 in
                 Keeper_tool_call_log.set_turn_context
@@ -972,7 +975,7 @@ let assemble_hooks
                           Yojson.Safe.to_string
                             (Agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
-                  ~thinking_enabled:thinking_enabled_effective
+                  ?thinking_enabled:thinking_enabled_effective
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

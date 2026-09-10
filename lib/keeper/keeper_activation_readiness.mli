@@ -72,7 +72,6 @@ val owner_runtime_of_registry_entry :
 
 val retained_disabled_reason_to_wire : retained_disabled_reason -> string
 val paused_dead_reason_to_wire : paused_dead_reason -> string
-val owner_execution_truth_to_wire : owner_execution_truth -> string
 
 val classify_owner_execution :
   shutdown_operation_id:Keeper_shutdown_types.Operation_id.t option ->

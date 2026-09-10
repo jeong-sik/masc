@@ -685,7 +685,7 @@ export function KeeperWorkspaceChat({
               onClick=${() => navigate('approvals')}
             >
               <span class="chat-pendcue-dot"></span>
-              <span class="chat-pendcue-tx">판정 중 · 이 호출은 미뤄짐 · <span class="mono">${pendingCueItem.tool_name}</span></span>
+              <span class="chat-pendcue-tx">승인 대기 · 승인 목록에서 확인하세요 · <span class="mono">${pendingCueItem.tool_name}</span></span>
               <span class="chat-pendcue-arr">결재 큐에서 처리 →</span>
             </button>
           `

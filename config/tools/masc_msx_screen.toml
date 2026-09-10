@@ -2,7 +2,16 @@ name = "masc_msx_screen"
 description = """
 Read the MSX frame without advancing time.
 
-Returns mode, PC, text, a 64x24 ASCII view, tiles and sprites. Text is empty in bitmap modes; tile IDs depend on the game. Keeper calls include a PNG artifact and dimensions; use keeper_analyze_image for vision."""
+Returns mode, PC, text, a 64x24 ASCII view and tiles. Text is empty in \
+bitmap modes; tile IDs depend on the game. The sprite attribute table rides \
+only when sprites=true. Keeper calls include a PNG artifact and dimensions; \
+use keeper_analyze_image for vision."""
 additional_properties = false
 
 defer_loading = true
+
+[[params]]
+name = "sprites"
+type = "boolean"
+description = "Include the sprite attribute table (up to 32 slots). Default false."
+default = false

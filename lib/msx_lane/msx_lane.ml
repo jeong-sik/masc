@@ -1,5 +1,8 @@
 (* The workspace MSX machine and its input ledger. See msx_lane.mli. *)
 
+(* 순수 판별 코어를 lane 의 namespace 로 올린다 (mli 재노출용). *)
+module Screen_change = Screen_change
+
 type key = Msx.key
 
 type sprite = { index : int; x : int; y : int; pattern : int; color : int }
@@ -390,6 +393,46 @@ let step ~frames =
     | Ok () ->
       advance st frames;
       Ok (observe st))
+;;
+
+type until_change = {
+  frames_run : int;
+      (** frames actually advanced — less than the budget when it settled early *)
+  changed : bool;
+      (** the screen ended up different from the start; false with a settled
+          screen is the "this scene waits for a key" signal *)
+  stable : bool;
+      (** stopped because the screen settled; false means the budget ran out *)
+}
+
+(* 화면이 스스로 멈출 때까지 논다 — "n 프레임" 대신 "장면이 안착할 때까지"를
+   한 번의 호출로. 지문은 screen_view 그대로고 판정은 순수 코어(Screen_change)
+   가 한다: 키퍼는 큰 관찰 없이도 변화·정지·키 대기 후보를 알 수 있다. *)
+let step_until_change ~max_frames =
+  with_machine (fun st ->
+    match check_frames ~what:"frames" max_frames with
+    | Error e -> Error e
+    | Ok () ->
+      let cfg = Screen_change.default in
+      let start = observe st in
+      let base = start.screen_view in
+      let state = ref (Screen_change.initial base) in
+      let frames_run = ref 0 in
+      let stopped = ref false in
+      while not !stopped && !frames_run < max_frames do
+        let chunk = min cfg.interval (max_frames - !frames_run) in
+        advance st chunk;
+        frames_run := !frames_run + chunk;
+        let view = (observe st).screen_view in
+        state := Screen_change.feed cfg !state view;
+        stopped := Screen_change.settled cfg !state
+      done;
+      Ok
+        ( observe st
+        , { frames_run = !frames_run
+          ; changed = Screen_change.changed cfg base !state
+          ; stable = !stopped
+          } ))
 ;;
 
 (* Press everything or nothing: a key without a matrix place is refused

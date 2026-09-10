@@ -109,7 +109,30 @@ open Alcotest
    #34506 is the same shape and takes about 195 of that: five MSX tools
    whose first line was over the budget, the largest at 745 bytes. It fits
    under this figure, so the headroom it leaves is nearer 306. *)
-let ceiling_bytes = 98_164
+(* 2026-09-10: the workspace memory reader adds 776 serialized bytes and one
+   always-available tool. It lets Keepers discover and read attributed curator
+   proposals, disagreements and source gaps without treating them as verified
+   memory. Targeted CI 34401018154 at b33c497efb measured 98,808 bytes / 112
+   tools after the Browser description reduction landed. The preceding
+   surface is therefore 98,032 bytes / 111 tools. Add only the reader's 776
+   bytes to the previous 98,164 ceiling, retaining exactly 132 bytes of slack.
+   This is schema measurement, not a runtime token or behavior gate. *)
+(* 2026-09-10: 100,456 across 113 tools, measured by targeted CI 34420702044
+   at 8ccf4d6938. Four merges moved the surface past the line above, none of
+   them arguing it, because this suite runs in the nightly lane and not on a
+   pull request:
+
+     #34981  masc_fusion_decision, the 113th tool (+1,124 bytes of TOML)
+     #34983  masc_fusion carries the original Task and Goal text  (+623)
+     #34963  masc_keeper_up reports the existing sandbox image     (+289)
+     #34976  masc_goal_list admits the awaiting_confirmation phase  (+25)
+
+   Those are raw TOML bytes and sum to 2,061; the renderer drops comments and
+   formatting, so the serialized surface grew 1,648.
+
+   Set to the measurement with no headroom. A ceiling that carries slack lets
+   the next unargued growth land silently, which is how these four did. *)
+let ceiling_bytes = 100_456
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -121,6 +144,10 @@ let schema_json (schema : Masc_domain.tool_schema) =
 
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
+  List.iter (fun (schema : Masc_domain.tool_schema) ->
+    if String.equal schema.name "keeper_workspace_memory_read" then
+      Printf.printf "workspace memory reader schema: %d bytes\n%!"
+        (String.length (Yojson.Safe.to_string (schema_json schema)))) schemas;
   let bytes =
     List.fold_left
       (fun acc schema -> acc + String.length (Yojson.Safe.to_string (schema_json schema)))
@@ -179,6 +206,7 @@ let all_surface_golden_names =
   ; "keeper_lane_status"
   ; "keeper_library_read"
   ; "keeper_library_search"
+  ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"
@@ -241,6 +269,10 @@ let all_surface_golden_names =
   ; "masc_file_list"
   ; "masc_file_upload"
   ; "masc_fusion"
+  (* #34981: a Keeper's adopt/reject decision on a Fusion panel proposal
+     lands in task history instead of only in the panel, so the next turn
+     can read what was already decided. *)
+  ; "masc_fusion_decision"
   ; "masc_fusion_status"
   ; "masc_gc"
   ; "masc_get_metrics"
@@ -262,6 +294,9 @@ let all_surface_golden_names =
   ; "masc_msx_save"
   ; "masc_msx_screen"
   ; "masc_msx_step"
+  (* The existing settle action advances frames to a stable observation; record
+     its deliberate model-visible addition without increasing the byte ceiling. *)
+  ; "masc_msx_step_until_change"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_run_get"

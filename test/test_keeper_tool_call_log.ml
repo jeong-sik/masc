@@ -91,9 +91,11 @@ let test_pending_file_change_evidence_is_occurrence_scoped () =
   let first_evidence = Keeper_file_change_evidence.written "one\n" in
   let second_evidence = Keeper_file_change_evidence.written "one\ntwo\n" in
   Keeper_tool_call_log.set_file_change_evidence
+    ~artifact_refs:[]
     ~invocation:first
     ~evidence:first_evidence;
   Keeper_tool_call_log.set_file_change_evidence
+    ~artifact_refs:[]
     ~invocation:second
     ~evidence:second_evidence;
   let consume invocation =
@@ -147,6 +149,7 @@ let test_abandoned_file_change_evidence_is_released_with_invocation () =
   let record_abandoned () =
     let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
     Keeper_tool_call_log.set_file_change_evidence
+      ~artifact_refs:[]
       ~invocation:abandoned
       ~evidence:(Keeper_file_change_evidence.written "orphaned\n")
   in

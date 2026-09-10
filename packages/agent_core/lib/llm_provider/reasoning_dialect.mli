@@ -149,17 +149,6 @@ val replay_capability_for_provider_config
 val with_preserve_thinking : preserve_thinking:bool option -> t -> t
 val thinking_enabled : enable_thinking:bool option -> bool
 
-val thinking_object_only_control
-  :  t
-  -> enable_thinking:bool option
-  -> preserve_thinking:bool option
-  -> thinking_object_only_control
-
-val chat_template_kwargs_preserve_field
-  :  t
-  -> preserve_thinking:bool option
-  -> bool option
-
 val ignores_sampling_param
   :  t
   -> enable_thinking:bool option
@@ -196,20 +185,6 @@ val request_control_fields
 val normalize_effort_value : t -> Reasoning_effort.t -> string option
 
 val sampling_params_ignored_when_thinking : t -> Capabilities.sampling_parameter list
-
-(** [true] when [parameter] is a sampling parameter the wire format ignores
-    while thinking is enabled. Thinking defaults on: only an explicit
-    [enable_thinking = Some false] keeps the field. Provider-controlled
-    always-suppressed parameters such as Kimi fixed sampling are represented by
-    the full {!t} policy instead of this format-only helper. Keyed on
-    {!Capabilities.thinking_control_format} so the [Provider_config]-based
-    request builder ([Backend_openai_request]) drops the same parameters
-    consistently; the public path only has the format, not a full {!t}. *)
-val sampling_field_ignored_when_thinking
-  :  thinking_control_format:Capabilities.thinking_control_format
-  -> enable_thinking:bool option
-  -> parameter:Capabilities.sampling_parameter
-  -> bool
 
 (** Whether an assistant reasoning side-channel should be replayed into a
     subsequent request based on message shape. [assistant_had_tool_call] is

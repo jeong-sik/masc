@@ -18,6 +18,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
+import { OverviewRuntimeStats } from './runtime-stats'
 import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
@@ -1682,6 +1683,7 @@ export function Overview() {
           <${OverviewAttentionPanel} keeperList=${keeperList} health=${compositeHealth} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
+        <${OverviewRuntimeStats} />
         <${OverviewDomainSection}
           stats=${stats}
           fleet=${fleet}

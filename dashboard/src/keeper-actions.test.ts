@@ -584,6 +584,53 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
   })
 
+  it('waits for server cancellation confirmation', async () => {
+    let acceptedOperationId = ''
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        signal: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      acceptedOperationId = opts.operationId
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: {
+          operation_id: opts.operationId,
+          state: 'Running',
+          queued_count: 0,
+        },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial answer' })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal.addEventListener('abort', () => {
+          const error = new Error('Aborted')
+          error.name = 'AbortError'
+          reject(error)
+        }, { once: true })
+      })
+    })
+    let confirm!: (value: unknown) => void
+    cancelKeeperChatOperation.mockImplementation(() => new Promise(resolve => { confirm = resolve }))
+
+    const send = sendKeeperThreadMessage('echo', 'cancel me').catch(() => undefined)
+    await Promise.resolve()
+    await cancelActiveKeeperThreadMessage('echo')
+    await Promise.resolve()
+    expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+    expect((keeperThreads.value.echo ?? []).some(entry => entry.text === 'Partial answer' && entry.streamState === 'cancelling')).toBe(true)
+    confirm({ operationId: acceptedOperationId, sequence: '1', createdAt: 1, input: null,
+      state: { kind: 'cancelled', completedAt: 2 } })
+    await send
+    await Promise.resolve()
+
+    expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
+  })
+
   it('aborts locally without server cancel before operation acceptance', async () => {
     streamKeeperMessage.mockImplementation(async (
       _name: string,

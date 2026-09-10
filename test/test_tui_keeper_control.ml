@@ -694,6 +694,70 @@ let test_roster_decode_rejects_an_unknown_phase () =
         {|keepers[0]: keeper "analyst" has unknown lifecycle phase "teleporting"|}
         err
 
+(* A detail-less error is retained as unavailable, never a runtime snapshot. *)
+let error_row name = Printf.sprintf
+    {|{"status":"error","runtime_class":"keeper","name":%S,
+       "keepalive_running":false,
+       "meta":null,"created_at":null,"updated_at":null}|}
+    name
+
+let test_roster_decodes_an_error_row_without_refusing_the_rest () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s,%s]}|}
+         (gate_row "healthy-one")
+         (error_row "broken-meta"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Error detail -> Alcotest.failf "roster must decode past an error row: %s" detail
+  | Ok (rows, errors, _, _) ->
+      Alcotest.(check int) "only observed runtime rows survive" 1 (List.length rows);
+      Alcotest.(check (list (pair string string))) "missing metadata stays an error"
+        ["broken-meta", "Keeper metadata unavailable; the server supplied no error detail"] errors;
+      Alcotest.(check string) "healthy row retained" "healthy-one" (List.hd rows).Decode.kr_name
+
+let test_actual_producer_error_is_isolated () =
+  let producer_row = Yojson.Safe.from_string
+    {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
+       "keepalive_running":false,"meta":null,"created_at":null,"updated_at":null,
+       "effective_meta_error":{"keeper":"broken-meta","message":"metadata unreadable",
+       "terminal_reason":"effective_meta_read_failed","severity":"error",
+       "operator_action_required":true,"next_action":"fix_keeper_toml_or_keeper_instructions"}}|} in
+  let json = `Assoc ["keepers", `List [Yojson.Safe.from_string (gate_row "healthy-one"); producer_row]] in
+  match Decode.decode_keeper_runtime_list json with
+  | Error message -> Alcotest.fail message
+  | Ok (rows, errors, _, _) ->
+    Alcotest.(check int) "healthy Keeper remains visible" 1 (List.length rows);
+    Alcotest.(check (list (pair string string))) "producer error retained verbatim"
+      ["broken-meta", "metadata unreadable"] errors
+
+(* Present-but-unknown health stays a refusal even though an absent one now
+   falls back: the fallback is for readings that do not exist, not for
+   vocabulary this build has not learned. *)
+let test_roster_decode_rejects_present_unknown_health_on_error_row () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"keepers":[%s]}|} (error_row "broken-meta"))
+  in
+  let json_with_bad_health =
+    match json with
+    | `Assoc fields ->
+        let keepers =
+          List.find (fun (k, _) -> String.equal k "keepers") fields
+          |> snd
+        in
+        (match keepers with
+         | `List [ `Assoc row ] ->
+             `Assoc
+               (("keepers", `List [ `Assoc (("health", `String "quarantined") :: row) ])
+                :: List.filter (fun (k, _) -> not (String.equal k "keepers")) fields)
+         | _ -> json)
+    | _ -> json
+  in
+  match Decode.decode_keeper_runtime_list json_with_bad_health with
+  | Ok _ -> Alcotest.fail "a present unknown health must not decode"
+  | Error _ -> ()
+
 (* The roster header's tally and the status column are the same reading drawn
    twice. They disagreed once already, when the tally folded a status the
    column spelled out. These pin the tally to whichever function labels the
@@ -981,5 +1045,11 @@ let () =
             test_roster_decode_rejects_an_unknown_status
         ; Alcotest.test_case "unknown phase is rejected" `Quick
             test_roster_decode_rejects_an_unknown_phase
+        ; Alcotest.test_case "an error row decodes without refusing the rest" `Quick
+            test_roster_decodes_an_error_row_without_refusing_the_rest
+        ; Alcotest.test_case "actual producer error stays isolated" `Quick
+            test_actual_producer_error_is_isolated
+        ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick
+            test_roster_decode_rejects_present_unknown_health_on_error_row
         ] )
     ]

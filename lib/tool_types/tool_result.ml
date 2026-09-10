@@ -121,7 +121,8 @@ type output_payload =
     (not an [option]): callers must commit to a typed classification at
     the catch boundary. *)
 type failure_payload =
-  { class_ : tool_failure_class
+  { effect_disposition : failure_effect_disposition
+  ; class_ : tool_failure_class
   ; message : string
   ; data : Yojson.Safe.t
   ; metadata : Yojson.Safe.t option
@@ -169,9 +170,10 @@ let to_json (result : result) : Yojson.Safe.t =
        ; "duration_ms", `Float duration_ms
        ]
        @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
-  | Failed { class_; message; data; metadata; tool_name; duration_ms } ->
+  | Failed { effect_disposition; class_; message; data; metadata; tool_name; duration_ms } ->
     `Assoc
-      ([ "failure_class", `String (tool_failure_class_to_string class_)
+      ([ "effect_disposition", `String (failure_effect_disposition_to_string effect_disposition)
+       ; "failure_class", `String (tool_failure_class_to_string class_)
        ; "disposition", `String disposition
        ; "data", data
        ; "message", `String message
@@ -240,7 +242,8 @@ let error ~failure_class ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
   Failed
-    { class_ = failure_class
+    { effect_disposition = Effect_outcome_unknown
+    ; class_ = failure_class
     ; message = message_str
     ; data = `String message_str
     ; metadata = None
@@ -264,7 +267,8 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
       (Stdlib.Printexc.to_string exn)
   in
   Failed
-    { class_
+    { effect_disposition = Effect_outcome_unknown
+    ; class_
     ; message
     ; data = `String message
     ; metadata = None
@@ -295,11 +299,12 @@ let make_err
       ~start_time
       ?(data = `Null)
       ?metadata
+      ?(effect_disposition = Effect_outcome_unknown)
       message_str
   : result
   =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Failed { class_; message = message_str; data; metadata; tool_name; duration_ms }
+  Failed { effect_disposition; class_; message = message_str; data; metadata; tool_name; duration_ms }
 ;;
 
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
@@ -316,7 +321,8 @@ let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
       (Stdlib.Printexc.to_string exn)
   in
   Failed
-    { class_
+    { effect_disposition = Effect_outcome_unknown
+    ; class_
     ; message
     ; data = `String message
     ; metadata = None

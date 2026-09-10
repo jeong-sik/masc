@@ -1,0 +1,87 @@
+name: Keeper sandbox image
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/sandbox-image.yml'
+      - 'lib/keeper_sandbox_image/**'
+      - 'scripts/verify-sandbox-creative-tools.py'
+      - 'scripts/verify-sandbox-image-archive.py'
+      - 'scripts/tests/test_sandbox_image_archive.py'
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify archive identity contract
+        run: python3 -m unittest discover -s scripts/tests -p test_sandbox_image_archive.py
+      - name: Compile the embedded recipe printer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ocaml-nox
+          cp lib/keeper_sandbox_image/keeper_sandbox_image.ml "$RUNNER_TEMP/recipe.ml"
+          printf '\nlet () = print_string dockerfile\n' >> "$RUNNER_TEMP/recipe.ml"
+          ocamlc -o "$RUNNER_TEMP/print-recipe" "$RUNNER_TEMP/recipe.ml"
+          mkdir -p "$RUNNER_TEMP/sandbox-image"
+          "$RUNNER_TEMP/print-recipe" > "$RUNNER_TEMP/sandbox-image/Dockerfile"
+      - name: Build the native image
+        run: |
+          source_commit=$(git rev-parse HEAD)
+          image_tag="masc-sandbox:ci-${source_commit}-${{ matrix.arch }}"
+          docker build --label "org.opencontainers.image.revision=$source_commit" \
+            -t "$image_tag" - < "$RUNNER_TEMP/sandbox-image/Dockerfile"
+          docker image inspect "$image_tag" > "$RUNNER_TEMP/sandbox-image/image-inspect.json"
+          printf 'image_tag=%s\n' "$image_tag" >> "$GITHUB_ENV"
+      - name: Verify creative artifacts offline as a non-root user
+        run: |
+          mkdir -p "$RUNNER_TEMP/sandbox-image/proof"
+          chmod 0777 "$RUNNER_TEMP/sandbox-image/proof"
+          docker run --rm --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --user 65532:65532 \
+            --tmpfs /tmp:rw,mode=1777 -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE/scripts:/proof:ro" \
+            -v "$RUNNER_TEMP/sandbox-image/proof:/out" \
+            "$image_tag" python3 /proof/verify-sandbox-creative-tools.py /out
+      - name: Export the verified image
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          docker save "$image_tag" | gzip > "$RUNNER_TEMP/sandbox-image/image.tar.gz"
+          python3 scripts/verify-sandbox-image-archive.py \
+            --artifact-dir "$RUNNER_TEMP/sandbox-image" \
+            --expected-commit "$(git rev-parse HEAD)" --architecture "$IMAGE_ARCH" \
+            --image-tag "$image_tag" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/sandbox-image/manifest.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: keeper-sandbox-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/sandbox-image
+          compression-level: 0
+          if-no-files-found: error
+      - name: Preserve failed build or smoke evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-sandbox-failure-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/sandbox-image/Dockerfile
+            ${{ runner.temp }}/sandbox-image/image-inspect.json
+            ${{ runner.temp }}/sandbox-image/proof
+          if-no-files-found: ignore

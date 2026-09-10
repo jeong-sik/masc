@@ -44,13 +44,6 @@ type history_projection =
   }
 [@@deriving show]
 
-val dialect_history_projection
-  :  ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
-  -> replay_capability:Reasoning_dialect.replay_capability
-  -> Reasoning_dialect.t
-  -> Types.message list
-  -> (history_projection, Reasoning_history_projection.error) result
-
 val project_history
   :  Provider_config.t
   -> Types.message list

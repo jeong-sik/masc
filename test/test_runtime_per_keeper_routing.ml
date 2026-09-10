@@ -785,6 +785,13 @@ let test_deleted_keeper_loses_assignment_and_egress_together () =
 
 let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
   with_runtime_file (fun path ->
+    (* Both writers must change the observed assignment. Otherwise the writer
+       reasserting the fixture's initial openai.gpt can legitimately finish as
+       Assignment_unchanged before the other writer commits, with no conflict. *)
+    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path
+             ~keeper_name:"routingtest" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.failf "clear initial assignment failed: %s" detail);
     let expected =
       match Runtime.observe_keeper_assignment ~runtime_config_path:path
               ~keeper_name:"routingtest" () with
@@ -937,6 +944,74 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
       check_first_run_lanes path "codex.codex" ~cli:true))
+;;
+
+let test_first_run_fallback_order_and_preservation () =
+  with_runtime_file (fun path ->
+    let extra = {|
+[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[models.disabled]
+api-name = "small"
+max-context = 32000
+
+[openai.disabled]
+enabled = false
+|} in
+    write_file path (read_file path ^ extra);
+    let select fallbacks = Runtime.set_first_run_runtime ~runtime_config_path:path
+      ~runtime_id:"openai.gpt" ~fallback_runtime_ids:fallbacks () in
+    let candidates = [ "openai.gpt"; "codex.codex"; "runpod_mtp.qwen" ] in
+    (match select [ "codex.codex"; "runpod_mtp.qwen" ] with
+     | Ok _ -> () | Error detail -> Alcotest.fail detail);
+    check_first_run_lanes path "openai.gpt" ~cli:false;
+    (match Runtime.resolve_assignment "openai.gpt" with
+     | `Lane lane -> Alcotest.(check (list string)) "mixed transport order" candidates
+         (Runtime_lane.ordered_candidates lane)
+     | `Missing | `Unavailable _ -> Alcotest.fail "primary lane must resolve");
+    Alcotest.(check (option string)) "other Keeper assignment preserved"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest");
+    let committed = read_file path in
+    List.iter (fun invalid ->
+      (match select invalid with
+       | Error _ -> () | Ok _ -> Alcotest.fail "invalid fallback accepted");
+      Alcotest.(check string) "invalid fallback leaves every config byte unchanged"
+        committed (read_file path))
+      [ [ "missing.runtime" ]; [ "openai.disabled" ]; [ "openai.gpt" ];
+        [ "codex.codex"; "codex.codex" ]; [ "" ]; [ "bad\nvalue" ] ];
+    (match select [] with
+     | Ok _ -> () | Error detail -> Alcotest.fail detail);
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Lane lane -> Alcotest.(check (list string)) "reselection removes stale fallbacks"
+        [ "openai.gpt" ] (Runtime_lane.ordered_candidates lane)
+    | `Missing | `Unavailable _ -> Alcotest.fail "reselected primary lane must resolve")
+;;
+
+let test_first_run_imp_binding_is_explicit () =
+  with_runtime_file (fun path ->
+    write_file path (Runtime.update_runtime_assignment_text (read_file path)
+      ~keeper_name:"imp" ~runtime_id:"runpod_mtp.qwen");
+    let select ?(bind_imp = false) () =
+      match Runtime.set_first_run_runtime ~runtime_config_path:path
+        ~runtime_id:"openai.gpt" ~fallback_runtime_ids:[ "runpod_mtp.qwen" ] ~bind_imp () with
+      | Ok _ -> () | Error detail -> Alcotest.fail detail in
+    select ();
+    Alcotest.(check (option string)) "existing imp preserved without explicit selection"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "imp");
+    select ~bind_imp:true ();
+    Alcotest.(check (option string)) "explicit setup selects primary lane for imp"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "imp");
+    Alcotest.(check (option string)) "unrelated Keeper assignment preserved"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
 let test_runtime_route_writer_rejects_unknown_default_without_write () =
@@ -2265,6 +2340,10 @@ let () =
             test_runtime_route_writer_updates_default
         ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
             test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "first-run fallback ordering and atomic preservation" `Quick
+            test_first_run_fallback_order_and_preservation
+        ; Alcotest.test_case "first-run imp binding requires explicit selection" `Quick
+            test_first_run_imp_binding_is_explicit
         ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
             test_first_run_cli_runtime_binds_supporting_lanes
         ; Alcotest.test_case

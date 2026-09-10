@@ -235,11 +235,6 @@ type row = {
           of the first row, so that is the row a press lands on. *)
 }
 
-val siding_lead : siding -> string
-(** The run a siding takes to reach the line, {!siding_lead_cells} wide. The
-    kind is in the texture -- the journal dashed, an arrival solid -- rather
-    than a mark, which would be the third time one row says who it is. *)
-
 val siding_lead_cells : int
 
 val turn_rail_gutter : turn_rail -> string

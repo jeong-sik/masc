@@ -153,6 +153,8 @@ val keeper_world_transcript_intro : string
 
 val keeper_world_active_goals_unavailable : string
 val keeper_world_active_goals_heading : string
+val keeper_world_active_goals_criterion : string
+val keeper_world_active_goals_review : string
 val keeper_world_active_goals_row : string
 val keeper_world_active_goals_row_untitled : string
 val keeper_world_active_goals_verifying_annotation : string

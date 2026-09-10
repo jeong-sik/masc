@@ -336,10 +336,10 @@ let test_unknown_ledger_field_is_a_decode_error () =
       (String_util.contains_substring msg "surprise_field")
 ;;
 
-let test_retired_human_confirmation_state_is_a_decode_error () =
+let test_human_confirmation_requires_bound_verdict () =
   with_workspace
   @@ fun config ->
-  (match Goal_verification.mark_proof_pending config ~goal_id:"goal-no-human-legacy" ~criterion:isolated_criterion with
+  (match Goal_verification.mark_proof_pending config ~goal_id:"goal-human-missing-verdict" ~criterion:isolated_criterion with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let path = Goal_verification.verifications_path config in
@@ -367,11 +367,11 @@ let test_retired_human_confirmation_state_is_a_decode_error () =
   in
   Yojson.Safe.to_file path poisoned;
   Yojson.Safe.to_file (path ^ ".last-good") poisoned;
-  match Goal_verification.get_record config ~goal_id:"goal-no-human-legacy" with
-  | Ok _ -> fail "retired human confirmation state decoded silently"
+  match Goal_verification.get_record config ~goal_id:"goal-human-missing-verdict" with
+  | Ok _ -> fail "human confirmation without proof decoded silently"
   | Error msg ->
-    check bool "the retired state is rejected as unknown" true
-      (String_util.contains_substring msg "human_confirmed")
+    check bool "the missing bound verdict is rejected" true
+      (String_util.contains_substring msg "goal_verification.verdict")
 ;;
 
 (* Observability: the read surfaces join the ledger *)
@@ -584,7 +584,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
        ~start_time:0. config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
-  check string "new execution can complete" "completed" (stored_phase config goal_id);
+  check string "new execution can complete" "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven verdict ->
     check string "new proof owns the active verdict" "second-verifier-run" verdict.verification_run_id
@@ -661,7 +661,7 @@ let test_reopen_archive_failure_is_recoverable_without_losing_proof () =
   Unix.mkdir path 0o755;
   let refused = must_fail "archive failure" (transition ctx goal_id "reopen") in
   check string "archive failure is explicit" "internal_error" (json_state refused [ "error_code" ]);
-  check string "archive failure leaves the original phase" "completed" (stored_phase config goal_id);
+  check string "archive failure leaves the original phase" "awaiting_confirmation" (stored_phase config goal_id);
   check bool "archive failure retains the original active proof" true
     (original = ledger_record config goal_id);
   Unix.rmdir path;
@@ -707,7 +707,7 @@ let test_reopen_reset_refuses_a_recovered_verification_ledger () =
   (* Model the persisted phase write before a failed reset, so a recovered
      proven ledger would otherwise be overwritten with idle. *)
   (match Goal_store.update_goal_if_phase config ~goal_id
-     ~expected_phase:Goal_phase.Completed
+     ~expected_phase:Goal_phase.Awaiting_confirmation
      (fun goal -> { goal with phase = Goal_phase.Executing }) with
    | Ok (Goal_store.Goal_updated _) -> ()
    | _ -> fail "could not enter the reopen recovery boundary");
@@ -801,7 +801,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
          Workspace_goals.Proof_proven
          "metric observed at target")
   in
-  check string "completed via proof" "completed"
+  check string "completed via proof" "awaiting_confirmation"
     (json_state completed [ "goal"; "phase" ]);
   check string "ledger shows the proven verdict" "proof_proven"
     (json_state completed [ "verification"; "completion"; "state" ]);
@@ -906,7 +906,7 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
          Workspace_goals.Proof_proven
          "verified after re-arm")
   in
-  check string "the re-armed gate completes" "completed"
+  check string "the re-armed gate completes" "awaiting_confirmation"
     (json_state completed [ "goal"; "phase" ])
 ;;
 
@@ -967,7 +967,7 @@ let test_verifying_repeat_reconciles_a_committed_proof () =
   in
   check bool "response exposes recovery" true
     (json_bool answered [ "reconciled" ]);
-  check string "the committed proof converges to completed" "completed"
+  check string "the committed proof converges to completed" "awaiting_confirmation"
     (json_state answered [ "goal"; "phase" ]);
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_proven proof ->
@@ -1011,6 +1011,8 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
   let summaries =
     [ { Keeper_unified_prompt.summary_goal_id = goal_id
       ; summary_title = "Goal under proof"
+      ; summary_criterion = None
+      ; summary_review_note = None
       ; summary_phase = Some Goal_phase.Verifying
       }
     ]
@@ -1172,8 +1174,8 @@ let () =
             test_undecodable_ledger_fails_closed_and_loud
         ; test_case "unknown ledger field is a decode error" `Quick
             test_unknown_ledger_field_is_a_decode_error
-        ; test_case "retired human confirmation state is a decode error" `Quick
-            test_retired_human_confirmation_state_is_a_decode_error
+        ; test_case "human confirmation requires a bound verdict" `Quick
+            test_human_confirmation_requires_bound_verdict
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick

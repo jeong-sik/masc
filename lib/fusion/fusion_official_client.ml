@@ -122,6 +122,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
+  ; isolated_home = None
   ; model = execution.model
   ; native = Runtime_native_tools.codex_default
   ; developer_instructions = system_prompt

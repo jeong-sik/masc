@@ -7,3 +7,5 @@ val compare : t -> t -> int
 val equal : t -> t -> bool
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
+
+val direct_operation_id : t -> Keeper_operation_id.t option

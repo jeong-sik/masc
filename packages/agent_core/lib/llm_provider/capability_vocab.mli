@@ -104,11 +104,9 @@ type thinking_control_format_codec_error =
       ; invalidity : thinking_control_token_invalidity
       }
 
-val structured_output_support_to_string : structured_output_support -> string
 val anthropic_thinking_control_values : string list
 val anthropic_thinking_control_of_string : string -> anthropic_thinking_control option
 val canonical_label_of_thinking_control_format : thinking_control_format -> string
-val thinking_control_format_values : string list
 val token_of_thinking_control_format : thinking_control_format -> string option
 
 val encode_thinking_control_format
@@ -163,7 +161,6 @@ val reasoning_output_format_values : string list
 val reasoning_output_format_of_string : string -> reasoning_output_format option
 val content_inline_reasoning_values : string list
 val content_inline_reasoning_of_string : string -> content_inline_reasoning option
-val reasoning_streaming_format_values : string list
 val reasoning_streaming_format_syntax : string
 val reasoning_streaming_format_of_string : string -> reasoning_streaming_format option
 val sampling_parameter_values : string list

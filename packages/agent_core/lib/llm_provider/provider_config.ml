@@ -254,8 +254,6 @@ type reasoning_effort = Reasoning_effort.t =
   | High
   | XHigh
   | Max
-
-let all_reasoning_efforts = Reasoning_effort.all
 let reasoning_effort_to_string = Reasoning_effort.to_string
 let reasoning_effort_of_string = Reasoning_effort.of_string
 

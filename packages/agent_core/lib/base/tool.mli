@@ -51,8 +51,6 @@ val descriptor_execution_mode
   -> input:Yojson.Safe.t
   -> Tool_contract.execution_mode
 
-val descriptor_completion : descriptor -> Tool_contract.completion
-
 type t =
   { schema : Types.tool_schema
   ; descriptor : descriptor option

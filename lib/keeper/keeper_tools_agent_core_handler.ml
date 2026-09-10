@@ -89,9 +89,9 @@ let make_keeper_tool_handler_with_authority
          on_completed
      | Tool_result.Deferred _ ->
        (match deferred_kind with
-        | Some Keeper_tool_execution.External_effect_deferred ->
+        | Some (Keeper_tool_execution.External_effect_deferred {approval_id}) ->
           Option.iter
-            (fun deferred -> deferred ())
+            (fun deferred -> deferred ~approval_id)
             on_external_effect_deferred
         | None | Some Keeper_tool_execution.Generic_deferred ->
           Option.iter (fun deferred -> deferred ()) on_deferred)

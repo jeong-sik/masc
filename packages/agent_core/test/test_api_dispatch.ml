@@ -25,7 +25,7 @@ let test_anthropic_parse_response () =
     "id": "msg_test",
     "type": "message",
     "role": "assistant",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "content": [{"type": "text", "text": "Hello back"}],
     "stop_reason": "end_turn",
     "usage": {"input_tokens": 10, "output_tokens": 5,
@@ -35,7 +35,7 @@ let test_anthropic_parse_response () =
   in
   let resp = Llm_provider.Backend_anthropic.parse_response mock_json in
   check string "id" "msg_test" resp.id;
-  check string "model" "claude-sonnet-4-6" resp.model;
+  check string "model" "claude-sonnet-5" resp.model;
   (match resp.stop_reason with
    | Types.EndTurn -> ()
    | _ -> fail "expected EndTurn");
@@ -81,8 +81,8 @@ let test_openai_parse_response () =
 (* ── Pricing ─────────────────────────────────────────────────── *)
 
 let test_pricing_known_models () =
-  let p_opus = declared_pricing "claude-opus-4-6" in
-  check (float 0.01) "opus input" 15.0 p_opus.input_per_million;
+  let p_opus = declared_pricing "claude-opus-5" in
+  check (float 0.01) "opus input" 5.0 p_opus.input_per_million;
   let p_gpt4o = declared_pricing "gpt" in
   check (float 0.01) "gpt4o input" 2.5 p_gpt4o.input_per_million;
   let p_mini = declared_pricing "gpt-mini" in
@@ -138,7 +138,7 @@ let test_anthropic_missing_usage () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_001",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "stop_reason": "end_turn",
     "content": [{"type": "text", "text": "hello"}],
     "usage": null
@@ -155,7 +155,7 @@ let test_anthropic_empty_content () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_002",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "stop_reason": "end_turn",
     "content": [],
     "usage": {"input_tokens": 10, "output_tokens": 5,
@@ -172,7 +172,7 @@ let test_anthropic_cache_usage_parsing () =
     Yojson.Safe.from_string
       {|{
     "id": "msg_003",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "stop_reason": "end_turn",
     "content": [{"type": "text", "text": "cached"}],
     "usage": {
@@ -197,8 +197,8 @@ let test_anthropic_cache_usage_parsing () =
 (* ── Cache-aware cost estimation ─────────────────────────────── *)
 
 let test_cache_cost_calculation () =
-  let pricing = declared_pricing "claude-sonnet-4-6" in
-  (* Sonnet: 3.0/M input, 15.0/M output, cache_write=1.25x, cache_read=0.1x *)
+  let pricing = declared_pricing "claude-sonnet-5" in
+  (* Sonnet: 2.0/M input, 10.0/M output, cache_write=1.25x, cache_read=0.1x *)
   let cost =
     Llm_provider.Pricing.estimate_cost
       ~pricing
@@ -209,15 +209,15 @@ let test_cache_cost_calculation () =
       ()
     |> require_estimated_cost
   in
-  (* regular = 1M - 500K - 300K = 200K -> 200K * 3.0/1M = 0.6
-     cache_write = 500K * 3.0/1M * 1.25 = 1.875
-     cache_read  = 300K * 3.0/1M * 0.1  = 0.09
-     total = 0.6 + 1.875 + 0.09 = 2.565 *)
-  check (float 0.001) "cache cost" 2.565 cost
+  (* regular = 1M - 500K - 300K = 200K -> 200K * 2.0/1M = 0.4
+     cache_write = 500K * 2.0/1M * 1.25 = 1.25
+     cache_read  = 300K * 2.0/1M * 0.1  = 0.06
+     total = 0.4 + 1.25 + 0.06 = 1.71 *)
+  check (float 0.001) "cache cost" 1.71 cost
 ;;
 
 let test_cache_cost_no_cache_tokens () =
-  let pricing = declared_pricing "claude-sonnet-4-6" in
+  let pricing = declared_pricing "claude-sonnet-5" in
   let cost_with =
     Llm_provider.Pricing.estimate_cost
       ~pricing

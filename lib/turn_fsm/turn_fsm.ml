@@ -152,6 +152,7 @@ type transition_action =
   | ProviderTimeout
   | StreamYieldsTool
   | ToolReturned
+  | ToolTimeout
   | StreamComplete
   | FinishTurn
   | ReceiptLost
@@ -175,6 +176,7 @@ let all_transition_actions =
   ; ProviderTimeout
   ; StreamYieldsTool
   ; ToolReturned
+  ; ToolTimeout
   ; StreamComplete
   ; FinishTurn
   ; ReceiptLost
@@ -196,6 +198,7 @@ let transition_action_label = function
   | ProviderTimeout -> "ProviderTimeout"
   | StreamYieldsTool -> "StreamYieldsTool"
   | ToolReturned -> "ToolReturned"
+  | ToolTimeout -> "ToolTimeout"
   | StreamComplete -> "StreamComplete"
   | FinishTurn -> "FinishTurn"
   | ReceiptLost -> "ReceiptLost"
@@ -283,6 +286,16 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some StreamYieldsTool
   | Any Awaiting_tool_result, Any Streaming when not stop_signaled_before ->
       Some ToolReturned
+  | Any Awaiting_tool_result, Any (Cancelled Cancelled_provider_timeout)
+    when not stop_signaled_before ->
+      (* Whole-turn wall-clock ceiling expired while a tool result was
+         pending. The runtime terminates the turn through its typed Timeout
+         error and the handler cancels with Provider_timeout; the spec names
+         this edge ToolTimeout (ProviderTimeout's symmetric counterpart).
+         Without this arm the transition still fired — as a classified-gap
+         WARN from the stop-signal arm or a mislabeled GenericFail — leaving
+         the audit trail unable to say which escape ended the turn. *)
+      Some ToolTimeout
   | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
   | Any Streaming, Any (Failed (Failure_receipt_lost _))

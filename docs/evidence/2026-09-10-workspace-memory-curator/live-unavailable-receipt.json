@@ -1,0 +1,14 @@
+{
+  "started_at": "2026-09-09T18:23:18.340506+00:00",
+  "context_source": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8935/api/v1/dashboard/workspace-memory-context"
+  },
+  "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "endpoint": "http://127.0.0.1:11434",
+  "semantic_verification": "not_performed",
+  "runtime_mutation": false,
+  "status": "failed",
+  "error": "Workspace context returned HTTP 404",
+  "elapsed_seconds": 0.002965416992083192
+}

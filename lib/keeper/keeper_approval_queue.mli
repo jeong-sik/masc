@@ -313,6 +313,8 @@ module For_testing : sig
   type strict_snapshot_writer =
     string -> string -> (unit, Fs_compat.atomic_replace_failure) result
 
+  val with_unavailable_workspace : base_path:string -> (unit -> 'a) -> 'a
+  (** Expose the production unavailable-store observation without removing its durable requests. *)
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
   val get_pending_entry_unchecked : id:string -> pending_approval option
@@ -649,3 +651,10 @@ val pending_count_for_keeper_in_workspace :
   base_path:string -> keeper_name:string -> (int, storage_error) result
 (** Count one keeper's pending approvals within the durable workspace store.
     Store read failures remain explicit instead of collapsing to zero. *)
+
+(** Durable observation for an operation waiting on this exact Gate request.
+    [None] is absent authority, never an implicit approval or denial. *)
+type waiting_observation = private
+  { waiting_request : pending_approval; waiting_decision : decision option }
+val observe_waiting_request : base_path:string -> id:string ->
+  (waiting_observation option, storage_error) result

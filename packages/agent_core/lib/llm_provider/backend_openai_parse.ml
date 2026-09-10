@@ -310,8 +310,19 @@ let telemetry_of_openai_json json =
 ;;
 
 (** Parse an OpenAI-compatible JSON response string into an [api_response].
-    Returns [Error msg] when the response body contains an API error. *)
-let parse_openai_response_result_json_raw (raw_json : Yojson.Safe.t) =
+    Returns [Error msg] when the response body contains an API error.
+
+    [content_inline_reasoning] is the catalog-declared contract for reasoning
+    embedded in the content channel (see
+    {!Capabilities.capabilities.content_inline_reasoning}); when it is
+    [Think_tags], [message.content] is split through {!Inline_reasoning_split}
+    so tagged reasoning becomes a [Thinking] block instead of leaking into the
+    visible [Text] answer. The default keeps every byte of [content] in [Text],
+    byte-identical to the pre-split behavior. *)
+let parse_openai_response_result_json_raw
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      (raw_json : Yojson.Safe.t)
+  =
   let open Yojson.Safe.Util in
   let json =
     match raw_json with
@@ -336,6 +347,25 @@ let parse_openai_response_result_json_raw (raw_json : Yojson.Safe.t) =
        provider message shape can be replayed without overloading visible or
        redacted thinking channels. Other reasoning text stays [Thinking]. *)
     let* thinking_blocks = reasoning_content_blocks_of_message_result msg in
+    (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
+       Qwen3 chat-template runtimes) embed part of their reasoning inside
+       [message.content] itself. Feed the complete string through the same
+       splitter the streaming path uses; [flush] releases an unterminated
+       open tag as reasoning, so a reasoning-only turn stays typed [Thinking]
+       and never lands in visible [Text]. *)
+    let inline_content_blocks =
+      match content_inline_reasoning with
+      | Capabilities.Think_tags ->
+        let splitter = Inline_reasoning_split.create () in
+        let head = Inline_reasoning_split.feed_segments splitter text_content in
+        let tail = Inline_reasoning_split.flush_segments splitter in
+        let pieces = head @ tail in
+        List.map (function
+          | Inline_reasoning_split.Text text -> Text text
+          | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces
+      | Capabilities.No_content_inline_reasoning ->
+        if Api_common.string_is_blank text_content then [] else [ Text text_content ]
+    in
     let stop_reason =
       (* SSOT: Stop_reason_wire owns the wire finish-reason -> stop_reason table
          and the StopToolUse => has-tool-block invariant (previously duplicated
@@ -349,19 +379,7 @@ let parse_openai_response_result_json_raw (raw_json : Yojson.Safe.t) =
       ; model = Cli_common_json.member_str "model" json
       ; stop_reason
       ; content =
-          (let text_blocks =
-             if Api_common.string_is_blank text_content then [] else [ Text text_content ]
-           in
-           (* Reasoning stays typed as [Thinking] end-to-end -- it is never
-              promoted into a [Text] block. Promotion erased the type distinction
-              between reasoning and answer, so on the next turn the request
-              serializer re-fed the reasoning as the assistant's answer content
-              and the model re-reasoned over it: the #2236 CoT re-injection loop.
-              Surfacing reasoning-only replies for display is a read-side
-              projection concern (see [Api_common.text_blocks_to_string] and the
-              runtime text extractors), not a parse-time mutation that also
-              pollutes replay. *)
-           thinking_blocks @ text_blocks @ tool_blocks)
+          thinking_blocks @ inline_content_blocks @ tool_blocks
       ; usage = usage_of_openai_json json
       ; telemetry = telemetry_of_openai_json json
       }
@@ -379,8 +397,11 @@ let parse_openai_response_result_json_raw (raw_json : Yojson.Safe.t) =
    no tool_calls) becomes a typed [Empty_completion] instead of [Ok content=[]]
    — the silent empty turn that stormed downstream. Blank text WITH tool_calls
    has content=[ToolUse ..] (content <> []) and stays [Ok]. *)
-let parse_openai_response_result_json raw_json =
-  match parse_openai_response_result_json_raw raw_json with
+let parse_openai_response_result_json
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      raw_json
+  =
+  match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
   | Error msg -> Error (Provider_error msg)
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
     -> Error (Empty_completion { id; model; stop_reason; usage; telemetry })
@@ -392,8 +413,13 @@ let parse_openai_response_result_json raw_json =
     parsed [Yojson.Safe.t] (e.g. {!Backend_glm.parse_response}, which also
     error-checks and reasoning-extracts from the same body) should call
     {!parse_openai_response_result_json} directly to avoid re-parsing. *)
-let parse_openai_response_result json_str =
-  parse_openai_response_result_json (Yojson.Safe.from_string json_str)
+let parse_openai_response_result
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      json_str
+  =
+  parse_openai_response_result_json
+    ~content_inline_reasoning
+    (Yojson.Safe.from_string json_str)
 ;;
 
 let%test "missing finish reason is not synthesized as stop" =

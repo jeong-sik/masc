@@ -507,7 +507,7 @@ let test_concurrent_owned_writers_share_uncached_preparation () =
        let target = Filename.concat base "contended" in
        let hook = blocking_hook base in
        let preparation_count = Atomic.make 0 in
-       let waiter_first_validation = Atomic.make true in
+       let waiter_first_claim = Atomic.make true in
        let waiter_validated, resolve_waiter_validated = Eio.Promise.create () in
        let allow_waiter_claim, resolve_allow_waiter_claim = Eio.Promise.create () in
        let owner_result, resolve_owner_result = Eio.Promise.create () in
@@ -523,6 +523,7 @@ let test_concurrent_owned_writers_share_uncached_preparation () =
          let result =
            KDD.For_testing.ensure
              ~after_validation:(fun () -> ())
+             ~before_claim:(fun () -> ())
              ~before_prepare:count_preparation
              ~before_directory_fsync:(block_once hook (fun () -> ()))
              ~ownership_root:base
@@ -538,6 +539,7 @@ let test_concurrent_owned_writers_share_uncached_preparation () =
                then (
                  Eio.Promise.resolve resolve_waiter_validated ();
                  Eio.Promise.await allow_waiter_claim))
+             ~before_claim:(fun () -> ())
              ~before_prepare:count_preparation
              ~before_directory_fsync:(fun _ -> ())
              ~ownership_root:base
@@ -629,19 +631,24 @@ let test_owner_cancellation_wakes_waiter () =
    legitimately becomes the next owner and prepares it itself. The two answers
    differ, so the arrangement has to be pinned before the owner fails.
 
-   [after_validation] is the only boundary that pins it. It runs between the
-   cache observation and the claim, so once the waiter has signalled from
-   there, that fiber runs on through [claim] and parks on the owner's
-   completion before this fiber is scheduled again -- [claim] takes the
-   preparation mutex only to touch the table, and the owner holds it across
-   nothing.
+   [before_claim] is the boundary that pins it: nothing runs between it and
+   either parking on the owner's preparation or becoming the owner, so once
+   the waiter has signalled from there, that fiber runs on through [claim] and
+   parks before this one is scheduled again. [claim] takes the preparation
+   mutex only to touch the table, and the owner holds it across nothing.
 
-   Without that ordering the assertion recorded which fiber won a race, and it
-   lost often enough to sit in ci-known-failures.txt reading as a behaviour
-   claim (masc#35016). The waiter takes the directory boundary rather than the
-   save path because the claim ordering is only observable there; the save
-   path's own translation of a shared failure is what the owner assertion
-   below covers. *)
+   [after_validation] cannot do it. The root is anchored in a systhread
+   between the two boundaries, which parks the waiter and lets this fiber
+   release the owner; the owner then fails and drops its claim before the
+   waiter's claim arrives, so the waiter legitimately becomes the next owner.
+   That is what the case recorded while it sat in ci-known-failures.txt
+   reading as a behaviour claim, and signalling from [after_validation]
+   reproduced it (run 34489490942).
+
+   The waiter takes the directory boundary rather than the save path because
+   the claim ordering is only observable there; the save path's own
+   translation of a shared failure is what the owner assertion below
+   covers. *)
 let test_parked_waiter_shares_the_owners_ordinary_failure () =
   Eio_main.run
   @@ fun _env ->
@@ -658,7 +665,7 @@ let test_parked_waiter_shares_the_owners_ordinary_failure () =
        let owner_result, resolve_owner_result = Eio.Promise.create () in
        let waiter_claiming, resolve_waiter_claiming = Eio.Promise.create () in
        let waiter_result, resolve_waiter_result = Eio.Promise.create () in
-       let waiter_first_validation = Atomic.make true in
+       let waiter_first_claim = Atomic.make true in
        let waiter_prepared = Atomic.make false in
        Eio.Switch.run
        @@ fun sw ->
@@ -676,8 +683,9 @@ let test_parked_waiter_shares_the_owners_ordinary_failure () =
        Eio.Fiber.fork ~sw (fun () ->
          let result =
            KDD.For_testing.ensure
-             ~after_validation:(fun () ->
-               if Atomic.compare_and_set waiter_first_validation true false
+             ~after_validation:(fun () -> ())
+             ~before_claim:(fun () ->
+               if Atomic.compare_and_set waiter_first_claim true false
                then Eio.Promise.resolve resolve_waiter_claiming ())
              ~before_prepare:(fun () -> Atomic.set waiter_prepared true)
              ~before_directory_fsync:(fun _ -> ())

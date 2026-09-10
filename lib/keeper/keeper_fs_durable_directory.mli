@@ -47,10 +47,20 @@ val clear : unit -> unit
 val fsync_directory : string -> unit
 
 module For_testing : sig
-  (** [after_validation] is an immutable synchronization boundary between the
-      cache observation and preparation claim. *)
+  (** Two synchronization boundaries. [after_validation] runs once the cache
+      observation has found no usable lease. [before_claim] runs immediately
+      before the claim itself, with nothing between it and either parking on
+      another caller's preparation or becoming the owner.
+
+      The gap between them is not empty: the root is anchored in a systhread
+      there, which parks the fiber. So a test that has to arrange one caller
+      as an already-parked waiter can only do it from [before_claim] --
+      signalling from [after_validation] lets the scheduler run the other
+      caller to completion first, which is what made the shared-failure case
+      record a race instead of the contract (masc#35016). *)
   val ensure
     :  after_validation:(unit -> unit)
+    -> before_claim:(unit -> unit)
     -> before_prepare:(unit -> unit)
     -> before_directory_fsync:(string -> unit)
     -> ?ownership_root:string

@@ -789,8 +789,13 @@ def native_discover_models(binary, source, timeout):
 
 def native_serving_context(binary, source, model, timeout, load=False):
     arguments = ['--model', model] + (['--load'] if load else [])
+    if load:
+        print('Loading the selected model and reading its running context… Ctrl-C cancels setup.', file=sys.stderr)
     try:
-        result = native_connection_command(binary, 'runtime-serving-context', source, timeout, arguments)
+        # A cold model load may legitimately outlast an inventory request.
+        # The operator can cancel it; the discovery timeout must not keep
+        # aborting and restarting a large model before it becomes available.
+        result = native_connection_command(binary, 'runtime-serving-context', source, None if load else timeout, arguments)
     except subprocess.TimeoutExpired:
         raise SetupError('The selected model is not ready yet. Wait for its server to load it, then refresh.')
     if result.returncode:

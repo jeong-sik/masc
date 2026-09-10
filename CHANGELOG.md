@@ -1,17 +1,32 @@
 # Changelog
 
 
-## [0.35.5] - 2026-09-10
+## [0.35.5] - Unreleased
 
-### Installation
+### First conversation and installation
 
-- Run `masc` and `masc start` without repeating `--base-path` or exporting `MASC_BASE_PATH`. `masc setup` and `masc init` record the workspace they prepared, an explicit `masc start --base-path` records it too, and the server accepts that recorded workspace at startup. A record whose path no longer holds a `.masc` directory is ignored, and the error says which record was skipped and why.
-- Choose the sandbox imp runs its turns on: `masc setup --sandbox-profile docker|microvm|remote_ssh`, with `--microvm-backend` for the microVM runtime. The chosen profile is written into imp's keeper file, and setup checks what that profile needs on this host. With no flag it reads the profile imp already declares instead of asking for Docker regardless.
-- Read what a missing sandbox dependency was. An absent `docker` reported `create_process docker: No such file or directory`; it now names Docker and points at Apple Container together with the flags that move imp onto it.
+- Guide first setup through workspace, multiple model connections, primary/fallback order, sandbox and imp chat. Fast setup prioritizes detected clients and account keys; the full catalog stays available through the advanced connection menu.
+- Save hidden API-key input in private files for future terminals. Offer selected official CLI install actions and Claude Code/Codex sign-in recovery without discarding model choices. Homebrew is not required for the macOS MASC bundle.
+- Remember workspace and server port. Inspect occupied ports and older workspace owners before offering an authorized transition; preserve unrelated processes and existing Keeper history.
+- Discover models and context from the selected client/account/server. Distinguish release dates from provider listings, model suggestions from account access, and unknown context from a measured running limit.
+- Keep setup available before a usable model is configured. Resume owner services after saving model settings; optional exact-output authority does not stand in for basic conversation readiness.
+
+### Browser Settings
+
+- Add model connections, select several models and their fallback order, prepare selected-model context, and verify response/tool use before saving through the shared native writer.
+- Import the server's explicitly selected Antigravity account using a private, workspace-scoped opaque reference. Do not ask browser users for OAuth file paths.
+- Prepare a supported sandbox image and publish its selection with manifest concurrency checks. Refuse changes to live or unsettled imp lanes; preserve custom image selection and stopped Keeper identity. Use existing model-resume and imp lifecycle actions afterward, retaining the saved result if later activation fails.
+- Report model verification, sandbox service detection, configuration publication and actual guest execution separately. Starting imp is not proof that Board, Task, sandbox listing or WebFetch has executed successfully.
+
+### Scope and validation
+
+- The first-use target is imp conversation plus Board/Task creation, sandbox directory access and WebFetch, without requiring Task completion.
+- AWS Bedrock and GCP/Vertex remain deferred TODOs. Listed providers and models are not a claim that every account or model has been exercised.
+- This entry describes candidate behavior. Publication and platform acceptance depend on the final source-bound release artifacts and their validation evidence.
 
 ### Health
 
-- See which section set the overall status, and read only the reasons an operator has to answer.
+- Show which section determines overall status and the reasons an operator needs to address.
 
 ## [0.35.4] - 2026-09-10
 

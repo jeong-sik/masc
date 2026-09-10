@@ -60,21 +60,47 @@ product grows (see [Dashboard](#dashboard)).
 
 ### First conversation: 0.35.5
 
-First sign in to your model CLI or export its API credential, and start Docker.
-In the installer, use **↑/↓, Space and Enter** to select one or more models, then
-choose imp's primary connection and fallback order. The wizard checks each model's
-response and tool use before saving. Context limits come from the connection's
-metadata; an unknown limit offers reselection or an advanced field. Z.AI uses
-`ZAI_API_KEY`. Then start imp:
+Run the installer, then choose a workspace, model connections and a sandbox.
+**↑/↓, Space and Enter** select multiple connections and models; choose imp's
+primary model and fallback order afterward. **Fast setup** puts detected clients
+and account keys first. **Browse all providers and advanced connections** opens
+the full catalog. Existing connections remain available when adding models.
+
+You can enter API keys in a hidden field and save them privately for future
+terminals; exporting a variable is optional. Missing model clients offer official
+install actions. If Claude Code or Codex verification needs sign-in, choose the
+official login action and retry with the same model choices. Codex reads its own
+cached or bundled context metadata; local servers and selected Antigravity models
+supply their running context. Unknown context stays explicit instead of borrowing
+an unrelated model's capacity. Recent, dated model suggestions remain distinct
+from account access and actual verification.
 
 ```bash
-masc setup --base-path "$HOME/masc-workspace"
+masc setup
 ```
 
-Setup prepares the default image, starts the workspace server and `imp`, and opens
-the TUI. Ask `imp` to reply, create a Board post and Task, list its sandbox directory,
-and say “Use WebFetch to retrieve https://example.com now and report the HTTP status and title.” Follow the [first-conversation steps](docs/INSTALL.md#first-conversation-with-imp-0352).
-Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary availability.
+Setup remembers the selected workspace and port. Later `masc` opens that workspace;
+`masc setup` reopens preparation. Choose a supported sandbox service; install or
+service changes run only after selecting the corresponding action. The macOS
+MASC bundle includes Python and its libraries, so Homebrew is not required.
+
+In browser **Settings**, you can add model connections, select multiple models,
+prepare a selected model's context, and save after response/tool checks. You can
+explicitly import the Antigravity account signed in on the server without entering
+an OAuth file path. Sandbox controls prepare the selected image and settings,
+then use the existing imp start action. A running imp is not silently restarted;
+a custom image must exist in the selected runtime. Missing vendor installation or
+login can require a terminal on that server.
+
+Ask `imp` to reply, create a Board post and a Task, list its sandbox directory,
+and use WebFetch to retrieve `https://example.com`. The first-use target is this
+conversation and tool access, not completion of the Task. Model verification,
+service detection, configuration saving and actual guest tool execution are
+separate results. Follow the [first-conversation steps](docs/INSTALL.md).
+
+AWS Bedrock and GCP/Vertex are deferred TODOs, outside the 0.35.5 scope.
+This describes the candidate's setup flow; check [GitHub Releases](https://github.com/jeong-sik/masc/releases)
+for published binaries and their platform validation evidence.
 
 ### Published binaries
 
@@ -99,12 +125,12 @@ and runs a one-time wizard (`--no-wizard` skips it). The 0.35.5 wizard
 offers multiple model connections with arrow keys and checkboxes. It verifies each
 selected model with a real response and harmless tool call, then binds imp to the
 selected primary and fallback order while preserving other connections.
-It asks for API credential variable names, never their secret values; the server
-reads those variables from its startup environment. `--provider <id>` selects
-an existing provider without prompting. For the default `imp`, `masc setup`
-prepares the Docker image after you install and start Docker.
+API keys use hidden input and private files; existing environment-variable and
+CLI account references remain supported. `--provider <id>` selects an existing
+provider without prompting. Setup prepares the sandbox you select, with service
+readiness and guest verification reported separately.
 
-Release **0.35.5** includes Intel macOS, `masc-browser-host`, and the matched
+The **0.35.5 candidate** includes Intel macOS, `masc-browser-host`, and the matched
 dashboard, and preserves configuration during `--force` reinstalls.
 The macOS installer includes its Python and shared libraries, so MASC does not require Homebrew. Apple Silicon requires macOS 14 or later; Intel requires macOS 15 or later.
 
@@ -157,11 +183,13 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.5) |
+| `masc setup --base-path <dir>` | Selects model connections and sandbox, prepares imp, and opens the TUI (0.35.5) |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
-falls back to `MASC_BASE_PATH`, then the current directory. Runtime state
+uses `MASC_BASE_PATH` or the saved workspace when no explicit path is supplied.
+The selected server port is saved per workspace; explicit flags and environment
+settings override the saved port. Runtime state
 lives under `<base-path>/.masc`; authored configuration under
 `<base-path>/.masc/config`.
 

@@ -58,21 +58,45 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ### 첫 대화: 0.35.5
 
-먼저 보유한 모델 CLI에 로그인하거나 API 인증 환경변수를 설정하고 Docker를
-시작하세요. 설치 화면에서 **↑/↓, Space, Enter**로 모델을 여러 개 선택한 뒤
-imp의 기본 연결과 대체 순서를 고릅니다. 마법사는 저장 전에 각 모델의 응답과
-도구 사용을 확인합니다. Context 한도는 연결의 메타데이터에서 읽으며, 알 수
-없는 경우 다시 선택하거나 고급 입력을 사용할 수 있습니다.
-Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다. 다음 명령으로 imp를 시작합니다.
+설치기를 실행하고 작업공간, 모델 연결, sandbox를 선택하세요.
+**↑/↓, Space, Enter**로 연결과 모델을 여러 개 고른 뒤 imp의 기본 모델과
+대체 순서를 정합니다. **Fast setup**은 감지된 CLI와 계정 키를 먼저 보여주고,
+**Browse all providers and advanced connections**에서 전체 목록을 엽니다.
+새 모델을 추가해도 기존 연결은 유지됩니다.
+
+API 키는 숨김 입력으로 받아 사용자 전용 파일에 저장하므로 다음 터미널에서
+다시 export할 필요가 없습니다. 필요한 CLI가 없으면 공식 설치 작업을 선택할
+수 있습니다. Claude Code·Codex 검사가 로그인을 요구하면 공식 로그인 후
+선택한 모델 그대로 재시도합니다. Codex는 자신의 캐시·내장 목록에서 context를
+읽고, 로컬 서버와 선택한 Antigravity 모델은 실행 환경의 context를 확인합니다.
+알 수 없는 한도를 다른 모델의 최대값으로 대체하지 않습니다. 최근 출시 정보,
+계정 접근 가능 여부, 실제 모델 검증은 구분해서 표시합니다.
 
 ```bash
-masc setup --base-path "$HOME/masc-workspace"
+masc setup
 ```
 
-기본 이미지를 준비하고 작업 공간 서버와 `imp`를 시작한 뒤 TUI를 엽니다.
-대화 응답, Board 글·Task 생성, 샌드박스 디렉터리 조회를 확인하세요.
-“WebFetch로 지금 https://example.com 을 가져와서 HTTP 상태와 페이지 제목을 알려줘.”라고 요청하세요. [첫 대화 절차](docs/INSTALL.ko.md)를 따르세요.
-바이너리 제공 여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
+선택한 작업공간과 포트를 기억합니다. 다음에는 `masc`로 그 작업공간을 열고,
+`masc setup`으로 준비 과정을 다시 엽니다. 사용할 sandbox 서비스를 고르면
+필요한 준비 작업을 안내하며, 설치나 서비스 변경은 해당 작업을 선택했을 때
+진행합니다. macOS MASC 번들은 Python과 실행 라이브러리를 포함하므로
+Homebrew가 필수는 아닙니다.
+
+브라우저 **Settings**에서도 모델 연결 추가, 여러 모델 선택, 선택한 모델의
+context 확인과 응답·도구 검증 후 저장을 할 수 있습니다. 서버에 로그인된
+Antigravity 계정은 OAuth 파일 경로를 입력하지 않고 명시적으로 가져옵니다.
+sandbox 선택 화면은 이미지와 설정을 준비한 뒤 기존 imp 시작 경로를 사용합니다.
+실행 중인 imp를 몰래 재시작하지 않으며, 사용자 지정 이미지는 선택한 실행 도구에
+준비되어 있어야 합니다. 설치나 로그인이 필요한 경우 서버의 터미널을 사용합니다.
+
+imp에게 대화를 요청하고 Board 글·Task 생성, sandbox 디렉터리 조회,
+`https://example.com` WebFetch를 확인하세요. 첫 사용의 목표는 Task 완료가
+아니라 이 대화와 도구 접근입니다. 모델 검증, 서비스 감지, 설정 저장, 실제 guest
+도구 실행은 각각 별도 결과입니다. [첫 대화 절차](docs/INSTALL.ko.md)를 따르세요.
+
+AWS Bedrock과 GCP/Vertex는 후속 TODO이며 0.35.5 범위에 포함하지 않습니다.
+이 설명은 출시 후보의 설정 흐름입니다. 공개 바이너리와 플랫폼별 검증 결과는
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
 
 ### 공개 바이너리
 
@@ -95,11 +119,12 @@ bash /tmp/masc-install.sh --version "$TAG"
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
 0.35.5의 마법사는 방향키와 체크박스로 여러 모델 연결을 선택합니다.
 선택한 모델의 실제 응답과 무해한 도구 호출을 확인한 뒤 imp의 기본 연결과
-대체 순서를 반영하고 다른 연결은 보존합니다. API 키 값은 묻지 않고 환경변수 이름만 받으며 서버는 시작된 환경에서
-키를 읽습니다. `--provider <id>`로 기존 프로바이더를 선택할 수 있습니다.
-기본 `imp`는 Docker를 설치·시작한 뒤 `masc setup`으로 이미지를 준비하고 실행합니다.
+대체 순서를 반영하고 다른 연결은 보존합니다. API 키는 숨김 입력과 비공개
+파일 저장을 지원하며 기존 환경변수와 CLI 계정 참조도 사용할 수 있습니다.
+`--provider <id>`로 기존 공급자를 선택할 수 있습니다. 선택한 sandbox를 준비하며
+서비스 감지와 실제 guest 검증을 구분합니다.
 
-릴리스 **0.35.5**은 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
+출시 후보 **0.35.5**는 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
 대시보드 번들을 포함하고 `--force` 재설치에서 기존 설정을 보존합니다.
 macOS 설치기는 Python과 실행 라이브러리를 함께 제공하므로 MASC 설치에 Homebrew가 필요하지 않습니다. Apple Silicon은 macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
 첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.ko.md)에 정리했습니다.
@@ -150,11 +175,12 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | `masc` | 터미널에서는 TUI를 엽니다. 포트에 아무도 없으면 서버부터 띄웁니다. 터미널이 아닌 곳(파이프, 유닛 파일, 컨테이너, CI)에서는 서버가 뜹니다 |
 | `masc start --base-path <dir>` | 터미널이든 아니든 서버를 띄웁니다 |
 | `masc-tui --base-path <dir>` | TUI를 이름으로 엽니다 |
-| `masc setup --base-path <dir>` | Docker를 준비하고 기존 `imp`를 시작한 뒤 TUI를 엽니다(0.35.5) |
+| `masc setup --base-path <dir>` | 모델 연결과 sandbox를 선택하고 imp를 준비한 뒤 TUI를 엽니다(0.35.5) |
 | `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. Keeper `imp` 하나가 `activation_mode = "manual"`로 들어갑니다 |
 
 `--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 없으면
-`MASC_BASE_PATH`, 그다음 현재 디렉터리를 씁니다. 실행 상태는
+`MASC_BASE_PATH` 또는 저장된 작업공간을 사용합니다. 서버 포트도 작업공간별로
+저장하며 명시한 옵션과 환경변수가 저장된 포트보다 우선합니다. 실행 상태는
 `<base-path>/.masc` 아래, 직접 쓰는 설정은 `<base-path>/.masc/config` 아래에
 있습니다.
 

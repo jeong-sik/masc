@@ -992,9 +992,9 @@ let () =
       in
       let result =
         { (run_result ()) with tool_calls =
-            [ call "tool_read_file" Masc.Tool_result.Ok
-            ; call "tool_read_file" Masc.Tool_result.Ok
-            ; call "tool_write_file" Masc.Tool_result.Error ] }
+            [ call "tool_read_file" Tool_result.Ok
+            ; call "tool_read_file" Tool_result.Ok
+            ; call "tool_write_file" Tool_result.Error ] }
       in
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in

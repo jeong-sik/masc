@@ -181,8 +181,10 @@ Each selected model must complete an actual response and tool check before savin
 
 The sandbox screen shows service observations, missing prerequisites and advanced
 choices. A running service still needs image preparation and imp boot. The quick
-path permits network access for model APIs and WebFetch. Advanced setup also
-shows offline guest networking, which cannot satisfy the WebFetch check.
+path permits internet access for guest commands when choosing a new backend.
+Selecting the currently configured backend preserves its network policy; Advanced
+setup can explicitly change it. Disabling guest networking affects sandbox commands.
+MASC model connections and WebFetch use separate server-side network controls.
 
 ```bash
 masc setup                     # reopen connection and sandbox selection

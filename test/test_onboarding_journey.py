@@ -42,6 +42,23 @@ class Journey(unittest.TestCase):
             self.assertEqual(SETUP.select_sandbox('/bin/masc', '/workspace'), [
                 '--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container', '--network-mode', 'inherit'])
 
+    def test_existing_network_policy_is_preserved_unless_explicitly_changed(self):
+        for mode in ('none', 'policy', 'inherit'):
+            catalog = dict(schema='masc.sandbox_readiness.v1', configured_selection=dict(
+                backend='apple_container', network_mode=mode), candidates=[dict(
+                id='apple_container', state='service_ready', reason='service only', advanced=False,
+                recommended=True, setup_args=['--sandbox-profile','microvm','--microvm-backend','apple_container'],
+                capabilities=dict(network_modes=['none','inherit','policy']))])
+            response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+            with self.subTest(mode=mode), patch.object(SETUP.subprocess, 'run', return_value=response), \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+                result = SETUP.select_sandbox('/bin/masc', '/workspace')
+                self.assertNotIn('--network-mode', result)
+        # Open Advanced, select the same backend, explicitly select offline.
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pick', side_effect=[[2], [0], [2]]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_sandbox('/bin/masc', '/workspace')[-2:], ['--network-mode','none'])
+
     def test_unavailable_sandbox_never_selects_host_or_another_backend(self):
         catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
             id='docker', state='missing_prerequisite', reason='Docker is missing', advanced=False,

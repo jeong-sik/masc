@@ -31,6 +31,30 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        replies = [receipt('masc.setup_server.v1', **same),
+                   receipt('masc.setup_server_stopped.v1', owner_stopped=True),
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ['--expected-version', '0.35.5'])
+        self.assertEqual(len(pick.call_args.args[1]), 2)
+        self.assertTrue(pick.call_args.args[1][0].startswith('Restart'))
+
+    def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
+        with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \
+                patch.object(SETUP, 'select_sandbox') as sandbox, patch.object(SETUP, 'wizard') as models:
+            self.assertEqual(SETUP.sandbox_journey('/owned/masc', '/saved', 9123, refresh_owner=True), 1)
+        owner.assert_called_once_with('/owned/masc', '/saved', 9123, require_new_owner=True)
+        sandbox.assert_not_called()
+        models.assert_not_called()
+
     def test_saved_sandbox_step_never_reselects_models_or_workspace(self):
         with patch.object(SETUP, 'wizard') as models, \
                 patch.object(SETUP, 'workspace_check') as workspace, \

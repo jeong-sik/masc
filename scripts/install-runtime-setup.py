@@ -1533,6 +1533,63 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
+def select_setup_server(binary, base_path, port, require_new_owner=False):
+    while True:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            observed = json.loads(response.stdout)
+            if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
+                raise ValueError('invalid server observation')
+        except (TypeError, ValueError):
+            raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
+        state = observed.get('status')
+        if state == 'free':
+            return port
+        if state == 'same_workspace':
+            server_version = observed['server_version']
+            choices = [('use', 'Continue with this running workspace'),
+                       ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
+                       ('later', 'Finish later')]
+            if require_new_owner:
+                print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
+                choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
+                           ('later', 'Finish later and keep the existing server')]
+            elif server_version != observed['installed_version']:
+                choices[0], choices[1] = choices[1], choices[0]
+            selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
+                                    [label for _, label in choices])[0]][0]
+            if selected == 'use':
+                return port
+            if selected == 'later':
+                raise SetupError('setup paused; the existing workspace server was preserved')
+            result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
+                                     '--port', str(port), '--expected-version', server_version],
+                                    stdout=subprocess.PIPE, text=True)
+            try:
+                receipt = json.loads(result.stdout)
+                if result.returncode:
+                    if receipt.get('schema') == 'masc.setup_server_error.v1':
+                        print(terminal_text(receipt['error']), file=sys.stderr)
+                        return None
+                    raise ValueError('invalid error')
+                if receipt.get('schema') != 'masc.setup_server_stopped.v1' or receipt.get('owner_stopped') is not True:
+                    raise ValueError('invalid shutdown receipt')
+            except (TypeError, KeyError, ValueError):
+                raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            continue  # server or port might have changed during graceful drain
+        if state not in ('other_workspace', 'unknown_server'):
+            raise SetupError('MASC returned an unknown server observation')
+        if state == 'other_workspace':
+            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
+        else:
+            print('Another service is using port ' + str(port), file=sys.stderr)
+        suggested = observed.get('suggested_port')
+        if not positive_integer(suggested) or suggested > 65535:
+            raise SetupError('MASC could not find an unused local port')
+        if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            raise SetupError('setup paused; existing services were preserved')
+        port = suggested
 def select_sandbox(binary, base_path, port=8945):
     advanced = False
     names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
@@ -1626,7 +1683,11 @@ def journey(binary, base_path, port, timeout, resume=False):
     return sandbox_journey(binary, base, port)
 
 
-def sandbox_journey(binary, base, port):
+def sandbox_journey(binary, base, port, refresh_owner=False):
+    if refresh_owner:
+        port = select_setup_server(binary, base, port, require_new_owner=True)
+        if port is None:
+            return 1
     sandbox_args = select_sandbox(binary, base, port=port)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
@@ -1671,7 +1732,7 @@ def main():
         if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
             raise SetupError('discovery timeout must be positive')
         if args.sandbox_step:
-            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port))
+            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port, refresh_owner=True))
         if args.journey:
             raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
         if args.workspace_check:

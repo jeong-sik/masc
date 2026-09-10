@@ -4893,6 +4893,7 @@ let () =
           Alcotest.test_case
             "config load failure diagnostic attributes to config"
             `Quick test_config_load_failure_diagnostic_attributes_to_config;
+          Alcotest.test_case
             "model catalog overlay skips poisoned entries"
             `Quick test_model_catalog_overlay_skips_poisoned_entries;
           Alcotest.test_case

@@ -811,6 +811,27 @@ def antigravity_models(binary, source):
         raise SetupError('Antigravity did not return a readable model list')
 
 
+def antigravity_context(binary, source, model_id):
+    print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
+    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file'], '--model', model_id],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if response.returncode:
+            if observed.get('schema') == 'masc.antigravity_setup_error.v1' and isinstance(observed.get('error'), str):
+                raise SetupError(terminal_text(observed['error']))
+            raise ValueError('invalid error')
+        context = observed['context']
+        if (observed.get('source') != 'antigravity_statusline' or observed.get('model') != model_id
+                or observed.get('invocation_verified') is not False
+                or context is not None and not positive_integer(context)):
+            raise ValueError('invalid context')
+        return context
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity did not return a valid context for the selected model')
+
+
 def prerequisite_menu(binary, dependency):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -991,6 +1012,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
     if choice is None:
         raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
     context = model.get('context')
+    if choice == 'antigravity' and binary:
+        context = antigravity_context(binary, source, model['id'])
     if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1034,7 +1057,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})

@@ -5512,3 +5512,4 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+(include stanzas/test_onboarding_status.inc)

@@ -116,8 +116,7 @@ let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
-let incarnation_uuid = Uuidm.v4_gen (Random.State.make_self_init ())
-let fresh_incarnation () = Uuidm.to_string (incarnation_uuid ())
+let fresh_incarnation () = Random_id.uuid_v7 ()
 
 let with_machine f =
   locked (fun () ->

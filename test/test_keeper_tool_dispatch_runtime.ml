@@ -7939,7 +7939,7 @@ let test_edit_manifest_through_model_projection () =
 
 let test_peer_artifact_materializes_exact_binary () =
   with_exec_fixture "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
-    let sender = { meta with sandbox_profile = Masc.Keeper_types_profile_sandbox.Docker;
+    let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
       sandbox_image = Some "alpine:peer-fixture" } in
     let peer = { sender with name = "receiving-peer" } in
     let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in

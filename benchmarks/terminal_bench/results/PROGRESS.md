@@ -53,3 +53,12 @@
 - 실행은 worktree에서만: /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/bench-harness-design
 - main 체크아웃은 타인 WIP로 dirty — 건드리지 말 것
 - `uv run pytest tests/ -q` 현재 12 passed
+
+## 2026-09-11 v0.35.7 — 세 번째 제품 갭 픽스 + 채택
+
+- **갭 3**: anthropic 스모크 2회 연속 `turn_failed: 'temperature' may only be set to 1 when thinking is enabled` (oneOf 400은 v0.35.6에서 해소 확인). 원인: `Reasoning_dialect.base_for_provider_config`의 Anthropic arm이 capability row를 소비하지 않아 `ignored_sampling_parameters` 선언이 침묵 무시 + `backend_anthropic`이 sampling 필드 무조건 emit.
+- **픽스**: #35193 (reasoning_dialect Anthropic arm이 sampling_policy 소비 + backend_anthropic이 add_sampling_field 게이트 사용, 알고테스트 2개) merged → #35194 (10파일 bump) merged → **v0.35.7 태그/릴리스 (assets 37)** → dist 재fetch 완료 (`dist/.version=0.35.7`), fetch_masc.sh 기본값 0.35.7.
+- **aggregate.py 필드 보정**: 추가 수정 불필요 확인. arm-b(kimi) 행에서 reward/tokens/tool_calls/state 전부 파싱됨. terminus attempt3의 reward 공란은 verifier 이전 exception이라 정상.
+- **baseline 블로커**: terminus-2 + `openai/kimi-for-coding`은 27턴째 `assistant must not be empty` 400 (litellm↔Kimi wire 비호환, MASC 버스 아님). anthropic 스모크가 통과하면 매트릭스 전체를 `anthropic/claude-fable-5`로 돌려 same-model 비교를 만족시키는 방향.
+- **kimi MASC 레인 검증됨**: phase0-arm-b 48 tool calls, 토큰 계측 정상, 40분 Timeout(state 기록됨) — gpt2-codegolf는 난 task.
+- 진행 중: `phase0-arm-b-anthropic3` 스모크 (v0.35.7 바이너리).

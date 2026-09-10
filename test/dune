@@ -5516,3 +5516,8 @@
 (include stanzas/test_onboarding_journey.inc)
 (include stanzas/test_sandbox_readiness.inc)
 (include stanzas/test_runtime_model_discovery.inc)
+
+(test
+ (name test_runtime_setup_credentials)
+ (modules test_runtime_setup_credentials)
+ (libraries masc_test_deps))

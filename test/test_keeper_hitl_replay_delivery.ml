@@ -216,6 +216,22 @@ let test_no_connector_attention_no_yield () =
                       ; channel = unrouted
                       })
              ; stimulus ~post_id:"board" ~urgency:Q.Low ~arrived_at:995. ~payload:Q.Bootstrap
+             ; (* #35033 added [Task_outcome] — the variant that broke the
+                  build in CI. The negative case must pin that the newest
+                  non-connector payload also never preempts, so the next
+                  payload variant lands with its branch in the same change. *)
+               stimulus
+                 ~post_id:"task-outcome"
+                 ~urgency:Q.Normal
+                 ~arrived_at:997.
+                 ~payload:
+                   (Q.Task_outcome
+                      { to_task_id = "task-999"
+                      ; to_verification_id = "verif-1"
+                      ; to_producer = "fixture-keeper"
+                      ; to_authority =
+                          Masc_domain.System_llm_agent { agent_run_id = "judge-1" }
+                      })
              ])))
 ;;
 

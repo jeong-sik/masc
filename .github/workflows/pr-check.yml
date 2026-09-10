@@ -282,6 +282,69 @@ jobs:
   # dashboard/ ships a `typecheck` script and no lane calls it.
   #
   # ci.yml's header records that its dashboard job was folded away on
+  # The dev profile builds ppx inline tests, the release profile drops them, so
+  # a value only a let%test reaches is used in one and unused in the other --
+  # warning 32, and the root dune makes it an error in both profiles. The only
+  # workflow that built with the release profile was browser-host-proof.yml,
+  # behind a paths: filter and over two executables' dependency graphs, so the
+  # answer arrived days late and only when a pull request happened to touch
+  # those paths: slot_scheduler.available and in_use (#34848) and
+  # discovery.discovered_endpoint_contexts (#34861) reached main that way, and
+  # were found together by an unrelated change (#34876 repairs them, #34878
+  # asks for this).
+  #
+  # Its own job rather than a step in the one above, because it is a second
+  # full compile: as a step it would double that job's six minutes on the
+  # critical path, and as a job it runs beside it. The switch setup is the same
+  # composite actions, so the duplication is five lines.
+  release-check:
+    name: dune build --profile release @check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Free disk space
+        # The opam switch plus a second _build profile does not fit beside the
+        # preinstalled Android SDK, .NET, GHC and CodeQL bundle (#22954).
+        run: |
+          set -euo pipefail
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+
+      - name: Build
+        env:
+          DUNE_JOBS: "4"
+        # --profile release rather than --release: the profile is what drops
+        # inline tests and what the root dune names its flags for, and
+        # --release carries a set of unrelated defaults with it.
+        #
+        # NO continue-on-error: an unused value is deterministic.
+        run: |
+          set -euo pipefail
+          dune build --profile release @check
+
   # 2026-09-02, and pr-check.yml never had one, so nothing type-checks the
   # 697 test files and 9445 tests under dashboard/. What that cost, measured
   # on 2026-09-06: #33454 left two TS2352 errors on main and they sat a full

@@ -6,8 +6,8 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, relative, extname, sep } from 'node:path'
 import assert from 'node:assert/strict'
 
-const [previewDir, expectedHead, baseUrl, outputDir, tokenFile, taskId, runId, playwrightPackage] = process.argv.slice(2)
-if (!playwrightPackage) throw new Error('Usage: node SCRIPT PREVIEW HEAD BASE_URL OUTPUT TOKEN_FILE TASK_ID RUN_ID PLAYWRIGHT_PACKAGE_JSON')
+const [previewDir, expectedHead, baseUrl, outputDir, tokenFile, taskId, runId, playwrightPackage, expectedBackendHead = expectedHead] = process.argv.slice(2)
+if (!playwrightPackage) throw new Error('Usage: node SCRIPT PREVIEW HEAD BASE_URL OUTPUT TOKEN_FILE TASK_ID RUN_ID PLAYWRIGHT_PACKAGE_JSON [BACKEND_HEAD]')
 const require = createRequire(resolve(playwrightPackage))
 const { chromium } = require('playwright')
 const root = resolve(previewDir)
@@ -28,7 +28,7 @@ async function readApi(path) {
   return response.json()
 }
 const health = await readApi('/health?full=1')
-assert.equal(health.build.binary_commit, expectedHead)
+assert.equal(health.build.binary_commit, expectedBackendHead)
 const history = await readApi(`/api/v1/dashboard/tasks/history?task_id=${encodeURIComponent(taskId)}&limit=100`)
 const decisions = history.filter(row => row.type === 'fusion_decision' && row.fusion_run_id === runId)
 assert.equal(decisions.length, 1, 'One actual same-run Keeper decision must already exist')
@@ -86,7 +86,7 @@ try {
   assert.deepEqual(pageErrors, [])
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({
     observed_at: new Date().toISOString(), scope: 'Actual Keeper decision read from the isolated backend and rendered by exact CI preview; not production deployment or original PDF Task completion',
-    preview_manifest: manifest, health, decision, history, fusion, browser_history: browserHistory,
+    preview_manifest: manifest, expected_backend_commit: expectedBackendHead, health, decision, history, fusion, browser_history: browserHistory,
     checks: ['exact_ci_asset_hashes', 'exact_runtime_commit', 'same_task_run_decision_in_two_readbacks', 'actual_task_history_render'],
     page_errors: pageErrors, blocked_requests: blocked, mobile_dialog: overflow,
   }, null, 2) + '\n')

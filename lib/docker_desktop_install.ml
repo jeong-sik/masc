@@ -59,6 +59,7 @@ let mounted ~run ~directory ~path f =
   Unix.mkdir mount 0o700;
   let cleaned = ref false in
   let result = Fun.protect ~finally:(fun () ->
+    (* See cleaned below: inability to remove the mountpoint preserves cleanup pending. *)
     ignore (run ["/usr/bin/hdiutil";"detach";mount]);
     (* Never recursively remove a failed/unconfirmed mount. *)
     cleaned := remove_empty mount)
@@ -79,6 +80,7 @@ let mounted ~run ~directory ~path f =
   result, !cleaned
 let cleanup_directory ~directory ~path =
   (try Sys.remove path with Sys_error _ -> ());
+  (* See mounted: never recursively remove a directory containing an unconfirmed mount. *)
   ignore (remove_empty directory)
 let acquire ~host ~run =
   let* arch = architecture host in

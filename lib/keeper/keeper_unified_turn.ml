@@ -853,7 +853,7 @@ let run_keeper_cycle
                     it as a user message re-fed the model its own observations
                     (943/945 identical frames in one live checkpoint, #25193)
                     and exhausted the request window. Persisted user content is utterances
-                    only (wake marker + HITL resolutions). *)
+                    only (wake marker, answered Asks, and HITL resolutions). *)
                  { system_prompt; dynamic_context = world_state }
                in
                (* 5. Run via Agent_core.Agent.run() with transient-error retry.

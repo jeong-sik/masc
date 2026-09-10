@@ -638,7 +638,7 @@ let test_parse_minimax_split_reasoning_details () =
   let data =
     {|{"id":"c-minimax","model":"minimax-m3","choices":[{"index":0,"delta":{"reasoning_content":"inspect schema","reasoning_details":[{"type":"text","text":"inspect schema"}]},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.Delta_reasoning_details data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field_and_details "reasoning_content") data with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string)) "no visible content" None chunk.delta_content;
     Alcotest.(check (option string)) "legacy reasoning unused" None chunk.delta_reasoning;
@@ -660,9 +660,90 @@ let test_parse_minimax_split_reasoning_details () =
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
+(* The OpenRouter shape the [delta_details:<field>] declaration exists for.
+   Verbatim first delta of a live gpt-5.5 stream (2026-09-10,
+   evidence/task-openrouter-support/probe-gpt55-stream.json, blob truncated):
+   the readable member is null and the only reasoning artifact is the
+   encrypted item beside it. A "delta:reasoning" row reads the null and
+   reports no reasoning at all. *)
+let test_parse_openrouter_encrypted_details_without_text () =
+  let data =
+    {|{"id":"c-or","model":"openai/gpt-5.5","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null,"reasoning_details":[{"type":"reasoning.encrypted","data":"gAAAAAB...","format":"openai-responses-v1","id":"rs_0ae676d9","index":0}]},"finish_reason":null}]}|}
+  in
+  match
+    S.parse_openai_sse_chunk
+      ~streaming_reasoning:(RD.Delta_field_and_details "reasoning")
+      data
+  with
+  | S.Openai_chunk chunk ->
+    Alcotest.(check (option string)) "no readable text" None chunk.delta_reasoning;
+    (match chunk.delta_reasoning_details with
+     | Some { delta_reasoning_content; delta_details } ->
+       Alcotest.(check (option string))
+         "null text stays absent"
+         None
+         delta_reasoning_content;
+       (match delta_details with
+        | [ detail ] ->
+          Alcotest.(check (option string)) "encrypted item carries no text" None detail.text;
+          Alcotest.(check string)
+            "raw item preserved"
+            "reasoning.encrypted"
+            (Yojson.Safe.Util.member "type" detail.raw |> Yojson.Safe.Util.to_string)
+        | _ -> Alcotest.fail "expected one reasoning detail")
+     | None -> Alcotest.fail "expected the encrypted item to survive as a typed delta")
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    -> Alcotest.fail "expected OpenAI chunk"
+;;
+
+(* The same declaration on a model that streams both halves: the text rides
+   the declared member (OpenRouter spells it [reasoning], not
+   [reasoning_content]) and the mirrored item rides beside it. *)
+let test_parse_openrouter_reads_declared_field_and_details () =
+  let data =
+    {|{"id":"c-or2","model":"z-ai/glm-5.3","choices":[{"index":0,"delta":{"reasoning":"17*23","reasoning_details":[{"type":"reasoning.text","text":"17*23"}]},"finish_reason":null}]}|}
+  in
+  match
+    S.parse_openai_sse_chunk
+      ~streaming_reasoning:(RD.Delta_field_and_details "reasoning")
+      data
+  with
+  | S.Openai_chunk chunk ->
+    (match chunk.delta_reasoning_details with
+     | Some { delta_reasoning_content; delta_details } ->
+       Alcotest.(check (option string))
+         "declared field read"
+         (Some "17*23")
+         delta_reasoning_content;
+       Alcotest.(check int) "one detail" 1 (List.length delta_details)
+     | None -> Alcotest.fail "expected typed reasoning_details delta")
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    -> Alcotest.fail "expected OpenAI chunk"
+;;
+
+(* Without the details half the same payload loses the encrypted item; this is
+   the regression the axis extension closes, pinned so a later simplification
+   back to [Delta_field] shows up as a failure instead of silence. *)
+let test_plain_delta_field_drops_openrouter_details () =
+  let data =
+    {|{"id":"c-or3","model":"openai/gpt-5.5","choices":[{"index":0,"delta":{"reasoning":null,"reasoning_details":[{"type":"reasoning.encrypted","data":"gAAAAAB...","format":"openai-responses-v1"}]},"finish_reason":null}]}|}
+  in
+  match
+    S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field "reasoning") data
+  with
+  | S.Openai_chunk chunk ->
+    Alcotest.(check (option string)) "no text" None chunk.delta_reasoning;
+    Alcotest.(check bool)
+      "plain delta field carries no details"
+      true
+      (Option.is_none chunk.delta_reasoning_details)
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    -> Alcotest.fail "expected OpenAI chunk"
+;;
+
 let expect_split_parse_failed label expected_reason data =
   let parsed =
-    S.parse_openai_sse_chunk ~streaming_reasoning:RD.Delta_reasoning_details data
+    S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field_and_details "reasoning_content") data
   in
   match parsed with
   | S.Openai_parse_failed { reason; raw } ->
@@ -1029,7 +1110,7 @@ let test_events_reasoning_details_accumulates_typed () =
   in
   let chunk =
     match
-      S.parse_openai_sse_chunk ~streaming_reasoning:RD.Delta_reasoning_details data
+      S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field_and_details "reasoning_content") data
     with
     | S.Openai_chunk chunk -> chunk
     | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
@@ -1735,6 +1816,18 @@ let () =
             "minimax split reasoning details"
             `Quick
             test_parse_minimax_split_reasoning_details
+        ; test_case
+            "openrouter encrypted details without text"
+            `Quick
+            test_parse_openrouter_encrypted_details_without_text
+        ; test_case
+            "openrouter declared field and details"
+            `Quick
+            test_parse_openrouter_reads_declared_field_and_details
+        ; test_case
+            "plain delta field drops openrouter details"
+            `Quick
+            test_plain_delta_field_drops_openrouter_details
         ; test_case
             "minimax split malformed details"
             `Quick

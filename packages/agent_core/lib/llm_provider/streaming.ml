@@ -686,15 +686,26 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                  in
                  let reasoning_result =
                    match streaming_reasoning with
-                   | Some Reasoning_dialect.Delta_reasoning_details ->
+                   | Some (Reasoning_dialect.Delta_field_and_details field) ->
+                     (* The declared member carries the readable text and the
+                        sibling [reasoning_details] carries the typed item. A
+                        model can send one without the other: OpenRouter's
+                        gpt-5.5 streams [reasoning: null] with the encrypted
+                        item in [reasoning_details] (live probe 2026-09-10),
+                        while minimax-m3 streams [reasoning_content] text with
+                        a mirrored text detail. Reading only one member drops
+                        the other model's reasoning entirely. *)
                      let reasoning_content_result =
-                       match assoc_field_opt "reasoning_content" delta with
+                       match assoc_field_opt field delta with
                        | None -> Ok None
                        | Some value ->
                          (match non_blank_json_string value with
                           | Ok _ as ok -> ok
                           | Error _ ->
-                            Error "malformed_delta_reasoning_content:not_string")
+                            Error
+                              (Printf.sprintf
+                                 "malformed_delta_reasoning_field:%s:not_string"
+                                 field))
                      in
                      let details_result =
                        parse_stream_reasoning_details
@@ -1546,7 +1557,8 @@ let%test "minimax-m3 declares inline reasoning without losing its reasoning stre
     in
     let stream_intact =
       match (Reasoning_dialect.of_capabilities caps).streaming with
-      | Reasoning_dialect.Delta_reasoning_details -> true
+      | Reasoning_dialect.Delta_field_and_details "reasoning_content" -> true
+      | Reasoning_dialect.Delta_field_and_details _
       | Reasoning_dialect.No_streaming_reasoning
       | Reasoning_dialect.Delta_field _
       | Reasoning_dialect.Template_parser -> false

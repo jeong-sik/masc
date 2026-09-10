@@ -1098,6 +1098,9 @@ let test_done_submits_three_rendered_pages () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       (* This scenario inspects real snapshots, so install the production
+          submission persistence hooks rather than the outcome-only stub. *)
+       Masc.Workspace_metric_hooks.install ();
        let config = Masc.Workspace.default_config base_path in
        let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -1144,7 +1147,7 @@ let test_done_submits_three_rendered_pages () =
        in
        mkdir_p producer_root;
        let run_done evidence =
-         Task.handle_keeper_task_tool
+         Task.handle_keeper_task_tool_with_outcome
            ~config
            ~meta
            ~name:"keeper_task_done"
@@ -1159,10 +1162,11 @@ let test_done_submits_three_rendered_pages () =
        let names = ["page1.png"; "page2.png"; "page3.png"] in
        List.iter (fun name -> Fs_compat.save_file (Filename.concat producer_root name) png) names;
        let refs = List.map (fun name -> `String ("artifact:" ^ name)) names in
-       let payload = run_done refs in
-       let json = Yojson.Safe.from_string payload in
-       check bool "three rendered pages submitted" true
-         (json |> U.member "ok" |> U.to_bool);
+       let result = run_done refs in
+       (match result.Masc.Keeper_tool_execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () | Tool_result.Failed _ ->
+          fail ("three rendered pages were not submitted: " ^ result.raw_output));
        let verification_id = match Masc.Workspace.get_tasks_raw config with
          | [{ task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ }] -> verification_id
          | _ -> fail "submission must await an independent verifier" in

@@ -51,4 +51,16 @@ val maximum_scroll : entry_count:int -> content_height:int -> int
 val normalize_scroll : entry_count:int -> content_height:int -> int -> int
 val scroll_up : entry_count:int -> content_height:int -> int -> int
 val scroll_down : entry_count:int -> content_height:int -> int -> int
+val page_up : entry_count:int -> content_height:int -> int -> int
+val page_down : entry_count:int -> content_height:int -> int -> int
+
+val visible
+  :  entries:Decode.log_entry list
+  -> content_height:int
+  -> scroll:int
+  -> Decode.log_entry list
+(** The rows to draw, newest first. [scroll] counts rows back from the newest,
+    so [scroll = 0] is the tail of the file. Stored order stays chronological;
+    this is the only place that reverses it, and it walks the list once rather
+    than indexing it per row. *)
 val empty_message : load_error option -> string

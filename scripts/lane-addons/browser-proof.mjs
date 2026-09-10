@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util'
 const { values } = parseArgs({ options: {
   url: { type: 'string' }, out: { type: 'string' },
   'expected-addon': { type: 'string', multiple: true },
+  'run-id': { type: 'string' },
   keeper: { type: 'string' }, 'token-env': { type: 'string' },
   'timeout-ms': { type: 'string', default: '60000' },
   'verify-evidence-files': { type: 'boolean', default: false },
@@ -19,13 +20,14 @@ const { values } = parseArgs({ options: {
 } })
 if (values.help) {
   process.stdout.write(`Usage: node scripts/lane-addons/browser-proof.mjs --url URL --out DIR
-  [--expected-addon ID] [--expected-addon ID] [--keeper NAME]
+  [--expected-addon ID] [--expected-addon ID] [--run-id RUN] [--keeper NAME]
   [--token-env EXISTING_ENV_NAME] [--timeout-ms 60000] [--headed] [--verify-evidence-files]
 
 URL/DIR may instead use MASC_LANE_ADDON_DASHBOARD_URL and MASC_LANE_ADDON_EVIDENCE_DIR.
 The URL must serve the already built candidate Dashboard and its real API.
 At least two different packages with retained observations must already be present.
 This runner refreshes, drags the timeline, submits a slice, and preserves one row.
+--run-id first selects that run through the UI and preserves evidence only from its instances.
 Keeper delivery occurs ONLY when --keeper is explicitly supplied; default is preserve only.
 Output contains raw API replies, request bodies (never auth headers), screenshots and a summary.
 A preservation receipt is recorded separately from independent file verification or Keeper consumption.
@@ -61,6 +63,7 @@ const summary = {
   candidate_url: publicUrl.href, response_mocking: false, keeper_delivery_requested: values.keeper !== undefined,
   keeper_name: values.keeper ?? null, evidence_file_independently_verified: false,
   keeper_consumption_verified: false, expected_addons: values['expected-addon'] ?? [], artifacts: [],
+  run_id: values['run-id'] ?? null,
 }
 await writeJson('summary.json', summary)
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -112,7 +115,7 @@ try {
   await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
   const snapshot = await captureResponse(await inspectWait, 'inspect.json')
   assert(Array.isArray(snapshot.instances) && Array.isArray(snapshot.rows), 'inspect must contain instances and rows')
-  const observedInstances = snapshot.instances.filter(instance => instance.observation_seq > 0
+  const observedInstances = snapshot.instances.filter(instance => (!values['run-id'] || instance.run_id === values['run-id']) && instance.observation_seq > 0
     && snapshot.rows.some(row => row.id.startsWith(`${instance.instance_id}/`)))
   const packageIds = [...new Set(observedInstances.map(instance => instance.addon_id))]
   assert(packageIds.length >= 2, 'two different installed packages must already have retained observations')
@@ -124,6 +127,16 @@ try {
     await instanceRow.waitFor({ state: 'visible' })
   }
   summary.observed_instances = observedInstances.map(({ instance_id, addon_id, revision, phase }) => ({ instance_id, addon_id, revision, phase }))
+  if (values['run-id']) {
+    await panel.getByLabel('Run filter', { exact: true }).fill(values['run-id'])
+    const runWait = page.waitForResponse(response => endpoint(response, '/api/v1/lane-addons/slice', 'GET'))
+    await panel.getByRole('button', { name: 'Slice', exact: true }).click()
+    const runResponse = await runWait
+    assert.equal(new URL(runResponse.url()).searchParams.get('run_id'), values['run-id'])
+    const runSlice = await captureResponse(runResponse, 'fresh-run-slice.json')
+    assert(new Set(runSlice.rows.map(row => row.lane_id)).size >= 2, 'selected run must contain two actual lanes')
+    await panel.getByText(/^Slice: /).waitFor({ state: 'visible' })
+  }
   const figure = panel.getByRole('figure', { name: 'Lane by time' })
   const plot = figure.getByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
   await plot.scrollIntoViewIfNeeded()
@@ -159,6 +172,11 @@ try {
   assert.equal(Number(query.get('until')), until, 'submitted until must equal the selected window')
   const slice = await captureResponse(sliceResponse, 'slice.json')
   assert(Array.isArray(slice.rows) && Array.isArray(slice.coverage) && typeof slice.complete === 'boolean', 'slice must carry rows, coverage and completeness')
+  if (values['run-id']) {
+    assert.equal(query.get('run_id'), values['run-id'])
+    assert(slice.rows.every(row => observedInstances.some(instance => row.id.startsWith(`${instance.instance_id}/`))),
+      'every returned row must belong to an observed instance from the selected run')
+  }
   const slicedLanes = [...new Set(slice.rows.map(row => row.lane_id))]
   assert(slicedLanes.length >= 2, 'the actual selected interval must contain at least two lanes')
   await panel.getByText(/^Slice: /).waitFor({ state: 'visible' })

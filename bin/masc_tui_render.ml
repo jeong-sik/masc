@@ -19495,9 +19495,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:"Tab:instances/rows  j/k:select  J/K:scroll  space:mark  e:preserve  o:observe  d:detach  r:inspect  :command  Esc:back"
     ~body:(fun ~budget c ->
-      Masc_tui_lane_addons.lines ~width:cols view
+      Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
-      |> List.iter (fun line -> c.push (fit_width (Terminal_text.single_line line) cols)))
+      |> List.iter (fun line -> c.push (Terminal_text.single_line line)))
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

@@ -471,6 +471,7 @@ let test_context_injection_sets_values () =
       ; tool_name = "search"
       ; input = `Assoc []
       ; content = "result text"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -512,6 +513,7 @@ let test_context_injection_none () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -561,6 +563,7 @@ let test_context_injection_extra_messages () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -596,6 +599,7 @@ let test_context_injection_error_result () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "something went wrong"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
@@ -633,6 +637,7 @@ let test_context_injection_raises () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]

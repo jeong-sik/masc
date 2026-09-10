@@ -1013,6 +1013,58 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers))
 
+let test_runtime_adapter_file_credentials () =
+  let directory = Filename.temp_file "runtime-credentials-" "" in
+  Sys.remove directory;
+  Unix.mkdir directory 0o700;
+  let path = Filename.concat directory "api-key" in
+  let link = Filename.concat directory "linked-key" in
+  let materialize path =
+    let cfg =
+      { Runtime_schema.providers =
+          [ { runpod_provider with credentials = Some (File path) } ]
+      ; models = [ qwen_model ]
+      ; bindings = [ runpod_binding ]
+      ; default_runtime_id = Some "runpod_mtp.qwen"
+      ; keeper_assignments = []; media_failover = []; lane_decls = []
+      ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+      ; egress_allowlists = []; lsp_servers = []
+      }
+    in
+    Runtime_adapter.binding_to_provider_config cfg runpod_binding
+  in
+  let reject path expected =
+    match materialize path with
+    | Ok _ -> fail "unavailable credential unexpectedly materialized"
+    | Error message -> check string "safe credential error" expected message
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun file -> if Sys.file_exists file then Sys.remove file) [ link; path ];
+      Unix.rmdir directory)
+    (fun () ->
+      reject path "API credential file is missing";
+      let write value =
+        let channel = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o600 path in
+        Fun.protect ~finally:(fun () -> close_out channel)
+          (fun () -> output_string channel value)
+      in
+      write "  fixture-secret-token\n";
+      (match materialize path with
+       | Error message -> failf "file credential failed: %s" message
+       | Ok config ->
+         check string "file key reaches provider authentication" "fixture-secret-token"
+           (Llm_provider.Secret.header_value config.api_key);
+         check int "secret not duplicated in headers" 0
+           (normalized_header_count "Authorization" config.headers));
+      Unix.symlink path link;
+      reject link "API credential file could not be read as an owned regular file";
+      write {|{"access_token":"fixture-secret-token"}|};
+      reject path "API credential file must contain a raw API key, not a JSON credential document";
+      write " \n";
+      reject path "API credential file is empty";
+      reject "relative-secret-path" "API credential file must use an absolute path")
+
 let test_runtime_adapter_keeps_auth_out_of_headers () =
   let cfg =
     { Runtime_schema.providers = [ runpod_provider ]
@@ -2709,6 +2761,8 @@ let () =
             "runtime max_tokens wire omission and explicit override"
             `Quick
             test_runtime_adapter_max_tokens_wire_omission_and_explicit_override
+        ; test_case "runtime file credentials materialize or fail safely" `Quick
+            test_runtime_adapter_file_credentials
         ; test_case
             "runtime adapter materializes GLM Coding Plan provider"
             `Quick

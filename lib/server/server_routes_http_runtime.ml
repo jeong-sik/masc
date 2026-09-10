@@ -358,101 +358,6 @@ let compute_section ~name ?section_timings_ref f =
         ~status:"error"
         name
 
-let assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
-let assoc_string_opt name json =
-  match assoc_member_opt name json with
-  | Some (`String value) -> Some value
-  | _ -> None
-
-let assoc_string_list name json =
-  match assoc_member_opt name json with
-  | Some (`List values) ->
-    values
-    |> List.filter_map (function
-      | `String value -> Some value
-      | _ -> None)
-  | _ -> []
-
-let max_health_status = Health_status.max_string
-
-let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~publication_recovery_activation_json
-    ~reaction_ledger_json ~keeper_owner_json ~board_event_collection_json
-    ~keeper_event_queue_json ~runtime_startup_degradation_json
-    ~keeper_config_schema_status ~keeper_config_schema_blocking
-    ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
-    ~lazy_task_boot_guard_fires_total =
-  let status = ref "ok" in
-  let reasons = ref [] in
-  let note_status component json fallback_reason =
-    let component_status =
-      match assoc_string_opt "status" json with
-      | Some value -> value
-      | None -> "unknown"
-    in
-    status := max_health_status !status component_status;
-    let action_required =
-      match Json_util.assoc_bool_opt "operator_action_required" json with
-      | Some value -> value
-      | None -> false
-    in
-    let parsed_component_status = Health_status.of_string component_status in
-    if
-      action_required
-      || Health_status.requires_operator_action parsed_component_status
-      || Health_status.equal parsed_component_status Health_status.Unknown
-    then
-      let component_reasons =
-        match assoc_string_list "status_reasons" json with
-        | [] ->
-          [
-            (match fallback_reason with
-             | Some value -> value
-             | None -> component_status);
-          ]
-        | values -> values
-      in
-      let prefixed_reasons =
-        List.map
-          (fun reason -> Printf.sprintf "%s:%s" component reason)
-          component_reasons
-      in
-      reasons := List.rev_append prefixed_reasons !reasons
-  in
-  note_status "keeper_fleet_safety" keeper_fleet_safety
-    (assoc_string_opt "blocker" keeper_fleet_safety);
-  note_status "keeper_identity_drift" keeper_identity_drift_json
-    (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
-  note_status
-    "publication_recovery_activation"
-    publication_recovery_activation_json
-    (assoc_string_opt "reason" publication_recovery_activation_json);
-  note_status "keeper_reaction_ledger" reaction_ledger_json None;
-  note_status "keeper_owner" keeper_owner_json None;
-  note_status "keeper_board_event_collection" board_event_collection_json None;
-  note_status "keeper_event_queue" keeper_event_queue_json None;
-  note_status "runtime_startup_degradation" runtime_startup_degradation_json
-    (assoc_string_opt "terminal_reason" runtime_startup_degradation_json);
-  status := max_health_status !status keeper_config_schema_status;
-  if keeper_config_operator_action_required || keeper_config_schema_blocking
-  then
-    reasons :=
-      Printf.sprintf "keeper_config_schema:%s" keeper_config_schema_terminal_reason
-      :: !reasons;
-  if lazy_task_boot_guard_fires_total > 0
-  then (
-    status := max_health_status !status "degraded";
-    reasons :=
-      Printf.sprintf
-        "lazy_task_boot_guard_fires_total:%d"
-        lazy_task_boot_guard_fires_total
-      :: !reasons);
-  let reasons = List.rev !reasons in
-  (!status, reasons <> [], reasons)
-
 let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ~request_authority request =
   let uptime_secs = health_uptime_secs () in
@@ -618,24 +523,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
-  let overall_status, operator_action_required, operator_action_reasons =
-    full_health_operator_summary
-      ~keeper_fleet_safety
-      ~keeper_identity_drift_json
-      ~publication_recovery_activation_json
-      ~reaction_ledger_json
-      ~keeper_owner_json
-      ~board_event_collection_json
-      ~keeper_event_queue_json
-      ~runtime_startup_degradation_json
-      ~keeper_config_schema_status:
-        (if keeper_config_schema_blocking then "blocked" else "ok")
-      ~keeper_config_schema_blocking
-      ~keeper_config_schema_terminal_reason
-      ~keeper_config_operator_action_required
-      ~lazy_task_boot_guard_fires_total
-  in
-  Tool_args.ok_assoc [
+  (* The sections come first and the rollup reads them, rather than the rollup
+     being handed the eight it used to name. The three rollup fields are
+     appended after, so the payload's key order is unchanged. *)
+  let sections = [
     ("server", `String "masc");
     ("version", `String build.release_version);
     ("release_version", `String build.release_version);
@@ -666,10 +557,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       Dashboard_feature_health.overview_json features);
     ("gc", quick_gc_json ());
     ("scheduler", scheduler_json ());
-    ("overall_status", `String overall_status);
-    ("operator_action_required", `Bool operator_action_required);
-    ( "operator_action_reasons",
-      `List (List.map (fun reason -> `String reason) operator_action_reasons) );
     ("keeper_fibers", `Int keeper_fibers);
     ( "fd_observation"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
@@ -726,6 +613,26 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("lazy_task_boot_guard_fires_total",
      `Int lazy_task_boot_guard_fires_total);
   ]
+  in
+  let overall_status, operator_action_required, operator_action_reasons =
+    Server_health_rollup.operator_summary
+      ~sections
+      ~runtime_startup_degradation:runtime_startup_degradation_json
+      ~keeper_config_schema_status:
+        (if keeper_config_schema_blocking then "blocked" else "ok")
+      ~keeper_config_schema_blocking
+      ~keeper_config_schema_terminal_reason
+      ~keeper_config_operator_action_required
+      ~lazy_task_boot_guard_fires_total
+  in
+  Tool_args.ok_assoc
+    (sections
+     @ [
+         ("overall_status", `String overall_status);
+         ("operator_action_required", `Bool operator_action_required);
+         ( "operator_action_reasons",
+           `List (List.map (fun reason -> `String reason) operator_action_reasons) );
+       ])
 
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
    failure since the last successful refresh.  It is preserved across
@@ -808,41 +715,6 @@ let full_health_refresh_wakeup_coalesce_sec = 0.1
 
 let with_full_health_snapshot_lock f =
   Stdlib.Mutex.protect full_health_snapshot_mu f
-
-let full_health_cached_field_names =
-  [
-    "feature_flags";
-    "overall_status";
-    "operator_action_required";
-    "operator_action_reasons";
-    "keeper_fibers";
-    "fd_observation";
-    "fd_accountant";
-    "disk_observation";
-    "keeper_fleet_safety";
-    "keeper_identity_drift";
-    "publication_recovery_activation";
-    "keeper_reaction_ledger";
-    "keeper_owner";
-    "keeper_board_event_collection";
-    "keeper_event_queue";
-    "keeper_terminal_effect_policy";
-    "keeper_observability_artifacts";
-    "paused_keepers";
-    "keeper_config_error_count";
-    "keeper_config_errors";
-    "keeper_config_probe_error";
-    "keeper_config_unknown_key_count";
-    "keeper_config_unknown_keys";
-    "keeper_config_schema_status";
-    "keeper_config_schema_blocking";
-    "keeper_config_schema_terminal_reason";
-    "keeper_config_operator_action_required";
-    "lazy_task_boot_guard_fires_total";
-  ]
-
-let full_health_field_is_cached name =
-  List.exists (String.equal name) full_health_cached_field_names
 
 let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ?(status = "warming") () =
@@ -995,7 +867,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
 let cached_full_health_fields = function
   | `Assoc fields ->
       let cached =
-        List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+        List.filter (fun (name, _) -> Server_health_rollup.is_cached name) fields
       in
       let has_cached name =
         List.exists (fun (cached_name, _) -> String.equal cached_name name) cached
@@ -1003,7 +875,7 @@ let cached_full_health_fields = function
       let missing_placeholders =
         full_health_placeholder_fields ~status:"unavailable" ()
         |> List.filter (fun (name, _) ->
-            full_health_field_is_cached name && not (has_cached name))
+            Server_health_rollup.is_cached name && not (has_cached name))
       in
       cached @ missing_placeholders
   | json ->

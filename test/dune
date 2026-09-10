@@ -5561,3 +5561,8 @@
  (name test_model_release_evidence)
  (modules test_model_release_evidence)
  (libraries masc.runtime alcotest yojson))
+
+(test
+ (name test_keeper_declared_roster)
+ (modules test_keeper_declared_roster)
+ (libraries masc_test_deps))

@@ -257,6 +257,20 @@ let test_patch_reads_then_replaces () =
   check string "patched body" "let x = 2\nlet y = 1\n" stdin
 ;;
 
+let test_identical_remote_patch_does_not_write () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  save (f.frame_path ^ ".source") "let x = 1\n";
+  let result = handle f
+      [ "path", `String "src/a.ml"; "mode", `String "patch"
+      ; "old_string", `String "let x = 1"; "new_string", `String "let x = 1" ] in
+  check bool "completed without change" true (completed result);
+  check bool "changed false" true (member "changed" result = `Bool false);
+  check bool "zero bytes" true (member "bytes_written" result = `Int 0);
+  check bool "no write dispatch" false (Sys.file_exists (f.frame_path ^ ".write"));
+  check bool "no change evidence" true (Option.is_none result.file_change_evidence)
+;;
+
 let test_patch_without_a_source_is_a_workflow_rejection () =
   with_eio @@ fun () ->
   let f = fixture ~mode:"ok" in
@@ -305,6 +319,7 @@ let () =
               test_overwrite_sends_content_on_stdin
           ; test_case "append uses the append payload" `Quick
               test_append_uses_the_append_payload
+          ; test_case "identical remote patch does not write" `Quick test_identical_remote_patch_does_not_write
           ; test_case "patch reads then replaces" `Quick test_patch_reads_then_replaces
           ; test_case "patch without a source is a workflow rejection" `Quick
               test_patch_without_a_source_is_a_workflow_rejection

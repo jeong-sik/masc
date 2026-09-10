@@ -43,6 +43,23 @@ ARMS: dict[str, dict] = {
 # (keeper_run_tools_setup.ml: Keeper_identity_tool_allow.apply 대상 확인).
 COMPOSITION_FENCE = "```toml composition"
 
+# spawn/delegate 게이트 (masc v0.35.6+, #35169): keeper TOML tools.deny는
+# model-visible 이름의 built-in tool을 capability surface에서 완전 제거한다
+# (dispatch bundle에도 없고 frozen-surface admission이 호출을 거부).
+# spawn = parallel 실행 기구라 parallel=False arm(b, c, d)에서 deny.
+# delegate = 다른 keeper에게 위임이라 keeper가 1개인 arm(b-e)에서 deny.
+SPAWN_TOOLS = ["keeper_spawn", "keeper_spawn_read", "keeper_spawn_wait", "keeper_spawn_stop"]
+DELEGATE_TOOLS = ["masc_keeper_delegate", "masc_keeper_delegate_status", "masc_keeper_delegate_cancel"]
+
+
+def denied_tools(spec: dict) -> list[str]:
+    denied = []
+    if not spec["parallel"]:
+        denied += SPAWN_TOOLS
+    if spec["keepers"] == 1:
+        denied += DELEGATE_TOOLS
+    return denied
+
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML
 # (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
 # the same text on the keeper_up call.
@@ -75,16 +92,6 @@ def composition_skill_names() -> list[str]:
 def instruction_skill_names() -> list[str]:
     composition = set(composition_skill_names())
     return [name for name in _skill_names() if name not in composition]
-
-
-def _strip_one_of_blocks(text: str) -> str:
-    lines, out, skipping = text.splitlines(), [], False
-    for line in lines:
-        if line.startswith("[["):
-            skipping = line.startswith("[[one_of]]")
-        if not skipping:
-            out.append(line)
-    return "\n".join(out) + "\n"
 
 
 RUNTIME_TOML = """\
@@ -241,6 +248,10 @@ def keeper_toml(arm: str, index: int) -> str:
         # 만들어지지 않는다. 키 생략(arms d-h)은 전 skill 허용.
         names = ", ".join(f'"{n}"' for n in instruction_skill_names())
         lines += ["", f"skills.names = [{names}]"]
+    denied = denied_tools(spec)
+    if denied:
+        names = ", ".join(f'"{n}"' for n in denied)
+        lines += ["", f"tools.deny = [{names}]"]
     return "\n".join(lines) + "\n"
 
 
@@ -313,17 +324,11 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if spec["skills"]:
         shutil.copytree(REPO_ROOT / "skills", root / "skills")
 
-    if provider == "anthropic":
-        # Anthropic's Messages API rejects top-level oneOf/anyOf/allOf in a
-        # tool input_schema, and the agent-core Anthropic backend has no
-        # conformant-schema projection (tool_schema_conformance is only
-        # consumed by backend_openai_request.ml). The seed's tool_execute.toml
-        # expresses argv-xor-script as top-level [[one_of]], which 400s every
-        # turn (observed smoke attempt 15). Strip the in-schema contract for
-        # anthropic arms; the description still states the exclusivity.
-        te = root / "tools" / "tool_execute.toml"
-        if te.exists():
-            te.write_text(_strip_one_of_blocks(te.read_text()))
+    # NOTE: 예전에는 anthropic arm의 tool_execute.toml에서 [[one_of]]를 벤치 측
+    # strip 했다 (Anthropic API의 top-level combinator 400 때문). masc v0.35.6
+    # (#35168)부터 backend_anthropic.ml이 wire serialization 시점에 Anthropic
+    # kind만 projection하므로 워크어라운드 제거 — seed 스키마 fidelity와
+    # dispatcher의 [[one_of]] 런타임 검증을 두 레인 모두 회복한다.
 
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)

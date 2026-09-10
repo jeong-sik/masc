@@ -1,12 +1,15 @@
 import { post } from './core'
 import { isRecord } from '../lib/type-guards'
 export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string }
-export interface Source { integration_id: string; endpoint?: string; api_key?: string }
+export interface Source { integration_id: string; endpoint?: string; api_key?: string; account_ref?: string }
 export interface Model { id: string; label: string; context: number | null; tools: boolean | null }
 export type Selection = { kind: 'existing'; id: string; label: string } | { kind: 'new'; source: Source; model: Model; label: string }
 const positive = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
 export async function discoverSetupModels(source: Source): Promise<Model[]> {
   const response = await post<unknown>('/api/v1/setup/models', source)
+  return parseModels(response)
+}
+function parseModels(response: unknown): Model[] {
   if (!isRecord(response) || !Array.isArray(response.models)) throw new Error('Invalid model inventory')
   const seen = new Set<string>()
   return response.models.map(row => {
@@ -15,6 +18,13 @@ export async function discoverSetupModels(source: Source): Promise<Model[]> {
     return { id: row.id, label: typeof row.label === 'string' ? row.label : row.id,
       context: positive(row.context) ? row.context : null, tools: typeof row.tools === 'boolean' ? row.tools : null }
   })
+}
+export async function importAntigravityAccount(integration_id: string): Promise<{ source: Source; models: Model[] }> {
+  const response = await post<unknown>('/api/v1/setup/accounts/antigravity', { integration_id })
+  if (!isRecord(response) || response.schema !== 'masc.web_setup_account.v1'
+    || response.account_imported !== true || response.invocation_verified !== false
+    || typeof response.account_ref !== 'string' || !/^[a-f0-9]{64}$/.test(response.account_ref)) throw new Error('Account import not confirmed')
+  return { source: { integration_id, account_ref: response.account_ref }, models: parseModels(response.catalog) }
 }
 export async function saveSetupSelections(revision: string, choices: Selection[]): Promise<void> {
   const connections: { source: Source; models: { id: string; context: number; streaming: boolean }[] }[] = []

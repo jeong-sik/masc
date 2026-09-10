@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import type { Inventory } from '../api/onboarding'
-import { discoverSetupModels, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
+import { discoverSetupModels, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventory; onSaved: () => void }) {
   const [provider, setProvider] = useState('')
@@ -24,6 +24,17 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   function chooseProvider(id: string) { setProvider(id); setEndpoint(''); setKey(''); invalidateDiscovery(); setNotice('') }
   function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
   function editKey(value: string) { setKey(value); invalidateDiscovery() }
+  async function importAccount() {
+    if (busy || integration?.protocol !== 'antigravity-cli') return
+    const revision = inventory.setup_revision ?? null
+    setBusy(true); invalidateDiscovery(); setNotice('이 MASC 서버의 로그인된 계정을 가져오고 있습니다.')
+    try {
+      const imported = await importAntigravityAccount(integration.id)
+      setModels(imported.models); setSource(imported.source); setDiscoveryRevision(revision)
+      setNotice(imported.models.length ? '계정을 가져왔습니다. 사용할 모델을 선택하세요. 응답·도구 검증은 저장할 때 진행합니다.' : '계정을 가져왔지만 모델 목록을 확인하지 못했습니다. CLI 로그인 상태를 확인한 뒤 다시 가져오세요.')
+    } catch { setNotice('계정을 가져오지 못했습니다. 이 MASC 서버의 터미널에서 masc setup으로 CLI 설치·로그인을 마친 뒤 다시 시도하세요.') }
+    finally { setBusy(false) }
+  }
   async function discover() {
     if (busy || !integration || (!http && !client)) return
     setBusy(true); setNotice('')
@@ -88,6 +99,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`
         : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '선택한 CLI 계정의 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>모델 목록 확인</button>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
+      ${integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">브라우저 계정이 아니라 이 MASC 서버에 로그인된 Antigravity 계정을 사용합니다.</p><button type="button" class="btn" onClick=${importAccount}>서버의 로그인된 Antigravity 계정 사용</button>` : null}
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
         ${model.label}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>

@@ -120,7 +120,41 @@ let with_eio_fs f =
     (fun () -> f ~fs ~sw ())
 ;;
 
+(* Every case below runs a turn inside the docker sandbox image. On a runner
+   that has no such image the reads come back as
+   "docker_cat_failed: image_not_found ...", which reads as a product failure
+   and is not one: the suite's own precondition is absent. Say that instead,
+   so the red is about the code and never about the machine. *)
+let docker_sandbox_image_available =
+  lazy
+    (let available =
+       Sys.command
+         (Printf.sprintf
+            "docker image inspect %s >/dev/null 2>&1"
+            (Filename.quote Keeper_sandbox_image.default_tag))
+       = 0
+     in
+     (* A silent skip reads as "ran and passed" in a log someone scans later.
+        Said once, because the answer does not change within a run. *)
+     if not available
+     then
+       (* stderr, because alcotest captures each case's stdout into a file
+          nobody opens when the run is green. *)
+       Printf.eprintf
+         "SKIPPING every case in this suite: it runs each turn inside the %s \
+          sandbox image, which is not on this host. Build it with `masc \
+          sandbox-image` to run them.\n%!"
+         Keeper_sandbox_image.default_tag;
+     available)
+
 let setup ?sandbox ?always_allow f =
+  (* No [?sandbox] means [make_meta]'s default, which is Docker. *)
+  (match sandbox with
+   | None | Some Keeper_types_profile_sandbox.Docker ->
+     if not (Lazy.force docker_sandbox_image_available)
+     then
+       Alcotest.skip ()
+   | Some _ -> ());
   with_eio_fs
   @@ fun ~fs ~sw () ->
   let base = temp_dir () in
@@ -771,6 +805,10 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
 ;;
 
 let () =
+  (* Forced before the runner starts: alcotest captures each case's stdout and
+     stderr into a per-case file, so a line printed from inside a case reaches
+     nobody scanning a green run. *)
+  ignore (Lazy.force docker_sandbox_image_available : bool);
   Alcotest.run
     "Keeper_visible_path_projection"
     [ ( "shared_projection"

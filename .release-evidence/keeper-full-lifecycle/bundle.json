@@ -1,6 +1,6 @@
 {
-  "bundle_id": "f897df0f51c8236778b96045cc498a2d5cdbf79c5e8495485d47ea803ec899c4",
-  "generated_at": "2026-09-10T10:06:13Z",
+  "bundle_id": "64743bbb8f1e59e8eab4104403712ed1a956d00dc34d0be795a0fe7765c1581b",
+  "generated_at": "2026-09-10T10:30:04Z",
   "passed_count": 14,
   "scenario_count": 14,
   "scenarios": [
@@ -16,7 +16,7 @@
         ".",
         "@test/runtest-test_server_runtime_bootstrap"
       ],
-      "duration_seconds": 76.715,
+      "duration_seconds": 137.374,
       "evidence": [
         "source_sha",
         "config_root",
@@ -25,7 +25,7 @@
       "exit_code": 0,
       "id": "V01",
       "log": "v01-boot_materialize.log",
-      "log_sha256": "f4528859008e814964f543b3f0ecc5bcc098aa76477a5282344892bf0596f005",
+      "log_sha256": "89e63b8ee7a3b9f653b44ec71cc068c7179408d8e0e556124a891a492ecc082e",
       "name": "boot_materialize",
       "status": "passed",
       "targets": [
@@ -45,7 +45,7 @@
         ".",
         "@test/runtest-test_keeper_owner"
       ],
-      "duration_seconds": 59.787,
+      "duration_seconds": 55.281,
       "evidence": [
         "operation_id",
         "owner_timeline"
@@ -53,7 +53,7 @@
       "exit_code": 0,
       "id": "V02",
       "log": "v02-owner_serialization.log",
-      "log_sha256": "8ce57744853b0ed3d3d1ee989f6a4bc3696d5aaa431304f1e7aaccc7770032cd",
+      "log_sha256": "738f9367d06c9a4cdc5155fbe5b962ab52382d339d9e0ad6edc5c854970cce46",
       "name": "owner_serialization",
       "status": "passed",
       "targets": [
@@ -73,7 +73,7 @@
         ".",
         "@test/runtest-test_keeper_chat_operation_http"
       ],
-      "duration_seconds": 25.009,
+      "duration_seconds": 68.822,
       "evidence": [
         "runtime_id",
         "receipt",
@@ -83,7 +83,7 @@
       "exit_code": 0,
       "id": "V03",
       "log": "v03-direct_dashboard.log",
-      "log_sha256": "d8d44cee002552adaf305c188678d21934acd9348cb602b7f9fc4deb1e036bd2",
+      "log_sha256": "04c3fb01f4021f746899095e2705a6cfd1df525c3a96309b6a2d2b461d2ae866",
       "name": "direct_dashboard",
       "status": "passed",
       "targets": [
@@ -103,7 +103,7 @@
         ".",
         "@test/runtest-test_keeper_event_queue"
       ],
-      "duration_seconds": 13.484,
+      "duration_seconds": 18.704,
       "evidence": [
         "queue_revision_before",
         "queue_revision_after"
@@ -111,7 +111,7 @@
       "exit_code": 0,
       "id": "V04",
       "log": "v04-durable_restart.log",
-      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log_sha256": "1370cd243f51d14bbe0d8f57c8b6685c1bb7aff083c07926ba46994ddde75237",
       "name": "durable_restart",
       "status": "passed",
       "targets": [
@@ -132,7 +132,7 @@
         "@test/runtest-test_keeper_event_queue",
         "@test/runtest-test_keeper_event_queue_state_v2"
       ],
-      "duration_seconds": 15.025,
+      "duration_seconds": 19.274,
       "evidence": [
         "source_identity",
         "pre_state_wal",
@@ -141,7 +141,7 @@
       "exit_code": 0,
       "id": "V05",
       "log": "v05-exact_ack.log",
-      "log_sha256": "51a2ee016c62345aa0aa55b82f4cd07bf84e9f0a4e5dc23c35d3f3a6af53098f",
+      "log_sha256": "198370ebf342e1f13c7d1359bf5e3147008b77cda9c9f13132685e41135d5272",
       "name": "exact_ack",
       "status": "passed",
       "targets": [
@@ -162,7 +162,7 @@
         ".",
         "@test/runtest-test_keeper_turn_driver_failover"
       ],
-      "duration_seconds": 20.763,
+      "duration_seconds": 69.555,
       "evidence": [
         "attempt_sequence",
         "fallback_reason",
@@ -171,7 +171,7 @@
       "exit_code": 0,
       "id": "V06",
       "log": "v06-pre_checkpoint_failover.log",
-      "log_sha256": "1c6efc85fce0c7275f499f42e32959e3a3d4fa58a0a0fd3fe6ef5335e6c48e01",
+      "log_sha256": "924d192249d486dc67fea3371bb386c6e87c2d27585ed55002662a1285159c4a",
       "name": "pre_checkpoint_failover",
       "status": "passed",
       "targets": [
@@ -192,7 +192,7 @@
         "@test/runtest-test_keeper_gate_effect_coverage",
         "@test/runtest-test_keeper_terminal_reason_typed"
       ],
-      "duration_seconds": 19.192,
+      "duration_seconds": 34.09,
       "evidence": [
         "effect_id",
         "checkpoint_stage",
@@ -201,7 +201,7 @@
       "exit_code": 0,
       "id": "V07",
       "log": "v07-post_effect_failure.log",
-      "log_sha256": "2baed8d3e2d79cdff923ab1b2de18daf6be4648811820461f35f6707b56c3685",
+      "log_sha256": "6e9361c3d22b59834f4742a07707053e452d2b2779fc73a94d869af5894cb5ad",
       "name": "post_effect_failure",
       "status": "passed",
       "targets": [
@@ -223,7 +223,7 @@
         "@test/runtest-test_keeper_replay_checkpoint",
         "@test/runtest-test_official_client_session_store"
       ],
-      "duration_seconds": 22.613,
+      "duration_seconds": 32.831,
       "evidence": [
         "checkpoint_owner",
         "session_owner",
@@ -232,7 +232,7 @@
       "exit_code": 0,
       "id": "V08",
       "log": "v08-checkpoint_resume.log",
-      "log_sha256": "71a842697513c6deb2d279eec5002bea4ef98a0ea9c41b27ad16646b35aa5324",
+      "log_sha256": "81a40833355c7fc781e70d8a8326e3fccef0146466d7442247d35b2afe87ed9a",
       "name": "checkpoint_resume",
       "status": "passed",
       "targets": [
@@ -254,7 +254,7 @@
         "@test/runtest-test_keeper_tool_policy_masc_surface",
         "@test/runtest-test_keeper_sandbox_containment"
       ],
-      "duration_seconds": 21.315,
+      "duration_seconds": 29.488,
       "evidence": [
         "tool_outcome",
         "sandbox_profile"
@@ -262,7 +262,7 @@
       "exit_code": 0,
       "id": "V09",
       "log": "v09-sandbox_tool_policy.log",
-      "log_sha256": "bd0a5d258c4097bbac93cff9d936681b215634bf7a4a5e03dd82da5c9ce3ae9e",
+      "log_sha256": "62d9b37add89db187a1ce4700f8c38b7eb0f2d596890ff9f2bb667d02c759993",
       "name": "sandbox_tool_policy",
       "status": "passed",
       "targets": [
@@ -284,7 +284,7 @@
         "@test/runtest-test_keeper_gate_replay",
         "@test/runtest-test_keeper_hitl_resolution_prompt"
       ],
-      "duration_seconds": 21.912,
+      "duration_seconds": 22.908,
       "evidence": [
         "approval_id",
         "effect_receipt",
@@ -293,7 +293,7 @@
       "exit_code": 0,
       "id": "V10",
       "log": "v10-hitl_replay.log",
-      "log_sha256": "a0cbd43f8ac5e54adb70cd94b87fd437cf9469101e48d0c49ed2a641571b72d3",
+      "log_sha256": "6a9a94fa3acf12f5176d578a20d992a1eeae61b7dbeddfd501ca95692a6a1672",
       "name": "hitl_replay",
       "status": "passed",
       "targets": [
@@ -315,7 +315,7 @@
         "@test/runtest-test_verification_authority_tools",
         "@test/runtest-test_completion_trust_harness"
       ],
-      "duration_seconds": 21.5,
+      "duration_seconds": 24.288,
       "evidence": [
         "evidence_submission",
         "authority_verdict"
@@ -323,7 +323,7 @@
       "exit_code": 0,
       "id": "V11",
       "log": "v11-completion_authority.log",
-      "log_sha256": "671f2816e74e4ce04e491ea10bce1205bfb3a9e42228640b034e45fb2a5b72a3",
+      "log_sha256": "307f8269176118dc7ce7ed2ad5bb61489d2d11109b0c80ed87d2107ce692eccc",
       "name": "completion_authority",
       "status": "passed",
       "targets": [
@@ -345,7 +345,7 @@
         "@test/runtest-test_runtime_toml_overrides",
         "@test/runtest-test_keeper_runtime_config_leaf"
       ],
-      "duration_seconds": 30.517,
+      "duration_seconds": 20.57,
       "evidence": [
         "configured_value",
         "effective_value",
@@ -355,7 +355,7 @@
       "exit_code": 0,
       "id": "V13",
       "log": "v13-config_application_boundary.log",
-      "log_sha256": "b72ad6f8f7589a281b0655ca94250c6c9409be65dbe396a79d277f5cab5fbcad",
+      "log_sha256": "197689d231f0ebcaa4c705897e2d817cff3e6bddd3e34fd7a2c7e69d2ba0c654",
       "name": "config_application_boundary",
       "status": "passed",
       "targets": [
@@ -377,7 +377,7 @@
         "@test/runtest-test_runtime_toml_overrides",
         "@test/runtest-test_keeper_runtime_config_leaf"
       ],
-      "duration_seconds": 25.843,
+      "duration_seconds": 19.661,
       "evidence": [
         "schema_issue",
         "setting_registry_census"
@@ -407,7 +407,7 @@
         "@test/runtest-test_keeper_failed_selection_disposition",
         "@test/runtest-test_keeper_event_queue"
       ],
-      "duration_seconds": 29.6,
+      "duration_seconds": 21.56,
       "evidence": [
         "source_incarnation",
         "queue_order_after_defer",
@@ -417,7 +417,7 @@
       "exit_code": 0,
       "id": "V15",
       "log": "v15-continuous_multi_source_liveness.log",
-      "log_sha256": "c9e6a394ad1a1c21a27fea09096cd6f2e48015e7371c009e3c1c3780dbd50fcd",
+      "log_sha256": "bba5232cd912b976aba37d808a679643dfbf1f73b49da0eef3ec1ed9e6d5411b",
       "name": "continuous_multi_source_liveness",
       "status": "passed",
       "targets": [
@@ -428,6 +428,6 @@
     }
   ],
   "schema": "masc.keeper_full_lifecycle_evidence.v1",
-  "source_sha": "2c7cf866ed1b76f95c0054e39e3ae25618528c23",
+  "source_sha": "0de00c6db04021e856333aa00145fe6ee068fac7",
   "status": "passed"
 }

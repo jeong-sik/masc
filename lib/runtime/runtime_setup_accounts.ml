@@ -47,6 +47,7 @@ let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
     Unix.mkdir directory_path 0o700;
     let retained=ref false in
     Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path);
+    Unix.mkdir (Common.masc_dir_from_base_path ~base_path:directory_path) 0o700;
     let* (imported:imported)=import ~base_path:directory_path in
     let* credential_file=credential ~directory:directory_path imported.credential_file in
     if not (Float.is_finite imported.timeout_s && imported.timeout_s>0.) then Error Import_failed else

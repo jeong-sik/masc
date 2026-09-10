@@ -17,6 +17,8 @@ let fixture f =
       Eio_main.run (fun _ -> f directory workspace))
 
 let import ~base_path =
+  let runtime_root=Common.masc_dir_from_base_path ~base_path in
+  check int "native account requires private runtime root" 0o700 ((Unix.stat runtime_root).st_perm land 0o777);
   let credential_file = Filename.concat base_path "account.json" in
   write credential_file "fixture-selected-account";
   Ok {Accounts.credential_file; timeout_s=123.5; catalog=`Assoc ["models",`List []]}

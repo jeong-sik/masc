@@ -630,9 +630,13 @@ let test_rejection_delivery_then_changed_submission_completes () =
      | Some task -> fail ("expected Done after second verdict, got " ^
                           Masc_domain.task_status_to_string task.task_status)
      | None -> fail "approved task disappeared");
+    (* reviewer_calls records the response this harness handed back, so the
+       second entry carries the approval text set above, not an empty one. *)
     check bool "both controlled verdicts actually ran" true
-      (List.rev !reviewer_calls =
-       [ Reviewer_verdict (AR.Reject reason); Reviewer_verdict (AR.Approve "") ]))
+      (List.rev !reviewer_calls
+       = [ Reviewer_verdict (AR.Reject reason)
+         ; Reviewer_verdict (AR.Approve "solid evidence")
+         ]))
 
 (* Historical shape: keeper_task_done used to consult the reviewer inline and
    an unavailable evaluator rejected the call. The tool now only files

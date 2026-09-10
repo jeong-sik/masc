@@ -212,6 +212,26 @@ let test_committed_work_reports_clean () =
         (Astring.String.is_infix ~affix:"working tree clean" output))
 ;;
 
+(* Local repository configuration is producer-controlled. In particular,
+   [core.fsmonitor] is an executable, despite [git status] looking read-only. *)
+let test_git_status_does_not_execute_fsmonitor () =
+  with_surface [] (fun surface root ->
+    let repo = Filename.concat root "checkout" in
+    let marker = Filename.concat root "fsmonitor-ran" in
+    let hook = Filename.concat repo "fsmonitor-hook" in
+    init_repo repo;
+    write_file hook (Printf.sprintf "#!/bin/sh\ntouch %s\n" (Filename.quote marker));
+    Unix.chmod hook 0o700;
+    git_in repo [ "config"; "core.fsmonitor"; hook ];
+    (match git_status_of surface ~path:"checkout" with
+     | Error detail -> Alcotest.failf "expected a status, got error: %s" detail
+     | Ok _ -> ());
+    Alcotest.(check bool)
+      "producer fsmonitor was not executed"
+      false
+      (Sys.file_exists marker))
+;;
+
 let test_git_status_outside_root_is_rejected () =
   with_surface [] (fun surface root ->
     let outside = Filename.concat (Filename.dirname root) "outside-repo" in
@@ -266,6 +286,8 @@ let () =
             test_uncommitted_work_is_named
         ; Alcotest.test_case "committed work reports clean" `Quick
             test_committed_work_reports_clean
+        ; Alcotest.test_case "producer fsmonitor is not executed" `Quick
+            test_git_status_does_not_execute_fsmonitor
         ; Alcotest.test_case "missing directory is an error" `Quick
             test_git_status_on_a_missing_directory_is_an_error
         ; Alcotest.test_case "non-repository is an error" `Quick

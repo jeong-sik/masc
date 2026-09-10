@@ -117,12 +117,29 @@ let read_file t ~relative =
          content)
 ;;
 
-(* The argv is a constant. The model supplies a directory to run in and nothing
-   else, so a write subcommand is not something this tool rejects — it is
-   something the tool cannot express. An argv whitelist would put the same
-   guarantee behind a string comparison that has to stay correct as Git grows
-   subcommands; this way the type of the input is a path. *)
-let git_status_argv = [ "--no-optional-locks"; "status"; "--porcelain=v1" ]
+(* The checkout and its local Git configuration belong to the producer. Git
+   status normally honors [core.fsmonitor], which would turn this read-only
+   lookup into execution of a producer-chosen host command. Command-line
+   configuration has the highest precedence, and the environment also excludes
+   configuration inherited from the verifier account. [core.hooksPath] is
+   disabled defensively so future Git status behavior cannot find repository
+   hooks. *)
+let git_status_argv =
+  [ "--no-optional-locks"
+  ; "-c"
+  ; "core.fsmonitor=false"
+  ; "-c"
+  ; "core.hooksPath=/dev/null"
+  ; "status"
+  ; "--porcelain=v1"
+  ]
+;;
+
+let git_status_env =
+  [ "GIT_CONFIG_NOSYSTEM", "1"; "GIT_CONFIG_GLOBAL", "/dev/null" ]
+;;
+
+let git_status_timeout_sec = 5.0
 
 (* [Repo_git.run_git] drops blank lines, so an empty result and a clean tree
    are the same list. Saying "clean" is a claim about the tree; the caller has
@@ -141,7 +158,10 @@ let git_status t ~relative =
       (Printf.sprintf "%s: no such directory in the producer's tree"
          (if String.equal relative "" then "." else relative))
   | Ok (Fs_compat.Owned_directory _) ->
-    (match Repo_git.run_git ~cwd:target git_status_argv with
+    (match
+       Repo_git.run_git ~cwd:target ~env:git_status_env
+         ~timeout_sec:git_status_timeout_sec git_status_argv
+     with
      | Error message -> Error (Printf.sprintf "%s: %s" relative message)
      | Ok [] ->
        Ok

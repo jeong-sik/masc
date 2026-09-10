@@ -481,7 +481,7 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
          | Tool_result.Completed _ ->
            Ok
              { Agent_core.Types.content = Tool_result.message result
-             ; _meta = None
+             ; content_blocks = None; _meta = None
              }
          | Tool_result.Deferred _ -> Alcotest.fail "Edit unexpectedly deferred"
          | Tool_result.Failed { message; _ } ->

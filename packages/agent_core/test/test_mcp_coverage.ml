@@ -223,13 +223,13 @@ let test_mcp_tool_to_agent_core_tool_empty_schema () =
   let mcp_tool : Mcp.mcp_tool =
     { name = "empty_params"; description = "No parameters"; input_schema = `Assoc [] }
   in
-  let call_fn _input : Types.tool_result = Ok { content = "ok"; _meta = None } in
+  let call_fn _input : Types.tool_result = Ok { content = "ok"; content_blocks = None; _meta = None } in
   let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
   Alcotest.(check string) "name" "empty_params" agent_core_tool.schema.name;
   Alcotest.(check int) "no params" 0 (List.length agent_core_tool.schema.parameters);
   (* Execute with empty input *)
   match Tool.execute agent_core_tool (`Assoc []) with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "ok" "ok" content
+  | Ok { content; _ } -> Alcotest.(check string) "ok" "ok" content
   | Error _ -> Alcotest.fail "expected Ok"
 ;;
 

@@ -386,6 +386,30 @@ let test_model_catalog_overlay_invalid_fails_loud () =
         (String_util.contains_substring message "agent-core-models-overlay.toml");
       Alcotest.(check int) "no install" 0 !set_overlay_calls)
 
+let test_config_load_failure_diagnostic_attributes_to_config () =
+  let output =
+    Server_runtime_bootstrap.config_load_failure_diagnostic
+      ~detail:
+        "catalog overlay /ws/.masc/config/agent-core-models-overlay.toml: model entry \
+         \"m\" contains unknown field(s): supports_extended_thinking"
+  in
+  Alcotest.(check bool)
+    "names the configuration class, not a connection problem"
+    true
+    (String_util.contains_substring output "not a model connection problem");
+  Alcotest.(check bool)
+    "carries the config file path verbatim"
+    true
+    (String_util.contains_substring output "agent-core-models-overlay.toml");
+  Alcotest.(check bool)
+    "names the next action"
+    true
+    (String_util.contains_substring output "masc runtime-verify");
+  Alcotest.(check bool)
+    "never claims a model connection failure"
+    false
+    (String_util.contains_substring output "Model connection failed")
+
 let test_explicit_model_catalog_replacement_precedes_overlay () =
   with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
     let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
@@ -4809,6 +4833,9 @@ let () =
           Alcotest.test_case
             "model catalog overlay invalid fails loud"
             `Quick test_model_catalog_overlay_invalid_fails_loud;
+          Alcotest.test_case
+            "config load failure diagnostic attributes to config"
+            `Quick test_config_load_failure_diagnostic_attributes_to_config;
           Alcotest.test_case
             "explicit model catalog replacement precedes overlay"
             `Quick test_explicit_model_catalog_replacement_precedes_overlay;

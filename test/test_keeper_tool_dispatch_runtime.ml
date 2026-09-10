@@ -7955,8 +7955,33 @@ let test_binary_write_reference_survives_replay () =
       | Ok args -> args | Error detail -> fail detail in
     let invoke () = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta ~publication_recovery ~args:replay_args () in
-    let result = invoke () in
-    check bool "replayed content completed" true (result.disposition = Tool_result.Completed ());
+    (match Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual with
+     | Ok _ -> () | Error detail -> fail detail);
+    let approval_id = match Masc.Keeper_gate.decide ~keeper_always_allow:false
+        {keeper_name=meta.name; operation=Masc.Keeper_gate.filesystem_write_gate_operation;
+         input; call_summary=Some "binary artifact replay"; sandbox_profile=None;
+         base_path=config.base_path; causal_context=None; task_id=None; continuation_channel=None} with
+      | Masc.Keeper_gate.Deferred {approval_id; _} -> approval_id
+      | Masc.Keeper_gate.Allow _ -> fail "binary approval unexpectedly allowed"
+      | Masc.Keeper_gate.Unavailable reason -> fail (Masc.Keeper_gate.unavailable_reason_to_string reason) in
+    check bool "deferred file absent" false (Sys.file_exists target);
+    Masc.Keeper_approval_queue.For_testing.reset_runtime_state ();
+    (match Masc.Keeper_approval_queue.install_persistence ~base_path:config.base_path with
+     | Ok _ -> () | Error e -> fail (Masc.Keeper_approval_queue.install_error_to_string e));
+    (match Masc.Keeper_approval_queue.resolve_with_policy ~base_path:config.base_path ~id:approval_id
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Auto_judge () with
+     | Ok _ -> () | Error e -> fail (Masc.Keeper_approval_queue.resolve_error_to_string e));
+    let resolution : Keeper_event_queue.hitl_resolution = {approval_id;
+      decision=Keeper_event_queue.Hitl_approved;
+      channel=Keeper_continuation_channel.unrouted "binary replay test"} in
+    let grant = match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+      | Some grant -> grant | None -> fail "missing approved grant" in
+    (match Masc.Keeper_gate_replay.replay_approved_effect ~config ~meta ~publication_recovery
+       ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
+       ~grant ~approval_id () with
+     | Masc.Keeper_gate_replay.Applied _ -> ()
+     | outcome -> fail (Masc.Keeper_gate_replay.outcome_to_string outcome));
     check string "recipient PNG bytes exact" bytes (Fs_compat.load_file target);
     let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store)
        (String.sub reference.sha256 0 2)) reference.sha256 in

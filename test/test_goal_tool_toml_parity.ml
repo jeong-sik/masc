@@ -20,7 +20,7 @@ open Alcotest
 let published =
   [ ( "masc_goal_list"
   , "List shared planning goals, optionally filtered by explicit lifecycle phase."
-  , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"completed\",\"dropped\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
+  , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"awaiting_confirmation\",\"completed\",\"dropped\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
   ; ( "masc_goal_transition"
   , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 

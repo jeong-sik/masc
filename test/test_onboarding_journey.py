@@ -43,6 +43,7 @@ class Journey(unittest.TestCase):
                 os.chdir(home)  # helper cannot depend on the source checkout
                 os.execve(BINARY, [BINARY, 'setup'], environment)
             captured = b''
+            exited = False
             try:
                 deadline = time.monotonic() + 30
                 while b'Your workspace' not in captured and time.monotonic() < deadline:
@@ -56,15 +57,30 @@ class Journey(unittest.TestCase):
                         captured += chunk
                 self.assertIn(b'Your workspace', captured, captured.decode(errors='replace'))
                 os.write(fd, b'q')
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    if waited == pid:
+                        exited = True
+                        self.assertTrue(os.WIFEXITED(status), captured.decode(errors='replace'))
+                        self.assertEqual(os.WEXITSTATUS(status), 1, captured.decode(errors='replace'))
+                        break
+                    if select.select([fd], [], [], 0.1)[0]:
+                        try:
+                            captured += os.read(fd, 65536)
+                        except OSError:
+                            pass
+                self.assertTrue(exited, 'q did not terminate setup naturally: ' + captured.decode(errors='replace'))
                 self.assertFalse(Path(home, 'MASC').exists())
                 self.assertFalse(Path(home, '.masc').exists())
             finally:
                 os.close(fd)
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                os.waitpid(pid, 0)
+                if not exited:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
 
     def test_cancel_fresh_home_does_not_initialize_or_select_models(self):
         with patch.object(SETUP, 'onboarding_status', return_value=observation()), \

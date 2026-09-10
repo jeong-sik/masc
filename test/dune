@@ -5553,3 +5553,8 @@
 (include stanzas/test_docker_account_access.inc)
 
 (include stanzas/test_apple_container_install.inc)
+
+(test
+ (name test_lane_addon_worker)
+ (modules test_lane_addon_worker)
+ (libraries masc alcotest eio eio_main yojson unix))

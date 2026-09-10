@@ -1,0 +1,223 @@
+(** Real subprocess/stdio lifecycle with a hermetic Docker control fixture.
+    This verifies host isolation logic, not kernel resource enforcement.
+    Actual Docker enforcement remains an integration qualification. *)
+open Alcotest
+module Worker = Masc.Lane_addon_worker
+module Types = Masc.Lane_addon_types
+
+let docker_fixture = {|#!/usr/bin/env python3
+import hashlib, json, os, pathlib, signal, sys
+root = pathlib.Path(__file__).parent
+argv = sys.argv[1:]
+if not argv or argv[0] != "container":
+    raise SystemExit(2)
+action, args = argv[1], argv[2:]
+def value(flag):
+    return args[args.index(flag) + 1]
+def path(cid):
+    return root / (cid + ".json")
+def load(cid):
+    return json.loads(path(cid).read_text())
+def output(value):
+    print(json.dumps(value), flush=True)
+if action == "create":
+    name = value("--name")
+    cid = hashlib.sha256(name.encode()).hexdigest()
+    mode = args[-1]
+    config = {"Id": cid, "Name": "/" + name,
+        "Config": {"Labels": dict([value("--label").split("=", 1)])},
+        "HostConfig": {"NanoCpus": round(float(value("--cpus")) * 1000000000),
+            "Memory": int(value("--memory")),
+            "MemorySwap": int(value("--memory-swap")),
+            "PidsLimit": int(value("--pids-limit"))},
+        "mode": mode, "argv": args}
+    if mode == "unlimited": config["HostConfig"]["PidsLimit"] = 0
+    path(cid).write_text(json.dumps(config))
+    print(cid, flush=True)
+elif action == "inspect":
+    output([load(args[-1])])
+elif action == "ls":
+    condition = value("--filter")
+    for file in root.glob("*.json"):
+        config = json.loads(file.read_text())
+        if (condition == "id=" + config["Id"] or
+            condition == "name=^" + config["Name"] + "$"):
+            output(config["Id"])
+elif action == "rm":
+    cid = args[-1]
+    if (root / (cid + ".refuse-remove")).exists():
+        print("fixture removal refused", file=sys.stderr)
+        raise SystemExit(7)
+    pidfile = root / (cid + ".pid")
+    if pidfile.exists():
+        try: os.kill(int(pidfile.read_text()), signal.SIGKILL)
+        except ProcessLookupError: pass
+        pidfile.unlink()
+    if path(cid).exists(): path(cid).unlink()
+    print(cid, flush=True)
+elif action == "start":
+    cid = args[-1]
+    mode = load(cid)["mode"]
+    (root / (cid + ".pid")).write_text(str(os.getpid()))
+    for line in sys.stdin:
+        request = json.loads(line)
+        if "id" not in request: continue
+        method = request["method"]
+        if method == "initialize":
+            if mode == "hang_initialize":
+                (root / (cid + ".blocked")).write_text(method)
+                while True: signal.pause()
+            result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}},
+                "serverInfo": {"name": "lane-fixture", "version": "1"}}
+        elif method == "tools/list":
+            result = {"tools": [{"name": "lane_observe", "description": "fixture",
+                "inputSchema": {"type": "object"}, "outputSchema": {"type": "object"}}]}
+        elif method == "tools/call":
+            request_mode = request["params"]["arguments"]["sources"].get("mode", "good")
+            if request_mode == "hang":
+                (root / (cid + ".blocked")).write_text(method)
+                while True: signal.pause()
+            if request_mode == "oversize":
+                result = {"content": [{"type": "text", "text": "x" * 65536}]}
+            elif request_mode == "error":
+                result = {"isError": True, "content": [{"type": "text", "text": "fixture failure"}],
+                    "structuredContent": {"rows": [], "coverage": []}}
+            else:
+                result = {"content": [{"type": "text", "text": "not JSON; structuredContent is authoritative"}],
+                    "structuredContent": {"rows": [], "coverage": []}}
+        else: result = {}
+        output({"jsonrpc": "2.0", "id": request["id"], "result": result})
+else: raise SystemExit(2)
+|}
+
+let write path value =
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel value)
+
+let rec remove_tree path =
+  if Sys.is_directory path then begin
+    Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path
+  end else Sys.remove path
+
+let with_fixture f =
+  let dir = Filename.temp_file "lane-worker-" ".fixture" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let docker = Filename.concat dir "docker-fixture" in
+  write docker docker_fixture;
+  Unix.chmod docker 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
+        Eio.Switch.run (fun sw -> f env sw dir docker))))
+
+let package directory mode : Types.package = {
+  id = "worker-test"; revision = "fixture-1"; title = "Worker test";
+  contributions = [ Types.Observe ]; image = "fixture/image";
+  command = [ "observer"; mode ]; directory;
+  resources = { cpus = 0.5; memory_bytes = 67_108_864L;
+                pids = 16; max_reply_bytes = 4096 };
+}
+
+let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
+let sources mode = `Assoc [ "mode", `String mode ]
+let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
+let start env sw dir docker mode =
+  Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"worker-test"
+    ~package:(package dir mode) ~docker_command:docker ()
+
+let await_marker clock file =
+  let rec wait () =
+    if Sys.file_exists file then ()
+    else (Eio.Time.sleep clock 0.005; wait ())
+  in wait ()
+
+let test_structured_observation_and_exact_removal () = with_fixture (fun env sw dir docker ->
+  let first = unwrap (start env sw dir docker "good") in
+  let second = unwrap (start env sw dir docker "good") in
+  let output = unwrap (observe first "good") in
+  check int "structured rows decoded despite non-JSON text" 0 (List.length output.rows);
+  let config = Yojson.Safe.from_file (Filename.concat dir (Worker.container_id first ^ ".json")) in
+  let args = config |> Yojson.Safe.Util.member "argv" |> Yojson.Safe.Util.to_list
+    |> List.map Yojson.Safe.Util.to_string in
+  check bool "read-only mount requested" true
+    (List.mem ("type=bind,src=" ^ dir ^ ",dst=/addon,readonly") args);
+  check bool "no host network" true (List.mem "none" args);
+  unwrap (Worker.stop first);
+  check bool "exact container removed" false
+    (Sys.file_exists (Filename.concat dir (Worker.container_id first ^ ".json")));
+  ignore (unwrap (observe second "good"));
+  unwrap (Worker.stop first);
+  unwrap (Worker.stop second))
+
+let test_hanging_observation_is_optional_and_detachable () = with_fixture (fun env sw dir docker ->
+  let worker = unwrap (start env sw dir docker "good") in
+  let other = unwrap (start env sw dir docker "good") in
+  let blocked = Eio.Fiber.fork_promise ~sw (fun () -> observe worker "hang") in
+  await_marker (Eio.Stdenv.clock env)
+    (Filename.concat dir (Worker.container_id worker ^ ".blocked"));
+  (* This independent owner completes before the deliberately blocked call is
+     released. No elapsed-time guess is counted as forward progress. *)
+  ignore (unwrap (observe other "good"));
+  unwrap (Worker.stop worker);
+  check bool "blocked observation ends as failure" true
+    (Result.is_error (Eio.Promise.await_exn blocked));
+  ignore (unwrap (observe other "good"));
+  unwrap (Worker.stop other))
+
+let test_initialize_can_be_detached () = with_fixture (fun env sw dir docker ->
+  let created, resolver = Eio.Promise.create () in
+  let starting = Eio.Fiber.fork_promise ~sw (fun () ->
+    Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"starting-test"
+      ~package:(package dir "hang_initialize") ~docker_command:docker
+      ~on_created:(Eio.Promise.resolve resolver) ()) in
+  let worker = Eio.Promise.await created in
+  await_marker (Eio.Stdenv.clock env)
+    (Filename.concat dir (Worker.container_id worker ^ ".blocked"));
+  unwrap (Worker.stop worker);
+  check bool "unresponsive initialize stops" true
+    (Result.is_error (Eio.Promise.await_exn starting)))
+
+let test_resource_refusal_and_bounded_reply () = with_fixture (fun env sw dir docker ->
+  check bool "unapplied resource limit refuses attach" true
+    (Result.is_error (start env sw dir docker "unlimited"));
+  let worker = unwrap (start env sw dir docker "good") in
+  check bool "isError is not a successful observation" true
+    (Result.is_error (observe worker "error"));
+  check bool "oversized MCP reply rejected" true
+    (Result.is_error (observe worker "oversize"));
+  unwrap (Worker.stop worker);
+  check bool "all owned containers removed" false
+    (Array.exists (fun name -> Filename.check_suffix name ".json") (Sys.readdir dir)))
+
+let test_cleanup_failure_can_be_retried () = with_fixture (fun env sw dir docker ->
+  let worker = unwrap (start env sw dir docker "good") in
+  let marker = Filename.concat dir (Worker.container_id worker ^ ".refuse-remove") in
+  write marker "blocked";
+  check bool "failed cleanup is reported" true (Result.is_error (Worker.stop worker));
+  check bool "scope remains usable" true (Eio.Switch.get_error sw = None);
+  Sys.remove marker;
+  unwrap (Worker.stop worker))
+
+let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir docker ->
+  let worker = unwrap (start env sw dir docker "good") in
+  let recover instance_id = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+      ~instance_id ~container_id:(Worker.container_id worker) ~max_reply_bytes:4096
+      ~docker_command:docker () in
+  check bool "another binding cannot remove this container" true
+    (Result.is_error (recover "different-owner"));
+  ignore (unwrap (observe worker "good"));
+  unwrap (recover "worker-test");
+  unwrap (recover "worker-test");
+  unwrap (Worker.stop worker))
+
+let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
+  test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;
+  test_case "blocked initialization can detach" `Quick test_initialize_can_be_detached;
+  test_case "resource refusal and bounded response" `Quick test_resource_refusal_and_bounded_reply;
+  test_case "cleanup failure remains retryable" `Quick test_cleanup_failure_can_be_retried;
+  test_case "restart cleanup verifies exact owner" `Quick test_restart_cleanup_requires_exact_owner;
+]]

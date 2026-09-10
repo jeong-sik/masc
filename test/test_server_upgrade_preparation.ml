@@ -56,13 +56,31 @@ let test_duplicate_health_never_authorizes () =
       "{\"version\":\"0.35.2\",\"version\":\"0.35.5\",\"paths\":{\"effective_base_path\":" ^ path ^ "}}";
       "{\"version\":\"0.35.2\",\"paths\":{\"effective_base_path\":" ^ path ^ ",\"effective_base_path\":\"/\"}}"] in
     List.iter (fun body ->
+      (match Server_upgrade_preparation.authorize_initial ~base_path:base
+        ~expected_version:"0.35.2" ~body
+        ~login:(fun () -> Alcotest.fail "ambiguous initial health invoked login/mint") with
+       | Error Invalid_health -> () | _ -> Alcotest.fail "ambiguous pre-login identity accepted");
       match Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
         ~observe:(fun () -> Ok body)
         ~authorize:(fun () -> Alcotest.fail "ambiguous health transmitted credentials")
         ~capture:(fun () -> Alcotest.fail "ambiguous health captured owner") with
       | Error Invalid_health -> () | _ -> Alcotest.fail "duplicate identity fields accepted") payloads))
+let test_initial_login_identity () =
+  let base_path = Unix.realpath (Filename.get_temp_dir_name ()) in
+  let body = Yojson.Safe.to_string (`Assoc ["version", `String "0.35.4";
+    "paths", `Assoc ["effective_base_path", `String base_path]]) in
+  let calls = ref 0 in
+  let login () = incr calls; true in
+  (match Server_upgrade_preparation.authorize_initial ~base_path ~expected_version:"0.35.5" ~body ~login with
+   | Error Incumbent_changed -> () | _ -> Alcotest.fail "changed version invoked login");
+  (match Server_upgrade_preparation.authorize_initial ~base_path:"/" ~expected_version:"0.35.4" ~body ~login with
+   | Error Different_workspace -> () | _ -> Alcotest.fail "other workspace invoked login");
+  Alcotest.check Alcotest.int "rejected identity never mints" 0 !calls;
+  (match Server_upgrade_preparation.authorize_initial ~base_path ~expected_version:"0.35.4" ~body ~login with
+   | Ok () -> () | Error _ -> Alcotest.fail "exact identity rejected");
+  Alcotest.check Alcotest.int "exact identity authorizes once" 1 !calls
 let () = Alcotest.run "upgrade preparation"
-  ["owner checks",[Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
+  ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
     Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes]]

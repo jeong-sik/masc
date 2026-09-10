@@ -4,6 +4,13 @@ type t
 type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
 type incumbent = { base_path : string; version : string }
+val decode_health : string -> (incumbent, error) result
+(** Strict unique-field health identity decoding, without authentication or writes. *)
+
+val authorize_initial : base_path:string -> expected_version:string -> body:string ->
+  login:(unit -> bool) -> (unit, error) result
+(** Validates workspace and selected version before invoking the login callback. *)
+
 val prepare :
   sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> headers:(string * string) list ->
   run_dir:string -> base_path:string -> port:int -> (t, error) result
@@ -13,9 +20,11 @@ val request_termination : t -> (unit, error) result
     admin authentication immediately before identity-bound SIGTERM. Success is
     a request, not proof of drain. Caller waits for lease/port release and starts
     the replacement with the same workspace and existing authentication. *)
+
 val close : t -> unit
 val suggest_loopback_port : unit -> (int, error) result
 (** OS-selected candidate, not a reserved port. Recheck conflicts at startup. *)
+
 module For_testing : sig
   val prepare : sw:Eio.Switch.t -> base_path:string -> observe:(unit -> (string, error) result) ->
     authorize:(unit -> bool) ->

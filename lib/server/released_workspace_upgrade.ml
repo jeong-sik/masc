@@ -69,12 +69,13 @@ let assess_keeper ~path original =
      | Error _ -> Manual_repair_required)
 ;;
 
+let source_sha256 plan = digest plan.original
 let plan_to_json plan =
   `Assoc
     [ "schema", `String "masc.keeper_upgrade.v1"
     ; "source_schema", `String "v0.34.0_explicit_activation_booleans"
     ; "path", `String plan.path
-    ; "source_sha256", `String (digest plan.original)
+    ; "source_sha256", `String (source_sha256 plan)
     ; "result_sha256", `String (digest plan.updated)
     ; "activation_mode", Keeper_activation_mode.to_yojson plan.mode
     ]

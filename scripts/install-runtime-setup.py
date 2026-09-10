@@ -1188,6 +1188,62 @@ def wizard_with_credentials(binary, base_path, timeout, credentials):
                 return dict(configured=False, readiness='deferred', base_path=str(base_path))
 
 
+def workspace_upgrade_catalog(binary, base_path):
+    result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or catalog.get('schema') != 'masc.workspace_upgrades.v1'
+                or catalog.get('read_only') is not True
+                or not isinstance(catalog.get('keepers'), list) or not isinstance(catalog.get('backups'), list)):
+            raise ValueError('invalid catalog')
+    except (TypeError, ValueError):
+        raise SetupError('Workspace upgrades could not be inspected. Existing files were preserved.')
+    return catalog
+
+
+def workspace_upgrade_action(binary, base_path, arguments, schema):
+    result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)] + arguments,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if result.returncode:
+            if receipt.get('schema') == 'masc.workspace_upgrade_error.v1' and isinstance(receipt.get('error'), str):
+                print(terminal_text(receipt['error']), file=sys.stderr)
+                return False
+            raise ValueError('invalid error')
+        if receipt.get('schema') != schema:
+            raise ValueError('invalid receipt')
+    except (TypeError, ValueError):
+        raise SetupError('The upgrade result could not be read. Inspect the workspace backups before retrying.')
+    if receipt.get('backup_path'):
+        print('Original configuration saved at ' + terminal_text(receipt['backup_path']), file=sys.stderr)
+    if not receipt.get('durability_confirmed') or not receipt.get('lock_release_confirmed'):
+        print('The file was changed, but final disk or lock confirmation was incomplete. The original backup remains available.', file=sys.stderr)
+    return True
+
+
+def select_workspace_upgrades(binary, base_path, plans):
+    labels = [row['keeper_name'] + ' — preserve activation mode: ' + row['plan']['activation_mode'] for row in plans]
+    selected = pick('Back up and upgrade the selected Keeper configurations', labels, multiple=True)
+    print('Each selected file gets a separate private backup. Other workspace data stays in place.', file=sys.stderr)
+    for index in selected:
+        row = plans[index]
+        if not workspace_upgrade_action(binary, base_path,
+                ['--apply', row['keeper_name'], '--source-sha256', row['plan']['source_sha256']],
+                'masc.keeper_upgrade_receipt.v1'):
+            break  # preserve successful receipts and re-inspect before another attempt
+
+
+def select_workspace_restore(binary, base_path, backups):
+    labels = [Path(row['receipt']['plan']['path']).stem + ' — backup ' + row['backup_id'] for row in backups]
+    selected = pick('Restore an original configuration (later edits are protected)', labels + ['Back'])[0]
+    if selected < len(backups):
+        print('Restoring the original may require using the previous MASC version for this workspace.', file=sys.stderr)
+        workspace_upgrade_action(binary, base_path, ['--restore', backups[selected]['backup_id']],
+                                 'masc.workspace_restore.v1')
+
+
 def workspace_check(binary, base_path):
     base = Path(base_path).expanduser().resolve()
     while True:
@@ -1207,13 +1263,27 @@ def workspace_check(binary, base_path):
             print('  ' + terminal_text(issue['path']) + ': ' + terminal_text(issue['detail']), file=sys.stderr)
         if not sys.stdin.isatty():
             raise SetupError('choose a new unused workspace with --base-path, or keep the previous version for this workspace')
+        upgrades = workspace_upgrade_catalog(binary, base)
+        plans = [row for row in upgrades['keepers'] if row['status'] == 'upgrade_available']
         suggestion = base.parent / (base.name + '-new')
         suffix = 2
         while suggestion.exists():
             suggestion = base.parent / (base.name + '-new-' + str(suffix))
             suffix += 1
-        action = pick('Choose a workspace', ['Use new workspace: ' + str(suggestion),
-                                             'Choose another directory', 'Return without changing existing data'])[0]
+        actions = ['Use new workspace: ' + str(suggestion),
+                   'Choose another directory', 'Return without changing existing data']
+        optional = []
+        if plans:
+            optional.append(('upgrade', 'Keep this workspace: back up and upgrade known Keeper settings'))
+        if upgrades['backups']:
+            optional.append(('restore', 'Restore a previous configuration backup'))
+        action = pick('Choose a workspace', actions + [label for _, label in optional])[0]
+        if action >= len(actions):
+            if optional[action - len(actions)][0] == 'upgrade':
+                select_workspace_upgrades(binary, base, plans)
+            else:
+                select_workspace_restore(binary, base, upgrades['backups'])
+            continue
         if action == 2:
             raise SetupError('installation cancelled; existing workspace data was preserved')
         candidate = suggestion if action == 0 else Path(ask_text('New unused workspace directory')).expanduser().resolve()

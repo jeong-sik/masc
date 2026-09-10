@@ -229,7 +229,8 @@ let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
-  | Keeper_event_queue.Composition_completed _ -> false
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Task_outcome _ -> false
 ;;
 
 let record_replay_owned_turn_finished_reactions ~ctx ~keeper_name ~disposition stimuli =
@@ -261,7 +262,8 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Task_cancelled _
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _
-       | Keeper_event_queue.Composition_completed _ -> ())
+       | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Task_outcome _ -> ())
     stimuli
 ;;
 

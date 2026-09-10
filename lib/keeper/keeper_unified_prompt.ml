@@ -486,6 +486,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.External_attention _ -> "external_attention"
   | Keeper_world_observation.Completion_authority_rejected _ ->
     "completion_authority_rejected"
+  | Keeper_world_observation.Task_outcome _ -> "task_outcome"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
   | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
@@ -690,6 +691,7 @@ let board_event_note_fields = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
+  | Keeper_world_observation.Task_outcome _
   | Keeper_world_observation.Task_cancelled _
   | Keeper_world_observation.Delegate_completed
   (* The answer is the row's title and preview; there is no side fact to add. *)
@@ -854,6 +856,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Fusion_completed
     | Keeper_world_observation.External_attention _
     | Keeper_world_observation.Completion_authority_rejected _
+    | Keeper_world_observation.Task_outcome _
     | Keeper_world_observation.Task_cancelled _
     | Keeper_world_observation.Delegate_completed
     | Keeper_world_observation.Ask_answered_row
@@ -985,6 +988,18 @@ let format_completion_authority_rejection_observations
                 ; "reason", rejection.car_reason
                 ]
               ^ "\n")
+         | Keeper_world_observation.Task_outcome outcome ->
+           Some
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", outcome.Keeper_event_queue.to_task_id
+                ; "verification_id", outcome.to_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind outcome.to_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor outcome.to_authority )
+                ]
+              ^ "\n")
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
@@ -1007,6 +1022,55 @@ let format_completion_authority_rejection_observations
          [ "count", string_of_int (List.length rows) ]
        ^ "\n"
        ^ render_fragment Prompt_names.keeper_world_completion_authority_intro []
+       ^ "\n"
+       ^ String.concat "" rows
+       ^ "\n")
+;;
+
+(* The approval twin of the renderer above, joined with it under the same
+   completion-authority layer. The outcome fields carry the correlation keys;
+   there is no reason field because an approval carries none. *)
+let format_task_outcome_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Task_outcome outcome ->
+           Some
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", outcome.Keeper_event_queue.to_task_id
+                ; "verification_id", outcome.to_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind outcome.to_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor outcome.to_authority )
+                ]
+              ^ "\n")
+         | Keeper_world_observation.Board_post_created
+         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Schedule_due _
+         | Keeper_world_observation.External_attention _
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Ask_answered_row
+         | Keeper_world_observation.Composition_completed -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      (render_fragment
+         Prompt_names.keeper_world_task_outcomes_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n"
+       ^ render_fragment Prompt_names.keeper_world_task_outcomes_intro []
        ^ "\n"
        ^ String.concat "" rows
        ^ "\n")
@@ -1045,6 +1109,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Task_outcome _
          | Keeper_world_observation.Delegate_completed
          | Keeper_world_observation.Ask_answered_row
          | Keeper_world_observation.Composition_completed -> None)
@@ -1800,10 +1865,14 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     (* 5b. Completion-authority decisions — a distinct system LLM boundary.
        These rows are not Board activity and must not be routed through the
        scheduled-work renderer merely because they share the historical
-       pending-event carrier. *)
+       pending-event carrier. Both verdicts render here: the rejection with
+       its reason, the approval with its correlation keys. *)
     | Keeper_context_layers.Completion_authority ->
-      format_completion_authority_rejection_observations
-        observation.pending_board_events
+      combine_prompt_sections
+        [ format_completion_authority_rejection_observations
+            observation.pending_board_events
+        ; format_task_outcome_observations observation.pending_board_events
+        ]
     (* 6b. Cancellations of Tasks this Keeper authored — the author's only
        in-prompt account of why work it filed stopped. Not Board activity: the
        cancellation produces no post. *)

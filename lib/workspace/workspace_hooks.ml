@@ -366,13 +366,15 @@ let goal_verification_pending_fn
            goal_id)
 
 let verification_notify_verdict_fn
-  : (task_id:string ->
+  : (Workspace_utils_backend_setup.config ->
+     task_id:string ->
+     producer:string ->
      authority:Masc_domain.completion_authority ->
      verification_id:string ->
      decision:[ `Approve of string | `Reject of string ] ->
      unit) Atomic.t
   = Atomic.make
-      (fun ~task_id ~authority ~verification_id ~decision ->
+      (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
          let decision_kind =
            match decision with
            | `Approve _ -> "approve"

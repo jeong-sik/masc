@@ -34,6 +34,10 @@ type pending_board_event_kind =
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
+  | Task_outcome of Keeper_event_queue.task_outcome
+      (** The approval twin of {!Completion_authority_rejected}: the task id,
+          verification id and authority provenance are the row; the approval
+          fact itself needs no content store beyond the verdict record. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation
 
 type pending_board_event =
@@ -75,8 +79,10 @@ let is_board_activity_event (event : pending_board_event) =
   | Ask_answered_row
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
-     non-existent post in [board_activity_count]. Each has its own renderer. *)
-  | Completion_authority_rejected _ | Task_cancelled _ -> false
+     non-existent post in [board_activity_count]. Each has its own renderer,
+     as does the Task_outcome approval twin of the rejection. *)
+  | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _ ->
+    false
 ;;
 
 let is_scheduled_automation_event (event : pending_board_event) =
@@ -92,6 +98,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Ask_answered_row
   | External_attention _
   | Completion_authority_rejected _
+  | Task_outcome _
   | Task_cancelled _ -> false
 ;;
 
@@ -108,6 +115,26 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Ask_answered_row
   | Schedule_due _
   | External_attention _
+  | Task_outcome _
+  | Task_cancelled _ -> false
+;;
+
+(* The approval twin. Like the rejection it is its own system-LLM boundary
+   layer, not Board activity and not scheduled automation. *)
+let is_task_outcome_event (event : pending_board_event) =
+  match event.event_kind with
+  | Task_outcome _ -> true
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Board_vote_cast _
+  | Fusion_completed
+  | Delegate_completed
+  | Composition_completed
+  | Ask_answered_row
+  | Schedule_due _
+  | External_attention _
+  | Completion_authority_rejected _
   | Task_cancelled _ -> false
 ;;
 
@@ -127,7 +154,8 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Fusion_completed
   | Schedule_due _
   | External_attention _
-  | Completion_authority_rejected _ -> false
+  | Completion_authority_rejected _
+  | Task_outcome _ -> false
 ;;
 
 type scheduled_automation_item =
@@ -254,6 +282,7 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
+  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 
@@ -266,6 +295,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
+  | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn
@@ -1019,6 +1049,48 @@ let pending_board_event_of_task_cancellation
   }
 ;;
 
+(* The approval twin of the rejection row above. The title states the outcome
+   and the structured fields carry the correlation keys — the same choice the
+   rejection and cancellation rows make: a sentence here would repeat what the
+   fields say. *)
+let pending_board_event_of_task_outcome
+      ~(arrived_at : float)
+      (outcome : Keeper_event_queue.task_outcome)
+  : pending_board_event
+  =
+  { event_kind = Task_outcome outcome
+  ; post_id = Keeper_event_queue.task_outcome_post_id outcome
+  ; author = Masc_domain.completion_authority_actor outcome.to_authority
+  ; title =
+      event_row_text
+        Prompt_names.keeper_world_event_rows_task_outcome_title
+        [ "task_id", outcome.to_task_id ]
+        ~fallback:outcome.to_task_id
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (event_row_text
+           Prompt_names.keeper_world_event_rows_task_outcome_preview
+           [ "task_id", outcome.to_task_id
+           ; "verification_id", outcome.to_verification_id
+           ; ( "authority_kind"
+             , Masc_domain.completion_authority_kind outcome.to_authority )
+           ]
+           ~fallback:
+             (outcome.to_task_id ^ " " ^ outcome.to_verification_id))
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author =
+      Some (Masc_domain.completion_authority_actor outcome.to_authority)
+  ; latest_external_preview = None
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -1057,6 +1129,12 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_completion_authority_rejection
             ~arrived_at:stimulus.arrived_at
             rejection))
+  | Keeper_event_queue.Task_outcome outcome ->
+    Ok
+      (Some
+         (pending_board_event_of_task_outcome
+            ~arrived_at:stimulus.arrived_at
+            outcome))
   | Keeper_event_queue.Task_cancelled cancellation ->
     Ok
       (Some
@@ -1584,6 +1662,10 @@ let has_pending_completion_authority_rejection
     observation.pending_board_events
 ;;
 
+let has_pending_task_outcome (observation : world_observation) =
+  List.exists is_task_outcome_event observation.pending_board_events
+;;
+
 let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
@@ -1625,6 +1707,7 @@ let keeper_cycle_decision
       | Ask_answered_pending
       | Hitl_resolved_pending
       | Completion_authority_rejection_pending
+      | Task_outcome_pending
       | Task_cancellation_pending
       | Workspace_message_pending
       | Scheduled_autonomous_turn
@@ -1656,6 +1739,7 @@ let keeper_cycle_decision
                  | Connector_attention_pending
                  | Ask_answered_pending
                  | Hitl_resolved_pending
+                 | Task_outcome_pending
                  | Task_cancellation_pending
                  | Workspace_message_pending
                  | Scheduled_autonomous_turn
@@ -1664,6 +1748,15 @@ let keeper_cycle_decision
                  | Never_started -> false)
                triggers)
     then triggers @ [ Completion_authority_rejection_pending ]
+    else triggers
+    (* Same shape as the rejection injection above: the observation may carry a
+       verdict whose stimulus was already consumed from the event queue by an
+       earlier cycle, and the turn must still be attributable to it rather
+       than reported as an unexplained autonomous tick. *)
+  |> fun triggers ->
+    if has_pending_task_outcome observation
+       && not (List.mem Task_outcome_pending triggers)
+    then triggers @ [ Task_outcome_pending ]
     else triggers
     (* Same shape as the rejection injection above: the observation may carry a
        cancellation whose stimulus was already consumed from the event queue by

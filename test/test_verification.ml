@@ -3277,6 +3277,30 @@ let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
+let large_binary_format_fixtures () =
+  let pcm = String.make (2 * 1024 * 1024) '\000' in
+  let le32 value = let b = Bytes.create 4 in Bytes.set_int32_le b 0 (Int32.of_int value); Bytes.to_string b in
+  let wav = "RIFF" ^ le32 (36 + String.length pcm) ^ "WAVEfmt " ^ le32 16
+    ^ "\001\000\001\000" ^ le32 44100 ^ le32 88200 ^ "\002\000\016\000data"
+    ^ le32 (String.length pcm) ^ pcm in
+  let tiny_gif = Base64.decode_exn "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" in
+  let comments = String.concat "" (List.init 8192 (fun _ -> "\033\254\255" ^ String.make 255 'x' ^ "\000")) in
+  let gif = String.sub tiny_gif 0 (String.length tiny_gif - 1) ^ comments ^ ";" in
+  let contents = String.concat "" (List.init 8192 (fun _ -> "%" ^ String.make 255 'x' ^ "\n")) in
+  let objects = ["<< /Type /Catalog /Pages 2 0 R >>";
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>";
+    Printf.sprintf "<< /Length %d >>\nstream\n%sendstream" (String.length contents) contents] in
+  let pdf = Buffer.create (String.length contents + 1024) in
+  Buffer.add_string pdf "%PDF-1.7\n";
+  let offsets = List.mapi (fun index body -> let offset = Buffer.length pdf in
+    Buffer.add_string pdf (Printf.sprintf "%d 0 obj\n%s\nendobj\n" (index + 1) body); offset) objects in
+  let xref = Buffer.length pdf in
+  Buffer.add_string pdf "xref\n0 5\n0000000000 65535 f \n";
+  List.iter (fun offset -> Buffer.add_string pdf (Printf.sprintf "%010d 00000 n \n" offset)) offsets;
+  Buffer.add_string pdf (Printf.sprintf "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" xref);
+  ["wav", wav; "pdf", Buffer.contents pdf; "gif", gif]
+
 let test_complete_large_binary_snapshots () =
   with_temp_dir (fun base_path ->
     let config = Workspace_core.default_config base_path in
@@ -3284,8 +3308,7 @@ let test_complete_large_binary_snapshots () =
     ensure_producer_playground config worker;
     let root = Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path:(VS.project_root_of_base_path base_path) ~agent_name:worker in
-    List.iteri (fun index (extension, prefix) ->
-      let bytes = prefix ^ String.make (2 * 1024 * 1024) '\255' in
+    List.iteri (fun index (extension, bytes) ->
       let name = "complete." ^ extension in
       let source = Filename.concat root name in
       Fs_compat.save_file source bytes;
@@ -3303,7 +3326,7 @@ let test_complete_large_binary_snapshots () =
       Fs_compat.save_file source "changed";
       Unix.unlink source;
       Alcotest.(check string) "immutable full snapshot" bytes (Fs_compat.load_file body))
-      ["wav", "RIFF"; "pdf", "%PDF-1.7\n"; "gif", "GIF89a"])
+      (large_binary_format_fixtures ()))
 
 let test_a_binary_payload_is_adopted_and_filed () =
   with_temp_dir (fun base_path ->

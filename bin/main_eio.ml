@@ -1608,6 +1608,7 @@ let verify_runtime_execution runtime timeout_s =
     Eio_context.set_env env;
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
+      ~secure_random:(Eio.Stdenv.secure_random env)
       ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
@@ -2703,6 +2704,31 @@ let workspace_upgrade_cmd =
   Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect known configuration upgrades and private recovery backups.")
     Term.(const run $ base_path $ apply $ source_sha256 $ restore)
 
+let antigravity_account_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let sign_in = Arg.(value & flag & info ["sign-in"] ~doc:"Open official sign-in in a private account directory.") in
+  let credential = Arg.(value & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run base_path cli_path sign_in credential =
+    let action = match sign_in, credential with
+      | true, Some _ -> None
+      | true, None -> Some Masc_cli_antigravity.Sign_in
+      | false, Some path -> Some (Use_reference path)
+      | false, None -> Some Import_current in
+    match action with
+    | None -> prerr_endline "Choose sign-in or an existing account reference."; 1
+    | Some action -> Masc_cli_antigravity.account ~base_path ~cli_path
+        ~timeout_s:runtime_probe_subscription_timeout_s ~action in
+  Cmd.v (Cmd.info "runtime-antigravity-account" ~doc:"Select an Antigravity account and list its actual models without a model turn.")
+    Term.(const run $ base_path $ cli_path $ sign_in $ credential)
+
+let antigravity_models_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run cli_path oauth_source = Masc_cli_antigravity.models ~cli_path ~oauth_source
+    ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
+    Term.(const run $ cli_path $ credential)
+
 let sandbox_catalog_cmd =
   let inspect requested =
     let base_path = match requested with Some path -> Some path
@@ -2891,6 +2917,8 @@ let cmd =
     ; setup_preflight_cmd
     ; runtime_resume_cmd
     ; workspace_upgrade_cmd
+    ; antigravity_account_cmd
+    ; antigravity_models_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
     ; token_cmd

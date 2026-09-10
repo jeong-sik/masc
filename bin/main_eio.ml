@@ -1633,7 +1633,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
           print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
           Runtime_verification.exit_code result
          with Eio.Io _ | Unix.Unix_error _ | Sys_error _ ->
-           unavailable "client_unavailable" "The isolated verification session could not start or finish.")
+           unavailable "verification_session_failed" "The isolated verification session could not start or finish.")
 
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in

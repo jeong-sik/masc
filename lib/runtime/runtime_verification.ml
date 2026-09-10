@@ -2,8 +2,9 @@ type unavailable =
   | Missing_credential
   | Unsupported_runtime
   | Tools_not_declared
-  | Invalid_configuration
-  | Client_unavailable
+  | Invalid_configuration of string
+  | Client_not_authenticated of string
+  | Client_not_started of string
 
 type failure =
   | Unavailable of unavailable
@@ -33,8 +34,9 @@ let failure_code = function
   | Unavailable Missing_credential -> "missing_credential"
   | Unavailable Unsupported_runtime -> "unsupported_runtime"
   | Unavailable Tools_not_declared -> "tools_not_declared"
-  | Unavailable Invalid_configuration -> "invalid_configuration"
-  | Unavailable Client_unavailable -> "client_unavailable"
+  | Unavailable (Invalid_configuration _) -> "invalid_configuration"
+  | Unavailable (Client_not_authenticated _) -> "client_not_authenticated"
+  | Unavailable (Client_not_started _) -> "client_not_started"
   | Provider_rejected -> "provider_rejected"
   | Timed_out -> "timed_out"
   | Tool_not_called -> "tool_not_called"
@@ -49,9 +51,12 @@ let failure_message = function
   | Unavailable Unsupported_runtime ->
     "This transport has no readiness tool roundtrip yet."
   | Unavailable Tools_not_declared -> "This model binding does not declare tool calling."
-  | Unavailable Invalid_configuration -> "The selected runtime configuration is invalid."
-  | Unavailable Client_unavailable ->
-    "The configured client could not start or authenticate."
+  | Unavailable (Invalid_configuration _) ->
+    "The selected runtime configuration is invalid."
+  | Unavailable (Client_not_authenticated _) ->
+    "The configured client reports no sign-in. Sign in with the client itself, or \
+     export its credential variables."
+  | Unavailable (Client_not_started _) -> "The configured client could not be started."
   | Provider_rejected ->
     "The selected model request failed; check model access, endpoint and authentication."
   | Timed_out -> "The selected runtime did not finish verification before its deadline."
@@ -60,6 +65,21 @@ let failure_message = function
     "The model did not return the challenge from the actual tool result."
   | Empty_response -> "The selected model returned no assistant response."
   | Model_unreported -> "The runtime returned no observed model identity."
+;;
+
+(* The client already wrote an account of what it looked for and did not find;
+   without this it is discarded and every unavailable client reads the same. *)
+let failure_detail = function
+  | Unavailable (Invalid_configuration detail)
+  | Unavailable (Client_not_authenticated detail)
+  | Unavailable (Client_not_started detail) -> Some detail
+  | Unavailable (Missing_credential | Unsupported_runtime | Tools_not_declared)
+  | Provider_rejected
+  | Timed_out
+  | Tool_not_called
+  | Tool_result_not_consumed
+  | Empty_response
+  | Model_unreported -> None
 ;;
 
 let to_json result =
@@ -90,6 +110,10 @@ let to_json result =
           `Assoc
             [ "code", `String (failure_code failure)
             ; "message", `String (failure_message failure)
+            ; ( "detail"
+              , match failure_detail failure with
+                | None -> `Null
+                | Some detail -> `String detail )
             ] )
     ]
 ;;
@@ -222,7 +246,12 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
                 ~input_schema:tool.input_schema
                 ()
             with
-            | Error _ -> Error (Unavailable Invalid_configuration)
+            | Error _ ->
+              Error
+                (Unavailable
+                   (Invalid_configuration
+                      "the readiness tool schema could not be built from this model \
+                       binding"))
             | Ok schema ->
               let handler input =
                 let result = tool.call ~call_id:"readiness" input in
@@ -279,15 +308,22 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
              ~images:[]
          with
          | Ok result -> Ok { model = result.model; text = result.text }
-         | Error
-             ( Runtime_claude_code.Invalid_config _
-             | Spawn_failed _
-             | Subscription_required _ ) -> Error (Unavailable Client_unavailable)
+         | Error (Runtime_claude_code.Subscription_required _ as error) ->
+           Error
+             (Unavailable
+                (Client_not_authenticated (Runtime_claude_code.error_to_string error)))
+         | Error (Runtime_claude_code.Spawn_failed _ as error) ->
+           Error
+             (Unavailable (Client_not_started (Runtime_claude_code.error_to_string error)))
+         | Error (Runtime_claude_code.Invalid_config _ as error) ->
+           Error
+             (Unavailable
+                (Invalid_configuration (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
          | Error _ -> Error Provider_rejected)
       | Runtime_execution.Codex_app_server execution ->
         (match Runtime_verification_codex_home.prepare ~directory:cwd_path with
-        | Error _ -> Error (Unavailable Invalid_configuration)
+        | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
            posture and disables shell/unified_exec in the existing adapter;
@@ -313,10 +349,20 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
              ~images:[]
          with
          | Ok result -> Ok { model = result.model; text = result.text }
-         | Error
-             ( Runtime_codex_app_server.Invalid_config _
-             | Spawn_failed _
-             | Subscription_required _ ) -> Error (Unavailable Client_unavailable)
+         | Error (Runtime_codex_app_server.Subscription_required _ as error) ->
+           Error
+             (Unavailable
+                (Client_not_authenticated
+                   (Runtime_codex_app_server.error_to_string error)))
+         | Error (Runtime_codex_app_server.Spawn_failed _ as error) ->
+           Error
+             (Unavailable
+                (Client_not_started (Runtime_codex_app_server.error_to_string error)))
+         | Error (Runtime_codex_app_server.Invalid_config _ as error) ->
+           Error
+             (Unavailable
+                (Invalid_configuration
+                   (Runtime_codex_app_server.error_to_string error)))
          | Error (Runtime_codex_app_server.Timeout _) -> Error Timed_out
          | Error _ -> Error Provider_rejected)))
   in

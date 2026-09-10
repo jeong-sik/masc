@@ -5518,4 +5518,4 @@
 (test
  (name test_owner_process_identity)
  (modules test_owner_process_identity)
- (libraries alcotest unix masc.owner_process_identity))
+ (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))

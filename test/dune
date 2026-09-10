@@ -5568,3 +5568,4 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_docker_desktop_install.inc)
+(include stanzas/test_prerequisite_terminal.inc)

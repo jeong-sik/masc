@@ -128,7 +128,7 @@ class Journey(unittest.TestCase):
             original = ('# Preserve this exact prompt.\n[keeper]\nname = "imp"\n'
                         'instructions = "Remember the user"\nautoboot_enabled = true\n'
                         'proactive_enabled = false\nsandbox_profile = "microvm"\n'
-                        'microvm_backend = "docker"\n[keeper.tools]\nnative = "read"\n')
+                        'microvm_backend = "apple_container"\n[keeper.tools]\nnative = "read"\n')
             path.write_text(original)
             env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config',
                        MASC_BASE_PATH_LEASE_DIR=home + '/leases')

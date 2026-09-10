@@ -137,5 +137,5 @@ val run_command :
 
 (** Raw complete endpoint or Docker read. Docker requires authoritative process
     capture EOF; completion-only fallback is refused rather than returning previews. *)
-val read_complete_file : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+val read_complete_file : ?turn_sandbox_factory:Keeper_sandbox_factory.t -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   host_path:string -> timeout_sec:float -> unit -> (string, string) result

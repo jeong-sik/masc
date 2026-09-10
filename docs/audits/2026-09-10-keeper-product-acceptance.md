@@ -3,6 +3,30 @@
 Scope: all 18 user-reported gaps after 0.35.2, plus the supplied product contract.
 No row is complete. A prompt change is an intervention, not behavioral proof.
 
+## Current collaboration evidence at 2026-09-10T13:58Z
+
+The original exhibition task-001 reached Done at13:47:07Z through actual Kimi
+verification request vrf-1d46f3c204a6906a9cdd574e6752575c. The preserved PDF has
+three A4 pages; all five file hashes and byte counts match its manifest, and
+three independent PDF renders match the submitted PNGs pixel for pixel.
+The Dashboard shows this same original Done task and the GLM/Codex Keeper
+handoff. These observations advance rows1/3/4/5/7/8/9/13, but none closes the
+whole requirement. See the [actual collaboration record](../evidence/2026-09-10-collaboration-baseline/README.md)
+for files, hashes, interventions and screenshots.
+
+| Requirement group | New direct observation | Remaining acceptance work |
+|---|---|---|
+| Goal/Task and non-code outputs (1/3/4/5) | Real PDF/PNG output and original Task approval; independent pixels and Korean visual inspection | Goal proof and human confirmation, varied creative/research outputs, sustained purposeful work |
+| Operator requests and delegation (6/7/8) | Editor asked for missing facts, delegated design work; both wrote/read Board records; designer returned corrected final details | Repeated answers and manual QA were needed; designer's actual PNG could not be read from the editor sandbox and was not in the approved submission |
+| Standalone verification (9) | Real Kimi vision calls read the actual four submitted PNGs; task approved | Verifier lookup inserts invalid PDF/PNG bytes into UTF-8 JSON; Goal lookup currently has no visual input tool; manifest optional width1240 differs from actual1241 |
+| Configuration (13) | Actual preview/save added Codex; same designer conversation subsequently executed Codex tools; editor used GLM | Manual assignments are not automatic failover or complete configuration coverage |
+| Memory/librarian (17/18) | Editor attempted to publish learned workflow | Both Korean and ASCII library titles failed because fresh-base docs/library did not exist; a directory creation fix is in PR35149, not yet running |
+
+The previous matrix below retains its earlier measurement details. This update
+supersedes its statements that the two-Keeper scenario and original non-code
+Task completion have not yet run. The full18-row scope remains open; no1/2/4/24h
+continuous autonomy or automatic multi-runtime failover result is established.
+
 ## Initial observations (historical snapshot)
 
 - Source inspected: `e361d0f1c00a611c2c01f7aada77dd7e836dcb65`.

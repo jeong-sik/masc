@@ -54,6 +54,37 @@ class Setup(unittest.TestCase):
                 self.assertFalse((base/'.masc/auth').exists())
                 self.assertFalse((base/'.masc/config/runtime.toml').exists())
 
+    def test_sandbox_selection_is_refused_before_any_work(self):
+        """--sandbox-profile / --microvm-backend pairing, checked as usage.
+
+        setup used to require Docker whatever profile the keeper declared, and
+        offered no way to say otherwise, so a mac without Docker could not
+        finish setup at all (measured on a fresh mac, 2026-09-10). cmdliner
+        cannot express "this flag only means something under that value", so
+        the rule is checked in the command and has to keep reporting as usage
+        rather than silently ignoring the flag.
+        """
+        cases = [
+            (['--sandbox-profile','nope'], '--sandbox-profile takes one of'),
+            (['--microvm-backend','nerdctl_kata'], '--microvm-backend requires --sandbox-profile microvm'),
+            (['--sandbox-profile','docker','--microvm-backend','nerdctl_kata'],
+             '--microvm-backend requires --sandbox-profile microvm'),
+            (['--sandbox-profile','microvm','--microvm-backend','bogus'],
+             '--microvm-backend takes one of'),
+        ]
+        for extra, expected in cases:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory(prefix='masc-setup-sandbox-') as tmp:
+                base = Path(tmp) / 'ws'
+                base.mkdir()
+                result = subprocess.run(
+                    [BINARY,'setup','--base-path',str(base),'--no-tui'] + extra,
+                    env={'PATH':'/usr/bin:/bin','HOME':tmp},
+                    capture_output=True, text=True, timeout=60)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                # Refused as usage: nothing was seeded on the way out.
+                self.assertFalse((base/'.masc').exists(), 'a usage error must not seed a workspace')
+
     def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)

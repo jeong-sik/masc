@@ -1,0 +1,70 @@
+name: Lane Add-on native candidate
+on:
+  push:
+    branches: ['codex/lane-addon-v0']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: lane-addon-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: System libraries
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig"
+            echo "CPATH=$openssl_prefix/include"
+            echo "LIBRARY_PATH=$openssl_prefix/lib"
+            echo "CPPFLAGS=-I$openssl_prefix/include"
+            echo "LDFLAGS=-L$openssl_prefix/lib"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+      - name: Dependencies
+        run: opam install . --deps-only --locked --with-test --yes
+      - name: Build and test native integration
+        run: |
+          set -euo pipefail
+          mkdir -p proof dist
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+          opam exec -- dune build --profile release \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe test/test_lane_addon.exe \
+            test/test_lane_addon_worker.exe test/test_lane_addon_sources.exe \
+            test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe 2>&1 | tee proof/build.log
+          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query; do
+            "_build/default/test/$test.exe" 2>&1 | tee "proof/$test.log"
+          done
+      - name: Package using the release runtime bundler
+        run: |
+          set -euo pipefail
+          cp _build/default/bin/main_eio.exe dist/masc-macos-arm64
+          cp _build/default/bin/masc_tui.exe dist/masc-tui-macos-arm64
+          cp _build/default/bin/masc_browser_host.exe dist/masc-browser-host-macos-arm64
+          cp _build/default/bin/deployment_preflight_helper.exe dist/masc-deployment-preflight-helper-macos-arm64
+          cp scripts/check-runtime-deployment-preflight.sh dist/masc-check-runtime-deployment-preflight-macos-arm64
+          python3 scripts/package-macos-runtime.py --dist dist \
+            --stage "$RUNNER_TEMP/masc-lane-runtime" --platform macos-arm64 \
+            --source-commit "$(git rev-parse HEAD)"
+          shasum -a 256 dist/* > proof/SHA256SUMS
+          tar -czf proof/masc-lane-addon-macos-arm64.tar.gz -C dist .
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lane-addon-native-macos-arm64-${{ github.sha }}
+          path: proof/
+          if-no-files-found: error

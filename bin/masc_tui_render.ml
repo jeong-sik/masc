@@ -1390,7 +1390,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
-    state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
+    Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
   if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
@@ -19489,6 +19489,16 @@ let render_terminal_too_small state ~rows ~cols =
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
+let render_lane_addons state view =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
+    ~title:(screen_title " MASC Lane Add-ons")
+    ~hints:"Tab:instances/rows  j/k:select  J/K:scroll  space:mark  e:preserve  o:observe  d:detach  r:inspect  :command  Esc:back"
+    ~body:(fun ~budget c ->
+      Masc_tui_lane_addons.lines ~width:cols view
+      |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
+      |> List.iter (fun line -> c.push (fit_width (Terminal_text.single_line line) cols)))
+
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity feed already fills its own
@@ -19503,6 +19513,10 @@ let render (state : state) =
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
+    (frame, clamped, None)
+  else if Option.is_some state.lane_addons then
+    let view = Option.get state.lane_addons in
+    let frame, clamped = render_lane_addons state view in
     (frame, clamped, None)
   else if state.palette_open then
     let frame, clamped = render_palette state in

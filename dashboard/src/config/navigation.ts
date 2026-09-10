@@ -58,6 +58,7 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
+  | 'lane-addons'
   | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
   | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
   // command
@@ -363,6 +364,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Skills',
       description: 'SKILL.md catalog and usage.',
       params: { section: 'skills' },
+    },
+    {
+      id: 'lane-addons',
+      label: 'Lane Add-ons',
+      description: 'Optional cross-lane observations and relationships.',
+      params: { section: 'lane-addons' },
     },
     {
       id: 'lanes',

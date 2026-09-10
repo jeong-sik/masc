@@ -404,6 +404,18 @@ class MultipleSelection(unittest.TestCase):
         self.assertIn(b'"num-ctx" = 16384', SETUP.render(configured)[1])
         self.assertEqual(identity, SETUP.render(configured)[0])
 
+    def test_wizard_ollama_context_uses_native_private_reference(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
+                      credential_kind='file', credential_file='/private/key', command='')
+        with patch.object(SETUP, 'native_serving_context', return_value=dict(context=16384, tools=True)) as native, \
+                patch.object(SETUP, 'http_json') as legacy:
+            _, configured = SETUP.resolve_model_spec(source, dict(id='owned-model', context=999999), 10,
+                                                      binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-model', 10, load=True)
+        legacy.assert_not_called()
+        self.assertEqual(configured['max_context'], 16384)
+        self.assertEqual(configured['credential_file'], '/private/key')
+
     def test_ollama_architecture_maximum_never_becomes_effective_context(self):
         responses = [{'parameters':'', 'model_info':{'qwen.context_length':999999}}, {'models':[]}]
         with patch.object(SETUP, 'http_json', side_effect=responses):

@@ -2535,6 +2535,22 @@ let runtime_store_credential_cmd =
   Cmd.v (Cmd.info "runtime-store-credential" ~doc:"Save an API key from a private stdin pipe for local setup.")
     Term.(const run $ const ())
 
+let runtime_serving_context_cmd =
+  let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private connection JSON with credential references.") in
+  let model = Arg.(required & opt (some string) None & info ["model"] ~doc:"Exact selected model ID.") in
+  let load = Arg.(value & flag & info ["load"] ~doc:"Preload only the selected Ollama model before observing its running context.") in
+  let run path model load =
+    let connection = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
+      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
+    match connection with
+    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
+    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        match Runtime_serving_context.observe ~sw ~net:(Eio.Stdenv.net env) connection ~model ~load with
+        | Ok observation -> print_endline (Yojson.Safe.to_string observation); 0
+        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
+  Cmd.v (Cmd.info "runtime-serving-context" ~doc:"Observe a selected Ollama or llama.cpp serving window with its protected credential.")
+    Term.(const run $ spec $ model $ load)
+
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
@@ -2780,6 +2796,7 @@ let cmd =
     ; runtime_model_list_cmd
     ; runtime_discover_models_cmd
     ; runtime_store_credential_cmd
+    ; runtime_serving_context_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

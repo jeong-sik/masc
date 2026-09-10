@@ -755,17 +755,21 @@ def prepare_connection(source, credentials):
     return source
 
 
-def native_discover_models(binary, source, timeout):
+def native_connection_command(binary, command, source, timeout, arguments=()):
     spec = {key: source[key] for key in ('choice', 'provider_kind', 'endpoint', 'provider_id', 'api_key_env', 'credential_file')
             if source.get(key)}
     with tempfile.TemporaryDirectory(prefix='masc-model-discovery-') as directory:
         path = Path(directory) / 'connection.json'
         atomic_write(path, json.dumps(spec).encode(), 0o600)
-        try:
-            result = subprocess.run([str(binary), 'runtime-discover-models', '--spec', str(path)],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return [], 'Model list did not answer in time; check the connection and refresh.'
+        return subprocess.run([str(binary), command, '--spec', str(path)] + list(arguments),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+
+
+def native_discover_models(binary, source, timeout):
+    try:
+        result = native_connection_command(binary, 'runtime-discover-models', source, timeout)
+    except subprocess.TimeoutExpired:
+        return [], 'Model list did not answer in time; check the connection and refresh.'
     if result.returncode:
         # Native errors are fixed diagnostics; never forward provider bodies.
         return [], 'Model list unavailable. Check account access, API credit or the running server, then refresh.'
@@ -779,6 +783,26 @@ def native_discover_models(binary, source, timeout):
     except (KeyError, TypeError, ValueError):
         raise SetupError('MASC returned an invalid model-list observation')
     return models, 'Current account/server model list; invocation is checked after selection'
+
+
+def native_serving_context(binary, source, model, timeout, load=False):
+    arguments = ['--model', model] + (['--load'] if load else [])
+    try:
+        result = native_connection_command(binary, 'runtime-serving-context', source, timeout, arguments)
+    except subprocess.TimeoutExpired:
+        raise SetupError('The selected model is not ready yet. Wait for its server to load it, then refresh.')
+    if result.returncode:
+        raise SetupError('The selected server did not return its serving context. Check its account or server configuration.')
+    try:
+        observation = json.loads(result.stdout)
+        if (observation.get('model') != model
+                or observation.get('context_source') not in ('running_model', 'configured_model', 'serving_endpoint', 'not_reported')
+                or (observation.get('context') is not None and not positive_integer(observation['context']))
+                or (observation.get('tools') is not None and type(observation['tools']) is not bool)):
+            raise ValueError('invalid observation')
+    except (TypeError, ValueError):
+        raise SetupError('The native serving-context observation was invalid')
+    return observation
 
 
 def source_models(binary, source, timeout):
@@ -839,23 +863,29 @@ def resolve_model_spec(source, model, timeout, binary=None):
             except ValueError:
                 pass
     if choice == 'ollama':
-        details = ollama_model_details(source['endpoint'], model['id'], source['api_key_env'], timeout, load=True)
+        details = (native_serving_context(binary, source, model['id'], timeout, load=True) if binary
+                   else ollama_model_details(source['endpoint'], model['id'], source['api_key_env'], timeout, load=True))
         if details['tools'] is False:
             raise SetupError('this Ollama model reports no tool support; select a tool-capable model for imp')
         context = details['context']
     elif choice in ('llama_cpp', 'openai_compatible') and context is None:
-        endpoint = source['endpoint'].rstrip('/')
-        root = endpoint[:-3] if endpoint.endswith('/v1') else endpoint
-        try:
-            props = http_json(root, '/props', source['api_key_env'], timeout)
-        except (OSError, ValueError, URLError):
-            props = None
-        served, _ = discover_models(choice, endpoint, source['api_key_env'], timeout)
-        # Router metadata must not become another model's context declaration.
-        if len(served) == 1 and served[0]['id'] == model['id'] and isinstance(props, dict):
-            settings = props.get('default_generation_settings')
-            if isinstance(settings, dict) and positive_integer(settings.get('n_ctx')):
-                context = settings['n_ctx']
+        if binary:
+            try:
+                context = native_serving_context(binary, source, model['id'], timeout)['context']
+            except SetupError:
+                context = None
+        else:
+            endpoint = source['endpoint'].rstrip('/')
+            root = endpoint[:-3] if endpoint.endswith('/v1') else endpoint
+            try:
+                props = http_json(root, '/props', source['api_key_env'], timeout)
+            except (OSError, ValueError, URLError):
+                props = None
+            served, _ = discover_models(choice, endpoint, source['api_key_env'], timeout)
+            if len(served) == 1 and served[0]['id'] == model['id'] and isinstance(props, dict):
+                settings = props.get('default_generation_settings')
+                if isinstance(settings, dict) and positive_integer(settings.get('n_ctx')):
+                    context = settings['n_ctx']
     if not positive_integer(context):
         action = pick('The server did not report its configured context window.',
                       ['Return to model selection', 'Advanced: enter the documented server limit'])[0]

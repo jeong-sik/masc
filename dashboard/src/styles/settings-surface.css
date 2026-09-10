@@ -1700,3 +1700,14 @@
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
+
+.runtime-setup-picker { display: grid; gap: 16px; margin: 20px 0; }
+.runtime-setup-picker fieldset { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--border, #39424c); border-radius: 8px; }
+.runtime-setup-picker legend { padding: 0 6px; font-weight: 600; }
+.runtime-setup-picker label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.runtime-setup-picker select, .runtime-setup-picker input[type="url"], .runtime-setup-picker input[type="password"] { width: 100%; min-width: 0; padding: 10px; color: inherit; background: var(--bg-panel, #171b20); border: 1px solid var(--border, #39424c); border-radius: 6px; }
+.runtime-setup-picker ol { display: grid; gap: 12px; padding-left: 24px; }
+.runtime-setup-picker li { overflow-wrap: anywhere; }
+.runtime-setup-picker li button { margin: 6px 0 0 8px; }
+.runtime-setup-picker button { cursor: pointer; min-height: 36px; padding: 6px 12px; }
+.runtime-setup-picker button:disabled { cursor: default; opacity: .55; }

@@ -8,6 +8,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   const [endpoint, setEndpoint] = useState('')
   const [key, setKey] = useState('')
   const [source, setSource] = useState<Source | null>(null)
+  const [discoveryRevision, setDiscoveryRevision] = useState<string | null>(null)
   const [models, setModels] = useState<Model[]>([])
   const [marked, setMarked] = useState<string[]>([])
   const [choices, setChoices] = useState<Selection[]>([])
@@ -17,18 +18,25 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   const integrations = inventory.integrations ?? []
   const integration = integrations.find(row => row.id === provider)
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
-  function chooseProvider(id: string) { setProvider(id); setEndpoint(''); setKey(''); setModels([]); setMarked([]); setSource(null); setNotice('') }
+  function invalidateDiscovery() { setModels([]); setMarked([]); setSource(null); setDiscoveryRevision(null) }
+  function chooseProvider(id: string) { setProvider(id); setEndpoint(''); setKey(''); invalidateDiscovery(); setNotice('') }
+  function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
+  function editKey(value: string) { setKey(value); invalidateDiscovery() }
   async function discover() {
     if (busy || !integration || !http) return
     setBusy(true); setNotice('')
-    const selected: Source = { integration_id: integration.id, ...(!integration.endpoint && endpoint ? { endpoint } : {}), ...(key ? { api_key: key } : {}) }
-    try { setModels(await discoverSetupModels(selected)); setSource(selected); setMarked([]) }
+    const revision = inventory.setup_revision ?? null
+    const selected: Source = { integration_id: integration.id, endpoint: integration.endpoint ?? endpoint, ...(key ? { api_key: key } : {}) }
+    try { setModels(await discoverSetupModels(selected)); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
     catch { setModels([]); setSource(null); setNotice('모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.') }
     finally { setBusy(false) }
   }
   function addModels() {
-    if (!source) return
-    if (!choices.length) setSelectionRevision(inventory.setup_revision ?? null)
+    if (!source || !discoveryRevision) return
+    if (choices.length && selectionRevision !== discoveryRevision) {
+      setNotice('설정이 변경되었습니다. 기존 선택을 비우고 모델 목록을 새로 확인하세요.'); return
+    }
+    if (!choices.length) setSelectionRevision(discoveryRevision)
     const selected = models.filter(model => marked.includes(model.id) && model.context !== null && model.tools !== false)
     setChoices(current => [...current, ...selected.map(model => ({ kind: 'new' as const, source, model, label: `${integration?.display_name ?? provider} · ${model.label}` }))])
     setMarked([]); setKey(''); setSource(null); setModels([])
@@ -59,8 +67,8 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
       checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, `${row.display_name} · ${row.model}`)} />${row.display_name} · ${row.model}</label>`)}</fieldset>
     <fieldset disabled=${busy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
       <option value="">공급자 선택</option>${integrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${row.display_name}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
-      ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => setEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
-        <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => setKey((event.currentTarget as HTMLInputElement).value)} /></label>
+      ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
+        <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<label key=${model.id}><input type="checkbox"

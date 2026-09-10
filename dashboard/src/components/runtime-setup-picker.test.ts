@@ -36,8 +36,8 @@ it('selects multiple models and default by clicking, hides key, resumes only aft
   await waitFor(() => expect(saved).toHaveBeenCalledOnce())
   const call = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))
   expect(call?.[1]).toEqual({ revision: 'paired-revision', connections: [
-    { source: { integration_id: 'openrouter', api_key: 'fixture-private-key' }, models: [{ id: 'model-b', context: 200000, streaming: true }] },
-    { source: { integration_id: 'openrouter', api_key: 'fixture-private-key' }, models: [{ id: 'model-a', context: 100000, streaming: true }] },
+    { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'fixture-private-key' }, models: [{ id: 'model-b', context: 200000, streaming: true }] },
+    { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'fixture-private-key' }, models: [{ id: 'model-a', context: 100000, streaming: true }] },
   ], selection: [{ connection: 0, model: 0 }, { connection: 1, model: 0 }] })
   expect(document.body.textContent).not.toContain('fixture-private-key')
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
@@ -53,4 +53,36 @@ it('keeps selected revision across inventory changes and hides backend errors', 
   expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', { revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'old.id' }] })
   expect(post).not.toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
   expect(document.body.textContent).not.toContain('private-backend-secret')
+})
+
+it('binds a discovered key and models to their original endpoint and revision before addition', async () => {
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/models')) return { models: [{ id: 'model-a', label: 'Model A', context: 100000, tools: true }] }
+    throw new Error('configuration changed')
+  })
+  const view = render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.input(screen.getByLabelText('새 연결 API 키'), { target: { value: 'endpoint-a-private-key' } })
+  fireEvent.click(screen.getByText('모델 목록 확인'))
+  await screen.findByLabelText('Model A')
+  const changed = { ...inventory, setup_revision: 'revision-b', integrations: inventory.integrations.map(row => ({ ...row, endpoint: 'https://other.invalid/v1' })) }
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${changed} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Model A')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결을 저장하지 못했습니다/)
+  const body = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))?.[1]
+  expect(body).toEqual({ revision: 'paired-revision', connections: [{
+    source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'endpoint-a-private-key' },
+    models: [{ id: 'model-a', context: 100000, streaming: true }],
+  }], selection: [{ connection: 0, model: 0 }] })
+  expect(document.body.textContent).not.toContain('endpoint-a-private-key')
+})
+it('invalidates discovered models when the account key changes', async () => {
+  vi.mocked(post).mockResolvedValue({ models: [{ id: 'model-a', label: 'Model A', context: 100000, tools: true }] })
+  render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByLabelText('Model A')
+  fireEvent.input(screen.getByLabelText('새 연결 API 키'), { target: { value: 'different-account' } })
+  expect(screen.queryByLabelText('Model A')).toBeNull()
+  expect(screen.queryByText('선택한 모델 추가')).toBeNull()
 })

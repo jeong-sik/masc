@@ -375,7 +375,7 @@ let test_resolve_params_with_tool_results () =
   in
   Alcotest.(check int) "1 tool result captured" 1 (List.length !captured_results);
   match List.hd !captured_results with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "content" "found it" content
+  | Ok { content; _ } -> Alcotest.(check string) "content" "found it" content
   | Error _ -> Alcotest.fail "expected Ok result"
 ;;
 

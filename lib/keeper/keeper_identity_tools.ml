@@ -298,7 +298,7 @@ let tool_result_of_call answer =
          nothing about that is this process's failure. *)
       failed ~recoverable:true ~error_class:(Some Agent_core.Types.Unknown)
         result.Mcp_client.text
-    else Ok { Agent_core.Types.content = result.Mcp_client.text; _meta = None }
+    else Ok { Agent_core.Types.content = result.Mcp_client.text; content_blocks = None; _meta = None }
   | Error (Precondition message) ->
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       message

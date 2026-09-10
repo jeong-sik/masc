@@ -4372,7 +4372,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
       let sink_stages = ref [] in
       let tool = Agent_core.Tool.create ~name:"boundary_probe"
         ~description:"Return one local tool result" ~parameters:[]
-        (fun _ -> incr tool_calls; Ok {content="boundary result"; _meta=None}) in
+        (fun _ -> incr tool_calls; Ok {content="boundary result"; content_blocks = None; _meta = None}) in
       let result, provider_calls =
         with_openai_tool_call_server ~tool_name:"boundary_probe" ~tool_input:(`Assoc [])
           (fun ~sw ~net ~base_url ->

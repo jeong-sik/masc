@@ -87,7 +87,7 @@ let test_tokens_accumulate_across_turns () =
   with_mock_server ~port:18301 handler (fun ~sw ~net ~base_url ->
     let tool =
       Tool.create ~name:"echo" ~description:"echo" ~parameters:[] (fun _input ->
-        Ok { content = "ok"; _meta = None })
+        Ok { content = "ok"; content_blocks = None; _meta = None })
     in
     let options =
       { Agent.default_options with provider_config = Some (local_provider ~base_url) }

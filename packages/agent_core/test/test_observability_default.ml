@@ -133,7 +133,7 @@ let get_time_tool =
         ; required = true
         }
       ]
-    (fun _input -> Ok { Types.content = "12:00 UTC"; _meta = None })
+    (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
 ;;
 
 let sequence_transport responses : Llm_provider.Llm_transport.t =

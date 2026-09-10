@@ -179,7 +179,7 @@ let test_agent_tools_registered () =
   let net = Eio.Stdenv.net env in
   let tool =
     Tool.create ~name:"my_tool" ~description:"test" ~parameters:[] (fun _ ->
-      Ok { Types.content = "ok"; _meta = None })
+      Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create
@@ -203,9 +203,9 @@ let test_agent_turn_preparation () =
   let tools =
     Tool_set.of_list
       [ Tool.create ~name:"a" ~description:"tool a" ~parameters:[] (fun _ ->
-          Ok { Types.content = "a"; _meta = None })
+          Ok { Types.content = "a"; content_blocks = None; _meta = None })
       ; Tool.create ~name:"b" ~description:"tool b" ~parameters:[] (fun _ ->
-          Ok { Types.content = "b"; _meta = None })
+          Ok { Types.content = "b"; content_blocks = None; _meta = None })
       ]
   in
   let messages =
@@ -283,7 +283,7 @@ let test_pipeline_sends_exact_supplied_tools () =
   @@ fun sw ->
   let make_tool name description =
     Tool.create ~name ~description ~parameters:[] (fun _ ->
-      Ok { Types.content = name; _meta = None })
+      Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let tools = [ make_tool "first" "first schema"; make_tool "second" "second schema" ] in
   let expected = List.map Tool.schema_to_json tools in
@@ -451,7 +451,7 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
           | None -> Alcotest.fail "tool handler received no invocation"
           | Some invocation ->
             handler_turns := Tool_contract.Invocation.turn invocation :: !handler_turns);
-         Ok { Types.content = "observed"; _meta = None })
+         Ok { Types.content = "observed"; content_blocks = None; _meta = None })
   in
   let responses =
     ref
@@ -644,7 +644,7 @@ let make_text_tool_intent_test_agent
   =
   let tool =
     Tool.create ~name:"my_tool" ~description:"test" ~parameters:[] (fun _ ->
-      Ok { Types.content = "ok"; _meta = None })
+      Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let response = text_tool_intent_response () in
   let transport = transport_returning response in
@@ -819,7 +819,7 @@ let test_repeated_validation_error_without_judge_continues_to_provider () =
         ]
       (fun _ ->
          incr executed;
-         Ok { Types.content = "should not execute"; _meta = None })
+         Ok { Types.content = "should not execute"; content_blocks = None; _meta = None })
   in
   let options =
     { Agent.default_options with
@@ -985,15 +985,15 @@ let test_agent_multiple_tools () =
   let net = Eio.Stdenv.net env in
   let t1 =
     Tool.create ~name:"tool_a" ~description:"A" ~parameters:[] (fun _ ->
-      Ok { Types.content = "a"; _meta = None })
+      Ok { Types.content = "a"; content_blocks = None; _meta = None })
   in
   let t2 =
     Tool.create ~name:"tool_b" ~description:"B" ~parameters:[] (fun _ ->
-      Ok { Types.content = "b"; _meta = None })
+      Ok { Types.content = "b"; content_blocks = None; _meta = None })
   in
   let t3 =
     Tool.create ~name:"tool_c" ~description:"C" ~parameters:[] (fun _ ->
-      Ok { Types.content = "c"; _meta = None })
+      Ok { Types.content = "c"; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create
@@ -1074,12 +1074,14 @@ let test_make_tool_results_ok () =
       ; tool_name = "tool-1"
       ; input = `Null
       ; content = "result1"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ; { invocation = invocation "tu2"
       ; tool_name = "tool-2"
       ; input = `Null
       ; content = "result2"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -1104,6 +1106,7 @@ let test_make_tool_results_error () =
       ; tool_name = "tool-1"
       ; input = `Null
       ; content = "failed"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
@@ -1124,12 +1127,14 @@ let test_make_tool_results_mixed () =
       ; tool_name = "tool-1"
       ; input = `Null
       ; content = "good"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ; { invocation = invocation "tu2"
       ; tool_name = "tool-2"
       ; input = `Null
       ; content = "bad"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
@@ -1433,7 +1438,7 @@ let test_terminal_disposition_retires_settled_provider_failure () =
       ~name:"durable_tool"
       ~description:"settled before provider failure"
       ~parameters:[]
-      (fun _input -> Ok { Types.content = "settled"; _meta = None })
+      (fun _input -> Ok { Types.content = "settled"; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create
@@ -1646,7 +1651,7 @@ let test_agent_run_uses_durable_tool_authority () =
            (fun _input ->
               incr effect_count;
               effect_after_locator := !locator_persisted;
-              Ok { Types.content = "tool-result"; _meta = None })
+              Ok { Types.content = "tool-result"; content_blocks = None; _meta = None })
        in
        let options =
          { Agent.default_options with
@@ -1922,7 +1927,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
            ~parameters:[]
            (fun _input ->
               incr effect_count;
-              Ok { Types.content = "duplicate"; _meta = None })
+              Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
        in
        let hooks =
          { Hooks.empty with
@@ -2124,7 +2129,7 @@ let test_unattempted_legacy_invocation_requires_typed_readmission () =
                ~parameters:[]
                (fun _ ->
                   incr effect_count;
-                  Ok { Types.content = "unexpected-effect"; _meta = None })
+                  Ok { Types.content = "unexpected-effect"; content_blocks = None; _meta = None })
            in
            let hooks =
              { Hooks.empty with
@@ -2469,7 +2474,7 @@ let test_agent_run_resumes_settled_closed_turn
            ~parameters:[]
            (fun _input ->
               incr effect_count;
-              Ok { Types.content = "duplicate"; _meta = None })
+              Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
        in
        let options =
          { Agent.default_options with
@@ -2667,7 +2672,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
                (fun _input ->
                   incr effect_count;
                   Internal_writer.close writer;
-                  Ok { Types.content = "effect committed"; _meta = None })
+                  Ok { Types.content = "effect committed"; content_blocks = None; _meta = None })
            in
            let agent =
              Internal_agent.create
@@ -2881,7 +2886,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                    ~parameters:[]
                    (fun _input ->
                       incr effect_count;
-                      Ok { Types.content = "unexpected-effect"; _meta = None })
+                      Ok { Types.content = "unexpected-effect"; content_blocks = None; _meta = None })
                in
                let assistant_content =
                  List.map
@@ -3193,7 +3198,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
              ~parameters:[]
              (fun _ ->
                 incr effect_count;
-                Ok { Types.content = "settled-before-checkpoint"; _meta = None })
+                Ok { Types.content = "settled-before-checkpoint"; content_blocks = None; _meta = None })
          in
          let saved_checkpoint = ref None in
          let initial_agent =
@@ -3271,7 +3276,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                  ~parameters:[]
                  (fun _ ->
                     incr resumed_handler_count;
-                    Ok { Types.content = "duplicate"; _meta = None })
+                    Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
              ]
          in
          let resumed_agent =
@@ -3424,7 +3429,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
            ~parameters:[]
            (fun _input ->
               incr effect_count;
-              Ok { Types.content = "duplicate"; _meta = None })
+              Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
        in
        let options =
          { Agent.default_options with
@@ -3620,7 +3625,7 @@ let test_agent_run_resume_fires_on_yield () =
            ~parameters:[]
            (fun _input ->
               incr effect_count;
-              Ok { Types.content = "executed"; _meta = None })
+              Ok { Types.content = "executed"; content_blocks = None; _meta = None })
        in
        let options =
          { Agent.default_options with

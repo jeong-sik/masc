@@ -1,5 +1,5 @@
-// Run with the dashboard's installed Playwright, a downloaded CI preview,
-// and a read-only live backend. No local compilation or runtime mutation.
+// Run with the dashboard's installed Playwright and a downloaded CI preview.
+// All browser traffic is fulfilled from local fixtures or blocked.
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
@@ -7,9 +7,9 @@ import { resolve, relative, extname, sep } from 'node:path'
 import assert from 'node:assert/strict'
 const require = createRequire(new URL('../dashboard/package.json', import.meta.url))
 const { chromium } = require('playwright')
-const [previewArgument, expectedHead, baseUrl, outputArgument] = process.argv.slice(2)
-if (!previewArgument || !expectedHead || !baseUrl || !outputArgument) {
-  throw new Error('Usage: node scripts/verify-workspace-memory-preview.mjs PREVIEW_DIR PR_HEAD BACKEND_URL EVIDENCE_DIR')
+const [previewArgument, expectedHead, outputArgument] = process.argv.slice(2)
+if (!previewArgument || !expectedHead || !outputArgument) {
+  throw new Error('Usage: node scripts/verify-workspace-memory-preview.mjs PREVIEW_DIR PR_HEAD EVIDENCE_DIR')
 }
 const snapshot = claim => ({ status: 'available', snapshot: {
   revision: 2, updated_at: 1, facts: [{ claim, category: 'fact', origin: { trace_id: 'fixture-turn' } }],
@@ -37,31 +37,38 @@ await mkdir(output, { recursive: true })
 const browser = await chromium.launch({ headless: true })
 const mutations = []
 const blockedWebSockets = []
+const blockedRequests = []
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' })
-  await page.routeWebSocket('**/*', socket => {
+  const previewOrigin = 'http://127.0.0.1'
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' })
+  await context.routeWebSocket('**/*', socket => {
     blockedWebSockets.push(socket.url())
     socket.close()
   })
-  await page.route('**/*', async route => {
+  await context.route('**/*', async route => {
     const request = route.request()
     if (!['GET', 'HEAD'].includes(request.method())) {
       mutations.push({ method: request.method(), path: new URL(request.url()).pathname })
       return route.abort()
     }
     const url = new URL(request.url())
-    if (url.origin === new URL(baseUrl).origin && url.pathname === '/api/v1/dashboard/workspace-memory-context') {
+    if (url.origin === previewOrigin && url.pathname === '/api/v1/dashboard/workspace-memory-context') {
       return route.fulfill({ json: memoryFixture })
     }
-    if (url.origin === new URL(baseUrl).origin && url.pathname.startsWith('/dashboard/')) {
+    if (url.origin === previewOrigin && url.pathname.startsWith('/dashboard/')) {
       const name = decodeURIComponent(url.pathname.slice('/dashboard/'.length)) || 'index.html'
       assert.ok(Object.hasOwn(manifest.files, name), `Unmanifested asset: ${name}`)
       return route.fulfill({ body: await readFile(resolve(root, name)),
         contentType: mime[extname(name)] ?? 'application/octet-stream' })
     }
-    return route.continue()
+    blockedRequests.push({ method: request.method(), url: request.url() })
+    return route.abort()
   })
-  await page.goto(new URL('/dashboard/#lab?section=keeper-memory-health', baseUrl).href)
+  const page = await context.newPage()
+  context.on('page', popup => {
+    if (popup !== page) void popup.close()
+  })
+  await page.goto(`${previewOrigin}/dashboard/#lab?section=keeper-memory-health`)
   const panel = page.locator('[data-workspace-memory-context]')
   await panel.getByText('Chapter finished', { exact: true }).waitFor()
   assert.equal(await panel.getByText('Chapter incomplete', { exact: true }).count(), 1)
@@ -83,8 +90,8 @@ try {
   assert.equal(await panel.getByText('Chapter incomplete', { exact: true }).count(), 1)
   const receipt = { observed_at: new Date().toISOString(), manifest,
     fixture_keepers: memoryFixture.keepers.length,
-    backend: new URL(baseUrl).origin, blocked_mutations: mutations, blocked_websockets: blockedWebSockets,
-    deployment: false, scope: 'CI-built Lab memory panel with synthetic memory context over read-only live backend' }
+    blocked_requests: blockedRequests, blocked_mutations: mutations, blocked_websockets: blockedWebSockets,
+    deployment: false, scope: 'CI-built Lab memory panel with an isolated synthetic memory context' }
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   console.log(JSON.stringify({ fixture_keepers: memoryFixture.keepers.length, evidence: output }))
 } finally { await browser.close() }

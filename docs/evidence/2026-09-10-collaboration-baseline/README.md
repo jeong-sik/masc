@@ -325,3 +325,37 @@ Goal back in Executing and its linked Task Done. The existing Evidence tab
 shows the phase transitions but not the refutation reason (the observation's
 ready=false means the reason did not become visible, not a dead server). A
 separate frontend correction is prepared with an actual before/after screenshot.
+
+## Actual GIF and audio files, with limited Task verification
+
+The designer created a 588811-byte GIF, 2116844-byte WAV and289689-byte MP3.
+`multimedia/independent-review.json` records24 distinct640x900 frames and a
+3.84-second GIF loop. Independent host FFmpeg decoded both audio files to12
+seconds of44.1kHz stereo samples with no decoder error or clipped samples.
+`multimedia/browser-playback.json` records actual Chromium playback to ended
+for both audio files and changed GIF screenshot pixels. `preview.html` is an
+observer-authored player for the actual files; it is not Keeper-authored UI.
+No subjective listening or musical-quality verdict is claimed.
+
+The operator manually approved the reviewed FFmpeg version check and generator
+request; both actual replay receipts returned exit0. These interventions are
+retained. The generator had been prepared before approval, and the Keeper then
+continued its own verification.
+
+Original task-002 became Done at14:22:48Z through request
+vrf-8194c1439706d873d8b8ff8af7696993, evaluator kimi_coding.kimi-for-coding.
+The immutable snapshot did NOT contain the media: GIF exceeded200000 bytes;
+WAV/MP3 were invalid_utf8. The verifier read the report and scripts, searched
+file signatures, then approved. Thus this Task status does not prove direct
+visual/audio inspection or complete media retention. The independent decoder
+and browser evidence above is separate. Full binary snapshot retention and
+actual visual tool-result transport are being implemented without changing the
+original Task or Goal criteria.
+
+A local Qwen3.8-27B workspace pass was also started from the captured current
+two-Keeper memory context. It is not a completed synthesis or published memory
+asset yet. The operator helper now uses its existing identity-bound durable
+intent/response handling for HTTP POST, including the two manual approvals. A
+local HTTP fixture confirmed JSON null remains POST after review caught the
+initial body=None ambiguity. Credential-less Codex app-server startup is now
+accepted as CLI-owned authentication; no restart was performed for this change.

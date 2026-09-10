@@ -122,3 +122,32 @@ it('uses native Codex discovery without endpoint or credential-path inputs', asy
   expect(screen.queryByLabelText('서버 API 주소')).toBeNull()
   expect(screen.queryByLabelText('새 연결 API 키')).toBeNull()
 })
+
+it('imports an explicitly selected server account and keeps only its opaque reference through context and save', async () => {
+  const account_ref = 'a'.repeat(64)
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/antigravity')) return { schema: 'masc.web_setup_account.v1', account_imported: true, invocation_verified: false, account_ref,
+      catalog: { models: [{ id: 'account-model', label: 'Account model', context: null, tools: null }] } }
+    if (path.endsWith('/context')) return { model: 'account-model', context: 32768, tools: true }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'native-account', runtime_ids: ['native-account'] }
+    return { runtime_ready: true, exact_output_authority_available: false, model_setup: { status: 'available' } }
+  })
+  const initial = { ...inventory, integrations: [{ id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' }] }
+  const view = render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'antigravity' } })
+  expect(post).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('서버의 로그인된 Antigravity 계정 사용'))
+  await screen.findByLabelText(/Account model/)
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/accounts/antigravity', { integration_id: 'antigravity' })
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${{ ...initial, setup_revision: 'later-revision' }} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByText('이 모델만 준비'))
+  await waitFor(() => expect((screen.getByLabelText('Account model') as HTMLInputElement).disabled).toBe(false))
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/context', { source: { integration_id: 'antigravity', account_ref }, model: 'account-model', load: false })
+  fireEvent.click(screen.getByLabelText('Account model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', { revision: 'paired-revision',
+    connections: [{ source: { integration_id: 'antigravity', account_ref }, models: [{ id: 'account-model', context: 32768, streaming: true }] }],
+    selection: [{ connection: 0, model: 0 }] }))
+  expect(document.body.textContent).not.toContain(account_ref)
+  expect(document.querySelector('input[type="password"]')).toBeNull()
+})

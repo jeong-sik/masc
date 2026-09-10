@@ -35,21 +35,30 @@ let release_of_json = function
         | _ -> Error Invalid_release)
      | _ -> Error Invalid_release)
   | _ -> Error Invalid_release
+let same_file a b =
+  a.Unix.st_dev = b.Unix.st_dev && a.st_ino = b.st_ino && a.st_kind = b.st_kind
+  && a.st_uid = b.st_uid && a.st_perm = b.st_perm && a.st_size = b.st_size
+  && a.st_mtime = b.st_mtime && a.st_ctime = b.st_ctime
 let file_digest path =
   try
     let stat = Unix.lstat path in
     if stat.Unix.st_kind <> Unix.S_REG || stat.st_uid <> Unix.geteuid () || stat.st_perm land 0o077 <> 0
     then Error Invalid_file
     else In_channel.with_open_bin path (fun input ->
+      let opened = Unix.fstat (Unix.descr_of_in_channel input) in
+      if not (same_file opened stat) then Error Invalid_file else
       let buffer = Bytes.create 65536 in
       let rec read digest = match In_channel.input input buffer 0 (Bytes.length buffer) with
-        | 0 -> Ok (Digestif.SHA256.(to_hex (get digest)), stat.st_size)
+        | 0 ->
+          if not (same_file (Unix.fstat (Unix.descr_of_in_channel input)) opened)
+             || not (same_file (Unix.lstat path) opened) then Error Invalid_file
+          else Ok (Digestif.SHA256.(to_hex (get digest)), opened.st_size)
         | count -> read (Digestif.SHA256.feed_string digest (Bytes.sub_string buffer 0 count)) in
       read Digestif.SHA256.empty)
   with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file
-let verify ~run ~release ~path =
-  let* digest,size = file_digest path in
-  if digest <> release.digest || size <> release.size then Error Digest_mismatch else
+let verify_file ~run ~sha256 ~size ~path =
+  let* digest,actual_size = file_digest path in
+  if digest <> sha256 || actual_size <> size then Error Digest_mismatch else
   (* Absolute system tools are intentional: a PATH shim must not attest its own
      package. Locale is fixed because pkgutil exposes certificate text, not JSON. *)
   let* signature = run ["/usr/bin/env";"LC_ALL=C";"/usr/sbin/pkgutil";"--check-signature";path]
@@ -60,6 +69,9 @@ let verify ~run ~release ~path =
   if leaves <> [expected_publisher] then Error Publisher_mismatch else
   let* _ = run ["/usr/sbin/spctl";"--assess";"--type";"install";path]
     |> Result.map_error (fun () -> Signature_rejected) in
+  Ok ()
+let verify ~run ~release ~path =
+  let* () = verify_file ~run ~sha256:release.digest ~size:release.size ~path in
   Ok {release;path}
 let acquire ~host ~run =
   match host with
@@ -82,10 +94,44 @@ let acquire ~host ~run =
           Ok artifact)
      with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file)
   | _ -> Error Unsupported_host
-let install ~run artifact =
+let install ~executable_path ~run artifact =
   let* verified = verify ~run ~release:artifact.release ~path:artifact.path in
-  run ["/usr/bin/sudo";"/usr/sbin/installer";"-pkg";verified.path;"-target";"/"]
-  |> Result.map (fun _ -> ()) |> Result.map_error (fun () -> Installer_failed)
+  try
+    let executable_path = Unix.realpath executable_path in
+    run ["/usr/bin/sudo";executable_path;"sandbox-install-apple-verified";
+      "--source";verified.path;"--sha256";verified.release.digest;
+      "--size";string_of_int verified.release.size]
+    |> Result.map (fun _ -> ()) |> Result.map_error (fun () -> Installer_failed)
+  with Unix.Unix_error _ -> Error Installer_failed
+let install_staged ~temp_dir ~run ~source ~sha256 ~size =
+  if size <= 0 || String.length sha256 <> 64
+    || not (String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) sha256)
+  then Error Invalid_release
+  else try
+    (* macOS's root-owned sticky system directory is intentional. Inherited
+       TMPDIR can be owned by the invoking user and must not contain this copy. *)
+    let path, output = Filename.open_temp_file ~temp_dir ~perms:0o600
+      "masc-root-apple-container-" ".pkg" in
+    Fun.protect ~finally:(fun () -> close_out_noerr output;
+      try Sys.remove path with Sys_error _ -> ()) (fun () ->
+      In_channel.with_open_bin source (fun input ->
+        let buffer = Bytes.create 65536 in
+        let rec copy remaining =
+          let count = In_channel.input input buffer 0 (min (Bytes.length buffer) remaining) in
+          if count = 0 then () else (output_bytes output (Bytes.sub buffer 0 count); copy (remaining-count)) in
+        copy size;
+        if In_channel.input_char input <> None then raise (Sys_error "package exceeds declared size"));
+      close_out output;
+      let* () = verify_file ~run ~sha256 ~size ~path in
+      run ["/usr/sbin/installer";"-pkg";path;"-target";"/"]
+      |> Result.map (fun _ -> ()) |> Result.map_error (fun () -> Installer_failed))
+  with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file
+let install_privileged ~run ~source ~sha256 ~size =
+  if Unix.geteuid () <> 0 then Error Installer_failed
+  else install_staged ~temp_dir:"/private/tmp" ~run ~source ~sha256 ~size
+module For_testing = struct
+  let install_staged = install_staged
+end
 let remove artifact = try Sys.remove artifact.path with Sys_error _ -> ()
 let to_json artifact = `Assoc ["schema",`String "masc.verified_prerequisite.v1";
   "backend",`String "apple_container";"version",`String artifact.release.version;

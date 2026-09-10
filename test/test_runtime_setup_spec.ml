@@ -27,6 +27,26 @@ let test_rejects_invalid_transport_claims () =
   let invalid = {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"openai_compat"}|} in
   Alcotest.check Alcotest.bool "messages cannot disguise OpenAI wire semantics" true
     (Result.is_error (Runtime_setup_spec.of_json (Yojson.Safe.from_string invalid)))
+let test_native_fractional_identity () =
+  (* The native renderer is the identity authority. Equivalent JSON decimal
+     spellings must join even when Python's shortest printer spells them
+     differently from Yojson. Callers consume this runtime_id before selection. *)
+  let render timeout =
+    let input = Printf.sprintf
+      {|{"choice":"antigravity","model":"selected-model","max_context":1024,"tools":true,"streaming":false,"credential_file":"/owned/oauth","timeout_s":%s}|} timeout in
+    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+    | Ok spec -> Runtime_setup_spec.render spec
+    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let shortest = render "824.844977148233" in
+  let roundtrip = render "824.8449771482331" in
+  Alcotest.check Alcotest.string "equivalent IEEE number has one native identity"
+    shortest.runtime_id roundtrip.runtime_id;
+  Alcotest.check Alcotest.string "equivalent number renders the same configuration"
+    shortest.runtime_toml roundtrip.runtime_toml;
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String shortest.runtime_id) ^ "\n" ^ shortest.runtime_toml in
+  Alcotest.check Alcotest.bool "native fractional output parses as configuration"
+    true (Result.is_ok (Runtime_toml.parse_string whole))
 let () = Alcotest.run "native runtime setup spec" ["contract",[
-  Alcotest.test_case "installer identity and TOML parity" `Quick test_existing_installer_contract;
+  Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
+  Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims]]

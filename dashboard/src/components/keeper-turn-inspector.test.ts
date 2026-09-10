@@ -230,6 +230,35 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
   })
 
+
+  it('renders highlighted JSON without interpreting malicious execution ids as HTML', async () => {
+    const records = turnRecordsWithMemoryOs()
+    records.entries[1]!.record.execution_ids = ['exec-1<img src=x onerror=alert(1)>']
+    fetchKeeperTurnRecordsMock.mockResolvedValue(records)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-tab-messages"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('exec-1<img src=x onerror=alert(1)>')
+    })
+
+    const codeBlock = container.querySelector('.kti-code pre')
+    expect(codeBlock?.querySelector('img')).toBeNull()
+    expect(codeBlock?.innerHTML).not.toContain('<img src="x" onerror="alert(1)">')
+  })
+
   it('displays summary stats in the stat strip', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 

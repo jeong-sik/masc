@@ -340,7 +340,7 @@ function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
   `
 }
 
-function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: string; htmlContent?: string; tokens?: number }) {
+function CodeCard({ cap, text, children, tokens }: { cap: string; text: string; children?: unknown; tokens?: number }) {
   return html`
     <div class="kti-code">
       <div class="kti-code-h">
@@ -348,17 +348,38 @@ function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: strin
         ${tokens != null ? html`<span class="sz">~${tokens} tok</span>` : null}
         <${CopyBtn} text=${text} />
       </div>
-      ${htmlContent
-        ? html`<pre dangerouslySetInnerHTML=${{ __html: htmlContent }} />`
-        : html`<pre>${text}</pre>`}
+      <pre>${children ?? text}</pre>
     </div>
   `
 }
 
-function jsonHighlight(obj: unknown): string {
-  return JSON.stringify(obj, null, 2)
-    .replace(/("[^"]+"):/g, '<span class="jk">$1</span>:')
-    .replace(/: ("[^"]*")/g, ': <span class="js">$1</span>')
+type JsonHighlightPart = { text: string; className?: 'jk' | 'js' }
+
+function jsonHighlightParts(obj: unknown): JsonHighlightPart[] {
+  const json = JSON.stringify(obj, null, 2)
+  const parts: JsonHighlightPart[] = []
+  const pattern = /("(?:\\.|[^"\\])*")(\s*:)?/g
+  let lastIndex = 0
+  for (const match of json.matchAll(pattern)) {
+    const index = match.index ?? 0
+    if (index > lastIndex) parts.push({ text: json.slice(lastIndex, index) })
+    parts.push({
+      text: match[1] ?? '',
+      className: match[2] ? 'jk' : 'js',
+    })
+    if (match[2]) parts.push({ text: match[2] })
+    lastIndex = index + match[0].length
+  }
+  if (lastIndex < json.length) parts.push({ text: json.slice(lastIndex) })
+  return parts
+}
+
+function HighlightedJson({ obj }: { obj: unknown }) {
+  return html`${jsonHighlightParts(obj).map((part, i) =>
+    part.className
+      ? html`<span key=${i} class=${part.className}>${part.text}</span>`
+      : html`<span key=${i}>${part.text}</span>`,
+  )}`
 }
 
 function TimelineTab({ t }: { t: TurnDetail }) {
@@ -444,9 +465,10 @@ function MessagesTab({ keeperName, t }: { keeperName: string; t: TurnDetail }) {
               <${CodeCard}
                 cap="요청 · args"
                 text=${JSON.stringify({ execution_id: tool.id }, null, 2)}
-                htmlContent=${jsonHighlight({ execution_id: tool.id })}
                 tokens=${approxTokens(JSON.stringify({ execution_id: tool.id }))}
-              />
+              >
+                <${HighlightedJson} obj=${{ execution_id: tool.id }} />
+              </${CodeCard}>
               <${CodeCard}
                 cap="응답 · result"
                 text="[도구 결과는 별도 execution trace 에서 확인]"

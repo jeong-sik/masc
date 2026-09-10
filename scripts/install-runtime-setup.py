@@ -923,6 +923,57 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
+def select_sandbox(binary, base_path):
+    advanced = False
+    names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
+             'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
+    while True:
+        response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            catalog = json.loads(response.stdout)
+        except ValueError:
+            raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
+        if response.returncode != 0 or catalog.get('schema') != 'masc.sandbox_readiness.v1':
+            raise SetupError('MASC could not inspect sandbox prerequisites.')
+        if catalog.get('configuration_error'):
+            print(terminal_text(catalog['configuration_error']), file=sys.stderr)
+        rows = [row for row in catalog['candidates'] if advanced or not row['advanced']]
+        rows.sort(key=lambda row: not row['recommended'])
+        labels = [names.get(row['id'], row['id']) + (' · recommended' if row['recommended'] else '')
+                  + ' — ' + ('service found; guest still needs preparation' if row['state'] == 'service_ready' else row['reason'])
+                  for row in rows]
+        action = pick('3 · Choose imp’s sandbox', labels + [
+            'Refresh after installing or starting a service',
+            'Show common choices' if advanced else 'Advanced sandbox choices', 'Finish later'])[0]
+        if action == len(rows):
+            continue
+        if action == len(rows) + 1:
+            advanced = not advanced
+            continue
+        if action == len(rows) + 2:
+            return None
+        row = rows[action]
+        if row['state'] != 'service_ready':
+            print(terminal_text(row['reason']), file=sys.stderr)
+            continue
+        arguments = list(row['setup_args'])
+        modes = row['capabilities']['network_modes']
+        if advanced:
+            # Policy requires declared destinations; never invent an empty
+            # allowlist while promising that online tools can work.
+            modes = [mode for mode in modes if mode in ('inherit', 'none')]
+            modes.sort(key=lambda mode: mode != 'inherit')
+            labels = [('Internet access — model APIs and WebFetch' if mode == 'inherit'
+                       else 'Offline guest — WebFetch unavailable') for mode in modes]
+            mode = modes[pick('Sandbox network access', labels)[0]]
+        else:
+            if 'inherit' not in modes:
+                raise SetupError('This sandbox needs advanced network configuration for the first conversation.')
+            mode = 'inherit'
+        return arguments + ['--network-mode', mode]
+
+
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     conditions = {check['id']: check['condition'] for check in state['checks']}
@@ -947,12 +998,16 @@ def journey(binary, base_path, port, timeout, resume=False):
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
-    print('\n3 · Prepare imp’s sandbox\n4 · Open your first conversation', file=sys.stderr)
+    sandbox_args = select_sandbox(binary, base)
+    if sandbox_args is None:
+        print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
+        return 0
+    print('\n4 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.
         code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
-                               '--no-tui'], stdout=sys.stderr).returncode
+                               '--no-tui'] + sandbox_args, stdout=sys.stderr).returncode
         if code == 0:
             return open_workspace(binary, base, port)
         action = pick('imp is not running yet. Keep your workspace and continue when ready.',

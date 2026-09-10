@@ -2557,9 +2557,9 @@ let setup_validate_runtime base_path =
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
-let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
+let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network_mode =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
     ~initialize:(fun () -> init_cmd_exit base_path false false)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
@@ -2586,6 +2586,15 @@ let setup_preflight_cmd =
   let info = Cmd.info "setup-preflight"
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
+
+let sandbox_catalog_cmd =
+  let inspect requested =
+    let base_path = match requested with Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
+    0 in
+  Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
+    Term.(const inspect $ run_base_path)
 
 let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
@@ -2657,24 +2666,34 @@ let setup_cmd =
     in
     Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
   in
-  let run base_path port no_tui sandbox_profile microvm_backend =
+  let network_mode = Arg.(value & opt (some string) None & info ["network-mode"]
+    ~doc:"Sandbox network mode: inherit, none, or policy where supported.") in
+  let run base_path port no_tui sandbox_profile microvm_backend network_mode =
+    let network = match network_mode with
+      | None -> Ok None
+      | Some value -> (match Keeper_types_profile_sandbox.network_mode_of_string value with
+        | Some mode -> Ok (Some mode)
+        | None -> Error "Unknown sandbox network mode. Use masc sandbox-catalog to see supported choices.") in
+    match network with
+    | Error message -> `Error (false, message)
+    | Ok network_mode ->
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
-      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
+      if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
       else
         let resolved = match base_path with
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
-        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend network_mode)
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2719,6 +2738,7 @@ let cmd =
     ; setup_cmd
     ; setup_preflight_cmd
     ; doctor_cmd
+    ; sandbox_catalog_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

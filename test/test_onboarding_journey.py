@@ -31,6 +31,27 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_sandbox_selection_uses_native_backend_arguments(self):
+        catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
+            id='apple_container', state='service_ready', reason='service only', advanced=False,
+            recommended=True, setup_args=['--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container'],
+            capabilities=dict(network_modes=['none', 'inherit', 'policy']))])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pick', return_value=[0]):
+            self.assertEqual(SETUP.select_sandbox('/bin/masc', '/workspace'), [
+                '--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container', '--network-mode', 'inherit'])
+
+    def test_unavailable_sandbox_never_selects_host_or_another_backend(self):
+        catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
+            id='docker', state='missing_prerequisite', reason='Docker is missing', advanced=False,
+            recommended=False, setup_args=['--sandbox-profile', 'docker'],
+            capabilities=dict(network_modes=['none', 'inherit']))])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
+
     @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
     def test_native_setup_embeds_journey_and_new_home_cancels_without_writes(self):
         with tempfile.TemporaryDirectory() as home:
@@ -83,6 +104,7 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
+                    patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
                     patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
                     contextlib.redirect_stderr(io.StringIO()):
@@ -117,6 +139,7 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
+                patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \
                 patch.object(SETUP.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 1)]), \
                 contextlib.redirect_stderr(io.StringIO()):

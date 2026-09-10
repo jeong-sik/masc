@@ -209,6 +209,24 @@ wizard-default = true
     let integration rows id =
       List.find (fun row -> row |> member "id" |> to_string = id) rows
     in
+    List.iter (fun credential ->
+      let unbound = {config with bindings=[]; default_runtime_id=None;
+        providers=List.map (fun (p : Runtime_schema.provider) -> {p with credentials=Some credential}) config.providers} in
+      let public = Runtime_wizard_inventory.to_json unbound in
+      let private_json = Runtime_wizard_inventory.to_json ~include_credential_references:true unbound in
+      let row json = integration (json |> member "integrations" |> to_list) "cloud" in
+      check bool "unbound public inventory has no credential path or value" false
+        (contains (Yojson.Safe.to_string public) "must-not-leak");
+      match credential with
+      | Runtime_schema.File path ->
+        check string "unbound provider preserves protected kind" "file" (row public |> member "credential_kind" |> to_string);
+        check string "only opt-in CLI gets file reference" path (row private_json |> member "credential_file" |> to_string)
+      | Inline _ ->
+        check string "inline protection retained" "inline" (row private_json |> member "credential_kind" |> to_string);
+        check bool "inline value never serialized even for CLI" false
+          (contains (Yojson.Safe.to_string private_json) "must-not-leak")
+      | Env _ -> fail "fixture credential kind")
+      [Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak"];
     let declared = integration integrations "cloud" in
     check (list string) "configured provider retains both selected models"
       [ "cloud.first"; "cloud.second" ]

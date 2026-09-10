@@ -1,6 +1,6 @@
 (** JSON projection of every enabled declared binding, including runtimes whose
     credential or executable is unavailable. Credential values and file paths
-    are never projected. Undeclared context limits stay null.
+    are omitted by default; credential values are never projected. Undeclared context limits stay null.
 
     [integrations] independently projects configured providers, AGENT_CORE
     provider prototypes, and named CLI/local-server transports. Setup and

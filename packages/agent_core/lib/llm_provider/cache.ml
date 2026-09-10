@@ -82,9 +82,11 @@ let request_fingerprint
      not what is asked; [internal_model_rotation_count] is a local attempt
      counter; [supports_*_override] and [model_capabilities_override] gate
      which of the fields below may be sent at all, and those fields are
-     already in the key. *)
-  (* Refreshable credentials have no stable account identity in this snapshot.
-     Complete disables response caching for them before calling this function. *)
+     already in the key; [credential_source] is where the credential came from
+     rather than what it is, and a refreshable one has no stable account
+     identity in this snapshot -- Complete disables response caching for those
+     before calling this function. *)
+  (* See the exclusion note above for why this one is not in the key. *)
   ignore credential_source;
   ignore max_request_body_bytes;
   ignore connect_timeout_s;

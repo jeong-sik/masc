@@ -404,7 +404,7 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
   Alcotest.(check bool)
     "names the next action"
     true
-    (String_util.contains_substring output "masc runtime-verify");
+    (String_util.contains_substring output "masc runtime-verify <RUNTIME_ID>");
   Alcotest.(check bool)
     "never claims a model connection failure"
     false

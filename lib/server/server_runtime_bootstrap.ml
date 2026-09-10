@@ -128,7 +128,7 @@ let config_load_failure_diagnostic ~detail =
   Printf.sprintf
     "Model configuration could not be loaded (this is not a model connection problem):\n\
      %s\n\
-     Fix the configuration above or move the file aside, then run setup again. `masc runtime-verify` re-checks the model connection afterwards."
+     Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
     detail
 
 let exact_output_catalog_source_to_string = function

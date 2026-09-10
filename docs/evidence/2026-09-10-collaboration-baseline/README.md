@@ -98,3 +98,18 @@ so its actions must not be attributed to enabling autonomous mode.
 The editor then asked again for dates and venue already present in the original
 recorded answer. This is new evidence that answer-content retention needs
 inspection, beyond the earlier observation of delayed wake delivery.
+
+## Repeated operator answers
+
+Fresh authenticated observation returned two open asks for the same previously
+answered schedule and venue. One explicitly reported that the exact wording
+was no longer in its memory. Both were answered again with the same fictional
+event facts; both HTTP responses recorded and delivered the answer, with zero
+open asks after the second response. This is a repeated operator intervention,
+not autonomous recovery. The same server PID 71727 and original source/binary
+identity remained live. Task-001 was still in_progress at the next read.
+
+Source inspection found that Ask answer rows only entered ephemeral dynamic
+context while the ordinary persisted wake input contained just the wake prompt.
+That explains a concrete missing retention path; actual recovery on a fixed
+binary has not been measured. PR35110 fixes the separate 480-byte answer cut.

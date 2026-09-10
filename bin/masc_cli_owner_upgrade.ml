@@ -15,14 +15,10 @@ let with_http f = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   Eio_context.set_net (Eio.Stdenv.net env); Eio_context.set_clock (Eio.Stdenv.clock env);
   Masc_http_client.with_scoped_pool ~sw ~env (fun () -> f sw (Eio.Stdenv.clock env))))
 let decode ~base_path body =
-  let open Yojson.Safe.Util in
-  try
-    let json = Yojson.Safe.from_string body in
-    let actual = json |> member "paths" |> member "effective_base_path" |> to_string |> Unix.realpath in
-    let version = json |> member "version" |> to_string in
-    if String.trim version = "" then Unknown_server
-    else if actual = base_path then Same_workspace version else Other_workspace actual
-  with Yojson.Json_error _ | Type_error _ | Unix.Unix_error _ -> Unknown_server
+  match Upgrade.decode_health body with
+  | Ok identity when identity.base_path = base_path -> Same_workspace identity.version
+  | Ok identity -> Other_workspace identity.base_path
+  | Error _ -> Unknown_server
 let port_free port =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -55,13 +51,9 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
       let ( let* ) = Result.bind in
       let* () = match Masc_http_client.get_sync ~clock ~headers:[]
         ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
-        | Ok (200, body) -> (match decode ~base_path body with
-          | Same_workspace version when version = expected_version -> Ok ()
-          | Same_workspace _ -> Error Upgrade.Incumbent_changed
-          | Other_workspace _ -> Error Upgrade.Different_workspace
-          | Free | Unknown_server -> Error Upgrade.Invalid_health)
+        | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
+            ~login:(fun () -> login () = 0)
         | _ -> Error Upgrade.Invalid_health in
-      let* () = if login () = 0 then Ok () else Error Upgrade.Admin_required in
       let* token = match Auth_login.read_persisted_token ~base_path ~agent_name:agent with
         | None -> Error Upgrade.Admin_required | Some token -> Ok token in
       let run_dir = (Host_config.host ()).base_path_lease_dir in

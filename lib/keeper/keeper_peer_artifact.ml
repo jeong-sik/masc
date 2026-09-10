@@ -40,7 +40,7 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
   | Error detail -> fail Tool_result.Policy_rejection detail
   | Ok (Export {path; purpose}) ->
     (match Keeper_tool_filesystem_runtime.read_sandbox_bytes ?turn_sandbox_factory
-        ~config ~meta ~path ~max_bytes:max_int with
+        ~config ~meta ~path ~max_bytes:max_int () with
      | Error detail -> fail Tool_result.Runtime_failure detail
      | Ok bytes ->
        (try

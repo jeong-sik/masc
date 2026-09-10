@@ -117,7 +117,22 @@ open Alcotest
    surface is therefore 98,032 bytes / 111 tools. Add only the reader's 776
    bytes to the previous 98,164 ceiling, retaining exactly 132 bytes of slack.
    This is schema measurement, not a runtime token or behavior gate. *)
-let ceiling_bytes = 98_940
+(* 2026-09-10: 100,456 across 113 tools, measured by targeted CI 34420702044
+   at 8ccf4d6938. Four merges moved the surface past the line above, none of
+   them arguing it, because this suite runs in the nightly lane and not on a
+   pull request:
+
+     #34981  masc_fusion_decision, the 113th tool (+1,124 bytes of TOML)
+     #34983  masc_fusion carries the original Task and Goal text  (+623)
+     #34963  masc_keeper_up reports the existing sandbox image     (+289)
+     #34976  masc_goal_list admits the awaiting_confirmation phase  (+25)
+
+   Those are raw TOML bytes and sum to 2,061; the renderer drops comments and
+   formatting, so the serialized surface grew 1,648.
+
+   Set to the measurement with no headroom. A ceiling that carries slack lets
+   the next unargued growth land silently, which is how these four did. *)
+let ceiling_bytes = 100_456
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -254,6 +269,10 @@ let all_surface_golden_names =
   ; "masc_file_list"
   ; "masc_file_upload"
   ; "masc_fusion"
+  (* #34981: a Keeper's adopt/reject decision on a Fusion panel proposal
+     lands in task history instead of only in the panel, so the next turn
+     can read what was already decided. *)
+  ; "masc_fusion_decision"
   ; "masc_fusion_status"
   ; "masc_gc"
   ; "masc_get_metrics"

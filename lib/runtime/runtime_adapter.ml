@@ -221,6 +221,11 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 
 (* --- Provider kind resolution --- *)
 
+let resolve_api_key ~provider_id ~credential =
+  api_key_of_credential ?registry_entry:(find_registry_entry provider_id) credential
+  |> Result.map Llm_provider.Secret.of_string
+;;
+
 (* CLI subprocess provider kinds were removed in the agent_core pin bump
    (agent_core service-name migration). No provider kind is a subprocess CLI, so a
    CLI-transport provider can never resolve to a provider kind. The reason is

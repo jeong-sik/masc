@@ -15,6 +15,12 @@
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
+val resolve_api_key : provider_id:string -> credential:Runtime_schema.credential option ->
+  (Llm_provider.Secret.t, string) result
+(** Resolve the same protected API-key references used by HTTP bindings, for
+    model discovery before a model has been selected. Errors never contain the
+    credential's contents. This does not authenticate or verify account access. *)
+
 val effective_credential_reference :
   provider_id:string ->
   Runtime_schema.credential option ->

@@ -1685,6 +1685,13 @@ let add_routes ~sw ~clock router =
                                   "verification", `String "not_run"]) reqd))
                 | _ -> reject "Select a configured provider and enter its API key.")
              | _ -> reject "Expected a provider selection and API key.")) request reqd)
+  |> Http.Router.get "/api/v1/setup/sandbox" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Response.json_value ~request:req
+             (Masc.Sandbox_readiness.inspect ~base_path:(Some base_path)) reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/setup/status" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

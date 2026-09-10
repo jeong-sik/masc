@@ -4,6 +4,7 @@ import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status
 
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { RuntimeSetupPicker } from './runtime-setup-picker'
+import { SandboxSetupCatalog } from './sandbox-setup-catalog'
 import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 
 const labels = { satisfied: '확인됨', needs_setup: '설정 필요', needs_verification: '검증 필요', invalid: '설정 확인 필요' }
@@ -51,6 +52,7 @@ export function OnboardingSettings() {
     ${status ? html`<p class="set-hint">작업 공간: ${status.base_path ?? '선택 필요'}<br />모델: ${status.selected_model ?? '선택 필요'}</p>
       <ul>${status.checks.map(check => html`<li key=${check.id}><strong>${labels[check.condition]}</strong> · ${check.message}</li>`)}</ul>` : html`<p>준비 상태를 확인하고 있습니다.</p>`}
     ${inventory?.setup_revision ? html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${refresh} />` : null}
+    <${SandboxSetupCatalog} />
     <form onSubmit=${save}>
       <p class="set-hint">현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 계정 인증과 새 공급자 추가는 별도 연결 설정에서 진행하세요.</p>
       <label>연결 <select value=${provider} disabled=${busy} onChange=${(event: Event) => setProvider((event.currentTarget as HTMLSelectElement).value)}>

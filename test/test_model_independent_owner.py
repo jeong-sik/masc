@@ -62,6 +62,7 @@ class OwnerWithoutModel(unittest.TestCase):
                         self.assertEqual(observation['status'], 'setup_required' if reason else 'available')
                         self.assertEqual(observation['reason'], reason)
                         self.assertIn(get('/api/v1/runtime/config/raw')[0], (401, 403))
+                        self.assertIn(get('/api/v1/setup/sandbox')[0], (401, 403))
                         subprocess.run([BINARY, 'login', '--base-path', tmp, '--port', str(port),
                                         '--agent', 'local-admin', '--role', 'admin',
                                         '--client-env', 'FIXTURE_MASC_TOKEN'],
@@ -70,6 +71,11 @@ class OwnerWithoutModel(unittest.TestCase):
                         status, _ = get('/api/v1/runtime/config/raw', {'Authorization': 'Bearer '+token,
                                                                     'X-MASC-Agent': 'local-admin'})
                         self.assertEqual(status, 404 if contents is None else 200)
+                        status, sandbox = get('/api/v1/setup/sandbox', {'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin'})
+                        self.assertEqual(status, 200)
+                        self.assertEqual(sandbox['schema'], 'masc.sandbox_readiness.v1')
+                        self.assertTrue(sandbox['candidates'])
+                        self.assertTrue(all(row['guest_verification'] == 'not_run' for row in sandbox['candidates']))
                         if reason:
                             request = Request(url+'/api/v1/keepers/imp/boot', data=b'{}',
                                               headers={'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin',

@@ -5,8 +5,12 @@ type unavailable =
   | Missing_credential
   | Unsupported_runtime
   | Tools_not_declared
-  | Invalid_configuration
-  | Client_unavailable
+  | Invalid_configuration of string
+  | Client_not_authenticated of string
+      (** The official client started and answered, and reported no usable
+          sign-in. Carries the client's own account of what it looked for. *)
+  | Client_not_started of string
+      (** The official client binary could not be launched at all. *)
 
 type failure =
   | Unavailable of unavailable

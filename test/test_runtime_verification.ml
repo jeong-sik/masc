@@ -100,6 +100,54 @@ let test_invalid_call_and_errors () =
     [ Verify.Provider_rejected; Timed_out; Unavailable Missing_credential ]
 ;;
 
+(* The three client failures used to fold into one code with one message, so a
+   client that was merely not signed in read the same as one whose binary was
+   missing. Each keeps its own code, and the client's own account survives. *)
+let failure_field result field =
+  Verify.to_json result
+  |> fun json ->
+  Yojson.Safe.Util.member "failure" json |> Yojson.Safe.Util.member field
+;;
+
+let test_client_failures_stay_apart () =
+  let case failure =
+    let result = measure (fun _ ~prompt:_ -> Error failure) in
+    ( Yojson.Safe.Util.to_string (failure_field result "code")
+    , failure_field result "detail" )
+  in
+  let not_signed_in, signed_in_detail =
+    case (Verify.Unavailable (Client_not_authenticated "no stored credential was found"))
+  in
+  let not_started, started_detail =
+    case (Verify.Unavailable (Client_not_started "executable \"claude\" was not found"))
+  in
+  let bad_config, config_detail =
+    case (Verify.Unavailable (Invalid_configuration "cli_path must not be empty"))
+  in
+  check string "sign-in failure has its own code" "client_not_authenticated" not_signed_in;
+  check string "spawn failure has its own code" "client_not_started" not_started;
+  check string "config failure has its own code" "invalid_configuration" bad_config;
+  check
+    (list string)
+    "each carries the client's own account"
+    [ "no stored credential was found"
+    ; "executable \"claude\" was not found"
+    ; "cli_path must not be empty"
+    ]
+    (List.map
+       Yojson.Safe.Util.to_string
+       [ signed_in_detail; started_detail; config_detail ]);
+  let result =
+    measure (fun _ ~prompt:_ -> Error (Verify.Unavailable Missing_credential))
+  in
+  check
+    bool
+    "a failure with nothing to add reports no detail"
+    true
+    (failure_field result "detail" = `Null);
+  check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
+;;
+
 let test_inventory_keeps_all_models_and_no_secrets () =
   let config =
     {|
@@ -257,6 +305,10 @@ let () =
         ; test_case "tool result must be consumed" `Quick test_result_must_be_consumed
         ; test_case "missing observed model" `Quick test_missing_model_identity
         ; test_case "invalid input and errors" `Quick test_invalid_call_and_errors
+        ; test_case
+            "client failures stay apart"
+            `Quick
+            test_client_failures_stay_apart
         ; test_case
             "all configured model inventory"
             `Quick

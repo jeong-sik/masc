@@ -788,7 +788,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # stop_reason_wire's fail-closed predicate was sugar over a variant that
 # pipeline.ml already pattern-matches, and exact_output_plan's fingerprint
 # reader stayed as annotated test support with its val dropped.
-DEAD_EXPORT_BASELINE = 31
+# 31 -> 25, measured on 2026-09-10. The six frozen sessions readers are gone
+# (#34858): their artifact writers were removed in v0.217.x, sessions_store.mli
+# recorded the readers as kept on purpose, and nothing called them. Six exports
+# and the 209-line parser module they alone reached went with them.
+DEAD_EXPORT_BASELINE = 25
 
 
 def run_ratchet(count: int) -> int:

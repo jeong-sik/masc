@@ -512,6 +512,17 @@ class Journey(unittest.TestCase):
                         pass
                     os.waitpid(pid, 0)
 
+    def test_resume_invalid_saved_port_returns_to_workspace_selection(self):
+        state = observation('/old', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', side_effect=SETUP.SetupError('Invalid saved port')), \
+                patch.object(SETUP, 'pick', return_value=[2]) as picker, \
+                patch.object(SETUP, 'select_setup_server') as owner, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10, resume=True), 0)
+        picker.assert_called_once()
+        owner.assert_not_called()
+
     def test_cancel_fresh_home_does_not_initialize_or_select_models(self):
         with patch.object(SETUP, 'onboarding_status', return_value=observation()), \
                 patch.object(SETUP, 'pick', return_value=[2]), \

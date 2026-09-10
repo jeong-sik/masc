@@ -1410,9 +1410,13 @@ def journey(binary, base_path, port, timeout, resume=False):
             and conditions.get('keeper_persistence') == 'satisfied'
             and 'invalid' not in conditions.values()):
         base = state['base_path']
-        port = workspace_port(binary, base, port)
-        port = select_setup_server(binary, base, port, resume_existing=True)
-        return 1 if port is None else open_workspace(binary, base, port)
+        try:
+            saved_port = workspace_port(binary, base, port)
+        except SetupError as error:
+            print(terminal_text(str(error)) + '\nChoose a workspace to continue.', file=sys.stderr)
+        else:
+            selected_port = select_setup_server(binary, base, saved_port, resume_existing=True)
+            return 1 if selected_port is None else open_workspace(binary, base, selected_port)
     print('\nWelcome. Let’s make a home for you and imp.\n'
           'Choose with arrows and Enter; Space selects several connections.', file=sys.stderr)
     proposed = state.get('base_path') or str(Path.home() / 'MASC')

@@ -331,7 +331,20 @@ let strip_top_level_combinators tool =
           (fun (key, _) -> not (List.mem key anthropic_top_level_unsupported))
           schema_fields
       in
-      `Assoc (("input_schema", `Assoc stripped) :: List.remove_assoc "input_schema" fields)
+      (* A schema that was only combinators would strip to [{}], which the API
+         rejects for not being an object schema; MCP-sourced tools flow their
+         input_schema through this path verbatim, so pin the type rather than
+         trust every external server to carry one. *)
+      let stripped =
+        if List.mem_assoc "type" stripped
+        then stripped
+        else ("type", `String "object") :: stripped
+      in
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "input_schema" then key, `Assoc stripped else key, value)
+           fields)
     | _ -> tool)
   | _ -> tool
 ;;
@@ -339,6 +352,10 @@ let strip_top_level_combinators tool =
 let project_tools_for_kind kind tools =
   match kind with
   | Provider_config.Anthropic -> List.map strip_top_level_combinators tools
+  (* build_request_payload rejects the four non-Anthropic-wire kinds before
+     the tools body is built; these arms exist for exhaustiveness. Kimi is
+     the one other kind that reaches the projection, and its endpoint
+     accepts the top level, so its tools pass through verbatim. *)
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama

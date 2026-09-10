@@ -285,6 +285,28 @@ let test_kimi_keeps_top_level_combinators () =
   check bool "Kimi top-level oneOf kept" true (List.mem_assoc "oneOf" schema)
 ;;
 
+let test_anthropic_synthesizes_type_for_combinator_only_schema () =
+  let tool =
+    `Assoc
+      [ "name", `String "combinator_only"
+      ; "description", `String "Schema that is only a combinator"
+      ; ( "input_schema"
+        , `Assoc
+            [ "oneOf", `List [ `Assoc [ "type", `String "object" ] ] ] )
+      ]
+  in
+  let cfg = config "https://api.anthropic.com" in
+  let schema =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+    |> tool_input_schema_fields
+  in
+  check
+    bool
+    "type object synthesized"
+    true
+    (List.assoc_opt "type" schema = Some (`String "object"))
+;;
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -1554,6 +1576,10 @@ let () =
             "Kimi keeps top-level schema combinators"
             `Quick
             test_kimi_keeps_top_level_combinators
+        ; test_case
+            "anthropic synthesizes type for combinator-only schema"
+            `Quick
+            test_anthropic_synthesizes_type_for_combinator_only_schema
         ] )
     ; ( "transport"
       , [ test_case "native success" `Quick test_transport_success

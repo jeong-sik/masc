@@ -90,12 +90,19 @@ let with_stage action =
     Unix.mkdir masc 0o700;
     Unix.mkdir (Filename.concat masc "config") 0o700;
     action root)
+let remove_and_sync path =
+  Eio_unix.run_in_systhread (fun () ->
+    let directory = Unix.openfile (Filename.dirname path) [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
+    (* Synchronous descriptor settlement in the blocking system thread. *)
+    Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
+      Unix.unlink path;
+      Unix.fsync directory))
 let publish_using ~write changes =
   let rec restore = function
     | [] -> true
     | (path,original)::rest ->
       let restored = try match original with
-        | None -> Unix.unlink path; true
+        | None -> remove_and_sync path; true
         | Some file -> (match write path (mode original) file.Fs_compat.content with Ok () -> true | Error _ -> false)
         with Unix.Unix_error _ | Sys_error _ -> false in
       let remaining = restore rest in restored && remaining in

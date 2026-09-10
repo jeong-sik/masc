@@ -5516,3 +5516,5 @@
 (include stanzas/test_sandbox_readiness.inc)
 
 (include stanzas/test_sandbox_prerequisites.inc)
+
+(include stanzas/test_apple_container_install.inc)

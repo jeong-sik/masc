@@ -729,21 +729,18 @@ let assemble_hooks
                 Keeper_registry.mark_agent_core_turn_started
                   ~base_path:config.base_path
                   meta.name;
-                let runtime_seed =
-                  Runtime_inference.for_runtime ~name:runtime_id_string
-                in
-                let current_params =
-                  { current_params with
-                    enable_thinking =
-                      (match runtime_seed.thinking_enabled with
-                       | Some enabled -> Some enabled
-                       | None -> current_params.enable_thinking)
-                  ; preserve_thinking =
-                      (match runtime_seed.preserve_thinking with
-                       | Some preserve -> Some preserve
-                       | None -> current_params.preserve_thinking)
-                  }
-                in
+                (* [enable_thinking] and [preserve_thinking] are not rewritten
+                   here. The turn driver resolves them per dispatched candidate
+                   ([Keeper_turn_driver.attempt_inference_policy] from the
+                   candidate's own runtime seed) and they reach the agent config,
+                   which [Pipeline_stage_prepare] reads whenever the turn
+                   parameter is [None]. This hook is assembled once per keeper
+                   turn with [runtime_id_string] = the assignment id, so a seed
+                   taken here was the lane head's, not the candidate's: a
+                   glm-5.3 head declaring [preserve-thinking = false] sent
+                   [Some false] into a claude_code candidate, whose host refuses
+                   any explicit value, and every glm rate limit ended the turn
+                   with a config_error instead of failing over (#34899). *)
                 (* RFC-0233 PR-3: every append below also records its
                    (block id, raw text) pair; the snapshot lands in the
                    hook accumulator just before AdjustParams so the

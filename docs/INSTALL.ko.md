@@ -46,7 +46,7 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 ## 설치
 
 ```bash
-TAG=v0.35.5
+TAG=v0.35.6
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

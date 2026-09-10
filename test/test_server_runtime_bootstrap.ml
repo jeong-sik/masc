@@ -3604,7 +3604,7 @@ let test_startup_state_json () =
     (List.sort String.compare
        [ "phase"; "state_ready"; "pending_lazy_tasks"; "last_error";
          "path_diagnostics"; "config_resolution"; "elapsed_sec";
-         "watchdog_timeout_sec"; "product" ])
+         "watchdog_timeout_sec"; "product"; "model_runtime" ])
     (json |> json_assoc |> List.map fst |> List.sort String.compare);
   let product = List.assoc "product" (json_assoc json) in
   Alcotest.(check (list string))

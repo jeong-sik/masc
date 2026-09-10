@@ -758,6 +758,15 @@ let format_board_event_text
   format_prompt_row (board_event_fields event)
 ;;
 
+let answered_ask_inputs (observation : Keeper_world_observation.world_observation) =
+  observation.pending_board_events
+  |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
+    match event.event_kind with
+    | Keeper_world_observation.Ask_answered_row ->
+      Some (event.post_id, format_board_event_text event)
+    | _ -> None)
+;;
+
 let format_scheduled_automation_item
     (item : Keeper_world_observation.scheduled_automation_item) : string =
   let payload_kind =
@@ -2007,14 +2016,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
      Dynamic context is transient across tool rounds and is not checkpointed.
      Keep the attributed, quoted answer in the ordinary durable user turn;
      subsequent wakes carry no copy once the answer stimulus is consumed. *)
-  let answered_asks =
-    observation.pending_board_events
-    |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
-      match event.event_kind with
-      | Keeper_world_observation.Ask_answered_row ->
-        Some (format_board_event_text event)
-      | _ -> None)
-  in
+  let answered_asks = List.map snd (answered_ask_inputs observation) in
   let user_message =
     String.concat "\n\n"
       (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)

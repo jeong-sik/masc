@@ -104,16 +104,27 @@ test/test_keeper_tool_schema_bytes.ml"
   # Measured over origin/main's last 60 commits: 18 pick up at least one suite,
   # the largest picks up 6, and none reaches the max_suites cap above. Of the
   # 673 modules that match at all, the per-module cap drops 26.
+  #
+  # packages/*/lib is in the scope for the same reason bin and lib are. It was
+  # not, and neither test root was searched but the top one, so no edit under
+  # agent_core selected a suite by name at all. Measured 2026-09-10: of 223
+  # package sources, 94 name a suite, 79 of those within the per-module cap,
+  # median 1. The 15 over the cap are the namespace modules the cap is for --
+  # base/tool.ml names 61 suites, runtime.ml 31.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
     stem=$(basename "${changed_source}" .ml)
     stem=${stem#masc_}
-    # Both spellings: the suite named for the module, and the family under it.
-    matches=$( { ls "test/test_${stem}.ml" "test/test_${stem}"_*.ml 2>/dev/null \
+    # Both spellings, in both test roots: the suite named for the module, and
+    # the family under it.
+    matches=$( { ls \
+      "test/test_${stem}.ml" "test/test_${stem}"_*.ml \
+      "packages/agent_core/test/test_${stem}.ml" \
+      "packages/agent_core/test/test_${stem}"_*.ml 2>/dev/null \
       || true; } | sort -u)
     [ -n "${matches}" ] || continue
     matched=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
@@ -280,6 +291,12 @@ self_test() {
   check "a guard that opens its input is selected too" \
     "test/test_blocker_class_mirror.ml" \
     "lib/keeper/keeper_meta_contract.ml"
+  # A package source names its suites the same way, in whichever test root
+  # holds them. event_bus has one in each, which is why it is the fixture:
+  # before this, an edit under packages/ selected nothing by name.
+  check "a package source selects its suites in both test roots" \
+    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
+    "packages/agent_core/lib/event_bus.ml"
   check "a doc-only change selects nothing" "" \
     "docs/x.md"
   # A tool definition reaches both: the one that says the asset embeds and

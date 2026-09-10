@@ -250,8 +250,32 @@ let record_imp_sandbox_profile ~base_path ~profile =
    how to ask. Docker was the only answer here, hardwired, and it was asked for
    even when the keeper's own TOML named another profile. *)
 type sandbox_readiness =
-  | Needs_command of { label : string ; argv : string list }
+  | Needs_command of
+      { label : string
+      ; argv : string list
+      ; missing_hint : string list
+            (** Printed when the executable itself is absent, where the
+                operator needs to hear about the alternative rather than
+                only that a command failed. *)
+      }
   | Needs_nothing_on_this_host of string
+
+(* Apple Container is a supported runtime for the microvm profile, and until
+   setup could name a profile the advice had to end at "imp still requires
+   Docker". Now it can point at the flag that actually moves imp. *)
+let docker_missing_hint () =
+  "The docker executable was not found on PATH."
+  :: (if Executable_path.command_available "container" then
+        [ "Apple Container is installed. To run imp on it instead of Docker, \
+           rerun setup with --sandbox-profile microvm --microvm-backend \
+           apple_container (see docs/INSTALL.md)."
+        ]
+      else
+        [ "On Apple Silicon with macOS 26+, Apple Container is a separate \
+           supported runtime for the microvm profile. Install it and rerun \
+           setup with --sandbox-profile microvm --microvm-backend \
+           apple_container, or install Docker (see docs/INSTALL.md)."
+        ])
 
 let sandbox_readiness ~profile ~microvm_backend =
   match (profile : Keeper_sandbox_config.sandbox_profile) with
@@ -261,6 +285,7 @@ let sandbox_readiness ~profile ~microvm_backend =
           "Docker (install and start Docker Desktop on macOS, or Docker Engine \
            on Linux), or choose another sandbox with --sandbox-profile"
       ; argv = [ "docker"; "info"; "--format"; "{{.OSType}}" ]
+      ; missing_hint = docker_missing_hint ()
       }
   | Micro_vm ->
     (match microvm_backend with
@@ -271,8 +296,13 @@ let sandbox_readiness ~profile ~microvm_backend =
      | Some backend ->
        let cli = Masc.Keeper_microvm_backend.cli_name backend in
        Needs_command
-         { label = Printf.sprintf "MicroVM runtime %s (install it, or choose another --microvm-backend)" cli
+         { label =
+             Printf.sprintf
+               "MicroVM runtime %s (install it, or choose another --microvm-backend)"
+               cli
          ; argv = [ cli; "--version" ]
+         ; missing_hint =
+             [ Printf.sprintf "The %s executable was not found on PATH." cli ]
          })
   | Remote_ssh ->
     (* The endpoint lives in runtime.toml and the server validates it; there is
@@ -297,7 +327,7 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
         Printf.printf "Preparing imp in %s\n%!" base_path;
-        require_ok "Model connection" validate_runtime;
+        require_ok "Model validation" validate_runtime;
         (* The profile imp will actually run on: what --sandbox-profile asked
            for, else what its own TOML already declares. Before this the check
            was Docker regardless, so a keeper seeded on another profile was
@@ -314,13 +344,15 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
         in
         (* A reused port is checked before credentials or Keeper state change. *)
         (match sandbox_readiness ~profile ~microvm_backend with
-         | Needs_command { label; argv } ->
+         | Needs_command { label; argv; missing_hint } ->
            (* run_process raises Unix_error when the executable is absent, and
               the handler at the bottom printed that raw ("create_process
               docker: No such file or directory") instead of this label. *)
            require_ok label (fun () ->
              try run_process argv with
-             | Unix.Unix_error (Unix.ENOENT, _, _) -> 1)
+             | Unix.Unix_error (Unix.ENOENT, _, _) ->
+               List.iter prerr_endline missing_hint;
+               1)
          | Needs_nothing_on_this_host note ->
            Printf.printf "Sandbox: %s\n%!" note);
         require_ok "Sandbox image preparation" prepare_image;

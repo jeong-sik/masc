@@ -134,6 +134,17 @@ let configure_agent_core_model_catalog_overlay
          (Env_config_core.Config_error
             (Printf.sprintf "catalog overlay %s: %s" path detail)))
 
+(* A config-load failure (catalog overlay, runtime.toml) must not be reported
+   as a model connection problem: the model was never reached. The diagnostic
+   names the class, carries the underlying file-path-bearing detail verbatim,
+   and states the next action. *)
+let config_load_failure_diagnostic ~detail =
+  Printf.sprintf
+    "Model configuration could not be loaded (this is not a model connection problem):\n\
+     %s\n\
+     Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
+    detail
+
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"
   | Exact_output.Full_replacement_catalog -> "full replacement"

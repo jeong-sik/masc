@@ -1016,10 +1016,12 @@ def source_models(binary, source, timeout):
                        else row.get('max_context'))
             rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
                              context=context, existing=None, catalog=row))
+    # An account switch invalidates both membership and effective CLI context.
+    declared_rows = [] if choice == 'antigravity' and source.get('credential_replaced') else source['rows']
     for model in observed:
         if model['id'] in curated_ids:
             continue
-        existing_rows = [row for row in source['rows'] if row['model'] == model['id']]
+        existing_rows = [row for row in declared_rows if row['model'] == model['id']]
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
             for existing in existing_rows:
@@ -1029,11 +1031,11 @@ def source_models(binary, source, timeout):
                                  existing=None if source.get('credential_replaced') else existing))
         else:
             rows.append(dict(model, existing=None))
-    for row in source['rows']:
+    for row in declared_rows:
         if source.get('credential_replaced') and any(item['id'] == row['model'] for item in rows):
             continue
         if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
-            duplicates = sum(other['model'] == row['model'] for other in source['rows']) > 1
+            duplicates = sum(other['model'] == row['model'] for other in declared_rows) > 1
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
             rows.append(dict(id=row['model'], label=label, context=row['max_context'],
                              existing=None if source.get('credential_replaced') else row))

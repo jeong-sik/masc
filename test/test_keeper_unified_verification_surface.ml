@@ -1061,7 +1061,7 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
     Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
 
-let test_answered_ask_survives_later_turns_and_checkpoint_reload () =
+let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.run (fun _ ->
   let answer = "2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
   let answered : WO.pending_board_event =
     { sample_board_event with
@@ -1104,7 +1104,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () =
     let messages = Context.context_of_agent_core_checkpoint checkpoint
       |> Context.messages_of_context in
     check int "one complete attributed answer remains after ten later wakes" 1
-      (List.length (List.filter (fun message -> message = original) messages))
+      (List.length (List.filter (fun message -> message = original) messages)))
 
 let post_id_exn s =
   match Masc.Board.Post_id.of_string s with

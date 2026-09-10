@@ -2598,7 +2598,7 @@ let doctor_cmd =
   let inspect requested json =
     let selected = match requested with
       | Some path -> Some path
-      | None -> Env_config_core.base_path_opt () in
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
     let state = Onboarding_status.inspect ~base_path:selected in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);

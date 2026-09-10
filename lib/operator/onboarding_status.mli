@@ -20,6 +20,9 @@ type t =
   ; selected_model : string option
   }
 
+(** [keeper_persistence] is Satisfied only for strictly decoded current imp
+    metadata. Absence is Needs_setup; unreadable or noncurrent metadata is
+    Invalid. Persistence does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
 val to_json : t -> Yojson.Safe.t
 val to_text : t -> string

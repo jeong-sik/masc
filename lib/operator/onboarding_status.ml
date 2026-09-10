@@ -41,44 +41,45 @@ let model_checks config_path =
     None, None,
     [check "model_connection" Needs_setup "Choose a model connection for imp."
        [Configure_models]]
-  else match Runtime_toml.parse_file config_path with
+  else match Runtime.load_list ~config_path with
   | Error _ ->
-    (* Parser diagnostics can contain operator input. This shared projection
-       names the source without copying credential-bearing TOML into the UI. *)
+    (* Resolver diagnostics can contain operator input. Keep the error useful
+       without copying credential-bearing TOML into either UI. *)
     None, None,
     [check "model_connection" Invalid
-       "The workspace runtime.toml could not be read. Repair configuration to continue."
+       "The workspace runtime.toml is unreadable or has invalid runtime references. Repair configuration to continue."
        [Inspect_configuration; Configure_models]]
-  | Ok config ->
-    let requested = match List.assoc_opt "imp" config.keeper_assignments with
-      | Some id -> Some id
-      | None -> config.default_runtime_id in
-    let selected = Option.bind requested (fun id ->
-      match List.find_opt (fun (lane : Runtime_schema.lane_decl) -> lane.id = id)
-              config.lane_decls with
-      | Some lane -> List.nth_opt lane.candidate_ids 0
-      | None -> Some id) in
-    let binding = Option.bind selected (fun id ->
-      List.find_opt (fun (binding : Runtime_schema.binding) ->
-        binding.enabled && Runtime_schema.binding_key binding = id) config.bindings) in
-    let declaration = Option.bind binding (fun binding ->
-      match List.find_opt (fun (provider : Runtime_schema.provider) ->
-              provider.id = binding.provider_id && provider.enabled) config.providers,
-            List.find_opt (fun (model : Runtime_schema.model_spec) ->
-              model.id = binding.model_id) config.models with
-      | Some provider, Some model -> Some (provider, model)
-      | _ -> None) in
-    match declaration with
+  | Ok (runtimes, default, assignments, _, lanes) ->
+    let selected = Runtime_verification.initial_runtime_id
+      ~default_runtime_id:default.id ~assignments ~lanes ~keeper_name:"imp" in
+    let runtime = Option.bind selected (fun id ->
+      List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
+    match runtime with
     | None -> selected, None,
-      [check "model_connection" Needs_setup "Choose an available model connection for imp."
-         [Configure_models]]
-    | Some (_, model) when not model.tools_support -> selected, Some model.api_name,
+      [check "model_connection" Invalid "imp's assigned runtime cannot be resolved."
+         [Inspect_configuration; Configure_models]]
+    | Some runtime when not runtime.model.tools_support -> selected, Some runtime.model.api_name,
       [check "model_connection" Needs_setup "The selected model has tool calling disabled."
          [Configure_models]]
-    | Some (_, model) -> selected, Some model.api_name,
+    | Some runtime -> selected, Some runtime.model.api_name,
       [check "model_connection" Needs_verification
          "A model is configured. Check its current sign-in, response and tool access."
          [Configure_models; Start_imp]]
+
+let persistence_check base_path =
+  let root = Workspace_utils.masc_root_dir_from ~base_path
+    ~cluster_name:(Env_config_core.cluster_name ()) in
+  let path = Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
+    (Keeper_runtime_root_entry.keeper_basename ~keeper_name:"imp" Keeper_runtime_root_entry.Metadata) in
+  match Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:base_path path with
+  | Ok None -> check "keeper_persistence" Needs_setup
+      "imp has no persisted history yet. Prepare imp before opening its conversation." [Start_imp]
+  | Ok (Some meta) when String.equal meta.name "imp" ->
+    check "keeper_persistence" Satisfied
+      "imp has persisted history. This does not verify that it is running or that its model and sandbox are ready." [Start_imp]
+  | Ok (Some _) | Error _ -> check "keeper_persistence" Invalid
+      "imp's persisted history cannot be read as its current metadata. Inspect configuration before proceeding."
+      [Inspect_configuration]
 
 let keeper_checks base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
@@ -115,11 +116,11 @@ let inspect ~base_path =
           "This location does not contain an initialized MASC workspace."
           [Initialize_workspace; Choose_workspace]] }
     else
-      let config_path = Filename.concat (Filename.concat root "config") "runtime.toml" in
+      let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check "workspace" Satisfied "Workspace found." [Choose_workspace]
-          :: (models @ keeper_checks base_path) }
+          :: (models @ keeper_checks base_path @ [persistence_check base_path]) }
 
 let optional_string = function None -> `Null | Some value -> `String value
 

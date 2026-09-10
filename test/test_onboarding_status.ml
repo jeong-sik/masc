@@ -33,7 +33,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   List.iter (fun path -> Unix.mkdir path 0o700) [root; config; keepers];
   let runtime_path = Filename.concat config "runtime.toml" in
   let keeper_path = Filename.concat keepers "imp.toml" in
-  write runtime_path (read "../config/runtime.toml");
+  write runtime_path (read "../scripts/fixtures/release-evidence/runtime.toml");
   write keeper_path (read "../config/keepers-default/imp.toml");
   let runtime_before = read runtime_path and keeper_before = read keeper_path in
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -45,6 +45,43 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     (condition "sandbox" observed = Onboarding_status.Needs_verification);
   check string "runtime preserved" runtime_before (read runtime_path);
   check string "keeper preserved" keeper_before (read keeper_path);
+  check bool "unstarted declaration has no persisted history" true
+    (condition "keeper_persistence" observed = Onboarding_status.Needs_setup);
+  check bool "read does not create keeper runtime directory" false
+    (Sys.file_exists (Filename.concat root "keepers"));
+  let invalid_configs = [
+    String.concat "\n" (List.filter (fun line -> not (String.starts_with ~prefix:"default = " line)) (String.split_on_char '\n' runtime_before))
+      ^ "\n[runtime.assignments]\nimp = \"ollama_cloud.deepseek-v4-flash\"\n";
+    runtime_before ^ "\n[runtime.lanes.broken]\ncandidates = [\"not.configured\"]\n";
+    runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n"
+  ] in
+  List.iter (fun invalid ->
+    write runtime_path invalid;
+    let state = Onboarding_status.inspect ~base_path:(Some base) in
+    check bool "invalid runtime references are not merely unverified" true
+      (condition "model_connection" state = Onboarding_status.Invalid);
+    check string "invalid config preserved" invalid (read runtime_path)) invalid_configs;
+  write runtime_path runtime_before;
+  let metadata_dir = Filename.concat root "keepers" in
+  Unix.mkdir metadata_dir 0o700;
+  let metadata_path = Filename.concat metadata_dir "imp.json" in
+  let valid_meta = Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"imp" ()) in
+  write metadata_path valid_meta;
+  let persisted = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "canonical metadata records history" true
+    (condition "keeper_persistence" persisted = Onboarding_status.Satisfied);
+  check bool "persisted history is not sandbox proof" true
+    (condition "sandbox" persisted = Onboarding_status.Needs_verification);
+  check string "metadata observation is read-only" valid_meta (read metadata_path);
+  write metadata_path (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"someone-else" ()));
+  let wrong_owner = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "another keeper's metadata is not imp history" true
+    (condition "keeper_persistence" wrong_owner = Onboarding_status.Invalid);
+  write metadata_path "{broken";
+  let corrupt = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "corrupt metadata is invalid, not absent" true
+    (condition "keeper_persistence" corrupt = Onboarding_status.Invalid);
+  check string "read does not repair metadata" "{broken" (read metadata_path);
   write runtime_path "[providers.secret]\napi_key = \"DO_NOT_PROJECT\"\ninvalid = [";
   let broken = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "bad config remains inspectable" true

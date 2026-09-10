@@ -124,3 +124,31 @@ Follow-up PR35114 puts Ask answer rows into ordinary durable user input. Its
 checkpoint serialization test appends ten wake inputs, not ten real model
 turns. Independent review identified a remaining Ask+Gate co-delivery path
 that can skip this input; fixed-runtime acceptance remains outstanding.
+
+## No-change edits and candidate preparation
+
+The editor remained keepalive_running with no pending human approval or runtime
+blocker. Its recent Edit records repeatedly supplied equal old_string/new_string.
+The retained result manifest reports ok=true and bytes_written=12945 despite
+identical before/after hashes. The original goal-task link is also retained.
+
+The operator sent explicit QA feedback about those no-change edits and the
+malformed Korean fee/prose. This is another manual intervention. The resulting
+operation kmsg-26f2f1c5868f802ade02062ba5cd39d3 reached Succeeded, while the actual
+PDF, poster, and evidence.json still retained their original hashes. A completed
+chat operation is not completed task evidence.
+
+A separate recovery candidate combines full answers, ordinary answer retention,
+Gate/Ask co-admission, sandbox-image analysis, and truthful no-change Edit
+results. Its CI build and ten target suites were dispatched. No candidate
+binary has been installed into this scenario yet. The local operator helper
+now verifies the old binary against its own receipt before an upgrade and waits
+for both process and listener termination before starting a successor. That
+restart path has only been prepared and source reviewed, not executed here.
+
+Independent operator-helper review found that empty stdout from failed ps/lsof
+queries could be mistaken for process absence. The helper now accepts only
+explicit no-match exit status with empty stdout/stderr as absence. Six mocked
+observation cases and a real read of PID71727 passed. No signal was sent. The
+pre-existing Popen-to-new-PID-receipt crash gap remains; crash-atomic upgrade
+is not claimed.

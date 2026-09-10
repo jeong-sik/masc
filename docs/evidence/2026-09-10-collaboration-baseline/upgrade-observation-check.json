@@ -1,0 +1,16 @@
+{
+  "scope": "operator upgrade helper process-observation classifier",
+  "cases": [
+    "running process",
+    "explicit no-match",
+    "unexpected exit",
+    "stderr with no-match",
+    "empty successful response",
+    "rows with no-match exit"
+  ],
+  "cases_passed": 6,
+  "live_pid_observed": 71727,
+  "signals_sent": 0,
+  "restart_executed": false,
+  "limitation": "Popen to new PID receipt persistence is not crash-atomic"
+}

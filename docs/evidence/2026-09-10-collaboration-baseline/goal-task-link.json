@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "last_updated": "2026-09-10T12:16:46Z",
+  "links": [
+    {
+      "goal_id": "exhibition-publication-baseline",
+      "task_ids": [ "task-001" ]
+    }
+  ]
+}

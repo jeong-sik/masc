@@ -23,6 +23,16 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def observe_process_rows(command):
+    result = subprocess.run(command, capture_output=True, text=True)
+    rows = result.stdout.splitlines()
+    if result.returncode == 0 and rows and not result.stderr.strip():
+        return rows
+    if result.returncode == 1 and not rows and not result.stderr.strip():
+        return []  # Both lsof and ps report a successful no-match with exit 1.
+    raise RuntimeError(f'{command[0]} process observation failed (exit {result.returncode}); no restart authorized')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base', type=Path, required=True)
@@ -84,10 +94,12 @@ def main():
         lines = [line[6:] for line in raw.splitlines() if line.startswith('data: ')]
         return json.loads(next((line for line in lines if '"id"' in line), raw))
 
-    def check_health():
+    def check_health(*, expected_commit=None, expected_binary_sha256=None):
         health = request('/health?full=1')
-        if health['build']['binary_commit'] != args.expected_commit or Path(health['paths']['effective_base_path']).resolve() != base:
+        if health['build']['binary_commit'] != (expected_commit or args.expected_commit) or Path(health['paths']['effective_base_path']).resolve() != base:
             raise ValueError('Running binary/base identity mismatch')
+        if expected_binary_sha256 is not None and health['build']['executable_sha256'] != expected_binary_sha256:
+            raise ValueError('Running binary hash differs from the owned process receipt')
         return health
 
     if args.command in ['start', 'restart-owned']:
@@ -113,23 +125,28 @@ def main():
         if args.command == 'restart-owned':
             if state.get('pending'):
                 raise ValueError('Unconfirmed effect requires reconciliation before restart')
-            listeners = subprocess.run(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'], capture_output=True).stdout.decode().split()
+            listeners = observe_process_rows(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'])
             if set(listeners) == {str(state['pid'])}:
-                check_health()
+                # Validate the process being replaced against its own receipt,
+                # not against the new candidate's commit. A source change is
+                # the reason for this restart, not an ownership mismatch.
+                check_health(expected_commit=state['expected_commit'],
+                             expected_binary_sha256=state['binary_sha256'])
                 state.setdefault('restarts', []).append({'previous_pid': state['pid'], 'at': time.time()})
                 persist_state()
                 os.kill(state['pid'], signal.SIGTERM)
             elif (listeners or not state.get('restarts')
                   or state['restarts'][-1]['previous_pid'] != state['pid']
-                  or subprocess.run(['ps', '-p', str(state['pid']), '-o', 'comm='], capture_output=True).stdout.strip()):
+                  or observe_process_rows(['ps', '-p', str(state['pid']), '-o', 'comm='])):
                 raise ValueError('Neither a verified owned listener nor a recorded stopped restart')
             for _ in range(100):
-                listeners = subprocess.run(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'], capture_output=True).stdout.split()
-                if not listeners:
+                listeners = observe_process_rows(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'])
+                process_alive = observe_process_rows(['ps', '-p', str(state['pid']), '-o', 'comm='])
+                if not listeners and not process_alive:
                     break
                 time.sleep(0.2)
             else:
-                raise TimeoutError('Owned listener did not stop; no forced kill or new process')
+                raise TimeoutError('Owned process has not finished stopping; no forced kill or new process')
             state.pop('session', None)
             state['counter'] += 1
         with socket.socket() as sock:

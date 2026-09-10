@@ -251,10 +251,9 @@ jobs:
       # repaired the ceiling the next morning. The trigger worked; nothing
       # was answerable for the verdict.
       - name: Run the tests this pull request edits
-        # continue-on-error covers a failing step, not a job the runner
-        # cancelled: timeout-minutes above ends the job and reports it
-        # failed whatever a step says. So this bounds itself, and the script
-        # bounds each suite it runs on top of that.
+        # Bounded twice, because a hung suite must not read as a break: the
+        # deadline below ends the step, and the script gives each suite its
+        # own timeout on top of that.
         timeout-minutes: 12
         env:
           GH_TOKEN: ${{ github.token }}

@@ -33,6 +33,22 @@ let test_other_workspace_never_receives_credentials () =
       ~capture:(fun () -> Alcotest.fail "unrelated workspace captured") in
     (match result with Error Different_workspace -> () | _ -> Alcotest.fail "workspace conflict ignored");
     Alcotest.check Alcotest.int "no credential transmission across workspace conflict" 0 !authorizations))
+let test_drain_requires_lease_and_port_release () =
+  let root = Filename.temp_file "masc-upgrade-drain-" "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,0)); Unix.listen socket 1;
+    let port = match Unix.getsockname socket with Unix.ADDR_INET (_,port) -> port
+      | _ -> Alcotest.fail "loopback fixture port" in
+    (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
+     | Ok Port_busy -> () | _ -> Unix.close socket; Alcotest.fail "occupied port was restart-ready");
+    Unix.close socket;
+    (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
+     | Ok Replacement_can_start -> () | _ -> Alcotest.fail "released owner/port not observed"))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
-    Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials]]
+    Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
+    Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release]]

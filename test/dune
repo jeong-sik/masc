@@ -5523,4 +5523,4 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio_main masc.server))
+ (libraries alcotest unix yojson eio_main masc.server masc.fs_compat))

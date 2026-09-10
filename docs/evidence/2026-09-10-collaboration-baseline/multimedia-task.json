@@ -1,0 +1,20 @@
+{
+  "title": "기억의 정원 전시의 애니메이션과 오리지널 사운드 제작",
+  "description": "완료된 출판물과 같은 허구 전시를 다른 감각으로 표현한다. 디자이너는 자기 포스터를 바탕으로 움직이는 GIF와 원래 창작한 짧은 사운드를 만든다. 물건에 담긴 기억과 서로 다른 회상의 공존이라는 주제가 전달되어야 한다. 책자나 기존 승인 파일은 덮어쓰지 않고 multimedia/에 새 산출물을 만든다. 기존 Goal의 PDF·PNG 성공 조건을 바꾸는 작업이 아닌 독립 확장 작업이다.",
+  "contract": {
+    "strict": true,
+    "completion_contract": [
+      "multimedia/garden.gif가 실제 GIF 애니메이션이며 서로 다른 프레임 8개 이상이 있고 움직임과 읽을 수 있는 한국어 제목·허구 고지가 있다.",
+      "원래 창작한 8초 이상 사운드 multimedia/garden.wav와 동일 작품의 multimedia/garden.mp3가 실제 디코딩되며 무음이나 파형 클리핑이 없다. 음성이나 외부 음악 복제는 필요하지 않다.",
+      "multimedia/evidence.json에 실제 파일명·바이트·SHA256, GIF 프레임수·재생시간, 오디오 코덱·샘플레이트·채널수·재생시간 및 실행한 디코딩 검증 결과가 있다.",
+      "multimedia/creative-note.md에 전시 주제와 움직임·사운드 선택의 관계, 실제 검수 방법과 한계를 짧게 설명한다. 기존 행사 정보와 모순되거나 실제 행사처럼 주장하지 않는다."
+    ],
+    "required_evidence": [
+      "artifact:multimedia/garden.gif",
+      "artifact:multimedia/garden.wav",
+      "artifact:multimedia/garden.mp3",
+      "artifact:multimedia/evidence.json",
+      "artifact:multimedia/creative-note.md"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # One collaboration scenario: original Task verified
 
-## Current result at 2026-09-10 13:53 UTC
+## Current result at 2026-09-10 14:08 UTC
 
 The original task-001 is Done, approved at 13:47:07Z by Kimi through verification
 request vrf-1d46f3c204a6906a9cdd574e6752575c. The primary task receipt is
@@ -17,8 +17,8 @@ values match. Direct visual inspection reads the confirmed date/time, venue,
 audience, free entry, and fictional-event disclosure without clipped or
 overlapping Korean text. The optional manifest page_render_size metadata says
 1240x1754 while the actual images are1241x1754; this discrepancy remains visible
-in the preserved submission. A queued editor follow-up requests that precise
-metadata correction and the original Goal completion proof.
+in the preserved submission. That discrepancy was corrected in the later Goal revision, preserved separately
+in `goal-publication/`; it does not rewrite the approved Task snapshot.
 
 The designer separately created a corrected poster (SHA2561e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16),
 visually inspected it, corrected its misleading Board text, and delegated a
@@ -42,8 +42,9 @@ the verifier API is not healthy. The PDF evidence snapshot itself is
 artifact_unreadable/invalid_utf8; independent PDF rendering above is separate
 proof, not a claim that the verifier snapshot decoded PDF content.
 
-The original Goal remains Executing in the saved observation. Goal proof and
-real human final confirmation are outstanding. All18 product requirements and
+The original Goal returned to Executing after its proof was refuted at14:04:02Z
+because the verifier lacks visual input. Goal proof and real human final
+confirmation are outstanding. All18 product requirements and
 1/2/4/24-hour continuity, automatic failover, broader media, workspace memory,
 and IDE acceptance remain open. Sections below are chronological observations;
 their earlier Running/unproven states are historical.
@@ -290,3 +291,37 @@ The designer was asked to finish the actual poster after successful visual
 reading. The operator explicitly allowed the equivalent fee wording0원 to
 avoid the prior word-edit loop. This is further operator steering, not proof
 of autonomous recovery. Its operation remains separately tracked.
+
+## Goal proof request and separate multimedia task
+
+At14:03:24Z the editor requested completion of the original Goal, request
+2ab52c7b22e15b3e1fa4eaa4bcfdf455. It entered Verifying/proof_pending; no human
+confirmation was recorded. The later `goal-publication/` PDF differs from the
+Task-approved PDF because a previously queued build changed the fictional-event
+wording. Its size is102608 bytes, SHA256ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb.
+The subsequent size-only correction preserved those revised artifacts and fixed
+the manifest width to1241. Independent checks again found three A4 pages, all
+five matching file hashes/lengths, and three pixel-identical150dpi page renders.
+The originally approved Task artifacts above remain preserved separately.
+
+The operator admitted unscoped task-002 for an original exhibition GIF plus
+WAV/MP3 sound, with actual animation/decoding/provenance criteria. The designer's
+operation kmsg-4a5167ad0b67bf0c5c3f1beb16e7580e was observed Running and made real
+ffmpeg/ffprobe/Pillow environment requests. This is assigned work in progress,
+not completed multimedia output or spontaneous initiation. It does not change
+the original Goal criteria or Task001 approval.
+
+At14:04:02Z the real Goal verifier refuted this request and returned the Goal to
+Executing. `goal-proof-refuted.json` retains request2ab52c7b22e15b3e1fa4eaa4bcfdf455
+and run01a08ba1-632e-7000-8e1e-c11bc20da444. Its reason explicitly says the current
+read tools only provide binary text previews and cannot inspect the visual
+criteria. This confirms the missing Goal visual input path. The operator told
+the editor to preserve the criteria/artifacts and avoid resubmitting unchanged
+evidence until the actual tool capability is available. No human confirmation
+is requested or recorded for this refuted proof.
+
+The actual Planning screenshot `dashboard-goal-refuted-phase.png` shows the
+Goal back in Executing and its linked Task Done. The existing Evidence tab
+shows the phase transitions but not the refutation reason (the observation's
+ready=false means the reason did not become visible, not a dead server). A
+separate frontend correction is prepared with an actual before/after screenshot.

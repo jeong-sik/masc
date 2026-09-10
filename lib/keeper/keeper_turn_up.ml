@@ -52,6 +52,11 @@ let config_revision_conflict ~expected ~observed =
        ])
 
 let handle_keeper_up ctx args : tool_result =
+  match Runtime_startup_state.get () with
+  | Setup_required reason ->
+    tool_result_error ~class_:Tool_result.Runtime_failure
+      (Runtime_startup_state.message reason)
+  | Not_initialized | Available ->
   match Keeper_turn_up_args.parse ctx args with
   | Error result -> result
   | Ok p ->

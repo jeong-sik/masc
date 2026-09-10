@@ -95,6 +95,11 @@ val publish
     refs remain fatal. A required lane must retain at least one admitted slot.
     Returns [Publication_busy] while a replacement reservation is active. *)
 
+val unpublish : unit -> (unit, publication_error) result
+(** Revoke the current registry for future lookups after owner configuration
+    makes authority unavailable. Existing in-flight immutable snapshots remain
+    intact. Refuses while a configuration replacement reservation is active. *)
+
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
   -> (prepared_replacement, publication_error) result

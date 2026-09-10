@@ -293,6 +293,7 @@ let to_yojson () =
     [
       ("phase", `String (phase_to_string current.phase));
       ("state_ready", `Bool current.state_ready);
+      ("model_runtime", Runtime_startup_state.to_json ());
       ( "pending_lazy_tasks",
         `List (List.map (fun task -> `String task) current.pending_lazy_tasks)
       );

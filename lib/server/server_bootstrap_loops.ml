@@ -1723,6 +1723,7 @@ let start_keeper_loops_owned
      transient model/discovery failures neither abandon that lane nor block
      supervisor startup or sibling lanes. See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
+    Runtime_startup_state.await_available ();
     if not (Env_config.KeeperBootstrap.enabled ())
     then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false"
     else (

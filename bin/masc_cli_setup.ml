@@ -233,10 +233,14 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
         Printf.printf "Preparing imp in %s\n%!" base_path;
-        require_ok "Model connection" validate_runtime;
+        require_ok "Model validation" validate_runtime;
         (* A reused port is checked before credentials or Keeper state change. *)
         require_ok "Docker (install and start Docker Desktop on macOS, or Docker Engine on Linux)"
-          (fun () -> run_process ["docker"; "info"; "--format"; "{{.OSType}}"]);
+          (fun () ->
+            try run_process [ "docker"; "info"; "--format"; "{{.OSType}}" ] with
+            | Unix.Unix_error (Unix.ENOENT, _, _) ->
+              prerr_endline "The docker executable was not found on PATH.";
+              1);
         require_ok "Sandbox image preparation" prepare_image;
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;

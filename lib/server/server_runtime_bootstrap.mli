@@ -46,6 +46,13 @@ val configure_agent_core_model_catalog_overlay :
     [Env_config_core.Config_error] (fail-loud at boot, same as the full-catalog
     path). *)
 
+val config_load_failure_diagnostic : detail:string -> string
+(** Operator-facing diagnostic for configuration load failures (catalog overlay,
+    runtime.toml): attributes the failure to configuration — explicitly not a
+    model connection problem — carries the underlying detail (which already
+    names the file) verbatim, and states the next action. Pure formatting; no
+    I/O, no exit-code decision. *)
+
 (** {1 Runtime Context}
 
     Extracts Eio resources from the standard environment.

@@ -1118,12 +1118,33 @@ let run_keeper_cycle
                     ();
                   (if EC.is_provider_timeout_error err
                    then
-                     Keeper_turn_fsm.emit_transition
-                       ~keeper_name:meta.name
-                       ~turn_id:keeper_turn_id
-                       ~prev:Keeper_turn_fsm.Streaming
-                       (Keeper_turn_fsm.Cancelled
-                          Keeper_turn_fsm.Cancelled_provider_timeout)
+                     (* The FSM's from-state is the event bus's pending-tool
+                        count (the authoritative value, per drain): [>0] means
+                        the turn was in [Awaiting_tool_result] when the
+                        wall-clock ceiling expired. Hardcoding [Streaming]
+                        here recorded a false from-state for exactly the hang
+                        this escape exists for (#29230) — the classifier then
+                        had no arm for it and the audit trail lost the
+                        action. The branches are separate because the state
+                        is a GADT; both emit the same terminal Cancelled. *)
+                     if
+                       Keeper_unified_turn_event_bus.pending_tool_count
+                         turn_event_bus_state
+                       > 0
+                     then
+                       Keeper_turn_fsm.emit_transition
+                         ~keeper_name:meta.name
+                         ~turn_id:keeper_turn_id
+                         ~prev:Keeper_turn_fsm.Awaiting_tool_result
+                         (Keeper_turn_fsm.Cancelled
+                            Keeper_turn_fsm.Cancelled_provider_timeout)
+                     else
+                       Keeper_turn_fsm.emit_transition
+                         ~keeper_name:meta.name
+                         ~turn_id:keeper_turn_id
+                         ~prev:Keeper_turn_fsm.Streaming
+                         (Keeper_turn_fsm.Cancelled
+                            Keeper_turn_fsm.Cancelled_provider_timeout)
                    else
                      let fsm_failure_reason =
                        if EC.is_receipt_lost_error err
@@ -1158,11 +1179,25 @@ let run_keeper_cycle
                            ; detail = short_preview e_str
                            }
                      in
-                     Keeper_turn_fsm.emit_transition
-                       ~keeper_name:meta.name
-                       ~turn_id:keeper_turn_id
-                       ~prev:Keeper_turn_fsm.Streaming
-                       (Keeper_turn_fsm.Failed fsm_failure_reason));
+                     (* Same reasoning as the timeout branch above: the
+                        from-state must reflect the pending-tool count, not
+                        an assumed [Streaming]. *)
+                     if
+                       Keeper_unified_turn_event_bus.pending_tool_count
+                         turn_event_bus_state
+                       > 0
+                     then
+                       Keeper_turn_fsm.emit_transition
+                         ~keeper_name:meta.name
+                         ~turn_id:keeper_turn_id
+                         ~prev:Keeper_turn_fsm.Awaiting_tool_result
+                         (Keeper_turn_fsm.Failed fsm_failure_reason)
+                     else
+                       Keeper_turn_fsm.emit_transition
+                         ~keeper_name:meta.name
+                         ~turn_id:keeper_turn_id
+                         ~prev:Keeper_turn_fsm.Streaming
+                         (Keeper_turn_fsm.Failed fsm_failure_reason));
                   let log_keeper_cycle_failed =
                     if EC.should_warn_keeper_cycle_failed err
                     then Log.Keeper.warn

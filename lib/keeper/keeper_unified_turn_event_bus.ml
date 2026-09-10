@@ -223,6 +223,8 @@ let tool_completed_count t =
   |> Keeper_unified_turn_types.turn_tool_completed_count
 ;;
 
+let pending_tool_count t = (Atomic.get t.state).pending_tool_count
+
 let start_background_drain ~clock t =
   match Atomic.get t.event_bus_subscription, Eio_context.get_switch_opt () with
   | Subscribed _, Some sw ->

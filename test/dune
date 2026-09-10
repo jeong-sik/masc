@@ -5569,3 +5569,14 @@
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_prerequisite_terminal.inc)
+
+(test
+ (name test_runtime_setup_spec)
+ (modules test_runtime_setup_spec)
+ (libraries alcotest yojson masc.runtime)
+ (deps fixtures/runtime-setup-spec-parity.json))
+
+(test
+ (name test_runtime_setup_batch)
+ (modules test_runtime_setup_batch)
+ (libraries alcotest yojson unix eio eio_main masc.runtime masc.masc_core masc.fs_compat masc.masc_process))

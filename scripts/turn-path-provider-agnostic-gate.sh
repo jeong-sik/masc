@@ -45,6 +45,14 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # it.
 VENDOR_PATTERN='glm|deepseek|kimi|anthropic|openai|gemini|ollama|minimax|mimo|qwen|zai'
 
+# Serialized provider facts quoted in comments. try_provider.ml documents the
+# thinking-controls retry with the exact module and function that rejects the
+# pair (backend_anthropic.validate_thinking_controls): the comment must stay
+# grep-accurate, so the name is exempted here rather than reworded away (see
+# the #35197 review objection to f9fb039e). Only the quoted reference is
+# exempt; the code around it still scans normally.
+VENDOR_COMMENT_EXEMPT='(backend_anthropic\.validate_thinking_controls fails the request)'
+
 # Turn-path surface. Globs, not a fixed file list, so a new file that joins the
 # turn path is covered the moment it is named like its siblings.
 TURN_PATH_GLOBS=(
@@ -78,6 +86,7 @@ scan() {
   printf '%s\n' "${list}" \
     | tr '\n' '\0' \
     | xargs -0 rg --ignore-case --line-number --with-filename "${VENDOR_PATTERN}" 2>/dev/null \
+    | rg -v "${VENDOR_COMMENT_EXEMPT}" \
     || true
 }
 

@@ -5525,6 +5525,11 @@
   (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
 
 (test
+ (name test_released_workspace_upgrade)
+ (modules test_released_workspace_upgrade)
+ (libraries masc masc.server fs_compat alcotest unix yojson))
+
+(test
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)
  (libraries masc_test_deps))

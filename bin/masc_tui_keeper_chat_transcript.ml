@@ -1500,7 +1500,15 @@ let apply ~now t delta =
 (* The same fold the live path runs one delta at a time, over a whole log. A
    transcript rebuilt from a log is equal to one that grew with it -- pinned
    by test -- which is what lets a settled or reloaded turn be drawn by the
-   projection the live turn used. *)
+   projection the live turn used.
+
+   One live-path fact a replay cannot give: when the run ended. The entries
+   carry no instants of their own, so every delta lands at the instant of the
+   replay -- an [ended_at] taken from [now] would say "this turn ran for as
+   long as I have had the TUI open", an age wearing a span's clothes. The
+   replay leaves [ended_at] unset and the row falls back to the true age.
+   Same rule as the backwards clock: an unusable number says nothing rather
+   than a confident wrong one. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t =
     create

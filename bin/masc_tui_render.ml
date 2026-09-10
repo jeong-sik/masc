@@ -10280,7 +10280,9 @@ let render_keeper_message (state : state) =
        list, and the queue cannot see it without a dependency cycle through
        [masc_tui_types]. *)
     let pending_behind (item : Masc_tui_keeper_chat_queue.item) =
-      let keeper_name = item.request.Keeper_chat.keeper_name in
+      let keeper_name =
+        item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+      in
       let held =
         List.length
           (List.filter
@@ -10292,7 +10294,9 @@ let render_keeper_message (state : state) =
       let ahead =
         List.filter
           (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
-             String.equal waiting.request.Keeper_chat.keeper_name keeper_name
+             String.equal
+               waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+               keeper_name
              && waiting.submission_seq > item.submission_seq
              &&
              (* A steer precedes ordinary input whatever its seq; a NEXT line

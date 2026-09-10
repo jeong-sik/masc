@@ -77,10 +77,20 @@ let post_execute_git_status_change ~(tool_name : string) raw_result =
             ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
             ~raw_source:
               ("git -C " ^ Filename.quote cwd
-               ^ " --no-optional-locks status --short")
+               ^ " -c core.fsmonitor=false --no-optional-locks status --short \
+                  --ignore-submodules=all")
             ~summary:"post-Execute git status delta"
             ~timeout_sec:5.0
-            [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short" ]
+            [ "git"
+            ; "-C"
+            ; cwd
+            ; "-c"
+            ; "core.fsmonitor=false"
+            ; "--no-optional-locks"
+            ; "status"
+            ; "--short"
+            ; "--ignore-submodules=all"
+            ]
         in
         match status with
         | Unix.WEXITED 0 -> render_git_status_changes output

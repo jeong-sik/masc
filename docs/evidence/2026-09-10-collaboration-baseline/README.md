@@ -47,3 +47,18 @@ quarantined with domain_invalid_output from the Kimi Auto Judge. The operator
 reviewed its exact read-only command and explicitly approved that single request.
 This is a manual intervention, not automatic recovery or completed execution.
 The failure receipt is retained for diagnosis after this work advances.
+
+## Corrected observation and remaining answer delivery
+
+The delegate_status tool returned unknown_operation to admin because its caller
+must equal source.submitted_by. The designer operation was submitted by the
+editor. The authorized admin HTTP operation endpoint returned the same operation;
+this is an observer selection error, not missing persisted work.
+
+The designer produced a real poster PNG. Direct visual inspection shows Korean
+text and a garden motif, but the initial online-only assumption and TBD event
+information remain. The original operator answer corrected those details. Both
+ask_answered events still appear in the editor pending event queue; recorded
+delivered=true meant queued wake delivery, not incorporation into model input.
+The poster is retained as a before-correction artifact, not accepted output.
+Do not inject a replacement instruction to conceal this pending-input behavior.

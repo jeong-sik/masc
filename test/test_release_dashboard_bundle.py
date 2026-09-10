@@ -334,29 +334,26 @@ class Distribution(unittest.TestCase):
         self.assertFalse((self.prefix / "masc-browser-host").exists())
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
-    def test_real_installer_exposes_startup_error_before_dashboard_download(self):
+    def test_real_installer_exposes_startup_error_after_verified_assembly(self):
         previous = self.old()
         mirror = self.mirror()
         binary = mirror / self.asset
         binary.write_text("#!/bin/sh\nulimit -c 0\n"
                           "echo 'dyld: Library not loaded: /missing/libssl.3.dylib' >&2\n"
                           "kill -ABRT $$\n")
-        if self.arch.startswith("macos-"):
-            # Bind the intentionally non-starting bytes without executing them
-            # during fixture packaging; install must expose the loader failure
-            # only after assembling the verified portable tree.
-            def update_digest(entries):
-                for info, data in entries:
-                    if info.name == bundle.RECEIPT:
-                        receipt = json.loads(data)
-                        receipt["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
-                        data = json.dumps(receipt).encode()
-                        info.size = len(data)
-                    yield info, data
-            self.mutate_archive(update_digest)
-            shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))
-        else:
-            (mirror / ("masc-dashboard-" + self.arch + ".tar.gz")).unlink()
+        # Bind the intentionally non-starting bytes without executing them
+        # during fixture packaging; install must expose the loader failure
+        # only after assembling the verified portable tree.
+        def update_digest(entries):
+            for info, data in entries:
+                if info.name == bundle.RECEIPT:
+                    receipt = json.loads(data)
+                    receipt["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+                    data = json.dumps(receipt).encode()
+                    info.size = len(data)
+                yield info, data
+        self.mutate_archive(update_digest)
+        shutil.copy2(self.archive, mirror / ("masc-dashboard-" + self.arch + ".tar.gz"))
         (mirror / "SHA256SUMS").write_text("".join(
             f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n"
             for p in mirror.iterdir() if p.name != "SHA256SUMS"))

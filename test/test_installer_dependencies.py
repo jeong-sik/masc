@@ -135,7 +135,7 @@ class LinuxPortableBootstrap(unittest.TestCase):
         # or user's bin directory can accidentally satisfy the installation.
         (self.bin / 'python3').unlink()
         for name in ('curl', 'chmod', 'mkdir', 'mktemp', 'readlink', 'dirname', 'basename',
-                     'awk', 'tar', 'sha256sum', 'shasum', 'rm', 'mv', 'cp', 'cat', 'grep',
+                     'awk', 'tar', 'gzip', 'sha256sum', 'shasum', 'rm', 'mv', 'cp', 'cat', 'grep',
                      'sed', 'tr', 'cut', 'sort', 'head', 'tail', 'date', 'sleep', 'ln', 'env'):
             tool = shutil.which(name)
             if tool:
@@ -173,6 +173,16 @@ class LinuxPortableBootstrap(unittest.TestCase):
         result = self.run_installer(['--version', 'v9.9.9', '--no-seed', '--no-guest-shim'])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('unsupported', result.stderr)
+
+    def test_offline_smoke_requires_linux_runtime_in_its_mirror(self):
+        self.platform('x86_64', 'linux-x64')
+        mirror = self.fixture.mirror()
+        (mirror / 'masc-runtime-linux-x64.tar.gz').unlink()
+        result = subprocess.run(['/bin/bash', str(INSTALLER.with_name('install-smoke.sh')), str(mirror), 'linux-x64'],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('missing release asset', result.stderr)
+        self.assertIn('masc-runtime-linux-x64.tar.gz', result.stderr)
 
     def test_missing_linux_runtime_checksum_has_no_unverified_fallback(self):
         self.platform('x86_64', 'linux-x64')

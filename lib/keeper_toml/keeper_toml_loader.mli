@@ -53,6 +53,11 @@ type toml_edit =
   | Set of toml_value
   | Remove
 
+(** Pure counterpart of the staged editor, for assessing an exact migration
+    before acquiring its write boundary. Preserves unrelated content. *)
+val edit_keeper_fields_in_content :
+  string -> (string * toml_edit) list -> (string, string) result
+
 val edit_keeper_toml_fields_strict_staged :
   path:string ->
   (string * toml_edit) list ->

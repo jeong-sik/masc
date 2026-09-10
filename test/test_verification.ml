@@ -3277,6 +3277,34 @@ let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
+let test_complete_large_binary_snapshots () =
+  with_temp_dir (fun base_path ->
+    let config = Workspace_core.default_config base_path in
+    let worker = "large-binary-owner" in
+    ensure_producer_playground config worker;
+    let root = Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:(VS.project_root_of_base_path base_path) ~agent_name:worker in
+    List.iteri (fun index (extension, prefix) ->
+      let bytes = prefix ^ String.make (2 * 1024 * 1024) '\255' in
+      let name = "complete." ^ extension in
+      let source = Filename.concat root name in
+      Fs_compat.save_file source bytes;
+      let snapshot = VS.snapshot_submitted_evidence_json
+          ~request_id:("large-" ^ string_of_int index) ~base_path ~worker
+          ["artifact:" ^ name] in
+      let open Yojson.Safe.Util in
+      let item = List.hd (to_list snapshot) in
+      Alcotest.(check string) "binary retained" "artifact_binary" (item |> member "kind" |> to_string);
+      Alcotest.(check int) "full size" (String.length bytes) (item |> member "bytes" |> to_int);
+      Alcotest.(check string) "full SHA" Digestif.SHA256.(digest_string bytes |> to_hex)
+        (item |> member "sha256" |> to_string);
+      let body = Filename.concat (CU.masc_dir_from_base_path ~base_path)
+          (item |> member "body" |> to_string) in
+      Fs_compat.save_file source "changed";
+      Unix.unlink source;
+      Alcotest.(check string) "immutable full snapshot" bytes (Fs_compat.load_file body))
+      ["wav", "RIFF"; "pdf", "%PDF-1.7\n"; "gif", "GIF89a"])
+
 let test_a_binary_payload_is_adopted_and_filed () =
   with_temp_dir (fun base_path ->
       let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" in
@@ -3733,6 +3761,7 @@ let () =
         test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
+      Alcotest.test_case "large binary snapshots retain complete immutable bytes" `Quick test_complete_large_binary_snapshots;
       Alcotest.test_case "a binary payload is adopted and filed" `Quick
         test_a_binary_payload_is_adopted_and_filed;
       Alcotest.test_case "a filed body reads back and only images attach" `Quick

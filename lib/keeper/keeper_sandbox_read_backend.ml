@@ -130,7 +130,7 @@ let container_name_of meta =
    from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
    accepts exit 1. Pure and exported so the distinction is tested directly
    (test_keeper_sandbox_read_backend, the differential test). *)
-let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
   match (outcome : Masc_exec.Sandbox_target.run_outcome) with
   | Transport_failed { reason; stderr; _ } ->
     Error
@@ -142,8 +142,9 @@ let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
      | Unix.WEXITED code
        when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
        let output =
-         if String.length stdout > max_bytes then String.sub stdout 0 max_bytes
-         else stdout
+         match max_bytes with
+         | Some limit when String.length stdout > limit -> String.sub stdout 0 limit
+         | Some _ | None -> stdout
        in
        Ok (status, output)
      | Unix.WEXITED code ->
@@ -161,6 +162,10 @@ let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
          (Printf.sprintf
             "%s_read_stopped: endpoint=%s signal=%d"
             lane endpoint_name signal))
+;;
+
+let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+  classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes:(Some max_bytes) outcome
 ;;
 
 let run_endpoint_command_with_status
@@ -190,7 +195,7 @@ let run_endpoint_command_with_status
     Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
   in
   let endpoint_name = Keeper_sandbox_remote.name endpoint in
-  classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
+  classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
 ;;
 
 type read_dispatch =
@@ -275,7 +280,7 @@ let run_command_with_status ?turn_sandbox_factory
       run_endpoint_command_with_status
         ~acquire_endpoint:(fun ~cwd ->
           Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
-        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
     | Ok Attached_guest ->
       (* The guest is not probed before the call: a stopped one fails the exec
          on its own, and probing first would spend a second subprocess on
@@ -285,7 +290,7 @@ let run_command_with_status ?turn_sandbox_factory
          run_endpoint_command_with_status
            ~acquire_endpoint:(fun ~cwd:_ ->
              Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ())
-           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
        with
        | Ok _ as ok -> ok
        | Error message ->
@@ -439,3 +444,19 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
           (Read_failed
              (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
                 operation argument (Unix.error_message error)))
+
+let read_complete_endpoint_file ~config ~meta ~host_path ~timeout_sec () =
+  let ( let* ) = Result.bind in
+  let* backend_path = container_path_of_host ~config ~meta ~host_path in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Shared_mount -> Error "Complete endpoint read requires an endpoint-owned tree"
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+    let* _, bytes = run_endpoint_command_with_status
+      ~acquire_endpoint:(fun ~cwd -> match meta.sandbox_profile with
+        | Keeper_types_profile_sandbox.Micro_vm ->
+          Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ()
+        | Keeper_types_profile_sandbox.Remote_ssh ->
+          Keeper_sandbox_remote_lane.endpoint ~config ~meta ~cwd ()
+        | Keeper_types_profile_sandbox.Docker -> Error "Docker is not an endpoint-owned tree")
+      ~config ~meta ~command_argv:["cat"; backend_path] ~max_bytes:None ~timeout_sec () in
+    Ok bytes

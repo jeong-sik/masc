@@ -1,0 +1,22 @@
+{
+  "scope": "real isolated server and operator HTTP; synthetic verifier, no semantic LLM acceptance",
+  "status": "verified",
+  "expected_commit": "8ccf4d693892b78235458f81b0183dab464b6aa4",
+  "base_path": "/private/tmp/masc-goal-http-8ccf-1/base",
+  "port": 18946,
+  "binary_sha256": "934ac8306bda592d7bb8fbf7a1c40b67f03581600f21a1a586377559f4750891",
+  "goal_id": "goal-1789000433949-245cd91d",
+  "binding": {
+    "goal_id": "goal-1789000433949-245cd91d",
+    "criterion_revision": "da3eb9d3012ad3845d050ee3ecbae3b6",
+    "request_id": "a2605902f6e23e27e3a1452298f7020c",
+    "verification_run_id": "01a088bc-414f-7000-8991-88566eadfa96"
+  },
+  "operator_id": "admin",
+  "confirmed_at": "2026-09-10T00:33:54Z",
+  "verifier_requests": 3,
+  "unauthenticated_status": 401,
+  "spoof_body_status": 400,
+  "stale_run_status": 400,
+  "reopened_replay_status": 400
+}

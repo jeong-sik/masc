@@ -66,6 +66,7 @@ let session_argv ~executable_path ~base_path ~port ~uid =
        https://man7.org/linux/man-pages/man1/sg.1.html *)
     Ok ["/usr/bin/sg";"docker";"-c";"exec " ^ String.concat " " (List.map Filename.quote argv)]
   with Unix.Unix_error _ -> Error Invalid_resume
+type handoff = Already_active | Child_finished | Reauthentication_pending
 let handoff ~host ~executable_path ~base_path ~port ~run =
   let* observed = inspect ~host in
   match observed.state with

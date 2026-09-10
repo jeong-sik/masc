@@ -2559,13 +2559,13 @@ let setup_validate_runtime base_path =
 
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
     ~initialize:(fun () -> init_cmd_exit base_path false false)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
-    (* The image builder already takes a backend; setup passed None, which
-       means Docker, whatever profile imp was on. *)
-    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok microvm_backend))
+    ~prepare_image:(fun ~selection ->
+      let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
+      sandbox_image_cmd_exit false None (Ok runtime))
     ~login:(fun () ->
       match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with

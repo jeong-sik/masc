@@ -38,7 +38,12 @@ bin/main_eio.ml
 # interface, not structured server logging.
 bin/masc_trace.ml
 bin/masc_tui_loader.ml
-bin/masc_cost.ml# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
+bin/masc_cost.ml
+# masc_cli_onboarding spawns the Python setup journey and reports its own
+# startup failures to the operator's terminal before any runtime exists;
+# user-facing CLI output, not server logging.
+bin/masc_cli_onboarding.ml
+# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml
 

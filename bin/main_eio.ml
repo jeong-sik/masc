@@ -1229,13 +1229,8 @@ let front_door_cmd_exit
       ~is_executable:path_is_executable
   with
   | Masc_front_door.Serve -> serve ()
-  | Masc_front_door.Open_tui { binary; argv } ->
-    Printf.printf "masc: opening %s — `masc start` runs the server alone\n%!" binary;
-    (try Unix.execv binary (Array.of_list argv) with
-     | Unix.Unix_error (err, _, _) ->
-       Printf.eprintf "masc: could not run %s (%s); starting the server instead\n%!"
-         binary (Unix.error_message err);
-       serve ())
+  | Masc_front_door.Open_tui _ ->
+    Masc_cli_onboarding.run ~base_path ~port ~resume:true
 
 let start_cmd =
   let doc =
@@ -2693,12 +2688,21 @@ let setup_cmd =
   let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
-    | `Ok (profile, backend) -> `Ok (setup_cmd_exit base_path port no_tui profile backend)
+    | `Ok (profile, backend) ->
+      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
+        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
+      else
+        let resolved = match base_path with
+          | Some path -> Some path
+          | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+        match resolved with
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
+        | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling

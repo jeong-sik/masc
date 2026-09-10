@@ -103,6 +103,9 @@ type 'a config_lock_receipt = private
   ; warnings : config_lock_warning list
   }
 
+val config_observation : path:string -> string -> config_observation
+(** Pure source identity used inside callers' locked config edits. *)
+
 val config_source_revision_to_string : config_source_revision -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int

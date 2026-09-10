@@ -5513,3 +5513,8 @@
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
 (include stanzas/test_onboarding_status.inc)
+
+(test
+ (name test_runtime_setup_credentials)
+ (modules test_runtime_setup_credentials)
+ (libraries masc_test_deps))

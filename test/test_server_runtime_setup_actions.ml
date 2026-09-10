@@ -21,6 +21,8 @@ import json,sys,os
 args=sys.argv[1:]
 if args[0]=='runtime-antigravity-account':
     assert args[1]=='--base-path' and args[3:]==['--cli-path','agy']
+    assert os.path.isdir(os.path.join(args[2],'.masc'))
+    assert os.stat(os.path.join(args[2],'.masc')).st_mode & 0o777 == 0o700
     credential=os.path.join(args[2],'fixture-account.json')
     with open(credential,'w') as f: f.write('fixture-imported-account')
     os.chmod(credential,0o600)

@@ -51,7 +51,7 @@ type replay_policy = Reasoning_replay_contract.replay_policy =
 type streaming_reasoning = Reasoning_replay_contract.streaming_reasoning =
   | No_streaming_reasoning
   | Delta_field of string
-  | Delta_reasoning_details
+  | Delta_field_and_details of string
   | Template_parser
 
 type output_wire = Reasoning_replay_contract.output_wire =

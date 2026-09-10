@@ -1,0 +1,5 @@
+
+         
+
+         
+{"id":"gen-1789034746-HqufV1VO4UQRrYS64gwQ","object":"chat.completion","created":1789034746,"model":"deepseek/deepseek-v4-flash","provider":"Azure","system_fingerprint":null,"service_tier":null,"choices":[{"index":0,"logprobs":null,"finish_reason":"stop","native_finish_reason":"stop","message":{"role":"assistant","content":"Let's calculate 17 × 23 step by step.\n\nOne way is to break it up:\n\n17 × 23 = 17 × (20 + 3)  \n= (17 × 20) + (17 × 3)  \n= 340 + 51  \n= 391.\n\nAlternatively, 17 × 23 is also (20 - 3) × (20 + 3)  \n= 20² - 3²  \n= 400 - 9  \n= 391.\n\nSo the result is **391**.","refusal":null,"reasoning":null}}],"usage":{"prompt_tokens":20,"completion_tokens":112,"total_tokens":132,"cost":0.00006692,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00006692,"upstream_inference_prompt_cost":0.0000042,"upstream_inference_completions_cost":0.00006272},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}

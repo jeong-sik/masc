@@ -1,6 +1,12 @@
 (** JSON projection of every enabled declared binding, including runtimes whose
     credential or executable is unavailable. Credential values and file paths
-    are never projected. Undeclared context limits stay null. *)
+    are never projected. Undeclared context limits stay null.
+
+    [integrations] independently projects configured providers, AGENT_CORE
+    provider prototypes, and named CLI/local-server transports. Setup and
+    verification support describe adapter capability, never account access or
+    measured readiness. Unsupported protocols remain visible with null protocol
+    or unsupported status. Catalog endpoint credentials are also redacted. *)
 val to_json : Runtime_schema.config -> Yojson.Safe.t
 
 val binding_for_provider

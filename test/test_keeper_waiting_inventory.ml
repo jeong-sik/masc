@@ -359,6 +359,16 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
           }
           : Keeper_event_queue.completion_authority_rejection))
   in
+  let approved =
+    stimulus ~post_id:"task-outcome:T-3" ~arrived_at:103.0
+      (Keeper_event_queue.Task_outcome
+         ({ to_task_id = "T-3"
+          ; to_producer = "polisher"
+          ; to_verification_id = "verification-3"
+          ; to_authority = Masc_domain.System_llm_agent { agent_run_id = "run-3" }
+          }
+          : Keeper_event_queue.task_outcome))
+  in
   let sensitive_content = "private-board-content-must-not-cross-inventory" in
   let board =
     stimulus ~post_id:"board-post-sensitive" ~arrived_at:103.0
@@ -375,7 +385,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
-    (queue_of_list [ message; cancelled; rejected; board ]);
+    (queue_of_list [ message; cancelled; rejected; approved; board ]);
   let json =
     Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name
   in
@@ -403,6 +413,9 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
   check string "rejection sentence names the task"
     "작업 T-2 완료 증거 거절됨"
     (what_of rejected.Keeper_event_queue.post_id);
+  check string "approval sentence names the task and verification"
+    "작업 T-3 증거 승인됨 (verification-3)"
+    (what_of approved.Keeper_event_queue.post_id);
   check string "board sentence names the author, not the content"
     "operator의 새 글"
     (what_of board.Keeper_event_queue.post_id);
@@ -424,6 +437,13 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
     (json_string_member "rejection_task_id" rejected_detail);
   check bool "rejection row does not serialize the authority payload" true
     (U.member "car_authority" rejected_detail = `Null);
+  let approved_detail = detail_of approved.Keeper_event_queue.post_id in
+  check string "approval task id" "T-3"
+    (json_string_member "outcome_task_id" approved_detail);
+  check string "approval verification id" "verification-3"
+    (json_string_member "outcome_verification_id" approved_detail);
+  check bool "approval row does not serialize the authority payload" true
+    (U.member "to_authority" approved_detail = `Null);
   let board_detail = detail_of board.Keeper_event_queue.post_id in
   check string "board row keeps only the typed payload label" "board_signal"
     (json_string_member "payload_kind" board_detail);

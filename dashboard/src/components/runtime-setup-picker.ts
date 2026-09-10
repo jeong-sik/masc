@@ -1,9 +1,13 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Inventory } from '../api/onboarding'
 import { discoverSetupModels, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventory; onSaved: () => void }) {
+  const activeRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => activeRequest.current?.abort(), [])
+  function beginRequest() { const controller = new AbortController(); activeRequest.current = controller; return controller }
+  function endRequest(controller: AbortController) { if (activeRequest.current === controller) activeRequest.current = null }
   const [provider, setProvider] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [key, setKey] = useState('')
@@ -25,24 +29,26 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
   function editKey(value: string) { setKey(value); invalidateDiscovery() }
   async function importAccount() {
-    if (busy || integration?.protocol !== 'antigravity-cli') return
+    if (busy || activeRequest.current || integration?.protocol !== 'antigravity-cli') return
     const revision = inventory.setup_revision ?? null
+    const controller = beginRequest()
     setBusy(true); invalidateDiscovery(); setNotice('이 MASC 서버의 로그인된 계정을 가져오고 있습니다.')
     try {
-      const imported = await importAntigravityAccount(integration.id)
+      const imported = await importAntigravityAccount(integration.id, { signal: controller.signal })
       setModels(imported.models); setSource(imported.source); setDiscoveryRevision(revision)
       setNotice(imported.models.length ? '계정을 가져왔습니다. 사용할 모델을 선택하세요. 응답·도구 검증은 저장할 때 진행합니다.' : '계정을 가져왔지만 모델 목록을 확인하지 못했습니다. CLI 로그인 상태를 확인한 뒤 다시 가져오세요.')
     } catch { setNotice('계정을 가져오지 못했습니다. 이 MASC 서버의 터미널에서 masc setup으로 CLI 설치·로그인을 마친 뒤 다시 시도하세요.') }
-    finally { setBusy(false) }
+    finally { endRequest(controller); setBusy(false) }
   }
   async function discover() {
-    if (busy || !integration || (!http && !client)) return
+    if (busy || activeRequest.current || !integration || (!http && !client)) return
+    const controller = beginRequest()
     setBusy(true); setNotice('')
     const revision = inventory.setup_revision ?? null
     const selected: Source = { integration_id: integration.id, ...(http ? { endpoint: integration.endpoint ?? endpoint } : {}), ...(http && key ? { api_key: key } : {}) }
-    try { setModels(await discoverSetupModels(selected)); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
+    try { setModels(await discoverSetupModels(selected, { signal: controller.signal })); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
     catch { setModels([]); setSource(null); setNotice(http ? '모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.' : '설치된 CLI와 로그인 상태를 확인한 뒤 모델 목록을 새로고침하세요.') }
-    finally { setBusy(false) }
+    finally { endRequest(controller); setBusy(false) }
   }
   function addModels() {
     if (!source || !discoveryRevision) return
@@ -63,21 +69,24 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     setChoices(current => { const result = [...current]; const [choice] = result.splice(index, 1); if (choice) result.splice(to, 0, choice); return result })
   }
   async function prepare(model: Model) {
-    if (busy || !source) return
+    if (busy || activeRequest.current || !source) return
+    const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 실행 환경을 확인하고 있습니다.')
     try {
-      const prepared = await prepareSetupModel(source, model, integration?.protocol === 'ollama-http')
+      const prepared = await prepareSetupModel(source, model, integration?.protocol === 'ollama-http', { signal: controller.signal })
       setModels(current => current.map(row => row.id === prepared.id ? prepared : row)); setNotice('실행 context를 확인했습니다. 모델을 선택해 추가하세요.')
     } catch { setNotice('이 모델의 실행 context를 확인하지 못했습니다. 연결이나 모델 상태를 확인하고 목록을 새로고침하세요.') }
-    finally { setBusy(false) }
+    finally { endRequest(controller); setBusy(false) }
   }
   async function save() {
-    if (busy || !choices.length || !selectionRevision) return
+    if (busy || activeRequest.current || !choices.length || !selectionRevision) return
+    const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 응답과 도구 호출을 검증하고 있습니다.')
-    try { await saveSetupSelections(selectionRevision, choices) }
+    try { await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
     catch {
-      setNotice('연결 저장 결과를 확인하지 못했습니다. 준비 상태와 모델 목록을 새로고침하고 확인하세요.'); setBusy(false); return
+      setNotice('연결 저장 결과를 확인하지 못했습니다. 준비 상태와 모델 목록을 새로고침하고 확인하세요.'); endRequest(controller); setBusy(false); return
     }
+    endRequest(controller)
     setChoices([]); setSource(null); setKey(''); setModels([])
     try {
       const activation = await resumeSavedModelSetup()
@@ -86,7 +95,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
         : '모델 저장과 응답·도구 검증은 완료했습니다. 서버 설정 재개가 필요합니다. 아래 설정 재개 버튼으로 다시 시도하세요.')
       await onSaved()
     } catch { setNotice('모델 저장과 응답·도구 검증은 완료했습니다. 서버 준비 상태를 새로 확인하고 설정을 재개하세요.') }
-    finally { setBusy(false) }
+    finally { endRequest(controller); setBusy(false) }
   }
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
     <h4>모델 연결 선택</h4><p class="set-hint">여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.</p>
@@ -108,6 +117,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     ${choices.length ? html`<ol aria-label="기본 모델과 대체 순서">${choices.map((choice, index) => html`<li key=${index}><strong>${index === 0 ? '기본' : `대체 ${index}`}</strong> · ${choice.label}
       ${index > 0 ? html`<button type="button" disabled=${busy} onClick=${() => move(index, 0)}>기본으로 선택</button><button type="button" aria-label=${`${choice.label} 위로`} disabled=${busy} onClick=${() => move(index, index - 1)}>위로</button>` : null}
       <button type="button" disabled=${busy} onClick=${() => setChoices(current => current.filter((_, position) => position !== index))}>제거</button></li>`)}</ol>` : null}
+    ${busy && activeRequest.current ? html`<button type="button" class="btn" onClick=${() => activeRequest.current?.abort()}>요청 대기 취소</button><p class="set-hint">대기를 취소해도 이미 저장된 설정은 유지될 수 있습니다. 결과를 새로 확인하세요.</p>` : null}
     <button type="button" class="btn" disabled=${busy || !choices.length || !inventory.setup_revision} onClick=${save}>검증 후 선택 저장</button>${notice ? html`<p role="status">${notice}</p>` : null}
   </section>`
 }

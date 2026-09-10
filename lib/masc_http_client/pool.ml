@@ -122,11 +122,12 @@ type t = {
   config   : config;
   mu       : Eio.Mutex.t;
   mutable idle : idle_entry list Host_map.t;
-  (* Host -> connect-failure cooldown deadline (Eio.Time.now seconds).
-     A probe refused within the window fails fast without touching
-     piaf, so a dead host cannot leak one fd per request into the
-     pool's long-lived switch. Guarded by [mu] like [idle]. *)
-  mutable connect_failed_until : float Host_map.t;
+  (* Last connect-failure timestamp per host. A host inside
+     [connect_failure_cooldown_seconds] of its last failure fast-fails
+     without opening a socket. Entries age out by time comparison, so
+     the map needs no sweeper; it holds at most one float per distinct
+     failing host. *)
+  mutable connect_failures : float Host_map.t;
   stop     : bool Atomic.t;
   counters : stats_counters;
 }
@@ -218,7 +219,7 @@ let create ~sw ~env ?(config = default_config) () : t =
     config;
     mu = Eio.Mutex.create ();
     idle = Host_map.empty;
-    connect_failed_until = Host_map.empty;
+    connect_failures = Host_map.empty;
     stop = Atomic.make false;
     counters = new_counters ();
   } in
@@ -300,86 +301,96 @@ let try_acquire_idle t key ~now =
     !expired;
   client
 
-(* Probe the host with a bare Eio.Net.connect inside a short-lived
-   switch before handing piaf the pool's long-lived [t.sw].
+(* ── Connect backoff ───────────────────────────────────────────── *)
 
-   Why: on connect failure Eio attaches the half-open socket to the
-   switch it was given ([Eio.Net.connect ~sw]) and the failure path
-   returns without ever running that switch's release hook, so the fd
-   stays open for the life of the switch. When the switch is the
-   pool's process-lifetime switch, every refused request leaks one fd
-   (reproduced: 50 refused requests -> +50 fds; the TUI's 2-second
-   refresh tick exhausts macOS nofile=256 within a minute, 2026-09-10).
+let now_ts t =
+  Eio.Time.now (Eio.Stdenv.clock t.env)
 
-   The probe runs in its own switch which ends immediately, and a
-   refused probe additionally marks the host dead for
-   [connect_failure_cooldown_seconds] so the retry storm a dead
-   server attracts (9 GETs / 2 s) never reaches the socket layer. *)
-let probe_reachable t (key : Host_key.t) =
-  let now = Eio.Time.now (Eio.Stdenv.clock t.env) in
-  let cooled, deadline =
-    with_mu t (fun () ->
-      match Host_map.find_opt key t.connect_failed_until with
-      | Some until_ when until_ > now -> (true, until_)
-      | _ -> (false, 0.0))
+let connect_backoff_active t key ~now =
+  with_mu t (fun () ->
+    match Host_map.find_opt key t.connect_failures with
+    | Some ts -> now -. ts < t.config.connect_failure_cooldown_seconds
+    | None -> false)
+
+let record_connect_failure t key ~now =
+  with_mu t (fun () ->
+    t.connect_failures <- Host_map.add key now t.connect_failures)
+
+(* ── Probe-first connect ───────────────────────────────────────── *)
+
+(* TCP-reachability probe on a short-lived child switch. piaf 0.2.0
+   (pinned) does not release the socket when [Piaf.Client.create]'s
+   connect fails, and the client would be bound to the pool's
+   long-lived switch, so nothing ever reclaims it — one fd per failed
+   request (#dead-server-emfile, 2026-09-10). Probing first confines
+   the failure socket to [probe_sw], whose teardown closes it
+   immediately.
+
+   Cost: one extra TCP connect+close per fresh client, only on cache
+   miss; idle-reuse requests skip this entirely. The probe is
+   TCP-level for https too — TLS problems still surface from
+   [Piaf.Client.create] and feed the same backoff.
+
+   A success here followed by a refused [Piaf.Client.create] (server
+   died in between) can still leak one fd; the window is narrow and
+   the backoff bounds the rate. Cancelled must propagate so a dying
+   fiber unwinds instead of reporting "unreachable" (RFC-0106). *)
+let probe_connectable t key =
+  let net = Eio.Stdenv.net t.env in
+  let clock = Eio.Stdenv.clock t.env in
+  let addrs =
+    try
+      Eio.Net.getaddrinfo_stream net key.Host_key.host
+        ~service:(string_of_int key.Host_key.port)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
   in
-  if cooled then
-    Error
-      (Printf.sprintf "connect to %s suppressed: in failure cooldown until %.0f"
-         (Host_key.to_string key) deadline)
-  else (
-    let refused =
-      Eio.Switch.run @@ fun probe_sw ->
-      try
-        let net = Eio.Stdenv.net t.env in
-        let addr =
-          (* Resolve exactly like the real connect would: host name or
-             literal IP, first address, same as piaf's Connection.connect
-             ([List.hd addresses]). The probe must see what piaf would
-             see, no more and no less. *)
-          match
-            Eio.Net.getaddrinfo net ~service:(string_of_int key.port) key.host
-          with
-          | [] -> raise Not_found
-          | `Tcp _ :: sockaddr :: _ -> (
-              match sockaddr with
-              | `Tcp _ as sa -> sa
-              | _ -> raise Not_found)
-          | _ -> raise Not_found
-        in
-        ignore (Eio.Net.connect ~sw:probe_sw net addr);
-        false
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> true
-      (* The probe switch closes here whether we connected (normal
-         close) or failed (release of any half-open socket) — either
-         way nothing binds to [t.sw]. *)
-    in
-    if refused then (
-      let cooldown = t.config.connect_failure_cooldown_seconds in
-      let until_ = Eio.Time.now (Eio.Stdenv.clock t.env) +. cooldown in
-      with_mu t (fun () ->
-        t.connect_failed_until <-
-          Host_map.add key until_ t.connect_failed_until);
-      Error
-        (Printf.sprintf "connect probe to %s refused; cooling down %.0fs"
-           (Host_key.to_string key) cooldown))
-    else Ok ())
+  let try_addr addr =
+    Eio.Fiber.first
+      (fun () ->
+         Eio.Switch.run (fun probe_sw ->
+           try
+             let flow = Eio.Net.connect ~sw:probe_sw net addr in
+             Eio.Flow.close flow;
+             true
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _ -> false))
+      (fun () ->
+         Eio.Time.sleep clock t.config.connect_timeout_seconds;
+         false)
+  in
+  List.exists try_addr addrs
 
-(* Build a fresh piaf client.  Returns [Result] mirroring piaf's API
-   so callers can surface DNS/TCP/TLS failures distinctly.  A refused
-   probe short-circuits here — piaf (and its fd) is never created. *)
-let create_fresh t uri =
-  let key = Host_key.of_uri uri in
-  match probe_reachable t key with
-  | Error msg -> Error msg
-  | Ok () ->
+(* Build a fresh piaf client for [key], gated on the per-host
+   connect-failure backoff and a TCP reachability probe (see
+   [probe_connectable]). Returns [Result] mirroring piaf's API so
+   callers can surface DNS/TCP/TLS failures distinctly. *)
+let create_fresh t key uri =
+  let now = now_ts t in
+  if connect_backoff_active t key ~now then
+    Error
+      (Printf.sprintf
+         "connect backoff: %s failed recently (cooldown %.0fs)"
+         (Host_key.to_string key)
+         t.config.connect_failure_cooldown_seconds)
+  else if not (probe_connectable t key) then begin
+    record_connect_failure t key ~now:(now_ts t);
+    Error
+      (Printf.sprintf "connect refused: %s unreachable"
+         (Host_key.to_string key))
+  end
+  else
     match Piaf.Client.create ~sw:t.sw t.env uri with
     | Ok c ->
       t.counters.create_count_total <- t.counters.create_count_total + 1;
       Ok c
     | Error err ->
+      (* Probe passed but create failed (TLS error, or the server died
+         in the narrow window): feed the same backoff so a broken
+         endpoint is not hammered either. *)
+      record_connect_failure t key ~now:(now_ts t);
       Error (Piaf.Error.to_string (err :> Piaf.Error.t))
 
 (* Count idle entries (host_map -> int). For [max_total_idle]. *)
@@ -532,7 +543,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   let acquired =
     match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
-    | None -> create_fresh t host_origin
+    | None -> create_fresh t key host_origin
   in
   match acquired with
   | Error e -> Error e
@@ -734,7 +745,7 @@ let do_request_streaming
   let acquired =
     match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
-    | None -> create_fresh t host_origin
+    | None -> create_fresh t key host_origin
   in
   match acquired with
   | Error e -> Error e

@@ -68,3 +68,10 @@
 - **갭 3 검증 + 갭 4 발견** (phase0-arm-b-anthropic3, v0.35.7): temperature 400 해소 확인(요청 통과, 2 tool calls, 토큰 계측 정상). 136s에 신규 실패 `turn_failed: cannot set reasoning_effort "high" when enable_thinking=false`. 체인: thinking-on 첫 시도가 max_tokens truncation → truncation_recovery의 Retry_without_thinking이 enable_thinking만 뒤집고 candidate의 reasoning_effort 잔류 → validate_thinking_controls 정당 거부.
 - **픽스**: #35195 (retry 시 candidate에서 reasoning_effort strip, For_testing 노출 + 알고테스트) merged → #35196 bump merged → **v0.35.8 태그**. bench fetch 기본값 0.35.8. CI에서 For_testing re-export 누락 1회 실패 후 수정(로컬 dune 금지 룰의 blind spot).
 - 관찰: thinking-on + max_tokens 16k에서 truncation 실제 발생 → 매트릭스 때 anthropic 레인 max_tokens 상향 검토.
+
+## 2026-09-11 anthropic 레인 완전 개통 (smoke 6 PASS)
+
+- phase0-arm-b-anthropic6 (v0.35.8 + adaptive_only + max_output 64k): **reward 1.0, 예외 0**, state=Succeeded, 9 tool calls, dup 0, agent 365s, input 380k(전량 cache hit급), output 22.9k.
+- 갭 5/6은 제품 버그가 아니라 벤치 선언 오류였음: fable-5는 disabled 미지원(adaptive_only 필요), 출력 상한 8192 기본값 부족(64000 필요). 제품 capability 모델이 이미 올바른 노브 제공.
+- 최종 실패 시퀀스: 12s(oneOf→v0.35.6) → 12s(temperature→v0.35.7) → 136s(retry effort→v0.35.8) → 138s(disabled→adaptive_only) → 775s(output ceiling→64k) → **PASS**.
+- Task 10 착수: BENCH_MODEL=anthropic/claude-fable-5, arms a,b,c,e,f,h × 24 tasks × 3회, CONCURRENCY=4, timeout multiplier 전 arm 동일(setup 5 / agent 3).

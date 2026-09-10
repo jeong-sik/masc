@@ -9,6 +9,8 @@
   masc.apple_keychain
   masc.egress_host
   masc.build_version
+  masc.embedded_config
+  ptime
   yojson
   cstruct
   otoml

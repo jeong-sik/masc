@@ -178,6 +178,11 @@ type t =
   ; mutable reversed_trail : trail_node list
   ; mutable next_tool_local_id : int
   ; mutable phase : phase
+  ; mutable ended_at : float option
+        (* [Some] the instant the run said it was over -- finished or failed.
+           An age drawn after that instant is a lie about a live turn: the
+           numbers would keep climbing while nothing ran. The end instant
+           turns the open-ended age into the turn's span. *)
   ; mutable interrupt : interrupt
   ; mutable checkpoints : int
   ; mutable unreadable_count : int
@@ -211,6 +216,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; reversed_trail = []
   ; next_tool_local_id = 0
   ; phase = Waiting
+  ; ended_at = None
   ; interrupt = Not_requested
   ; checkpoints = 0
   ; unreadable_count = 0
@@ -1112,9 +1118,17 @@ let unreadable_text t =
 (* An age, not a duration budget: the row says how long this turn has been
    outstanding so a watcher can tell slow from stuck. Rendered from a clock the
    caller passes rather than one read here, so a test can state the instant.
-   A clock that moved backwards says nothing instead of a negative age. *)
+   A clock that moved backwards says nothing instead of a negative age.
+
+   Once the run has said it is over, the age stops: the row answers with the
+   turn's span instead, so a settled turn does not read as one that keeps
+   getting older while nothing runs. *)
 let elapsed_text ~now t =
-  Masc_tui_message_layout.age_text ~now ~since:t.started_at
+  match t.ended_at with
+  | Some ended ->
+      if ended < t.started_at then None
+      else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
+  | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
 let progress_text ~now t =
   match elapsed_text ~now t with
@@ -1467,8 +1481,12 @@ let apply_delta ~now t (delta : Live.delta) =
       (* The turn handed work to something outside it and that work finished.
          It is not a turn outcome: the run says when it ends. *)
       ()
-  | Live.Run_failed { message } -> t.phase <- Stream_failed message
-  | Live.Run_finished -> t.phase <- Stream_ended
+  | Live.Run_failed { message } ->
+      t.phase <- Stream_failed message;
+      t.ended_at <- Some now
+  | Live.Run_finished ->
+      t.phase <- Stream_ended;
+      t.ended_at <- Some now
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
       t.reply <-
         Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref }
@@ -1482,7 +1500,15 @@ let apply ~now t delta =
 (* The same fold the live path runs one delta at a time, over a whole log. A
    transcript rebuilt from a log is equal to one that grew with it -- pinned
    by test -- which is what lets a settled or reloaded turn be drawn by the
-   projection the live turn used. *)
+   projection the live turn used.
+
+   One live-path fact a replay cannot give: when the run ended. The entries
+   carry no instants of their own, so every delta lands at the instant of the
+   replay -- an [ended_at] taken from [now] would say "this turn ran for as
+   long as I have had the TUI open", an age wearing a span's clothes. The
+   replay leaves [ended_at] unset and the row falls back to the true age.
+   Same rule as the backwards clock: an unusable number says nothing rather
+   than a confident wrong one. *)
 let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t =
     create
@@ -1493,6 +1519,14 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   List.iter
     (fun (entry : Masc_tui_keeper_chat_log.entry) -> apply ~now t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
+  (* A replayed turn has no measured end. Every delta folds at the replay
+     instant while [started_at] is the log's own start, so an [ended_at] taken
+     from that fold would make [ended_at -. started_at] read as "how long the
+     turn took" while it is "how long ago the turn began" -- a turn of forty
+     seconds replayed three hours later would say 3h00m. Absent, so the row
+     answers with the age instead, which is what that number is. The span the
+     stream measures is the live path's, where the two instants are real. *)
+  t.ended_at <- None;
   t
 ;;
 

@@ -784,6 +784,80 @@ let test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline () =
        | Ok _ -> fail "an unbounded silent turn outlived the wall-clock ceiling")
 ;;
 
+(* #29230: hang-duration distribution. The two ceiling tests above prove
+   single-shot bounds; this one measures the escape repeatedly and reports
+   the observed wall-clock hang-duration distribution, so drift in *when*
+   the ceiling ends a stuck turn (not just whether it does) shows up in CI.
+
+   Measured value: elapsed wall time around run_turn, i.e. how long the
+   turn actually stayed hung before the typed Timeout ended it. The
+   [Timeout seconds] payload alone cannot serve here: it reports the idle
+   window that expired, which for a dripping stream is the ceiling-capped
+   remainder (small), not the hang duration. Two shapes mirror the 8/21
+   field report: a stream that keeps dripping events (idle window never
+   expires) and a silently held stdout with no idle deadline at all. *)
+let test_wall_clock_ceiling_hang_duration_distribution () =
+  let runs = 8 in
+  let percentile p (a : float array) =
+    let sorted = Array.copy a in
+    Array.sort compare sorted;
+    sorted.(int_of_float (float_of_int (Array.length sorted - 1) *. p))
+  in
+  let measure_one ?no_turn_deadline ~timeout_s ~ceiling_s path =
+    let started = Unix.gettimeofday () in
+    let outcome =
+      run_fixture ?no_turn_deadline ~timeout_s ~wall_clock_ceiling_s:ceiling_s path
+    in
+    let elapsed = Unix.gettimeofday () -. started in
+    (match outcome with
+     | Error (Runtime_antigravity.Timeout _) -> ()
+     | Error error -> fail (Runtime_antigravity.error_to_string error)
+     | Ok _ -> fail "the turn completed; the hang escape never fired");
+    elapsed
+  in
+  (* dripping: 0.2s lines inside a 2.0s idle window, ceiling 0.7s. Without
+     the ceiling this shape runs to EOF (~2.4s) without ever tripping the
+     idle deadline, so an elapsed under ~0.9s means the ceiling fired. *)
+  let dripping = Array.init runs (fun _ ->
+      with_fixture
+        ~line_delay_s:0.2
+        [ init ()
+        ; step (); step (); step (); step (); step (); step ()
+        ; step (); step (); step (); step (); step (); step ()
+        ]
+        (fun path -> measure_one ~timeout_s:2.0 ~ceiling_s:0.7 path)) in
+  (* silent, no idle deadline: the ceiling is the only deadline *)
+  let silent = Array.init runs (fun _ ->
+      with_fixture
+        ~stdout_holder_s:5.0
+        [ init () ]
+        (fun path ->
+           measure_one ~no_turn_deadline:true ~timeout_s:2.0 ~ceiling_s:0.3 path)) in
+  Printf.printf
+    "#29230 hang-duration distribution (%d runs per shape)\n\
+     | shape | runs | min | p50 | p90 | max | ceiling |\n\
+     | dripping (idle 2.0s) | %d | %.3f | %.3f | %.3f | %.3f | 0.7 |\n\
+     | silent (no idle deadline) | %d | %.3f | %.3f | %.3f | %.3f | 0.3 |\n%!"
+    runs
+    runs
+    (percentile 0.0 dripping) (percentile 0.5 dripping)
+    (percentile 0.9 dripping) (percentile 1.0 dripping)
+    runs
+    (percentile 0.0 silent) (percentile 0.5 silent)
+    (percentile 0.9 silent) (percentile 1.0 silent);
+  (* every run's hang must be bounded by its ceiling plus process-spawn
+     slack (the ceiling clock starts after spawn; the measurement wraps
+     run_turn, so it includes it) *)
+  check bool
+    "dripping hang duration stays under ceiling + spawn slack (all runs)"
+    true
+    (Array.for_all (fun s -> s > 0.0 && s <= 0.9) dripping);
+  check bool
+    "silent hang duration stays under ceiling + spawn slack (all runs)"
+    true
+    (Array.for_all (fun s -> s > 0.0 && s <= 0.5) silent)
+;;
+
 let test_no_deadline_keeps_init_bounded () =
   with_fixture
     ~sleep_s:0.2
@@ -1013,6 +1087,10 @@ let () =
             "wall-clock ceiling bounds a turn without idle deadline"
             `Quick
             test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline
+        ; test_case
+            "wall-clock ceiling hang-duration distribution"
+            `Quick
+            test_wall_clock_ceiling_hang_duration_distribution
         ; test_case
             "no deadline keeps init bounded"
             `Quick

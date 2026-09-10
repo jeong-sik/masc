@@ -1,8 +1,8 @@
 (** Native Codex app-server single-turn execution.
 
     The official CLI keeps ownership of ChatGPT credentials. We deliberately
-    remove API-key fallback variables from the child environment and then gate
-    on [account/read = chatgpt] before starting a thread. *)
+    give it only the non-secret environment needed to run and then gate on
+    [account/read = chatgpt] before starting a thread. *)
 
 type subscription =
   { plan_type : string
@@ -688,13 +688,24 @@ let env_key entry =
   | None -> entry
 ;;
 
+let subscription_environment_keys =
+  [ "CODEX_HOME"
+  ; "HOME"
+  ; "LANG"
+  ; "LC_ALL"
+  ; "PATH"
+  ; "SSL_CERT_DIR"
+  ; "SSL_CERT_FILE"
+  ; "TMPDIR"
+  ; "XDG_CACHE_HOME"
+  ; "XDG_CONFIG_HOME"
+  ]
+;;
+
 let subscription_only_environment () =
   Unix.environment ()
   |> Array.to_list
-  |> List.filter (fun entry ->
-    match env_key entry with
-    | "OPENAI_API_KEY" | "CODEX_API_KEY" -> false
-    | _ -> true)
+  |> List.filter (fun entry -> List.mem (env_key entry) subscription_environment_keys)
   |> Array.of_list
 ;;
 

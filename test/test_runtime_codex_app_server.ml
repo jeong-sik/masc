@@ -78,6 +78,40 @@ let run_fixture ?(dynamic_tools = []) ?(history = []) path =
       ~prompt:"Return the fixture marker")
 ;;
 
+let test_child_environment_excludes_secrets () =
+  let secret_key = "MASC_CODEX_APP_SERVER_TEST_SECRET" in
+  let previous = Sys.getenv_opt secret_key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv secret_key value
+      | None -> Unix.putenv secret_key "")
+    (fun () ->
+      Unix.putenv secret_key "must-not-reach-codex";
+      with_fixture
+        [ init_result
+        ; account_chatgpt
+        ; thread_result
+        ; turn_result
+        ; item_completed
+        ; turn_completed
+        ]
+        (fun path ->
+           let input = open_in_bin path in
+           let contents = really_input_string input (in_channel_length input) in
+           close_in input;
+           let output = open_out_bin path in
+           output_string output "#!/bin/sh\n";
+           output_string output
+             ("if [ \"${" ^ secret_key ^ "+present}\" = present ]; then exit 86; fi\n");
+           output_string output (String.sub contents 10 (String.length contents - 10));
+           close_out output;
+           Unix.chmod path 0o700;
+           match run_fixture path with
+           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+           | Ok result -> check string "response" "MASC_SUBSCRIPTION_OK" result.text))
+;;
+
 let tool_call_request =
   {|{"id":"tool-request-1","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","tool":"masc_probe","namespace":null,"arguments":{"marker":"from-codex"}}}|}
 ;;
@@ -795,6 +829,10 @@ let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case
+            "child environment excludes secrets"
+            `Quick
+            test_child_environment_excludes_secrets
         ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case

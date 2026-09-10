@@ -22,8 +22,19 @@ let endpoint_valid endpoint =
   List.mem (Uri.scheme uri) [Some "http"; Some "https"]
   && Option.is_some (Uri.host uri) && Uri.userinfo uri = None
   && Uri.query uri = [] && Uri.fragment uri = None
+let optional_reference fields key =
+  match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`String value) when safe_text value -> Ok (Some value)
+  | Some _ -> Error Invalid_connection
 let connection_of_json = function
   | `Assoc fields ->
+    let keys = List.map fst fields in
+    let* () = if List.length keys = List.length (List.sort_uniq String.compare keys)
+      then Ok () else Error Invalid_connection in
+    let* credential_file = optional_reference fields "credential_file" in
+    let* api_key_env = optional_reference fields "api_key_env" in
+    let* provider_id = optional_reference fields "provider_id" in
     let protocol = match string fields "choice", string fields "provider_kind" with
       | Some ("openai_compatible" | "vllm" | "llama_cpp"), _ -> Some Openai
       | Some "ollama", _ -> Some Ollama
@@ -32,14 +43,14 @@ let connection_of_json = function
       | _ -> None in
     (match protocol, string fields "endpoint" with
      | Some protocol, Some endpoint when endpoint_valid endpoint ->
-       let credential = match string fields "credential_file", string fields "api_key_env" with
+       let credential = match credential_file, api_key_env with
          | Some path, None when not (Filename.is_relative path) -> Ok (Some (Runtime_schema.File path))
          | None, Some name -> Ok (Some (Runtime_schema.Env name))
          | None, None -> Ok None
          | _ -> Error Invalid_connection in
        let* credential = credential in
        Ok { protocol; endpoint; credential;
-            provider_id = Option.value ~default:"" (string fields "provider_id") }
+            provider_id = (match provider_id with Some id -> id | None -> "") }
      | _ -> Error Invalid_connection)
   | _ -> Error Invalid_connection
 let model protocol = function

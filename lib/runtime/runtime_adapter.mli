@@ -15,6 +15,9 @@
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
+(** Uses the dispatch credential alias/registry resolution. A missing required
+    credential is an error; anonymous access is allowed only without an
+    effective credential reference. *)
 val resolve_api_key : provider_id:string -> credential:Runtime_schema.credential option ->
   (Llm_provider.Secret.t, string) result
 (** Resolve the same protected API-key references used by HTTP bindings, for

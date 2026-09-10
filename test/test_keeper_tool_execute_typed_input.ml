@@ -507,18 +507,17 @@ let test_the_shell_reads_its_own_operators () =
     [ "test -w /tmp && echo ok"; "grep x f || echo none"; "a; b" ]
 ;;
 
-(* RFC execute-boundary-is-the-sandbox. A construct outside the subset used to
-   be refused by name; it now runs, and the name reaches the caller as advice
-   instead. Both halves matter: the script has to execute, and the judge still
-   has to say what is in it. *)
-let test_a_construct_outside_the_subset_runs_and_is_still_named () =
+(* RFC shell-ir-typed-command-substitution. [$( )] is inside the subset now:
+   the script lowers to one Simple whose arg is the Subst, and the judge
+   classifies it Representable rather than naming a refusal. *)
+let test_a_substitution_lowers_and_classifies_representable () =
   let input = parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ]) in
   (match Execute_input.to_shell_ir input with
    | Ok (Masc_exec.Shell_ir.Simple _) -> ()
    | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
    | Error e ->
      Alcotest.failf
-       "command substitution is a shell's job, not a refusal: %a"
+       "command substitution lowers to a Subst arg: %a"
        Execute_input.pp_validation_error
        e);
   match
@@ -526,10 +525,10 @@ let test_a_construct_outside_the_subset_runs_and_is_still_named () =
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       input
   with
-  | [ (_, Keeper_tooling.Shell_costume.Outside_the_subset (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct `Cmd_subst)) ] -> ()
+  | [ (_, Keeper_tooling.Shell_costume.Representable) ] -> ()
   | findings ->
     Alcotest.failf
-      "the judge must still name it; got %d finding(s)"
+      "a substitution classifies representable; got %d finding(s)"
       (List.length findings)
 ;;
 
@@ -675,6 +674,7 @@ let shell_arg_string = function
   | Masc_exec.Shell_ir.Lit (s, _) -> s
   | Masc_exec.Shell_ir.Var (name, _) -> "$" ^ name
   | Masc_exec.Shell_ir.Concat _ -> "<concat>"
+  | Masc_exec.Shell_ir.Subst _ -> "<subst>"
 ;;
 
 let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
@@ -824,7 +824,10 @@ let test_gh_multiline_body_lowers_to_literal_argv () =
       List.filter_map
         (function
           | Masc_exec.Shell_ir.Lit (value, _) -> Some value
-          | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None)
+          | Masc_exec.Shell_ir.Concat _
+          | Masc_exec.Shell_ir.Var _
+          | Masc_exec.Shell_ir.Subst _ ->
+            None)
         simple.args
     in
     Alcotest.(check (list string))
@@ -1046,8 +1049,10 @@ let test_a_costume_keeps_its_shell () =
 ;;
 
 let test_what_the_ir_cannot_hold_keeps_todays_path () =
-  (* Constructs like cmd_subst and heredoc cannot be held in IR, so they stay on the shell. *)
-  Alcotest.(check string) "cmd_subst" "sh" (lowered_bin (costume "cat $(echo foo)"));
+  (* Constructs the IR still cannot hold — backtick substitution, unquoted
+     heredoc — stay on the shell.  [$( )] left this list when it became
+     [Shell_ir.Subst] (RFC shell-ir-typed-command-substitution). *)
+  Alcotest.(check string) "backtick cmd_subst" "sh" (lowered_bin (costume "cat `echo foo`"));
   Alcotest.(check string) "heredoc" "sh" (lowered_bin (costume "cat <<'EOF'\nx\nEOF"))
 ;;
 
@@ -1219,9 +1224,9 @@ let suite =
           `Quick
           test_the_shell_reads_its_own_operators
       ; Alcotest.test_case
-          "a_construct_outside_the_subset_runs_and_is_still_named"
+          "a_substitution_lowers_and_classifies_representable"
           `Quick
-          test_a_construct_outside_the_subset_runs_and_is_still_named
+          test_a_substitution_lowers_and_classifies_representable
       ; Alcotest.test_case
           "the_advice_names_the_construct_the_script_contains"
           `Quick

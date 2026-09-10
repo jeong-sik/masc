@@ -369,16 +369,32 @@ let discover_and_inspect
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
         ]
       in
-      let status, stdout, stderr =
-        Masc_exec.Sandbox_target.status_tuple
-          (runner
-             ~on_stdout_chunk:None
-             ~on_stderr_chunk:None
-             ~stdin_content:None
-             ~argv
-             ~env:[||]
-             ~cwd:(Some root))
+      (* Matched rather than collapsed with [status_tuple]: that helper turns
+         a transport failure into [WEXITED 1], and the non-zero-exit arm below
+         reports [Root_unreadable] -- a claim about the root. A payload that
+         exceeded the remote timeout never read the root at all, and its own
+         [.mli] says not to collapse where a non-zero exit carries a distinct
+         meaning. *)
+      let outcome =
+        runner
+          ~on_stdout_chunk:None
+          ~on_stderr_chunk:None
+          ~stdin_content:None
+          ~argv
+          ~env:[||]
+          ~cwd:(Some root)
       in
+      match outcome with
+      | Masc_exec.Sandbox_target.Transport_failed { reason; _ } -> (
+        (* A guest that has gone away is absence, the same answer the exit
+           arms give it, and the booted flag has to be dropped either way. *)
+        match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+        | Some _ ->
+          Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
+          Error (Keeper_playground_checkouts.Root_missing { root })
+        | None ->
+          Error (Keeper_playground_checkouts.Root_probe_unreachable { root; reason }))
+      | Masc_exec.Sandbox_target.Ran { status; stdout; stderr; _ } ->
       match status with
       | Unix.WEXITED 0 ->
         (match parse_probe_json ~root stdout with

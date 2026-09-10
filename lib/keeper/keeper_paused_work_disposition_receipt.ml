@@ -75,6 +75,7 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_outcome _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   (* The answer arriving is the reply; it names no further destination. *)

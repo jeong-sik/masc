@@ -100,10 +100,32 @@ let strip_matching_quotes value =
    login) only when [redact_identity_scalars] is set. The default mined
    every scalar, so a GitHub account name — public in every repo URL — was
    masked as [REDACTED] throughout chat text (2026-08-29, keeper edgar.a.poe). *)
+(* What makes a key credential-shaped, and the promise this module publishes:
+   these values are masked whatever [redact_identity_scalars] says. The list
+   is markers rather than key spellings on purpose -- enumerating names
+   ("api_key", "apikey", "access_key", ...) is a list that is always one
+   spelling short of the file it is about to read.
+
+   [key] over-matches: a `public_key:` line in a secret file is masked too.
+   That is the side to be wrong on. The complaint that produced the identity
+   switch was a GitHub *account name* showing as [REDACTED] in chat prose,
+   not a public key inside a credential file. *)
 let credential_shaped_key key =
   List.exists
     (fun marker -> String_util.contains_substring_ci key marker)
-    [ "token"; "secret"; "password"; "passwd"; "credential"; "passphrase" ]
+    [ "token"
+    ; "secret"
+    ; "password"
+    ; "passwd"
+    ; "credential"
+    ; "passphrase"
+    ; "key"
+    ; "auth"
+    ; "bearer"
+    ; "cookie"
+    ; "session"
+    ; "signature"
+    ]
 
 let add_mapping_scalar_values ~(redact_identity_scalars : bool) value acc =
   value

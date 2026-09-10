@@ -71,7 +71,13 @@
 # its exemption so a future failure is visible to this ratchet.
 
 # --- assertions that fail -------------------------------------------------
-test/test_keeper_fs_directory_durability          # durable commit observer: observer exception [2026-09-07 alone: fails, run 34136512035]
+# 2026-09-10: dispatched alone on main (run 34434062139) this suite fails two
+# cases, and only one of them is what the row said. The backtrace one is a test
+# artifact and #35015 removes it: raise_with_backtrace extends the installed
+# backtrace, so the exact equality this asserted is unreachable (#34519
+# measured the same thing for the sibling suite). What remains is the
+# coordination case below, which is a behaviour claim, not a test shape.
+test/test_keeper_fs_directory_durability          # coordination: a waiter retries an ordinary owner Directory_prepare failure instead of sharing it [2026-09-10 alone: fails, run 34434062139]
 
 # The complete root sweep at 95146db3ff (34384710653, 2026-09-09) reported
 # fs_edit_patch as passing: 43 tests run, 1.082s, no failure. #34924 merged

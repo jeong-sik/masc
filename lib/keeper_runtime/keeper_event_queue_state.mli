@@ -82,6 +82,7 @@ type projected_source_kind =
   | Source_hitl_resolved
   | Source_ask_answered
   | Source_completion_authority_rejected
+  | Source_task_outcome
   | Source_task_cancelled
   | Source_workspace_message
   | Source_delegate_completed

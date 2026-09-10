@@ -1,0 +1,4 @@
+{
+  "name": "fusion-evidence-review",
+  "message": "추가 요청(구조화 기록 기능의 명시적 사용 확인): 방금 내린 판단을 masc_fusion_decision 도구로 기록해 주세요. 원래 Fusion run_id는 kmsg-cd179ef2b1978a75c96df4c82478c260, Task는 task-001입니다. 도구 설명을 확인하고, 패널 권고와 자신의 최종 선택을 구분하여 실제 adopted/rejected/modified 판단·choice·reason을 직접 정하세요. 기존 별도 Task 검증은 다시 제출하지 말고, 기록 결과를 읽어 확인한 뒤 응답해 주세요. 이 추가 요청은 도구를 명시했으므로 자발적 도구 발견 사례로 간주하지 않습니다."
+}

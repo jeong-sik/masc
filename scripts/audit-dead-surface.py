@@ -783,7 +783,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 #       observation of an authoritative Gate request, published ahead of its
 #       consumer: the dependent direct-Gate dispatch unit consumes it next
 #       (#34962 evidence: docs/evidence/2026-09-10-direct-gate-wait).
-DEAD_EXPORT_BASELINE = 34
+# 34 -> 31, measured on 2026-09-10. The staged observation above found its
+# consumer, and the two exports whose only caller was an inline test are gone:
+# stop_reason_wire's fail-closed predicate was sugar over a variant that
+# pipeline.ml already pattern-matches, and exact_output_plan's fingerprint
+# reader stayed as annotated test support with its val dropped.
+DEAD_EXPORT_BASELINE = 31
 
 
 def run_ratchet(count: int) -> int:

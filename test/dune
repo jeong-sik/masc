@@ -1805,6 +1805,20 @@
  (modules test_server_mcp_session_persist)
  (libraries alcotest masc_server unix))
 
+; The /health?full=1 operator rollup: which sections overall_status is
+; answerable for, and which it structurally cannot reach (#34893).
+(test
+ (name test_server_health_rollup)
+ (modules test_server_health_rollup)
+ (libraries alcotest masc_server yojson))
+
+; What check-pr-hygiene.sh attributes to a pull request, run against the
+; shallow clone shape CI has (#35012).
+(test
+ (name test_pr_hygiene_range)
+ (modules test_pr_hygiene_range)
+ (libraries alcotest unix))
+
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test
@@ -2156,6 +2170,8 @@
 (include stanzas/test_auth_token_uniqueness_audit.inc)
 
 (include stanzas/test_base_path_prod_guard.inc)
+
+(include stanzas/test_persisted_default_base_path.inc)
 
 (include stanzas/test_board_api_e2e.inc)
 

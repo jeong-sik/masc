@@ -1,0 +1,32 @@
+[
+  {
+    "turn_ref": "trace-1788998630329-00000#1",
+    "tool_schema_count": 47,
+    "masc_run_plan_present": true,
+    "masc_fusion_decision_present": false
+  },
+  {
+    "turn_ref": "trace-1788998630329-00000#2",
+    "tool_schema_count": 49,
+    "masc_run_plan_present": true,
+    "masc_fusion_decision_present": false
+  },
+  {
+    "turn_ref": "trace-1788998630329-00000#3",
+    "tool_schema_count": 49,
+    "masc_run_plan_present": true,
+    "masc_fusion_decision_present": false
+  },
+  {
+    "turn_ref": "trace-1788998630329-00000#4",
+    "tool_schema_count": 49,
+    "masc_run_plan_present": true,
+    "masc_fusion_decision_present": false
+  },
+  {
+    "turn_ref": "trace-1788998630329-00000#5",
+    "tool_schema_count": 50,
+    "masc_run_plan_present": true,
+    "masc_fusion_decision_present": true
+  }
+]

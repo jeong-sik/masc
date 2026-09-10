@@ -2,14 +2,12 @@ type load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
-  | Trigger_policy_env_invalid of { detail : string }
 
 module type CONNECTOR = sig
   type policy
 
   val table : string
   val parse : string -> (policy, string) result
-  val env : unit -> string option
   val default : policy
 end
 
@@ -53,21 +51,15 @@ module Make (C : CONNECTOR) = struct
   ;;
 
   let resolve () =
-    match C.env () with
-    | Some raw ->
-      (match C.parse raw with
-       | Ok policy -> Ok policy
-       | Error detail -> Error (Trigger_policy_env_invalid { detail }))
-    | None ->
-      let resolution = Config_dir_resolver.resolve () in
-      let toml_path =
-        Filename.concat
-          resolution.Config_dir_resolver.config_root.path
-          Config_dir_resolver.runtime_toml_filename
-      in
-      (match load_from_toml ~path:toml_path with
-       | Error _ as error -> error
-       | Ok (Trigger_policy_loaded policy) -> Ok policy
-       | Ok (Runtime_toml_missing | Trigger_policy_missing) -> Ok C.default)
+    let resolution = Config_dir_resolver.resolve () in
+    let toml_path =
+      Filename.concat
+        resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    match load_from_toml ~path:toml_path with
+    | Error _ as error -> error
+    | Ok (Trigger_policy_loaded policy) -> Ok policy
+    | Ok (Runtime_toml_missing | Trigger_policy_missing) -> Ok C.default
   ;;
 end

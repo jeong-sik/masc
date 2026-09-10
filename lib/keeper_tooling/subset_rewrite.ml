@@ -56,6 +56,19 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
           "the shell running this line exits when the line does, so [&] \
            leaves a child with no handle to wait on, read from, or stop"
       }
+  | `Shell_builtin name as construct ->
+    a_shell_is_the_answer
+      construct
+      (match name with
+       | "eval" ->
+         "eval re-parses its arguments in the running shell. The keeper \
+          sandbox image already exports the switch environment (OPAMROOT, \
+          OPAM_SWITCH_PREFIX), so drop the eval $(opam env ...) wrapper \
+          entirely"   (* RFC-shell-ir-typed-command-substitution §1/§3 *)
+       | _ ->
+         "source and . run text in the running shell; a shell runs this \
+          line, so it does what you wrote — the typed argv form cannot \
+          say it")
   | ( `Heredoc
     | `Here_string
     | `Cmd_subst

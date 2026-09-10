@@ -99,9 +99,15 @@ let resolve_agent_core_model_catalog_overlay_path ?config_root () =
     else
       existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
 
+(* Per-row degradation: a poisoned overlay row (e.g. a stale field left by
+   another release) is excluded with one WARN per row instead of failing the
+   whole boot — install must not be blocked by config residue. Whole-file
+   failures (unreadable, broken TOML, duplicate surviving rows) still raise
+   [Config_error], as does the [AGENT_CORE_MODEL_CATALOG] full-replacement
+   path, which keeps the strict loader. *)
 let configure_agent_core_model_catalog_overlay
       ?config_root
-      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(load_catalog = Llm_provider.Model_catalog.load_file_lenient)
       ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
       ()
   =
@@ -109,7 +115,15 @@ let configure_agent_core_model_catalog_overlay
   | None -> None
   | Some path ->
     (match load_catalog path with
-     | Ok overlay ->
+     | Ok (overlay, skipped) ->
+       List.iter
+         (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
+            Log.Misc.warn
+              "model_catalog: overlay %s skipping entry %s: %s"
+              path
+              skip.entry_label
+              skip.skip_reason)
+         skipped;
        set_overlay overlay;
        Log.Misc.info
          "model_catalog: deployment overlay %s installed onto embedded catalog"
@@ -119,6 +133,17 @@ let configure_agent_core_model_catalog_overlay
        raise
          (Env_config_core.Config_error
             (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
+(* A config-load failure (catalog overlay, runtime.toml) must not be reported
+   as a model connection problem: the model was never reached. The diagnostic
+   names the class, carries the underlying file-path-bearing detail verbatim,
+   and states the next action. *)
+let config_load_failure_diagnostic ~detail =
+  Printf.sprintf
+    "Model configuration could not be loaded (this is not a model connection problem):\n\
+     %s\n\
+     Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
+    detail
 
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"

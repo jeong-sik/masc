@@ -28,7 +28,11 @@ import sys
 
 SKIP_DIRS = {".git", "_build", "node_modules", ".worktrees", "_opam", "dist"}
 SCRIPT_SUFFIXES = (".sh", ".py")
-GUARD_NAME = re.compile(r"(lint|check|guard|gate|ratchet|audit)")
+# A lister belongs here too: CI runs whatever it prints, so one that stops
+# being called takes a whole lane with it and the build still reports success.
+# Measured 2026-09-10: two scripts carry "list", both reached, and the
+# not-wired baseline does not move.
+GUARD_NAME = re.compile(r"(lint|check|guard|gate|ratchet|audit|list)")
 
 # One guard per wiring mechanism, and where its name is written. A mechanism
 # the seed loses shows up here as the file that names it no longer naming it,

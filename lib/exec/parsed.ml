@@ -11,6 +11,7 @@ type reason_too_complex =
   [ `Heredoc
   | `Here_string
   | `Cmd_subst
+  | `Shell_builtin of string
   | `Proc_subst
   | `Subshell
   | `Arith_expansion

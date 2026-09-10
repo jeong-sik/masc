@@ -2,6 +2,12 @@ export interface DashboardCompositeHealthSource {
   overall_status?: string | null
   operator_action_required?: boolean | null
   operator_action_reasons?: readonly string[]
+  // What moved `overall_status` off ok, whether or not anyone has to answer
+  // it. A section at warning with operator_action_required=false raises the
+  // grade and contributes nothing to the list above, so without this the card
+  // read "Runtime health warning · status=warning ·
+  // operator_action_required=false" and stopped (#34895).
+  overall_status_reasons?: readonly string[]
   full_health_snapshot?: {
     status?: 'ready' | 'warming' | 'stale' | 'timeout' | 'error' | null
     stale_reason?: string | null
@@ -136,6 +142,11 @@ export function projectDashboardCompositeHealth(
       ? 'bad'
       : 'warn'
   const reasons = health?.operator_action_reasons?.filter(reason => reason.trim() !== '') ?? []
+  // Only the ones the action list does not already carry: a section whose gate
+  // opened appears in both, and repeating it on the card says nothing.
+  const statusReasons = (health?.overall_status_reasons ?? [])
+    .filter(reason => reason.trim() !== '')
+    .filter(reason => !reasons.includes(reason))
   const snapshotDetails = snapshotUnhealthy
     ? [
         `snapshot=${snapshotStatus}`,
@@ -154,6 +165,7 @@ export function projectDashboardCompositeHealth(
         ? `operator_action_required=${requiresAction}`
         : null,
       ...reasons,
+      ...statusReasons,
       ...snapshotDetails,
     ].filter((detail): detail is string => detail !== null).join(' · '),
   }

@@ -46,8 +46,10 @@ val validate_shell_ir_paths :
   Masc_exec.Shell_ir.t ->
   (unit, string) result
 (** Validate only explicit typed filesystem scopes carried by Shell IR:
-    [cwd] and redirect targets. Positional argv is opaque application data and
-    is never classified from command names, flag strings, or token shapes.
+    [cwd] and redirect targets — including those carried by the stages inside
+    a [Shell_ir.Subst] child, which dispatch executes. Positional argv is
+    opaque application data and is never classified from command names, flag
+    strings, or token shapes.
     Runtime sandbox containment remains authoritative for the process itself. *)
 
 (** Flatten all literal stage words from a parsed shell IR.

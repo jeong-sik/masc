@@ -1011,11 +1011,29 @@ let test_planning_phase_uses_goal_ssot () =
        ~module_path:"bin/masc_tui_loader.ml"
        ~callee:"Tui_decode.decode_planning_snapshot"
      >= 1);
-  check bool "renderer labels the canonical goal phase" true
-    (Ast_grep.count_calls
+  (* The renderer used to label a phase by calling [Goal_phase.to_string],
+     and counting that call was how this guard checked the SSOT. #35011 gave
+     the phases screen words instead: [Goal_phase.to_string
+     Awaiting_confirmation] is "awaiting_confirmation", 21 cells, and the
+     PHASE column is as wide as the widest label, so the wire spelling took
+     twelve columns off TITLE and folded goal titles at every default width.
+
+     What the guard is for survives the change and is now stronger. The label
+     is an exhaustive match over Goal_phase, so a new constructor does not
+     compile until it is given a word -- where the old form would have
+     inherited whatever the wire spelled. Ask for every constructor by name
+     rather than for the call that no longer exists. *)
+  check int "renderer labels every goal phase" 5
+    (Ast_grep.count_constructors_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~callee:"Goal_phase.to_string"
-     >= 1);
+       ~binding_name:"planning_phase_label"
+       ~constructors:
+         [ "Goal_phase.Executing"
+         ; "Goal_phase.Verifying"
+         ; "Goal_phase.Awaiting_confirmation"
+         ; "Goal_phase.Completed"
+         ; "Goal_phase.Dropped"
+         ]);
   (* Asked of the bindings that draw a phase, not of the module. The renderer
      lowercases a MIME type before splitting it, which is not a planning
      status and never was; a module-wide count of a stdlib call cannot tell

@@ -59,6 +59,12 @@ export const ATTENTION_REASONS = [
   'tool_correction_lost',
   'terminal_effect_failed',
   'unmapped_runtime_state',
+  // keeper_status_bridge.ml:216 reads liveness last, after a paused Keeper and
+  // every written blocker have been answered: reaching there not running means
+  // nobody chose the silence. The bridge has emitted this since it was added
+  // and the union did not carry it, so the surface showed a Keeper needing
+  // attention with no word for why.
+  'keepalive_stopped',
 ] as const
 export type AttentionReason = typeof ATTENTION_REASONS[number]
 
@@ -82,6 +88,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',
   terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
+  keepalive_stopped: 'keepalive 가 멈춤 - 최근 오류 확인 필요',
 }
 
 // keeper_runtime_trust_snapshot.ml emits a SEPARATE, larger attention_reason

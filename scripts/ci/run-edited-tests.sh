@@ -104,16 +104,27 @@ test/test_keeper_tool_schema_bytes.ml"
   # Measured over origin/main's last 60 commits: 18 pick up at least one suite,
   # the largest picks up 6, and none reaches the max_suites cap above. Of the
   # 673 modules that match at all, the per-module cap drops 26.
+  #
+  # packages/*/lib is in the scope for the same reason bin and lib are. It was
+  # not, and neither test root was searched but the top one, so no edit under
+  # agent_core selected a suite by name at all. Measured 2026-09-10: of 223
+  # package sources, 94 name a suite, 79 of those within the per-module cap,
+  # median 1. The 15 over the cap are the namespace modules the cap is for --
+  # base/tool.ml names 61 suites, runtime.ml 31.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
     stem=$(basename "${changed_source}" .ml)
     stem=${stem#masc_}
-    # Both spellings: the suite named for the module, and the family under it.
-    matches=$( { ls "test/test_${stem}.ml" "test/test_${stem}"_*.ml 2>/dev/null \
+    # Both spellings, in both test roots: the suite named for the module, and
+    # the family under it.
+    matches=$( { ls \
+      "test/test_${stem}.ml" "test/test_${stem}"_*.ml \
+      "packages/agent_core/test/test_${stem}.ml" \
+      "packages/agent_core/test/test_${stem}"_*.ml 2>/dev/null \
       || true; } | sort -u)
     [ -n "${matches}" ] || continue
     matched=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
@@ -129,7 +140,62 @@ SOURCES
   module_suites=$( { printf '%s\n' "${module_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
-  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ]; then
+  # A structural guard is named after what it asserts, not after the module it
+  # reads, so the name mapping above cannot find it -- and the modules those
+  # guards watch are the umbrella ones it deliberately skips. But such a guard
+  # names its own input: it has the path in a string literal, because it opens
+  # the file. Take the dependency from the literal rather than from the name.
+  #
+  # The regression this exists for: #35011 changed bin/masc_tui_render.ml,
+  # which test_tui_http_ast watches through 52 Ast_grep ~module_path
+  # declarations, and the name mapping looks for test_tui_render_* instead. The
+  # pull request merged green and main was red on that suite until #35019.
+  #
+  # Matching the bare literal rather than ~module_path: reaching only through
+  # that one helper made the rule about which API a guard uses. A guard that
+  # opens the file itself watches its input just as much: 52 suites read a real
+  # repository source without ever calling Ast_grep -- among them
+  # test_blocker_class_mirror, which extracts the blocker class list straight
+  # out of lib/keeper/keeper_meta_contract.ml.
+  #
+  # Every changed file, not the .ml subset the name mapping needs. A guard over
+  # a shell script or a config file names it exactly the same way. The asset
+  # and tool triggers above stay: they fire for any file under a directory,
+  # which a named literal cannot say.
+  # Measured 2026-09-10: 44 non-.ml files are named by a suite and exist --
+  # 28 .sh, 3 .json, 2 .py, 2 .toml, 1 .ts, 1 .c -- the widest being
+  # config/runtime.toml at 9 suites, inside the max_suites bound.
+  #
+  # Measured 2026-09-10: 132 source files are named this way across 78 suites;
+  # 110 of them by exactly one suite, and bin/masc_tui_render.ml by the most, 8.
+  # The per-module cap above does not apply -- it guards against a name that is
+  # a namespace, and these are exact paths. max_suites still bounds the run.
+  declared_suites=""
+  while IFS= read -r changed_source; do
+    # Trimmed, unlike the loop above: the heredoc indents its first line, and
+    # that loop passes the value to basename, which does not care. This one
+    # matches the path inside a string literal, where two leading spaces match
+    # nothing and the miss is silent.
+    changed_source=$(printf '%s' "${changed_source}" \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "${changed_source}" ] || continue
+    # -F: the path carries a dot before the extension, and as a regex that
+    # dot matches any character, so lib/foo.ml would also select a suite that
+    # names lib/fooXml.
+    watchers=$( { grep -rlF "\"${changed_source}\"" \
+      test packages/agent_core/test --include='test_*.ml' 2>/dev/null \
+      || true; } | sort -u)
+    [ -n "${watchers}" ] || continue
+    declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watchers}")
+  done <<DECLARED
+  ${changed}
+DECLARED
+
+  declared_suites=$( { printf '%s\n' "${declared_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
+  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ] \
+    && [ -z "${declared_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -168,6 +234,13 @@ SOURCES
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${declared_suites}" ]; then
+    echo "guards that name the sources this pull request edits:"
+    printf '%s\n' "${declared_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${declared_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
 }
 
 # Fixtures for --self-test. Each is a changed-file list and the suites it must
@@ -199,11 +272,51 @@ self_test() {
   check "a source edit selects the suites named after it" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
-  # A module whose name is a namespace attributes nothing.
-  check "an umbrella module selects nothing" "" \
+  # A module whose name is a namespace attributes nothing by name -- it
+  # prefixes 136 suites, and picking those off one edit says nothing. What it
+  # still selects is the four guards that name the file themselves. The name
+  # mapping and the declared mapping answer different questions, and only the
+  # first one has to stay quiet here.
+  # test_tui_decode is here for a path inside a JSON fixture rather than a
+  # read: it is one of the two such entries in 170 (source, suite) pairs, and
+  # narrowing the match to exclude it would cost the guards that assign the
+  # path to a plain let-binding.
+  check "an umbrella module selects only the guards that name it" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml" \
     "bin/masc_tui.ml"
-  check "a doc-only change selects nothing" "" \
-    "docs/x.md"
+  # The regression the declared mapping exists for: #35011 changed this file,
+  # test_tui_http_ast watches it through 52 ~module_path declarations, and the
+  # name mapping looks for test_tui_render_* instead. Both mappings answer
+  # here, and the guard is in the answer.
+  check "a watched source reaches the guard that declares it" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml" \
+    "bin/masc_tui_render.ml"
+  # A guard that reads its input with open_in instead of Ast_grep is watching
+  # it just the same. test_blocker_class_mirror pulls the blocker class list
+  # out of this file and compares it to the dashboard mirror; the name mapping
+  # looks for test_keeper_meta_contract_*, and there is no suite by that name,
+  # so before this the only edit that ran the mirror was an edit to itself.
+  check "a guard that opens its input is selected too" \
+    "test/test_blocker_class_mirror.ml" \
+    "lib/keeper/keeper_meta_contract.ml"
+  # A package source names its suites the same way, in whichever test root
+  # holds them. event_bus has one in each, which is why it is the fixture:
+  # before this, an edit under packages/ selected nothing by name.
+  check "a package source selects its suites in both test roots" \
+    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
+    "packages/agent_core/lib/event_bus.ml"
+  # The path matters: "docs/x.md" used to be the fixture here and stopped
+  # meaning "no suite names this" -- test_tui_memory_facts_explorer carries it
+  # as a source-fact path in its own fixture data. That is the coincidence any
+  # literal match pays for, and it is one extra suite, not a wrong verdict.
+  check "a doc no suite names selects nothing" "" \
+    "docs/no-suite-names-this.md"
+  # A guard can watch a document. Four do, among them the RFC-0086 namespace
+  # invariant and this one, and before the declared mapping took every changed
+  # path they were selected by nothing.
+  check "a document a suite reads selects that suite" \
+    "test/test_tui_render_memory.ml" \
+    "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
   check "a tool definition reaches every guard over it" \
@@ -242,6 +355,22 @@ changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
 
 select_sources || exit 0
 
+# The suites main is known not to pass. The nightly ratchet holds this list in
+# both directions -- a suite that fails unlisted is a new break, a listed one
+# that passes has to come off -- so it is the record of what a pull request is
+# not answerable for. Running one here and failing on it would stop a pull
+# request for a break it did not cause, which is what kept this step advisory.
+known_failures_file="test/ci-known-failures.txt"
+known_failures=""
+if [ -f "${known_failures_file}" ]; then
+  known_failures=$( { grep -vE '^[[:space:]]*(#|$)' "${known_failures_file}" \
+    || [ $? -eq 1 ]; } | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//')
+fi
+
+is_known_failure() {
+  printf '%s\n' "${known_failures}" | grep -Fxq "$1"
+}
+
 ran=0
 skipped=0
 failed=""
@@ -249,6 +378,11 @@ while IFS= read -r source; do
   [ -n "${source}" ] || continue
   dir=$(dirname "${source}")
   name=$(basename "${source}" .ml)
+  if is_known_failure "${dir}/${name}"; then
+    echo "-- ${dir}/${name}: listed in ${known_failures_file}"
+    skipped=$((skipped + 1))
+    continue
+  fi
   verdict=$(python3 "${scope_tool}" "${dir}" "${name}")
   case "${verdict}" in
     run) ;;

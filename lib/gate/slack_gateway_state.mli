@@ -158,7 +158,7 @@ type trigger_policy =
   | All
 
 val parse_trigger_policy : string -> (trigger_policy, string) result
-(** Decodes the [MASC_SLACK_TRIGGER_POLICY] env value. Accepts exactly
+(** Decodes a configured [slack.trigger_policy] value. Accepts exactly
     ["mention_only"], ["mention_or_thread"], ["user_only:<id>"], ["all"]. *)
 
 val trigger_policy_to_string : trigger_policy -> string

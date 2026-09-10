@@ -796,6 +796,7 @@ let durable_occurrence_index state =
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _
        | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_outcome _
        | Keeper_event_queue.Task_cancelled _
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _
@@ -844,6 +845,7 @@ let durable_occurrence_index state =
        | Keeper_event_queue_state.Source_hitl_resolved
        | Keeper_event_queue_state.Source_ask_answered
        | Keeper_event_queue_state.Source_completion_authority_rejected
+       | Keeper_event_queue_state.Source_task_outcome
        | Keeper_event_queue_state.Source_task_cancelled
        | Keeper_event_queue_state.Source_workspace_message
        | Keeper_event_queue_state.Source_delegate_completed
@@ -985,6 +987,7 @@ let accept_keeper_wake_occurrence
        | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _
        | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_outcome _
        | Keeper_event_queue.Task_cancelled _
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _

@@ -319,14 +319,128 @@ let test_here_string_rejected () =
   | Parsed.Too_complex `Here_string -> ()
   | _ -> assert false
 
-let test_cmd_subst_paren_rejected () =
+let test_cmd_subst_parses_to_subst_node () =
+  (* $( ) opens: the child is a complete IR under Subst, one argv element
+     of the parent (RFC shell-ir-typed-command-substitution §2.1). *)
   match Bash.parse_string "echo $(date)" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "date");
+       assert (inner.args = [])
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_adjacent_to_literal_is_one_word () =
+  (* [foo$(bar)] is one word whose pieces include the Subst, as bash reads
+     it — whitespace, not the substitution, ends a word. *)
+  match Bash.parse_string "echo foo$(date)" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Concat [ Shell_ir.Lit ("foo", _); Shell_ir.Subst _ ] ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_env_assignment_value () =
+  (* An env binding's value may be a substitution; the binding splits at
+     the first [=] of the leading literal piece. *)
+  match Bash.parse_string "A=$(echo x) printenv A" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "printenv");
+    (match s.env with
+     | [ ("A", Shell_ir.Subst (Shell_ir.Simple inner)) ] ->
+       assert (Exec_program.to_string inner.bin = "echo")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_nested () =
+  match Bash.parse_string "echo $(echo $(date))" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple mid) ] ->
+       (match mid.args with
+        | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+          assert (Exec_program.to_string inner.bin = "date")
+        | _ -> assert false)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_inner_exclusion_rides_up () =
+  (* An inner refusal is the answer, unchanged — the same rules, the same
+     reasons (RFC shell-ir-typed-command-substitution §2.2). *)
+  (match Bash.parse_string "echo $(cat <<EOF)" with
+   | Parsed.Too_complex `Heredoc -> ()
+   | _ -> assert false);
+  (match Bash.parse_string "echo $(echo $HOME)" with
+   | Parsed.Too_complex `Param_expansion -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo $(echo `date`)" with
   | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_cmd_subst_unterminated_is_parse_error () =
+  (* A $( the scan never closes is not a construct to name — it is text
+     that never formed a command. *)
+  match Bash.parse_string "echo $(date" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_cmd_subst_in_bin_position_refused () =
+  (* A substituted program name is not opened by the RFC: [$(cmd) args]
+     stays refused even though $( ) parses in argument position. *)
+  match Bash.parse_string "$(echo x) arg" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_cmd_subst_shares_token_budget () =
+  (* The inner parse rides the same token counter — nesting is bounded by
+     source size, not by a depth limit of our own (RFC §2.4). *)
+  let many_words = List.init 50_001 (fun _ -> "x") in
+  match
+    Bash.parse_string ("echo $(" ^ String.concat " " many_words ^ ")")
+  with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
+let test_pp_prints_subst () =
+  match Bash.parse_string "echo $(date)" with
+  | Parsed.Parsed ir ->
+    let printed = Format.asprintf "%a" Shell_ir.pp ir in
+    let rec contains_from i =
+      i + 7 <= String.length printed
+      && (String.sub printed i 7 = "$(date)" || contains_from (i + 1))
+    in
+    assert (contains_from 0)
+  | _ -> assert false
+
+let test_eval_with_subst_still_refused_as_shell_builtin () =
+  (* Now that $( ) parses, the A1 refusal must still fire on the bin name
+     before the substitution's shape matters. *)
+  match Bash.parse_string "eval $(opam env)" with
+  | Parsed.Too_complex (`Shell_builtin "eval") -> ()
   | _ -> assert false
 
 let test_cmd_subst_backtick_rejected () =
   match Bash.parse_string "echo `date`" with
   | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+(* [eval]/[source]/[.] re-parse their arguments in the running shell, which
+   no IR node holds — refused by name in bin position (RFC
+   shell-ir-typed-command-substitution §2.4). *)
+let test_eval_refused_as_shell_builtin () =
+  match Bash.parse_string "eval echo ok" with
+  | Parsed.Too_complex (`Shell_builtin "eval") -> ()
+  | _ -> assert false
+
+let test_source_refused_as_shell_builtin () =
+  match Bash.parse_string "source foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin "source") -> ()
+  | _ -> assert false
+
+let test_dot_refused_as_shell_builtin () =
+  match Bash.parse_string ". foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin ".") -> ()
   | _ -> assert false
 
 let test_arith_expansion_rejected () =
@@ -506,11 +620,16 @@ let test_double_quote_var_word_continues () =
   | Parsed.Too_complex `Param_expansion -> ()
   | _ -> assert false
 
-let test_double_quote_cmd_subst_named () =
-  (* Inside quotes the refusal now names the construct bash would run,
-     instead of blaming the dollar. *)
+let test_double_quote_cmd_subst_parses_to_subst () =
+  (* Inside quotes the substitution is one quoted word whose only piece is
+     the Subst — quoted or not, a substitution is one argv element (RFC
+     shell-ir-typed-command-substitution §2.3 item 3). *)
   match Bash.parse_string "echo \"$(date)\"" with
-  | Parsed.Too_complex `Cmd_subst -> ()
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "date")
+     | _ -> assert false)
   | _ -> assert false
 
 let test_double_quote_default_form_still_excluded () =
@@ -664,8 +783,20 @@ let () =
   test_redirect_target_param_is_parse_error ();
   test_heredoc_rejected ();
   test_here_string_rejected ();
-  test_cmd_subst_paren_rejected ();
+  test_cmd_subst_parses_to_subst_node ();
+  test_cmd_subst_adjacent_to_literal_is_one_word ();
+  test_cmd_subst_env_assignment_value ();
+  test_cmd_subst_nested ();
+  test_cmd_subst_inner_exclusion_rides_up ();
+  test_cmd_subst_unterminated_is_parse_error ();
+  test_cmd_subst_in_bin_position_refused ();
+  test_cmd_subst_shares_token_budget ();
+  test_pp_prints_subst ();
+  test_eval_with_subst_still_refused_as_shell_builtin ();
   test_cmd_subst_backtick_rejected ();
+  test_eval_refused_as_shell_builtin ();
+  test_source_refused_as_shell_builtin ();
+  test_dot_refused_as_shell_builtin ();
   test_arith_expansion_rejected ();
   test_background_rejected ();
   test_subshell_rejected ();
@@ -685,7 +816,7 @@ let () =
   test_double_quote_with_dollar_requires_target_env ();
   test_double_quote_two_vars_and_brace ();
   test_double_quote_var_word_continues ();
-  test_double_quote_cmd_subst_named ();
+  test_double_quote_cmd_subst_parses_to_subst ();
   test_double_quote_default_form_still_excluded ();
   test_double_quote_array_subscript_still_excluded ();
   test_double_quote_with_backslash_rejected ();

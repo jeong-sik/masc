@@ -818,9 +818,14 @@ def wizard(binary, base_path, timeout):
                 except VerificationError as error:
                     print('Verification failed: ' + terminal_text(names[error.runtime_id]), file=sys.stderr)
                     # Native verification owns safe fixed diagnostics; never
-                    # display provider stderr or HTTP bodies here.
+                    # display provider stderr or HTTP bodies here. The detail
+                    # line is the official client's own account of what it
+                    # looked for (a missing sign-in, a binary that would not
+                    # launch), written by the adapter, not by the provider.
                     if model_text(error.failure.get('code')) and model_text(error.failure.get('message')):
                         print(terminal_text(error.failure['code']) + ': ' + terminal_text(error.failure['message']), file=sys.stderr)
+                    if model_text(error.failure.get('detail')):
+                        print('  ' + terminal_text(error.failure['detail']), file=sys.stderr)
                     action = pick('Keep your choices and decide how to continue',
                                   ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later'])[0]
                     if action == 1:

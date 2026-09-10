@@ -730,13 +730,34 @@ let search_files_output_schema =
     ~required:[ "ok"; "op"; "path"; "pattern"; "via"; "status"; "matches" ]
 ;;
 
-(* Producer: Keeper_tool_filesystem_runtime content-write (overwrite/append)
-   and patch-write [Write_succeeded] sites, and
+(* Producer: Keeper_tool_filesystem_runtime content-write
+   (overwrite/append) [Write_succeeded] sites, and
    Keeper_tool_filesystem_remote_write.success_payload for endpoint-owned
-   trees. [via] is absent on the host lane; the patch operation fields appear
-   only under mode "patch". Shared by tool_write_file and tool_edit_file,
-   which share one handler. *)
+   trees. [via] is absent on the host lane. Write's input is content-only, so
+   every advertised field is emitted by every mode Write can take, on both
+   lanes — advertising the patch fields here let a Write node reference
+   [/occurrences] past plan-create and fail only after the file was already
+   written (PR #34928 review). *)
 let file_write_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "mode", `Assoc [ "type", `String "string" ]
+      ; "bytes_written", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
+;;
+
+(* Producer: the patch-write [Write_succeeded] site on the host lane, and
+   Keeper_tool_filesystem_remote_write's patch branch for endpoint-owned
+   trees — both emit [occurrences] and [replace_all] (the remote branch from
+   the same apply_patch application it already computes evidence from).
+   Edit's input schema is closed to the four patch keys, so the insert
+   operation the shared runtime handler knows is unreachable from this tool
+   and its fields are not advertised. [via] is absent on the host lane. *)
+let file_edit_output_schema =
   object_output_schema
     ~properties:
       [ "ok", `Assoc [ "type", `String "boolean" ]
@@ -746,8 +767,6 @@ let file_write_output_schema =
       ; "via", `Assoc [ "type", `String "string" ]
       ; "occurrences", `Assoc [ "type", `String "integer" ]
       ; "replace_all", `Assoc [ "type", `String "boolean" ]
-      ; "insert_before_line", `Assoc [ "type", `String "integer" ]
-      ; "inserted", `Assoc [ "type", `String "string" ]
       ]
     ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
 ;;
@@ -867,7 +886,7 @@ let public_descriptors =
            ; validation = Validate_before_then_runtime_handler
            })
       ()
-      |> with_composable_output (Json_output { schema = file_write_output_schema })
+      |> with_composable_output (Json_output { schema = file_edit_output_schema })
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name

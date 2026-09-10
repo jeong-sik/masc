@@ -349,6 +349,39 @@ let test_scan_json_separates_failure_from_emptiness () =
       (scan_state (C.scan_json (C.discover ~root:missing))))
 ;;
 
+let holds ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+(* A transport that never reached the root must not read as a root the scan
+   read and could not use. On 2026-09-10 the live log carried 54 lines saying
+   "workspace root unreadable: /masc-work/<keeper>" whose own detail said the
+   payload had exceeded a 5.00s remote timeout, and the first move that text
+   invites -- check the permissions on that path -- is the wrong one. *)
+let test_probe_unreachable_does_not_claim_the_root_is_unreadable () =
+  let root = "/masc-work/code-reviewer" in
+  let unreachable =
+    C.scan_error_to_string
+      (C.Root_probe_unreachable
+         { root
+         ; reason =
+             "microvm_remote_remote_timeout: endpoint e payload exceeded remote \
+              timeout 5.00s"
+         })
+  in
+  let unreadable = C.scan_error_to_string (C.Root_unreadable { root; detail = "EACCES" }) in
+  check bool "a probe that never landed does not call the root unreadable" false
+    (holds ~needle:"unreadable" unreachable);
+  check bool "a root the scan could not read still says unreadable" true
+    (holds ~needle:"unreadable" unreadable);
+  check bool "the timeout stays in the operator's line" true
+    (holds ~needle:"remote timeout 5.00s" unreachable);
+  check bool "the root is still named" true (holds ~needle:root unreachable)
+;;
+
 let () =
   run
     "keeper_playground_checkout_discovery"
@@ -398,6 +431,8 @@ let () =
     ; ( "wire"
       , [ test_case "scan_json separates failure from emptiness" `Quick
             test_scan_json_separates_failure_from_emptiness
+        ; test_case "an unreachable probe is not an unreadable root" `Quick
+            test_probe_unreachable_does_not_claim_the_root_is_unreadable
         ] )
     ]
 ;;

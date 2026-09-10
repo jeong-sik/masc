@@ -1,9 +1,8 @@
-(** Connector_trigger_policy — env > runtime.toml > default resolution for a
+(** Connector_trigger_policy — runtime.toml > default resolution for a
     connector's trigger policy.
 
     The Discord and Slack gateways each carried a byte-for-byte copy of this
-    walk, differing only in the table name, the environment variable and which
-    module parses the value. The policy type stays with its connector: this
+    walk, differing only in the table name and which module parses the value. The policy type stays with its connector: this
     module is a functor over it and links against neither gateway.
 
     A functor rather than a polymorphic type because each gateway re-exports
@@ -15,7 +14,6 @@ type load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
-  | Trigger_policy_env_invalid of { detail : string }
 
 module type CONNECTOR = sig
   type policy
@@ -27,10 +25,6 @@ module type CONNECTOR = sig
   (** The connector's own grammar. An unparseable name is an error, never a
       policy: silently answering with a default would run the gateway on a
       stance the operator did not write. *)
-
-  val env : unit -> string option
-  (** The connector's env reader. It must report a blank value as [None] so a
-      blank variable falls through to the TOML plane. *)
 
   val default : policy
   (** Answers only when both planes are absent. *)
@@ -50,7 +44,7 @@ module Make (C : CONNECTOR) : sig
       errors: the caller refuses to start rather than falling back. *)
 
   val resolve : unit -> (C.policy, load_error) result
-  (** Env, then the runtime.toml the workspace resolves to, then [C.default].
-      An invalid environment value is an error, the same as an invalid TOML
-      value. *)
+  (** The runtime.toml the workspace resolves to, then [C.default]. Which
+      inbound messages start a turn is a stance an operator writes down, so it
+      is read from the config file and nowhere else. *)
 end

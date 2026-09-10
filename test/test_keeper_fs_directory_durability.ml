@@ -896,6 +896,29 @@ let test_durable_commit_observer_cardinality () =
        check int "post-rename fsync failure does not publish" 0 !post_rename)
 ;;
 
+(* [Printexc.raise_with_backtrace] extends the installed backtrace with the
+   frames between the raise site and its handler, so the observed backtrace is
+   the callback's capture plus whatever sits between. #34519 measured this on
+   OCaml 5.5.0 for the sibling suite -- even a single raise_with_backtrace
+   caught immediately adds frames -- which makes exact equality unreachable for
+   any implementation. What the durable write promises, and what is testable,
+   is that the captured frames survive as a prefix.
+
+   Written here rather than shared with test_fs_compat_capability_write: two
+   sites is where extraction starts to pay, and a shared module means wiring a
+   stanza into both of these large tests stanzas for ten lines. A third site
+   should extract it. *)
+let check_preserves_raw_backtrace ~label ~expected_backtrace observed_backtrace =
+  let expected = Printexc.raw_backtrace_to_string expected_backtrace in
+  let observed = Printexc.raw_backtrace_to_string observed_backtrace in
+  check
+    bool
+    (label ^ " preserves raw backtrace prefix")
+    true
+    (String.length observed >= String.length expected
+     && String.equal (String.sub observed 0 (String.length expected)) expected)
+;;
+
 let test_durable_commit_observer_failure_is_typed () =
   KF.clear_dir_cache ();
   let base = temp_dir () in
@@ -916,11 +939,10 @@ let test_durable_commit_observer_failure_is_typed () =
           with
           | Ok (KF.Committed_but_observer_failed (observed_exn, observed_backtrace)) ->
             check bool (label ^ " exception identity") true (observed_exn == exception_);
-            check
-              string
-              (label ^ " raw backtrace")
-              (Printexc.raw_backtrace_to_string backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace)
+            check_preserves_raw_backtrace
+              ~label
+              ~expected_backtrace:backtrace
+              observed_backtrace
           | Ok KF.Committed -> failf "%s observer failure was lost" label
           | Error error ->
             failf

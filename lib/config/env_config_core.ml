@@ -407,13 +407,75 @@ let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
     [Unix.putenv] before use. Parent-shell env edits do not affect an already
     running server.
     Returns None when MASC_BASE_PATH is unset or empty. *)
+(* Where the installer records the workspace it prepared, so a later bare
+   `masc` can find it. It cannot live inside the workspace: a caller that does
+   not know the base path yet cannot read a file under it. The user-level
+   config dir is the one place both sides can name without being told. *)
+let default_base_path_record_path_opt () =
+  let masc_config_dir =
+    match raw_value_opt "XDG_CONFIG_HOME" |> trim_opt with
+    | Some dir -> Some (Filename.concat dir "masc")
+    | None ->
+      Option.map
+        (fun home -> Filename.concat (Filename.concat home ".config") "masc")
+        (home_dir_opt ())
+  in
+  Option.map (fun dir -> Filename.concat dir "default-base-path") masc_config_dir
+
+(* A record that no longer names a workspace is not the same as no record: the
+   operator moved or deleted that directory, and saying so is the difference
+   between a puzzling error and an obvious one. *)
+type persisted_default =
+  | No_record
+  | Usable of { record : string; base_path : string }
+  | Stale of { record : string; recorded_path : string }
+
+let persisted_default_base_path () =
+  match default_base_path_record_path_opt () with
+  | None -> No_record
+  | Some record ->
+    if not (existing_file record)
+    then No_record
+    else (
+      match
+        (try Some (In_channel.with_open_text record In_channel.input_all) with
+         | Sys_error _ -> None)
+      with
+      | None -> No_record
+      | Some contents ->
+        (match
+           contents
+           |> String.split_on_char '\n'
+           |> List.map String.trim
+           |> List.find_opt (fun line -> line <> "")
+         with
+         | None -> No_record
+         | Some recorded ->
+           let normalized = normalize_masc_base_path_input recorded in
+           if normalized <> ""
+              && existing_dir (Filename.concat normalized Common.masc_dirname)
+           then Usable { record; base_path = normalized }
+           else Stale { record; recorded_path = recorded }))
+
+(* Which of the three answers the base path came from. The name is not always
+   an env var, so it is not a bare string: an earlier shape returned
+   (env_key, value) pairs and a persisted record has no env key to put there. *)
+type base_path_source =
+  | From_env of string
+  | From_persisted_default of string
+
 let base_path_source_opt () =
   match raw_value_opt base_path_input_env_key |> trim_opt with
-  | Some value -> Some (base_path_input_env_key, value)
+  | Some value -> Some (From_env base_path_input_env_key, value)
   | None ->
       (match raw_value_opt base_path_env_key |> trim_opt with
-       | Some value -> Some (base_path_env_key, value)
-       | None -> None)
+       | Some value -> Some (From_env base_path_env_key, value)
+       | None ->
+         (* Explicit input always wins over what a past install recorded. *)
+         (match persisted_default_base_path () with
+          | Usable { record; base_path } ->
+            Some (From_persisted_default record, base_path)
+          | No_record | Stale _ -> None))
 
 let base_path_raw_opt () =
   match base_path_source_opt () with
@@ -505,14 +567,69 @@ let base_path_prod_guard path =
         else path
   end
 
+(* Two callers report this: [base_path] here and the workspace resolver in
+   lib/workspace. They used to carry the same sentence twice, and the sentence
+   named only the env var -- not --base-path, and not the recorded default that
+   `masc setup` now writes. *)
+let base_path_not_set_message () =
+  let stale_note =
+    match persisted_default_base_path () with
+    | Stale { record; recorded_path } ->
+      Printf.sprintf
+        " The recorded default %s in %s no longer holds a %s directory, so it was \
+         ignored."
+        recorded_path record Common.masc_dirname
+    | No_record | Usable _ -> ""
+  in
+  "MASC_BASE_PATH is not set. Pass --base-path <workspace>, or set \
+   MASC_BASE_PATH to the project root containing the "
+  ^ Common.masc_dirname
+  ^ "/ directory. Running `masc setup --base-path <workspace>` records that \
+     workspace as the default for later commands."
+  ^ stale_note
+
 (** Project base path. [MASC_BASE_PATH] is required. *)
 let base_path () =
   match base_path_opt () with
   | Some path -> base_path_prod_guard path
-  | None ->
-      raise (Config_error
-        "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
-         containing the .masc/ directory.")
+  | None -> raise (Config_error (base_path_not_set_message ()))
+
+(* Written after a command has actually used the workspace, never on the way
+   in: a path that failed to boot is not a default worth remembering. *)
+type record_outcome =
+  | Recorded of string
+  | No_record_location
+  | Record_failed of { record : string; reason : string }
+
+let record_default_base_path path =
+  match default_base_path_record_path_opt () with
+  | None -> No_record_location
+  | Some record ->
+    let normalized = normalize_masc_base_path_input path in
+    if normalized = ""
+    then Record_failed { record; reason = "the workspace path normalized to nothing" }
+    else (
+      try
+        (* ~/.config need not exist yet on a machine that has only just been
+           set up, and a single mkdir does not create the parent. *)
+        let rec make_dir dir =
+          if not (existing_dir dir) then (
+            let parent = Filename.dirname dir in
+            if parent <> dir then make_dir parent;
+            try Unix.mkdir dir 0o700 with
+            | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+        in
+        make_dir (Filename.dirname record);
+        let temp = record ^ ".partial" in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_creat; Open_trunc ] 0o600 temp
+          (fun channel -> Out_channel.output_string channel (normalized ^ "\n"));
+        Sys.rename temp record;
+        Recorded normalized
+      with
+      | Unix.Unix_error (error, _, _) ->
+        Record_failed { record; reason = Unix.error_message error }
+      | Sys_error reason -> Record_failed { record; reason })
 
 (** Resolve a configured path against the project base path. Relative
     paths are concatenated onto [base_path ()]; absolute paths are

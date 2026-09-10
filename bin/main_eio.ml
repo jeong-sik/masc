@@ -590,6 +590,19 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   Server_base_path_guard.exit_on_violation
     (Server_base_path_guard.enforce
        { resolved_base_path with normalized_base_path = canonical_base_path });
+  (* An explicit start is the operator naming this workspace, so it becomes the
+     default for later commands the same way `masc init` does. Only explicit
+     sources: re-recording what the record itself supplied is a no-op, and the
+     implicit default never reaches here. *)
+  (match resolved_base_path.resolution_source with
+   | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
+     (match Env_config.record_default_base_path canonical_base_path with
+      | Env_config.Recorded _ -> ()
+      | Env_config.No_record_location | Env_config.Record_failed _ ->
+        (* Not fatal, and not worth a line on every boot: the server is
+           starting on a path the operator just supplied. *)
+        ())
+   | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =
@@ -1294,6 +1307,24 @@ let init_cmd_exit base_path force skills_only =
   let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
     result.written result.skipped result.failed skills target_root;
+  (* A seeded workspace is the one thing a later bare `masc` needs to know
+     about, and until now nothing wrote it down: the operator had to re-supply
+     --base-path or MASC_BASE_PATH on every command. Recorded on success only,
+     and never fatal -- a workspace that seeded is worth more than a record of
+     it. *)
+  if result.failed = 0 then (
+    match Env_config.record_default_base_path base_path with
+    | Env_config.Recorded path ->
+      Printf.printf "default workspace recorded: %s\n" path
+    | Env_config.No_record_location ->
+      Printf.printf
+        "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; \
+         pass --base-path to later commands\n"
+    | Env_config.Record_failed { record; reason } ->
+      Printf.printf
+        "default workspace not recorded: could not write %s (%s); pass --base-path \
+         to later commands\n"
+        record reason);
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
@@ -1394,56 +1425,7 @@ let runtime_wizard_credential_key (provider : Runtime_schema.provider) =
             environment-variable keys"
            provider.id)
 
-let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
-    (provider : Runtime_schema.provider) =
-  let bindings =
-    List.filter
-      (fun (binding : Runtime_schema.binding) ->
-         binding.enabled && String.equal binding.provider_id provider.id)
-      cfg.bindings
-  in
-  match bindings with
-  | [] -> Error (Printf.sprintf "provider %s has no concrete runtime binding" provider.id)
-  | _ ->
-      (match List.filter (fun (binding : Runtime_schema.binding) -> binding.wizard_default) bindings with
-       | [ binding ] -> Ok binding
-       (* One enabled binding is the default by arithmetic: there is nothing
-          else the wizard could install, so requiring the operator to say so
-          rejects a config the server boots from (#27991, live glm-coding).
-          Two or more without a flag stays an error -- that one is a real
-          choice and guessing it would install a model nobody picked. *)
-       | [] when List.length bindings = 1 -> Ok (List.hd bindings)
-       | [] ->
-           (* Prefer the binding the config already runs by default: that is the
-              operator's own pick, not a guess, so a live config with several
-              bindings and one [runtime].default no longer fails the wizard.
-              Only when this provider does not own the default runtime is the
-              choice genuinely ambiguous, and then it stays an error the caller
-              skips rather than guessing a model nobody picked. *)
-           (match
-              (match cfg.default_runtime_id with
-               | None -> None
-               | Some runtime_id ->
-                   List.find_opt
-                     (fun (binding : Runtime_schema.binding) ->
-                        String.equal
-                          (Runtime_schema.binding_key binding)
-                          runtime_id)
-                     bindings)
-            with
-            | Some binding -> Ok binding
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
-                     provider.id (List.length bindings) provider.id))
-       | defaults ->
-           Error
-             (Printf.sprintf
-                "provider %s has %d install wizard default bindings; set wizard-default = true on exactly one [%s.<model>] binding"
-                provider.id
-                (List.length defaults)
-                provider.id))
+let runtime_wizard_binding_for_provider = Runtime_wizard_inventory.binding_for_provider
 
 let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
   match provider.transport with
@@ -1633,7 +1615,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
           print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
           Runtime_verification.exit_code result
          with Eio.Io _ | Unix.Unix_error _ | Sys_error _ ->
-           unavailable "client_unavailable" "The isolated verification session could not start or finish.")
+           unavailable "verification_session_failed" "The isolated verification session could not start or finish.")
 
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
@@ -2553,7 +2535,9 @@ let setup_validate_runtime base_path =
     with Env_config_core.Config_error message -> Error message
   in
   match loaded with
-  | Error message -> prerr_endline message; 1
+  | Error message ->
+    prerr_endline (Server_runtime_bootstrap.config_load_failure_diagnostic ~detail:message);
+    1
   | Ok (runtimes, default, assignments, _, lanes) ->
     let selected =
       Option.bind
@@ -2578,12 +2562,15 @@ let setup_validate_runtime base_path =
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
-let setup_cmd_exit base_path port no_tui =
+let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+    ~sandbox_profile ~microvm_backend
     ~initialize:(fun () -> init_cmd_exit base_path false false)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
-    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok None))
+    (* The image builder already takes a backend; setup passed None, which
+       means Docker, whatever profile imp was on. *)
+    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok microvm_backend))
     ~login:(fun () ->
       match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
@@ -2605,11 +2592,68 @@ let setup_preflight_cmd =
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
 
+(* cmdliner cannot fail a flag on the value of another flag, so the pairing
+   rule (a backend only means something under microvm) is checked here and
+   reported as a usage error rather than being silently ignored. *)
+let setup_sandbox_selection sandbox_profile microvm_backend =
+  match sandbox_profile, microvm_backend with
+  | None, Some _ ->
+    `Error
+      (false,
+       "--microvm-backend requires --sandbox-profile microvm")
+  | Some profile, backend ->
+    (match Keeper_sandbox_config.sandbox_profile_of_string profile with
+     | None ->
+       `Error
+         (false,
+          Printf.sprintf "--sandbox-profile takes one of: %s"
+            (String.concat ", " Keeper_sandbox_config.valid_sandbox_profile_strings))
+     | Some Keeper_sandbox_config.Micro_vm ->
+       (match backend with
+        | None -> `Ok (Some Keeper_sandbox_config.Micro_vm, None)
+        | Some raw ->
+          (match Keeper_microvm_backend.of_string raw with
+           | None ->
+             `Error
+               (false,
+                Printf.sprintf "--microvm-backend takes one of: %s"
+                  (String.concat ", " Keeper_microvm_backend.valid_strings))
+           | Some backend -> `Ok (Some Keeper_sandbox_config.Micro_vm, Some backend)))
+     | Some profile ->
+       (match backend with
+        | None -> `Ok (Some profile, None)
+        | Some _ ->
+          `Error (false, "--microvm-backend requires --sandbox-profile microvm")))
+  | None, None -> `Ok (None, None)
+
 let setup_cmd =
   let no_tui = Arg.(value & flag & info ["no-tui"]
     ~doc:"Prepare imp and leave the server running without opening the terminal UI.") in
-  Cmd.v (Cmd.info "setup" ~doc:"Prepare the default Docker sandbox, start imp, and open its workspace.")
-    Term.(const setup_cmd_exit $ base_path $ port $ no_tui)
+  let sandbox_profile =
+    let doc =
+      Printf.sprintf
+        "Sandbox imp runs its turns on (%s). Recorded in imp's keeper TOML, and          setup checks what that profile needs on this host. Omitted, setup uses          the profile imp already declares."
+        (String.concat ", " Keeper_sandbox_config.valid_sandbox_profile_strings)
+    in
+    Arg.(value & opt (some string) None & info [ "sandbox-profile" ] ~docv:"PROFILE" ~doc)
+  in
+  let microvm_backend =
+    let doc =
+      Printf.sprintf
+        "MicroVM runtime (%s), valid only with --sandbox-profile microvm."
+        (String.concat ", " Keeper_microvm_backend.valid_strings)
+    in
+    Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
+  in
+  let run base_path port no_tui sandbox_profile microvm_backend =
+    match setup_sandbox_selection sandbox_profile microvm_backend with
+    | `Error _ as error -> error
+    | `Ok (profile, backend) -> `Ok (setup_cmd_exit base_path port no_tui profile backend)
+  in
+  Cmd.v
+    (Cmd.info "setup"
+       ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
+    Term.(ret (const run $ base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling

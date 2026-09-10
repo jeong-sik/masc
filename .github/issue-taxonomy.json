@@ -1,6 +1,14 @@
 {
   "$comment": "이슈 분류 어휘의 SSOT. 라벨과 게이트는 전부 이 파일에서 파생된다. 여기 없는 값은 존재하지 않는다.",
   "declaration_block_language": "masc-triage",
+  "retired_labels": {
+    "area/gates": "SSOT v2 has no gates axis value; a gate defect is area/turn or area/verification by what it gates.",
+    "area/tui": "SSOT v2 folded the TUI into area/dashboard: one operator surface, two renderers.",
+    "area/typed": "Not a place. A typing defect belongs to the area it is in, with root/variant.",
+    "impact/no-op": "SSOT v2 has impact/internal for a change nobody outside the repo sees.",
+    "root/budget": "SSOT v2 has no budget root; a budget miss is root/boundary or root/silent by how it fails.",
+    "root/process": "Not a code root. A process gap is a docs or runbook change, not an issue root."
+  },
   "axes": {
     "kind": {
       "values": {

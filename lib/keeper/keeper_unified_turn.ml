@@ -217,7 +217,8 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
-         | Keeper_event_queue.Composition_completed _ -> false)
+         | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Task_outcome _ -> false)
       stimuli
   with
   | None -> None
@@ -780,7 +781,8 @@ let run_keeper_cycle
                  | Error (Keeper_playground_checkouts.Root_missing _) -> []
                  | Error
                      ((Keeper_playground_checkouts.Root_not_directory _
-                      | Keeper_playground_checkouts.Root_unreadable _) as
+                      | Keeper_playground_checkouts.Root_unreadable _
+                      | Keeper_playground_checkouts.Root_probe_unreachable _) as
                       scan_error) ->
                    Log.Keeper.warn
                      "repository freshness scan unavailable keeper=%s: %s"

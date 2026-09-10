@@ -63,7 +63,8 @@ let rec literal_words = function
   | [] -> Some []
   | Shell_ir.Lit (text, _) :: rest ->
     Option.bind (literal_words rest) (fun rest -> Some (text :: rest))
-  | Shell_ir.Var _ :: _ | Shell_ir.Concat _ :: _ -> None
+  | Shell_ir.Var _ :: _ | Shell_ir.Concat _ :: _ | Shell_ir.Subst _ :: _ ->
+    None
 
 (* Positional words land on the schema's required parameters, in the order
    the schema states them.  A schema with no [required] key states zero
@@ -181,6 +182,11 @@ let rec contains_masc (ir : Shell_ir.t) =
   match ir with
   | Shell_ir.Simple simple ->
     String.equal (Exec_program.to_string simple.Shell_ir.bin) reserved_command
+    (* A substitution's child stages are command positions too: [$(masc …)]
+       names the reserved word exactly as a bare stage does. *)
+    || List.exists contains_masc
+         (List.concat_map Shell_ir.subst_children_of_arg
+            (simple.Shell_ir.args @ List.map snd simple.Shell_ir.env))
   | Shell_ir.Pipeline stages -> List.exists contains_masc stages
   | Shell_ir.Sequence { head; tail } ->
     contains_masc head
@@ -229,53 +235,91 @@ let rec rewrite ~(lookup : string -> Keeper_tool_descriptor.t option)
     in
     collect [] rewrites
   | Shell_ir.Simple simple -> (
-    if
-      not
-        (String.equal
-           (Exec_program.to_string simple.Shell_ir.bin)
-           reserved_command)
-    then Ok ir
-    else if simple.Shell_ir.env <> []
-    then Error "a masc stage carries no environment prefix; pass tool arguments as words"
-    else if simple.Shell_ir.redirects <> []
-    then Error "a masc stage takes no redirects; the tool answers with text"
+    (* The children check runs before the recursion so a [masc] anywhere
+       inside a substitution answers with the substitution refusal, not the
+       pipeline refusal a nested child shape might otherwise surface. *)
+    let children =
+      List.concat_map Shell_ir.subst_children_of_arg
+        (simple.Shell_ir.args @ List.map snd simple.Shell_ir.env)
+    in
+    if List.exists contains_masc children
+    then
+      Error
+        "a masc stage cannot join a command substitution yet; call the tool \
+         directly and pass the value as a literal word"
     else
-      match literal_words simple.Shell_ir.args with
-      | None ->
-        Error "a masc stage's words must be literal; expansions stay on the direct tool call"
-      | Some words -> (
-        let spoken = if words = [] then "(no arguments)" else String.concat " " words in
-        match split_words words with
+      let* args = rewrite_args ~lookup ~dispatch simple.Shell_ir.args in
+      let names, values = List.split simple.Shell_ir.env in
+      let* values = rewrite_args ~lookup ~dispatch values in
+      let simple =
+        { simple with Shell_ir.args; env = List.combine names values }
+      in
+      if
+        not
+          (String.equal
+             (Exec_program.to_string simple.Shell_ir.bin)
+             reserved_command)
+      then Ok (Shell_ir.Simple simple)
+      else if simple.Shell_ir.env <> []
+      then Error "a masc stage carries no environment prefix; pass tool arguments as words"
+      else if simple.Shell_ir.redirects <> []
+      then Error "a masc stage takes no redirects; the tool answers with text"
+      else
+        match literal_words simple.Shell_ir.args with
         | None ->
-          Error
-            (Printf.sprintf
-               "no tool on this turn's shell surface answers %s; each tool declares its own path"
-               spoken)
-        | Some (tool_name, argument_words) -> (
-          match lookup tool_name with
+          Error "a masc stage's words must be literal; expansions stay on the direct tool call"
+        | Some words -> (
+          let spoken = if words = [] then "(no arguments)" else String.concat " " words in
+          match split_words words with
           | None ->
             Error
               (Printf.sprintf
-                 "%s declares a shell path but has no descriptor this turn"
-                 tool_name)
-          | Some descriptor ->
-            (* A shell path on the Execute handler itself would recurse:
-               rewrite → dispatch → Execute → rewrite.  No such
-               declaration exists today; this guard keeps it a named
-               refusal instead of a loop the day one appears. *)
-            if
-              descriptor.Keeper_tool_descriptor.runtime_handler
-              = Keeper_tool_descriptor.Tool_execute
-            then
+                 "no tool on this turn's shell surface answers %s; each tool declares its own path"
+                 spoken)
+          | Some (tool_name, argument_words) -> (
+            match lookup tool_name with
+            | None ->
               Error
                 (Printf.sprintf
-                   "%s runs commands, so it cannot be a shell command itself"
+                   "%s declares a shell path but has no descriptor this turn"
                    tool_name)
-            else
-              let* args_json = args_json_of_words ~descriptor argument_words in
-              let tool_caller = caller ~dispatch ~descriptor args_json in
-              Ok
-                (Shell_ir.Simple
-                   { simple with
-                     Shell_ir.sandbox = Sandbox_target.delegated ~caller:tool_caller ()
-                   }))))
+            | Some descriptor ->
+              (* A shell path on the Execute handler itself would recurse:
+                 rewrite → dispatch → Execute → rewrite.  No such
+                 declaration exists today; this guard keeps it a named
+                 refusal instead of a loop the day one appears. *)
+              if
+                descriptor.Keeper_tool_descriptor.runtime_handler
+                = Keeper_tool_descriptor.Tool_execute
+              then
+                Error
+                  (Printf.sprintf
+                     "%s runs commands, so it cannot be a shell command itself"
+                     tool_name)
+              else
+                let* args_json = args_json_of_words ~descriptor argument_words in
+                let tool_caller = caller ~dispatch ~descriptor args_json in
+                Ok
+                  (Shell_ir.Simple
+                     { simple with
+                       Shell_ir.sandbox = Sandbox_target.delegated ~caller:tool_caller ()
+                     }))))
+
+and rewrite_arg ~lookup ~dispatch (arg : Shell_ir.arg)
+  : (Shell_ir.arg, string) result =
+  match arg with
+  | Shell_ir.Subst child ->
+    let* child = rewrite ~lookup ~dispatch child in
+    Ok (Shell_ir.Subst child)
+  | Shell_ir.Concat pieces ->
+    let* pieces = rewrite_args ~lookup ~dispatch pieces in
+    Ok (Shell_ir.Concat pieces)
+  | Shell_ir.Lit _ | Shell_ir.Var _ -> Ok arg
+
+and rewrite_args ~lookup ~dispatch args =
+  match args with
+  | [] -> Ok []
+  | arg :: rest ->
+    let* arg = rewrite_arg ~lookup ~dispatch arg in
+    let* rest = rewrite_args ~lookup ~dispatch rest in
+    Ok (arg :: rest)

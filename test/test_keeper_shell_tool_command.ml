@@ -96,5 +96,57 @@ let () =
    | Ok _ -> ()
    | Error _ -> assert false)
 
+(* A substitution's child stages are command positions too: [$(masc …)]
+   names the reserved word, and the refusal names the shape (RFC
+   shell-ir-typed-command-substitution, plan risk 3). *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let module SI = Masc_exec.Shell_ir in
+  let simple name args =
+    match Masc_exec.Exec_program.of_string name with
+    | Error (`Unknown detail) -> failwith ("test fixture: " ^ detail)
+    | Ok program ->
+      SI.Simple
+        { bin = program
+        ; args =
+            List.map
+              (fun a -> SI.Lit (a, SI.default_meta))
+              args
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Masc_exec.Sandbox_target.host ()
+        }
+  in
+  let with_subst_child child =
+    match simple "echo" [] with
+    | SI.Simple s -> SI.Simple { s with SI.args = [ SI.Subst child ] }
+    | ir -> ir
+  in
+  let masc_in_subst =
+    with_subst_child (simple "masc" [ "board"; "list" ])
+  in
+  (* refuse_reserved_command sees through the word. *)
+  (match K.refuse_reserved_command masc_in_subst with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* rewrite answers with the substitution refusal. *)
+  (match
+     K.rewrite
+       ~lookup:(fun _ -> None)
+       ~dispatch:(fun ~descriptor:_ ~args:_ -> None)
+       masc_in_subst
+   with
+   | Error message ->
+     let mentions sub =
+       let n = String.length message and m = String.length sub in
+       let rec go i =
+         i + m <= n && (String.sub message i m = sub || go (i + 1))
+       in
+       go 0
+     in
+     assert (mentions "command substitution")
+   | Ok _ -> assert false)
+
 let () =
   print_endline "[test_keeper_shell_tool_command] all tests passed"

@@ -1,0 +1,25 @@
+{
+  "pending": {
+    "counter": 13,
+    "tool": "masc_keeper_msg",
+    "arguments_sha256": "e9e1fa5dade484e4a47137f4cf5276ecd7064461544eb84c1d9ae67fa138077d",
+    "submitted_at": 1788999315.4986858,
+    "remote_effect": "unconfirmed"
+  },
+  "observed_http_error": 404,
+  "independent_session_get": {
+    "http_status": 404,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"SSE registration failed: unknown session mcp_VUlslLR_Fjh_40LO\"}}"
+  },
+  "operation_rows_after_refusal": [
+    [
+      "kmsg-96fbfa3ff1f7b5a11207b554a6bd0a01",
+      "failed"
+    ],
+    [
+      "kmsg-3b0d820c21168eca6bd64774fb15f02b",
+      "succeeded"
+    ]
+  ],
+  "disposition": "no new operation admitted; refresh MCP session before resubmission"
+}

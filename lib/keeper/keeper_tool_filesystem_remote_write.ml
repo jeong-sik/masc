@@ -145,7 +145,12 @@ let handle_with_endpoint
             with
             | Error message -> failure ~class_:Tool_result.Policy_rejection ~target message
             | Ok remote_path ->
-              let write ~content_mode ~mode_label ~body ~evidence =
+              (* [extra_fields] carries the patch operation fields the Edit
+                 output schema advertises — the endpoint lane emits them from
+                 the same apply_patch application the evidence comes from, so
+                 an [/occurrences] reference is answered on both lanes, not
+                 only on the host one. *)
+              let write ~content_mode ~mode_label ~body ~extra_fields ~evidence =
                 let status, _stdout, stderr =
                   Masc_exec.Sandbox_target.status_tuple
                     (run ~endpoint ~cwd:keeper_root
@@ -160,9 +165,10 @@ let handle_with_endpoint
                   let execution =
                     Keeper_tool_execution.success_data
                       (success_payload ~target ~meta
-                         [ "mode", `String mode_label
-                         ; "bytes_written", `Int (String.length body)
-                         ])
+                         ([ "mode", `String mode_label
+                          ; "bytes_written", `Int (String.length body)
+                          ]
+                         @ extra_fields))
                   in
                   (match evidence with
                    | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
@@ -181,10 +187,11 @@ let handle_with_endpoint
                   match mode with
                   | Overwrite ->
                     write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:content
+                      ~extra_fields:[]
                       ~evidence:(Some (Keeper_file_change_evidence.written content))
                   | Append ->
                     write ~content_mode:Append_tail ~mode_label:"append" ~body:content
-                      ~evidence:None
+                      ~extra_fields:[] ~evidence:None
                   | Patch ->
                     let old_string = Safe_ops.json_string ~default:"" "old_string" args in
                     let new_string = Safe_ops.json_string ~default:"" "new_string" args in
@@ -211,6 +218,10 @@ let handle_with_endpoint
                           | Ok application ->
                             write ~content_mode:Replace_whole ~mode_label:"patch"
                               ~body:application.updated
+                              ~extra_fields:
+                                [ "occurrences", `Int application.occurrence_count
+                                ; "replace_all", `Bool replace_all
+                                ]
                               ~evidence:(Some (Keeper_tool_patch.file_change_evidence application)))
                        | Unix.WEXITED code when code = patch_source_missing_exit ->
                          failure ~class_:Tool_result.Workflow_rejection ~target

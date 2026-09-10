@@ -279,13 +279,19 @@ let keeper_stage_timing_ring_size =
 
 (* Whether identity scalars (a `user:` login in a GitHub hosts.yml) mined
    from keeper secret files are masked as [REDACTED] in chat text and tool
-   output. Credential-shaped values (tokens, passwords) are always masked;
-   this switch only governs the identity half, so turning it off shows
-   account names without unmasking credentials. *)
+   output. Credential-shaped values are always masked
+   ([Keeper_secret_redaction.credential_shaped_key]); this switch only governs
+   the identity half.
+
+   Off by default: the scalar miner reads every `key: value` line of a secret
+   file, so with it on a GitHub account name -- public in every repo URL --
+   came back as [REDACTED] throughout chat prose (2026-08-29, keeper
+   edgar.a.poe), which is what the switch was added for. Operators who want
+   account names masked as well turn it on. *)
 let keeper_chat_redact_identity_scalars =
   register_bool
     ~key:"keeper.chat_redact_identity_scalars"
-    ~default:(fun () -> true)
+    ~default:(fun () -> false)
     ~meta:{ description = "secret 파일의 계정명(user 등) 값도 채팅·도구 출력에서 [REDACTED] 처리 (토큰류는 항상 처리)";
             value_type = "bool";
             min_value = None; max_value = None; choices = [] }
@@ -388,6 +394,9 @@ let surfaces =
       param_keys = [
         "keeper.turn.temperature";
         "keeper.turn.batch_limit";
+        "keeper.turn.enable_thinking";
+        "keeper.turn.max_tool_rounds";
+        "keeper.tool_search.carry_window";
       ];
     };
     {
@@ -396,6 +405,31 @@ let surfaces =
       param_keys = [
         "keeper.proactive.warmup_sec";
         "keeper.proactive.stagger_step_sec";
+        "keeper.bootstrap.retry_interval_sec";
+      ];
+    };
+    {
+      id = "keeper_world_observation";
+      description =
+        "What a keeper turn is told about the world — board posts, fleet \
+         messages, its own past tool calls, and the briefing's share of the \
+         request body";
+      param_keys = [
+        "keeper.board.own_recent.max";
+        "keeper.fleet.messages.max";
+        "keeper.own_actions.turns.max";
+        "keeper.context.briefing.share_percent";
+      ];
+    };
+    {
+      id = "keeper_hitl";
+      description =
+        "What the HITL judgment bundle carries and how many judgments a keeper \
+         runs at once";
+      param_keys = [
+        "keeper.hitl.thinking_blocks";
+        "keeper.hitl.observation_stderr_bytes";
+        "keeper.hitl.max_concurrent_per_keeper";
       ];
     };
     {

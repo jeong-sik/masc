@@ -24,7 +24,7 @@ let bot_token_opt () = Env_config_discord.bot_token_opt ()
    "quiet, mention-triggered bot" baseline per RFC-0203. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-(* The env > TOML walk moved to [Connector_trigger_policy]: this module and the
+(* The TOML walk lives in [Connector_trigger_policy]: this module and the
    Slack sibling each carried a byte-for-byte copy of it. A missing file or
    missing key is "unset" (default applies); an unreadable file, malformed
    TOML, wrong field type, or a value the strict grammar rejects is an explicit
@@ -41,7 +41,6 @@ module Policy_load = Connector_trigger_policy.Make (struct
   (* [Gw] is the client here, not the state machine: the grammar lives with
      the state module the client re-exports its policy type from. *)
   let parse = Discord_gateway_state.parse_trigger_policy
-  let env = Env_config_discord.trigger_policy_opt
   let default = default_trigger_policy
 end)
 
@@ -54,7 +53,6 @@ type trigger_policy_load_error = Connector_trigger_policy.load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
-  | Trigger_policy_env_invalid of { detail : string }
 
 let trigger_policy_load_error_to_string = function
   | Runtime_toml_unreadable { path; detail } ->
@@ -63,20 +61,17 @@ let trigger_policy_load_error_to_string = function
     Printf.sprintf "invalid TOML in %s: %s" path detail
   | Trigger_policy_invalid { path; detail } ->
     Printf.sprintf "invalid discord.trigger_policy in %s: %s" path detail
-  | Trigger_policy_env_invalid { detail } ->
-    Printf.sprintf "invalid MASC_DISCORD_TRIGGER_POLICY: %s" detail
 ;;
 
 let load_trigger_policy_from_toml ~path = Policy_load.load_from_toml ~path
 
-(* Env > TOML > default — the precedence config/runtime.toml documents for this
-   key. [Env_config_discord.trigger_policy_opt] reports a blank value as unset, so
-   a blank environment variable falls through to the TOML plane. *)
+(* runtime.toml > default — the precedence config/runtime.toml documents for
+   this key. A missing file, a missing key and a blank value all mean unset. *)
 let resolved_trigger_policy () = Policy_load.resolve ()
 
 (* What the gateway judges by right now: the operator's override when the
-   params surface holds one, otherwise what env and runtime.toml said at boot.
-   Read per step by the client, so a change lands on the next message. *)
+   params surface holds one, otherwise what runtime.toml said at boot. Read
+   per step by the client, so a change lands on the next message. *)
 let current_trigger_policy () =
   Runtime_params.get Runtime_settings.discord_trigger_policy
 ;;

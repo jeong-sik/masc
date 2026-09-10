@@ -85,23 +85,29 @@ let meta_has_unquoted_glob (meta : Masc_exec.Shell_ir.arg_meta) =
   meta.glob && not meta.quoted
 ;;
 
+(* The substituted text becomes one literal argv element; this IR has no
+   re-split or glob stage after substitution, so the result itself is not a
+   glob (RFC shell-ir-typed-command-substitution §2.3 item 3 — the same
+   argument as param-expansion RFC §6). The child IR, though, is dispatched
+   as a real command under this same policy: an unquoted glob inside a
+   substitution child must answer like a direct one does, so the child's
+   own args are traversed. *)
 let rec shell_ir_arg_has_unquoted_glob = function
   | Masc_exec.Shell_ir.Lit (_, meta)
   | Masc_exec.Shell_ir.Var (_, meta) -> meta_has_unquoted_glob meta
+  | Masc_exec.Shell_ir.Subst child -> shell_ir_has_unquoted_glob child
   | Masc_exec.Shell_ir.Concat parts ->
     List.exists shell_ir_arg_has_unquoted_glob parts
-;;
 
-let simple_has_unquoted_glob (simple : Masc_exec.Shell_ir.simple) =
+and simple_has_unquoted_glob (simple : Masc_exec.Shell_ir.simple) =
   List.exists
     shell_ir_arg_has_unquoted_glob
     simple.Masc_exec.Shell_ir.args
   || List.exists
        (fun (_, arg) -> shell_ir_arg_has_unquoted_glob arg)
        simple.Masc_exec.Shell_ir.env
-;;
 
-let rec shell_ir_has_unquoted_glob = function
+and shell_ir_has_unquoted_glob = function
   | Masc_exec.Shell_ir.Simple simple -> simple_has_unquoted_glob simple
   | Masc_exec.Shell_ir.Pipeline stages ->
     List.exists shell_ir_has_unquoted_glob stages
@@ -129,6 +135,7 @@ let block_reason_of_exec_too_complex
   | Unsupported_nested_pipeline
   | Unsupported_construct
       ( `Cmd_subst
+      | `Shell_builtin _
       | `Subshell
       | `Arith_expansion
       | `Param_expansion
@@ -301,12 +308,22 @@ let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
           Masc_exec.Path_scope.raw cwd
           |> validate_path_value ~requires_existing_dir
       in
-      let validate_simple (simple : Masc_exec.Shell_ir.simple) =
+      let rec validate_simple (simple : Masc_exec.Shell_ir.simple) =
         match validate_cwd simple.cwd with
         | Error _ as err -> err
-        | Ok () -> validate_redirects simple.redirects
-      in
-      let rec validate_parsed_shell_ir = function
+        | Ok () ->
+          (match validate_redirects simple.redirects with
+           | Error _ as err -> err
+           | Ok () ->
+             (* A substitution's child stages carry their own cwd and
+                redirects — exactly what the jail exists to validate, since
+                [Exec_dispatch.eval_substitutions] dispatches them. *)
+             validate_each
+               (List.concat_map
+                  Masc_exec.Shell_ir.subst_children_of_arg
+                  (simple.Masc_exec.Shell_ir.args
+                   @ List.map snd simple.Masc_exec.Shell_ir.env)))
+      and validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
         | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
         | Masc_exec.Shell_ir.Sequence { head; tail } ->

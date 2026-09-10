@@ -92,7 +92,6 @@ val finalize_measured
   -> (t, finalization_error) result
 
 val fingerprint : t -> fingerprint
-val fingerprint_to_string : fingerprint -> string
 val response_format : t -> Types.response_format
 val request_body_sha256 : t -> string
 val request_url : t -> string

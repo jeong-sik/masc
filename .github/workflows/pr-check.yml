@@ -192,9 +192,25 @@ jobs:
         # suite that left the group without leaving coverage_test_names.txt is
         # caught on its own pull request instead of on the next nightly
         # (#33922 was caught by #34367 a week later, #34392 the day after).
+        #
+        # The node targets are the five browser-parity rules: each asserts the
+        # extension and the OCaml driver carry the same injection script, a
+        # match kept by hand across background.js and lib/browser_*.ml. None of
+        # them had ever run in CI -- @check links test/ without running it, the
+        # targeted runner builds a <name>.exe these rules do not have, and the
+        # edited-test selector reads only test/test_*.ml (#34837). PR #34831
+        # edited three of those sources and both node suites and the log shows
+        # only the OCaml suite beside them. 3.3s for all five, node startup
+        # included.
+        #
+        # Computed rather than listed here so a sixth rule joins by existing;
+        # the reader exits non-zero when it finds none, because a build line
+        # that expands to nothing reports success.
         run: |
           set -euo pipefail
-          dune build @check @test/stanzas/runtest
+          node_targets=$(python3 scripts/ci/list-node-alias-targets.py)
+          printf 'browser parity suites:\n%s\n' "${node_targets}"
+          dune build @check @test/stanzas/runtest ${node_targets}
 
       # #32511 dropped the nine-job lane and took this ratchet with it: the
       # script still has a GITHUB_ACTIONS branch, and between 2026-09-02 and
@@ -236,14 +252,24 @@ jobs:
       # spend it. It runs here rather than in a job of its own because the
       # build cache it needs is the one the step above just filled.
       #
-      # continue-on-error until main's red count is known. Gating on an
-      # unknown number stops pull requests that changed nothing to do with it.
+      # Blocking as of 2026-09-10. It was advisory "until main's red count is
+      # known", because gating on an unknown number stops pull requests that
+      # changed nothing to do with it. That number is now one: the 09-09
+      # nightly named eight suites failing outside test/ci-known-failures.txt
+      # and all eight are answered (#33782), leaving the single listed row.
+      # The script skips whatever that file lists, so a failure here is a
+      # suite that is supposed to pass and did not.
+      #
+      # What advisory cost, measured on the pull requests themselves: #34981
+      # and #34983 each ran test_keeper_tool_schema_bytes through the
+      # config/tools mapping, each read "over the 98940 ceiling by 942" and
+      # "by 1516" in this step's own log, and both merged green. #35004
+      # repaired the ceiling the next morning. The trigger worked; nothing
+      # was answerable for the verdict.
       - name: Run the tests this pull request edits
-        continue-on-error: true
-        # continue-on-error covers a failing step, not a job the runner
-        # cancelled: timeout-minutes above ends the job and reports it
-        # failed whatever a step says. So this bounds itself, and the script
-        # bounds each suite it runs on top of that.
+        # Bounded twice, because a hung suite must not read as a break: the
+        # deadline below ends the step, and the script gives each suite its
+        # own timeout on top of that.
         timeout-minutes: 12
         env:
           GH_TOKEN: ${{ github.token }}
@@ -256,6 +282,69 @@ jobs:
   # dashboard/ ships a `typecheck` script and no lane calls it.
   #
   # ci.yml's header records that its dashboard job was folded away on
+  # The dev profile builds ppx inline tests, the release profile drops them, so
+  # a value only a let%test reaches is used in one and unused in the other --
+  # warning 32, and the root dune makes it an error in both profiles. The only
+  # workflow that built with the release profile was browser-host-proof.yml,
+  # behind a paths: filter and over two executables' dependency graphs, so the
+  # answer arrived days late and only when a pull request happened to touch
+  # those paths: slot_scheduler.available and in_use (#34848) and
+  # discovery.discovered_endpoint_contexts (#34861) reached main that way, and
+  # were found together by an unrelated change (#34876 repairs them, #34878
+  # asks for this).
+  #
+  # Its own job rather than a step in the one above, because it is a second
+  # full compile: as a step it would double that job's six minutes on the
+  # critical path, and as a job it runs beside it. The switch setup is the same
+  # composite actions, so the duplication is five lines.
+  release-check:
+    name: dune build --profile release @check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Free disk space
+        # The opam switch plus a second _build profile does not fit beside the
+        # preinstalled Android SDK, .NET, GHC and CodeQL bundle (#22954).
+        run: |
+          set -euo pipefail
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+
+      - name: Build
+        env:
+          DUNE_JOBS: "4"
+        # --profile release rather than --release: the profile is what drops
+        # inline tests and what the root dune names its flags for, and
+        # --release carries a set of unrelated defaults with it.
+        #
+        # NO continue-on-error: an unused value is deterministic.
+        run: |
+          set -euo pipefail
+          dune build --profile release @check
+
   # 2026-09-02, and pr-check.yml never had one, so nothing type-checks the
   # 697 test files and 9445 tests under dashboard/. What that cost, measured
   # on 2026-09-06: #33454 left two TS2352 errors on main and they sat a full
@@ -292,6 +381,24 @@ jobs:
         # NO continue-on-error: main is green here once #33548 lands, and a
         # type error is deterministic. Do not merge this before that one.
         run: pnpm typecheck
+
+      - name: Run the dashboard tests that read backend source
+        # These suites assert that a TypeScript vocabulary still matches the
+        # OCaml that produces it -- the SSE event union, turn outcomes, keeper
+        # attention reasons, the lane registry fields, lifecycle events, the
+        # TUI answering glow. Nothing else selects them: a backend token rename
+        # touches no file under dashboard/, and the dashboard suite as a whole
+        # is not in CI (#35032). That is how `keepalive_stopped` reached main
+        # with no label on the dashboard side (#35031).
+        #
+        # The list is computed, not kept here, so a seventh such test joins the
+        # lane by existing. 57 tests, ~4s locally.
+        run: |
+          set -euo pipefail
+          coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
+          printf 'backend-coupled dashboard suites:\n%s\n' "${coupled}"
+          cd dashboard
+          pnpm exec vitest run ${coupled}
 
       - name: Build browser preview
         working-directory: dashboard

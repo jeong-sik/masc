@@ -464,3 +464,30 @@ id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
 provider_ref = "ollama_cloud"
 model_id = "deepseek-v4-flash"
 enable_thinking = false
+
+# Every runtime the install wizard can pick needs a target row here, because
+# `runtime-default-set --setup-lanes` writes the chosen runtime id into the
+# exact-output lanes' `slots`, and those admit against this catalog. A runtime
+# binding in runtime.toml is not an Agent Core target declaration — the setup
+# script writes both halves for the runtimes it creates (install-runtime-setup.py
+# `render`), and these three rows are the same pair for the runtimes that ship
+# in the seed. Without them, choosing the wizard's own default left the
+# mandatory lanes with no admitted target and the server refused to boot.
+[[targets]]
+id = "ollama.gemma4-26b-a4b-qat"
+provider_ref = "ollama"
+model_id = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+
+[[targets]]
+id = "ollama_cloud.ollama-cloud-glm-5-3-flash"
+provider_ref = "ollama_cloud"
+model_id = "glm-5.3-flash"
+
+# Same model and the same reason for enable_thinking as the ollama_cloud rows
+# above: deepseek-v4-flash thinks by default, and the answer then lands in the
+# thinking field with content empty.
+[[targets]]
+id = "deepseek.deepseek-v4-flash"
+provider_ref = "deepseek"
+model_id = "deepseek-v4-flash"
+enable_thinking = false

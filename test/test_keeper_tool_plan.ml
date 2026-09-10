@@ -715,6 +715,69 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
   | Error _ | Ok _ -> fail "empty plan was accepted")
 ;;
 
+let test_write_edit_output_schemas_are_split_by_tool () =
+  (* PR #34928 review: Write and Edit shared one output schema, so a Write
+     node referencing [/occurrences] passed plan-create and its consumer
+     failed only after the file was already written — Write is content-only
+     and never emits the patch fields. Edit owns them (and emits them on
+     both lanes); the insert fields belong to no tool's reachable input and
+     are advertised by none. *)
+  let consumer_for ~id ~source pointer_path =
+    node
+      ~id
+      ~tool_name:"Grep"
+      (object_template
+         [ "pattern", Plan.Json_template.literal (`String "probe")
+         ; ( "path"
+           , Plan.Json_template.output
+               ~node_id:(node_id source)
+               ~pointer:(pointer pointer_path) )
+         ])
+  in
+  let write_source = node ~id:"write-src" ~tool_name:"Write" literal_object in
+  (match
+     Plan.create
+       ~descriptors:(descriptors ())
+       [ write_source; consumer_for ~id:"w-occ" ~source:"write-src" "/occurrences" ]
+   with
+   | Error (Plan.Invalid_output_pointer { pointer = bad; _ })
+     when String.equal (Plan.Json_pointer.to_string bad) "/occurrences" -> ()
+   | Error _ | Ok _ ->
+     fail "Write node referencing /occurrences must not pass plan-create");
+  (match
+     Plan.create
+       ~descriptors:(descriptors ())
+       [ write_source; consumer_for ~id:"w-ins" ~source:"write-src" "/inserted" ]
+   with
+   | Error (Plan.Invalid_output_pointer _) -> ()
+   | Error _ | Ok _ ->
+     fail "Write node referencing /inserted must not pass plan-create");
+  let edit_source = node ~id:"edit-src" ~tool_name:"Edit" literal_object in
+  (match
+     Plan.create
+       ~descriptors:(descriptors ())
+       [ edit_source; consumer_for ~id:"e-occ" ~source:"edit-src" "/occurrences" ]
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "Edit node referencing /occurrences must pass plan-create");
+  (match
+     Plan.create
+       ~descriptors:(descriptors ())
+       [ edit_source; consumer_for ~id:"e-rall" ~source:"edit-src" "/replace_all" ]
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "Edit node referencing /replace_all must pass plan-create");
+  match
+    Plan.create
+      ~descriptors:(descriptors ())
+      [ edit_source; consumer_for ~id:"e-ins" ~source:"edit-src" "/inserted" ]
+  with
+  | Error (Plan.Invalid_output_pointer _) -> ()
+  | Error _ | Ok _ ->
+    fail "Edit node referencing /inserted must not pass plan-create — no \
+          reachable input emits it"
+;;
+
 let test_plan_rejects_unsupported_output_schema_keywords () =
   let enum_schema =
     `Assoc [ "type", `String "string"; "enum", `List [ `String "ok" ] ]
@@ -2568,6 +2631,10 @@ let () =
             "unsupported output schema keywords"
             `Quick
             test_plan_rejects_unsupported_output_schema_keywords
+        ; test_case
+            "Write and Edit output schemas are split by tool"
+            `Quick
+            test_write_edit_output_schemas_are_split_by_tool
         ; test_case "nullable lane output stays strict" `Quick
             test_nullable_lane_output_keeps_type_and_field_validation
         ; test_case "nullable container references and contracts" `Quick

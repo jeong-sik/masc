@@ -2,11 +2,11 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.35.2 설치 계약**입니다. 태그와 자산 제공 여부는
+이 문서는 **0.35.3 설치 계약**입니다. 태그와 자산 제공 여부는
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-아래 다운로드 명령은 `v0.35.2`과 같은 버전의 설치기를 선택합니다.
+아래 다운로드 명령은 `v0.35.3`과 같은 버전의 설치기를 선택합니다.
 
-0.35.1 설치기를 사용 중이라면 해당 태그의 문서를 참고하세요. 다중 선택은 0.35.2부터 지원합니다.
+0.35.2 설치기를 사용 중이라면 해당 태그의 문서를 참고하세요. 다중 선택은 0.35.2부터 지원합니다.
 
 ## 플랫폼과 준비물
 
@@ -45,7 +45,7 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 ## 설치
 
 ```bash
-TAG=v0.35.2
+TAG=v0.35.3
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -118,7 +118,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.2 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.3 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
@@ -151,9 +151,9 @@ Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실�
 CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를 설치하거나 로그인하지
 않습니다. **Configure later**로 미룰 수 있고 imp는 자동으로 시작하지 않습니다.
 
-## `imp`와 첫 대화 (0.35.2)
+## `imp`와 첫 대화 (0.35.3)
 
-이 경로는 `masc setup`이 포함된 **0.35.2 설치 계약**입니다. 다운로드 전에
+이 경로는 `masc setup`이 포함된 **0.35.3 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
 1. 모델 선택 화면을 열기 전에 보유한 런타임을 준비합니다. Claude Code·Codex는
@@ -368,7 +368,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.35.2` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.3` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

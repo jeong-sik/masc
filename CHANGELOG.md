@@ -1,6 +1,31 @@
 # Changelog
 
 
+## [0.35.3] - 2026-09-10
+
+### Installation
+
+- Boot a fresh install on the connection the wizard preselects. Choosing it left the exact-output lanes with no catalog target, and the server refused to start.
+- Finish installing over an existing workspace when reselecting a connection or resetting configuration. The installer aborted at that point on macOS's own bash.
+- Say which client problem stopped a model verification: no sign-in, a client that would not start, or an invalid binding. All three read as one message before, and the client's own account of what it looked for is now shown.
+
+### Keeper and runtime
+
+- Declare the structured output of Read, Grep, Write and Edit as types rather than free-form text.
+- Name the wall-clock escape out of a turn that is waiting on a tool result.
+- Show Keeper identity values by default; credential markers keep their own boundary.
+
+### Shell execution
+
+- Run `$( )` command substitution. Its result is one argv element and is never re-split.
+- Refuse the `eval`, `source` and `.` builtins by name.
+
+### Terminal UI
+
+- Group the params screen by the surface catalog the registry already declares.
+- Draw surface frames in the spectator view.
+- Keep the TITLE columns aligned when a goal phase is shown.
+
 ## [0.35.2] - 2026-09-10
 
 ### Installation and model connections

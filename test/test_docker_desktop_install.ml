@@ -15,7 +15,9 @@ let platform ?(signature=true) ?(detach=true) ?(on_mount=(fun _ -> ())) calls ar
   match argv with
   | ["/usr/bin/hdiutil";"attach";"-readonly";"-nobrowse";"-mountpoint";mount;image] ->
     on_mount image;
-    Fs_compat.mkdir_p (Filename.concat mount "Docker.app/Contents/MacOS"); Ok ""
+    Fs_compat.mkdir_p (Filename.concat mount "Docker.app/Contents/MacOS");
+    Out_channel.with_open_bin (Filename.concat mount "Docker.app/Contents/MacOS/install")
+      (fun output -> output_string output "fixture executable"); Ok ""
   | ["/usr/bin/hdiutil";"detach";mount] ->
     if detach then (Fs_compat.remove_tree (Filename.concat mount "Docker.app"); Ok "") else Error ()
   | ["/usr/bin/codesign";"--verify";"--deep";"--strict";"-R";requirement;_] ->
@@ -104,6 +106,19 @@ let test_failure_and_cleanup_warning () = with_source @@ fun directory source ->
        ~source ~sha256 ~size:(String.length payload) with
      | Ok {cleanup=D.Pending private_directory} -> Sys.file_exists private_directory
      | _ -> false)
+let test_mounted_app_cannot_escape_to_host () = with_source @@ fun directory source ->
+  let outside = Filename.concat directory "outside-app" in
+  Fs_compat.mkdir_p (Filename.concat outside "Contents/MacOS");
+  Out_channel.with_open_bin (Filename.concat outside "Contents/MacOS/install")
+    (fun output -> output_string output "mutable host executable");
+  let run = function
+    | ["/usr/bin/hdiutil";"attach";"-readonly";"-nobrowse";"-mountpoint";mount;_] ->
+      Unix.symlink outside (Filename.concat mount "Docker.app"); Ok ""
+    | ["/usr/bin/hdiutil";"detach";mount] -> Unix.unlink (Filename.concat mount "Docker.app"); Ok ""
+    | _ -> fail "host symlink reached signature or execution" in
+  check bool "symlink escape rejected before signature and install" true
+    (D.For_testing.install_staged ~temp_dir:directory ~run ~source ~sha256
+       ~size:(String.length payload) = Error D.Invalid_file)
 let test_launch_is_explicit_and_rechecked () =
   let calls = ref [] in
   let run argv = match argv with
@@ -123,4 +138,5 @@ let () = run "verified Docker Desktop installer" ["selected actions",[
   test_case "official checksum before mount" `Quick test_official_checksum_is_required_before_mount;
   test_case "root-owned copy binds vendor installation" `Quick test_protected_install_copy;
   test_case "signature failure and cleanup warning" `Quick test_failure_and_cleanup_warning;
+  test_case "mounted app cannot escape protected image" `Quick test_mounted_app_cannot_escape_to_host;
   test_case "explicit launch and fresh service observation" `Quick test_launch_is_explicit_and_rechecked]]

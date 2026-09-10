@@ -65,7 +65,16 @@ let mounted ~run ~directory ~path f =
     (fun () ->
       let* _ = run ["/usr/bin/hdiutil";"attach";"-readonly";"-nobrowse";"-mountpoint";mount;path]
         |> Result.map_error (fun () -> Mount_failed) in
-      try f (Filename.concat mount "Docker.app")
+      try
+        let app = Filename.concat mount "Docker.app" in
+        let installer = Filename.concat app "Contents/MacOS/install" in
+        let resolved_installer = Unix.realpath installer in
+        (* The read-only image must contain the app and executable. A symlink
+           into a user-writable host directory would defeat protected staging. *)
+        if (Unix.lstat app).st_kind <> Unix.S_DIR || Unix.realpath app <> app
+          || not (String.starts_with ~prefix:(app ^ "/") resolved_installer)
+          || (Unix.stat resolved_installer).st_kind <> Unix.S_REG
+        then Error Invalid_file else f app
       with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file) in
   result, !cleaned
 let cleanup_directory ~directory ~path =
@@ -78,7 +87,7 @@ let acquire ~host ~run =
     |> Result.map_error (fun () -> Download_failed) in
   let* sha256 = checksum body in
   try
-    let directory = Filename.temp_dir "masc-docker-desktop-" "" in
+    let directory = Filename.temp_dir "masc-docker-desktop-" "" |> Unix.realpath in
     let path = Filename.concat directory "Docker.dmg" in
     let preserve = ref false in
     Fun.protect ~finally:(fun () -> if not !preserve then cleanup_directory ~directory ~path) (fun () ->
@@ -116,7 +125,7 @@ let completion_to_json completion = `Assoc ["schema",`String "masc.docker_instal
 let install_staged ~temp_dir ~run ~source ~sha256 ~size =
   if not (valid_sha sha256) || size <= 0 then Error Invalid_checksum else
   try
-    let directory = Filename.temp_dir ~temp_dir "masc-root-docker-" "" in
+    let directory = Filename.temp_dir ~temp_dir "masc-root-docker-" "" |> Unix.realpath in
     let path = Filename.concat directory "Docker.dmg" in
     let cleanup = ref true in
     Fun.protect ~finally:(fun () -> if !cleanup then cleanup_directory ~directory ~path) (fun () ->

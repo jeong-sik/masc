@@ -730,6 +730,56 @@ let test_progress_row_carries_the_turn_age () =
       check string "a backwards clock drops the age" "working" text
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
+(* The age answers "how long has this been going". Once the run said it was
+   over that question is closed: the row keeps the turn's span instead, so a
+   settled turn does not read as one that keeps getting older while nothing
+   runs. *)
+let test_a_settled_turn_reports_its_span_not_a_growing_age () =
+  let t = fresh () in
+  feed ~now:(origin +. 10.) t [ Live.Run_started ];
+  feed ~now:(origin +. 70.) t [ Live.Run_finished ];
+  (* The span is dispatch to finish, so the first ten waiting seconds are part
+     of it: 1m10s, not the 1m00s the run alone ran. *)
+  (match rows ~now:(origin +. 70.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "the settled row keeps the turn's span" true
+         (contains ~needle:"1m10s" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (* Minutes later the row must not have aged: nothing is running. *)
+  match rows ~now:(origin +. 600.) t with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the span does not grow after the run ended" true
+        (contains ~needle:"1m10s" text);
+      check bool "the row says the run finished" true
+        (contains ~needle:"stream ended" text)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
+(* The span above is the live path's, where both instants are real. A replayed
+   turn has neither: [of_log] folds every delta at the replay instant while
+   [started_at] is the log's own start, so a span taken from that fold would
+   say how long ago the turn began while calling it how long the turn took. A
+   forty-second turn replayed three hours later would read 3h00m. *)
+let test_a_replayed_turn_reports_an_age_not_a_frozen_span () =
+  let deltas = [ Live.Run_started; Live.Text "done"; Live.Run_finished ] in
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
+  List.iteri (fun seq delta -> ignore (Log.add log ~seq:(Some seq) delta : bool)) deltas;
+  let three_hours_later = origin +. 10_800. in
+  let replayed = Transcript.of_log ~now:three_hours_later log in
+  let text_at now =
+    match rows ~now replayed with
+    | (Transcript.Progress, text) :: _ -> text
+    | got -> failf "expected a progress row, got %d rows" (List.length got)
+  in
+  (* Both readings print 3h00m at the replay instant, so the number alone does
+     not say which it is. What separates them is whether it moves: a span taken
+     from the fold would sit at 3h00m forever, and an age answers the clock. *)
+  check bool "the replayed row reads 3h00m when it is opened" true
+    (contains ~needle:"3h00m" (text_at three_hours_later));
+  check bool "and ten minutes later it says 3h10m, because it is an age" true
+    (contains ~needle:"3h10m" (text_at (three_hours_later +. 600.)));
+  check bool "the row still says the run finished" true
+    (contains ~needle:"stream ended" (text_at three_hours_later))
+
 (* Slow or stuck is the question an operator holds while the row is up, and a
    count of calls cannot answer it: seven tools reads the same whether all
    seven came back and the model is writing, or two are still out. *)
@@ -2047,6 +2097,10 @@ let () =
             test_a_registered_length_name_passes_through_whole
         ; test_case "the progress row carries the turn age" `Quick
             test_progress_row_carries_the_turn_age
+        ; test_case "a settled turn reports its span, not a growing age" `Quick
+            test_a_settled_turn_reports_its_span_not_a_growing_age
+        ; test_case "a replayed turn reports an age, not a frozen span" `Quick
+            test_a_replayed_turn_reports_an_age_not_a_frozen_span
         ; test_case "the row says how long the open call has been open" `Quick
             test_the_row_says_how_long_the_open_call_has_been_open
         ] )

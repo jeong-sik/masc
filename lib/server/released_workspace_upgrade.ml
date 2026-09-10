@@ -254,7 +254,9 @@ type restoration =
   ; lock_release_confirmed : bool
   }
 
-let restore_using ~write ~run_dir ~base_path receipt =
+let restore_using
+    ~(write : mode:int -> string -> string -> (unit, Fs_compat.atomic_replace_failure) result)
+    ~run_dir ~base_path receipt =
   blocking (fun () ->
     with_workspace ~run_dir ~base_path (fun base_path ->
       if base_path <> receipt.base_path

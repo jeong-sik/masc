@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [0.35.6] - 2026-09-10
+
+### Fixed
+
+- Anthropic keeper lanes no longer fail every turn with `400: input_schema does not support oneOf, allOf, or anyOf at the top level`. The Anthropic request builder now projects each tool's `input_schema` to drop top-level combinators (the `tool_execute` argv-or-script rule rendered one); nested combinators and the dispatcher's own validation are unchanged, the Kimi endpoint served through the same backend keeps its schema verbatim, and a combinator-only schema gains a synthesized `type: "object"` (#35168).
+
+### Added
+
+- Keeper TOML gains `[keeper.tools] deny = [...]`: a per-keeper list of model-visible built-in tool names (e.g. `keeper_spawn`, `masc_keeper_delegate`) removed from the keeper's capability surface entirely — unlisted to the model, absent from the turn's dispatch bundle, and refused by the frozen-surface admission if named anyway. Deny entries matching no model-visible tool are logged as `keeper_tool_deny_unnamed`, and the dashboard effective-tool-surface projection reports the active list (#35169).
+
 ## [0.35.5] - 2026-09-10
 
 ### Installation

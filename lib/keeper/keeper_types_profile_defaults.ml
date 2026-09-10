@@ -31,9 +31,10 @@ type keeper_profile_defaults = {
   skill_names : string list option;
   (* RFC-0403: which of the attached services' tools this keeper takes.
      [None] is every tool the attached providers offer, which is what a
-     keeper got before this field existed. Attached tools only: built-in
-     tools already choose through [defer_loading], and two axes over one
-     tool would leave no way to read which one held it back. *)
+     keeper got before this field existed. Attached tools only: built-ins
+     defer globally through [defer_loading] or per keeper through
+     [tool_deny], and two axes over one attached tool would leave no way to
+     read which one held it back. *)
   attached_tool_allow : string list option;
   (* Built-in tools this keeper never offers the model, named by their
      model-visible name (e.g. ["keeper_spawn"; "masc_keeper_delegate"]).

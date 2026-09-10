@@ -442,26 +442,31 @@ let prepare_agent_setup
   in
   (* A deny entry that named nothing is a typo the operator cannot otherwise
      see: the surface silently denies nothing, exactly the failure shape the
-     [tools.attached_allow] unnamed warning below exists for. *)
-  let model_visible_tool_names =
-    Keeper_tool_descriptor.model_visible_descriptors ()
-    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-  in
-  List.iter
-    (fun name ->
-      if not (List.mem name model_visible_tool_names)
-      then
-        Log.Keeper.emit
-          Log.Warn
-          ~keeper_name:meta.name
-          ~category:Log.Tool
-          ~details:
-            (`Assoc
-              [ "error_kind", `String "keeper_tool_deny_unnamed"
-              ; "tool", `String name
-              ])
-          "The profile denies a built-in tool no descriptor offers the model")
-    profile_defaults.Keeper_types_profile.tool_deny;
+     [tools.attached_allow] unnamed warning below exists for. Skipped when the
+     profile denies nothing -- the model-visible walk revalidates every
+     descriptor's schema shape and is not free. *)
+  (match profile_defaults.Keeper_types_profile.tool_deny with
+   | [] -> ()
+   | tool_deny ->
+     let model_visible_tool_names =
+       Keeper_tool_descriptor.model_visible_descriptors ()
+       |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+     in
+     List.iter
+       (fun name ->
+         if not (List.mem name model_visible_tool_names)
+         then
+           Log.Keeper.emit
+             Log.Warn
+             ~keeper_name:meta.name
+             ~category:Log.Tool
+             ~details:
+               (`Assoc
+                 [ "error_kind", `String "keeper_tool_deny_unnamed"
+                 ; "tool", `String name
+                 ])
+             "The profile denies a built-in tool no descriptor offers the model")
+       tool_deny);
   let turn_skill_projection =
     Keeper_capability_surface.skill_projection capability_surface
   in

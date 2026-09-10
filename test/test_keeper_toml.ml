@@ -631,9 +631,9 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
     ; "tools.deny", "true", "string array"
     ]
 
-(* RFC-0390: [keeper.tools] carries exactly one key. The declared kind list
-   makes any sibling an unknown key, so a typo cannot silently keep the
-   runtime's default posture. *)
+(* [keeper.tools] now carries three keys ([native], [attached_allow],
+   [deny]). The declared kind list makes any sibling an unknown key, so a
+   typo cannot silently keep the runtime's default posture. *)
 let test_profile_parses_tools_native () =
   List.iter
     (fun (raw, expected) ->

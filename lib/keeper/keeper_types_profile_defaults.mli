@@ -33,7 +33,8 @@ type keeper_profile_defaults = {
       (** RFC-0403. Which of the attached services' tools this keeper takes.
           [None] is the whole offering, which is what a keeper got before
           this field existed; [Some []] is none of them. Attached tools
-          only -- built-in tools choose through [defer_loading]. *)
+          only -- built-ins defer globally through [defer_loading] or per
+          keeper through [tool_deny]. *)
   tool_deny : string list;
       (** Built-in tools this keeper never offers the model, named by their
           model-visible name (e.g. ["keeper_spawn";

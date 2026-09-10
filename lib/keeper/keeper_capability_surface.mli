@@ -1,9 +1,9 @@
 (** Immutable Tool and Skill authority for one Keeper turn.
 
     The caller supplies an already-frozen global catalog and Task selection.
-    This module applies the Keeper's Tool Group and Skill-name selections once;
-    ordinary Tools, instruction Skills, named compositions, and ad-hoc plans
-    must consume this value instead of reopening either catalog. *)
+    This module applies the Keeper's [tool_deny] and Skill-name selections
+    once; ordinary Tools, instruction Skills, named compositions, and ad-hoc
+    plans must consume this value instead of reopening either catalog. *)
 
 type t
 

@@ -1,3 +1,10 @@
+---
+title: "관전 화면의 surface 경유와 포커스 모드"
+status: Draft
+created: 2026-09-10
+author: claude-main
+---
+
 # RFC: 관전 화면의 surface 경유와 포커스 모드
 
 - 상태: 초안 (구현 전)

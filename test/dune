@@ -5535,6 +5535,11 @@
  (libraries masc_test_deps))
 (include stanzas/test_onboarding_status.inc)
 (include stanzas/test_sandbox_readiness.inc)
+
+(test
+ (name test_owner_process_identity)
+ (modules test_owner_process_identity)
+ (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_onboarding_journey.inc)
 

@@ -97,7 +97,36 @@
     "keeper_turn_id": 2,
     "trace_id": "trace-1788998630329-00000",
     "task_id": "task-001",
-    "execution_id": "exec-1788998936199-0008"
+    "execution_id": "exec-1788998936199-0008",
+    "input": {
+      "argv": [
+        "find",
+        ".",
+        "-type",
+        "f",
+        "\\(",
+        "-name",
+        "*.pdf",
+        "-o",
+        "-name",
+        "*.png",
+        "-o",
+        "-name",
+        "*.txt",
+        "-o",
+        "-name",
+        "*.json",
+        "-o",
+        "-name",
+        "*.md",
+        "\\)",
+        "-not",
+        "-path",
+        "./.git/*"
+      ],
+      "cwd": "."
+    },
+    "output": "{\"ok\":false,\"status\":{\"kind\":\"exit\",\"code\":1},\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/fusion-evidence-review\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output_completeness\":\"complete\",\"output\":\"find: paths must precede expression: `\\\\('\\n\",\"typed\":true,\"execution_time_ms\":185,\"error\":\"find: paths must precede expression: `\\\\('\",\"stderr\":\"find: paths must precede expression: `\\\\('\",\"requested_sandbox\":\"docker\",\"via\":\"docker\",\"sandbox_profile\":\"docker\"}"
   },
   {
     "ts": 1788998939.372867,
@@ -108,7 +137,16 @@
     "keeper_turn_id": 2,
     "trace_id": "trace-1788998630329-00000",
     "task_id": "task-001",
-    "execution_id": "exec-1788998939372-0009"
+    "execution_id": "exec-1788998939372-0009",
+    "input": {
+      "argv": [
+        "sh",
+        "-c",
+        "find . -type f \\( -iname '*.pdf' -o -iname '*.png' -o -iname '*.txt' -o -iname '*.json' -o -iname '*.md' \\) -not -path './.git/*' | sort"
+      ],
+      "cwd": "."
+    },
+    "output": "{\"message\":\"External effect deferred; nothing has run yet. This Keeper is not blocked, so continue other work in this same turn. If someone is waiting on an answer, tell them the call is parked for approval before you move on: your reply is the only place they see it. The host replays the parked call once the approval resolves, so do not call it again.\",\"operation\":\"tool_execute\",\"gate\":{\"decision\":\"deferred\",\"approval_id\":\"appr_01a088a5-72ad-7000-bf17-1de2bae6f5fa\",\"reason\":\"judge_requested\",\"on_approve\":\"The host replays this exact call and delivers its output to you automatically. Do not resubmit it; a resubmission folds onto this same approval.\",\"audit_receipts\":[{\"recorded\":true,\"event\":\"pending\"}]},\"context\":{\"typed\":true,\"cmd\":\"sh -c find . -type f \\\\( -iname '*.pdf' -o -iname '*.png' -o -iname '*.txt' -o -iname '*.json' -o -iname '*.md' \\\\) -not -path './.git/*' | sort\",\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/fusion-evidence-review\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null}}}"
   },
   {
     "ts": 1788998950.476087,
@@ -119,7 +157,15 @@
     "keeper_turn_id": 2,
     "trace_id": "trace-1788998630329-00000",
     "task_id": "task-001",
-    "execution_id": "exec-1788998950476-000a"
+    "execution_id": "exec-1788998950476-000a",
+    "input": {
+      "argv": [
+        "ls",
+        "-la"
+      ],
+      "cwd": "."
+    },
+    "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/fusion-evidence-review\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output_completeness\":\"complete\",\"output\":\"total 4\\ndrwxr-xr-x 3 root   root     96 Sep 10 00:08 .\\ndrwxr-xr-x 3 root   root   4096 Sep 10 00:08 ..\\ndrwxr-xr-x 4 keeper keeper  128 Sep 10 00:08 .docker-identity\\n\",\"typed\":true,\"execution_time_ms\":859,\"requested_sandbox\":\"docker\",\"via\":\"docker\",\"sandbox_profile\":\"docker\"}"
   },
   {
     "ts": 1788998963.761167,
@@ -186,7 +232,14 @@
     "keeper_turn_id": 2,
     "trace_id": "trace-1788998630329-00000",
     "task_id": "task-001",
-    "execution_id": "exec-1788998977986-000f"
+    "execution_id": "exec-1788998977986-000f",
+    "input": {
+      "argv": [
+        "masc_run_plan",
+        "--help"
+      ]
+    },
+    "output": "{\"message\":\"External effect deferred; nothing has run yet. This Keeper is not blocked, so continue other work in this same turn. If someone is waiting on an answer, tell them the call is parked for approval before you move on: your reply is the only place they see it. The host replays the parked call once the approval resolves, so do not call it again.\",\"operation\":\"tool_execute\",\"gate\":{\"decision\":\"deferred\",\"approval_id\":\"appr_01a088a6-09bb-7000-8ea1-f5c9068302ba\",\"reason\":\"judge_requested\",\"on_approve\":\"The host replays this exact call and delivers its output to you automatically. Do not resubmit it; a resubmission folds onto this same approval.\",\"audit_receipts\":[{\"recorded\":true,\"event\":\"pending\"}]},\"context\":{\"typed\":true,\"cmd\":\"masc_run_plan --help\",\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/fusion-evidence-review\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/fusion-evidence-review\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null}}}"
   },
   {
     "ts": 1788999194.45895,

@@ -16352,7 +16352,6 @@ let render_runtime_params (state : state) =
   let content_height = max 1 (rows - (if editing then 10 else 7)) in
   let count = List.length state.runtime_params in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
-  let first = if cursor < content_height then 0 else cursor - content_height + 1 in
   (match state.runtime_params_error with
    | Some detail ->
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
@@ -16369,14 +16368,66 @@ let render_runtime_params (state : state) =
        box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
        for _ = 2 to content_height do box_empty buf cols done
      end else begin
+       (* Rows arrive in registry-group order (Tui_decode sorts them by
+          surface). Headers are lines on this screen, not decoration outside it:
+          they are built into the same list the window scrolls over, so a group
+          heading costs a row from [content_height] instead of pushing the last
+          param off the bottom.
+
+          The cursor stays an index into [state.runtime_params] — key handling
+          and the edit target read it — so the window is positioned by where
+          that row lands in the display list. *)
+       let unfiled_description =
+         "그룹 없음 — 레지스트리가 이 param 을 어느 surface 에도 넣지 않았습니다"
+       in
+       let surface_of (row : Tui_decode.runtime_param_row) =
+         match row.Tui_decode.rpr_surface with
+         | Some s -> (s.Tui_decode.rps_id, s.Tui_decode.rps_description)
+         | None -> ("", unfiled_description)
+       in
+       let display =
+         let rec build previous index acc = function
+           | [] -> List.rev acc
+           | row :: rest ->
+             let id, description = surface_of row in
+             let acc =
+               match previous with
+               | Some prev when String.equal prev id -> acc
+               | Some _ | None -> `Header (id, description) :: acc
+             in
+             build (Some id) (index + 1) (`Row (index, row) :: acc) rest
+         in
+         build None 0 [] state.runtime_params
+       in
+       let cursor_display =
+         let rec find index = function
+           | [] -> 0
+           | `Row (row_index, _) :: _ when row_index = cursor -> index
+           | _ :: rest -> find (index + 1) rest
+         in
+         find 0 display
+       in
+       let total = List.length display in
+       let first =
+         if total <= content_height then 0
+         else if cursor_display < content_height then 0
+         else min (total - content_height) (cursor_display - content_height + 1)
+       in
        for index = 0 to content_height - 1 do
-         match List.nth_opt state.runtime_params (first + index) with
+         match List.nth_opt display (first + index) with
          | None -> box_empty buf cols
-         | Some row ->
+         | Some (`Header (id, description)) ->
+           let label = if String.equal id "" then "(unfiled)" else id in
+           box_line_styled buf cols
+             ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+             (Printf.sprintf "  %s %s"
+                (Terminal_text.single_line label)
+                (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
+         | Some (`Row (row_index, row)) ->
            let open Tui_decode in
            let line =
-             Printf.sprintf "  %s %-43s %-16s%s"
-               (if row.rpr_has_override then "●" else "○")
+             Printf.sprintf "    %s %-41s %-16s%s"
+               (if row.rpr_has_override then "\xe2\x97\x8f" else "\xe2\x97\x8b")
                (Terminal_text.single_line row.rpr_key)
                (Terminal_text.single_line
                   (runtime_param_value_text ~value_type:row.rpr_value_type
@@ -16389,7 +16440,7 @@ let render_runtime_params (state : state) =
                              row.rpr_default_json))
                 else "")
            in
-           if first + index = cursor then box_line_selected buf cols line
+           if row_index = cursor then box_line_selected buf cols line
            else
              box_line_styled buf cols
                ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line

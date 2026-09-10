@@ -7704,6 +7704,110 @@ let runtime_params_choices_json =
           ] )
     ]
 
+(* The screen groups by surface, so the decode boundary decides the order once
+   and every consumer -- screen, cursor, edit target -- reads that one list.
+   The fixture lists the surfaces out of the parameters' order on purpose: what
+   is pinned is that the catalog order wins, not that the server happened to
+   send them grouped. *)
+let runtime_params_surfaced_json =
+  `Assoc
+    [ ( "parameters"
+      , `List
+          [ `Assoc
+              [ ("key", `String "dashboard.max_path_length")
+              ; ("current", `Int 80)
+              ; ("default", `Int 80)
+              ; ("has_override", `Bool false)
+              ]
+          ; `Assoc
+              [ ("key", `String "slack.trigger_policy")
+              ; ("current", `String "all")
+              ; ("default", `String "mention_or_thread")
+              ; ("has_override", `Bool true)
+              ]
+          ; `Assoc
+              [ ("key", `String "orphan.setting")
+              ; ("current", `Int 1)
+              ; ("default", `Int 1)
+              ; ("has_override", `Bool false)
+              ]
+          ; `Assoc
+              [ ("key", `String "discord.trigger_policy")
+              ; ("current", `String "mention_only")
+              ; ("default", `String "mention_or_thread")
+              ; ("has_override", `Bool false)
+              ]
+          ] )
+    ; ( "surfaces"
+      , `List
+          [ `Assoc
+              [ ("id", `String "connector_trigger")
+              ; ("description", `String "Which inbound messages start a turn")
+              ; ( "param_keys"
+                , `List
+                    [ `String "discord.trigger_policy"
+                    ; `String "slack.trigger_policy"
+                    ] )
+              ]
+          ; `Assoc
+              [ ("id", `String "dashboard")
+              ; ("description", `String "Dashboard rendering")
+              ; ("param_keys", `List [ `String "dashboard.max_path_length" ])
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_params_orders_by_surface () =
+  match Tui_decode.decode_runtime_params runtime_params_surfaced_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    Alcotest.(check (list string))
+      "catalog order wins, and within a group the server's order holds"
+      [ "slack.trigger_policy"
+      ; "discord.trigger_policy"
+      ; "dashboard.max_path_length"
+      ; "orphan.setting"
+      ]
+      (List.map (fun (row : Tui_decode.runtime_param_row) -> row.Tui_decode.rpr_key) rows)
+
+let test_decode_runtime_params_attaches_the_claiming_surface () =
+  match Tui_decode.decode_runtime_params runtime_params_surfaced_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    Alcotest.(check (list (pair string string)))
+      "each row names the surface that claims it"
+      [ ("slack.trigger_policy", "connector_trigger")
+      ; ("discord.trigger_policy", "connector_trigger")
+      ; ("dashboard.max_path_length", "dashboard")
+      ; ("orphan.setting", "")
+      ]
+      (List.map
+         (fun (row : Tui_decode.runtime_param_row) ->
+           ( row.Tui_decode.rpr_key
+           , match row.Tui_decode.rpr_surface with
+             | Some s -> s.Tui_decode.rps_id
+             | None -> "" ))
+         rows)
+
+(* A param no surface claims must stay on the screen. Reporting it as [None]
+   rather than filing it under an invented group is what lets the renderer draw
+   it under a heading that says the registry never grouped it. *)
+let test_decode_runtime_params_leaves_an_unclaimed_param_unfiled () =
+  match Tui_decode.decode_runtime_params runtime_params_surfaced_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    (match
+       List.find_opt
+         (fun (row : Tui_decode.runtime_param_row) ->
+           String.equal row.Tui_decode.rpr_key "orphan.setting")
+         rows
+     with
+     | None -> Alcotest.fail "an unclaimed param must not be dropped"
+     | Some row ->
+       Alcotest.(check bool)
+         "no surface is attached" true
+         (Option.is_none row.Tui_decode.rpr_surface))
+
 let test_decode_runtime_params_reads_choices () =
   match Tui_decode.decode_runtime_params runtime_params_choices_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
@@ -8901,6 +9005,12 @@ let () =
           test_decode_runtime_params_rejects_a_row_without_a_key;
         Alcotest.test_case "reads a closed set of choices" `Quick
           test_decode_runtime_params_reads_choices;
+        Alcotest.test_case "orders rows by the surface catalog" `Quick
+          test_decode_runtime_params_orders_by_surface;
+        Alcotest.test_case "attaches the claiming surface to each row" `Quick
+          test_decode_runtime_params_attaches_the_claiming_surface;
+        Alcotest.test_case "leaves an unclaimed param unfiled, not dropped" `Quick
+          test_decode_runtime_params_leaves_an_unclaimed_param_unfiled;
       ] );
     ( "keeper_gate_settings",
       [

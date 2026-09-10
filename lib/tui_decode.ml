@@ -6790,6 +6790,15 @@ let decode_keeper_gate_settings json =
    value back to the typed runtime-parameter route.  Flattening strings to
    their display text made it impossible to distinguish ["30"] from [30] at
    the write boundary.  The renderer removes quotes for display only. *)
+(* Which surface claims a param, read from the [surfaces] array the same
+   response carries. [rps_order] is the catalog position, so the screen groups
+   in the order the registry declares rather than alphabetically. *)
+type runtime_param_surface =
+  { rps_order : int
+  ; rps_id : string
+  ; rps_description : string
+  }
+
 type runtime_param_row =
   { rpr_key : string
   ; rpr_current_json : string
@@ -6803,10 +6812,48 @@ type runtime_param_row =
     (** The closed set of values this param accepts, when it has one. Empty
         for a param whose value the reader types. A partly closed domain
         lists its named values here and still accepts the rest. *)
+  ; rpr_surface : runtime_param_surface option
+    (** [None] rather than a placeholder surface: a param no surface claims is
+        a real state the screen has to show, and inventing a group for it would
+        hide that the registry never filed it. *)
   }
+
+let surfaces_by_key json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "surfaces" fields with
+     | Some (`List items) ->
+       List.concat
+         (List.mapi
+            (fun order item ->
+              match item with
+              | `Assoc surface ->
+                let str name =
+                  match List.assoc_opt name surface with
+                  | Some (`String v) -> v
+                  | Some _ | None -> ""
+                in
+                let claim =
+                  { rps_order = order
+                  ; rps_id = str "id"
+                  ; rps_description = str "description"
+                  }
+                in
+                (match List.assoc_opt "param_keys" surface with
+                 | Some (`List keys) ->
+                   List.filter_map
+                     (function `String key -> Some (key, claim) | _ -> None)
+                     keys
+                 | Some _ | None -> [])
+              | _ -> [])
+            items)
+     | Some _ | None -> [])
+  | _ -> []
+;;
 
 let decode_runtime_params json =
   let* items = required_list_field json "parameters" in
+  let surfaces = surfaces_by_key json in
   let text = Yojson.Safe.to_string in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -6850,11 +6897,24 @@ let decode_runtime_params json =
                  (function `String c -> Some c | _ -> None)
                  items
              | Some _ | None -> [])
+        ; rpr_surface = List.assoc_opt key surfaces
         }
       in
       loop (row :: acc) rest
   in
-  loop [] items
+  let* rows = loop [] items in
+  (* Display order is the registry's own grouping order, decided here so the
+     screen, the cursor and the edit target all read one list. A stable sort
+     keeps the server's order within a group; a param no surface claims sorts
+     last rather than disappearing. *)
+  Ok
+    (List.stable_sort
+       (fun a b ->
+         let order row =
+           match row.rpr_surface with Some s -> s.rps_order | None -> max_int
+         in
+         compare (order a) (order b))
+       rows)
 
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in

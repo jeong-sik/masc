@@ -69,3 +69,19 @@ let suggest_loopback_port () =
       | Unix.ADDR_INET (_,port) -> Ok port | Unix.ADDR_UNIX _ -> Error Port_unavailable)
   with Unix.Unix_error _ -> Error Port_unavailable
 module For_testing = struct let prepare = prepare_with end
+
+type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
+let replacement_readiness ~run_dir ~base_path ~port =
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Ok owner -> Owner_process_identity.close owner; Ok Owner_draining
+  | Error (Owner_identity_unavailable No_owner) ->
+    if port < 1 || port > 65535 then Error Port_unavailable else
+    (try
+       let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+       Fun.protect ~finally:(fun () -> Unix.close socket) (fun () ->
+         Unix.setsockopt socket Unix.SO_REUSEADDR true;
+         try Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,port));
+           Ok Replacement_can_start
+         with Unix.Unix_error (Unix.EADDRINUSE, _, _) -> Ok Port_busy)
+     with Unix.Unix_error _ -> Error Port_unavailable)
+  | Error _ -> Error Owner_unavailable

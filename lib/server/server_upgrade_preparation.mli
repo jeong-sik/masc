@@ -22,3 +22,10 @@ module For_testing : sig
     capture:(unit -> (((unit -> (unit, error) result) * (unit -> unit)), error) result) ->
     (t, error) result
 end
+
+type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
+val replacement_readiness :
+  run_dir:string -> base_path:string -> port:int -> (replacement_readiness, error) result
+(** Observe kernel lease release and loopback bind availability after requesting
+    graceful termination. Never signals or starts anything; errors are not exit
+    proof. Availability is advisory, so replacement startup still owns conflicts. *)

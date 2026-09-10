@@ -439,10 +439,69 @@ let test_tolerates_a_cli_created_library_directory () =
   | Runtime_antigravity_home.Unsupported -> ()
 ;;
 
+let test_explicit_setup_import_and_login_home () =
+  with_temp_root (fun runtime_root ->
+    let account = match Runtime_antigravity_setup.prepare ~runtime_root ~account_id:"setup-account" with
+      | Ok account -> account | Error error -> fail (Runtime_antigravity_setup.error_message error) in
+    (match Runtime_antigravity_setup.credential_reference account with
+     | Error Sign_in_required -> () | _ -> fail "login preparation must not fabricate credentials");
+    let source_home = Filename.concat runtime_root "source-home" in
+    let gemini = Filename.concat source_home ".gemini" in
+    let cli = Filename.concat gemini "antigravity-cli" in
+    List.iter (fun dir -> Unix.mkdir dir 0o700) [source_home;gemini;cli];
+    let source = Filename.concat cli "antigravity-oauth-token" in
+    write_file ~mode:0o600 source "fixture-operator-token";
+    (match Runtime_antigravity_setup.import_signed_in ~source_home account with
+     | Ok () -> () | Error error -> fail (Runtime_antigravity_setup.error_message error));
+    let path = match Runtime_antigravity_setup.credential_reference account with
+      | Ok (Runtime_schema.File path) -> path
+      | _ -> fail "setup must produce an internal file reference without user typing" in
+    check string "original auth unchanged" "fixture-operator-token" (Fs_compat.load_file source);
+    check string "private copy" "fixture-operator-token" (Fs_compat.load_file path);
+    check int "private import permissions" 0o600 (permission path);
+    Unix.chmod source 0o644;
+    (match Runtime_antigravity_setup.import_signed_in ~source_home account with
+     | Error Unsafe_credential -> () | _ -> fail "unsafe canonical source must not fall through to another account"))
+;;
+
+let test_official_models_response_is_not_model_output () =
+  let response turns = Printf.sprintf {|{"status":"SUCCESS","num_turns":%d,"usage":{"total_tokens":0},"command":{"name":"models","data":{"models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"}]}}}|} turns in
+  let models = match Runtime_antigravity_setup.parse_models (response 0) with
+    | Ok models -> models | Error _ -> fail "measured official CLI envelope must parse" in
+  check (list string) "actual model slug preserved" ["gemini-3.8-flash-high"]
+    (List.map (fun (model : Runtime_antigravity_setup.model) -> model.id) models);
+  check bool "model-generated catalog is not authoritative discovery" true
+    (Result.is_error (Runtime_antigravity_setup.parse_models (response 1)));
+  let json = Runtime_antigravity_setup.models_json models in
+  check bool "discovery does not claim response/tool verification" false
+    Yojson.Safe.Util.(json |> member "account_availability_verified" |> to_bool)
+;;
+
+let test_selected_model_zero_turn_context () =
+  let model : Runtime_antigravity_setup.model = {id="gemini-3.8-flash-high";label="Gemini 3.8 Flash (High)"} in
+  let payload label size input = Yojson.Safe.to_string (`Assoc [
+    "version", `String "1.2.0";
+    "model", `Assoc ["id",`String label;"display_name",`String label];
+    "context_window", `Assoc ["context_window_size",`Int size;
+      "total_input_tokens",`Int input;"total_output_tokens",`Int 0;"current_usage",`Null]]) in
+  let parse = Runtime_antigravity_setup.parse_context ~model ~cli_version:"1.2.0" in
+  (match parse (payload model.label 1048576 0) with
+   | Ok (Observed_context 1048576) -> () | _ -> fail "official selected-model window must be observed");
+  (match parse (payload model.label 0 0) with
+   | Ok Unknown_context -> () | _ -> fail "initializing zero window must stay unknown");
+  check bool "another model cannot supply selected context" true
+    (Result.is_error (parse (payload "Gemini 3.8 Flash (Low)" 1048576 0)));
+  check bool "model inference cannot masquerade as zero-turn metadata" true
+    (Result.is_error (parse (payload model.label 1048576 1)))
+;;
+
 let () =
   run
     "runtime_antigravity_home"
-    [ ( "layout"
+    [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;
+                       test_case "official model catalog envelope" `Quick test_official_models_response_is_not_model_output;
+                       test_case "selected zero-turn context" `Quick test_selected_model_zero_turn_context] )
+    ; ( "layout"
       , [ test_case
             "private HOME and OAuth seed"
             `Quick

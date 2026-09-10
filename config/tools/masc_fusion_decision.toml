@@ -1,5 +1,8 @@
 name = "masc_fusion_decision"
-description = "Record your adopted, rejected or modified decision after a Fusion deliberation. This records the Keeper's actual choice and reason, not the judge's recommendation. Requires your own durable Fusion result and a task assigned to you; linked Goals and the current turn are captured by the runtime. Read it back through masc_task_history or the Fusion run detail. Same-turn exact retries are idempotent."
+description = """
+Record your adopted, rejected or modified decision after a Fusion deliberation.
+
+This records the Keeper's actual choice and reason, not the judge's recommendation. Requires your own durable Fusion result and a task assigned to you; linked Goals and the current turn are captured by the runtime. Read it back through masc_task_history or the Fusion run detail. Same-turn exact retries are idempotent."""
 additional_properties = false
 defer_loading = true
 [[params]]

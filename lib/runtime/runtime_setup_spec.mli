@@ -1,5 +1,8 @@
 (** Shared typed first-run connection specification. Pure parsing/rendering;
-    authentication, discovery and verification remain separate operations. *)
+    authentication, discovery and verification remain separate operations.
+    Native rendering is the identity authority for new connections. Callers must
+    consume its ID before choosing/defaulting a new connection, rather than
+    reimplement JSON canonicalization. Existing declared IDs remain unchanged. *)
 type t
 type error = Invalid_spec of string
 val error_message : error -> string

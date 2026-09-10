@@ -2799,6 +2799,13 @@ let sandbox_install_apple_verified_cmd =
     ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
     Term.(const execute $ source $ sha256 $ size)
 
+let prerequisite_actions_cmd =
+  let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
+  let action = Arg.(value & opt (some string) None & info ["execute"]
+    ~doc:"Execute this explicitly selected action from the current host catalog.") in
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation and service actions for a sandbox or official client.")
+    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -2827,6 +2834,7 @@ let cmd =
     ; keeper_github_cmd
     ; sandbox_image_cmd
     ; sandbox_install_apple_verified_cmd
+    ; prerequisite_actions_cmd
     ; setup_cmd
     ; setup_preflight_cmd
     ; doctor_cmd

@@ -66,8 +66,56 @@ class Journey(unittest.TestCase):
             capabilities=dict(network_modes=['none', 'inherit']))])
         response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
+        prerequisites.assert_called_once_with('/bin/masc', 'docker')
+
+    def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[
+            dict(id='vendor_guide', label='Official guide', requires_admin=False,
+                 detail='Read the vendor steps', source_url='https://example.org/guide'),
+            dict(id='install', label='Install selected dependency', requires_admin=True,
+                 detail='Install then recheck', source_url='https://example.org/install')])
+        for status, code in [('external_step_pending', 0),
+                             ('commands_completed_recheck_required', 0), ('failed', 1)]:
+            responses = [subprocess.CompletedProcess([], 0, json.dumps(catalog), ''),
+                         subprocess.CompletedProcess([], code, json.dumps(dict(
+                             schema='masc.prerequisite_action_result.v1', status=status,
+                             readiness='not_checked')), '')]
+            with self.subTest(status=status), patch.object(SETUP.subprocess, 'run', side_effect=responses) as run, \
+                    patch.object(SETUP, 'pick', return_value=[1]), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'docker'))
+            self.assertEqual(run.call_args.args[0], ['/owned/masc', 'prerequisite-actions', 'docker', '--execute', 'install'])
+            self.assertNotIn('stdin', run.call_args.kwargs)  # inherit the operator's terminal
+            self.assertNotIn('stderr', run.call_args.kwargs)
+            if status == 'external_step_pending':
+                self.assertIn('Complete the vendor installation window', output.getvalue())
+            elif status == 'failed':
+                self.assertIn('did not finish', output.getvalue())
+
+    def test_prerequisite_refresh_and_back_never_execute(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        for choice, expected in [(0, True), (1, False)]:
+            with self.subTest(choice=choice), patch.object(SETUP.subprocess, 'run', return_value=response) as run, \
+                    patch.object(SETUP, 'pick', return_value=[choice]):
+                self.assertEqual(SETUP.prerequisite_menu('/owned/masc', 'docker'), expected)
+            self.assertEqual(run.call_count, 1)
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_prerequisite_listing_and_unknown_action_have_no_install_effect(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config')
+            listed = subprocess.run([BINARY, 'prerequisite-actions', 'codex'], env=env,
+                                    capture_output=True, text=True, check=True)
+            catalog = json.loads(listed.stdout)
+            self.assertEqual(catalog['schema'], 'masc.prerequisite_actions.v1')
+            self.assertTrue(catalog['actions'])
+            rejected = subprocess.run([BINARY, 'prerequisite-actions', 'codex', '--execute', 'not-an-action'],
+                                      env=env, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertEqual(list(Path(home).iterdir()), [])
 
     @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
     def test_native_setup_embeds_journey_and_new_home_cancels_without_writes(self):

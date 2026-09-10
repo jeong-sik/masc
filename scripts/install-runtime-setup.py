@@ -736,11 +736,57 @@ class PendingCredentials:
         return path
 
 
+def prerequisite_menu(binary, dependency):
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or catalog.get('schema') != 'masc.prerequisite_actions.v1' or not isinstance(catalog.get('actions'), list):
+            raise ValueError('invalid actions')
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect installation actions for this computer')
+    actions = catalog['actions']
+    labels = [row['label'] + (' · administrator permission' if row['requires_admin'] else '') for row in actions]
+    choice = pick('Install or start the selected prerequisite', labels + ['Refresh detection', 'Back to setup choices'])[0]
+    if choice == len(actions) + 1:
+        return False
+    if choice == len(actions):
+        return True
+    selected = actions[choice]
+    print(terminal_text(selected['detail']), file=sys.stderr)
+    print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
+    # The selected native action owns commands and privilege boundaries. Child
+    # password prompts and vendor output keep the terminal, not a hidden pipe.
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if receipt.get('schema') != 'masc.prerequisite_action_result.v1' or receipt.get('readiness') != 'not_checked':
+            raise ValueError('invalid result')
+        state = receipt['status']
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
+    if state == 'failed' or result.returncode:
+        print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+    elif state == 'external_step_pending':
+        print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
+    elif state == 'commands_completed_recheck_required':
+        print('The installation step finished. Checking the service and account access next.', file=sys.stderr)
+    else:
+        raise SetupError('MASC returned an unknown installation state')
+    return True
+
+
 def prepare_connection(source, credentials):
     source = dict(source)
     if source.get('setup_support') == 'unsupported' or source['choice'] is None:
         raise SetupError(source['label'] + ' is listed for visibility but its setup integration is not available yet')
     if CHOICES[source['choice']][1] is not None:
+        command = source.get('command') or CHOICES[source['choice']][1]
+        while not shutil.which(command):
+            client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(source['choice'])
+            if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
+                raise SetupError('Install the selected client, then return to connection setup')
         return source
     if not source['endpoint']:
         urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
@@ -1154,6 +1200,7 @@ def select_sandbox(binary, base_path):
         row = rows[action]
         if row['state'] != 'service_ready':
             print(terminal_text(row['reason']), file=sys.stderr)
+            prerequisite_menu(binary, row['id'])
             continue
         arguments = list(row['setup_args'])
         configured = catalog.get('configured_selection')

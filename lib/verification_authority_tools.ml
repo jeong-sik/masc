@@ -345,7 +345,26 @@ let dispatch t ~name ~args =
        log_call t ~name ~argument ~outcome:Invalid_input;
        Error detail
      | Ok prepared_args ->
-       let result = run t tool ~args:prepared_args in
+       (* The lookup contract is text, unlike the snapshot's typed binary
+          payload. Raw PDF/PNG slices from Read must not become invalid JSON
+          strings in either the reviewer request or its durable observation. *)
+       let result =
+         match run t tool ~args:prepared_args with
+         | (Ok text | Error text) as result when String_util.is_valid_utf8 text ->
+           result
+         | Ok bytes | Error bytes ->
+           Error
+             (Yojson.Safe.to_string
+                (`Assoc
+                   [ "code", `String "lookup_output_invalid_utf8"
+                   ; "tool", `String name
+                   ; "output_bytes", `Int (String.length bytes)
+                   ; "output_sha256",
+                     `String Digestif.SHA256.(digest_string bytes |> to_hex)
+                   ; "error",
+                     `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Image inspection requires the submitted image evidence; binary file bytes are not a visual inspection."
+                   ]))
+       in
        log_call
          t
          ~name

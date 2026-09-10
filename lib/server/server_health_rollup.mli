@@ -40,6 +40,15 @@ val operator_summary :
     folds them to [Unknown] and would rank a listening socket alongside a
     degraded subsystem.
 
+    The reasons it carries are the section's ["operator_action_reasons"] when
+    it declares any -- the subset that needs an answer, which is not the same
+    list as what is happening. keeper_event_queue reports a paused-dead
+    backlog in ["status_reasons"] and leaves it out of those, because a keeper
+    the operator paused is their own standing decision. A section that
+    declares none falls back to ["status_reasons"]: the gate is already open,
+    so the operator is owed a line, and silence is the one answer this list
+    must not give (#34894).
+
     A section with no ["status"] is skipped, which is most cached fields:
     [keeper_config_errors] is a list, [keeper_fibers] an int.
 

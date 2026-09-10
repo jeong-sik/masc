@@ -56,12 +56,15 @@ let string_field name fields =
   | _ -> fail (name ^ " missing or not a string")
 ;;
 
-let reasons fields =
-  match List.assoc_opt "status_reasons" fields with
+let string_list name fields =
+  match List.assoc_opt name fields with
   | Some (`List items) ->
     List.filter_map (function `String s -> Some s | _ -> None) items
   | _ -> []
 ;;
+
+let reasons fields = string_list "status_reasons" fields
+let action_reasons fields = string_list "operator_action_reasons" fields
 
 let test_paused_dead_is_not_actionable () =
   let fields = dimensions (queue ~paused_dead:74 ()) in
@@ -125,6 +128,55 @@ let test_mixed_backlog_is_actionable () =
     (bool_field "operator_action_required" fields)
 ;;
 
+(* The verdict was right and the list beside it was not. #34781 stopped a
+   paused keeper opening the alarm; the health rollup then hoisted every
+   [status_reasons] entry of a section whose gate had opened for another
+   reason, so the paused-dead line arrived in the operator list anyway
+   (#34894). [operator_action_reasons] is the subset behind the verdict. *)
+let test_action_reasons_exclude_the_operators_own_decision () =
+  let fields =
+    dimensions (queue ~runnable:33 ~recoverable:105 ~paused_dead:41 ~retained_disabled:5 ())
+  in
+  check bool "the mix still demands action" true
+    (bool_field "operator_action_required" fields);
+  check (list string) "everything stays on screen"
+    [ "runnable_backlog=33"
+    ; "recoverable_backlog=105"
+    ; "retained_disabled_backlog=5"
+    ; "paused_dead_backlog=41"
+    ]
+    (reasons fields);
+  check (list string) "only the recoverable backlog needs an answer"
+    [ "recoverable_backlog=105" ]
+    (action_reasons fields)
+;;
+
+let test_action_reasons_are_empty_when_nothing_needs_an_answer () =
+  let fields = dimensions (queue ~runnable:18 ~paused_dead:74 ()) in
+  check bool "neither kind demands action" false
+    (bool_field "operator_action_required" fields);
+  check (list string) "and neither is offered as one" [] (action_reasons fields)
+;;
+
+let test_a_storage_read_error_needs_an_answer () =
+  let fields =
+    dimensions
+      (`Assoc
+         [ "counts_complete", `Bool true
+         ; "read_error_count", `Int 2
+         ; "transition_outbox_count", `Int 0
+         ; "runnable_backlog_count", `Int 0
+         ; "recoverable_backlog_count", `Int 0
+         ; "retained_disabled_backlog_count", `Int 0
+         ; "paused_dead_backlog_count", `Int 9
+         ; "shutdown_fenced_backlog_count", `Int 0
+         ])
+  in
+  check (list string) "the storage error is the answer owed, not the paused backlog"
+    [ "storage_read_error" ]
+    (action_reasons fields)
+;;
+
 let () =
   run "Keeper event queue health actionability"
     [ ( "operator_intended"
@@ -141,6 +193,14 @@ let () =
       , [ test_case "recoverable" `Quick test_recoverable_is_actionable
         ; test_case "shutdown_fenced" `Quick test_shutdown_fenced_is_actionable
         ; test_case "mixed" `Quick test_mixed_backlog_is_actionable
+        ] )
+    ; ( "reasons behind the verdict"
+      , [ test_case "exclude the operator's own decision" `Quick
+            test_action_reasons_exclude_the_operators_own_decision
+        ; test_case "empty when nothing needs an answer" `Quick
+            test_action_reasons_are_empty_when_nothing_needs_an_answer
+        ; test_case "a storage read error needs an answer" `Quick
+            test_a_storage_read_error_needs_an_answer
         ] )
     ]
 ;;

@@ -79,9 +79,27 @@ let operator_summary ~sections ~runtime_startup_degradation
            || Health_status.equal parsed_component_status Health_status.Unknown
          then begin
            let component_reasons =
-             match Json_util.json_string_list_member "status_reasons" json with
-             | [] -> [ fallback_reason json component_status ]
-             | values -> values
+             (* The subset the section says needs an answer, when it says.
+                keeper_event_queue reports a paused-dead backlog in
+                [status_reasons] and leaves it out of these, because a keeper
+                the operator paused is their own standing decision -- and
+                before this every entry of a section whose gate had opened
+                arrived in the operator list, so three of five lines had
+                nothing to answer (#34894).
+
+                A section that declares nothing, or declares none, falls back
+                to [status_reasons] and then to [fallback_reason]. The gate is
+                already open at this point, so the operator is owed a line;
+                showing everything is the loud answer, and silence would be
+                the one thing this list must not do. *)
+             match
+               Json_util.json_string_list_member "operator_action_reasons" json
+             with
+             | _ :: _ as declared -> declared
+             | [] ->
+               (match Json_util.json_string_list_member "status_reasons" json with
+                | [] -> [ fallback_reason json component_status ]
+                | values -> values)
            in
            let prefixed_reasons =
              List.map

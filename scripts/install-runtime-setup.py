@@ -1421,7 +1421,7 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
-def select_setup_server(binary, base_path, port):
+def select_setup_server(binary, base_path, port, require_new_owner=False):
     while True:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1439,7 +1439,11 @@ def select_setup_server(binary, base_path, port):
             choices = [('use', 'Continue with this running workspace'),
                        ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
                        ('later', 'Finish later')]
-            if server_version != observed['installed_version']:
+            if require_new_owner:
+                print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
+                choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
+                           ('later', 'Finish later and keep the existing server')]
+            elif server_version != observed['installed_version']:
                 choices[0], choices[1] = choices[1], choices[0]
             selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
                                     [label for _, label in choices])[0]][0]
@@ -1573,7 +1577,11 @@ def journey(binary, base_path, port, timeout, resume=False):
     return sandbox_journey(binary, base, port)
 
 
-def sandbox_journey(binary, base, port):
+def sandbox_journey(binary, base, port, refresh_owner=False):
+    if refresh_owner:
+        port = select_setup_server(binary, base, port, require_new_owner=True)
+        if port is None:
+            return 1
     sandbox_args = select_sandbox(binary, base, port=port)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
@@ -1618,7 +1626,7 @@ def main():
         if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
             raise SetupError('discovery timeout must be positive')
         if args.sandbox_step:
-            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port))
+            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port, refresh_owner=True))
         if args.journey:
             raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
         if args.workspace_check:

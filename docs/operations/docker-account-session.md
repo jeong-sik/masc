@@ -45,3 +45,9 @@ helper's `--sandbox-step`. That step keeps the saved runtime configuration and
 selected port; native `setup --no-tui` still validates the runtime, prepares the
 sandbox, authenticates the operator, and boots imp. A failed session keeps the
 saved model configuration available for retry.
+
+An owner started before the group grant still has its previous Unix groups. The
+resumed sandbox step therefore offers an authenticated graceful restart of an
+existing same-workspace owner (or finishing later), without a reuse option. The
+new native setup starts its owner from the refreshed account session. This uses
+the existing identity-bound owner shutdown path, including same-version owners.

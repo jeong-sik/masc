@@ -23,7 +23,7 @@ module Frame = Masc_tui_image_mosaic
    a failed or interrupted write must force the next frame to repaint. *)
 type retained_frame = {
   geometry : int * int * int * int * (int * int) option;
-  frame : Masc_tui_types.msx_frame;
+  pixels : Masc_tui_interactive.frame option;
 }
 let retained : retained_frame option ref = ref None
 let invalidate () = retained := None
@@ -126,9 +126,21 @@ let footer () =
   Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
     (int_of_float (!screen_fraction *. 100.0))
 
+(* RFC-msx-surface-focus-mode stage 1: the pixels this view draws arrive as a
+   surface frame ([Masc_tui_interactive.frame]) — the renderer knows the
+   contract, not [Masc_tui_types.msx_frame]'s pixel fields. [Rows] is another
+   surface's shape and draws nothing here. The meta frame (mode, media, who
+   pressed) still rides the old type; only the picture went through the
+   contract. *)
 let render ~(write : string -> unit)
     ~(connection : Masc_tui_types.connection_status) ?notice
-    (frame : Masc_tui_types.msx_frame option) =
+    (frame : Masc_tui_types.msx_frame option)
+    (surface : Masc_tui_interactive.frame option) =
+  let dims =
+    match surface with
+    | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
+    | Some (Rows _) | None -> None
+  in
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let header_rows = if Option.is_some notice then 2 else 1 in
   let screen_rows = max 4 (rows - header_rows - 1) in
@@ -136,24 +148,28 @@ let render ~(write : string -> unit)
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
   let geometry = (rows, cols, header_rows, picture_rows, !cell_pixels) in
-  let kitty = match frame, !graphics_protocol with
-    | Some f, Masc_tui_graphics.Kitty_protocol ->
-        f.msx_width > 0 && f.msx_height > 0
-        && String.length f.msx_rgb = f.msx_width * f.msx_height * 3
+  let kitty = match dims, !graphics_protocol with
+    | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol ->
+        width > 0 && height > 0 && String.length rgb = width * height * 3
     | _ -> false
   in
   let previous = !retained in
   (* Invalidate before output so even a partially written batch cannot be
      mistaken for an accepted frame on the next call. *)
   invalidate ();
-  let same_layout = match previous, frame with
-    | Some old, Some f when kitty ->
-        old.geometry = geometry && old.frame.msx_width = f.msx_width
-        && old.frame.msx_height = f.msx_height
+  let same_layout = match previous, dims with
+    | Some old, Some (width, height, _) when kitty ->
+        old.geometry = geometry
+        && (match old.pixels with
+            | Some (Pixels p) -> p.width = width && p.height = height
+            | _ -> false)
     | _ -> false
   in
-  let same_pixels = match previous, frame with
-    | Some old, Some f when same_layout -> String.equal old.frame.msx_rgb f.msx_rgb
+  let same_pixels = match previous, dims with
+    | Some old, Some (_, _, rgb) when same_layout ->
+        (match old.pixels with
+         | Some (Pixels p) -> String.equal p.rgb rgb
+         | _ -> false)
     | _ -> false
   in
   let buf = Buffer.create 1024 in
@@ -166,13 +182,13 @@ let render ~(write : string -> unit)
   Buffer.add_string buf "\027[0K\r\n";
   Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
-  (match frame with
-   | Some f when kitty ->
+  (match dims with
+   | Some (width, height, rgb) when kitty ->
        (* Keep full RGB detail. Stable image and placement IDs replace the
           previous picture; unchanged pixels need no encoding or transfer. *)
        let drawn_rows =
-         rows_that_fit ~cols ~rows:picture_rows ~frame_width:f.msx_width
-           ~frame_height:f.msx_height
+         rows_that_fit ~cols ~rows:picture_rows ~frame_width:width
+           ~frame_height:height
        in
        (* The image is drawn where the cursor sits, so a smaller picture
           starts mid-screen: park the cursor on its first row, centred, and
@@ -181,26 +197,26 @@ let render ~(write : string -> unit)
          (Printf.sprintf "\027[%d;1H" (header_rows + 1 + ((screen_rows - drawn_rows) / 2)));
        let escape =
          if same_pixels then "" else
-         Masc_tui_graphics.replace_rgb ~image_id ~placement_id ~data:f.msx_rgb ~pixel_width:f.msx_width
-           ~pixel_height:f.msx_height ~rows:drawn_rows
+         Masc_tui_graphics.replace_rgb ~image_id ~placement_id ~data:rgb ~pixel_width:width
+           ~pixel_height:height ~rows:drawn_rows
        in
        Buffer.add_string buf escape;
        Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
-   | Some f when f.msx_width > 0 && f.msx_height > 0
-                 && String.length f.msx_rgb >= f.msx_width * f.msx_height * 3 ->
+   | Some (width, height, rgb)
+     when width > 0 && height > 0 && String.length rgb >= width * height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
           the terminal alone drew that shape stretched to whatever the window
           happened to be. The grid keeps the frame's ratio and the leftover
           rows and columns stay blank, so the picture is the picture. *)
        let pcols, prows =
-         Frame.fit_grid ~src_w:f.msx_width ~src_h:f.msx_height ~max_cols:cols
+         Frame.fit_grid ~src_w:width ~src_h:height ~max_cols:cols
            ~max_rows:(2 * picture_rows)
        in
        let lines =
          Frame.render ~cols:pcols ~rows:prows
-           (Frame.downscale ~src_w:f.msx_width ~src_h:f.msx_height ~cols:pcols
-              ~rows:prows f.msx_rgb)
+           (Frame.downscale ~src_w:width ~src_h:height ~cols:pcols
+              ~rows:prows rgb)
        in
        let drawn = List.length lines in
        let above = (screen_rows - drawn) / 2 in
@@ -221,7 +237,15 @@ let render ~(write : string -> unit)
   image_may_exist := !image_may_exist || kitty;
   write_batch ~write (Buffer.contents buf);
   image_may_exist := kitty;
-  if kitty then Option.iter (fun frame -> retained := Some { geometry; frame }) frame
+  (* Always retained, not just Kitty: [consume]'s repaint redraws the last
+     surface frame, and the mosaic path needs it too. *)
+  Option.iter (fun _frame -> retained := Some { geometry; pixels = surface }) frame
+;;
+
+(* The last surface a render drew — consume's repaint redraws it. *)
+let last_surface () =
+  match !retained with Some r -> r.pixels | None -> None
+;;
 
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
@@ -235,7 +259,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
-      state.msx_frame;
+      state.msx_frame (last_surface ());
     true
   end
 

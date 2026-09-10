@@ -23,6 +23,12 @@ let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
 let a_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
+(* Stage 1: the picture rides the surface contract; the fixture's pixel
+   fields feed it, so the drawing assertions are unchanged. *)
+let a_surface (f : Masc_tui_types.msx_frame) : Masc_tui_interactive.frame =
+  Masc_tui_interactive.Pixels
+    { width = f.msx_width; height = f.msx_height; rgb = f.msx_rgb }
+
 (* The annotation is the point. Without it [render] is inferred from a use
    that drops its result as a statement, so an incomplete application -- a
    render missing one of its labelled arguments -- type-checks, returns the
@@ -44,15 +50,15 @@ let contains hay needle =
 
 let test_empty_frame () =
   let out = captured (fun write ->
-        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected None) in
+        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected None None) in
   check bool "an empty frame says no machine is loaded" true
     (contains out "no machine loaded");
   check bool "and writes something" true (String.length out > 0)
 
 let test_real_frame () =
   let out = captured (fun write ->
-        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
-          (Some (a_frame ()))) in
+      Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
+        (Some (a_frame ())) (Some (a_surface (a_frame ())))) in
   check bool "a real frame names the mode" true (contains out "GRAPHIC2");
   check bool "and the cartridge" true (contains out "xspelunker");
   check bool "and the frame number" true (contains out "345");

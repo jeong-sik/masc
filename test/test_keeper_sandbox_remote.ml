@@ -9,7 +9,10 @@
 open Alcotest
 open Masc
 
-let binary_fixture () = "RIFF" ^ String.concat "" (List.init 100000 (fun _ -> "/masc-work/keeper-a/payload\000\255"))
+let binary_fixture () =
+  let chunk = "/masc-work/keeper-a/payload\000\255" in
+  let capture_limit = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
+  "RIFF" ^ String.concat "" (List.init (capture_limit / String.length chunk + 1) (fun _ -> chunk))
 
 let write_all fd content =
   let bytes = Bytes.unsafe_of_string content in

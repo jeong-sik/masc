@@ -713,10 +713,14 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
                Keeper_remote_path.rewrite_stream_chunk stream,
                (fun () -> Keeper_remote_path.finish_stream stream)
            in
+           let binary_capture_failure = ref None in
            let binary_output = match stdout_mode with Binary_bytes -> Some (Buffer.create 4096) | Text_paths -> None in
            let stdout_path_stream = match binary_output with
              | None -> Option.map path_stream on_stdout_chunk
-             | Some buffer -> Some ((fun chunk -> Buffer.add_string buffer chunk;
+             | Some buffer -> Some ((fun chunk ->
+                 (match !binary_capture_failure with
+                  | Some _ -> ()
+                  | None -> (try Buffer.add_string buffer chunk with exn -> binary_capture_failure := Some exn));
                  Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =
@@ -763,6 +767,11 @@ let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_re
              Dispatch_failed { at = Unix.gettimeofday (); failure; detail }
            in
            let finished status = Payload_finished { at = Unix.gettimeofday (); status } in
+           match !binary_capture_failure with
+           | Some error ->
+             let detail = "binary_stdout_capture_failed: " ^ Printexc.to_string error in
+             settle (failed Transport_failed detail) (transport_failed detail)
+           | None ->
            match split_final_trailer raw_stderr with
            | Error detail ->
              flush_stderr_payload stderr_stream stderr_stream.tail;

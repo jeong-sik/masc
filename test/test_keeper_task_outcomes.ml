@@ -1165,7 +1165,7 @@ let test_done_submits_three_rendered_pages () =
        let result = run_done refs in
        (match result.Masc.Keeper_tool_execution.disposition with
         | Tool_result.Completed () -> ()
-        | Tool_result.Deferred () | Tool_result.Failed () ->
+        | Tool_result.Deferred () | Tool_result.Failed _ ->
           fail ("three rendered pages were not submitted: " ^ result.raw_output));
        let verification_id = match Masc.Workspace.get_tasks_raw config with
          | [{ task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ }] -> verification_id

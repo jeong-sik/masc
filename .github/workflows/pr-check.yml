@@ -236,10 +236,21 @@ jobs:
       # spend it. It runs here rather than in a job of its own because the
       # build cache it needs is the one the step above just filled.
       #
-      # continue-on-error until main's red count is known. Gating on an
-      # unknown number stops pull requests that changed nothing to do with it.
+      # Blocking as of 2026-09-10. It was advisory "until main's red count is
+      # known", because gating on an unknown number stops pull requests that
+      # changed nothing to do with it. That number is now one: the 09-09
+      # nightly named eight suites failing outside test/ci-known-failures.txt
+      # and all eight are answered (#33782), leaving the single listed row.
+      # The script skips whatever that file lists, so a failure here is a
+      # suite that is supposed to pass and did not.
+      #
+      # What advisory cost, measured on the pull requests themselves: #34981
+      # and #34983 each ran test_keeper_tool_schema_bytes through the
+      # config/tools mapping, each read "over the 98940 ceiling by 942" and
+      # "by 1516" in this step's own log, and both merged green. #35004
+      # repaired the ceiling the next morning. The trigger worked; nothing
+      # was answerable for the verdict.
       - name: Run the tests this pull request edits
-        continue-on-error: true
         # continue-on-error covers a failing step, not a job the runner
         # cancelled: timeout-minutes above ends the job and reports it
         # failed whatever a step says. So this bounds itself, and the script

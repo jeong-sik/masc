@@ -193,7 +193,7 @@ let stage_contents ~path ~contents selection =
   |> Result.map (fun _ -> next)
   |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string
 
-let commit_staged ~path ~original ~staged =
+let commit_staged_with_publication ~with_publication ~path ~original ~staged =
   let commit () =
     try
       if (Unix.lstat path).Unix.st_kind <> Unix.S_REG then
@@ -207,9 +207,12 @@ let commit_staged ~path ~original ~staged =
     with
     | Sys_error reason -> Error reason
     | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error) in
-  match File_lock_eio.with_durable_lock_observed ~lock_path:(path ^ ".lock") commit with
+  match File_lock_eio.with_durable_lock_observed ~lock_path:(path ^ ".lock") (fun () -> with_publication commit) with
   | File_lock_eio.Lock_not_acquired error -> Error (File_lock_eio.durable_lock_error_to_string error)
   | File_lock_eio.Body_completed {value=Error reason; _} -> Error reason
   | File_lock_eio.Body_completed {value=Ok (); release_error=None} -> Ok ()
   | File_lock_eio.Body_completed {value=Ok (); release_error=Some error} ->
     Error ("Selection was written, but releasing its lock failed: " ^ File_lock_eio.durable_lock_error_to_string error)
+
+let commit_staged ~path ~original ~staged =
+  commit_staged_with_publication ~with_publication:(fun publish -> publish ()) ~path ~original ~staged

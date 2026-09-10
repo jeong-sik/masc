@@ -5600,3 +5600,8 @@
  (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))
 
 (include stanzas/test_workspace_connection.inc)
+
+(test
+ (name test_server_sandbox_setup)
+ (modules test_server_sandbox_setup)
+ (libraries masc_test_deps masc.server))

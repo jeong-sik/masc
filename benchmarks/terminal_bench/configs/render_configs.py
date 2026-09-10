@@ -169,7 +169,7 @@ supports_native_streaming = true
 # Without an accepted_reasoning_efforts contract the request validator rejects
 # any reasoning-effort (provider_config.ml Undeclared_reasoning_effort_capability).
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
-{thinking_control}{sampling_lines}supports_parallel_tool_calls = {parallel}
+{thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
@@ -305,10 +305,19 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # Chat_completions + Reasoning_effort is the admitted pair).
     if pcfg["capabilities_base"] == "anthropic":
         thinking_control = 'anthropic_thinking_control = "adaptive_only"\n'
+        # The anthropic base preset caps output at 8192 ("higher for newer
+        # models" — capabilities.ml anthropic_capabilities). With adaptive
+        # thinking on, a turn burns 8k before finishing: observed v0.35.8
+        # smoke anthropic5, "Provider output reached its maximum token
+        # boundary before completion" at 775s after the truncation recovery
+        # exhausted the same ceiling. fable-5 takes 64k.
+        max_output_lines = "max_output_tokens = 64000\n"
     elif pcfg["capabilities_base"] == "openai":
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
+        max_output_lines = ""
     else:
         thinking_control = ""
+        max_output_lines = ""
     # kimi-for-coding accepts only temperature=1 ("invalid temperature: only
     # 1 is allowed for this model"), and Anthropic under adaptive thinking
     # answers "temperature may only be set to 1 when thinking is enabled or
@@ -322,6 +331,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         provider=provider, model_alias=model_alias,
         thinking_control=thinking_control,
         sampling_lines=sampling_lines,
+        max_output_lines=max_output_lines,
         parallel=str(spec["parallel"]).lower(), **pcfg))
 
     # skills=True arm은 skill source tree를 함께 싣는다. bootstrap.sh가 이를

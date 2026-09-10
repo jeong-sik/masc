@@ -1,0 +1,433 @@
+{
+  "bundle_id": "f897df0f51c8236778b96045cc498a2d5cdbf79c5e8495485d47ea803ec899c4",
+  "generated_at": "2026-09-10T10:06:13Z",
+  "passed_count": 14,
+  "scenario_count": 14,
+  "scenarios": [
+    {
+      "authority_transition": "validated declarations -> complete Owner install -> listener-ready health",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_server_runtime_bootstrap"
+      ],
+      "duration_seconds": 76.715,
+      "evidence": [
+        "source_sha",
+        "config_root",
+        "registry_names"
+      ],
+      "exit_code": 0,
+      "id": "V01",
+      "log": "v01-boot_materialize.log",
+      "log_sha256": "f4528859008e814964f543b3f0ecc5bcc098aa76477a5282344892bf0596f005",
+      "name": "boot_materialize",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_server_runtime_bootstrap"
+      ],
+      "user_outcome": "executable membership and invalid-config reason are inspectable"
+    },
+    {
+      "authority_transition": "one Owner child claim; competing direct/autonomous request queues or rejects typed",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_owner"
+      ],
+      "duration_seconds": 59.787,
+      "evidence": [
+        "operation_id",
+        "owner_timeline"
+      ],
+      "exit_code": 0,
+      "id": "V02",
+      "log": "v02-owner_serialization.log",
+      "log_sha256": "8ce57744853b0ed3d3d1ee989f6a4bc3696d5aaa431304f1e7aaccc7770032cd",
+      "name": "owner_serialization",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_owner"
+      ],
+      "user_outcome": "one external-effect lane per Keeper"
+    },
+    {
+      "authority_transition": "Owner -> runtime -> common terminal pipeline -> reply",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_chat_operation_http"
+      ],
+      "duration_seconds": 25.009,
+      "evidence": [
+        "runtime_id",
+        "receipt",
+        "response_digest",
+        "turn_ref"
+      ],
+      "exit_code": 0,
+      "id": "V03",
+      "log": "v03-direct_dashboard.log",
+      "log_sha256": "d8d44cee002552adaf305c188678d21934acd9348cb602b7f9fc4deb1e036bd2",
+      "name": "direct_dashboard",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_chat_operation_http"
+      ],
+      "user_outcome": "visible reply and turn_ref share the admitted turn identity"
+    },
+    {
+      "authority_transition": "queue commit -> reload -> exact single claim",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_event_queue"
+      ],
+      "duration_seconds": 13.484,
+      "evidence": [
+        "queue_revision_before",
+        "queue_revision_after"
+      ],
+      "exit_code": 0,
+      "id": "V04",
+      "log": "v04-durable_restart.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "name": "durable_restart",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_event_queue"
+      ],
+      "user_outcome": "async request survives restart"
+    },
+    {
+      "authority_transition": "selected source incarnation alone terminalizes",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_event_queue",
+        "@test/runtest-test_keeper_event_queue_state_v2"
+      ],
+      "duration_seconds": 15.025,
+      "evidence": [
+        "source_identity",
+        "pre_state_wal",
+        "ack_receipt"
+      ],
+      "exit_code": 0,
+      "id": "V05",
+      "log": "v05-exact_ack.log",
+      "log_sha256": "51a2ee016c62345aa0aa55b82f4cd07bf84e9f0a4e5dc23c35d3f3a6af53098f",
+      "name": "exact_ack",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_event_queue",
+        "@test/runtest-test_keeper_event_queue_state_v2"
+      ],
+      "user_outcome": "a newer incarnation is not lost"
+    },
+    {
+      "authority_transition": "retryable first attempt -> next candidate -> winner checkpoint owner",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_turn_driver_failover"
+      ],
+      "duration_seconds": 20.763,
+      "evidence": [
+        "attempt_sequence",
+        "fallback_reason",
+        "winner_owner"
+      ],
+      "exit_code": 0,
+      "id": "V06",
+      "log": "v06-pre_checkpoint_failover.log",
+      "log_sha256": "1c6efc85fce0c7275f499f42e32959e3a3d4fa58a0a0fd3fe6ef5335e6c48e01",
+      "name": "pre_checkpoint_failover",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_turn_driver_failover"
+      ],
+      "user_outcome": "one final response"
+    },
+    {
+      "authority_transition": "effect boundary closes blind replay; terminal failure stays typed",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_gate_effect_coverage",
+        "@test/runtest-test_keeper_terminal_reason_typed"
+      ],
+      "duration_seconds": 19.192,
+      "evidence": [
+        "effect_id",
+        "checkpoint_stage",
+        "terminal_disposition"
+      ],
+      "exit_code": 0,
+      "id": "V07",
+      "log": "v07-post_effect_failure.log",
+      "log_sha256": "2baed8d3e2d79cdff923ab1b2de18daf6be4648811820461f35f6707b56c3685",
+      "name": "post_effect_failure",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_gate_effect_coverage",
+        "@test/runtest-test_keeper_terminal_reason_typed"
+      ],
+      "user_outcome": "no duplicate external effect"
+    },
+    {
+      "authority_transition": "winning Agent Core checkpoint or official-client session owns resume",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_replay_checkpoint",
+        "@test/runtest-test_official_client_session_store"
+      ],
+      "duration_seconds": 22.613,
+      "evidence": [
+        "checkpoint_owner",
+        "session_owner",
+        "resume_id"
+      ],
+      "exit_code": 0,
+      "id": "V08",
+      "log": "v08-checkpoint_resume.log",
+      "log_sha256": "71a842697513c6deb2d279eec5002bea4ef98a0ea9c41b27ad16646b35aa5324",
+      "name": "checkpoint_resume",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_replay_checkpoint",
+        "@test/runtest-test_official_client_session_store"
+      ],
+      "user_outcome": "conversation continuity without cross-owner resume"
+    },
+    {
+      "authority_transition": "descriptor policy and sandbox boundary decide before execution",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_tool_policy_masc_surface",
+        "@test/runtest-test_keeper_sandbox_containment"
+      ],
+      "duration_seconds": 21.315,
+      "evidence": [
+        "tool_outcome",
+        "sandbox_profile"
+      ],
+      "exit_code": 0,
+      "id": "V09",
+      "log": "v09-sandbox_tool_policy.log",
+      "log_sha256": "bd0a5d258c4097bbac93cff9d936681b215634bf7a4a5e03dd82da5c9ce3ae9e",
+      "name": "sandbox_tool_policy",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_tool_policy_masc_surface",
+        "@test/runtest-test_keeper_sandbox_containment"
+      ],
+      "user_outcome": "forbidden tools fail before effect"
+    },
+    {
+      "authority_transition": "approval decision and effect outcome remain separate; replay is exact",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_gate_replay",
+        "@test/runtest-test_keeper_hitl_resolution_prompt"
+      ],
+      "duration_seconds": 21.912,
+      "evidence": [
+        "approval_id",
+        "effect_receipt",
+        "delivery_receipt"
+      ],
+      "exit_code": 0,
+      "id": "V10",
+      "log": "v10-hitl_replay.log",
+      "log_sha256": "a0cbd43f8ac5e54adb70cd94b87fd437cf9469101e48d0c49ed2a641571b72d3",
+      "name": "hitl_replay",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_gate_replay",
+        "@test/runtest-test_keeper_hitl_resolution_prompt"
+      ],
+      "user_outcome": "decision and final delivery are correlated"
+    },
+    {
+      "authority_transition": "natural-language result -> evidence -> authenticated typed verdict",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_verification_authority_tools",
+        "@test/runtest-test_completion_trust_harness"
+      ],
+      "duration_seconds": 21.5,
+      "evidence": [
+        "evidence_submission",
+        "authority_verdict"
+      ],
+      "exit_code": 0,
+      "id": "V11",
+      "log": "v11-completion_authority.log",
+      "log_sha256": "671f2816e74e4ce04e491ea10bce1205bfb3a9e42228640b034e45fb2a5b72a3",
+      "name": "completion_authority",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_verification_authority_tools",
+        "@test/runtest-test_completion_trust_harness"
+      ],
+      "user_outcome": "no false task completion"
+    },
+    {
+      "authority_transition": "raw save -> per-key startup/fiber/turn application state",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_runtime_toml_overrides",
+        "@test/runtest-test_keeper_runtime_config_leaf"
+      ],
+      "duration_seconds": 30.517,
+      "evidence": [
+        "configured_value",
+        "effective_value",
+        "applied_at",
+        "reload_class"
+      ],
+      "exit_code": 0,
+      "id": "V13",
+      "log": "v13-config_application_boundary.log",
+      "log_sha256": "b72ad6f8f7589a281b0655ca94250c6c9409be65dbe396a79d277f5cab5fbcad",
+      "name": "config_application_boundary",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_runtime_toml_overrides",
+        "@test/runtest-test_keeper_runtime_config_leaf"
+      ],
+      "user_outcome": "effective value and restart requirement are explicit"
+    },
+    {
+      "authority_transition": "unknown/retired key -> reject; forward schema -> warning",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_runtime_toml_overrides",
+        "@test/runtest-test_keeper_runtime_config_leaf"
+      ],
+      "duration_seconds": 25.843,
+      "evidence": [
+        "schema_issue",
+        "setting_registry_census"
+      ],
+      "exit_code": 0,
+      "id": "V14",
+      "log": "v14-config_typo_orphan.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "name": "config_typo_orphan",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_runtime_toml_overrides",
+        "@test/runtest-test_keeper_runtime_config_leaf"
+      ],
+      "user_outcome": "no silent setting no-op"
+    },
+    {
+      "authority_transition": "durable outbox -> active-head release; delivery terminal -> source ACK; recovery pending/transient failure -> queue-tail defer; deterministic failure -> source quarantine",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "build",
+        "--root",
+        ".",
+        "@test/runtest-test_keeper_failed_selection_disposition",
+        "@test/runtest-test_keeper_event_queue"
+      ],
+      "duration_seconds": 29.6,
+      "evidence": [
+        "source_incarnation",
+        "queue_order_after_defer",
+        "typed_liveness_disposition",
+        "delivery_intent"
+      ],
+      "exit_code": 0,
+      "id": "V15",
+      "log": "v15-continuous_multi_source_liveness.log",
+      "log_sha256": "c9e6a394ad1a1c21a27fea09096cd6f2e48015e7371c009e3c1c3780dbd50fcd",
+      "name": "continuous_multi_source_liveness",
+      "status": "passed",
+      "targets": [
+        "@test/runtest-test_keeper_failed_selection_disposition",
+        "@test/runtest-test_keeper_event_queue"
+      ],
+      "user_outcome": "one blocked Schedule/Task/Board/Goal/Comment/Fusion source does not monopolize the Keeper"
+    }
+  ],
+  "schema": "masc.keeper_full_lifecycle_evidence.v1",
+  "source_sha": "2c7cf866ed1b76f95c0054e39e3ae25618528c23",
+  "status": "passed"
+}

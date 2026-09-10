@@ -317,6 +317,18 @@ type read_file_attempt =
   | Read_failed_payload of string
   | Read_failed_message of string
 
+let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
+  let* target =
+    resolve_read_file_target ~config ~meta ~args:(`Assoc []) ~raw_path:path
+    |> Result.map_error (function Read_path_error detail -> detail)
+  in
+  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
+    ~host_path:target ~max_bytes
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
+  |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
+;;
+
 let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -1494,6 +1506,7 @@ let store_edit_snapshots ~config ~before ~after =
 ;;
 
 type file_write_attempt =
+  | Write_unchanged of Yojson.Safe.t
   | Write_succeeded of
       { payload : Yojson.Safe.t
       ; file_change_evidence : Keeper_file_change_evidence.t option
@@ -2002,6 +2015,7 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 ;;
 
 let rec file_write_attempt_to_execution ~config = function
+  | Write_unchanged payload -> Keeper_tool_execution.success_data payload
   | Write_succeeded { payload; file_change_evidence } ->
     let execution = Eio.Cancel.protect (fun () ->
       let result = Tool_result.make_ok ~tool_name:"tool_write_file"
@@ -2871,6 +2885,7 @@ let handle_file_write_with_outcome
                                  ([ "ok", `Bool true
                                   ; "path", `String target
                                   ; "mode", `String "patch"
+                                  ; "changed", `Bool true
                                   ; "edit_snapshots", store_edit_snapshots ~config ~before ~after:updated
                                   ]
                                   @ operation_fields
@@ -2911,9 +2926,20 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* (application : Keeper_tool_patch.patch_application) =
-                  Keeper_tool_patch.apply operation current
-                in
+                match Keeper_tool_patch.apply operation current with
+                | Error message ->
+                  Ok (Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Workflow_rejection })
+                | Ok application ->
+                if String.equal current application.updated then
+                  Ok (Write_unchanged (`Assoc
+                    ([ "ok", `Bool true; "changed", `Bool false
+                     ; "path", `String target; "mode", `String "patch"
+                     ; "occurrences", `Int application.occurrence_count
+                     ; "replace_all", `Bool replace_all
+                     ; "bytes_written", `Int 0 ] @ via_field)))
+                else
                 let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect
                     ~parent

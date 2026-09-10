@@ -693,6 +693,11 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
      fail "catalog reasoning stream override was not applied"
    | CAP.No_reasoning_streaming ->
      fail "catalog reasoning stream override disabled streaming"
+   | CAP.Delta_reasoning_field_and_details field ->
+     fail
+       (Printf.sprintf
+          "catalog reasoning stream override selected details streaming: %s"
+          field)
    | CAP.Template_reasoning_streaming ->
      fail "catalog reasoning stream override selected template parser");
   let dialect = RD.for_provider_config config in
@@ -703,7 +708,7 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
        (Printf.sprintf
           "ollama cloud OpenAI-compatible reasoning delta field drifted: %s"
           field)
-   | RD.Delta_reasoning_details ->
+   | RD.Delta_field_and_details _ ->
      fail "ollama cloud OpenAI-compatible should not use reasoning_details streaming"
    | RD.No_streaming_reasoning ->
      fail "ollama cloud OpenAI-compatible reasoning stream field was dropped"
@@ -910,7 +915,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
    | RD.Delta_field "reasoning_content" -> ()
    | RD.Delta_field other ->
      fail ("catalog qwen3.6 row resolved unexpected reasoning delta field: " ^ other)
-   | RD.No_streaming_reasoning | RD.Delta_reasoning_details | RD.Template_parser ->
+   | RD.No_streaming_reasoning | RD.Delta_field_and_details _ | RD.Template_parser ->
      fail "catalog qwen3.6 row must resolve the reasoning_content streaming dialect");
   let parse raw =
     match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming raw with

@@ -1456,6 +1456,11 @@ let empty_loaded_state =
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 
+let enter_setup_required ~reason () =
+  Atomic.set loaded_state_ref empty_loaded_state;
+  Runtime_startup_state.set (Setup_required reason)
+;;
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
@@ -1494,7 +1499,8 @@ let set_loaded
     ; lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
-    }
+    };
+  Runtime_startup_state.set Available
 
 let init_default ~config_path =
   let* loaded, _exact_output_lane_decls =
@@ -1598,6 +1604,12 @@ let startup_degraded () = Option.is_some (startup_degradation ())
 let default_runtime_id_or_fail () =
   match (runtime_state ()).default_runtime with
   | Some rt -> rt.id
+  | None when Runtime_startup_state.requires_setup () ->
+    let message = match Runtime_startup_state.get () with
+      | Setup_required reason -> Runtime_startup_state.message reason
+      | Not_initialized | Available -> "Model setup required"
+    in
+    failwith message
   | None ->
     failwith
       "Runtime.get_default_runtime_id: default runtime not initialized; \
@@ -1887,12 +1899,8 @@ let pricing_of_runtime_id (id : string) : float option * float option =
   | None -> (None, None)
 ;;
 
-(* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
-   condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
-   조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).
-   불변식: [init_default] 가 startup 에서 성공해야 한다(아니면 startup abort).
-   NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
-   [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
+(* A model-less owner server reports explicit setup-required. Other missing
+   initialization remains a programming error; neither invents a runtime ID. *)
 let get_default_runtime_id () =
   default_runtime_id_or_fail ()
 ;;

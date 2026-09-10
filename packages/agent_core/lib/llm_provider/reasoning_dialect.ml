@@ -36,7 +36,7 @@ type replay_policy = Reasoning_replay_contract.replay_policy =
 type streaming_reasoning = Reasoning_replay_contract.streaming_reasoning =
   | No_streaming_reasoning
   | Delta_field of string
-  | Delta_reasoning_details
+  | Delta_field_and_details of string
   | Template_parser
 
 type output_wire = Reasoning_replay_contract.output_wire =
@@ -159,7 +159,7 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     ; preserve_wire
     ; streaming =
         (match output_wire with
-         | Reasoning_split -> Delta_reasoning_details
+         | Reasoning_split -> Delta_field_and_details "reasoning_content"
          | No_output_control -> Delta_field "reasoning_content")
     ; output_wire
     }
@@ -226,6 +226,8 @@ let apply_streaming_format caps dialect =
   | Default_reasoning_streaming -> dialect
   | No_reasoning_streaming -> { dialect with streaming = No_streaming_reasoning }
   | Delta_reasoning_field field -> { dialect with streaming = Delta_field field }
+  | Delta_reasoning_field_and_details field ->
+    { dialect with streaming = Delta_field_and_details field }
   | Template_reasoning_streaming -> { dialect with streaming = Template_parser }
 ;;
 

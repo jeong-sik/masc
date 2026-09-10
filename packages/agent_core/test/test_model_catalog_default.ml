@@ -464,7 +464,7 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
           (match (Llm_provider.Reasoning_dialect.of_capabilities caps).streaming with
            | Delta_field "reasoning_content" -> ()
            | No_streaming_reasoning | Delta_field _
-           | Delta_reasoning_details | Template_parser ->
+           | Delta_field_and_details _ | Template_parser ->
              fail (provider_label ^ " drops GLM-4.6V reasoning deltas"))
         | None -> fail (provider_label ^ " resolves no capabilities for glm-4.6v"))
       [ "glm-coding"; "glm" ])
@@ -507,6 +507,175 @@ let test_glm_vision_rows_agree () =
         (Some true)
         entry.supports_multimodal_inputs)
     rows
+;;
+
+(* Every number here was read from OpenRouter's own GET /api/v1/models
+   metadata or measured on the wire on 2026-09-10
+   (evidence/task-openrouter-support/). Provider-scoped lookup is an exact id
+   match, so each row is asserted on its own rather than through a prefix. *)
+let openrouter_rows =
+  (* id, context, max output, input $/1M, output $/1M, image input *)
+  [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
+  ; "anthropic/claude-sonnet-5", 1_000_000, 128_000, 2.0, 10.0, None
+  ; "openai/gpt-5.5", 1_050_000, 128_000, 5.0, 30.0, None
+  ; "openai/gpt-5.6-sol", 1_050_000, 128_000, 2.0, 10.0, None
+  ; "google/gemini-3.8-flash", 1_048_576, 65_536, 0.75, 3.75, None
+  ; "x-ai/grok-4.6", 500_000, 450_000, 2.0, 6.0, None
+  ; "moonshotai/kimi-k3", 1_048_576, 943_718, 3.0, 15.0, None
+  ; "z-ai/glm-5.3-flash", 1_310_720, 131_072, 0.075, 0.25, None
+  ; "z-ai/glm-5.3", 1_310_720, 943_718, 1.4, 4.4, Some false
+  ; "deepseek/deepseek-v4-flash", 1_048_576, 384_000, 0.088606, 0.177212, Some false
+  ; "deepseek/deepseek-v4-pro", 1_048_576, 384_000, 0.95526, 1.91052, Some false
+  ; "qwen/qwen3.8-max-0902", 1_000_000, 131_072, 2.0, 6.0, None
+  ]
+;;
+
+let openrouter_entry entries model_id =
+  match
+    List.filter
+      (fun (entry : Model_catalog.model_entry) ->
+         entry.id_prefix = model_id && entry.provider_name = Some "openrouter")
+      entries
+  with
+  | [ entry ] -> entry
+  | [] -> Alcotest.failf "no openrouter row for %s" model_id
+  | _ :: _ :: _ -> Alcotest.failf "duplicate openrouter rows for %s" model_id
+;;
+
+let test_openrouter_rows_preserve_probe_truth () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter rows"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  List.iter
+    (fun (model_id, context, max_output, price_in, price_out, image_input) ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option string)
+         (model_id ^ " capability base")
+         (Some "openai_chat_extended")
+         entry.base_label;
+       check (option int) (model_id ^ " context") (Some context) entry.max_context_tokens;
+       check
+         (option int)
+         (model_id ^ " max output")
+         (Some max_output)
+         entry.max_output_tokens;
+       check
+         (option (float 1e-9))
+         (model_id ^ " input price")
+         (Some price_in)
+         entry.input_per_million;
+       check
+         (option (float 1e-9))
+         (model_id ^ " output price")
+         (Some price_out)
+         entry.output_per_million;
+       (* The gateway mirrors reasoning into reasoning_details[] on every one
+          of these models, and gpt-5.5 puts its only reasoning artifact there
+          with delta.reasoning = null. A row declaring plain "delta:reasoning"
+          would read that null and drop the item. *)
+       check
+         (option string)
+         (model_id ^ " reasoning stream")
+         (Some "delta_details:reasoning")
+         entry.reasoning_streaming_format;
+       check
+         (option string)
+         (model_id ^ " reasoning output")
+         (Some "split_reasoning_fields")
+         entry.reasoning_output_format;
+       check
+         (option string)
+         (model_id ^ " reasoning replay")
+         (Some "drop_without_tool")
+         entry.reasoning_replay;
+       check
+         (option bool)
+         (model_id ^ " image input")
+         image_input
+         entry.supports_image_input)
+    openrouter_rows
+;;
+
+(* Rows that lower a claim the openai_chat_extended base makes. The tool_choice
+   pair is a wire measurement; the modality trio is the gateway's own input
+   list. Left at the base value each one would be a false claim. *)
+let test_openrouter_rows_lower_contradicted_base_claims () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter overrides"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  let qwen = openrouter_entry entries "qwen/qwen3.8-max-0902" in
+  check
+    (option bool)
+    "qwen refuses required tool choice"
+    (Some false)
+    qwen.supports_required_tool_choice;
+  check
+    (option bool)
+    "qwen refuses named tool choice"
+    (Some false)
+    qwen.supports_named_tool_choice;
+  List.iter
+    (fun model_id ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option bool)
+         (model_id ^ " is text-only")
+         (Some false)
+         entry.supports_multimodal_inputs)
+    [ "z-ai/glm-5.3"; "deepseek/deepseek-v4-flash"; "deepseek/deepseek-v4-pro" ]
+;;
+
+(* The effort ladder is the difference between a thinking turn and an
+   Undeclared_reasoning_effort_capability, and five endpoints refuse the
+   disable rung outright, so the split is measured rung by rung rather than
+   assumed uniform (probe7-*, 12 models x 7 rungs, 2026-09-10). *)
+let openrouter_effort_ladders =
+  let with_disable =
+    [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  in
+  let without_disable = [ "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ] in
+  List.map
+    (fun model_id -> model_id, without_disable)
+    [ "google/gemini-3.8-flash"
+    ; "x-ai/grok-4.6"
+    ; "z-ai/glm-5.3"
+    ; "z-ai/glm-5.3-flash"
+    ; "qwen/qwen3.8-max-0902"
+    ]
+  @ List.map
+      (fun model_id -> model_id, with_disable)
+      [ "anthropic/claude-opus-5"
+      ; "anthropic/claude-sonnet-5"
+      ; "openai/gpt-5.5"
+      ; "openai/gpt-5.6-sol"
+      ; "moonshotai/kimi-k3"
+      ; "deepseek/deepseek-v4-flash"
+      ; "deepseek/deepseek-v4-pro"
+      ]
+;;
+
+let test_openrouter_rows_declare_their_measured_effort_ladder () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter efforts"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  check
+    int
+    "every OpenRouter row has a measured ladder"
+    (List.length openrouter_rows)
+    (List.length openrouter_effort_ladders);
+  List.iter
+    (fun (model_id, expected) ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option (list string))
+         (model_id ^ " effort ladder")
+         (Some expected)
+         entry.accepted_reasoning_efforts)
+    openrouter_effort_ladders
 ;;
 
 let () =
@@ -570,6 +739,18 @@ let () =
             "glm vision rows agree"
             `Quick
             test_glm_vision_rows_agree
+        ; test_case
+            "OpenRouter rows preserve probe truth"
+            `Quick
+            test_openrouter_rows_preserve_probe_truth
+        ; test_case
+            "OpenRouter rows lower contradicted base claims"
+            `Quick
+            test_openrouter_rows_lower_contradicted_base_claims
+        ; test_case
+            "OpenRouter rows declare their measured effort ladder"
+            `Quick
+            test_openrouter_rows_declare_their_measured_effort_ladder
         ] )
     ]
 ;;

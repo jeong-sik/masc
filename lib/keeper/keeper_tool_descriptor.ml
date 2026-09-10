@@ -792,6 +792,7 @@ let file_edit_output_schema =
       ; "mode", `Assoc [ "type", `String "string" ]
       ; "bytes_written", `Assoc [ "type", `String "integer" ]
       ; "via", `Assoc [ "type", `String "string" ]
+      ; "changed", `Assoc [ "type", `String "boolean" ]
       ; "occurrences", `Assoc [ "type", `String "integer" ]
       ; "replace_all", `Assoc [ "type", `String "boolean" ]
       ; ( "edit_snapshots"

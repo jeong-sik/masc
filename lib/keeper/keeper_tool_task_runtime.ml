@@ -339,37 +339,6 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
                         })))
   | Keeper_types_profile_sandbox.Shared_mount -> None
 
-let evidence_artifact_total_bytes ~(config : Workspace.config)
-      ~(meta : keeper_meta) evidence_refs
-  =
-  (* [artifact_reference_size] itself resolves the project root from
-     [base_path], so no separate normalization is needed here. *)
-  let artifact_read = evidence_artifact_reader ~config ~meta () in
-  List.filter_map
-    (fun reference ->
-       Workspace_verification_store.artifact_reference_size
-         ?artifact_read
-         ~base_path:config.base_path
-         ~worker:meta.name
-         reference)
-    evidence_refs
-  |> List.fold_left ( + ) 0
-;;
-
-(* What one submission may hand the reviewer as artifact bytes in total. A
-   resource boundary on the reviewer's inline window, not a behavioural
-   gate: over it, the submitter is told to hand over an excerpt and a
-   pointer instead. *)
-let evidence_total_bytes_limit = 50 * 1024
-
-let evidence_total_size_rejection ~total ~limit =
-  Printf.sprintf
-    "artifact total size %d bytes exceeds limit %d bytes — use note: for \
-     large files. Submit a small excerpt or summary as an artifact: and the \
-     pointer (path, URL, board post) as note:."
-    total limit
-;;
-
 let handle_keeper_task_tool_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -1144,21 +1113,6 @@ let handle_keeper_task_tool_with_outcome
                   { reason = "keeper_task_done rejected: evidence_refs required" })
              message)
       | Ok evidence_refs ->(
-      (* task-540: refuse oversized artifact: evidence here, before the
-         transition, so the caller learns the byte count and the note: escape
-         hatch while it can still fix the call — instead of the completion
-         authority later staring at a truncated prefix. *)
-      let total = evidence_artifact_total_bytes ~config ~meta evidence_refs in
-      let limit = evidence_total_bytes_limit in
-      if total > limit then
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Workflow_rejection
-          (workflow_rejection_error_json
-             ~typed_outcome:
-               (Keeper_tool_outcome.Error
-                  { reason = "keeper_task_done rejected: evidence too large" })
-             (evidence_total_size_rejection ~total ~limit))
-      else (
       (* A Keeper submits evidence; only the completion authority can issue the
          terminal verdict. *)
       let action = "submit_for_verification" in
@@ -1205,7 +1159,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload))))
+        Keeper_tool_execution.failure ~class_ payload)))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

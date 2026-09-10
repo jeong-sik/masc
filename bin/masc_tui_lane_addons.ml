@@ -103,7 +103,7 @@ let timeline_lines ~width rows =
       let label lane =
         match String.index_opt lane '/' with
         | Some separator when separator > 0 ->
-            let instance = String.sub lane 0 (min 8 separator) in
+            let instance = String.sub lane (max 0 (separator - 8)) (min 8 separator) in
             let local = String.sub lane (separator + 1) (String.length lane - separator - 1) in
             let suffix = " · " ^ instance in
             let local_width = label_width - Masc_tui_message_layout.display_width suffix in

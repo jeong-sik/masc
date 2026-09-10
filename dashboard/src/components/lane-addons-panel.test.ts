@@ -56,10 +56,24 @@ describe('optional Lane Add-on surface', () => {
     const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
     const labels = [...svg.querySelectorAll('g text')]
     expect(labels.map(label => label.lastChild?.textContent)).toEqual([
-      'custom/browser · 14f6117d', 'custom/expectation · 14f6117d',
+      'custom/browser · 5cca3312', 'custom/expectation · 5cca3312',
     ])
     expect(labels.map(label => label.getAttribute('aria-label')).sort()).toEqual([...lanes].sort())
     expect(labels.map(label => label.querySelector('title')?.textContent).sort()).toEqual([...lanes].sort())
+  })
+  it('distinguishes matching local lanes from UUIDv7 instances sharing a timestamp prefix', async () => {
+    const instances = ['0198ca47-9000-7000-8000-aaaa11111111', '0198ca47-9000-7000-8000-aaaa22222222']
+    const lanes = instances.map(instance => `${instance}/custom/observation`)
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      instances: instances.map(instance_id => ({ ...snapshot.instances[0], instance_id })), rows:
+      lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text')]
+    expect(labels.map(label => label.lastChild?.textContent)).toEqual([
+      'custom/observation · 11111111', 'custom/observation · 22222222',
+    ])
+    expect(labels.map(label => label.getAttribute('aria-label'))).toEqual(lanes)
   })
   it('queries the selected time and lane, showing partial coverage and explicit evidence action', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))

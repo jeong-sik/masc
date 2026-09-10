@@ -15,7 +15,8 @@ function laneLabel(lane: string) {
   }
   const instance = lane.slice(0, separator)
   const local = Array.from(lane.slice(separator + 1))
-  const shortInstance = instance.slice(0, 8)
+  // UUIDv7's timestamp prefix can be shared by concurrent installations.
+  const shortInstance = instance.slice(-8)
   const available = 34 - shortInstance.length - 3
   const label = local.length > available ? local.slice(0, available - 1).join('') + '…' : local.join('')
   return `${label} · ${shortInstance}`

@@ -214,7 +214,8 @@ let handle_with_endpoint
                          (match
                             Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
                           with
-                          | Error message -> failure ~target message
+                          | Error message ->
+                            failure ~class_:Tool_result.Workflow_rejection ~target message
                           | Ok application when String.equal current application.updated ->
                             Keeper_tool_execution.success_data
                               (success_payload ~target ~meta

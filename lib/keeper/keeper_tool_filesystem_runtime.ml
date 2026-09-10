@@ -2926,9 +2926,12 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* (application : Keeper_tool_patch.patch_application) =
-                  Keeper_tool_patch.apply operation current
-                in
+                match Keeper_tool_patch.apply operation current with
+                | Error message ->
+                  Ok (Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Workflow_rejection })
+                | Ok application ->
                 if String.equal current application.updated then
                   Ok (Write_unchanged (`Assoc
                     ([ "ok", `Bool true; "changed", `Bool false

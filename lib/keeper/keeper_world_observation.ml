@@ -945,7 +945,9 @@ let pending_board_event_of_ask_answer
         ; "surface", Surface_ref.lane_label responder.Keeper_ask.surface
         ]
         ~fallback:ask.Keeper_ask.ask_id
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len body
+  (* This is the only model-facing copy of the operator's answers, not a
+     preview of a fetchable Board post. Keep every question's complete answer. *)
+  ; preview = body
   ; hearth = None
     (* Not a Board post: masc wrote this row, nobody posted it. Marked
        [Human_post] the Keeper read it as a post it could fetch and spent a

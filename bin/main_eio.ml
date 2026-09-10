@@ -2642,6 +2642,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
             ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
         | Ok _ -> print_endline "Local operator credential ready."; 0
         | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1))
+    ~resume_models:(fun () -> Masc_cli_model_resume.run ~base_path ~port ~agent:default_login_agent)
     ~start_keeper:(fun () ->
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
         ~agent:default_login_agent ~token:None ~keeper_name:"imp"
@@ -2652,6 +2653,10 @@ let setup_preflight_cmd =
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
 
+let runtime_resume_cmd =
+  let run base_path port agent = Masc_cli_model_resume.run ~base_path ~port ~agent in
+  Cmd.v (Cmd.info "runtime-resume" ~doc:"Apply saved model settings to this running workspace after sign-in.")
+    Term.(const run $ base_path $ port $ login_agent)
 let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
     ~doc:"Print the shared read-only onboarding state as JSON.") in
@@ -2809,6 +2814,7 @@ let cmd =
     ; sandbox_install_apple_verified_cmd
     ; setup_cmd
     ; setup_preflight_cmd
+    ; runtime_resume_cmd
     ; doctor_cmd
     ; token_cmd
     ; build_commit_cmd

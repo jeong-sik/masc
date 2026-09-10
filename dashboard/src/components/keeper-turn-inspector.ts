@@ -617,7 +617,14 @@ function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
   `
 }
 
-function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: string; htmlContent?: string; tokens?: number }) {
+// No htmlContent branch: it took a pre-rendered HTML string and handed it to
+// dangerouslySetInnerHTML, and the caller that supplied one -- a string-based
+// jsonHighlight over values including execution_id -- is gone. What was left
+// was a reachable-by-nobody path that turned any future caller's string into
+// live DOM, which is how the stored XSS in #35059 was written in the first
+// place. Preact escapes an interpolated string; keeping only that branch means
+// there is no way to ask it not to.
+function CodeCard({ cap, text, tokens }: { cap: string; text: string; tokens?: number }) {
   return html`
     <div class="ti-code">
       <div class="ti-code-h">
@@ -625,9 +632,7 @@ function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: strin
         ${tokens != null ? html`<span class="sz">~${tokens} tok</span>` : null}
         <${CopyBtn} text=${text} />
       </div>
-      ${htmlContent
-        ? html`<pre dangerouslySetInnerHTML=${{ __html: htmlContent }} />`
-        : html`<pre>${text}</pre>`}
+      <pre>${text}</pre>
     </div>
   `
 }

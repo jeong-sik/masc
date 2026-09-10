@@ -45,6 +45,6 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
       Ok bytes in
     (match prepared with
      | Error detail -> fail detail
-     | Ok bytes -> write (`Assoc ["path", `String path; "mode", `String "overwrite";
-                                 "content", `String bytes]))
+     | Ok _ -> write (`Assoc ["path", `String path; "mode", `String "overwrite";
+                                 "content_artifact", Yojson.Safe.Util.member "artifact" args]))
   | Some _ | None -> fail "action must be export or materialize"

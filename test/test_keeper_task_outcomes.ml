@@ -1098,6 +1098,9 @@ let test_done_submits_three_rendered_pages () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       (* This scenario inspects real snapshots, so install the production
+          submission persistence hooks rather than the outcome-only stub. *)
+       Masc.Workspace_metric_hooks.install ();
        let config = Masc.Workspace.default_config base_path in
        let agent_name = "task-create-test" in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));

@@ -107,6 +107,7 @@ type runtime_handler =
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
+  | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_workspace_memory_read
   | Tool_memory_search
@@ -237,6 +238,7 @@ let runtime_handler_to_string = function
   | Tool_tools_list -> "tool_tools_list"
   | Tool_capability_search -> "tool_capability_search"
   | Tool_context_status -> "tool_context_status"
+  | Tool_peer_artifact -> "keeper_artifact_transfer"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
@@ -458,7 +460,8 @@ let descriptor
       | Tool_tools_list
       | Tool_capability_search
       | Tool_context_status
-      | Tool_artifact_read
+      | Tool_peer_artifact
+  | Tool_artifact_read
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
@@ -2369,6 +2372,17 @@ let internal_descriptors : t list =
          admission; do not promote this to Concurrent on its strength. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.transfer"
+      ~name:Keeper_runtime_schemas_toml.peer_artifact.name
+      ~description:Keeper_runtime_schemas_toml.peer_artifact.description
+      ~input_schema:Keeper_runtime_schemas_toml.peer_artifact.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_peer_artifact
       ()
   ; (in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity

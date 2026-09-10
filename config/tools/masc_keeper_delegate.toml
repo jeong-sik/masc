@@ -33,3 +33,11 @@ required = true
 name = "prompt"
 type = "string"
 required = true
+
+[[params]]
+name = "artifacts"
+type = "array"
+description = "Exact exported artifact objects from keeper_artifact_transfer. The receiver can materialize these bytes in its own sandbox."
+
+[params.items]
+type = "object"

@@ -2472,7 +2472,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
-let test_agent_delegate_submits_owner_operation_without_waiting () =
+let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=false) () =
   init_runtime_default_for_tests ();
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2531,6 +2531,11 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
            ~session_id:"owner-tool-session"
          |> Result.get_ok
        in
+       let artifact = if with_artifact then (
+         let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+         let blob = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path) ~bytes ~mime:"image/png" in
+         Some (Keeper_peer_artifact_ref.make ~blob ~filename:"poster.png" ~purpose:"Use in booklet" |> Result.get_ok)
+       ) else None in
        let args =
          `Assoc
            [ "target",
@@ -2541,6 +2546,10 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
            ; "prompt", `String "inspect owner state"
            ]
        in
+       let args = match artifact, args with
+         | Some artifact, `Assoc fields -> `Assoc (("artifacts", `List [Keeper_peer_artifact_ref.to_json artifact]) :: fields)
+         | None, args -> args
+         | Some _, _ -> fail "invalid test arguments" in
        let result =
          Keeper_tool_surface_ops.handle_keeper_delegate
            ~invocation_ref
@@ -2628,7 +2637,18 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
             | Ok input -> input
             | Error detail -> fail detail)
        in
-       check string "agent operation keeps prompt" "inspect owner state" input.message;
+       (match artifact with
+        | None -> check string "agent operation keeps prompt" "inspect owner state" input.message
+        | Some artifact ->
+          let encoded = List.hd (List.rev (String.split_on_char '\n' input.message)) in
+          let observed = match Yojson.Safe.from_string encoded with
+            | `List [item] -> Keeper_peer_artifact_ref.of_json item |> Result.get_ok
+            | _ -> fail "queued operation lost typed artifact descriptor" in
+          check string "queued artifact SHA" artifact.blob.sha256 observed.blob.sha256;
+          check string "queued artifact filename" "poster.png" observed.filename;
+          check string "queued artifact purpose" "Use in booklet" observed.purpose;
+          let bytes = Keeper_peer_artifact.fetch ~config observed |> Result.get_ok in
+          check int "queued artifact bytes" artifact.blob.bytes (String.length bytes));
        let cancelled =
          Keeper_tool_surface_ops.keeper_delegate_cancel_body
            ~config
@@ -3282,7 +3302,9 @@ let () =
         ; test_case
             "agent delegate submits owner operation without waiting"
             `Quick
-            test_agent_delegate_submits_owner_operation_without_waiting
+            (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:false)
+        ; test_case "peer artifacts reach the recipient Owner queue" `Quick
+            (test_agent_delegate_submits_owner_operation_without_waiting ~with_artifact:true)
         ; test_case
             "connector submit is owner-idempotent"
             `Quick

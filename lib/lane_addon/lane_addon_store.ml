@@ -152,7 +152,8 @@ let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~la
         | Error _ -> scan (seq + 1) remaining rows coverage false
         | Ok (_, output) ->
             let selected = List.filter matches output.rows in
-            if selected = [] then scan (seq + 1) remaining rows coverage complete
+            if selected = [] && output.coverage = [] then
+              scan (seq + 1) remaining rows coverage complete
             else
               let chunk = { rows = selected; coverage = output.coverage } in
               (* Counting each chunk's whole JSON envelope is conservative;

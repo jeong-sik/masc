@@ -49,6 +49,16 @@ let missing_record () = with_store (fun root store ->
   Sys.remove (record root 1);
   let empty = query store ~expected_seq:3 ~max_bytes:4096 () in
   check bool "persisted highwater exposes missing entire history" false (complete empty))
+let coverage_without_rows () = with_store (fun _root store ->
+  let source : Types.coverage = { source_id = "msx"; incarnation = "unobserved";
+    cursor = None; complete = false; detail = Some "machine unavailable" } in
+  unwrap (Store.append_observation store ~instance_id ~seq:1 ~sources:(`List [])
+    { rows = []; coverage = [source] });
+  let output = query store ~expected_seq:1 ~max_bytes:4096 () in
+  check int "unavailable source has no fabricated rows" 0 (List.length output.rows);
+  check bool "empty output does not erase missing source coverage" false (complete output);
+  check bool "source's reason remains in the query" true
+    (List.exists (fun (coverage : Types.coverage) -> coverage = source) output.coverage))
 let targeted_evidence () = with_store (fun root store ->
   append store 1 "unrelated"; append store 2 "selected";
   write (record root 1) "{broken unrelated observation";
@@ -80,5 +90,6 @@ let separate_source_and_output_envelopes () = with_store (fun root store ->
 let () = run "bounded Lane history" ["queries", [
   test_case "history growth and explicit window" `Quick bounded_history;
   test_case "missing persisted intervals" `Quick missing_record;
+  test_case "source absence survives a query with no rows" `Quick coverage_without_rows;
   test_case "targeted bounded evidence" `Quick targeted_evidence;
   test_case "separate ingress and egress envelopes remain preservable" `Quick separate_source_and_output_envelopes]]

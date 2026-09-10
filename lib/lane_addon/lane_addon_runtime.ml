@@ -392,8 +392,19 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
                e.phase <- Failed "startup ended without a retained container identity; cleanup is unverified");
            let* () = persist m e in Ok (entry_json e)))
 module For_testing = struct
-  type nonrec connection = connection
-  type nonrec backend = backend
+  type nonrec connection = connection = {
+    observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
+    stop : unit -> (unit, string) result;
+    container_id : string;
+  }
+  type nonrec backend = backend = {
+    start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
+      on_created:(connection -> unit) -> (connection, string) result;
+    acquire : store:Lane_addon_store.t -> package:package -> binding:Yojson.Safe.t ->
+      (Yojson.Safe.t, string) result;
+    recover_stop : instance_id:string -> container_id:string -> max_reply_bytes:int ->
+      (unit, string) result;
+  }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
   let reset () = Hashtbl.clear managers; delivery_handler := None

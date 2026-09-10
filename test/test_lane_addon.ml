@@ -130,7 +130,7 @@ let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env s
   let primary = Eio.Fiber.fork_promise ~sw (fun () -> "primary action completed") in
   check string "primary work completes before observer release"
     "primary action completed" (Eio.Promise.await_exn primary);
-  check int "blocked observation has not been released" 0
+  check Alcotest.int "blocked observation has not been released" 0
     (Option.value ~default:0 (Hashtbl.find_opt state.stops blocked));
   Runtime.notify_activity ~config;
   Runtime.notify_activity ~config;
@@ -195,7 +195,7 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
       Ok (`Assoc ["request_id", `String "keeper-request"; "status", `String "deferred"]));
     let accepted = unwrap (Runtime.dispatch ~caller:"operator" ~config ~operation:Runtime.Evidence
       (`Assoc (("keeper_name", `String "keeper") :: args))) in
-    check int "one explicitly requested delivery" 1 (List.length !delivered);
+    check Alcotest.int "one explicitly requested delivery" 1 (List.length !delivered);
     check string "acceptance keeps deferred receipt" "deferred"
       (accepted |> member "delivery" |> member "receipt" |> text "status");
     detach config id; await_phase clock config id "detached";
@@ -212,7 +212,7 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     unwrap (Store.save_binding store ~instance_id:id
       (`Assoc (("phase", Types.phase_to_json Types.Attached) :: List.remove_assoc "phase" fields)));
     detach config id; await_phase clock config id "detached";
-    check int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
+    check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
 
 let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;

@@ -5589,7 +5589,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -5600,5 +5600,5 @@
 (test
  (name test_lane_addon_store_query)
  (modules test_lane_addon_store_query)
- (libraries alcotest yojson masc))
+ (libraries alcotest yojson unix masc))
 

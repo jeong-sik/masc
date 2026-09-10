@@ -1,0 +1,5 @@
+{
+  "status": 200,
+  "content_type": "application/json",
+  "raw": "{\"id\": \"verifier-fixture\", \"model\": \"image-verifier\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"Synthetic fixture finished.\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 10, \"completion_tokens\": 10, \"total_tokens\": 20}}"
+}

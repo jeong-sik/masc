@@ -71,6 +71,17 @@ acceptance run remain necessary for the PDF scenario.
 
 ## Large-image aggregate repair
 
-Pending the repaired macOS candidate. No claim that the 497844-byte three-page
-submission reaches the provider is made yet. The small-image positive result
-cannot establish removal of the aggregate gate.
+`large-image-runtime/` records the repaired candidate
+`4a6723c3f54a597a52db26276635b4a2b8b6e871`, manifest verified before launch.
+Its three complete 165948-byte PNG artifact submissions total 497844 bytes.
+The production reviewer receives three exact image data URIs; every decoded
+body matches its persisted snapshot and SHA-256
+`ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0`.
+The primary Task is done and the committed approved event binds verification
+`vrf-788f11e65028f26a6e9faa094061d7b0` to `image_fixture.vision`, with producer
+operation `kmsg-249bf61fb7b5f1eb8d6c3e0f5ca278cc` Succeeded.
+
+This closes the aggregate-submission and production image-transport scenario.
+All pages remain below the per-image 200000-byte capture limit. The provider is
+synthetic and its approval means exact byte receipt, not document readability.
+Actual Kimi/PDF semantic verification remains a distinct run.

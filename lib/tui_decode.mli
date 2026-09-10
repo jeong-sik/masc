@@ -109,6 +109,7 @@ type planning_goal = {
 type planning_rollup = {
   pr_active : int;
   pr_verifying : int;
+  pr_awaiting_confirmation : int;
   pr_done : int;
   pr_dropped : int;
 }

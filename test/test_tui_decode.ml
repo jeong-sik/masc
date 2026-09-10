@@ -597,6 +597,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
               , `Assoc
                   [ "active_count", `Int 1
                   ; "verifying_count", `Int 0
+                  ; "awaiting_confirmation_count", `Int 0
                   ; "done_count", `Int 0
                   ; "dropped_count", `Int 0
                   ] )
@@ -760,6 +761,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
       , `Assoc
           [ "active_count", `Int 1
           ; "verifying_count", `Int 3
+          ; "awaiting_confirmation_count", `Int 0
           ; "done_count", `Int 4
           ; "dropped_count", `Int 5
           ] )

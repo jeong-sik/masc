@@ -310,6 +310,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-main-domain-scheduler-latency | Main domain scheduler latency: measure it, then remove what makes it wait | Draft | - |
 | RFC-mcp-dual-bearer-oauth | MCP dual authentication: static bearer and local OAuth 2.1 | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
+| RFC-msx-surface-focus-mode | 관전 화면의 surface 경유와 포커스 모드 | Draft | - |
 | RFC-observe-by-waking-not-polling | 관찰은 폴링이 아니라 깨움으로 — 조건 충족 시 턴을 돌려준다 | Draft | - |
 | RFC-one-provider-two-wires | One provider, two wires | Implemented | - |
 | RFC-outlive-process-adoption | 턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다 | Draft | - |

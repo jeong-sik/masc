@@ -1653,7 +1653,7 @@ catalog_hint=$(model_catalog_env_value)
 # without the setup journey's interactive env (runtime events stay off unless
 # the operator asks for them). The smoke helper env isolation stays the single
 # place runtime events defaults are pinned.
-start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="$start_env AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\""
 fi

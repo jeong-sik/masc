@@ -2,13 +2,20 @@ type reason = Config_missing | Config_unreadable | Config_invalid | Exact_output
 type t = Not_initialized | Available | Setup_required of reason
 let state = Atomic.make Not_initialized
 let get () = Atomic.get state
-let set value = Atomic.set state value
+let changed = Eio.Condition.create ()
+let set value = Atomic.set state value; Eio.Condition.broadcast changed
+let note_runtime_loaded () = match get () with
+  | Setup_required _ -> ()
+  | Not_initialized | Available -> set Available
+let await_available () =
+  Eio.Condition.loop_no_mutex changed (fun () -> match get () with
+    | Available -> Some () | Not_initialized | Setup_required _ -> None)
 let requires_setup () = match get () with Setup_required _ -> true | Not_initialized | Available -> false
 let message = function
-  | Config_missing -> "Model setup required: runtime configuration is missing. Open connection settings, configure a model, and restart the server."
-  | Config_unreadable -> "Model setup required: runtime configuration could not be read. Check workspace configuration access and restart the server."
-  | Config_invalid -> "Model setup required: runtime configuration has no valid initialized runtime. Review connection settings and restart the server."
-  | Exact_output_unavailable -> "Model authority setup required: internal model lanes or their credentials are unavailable. Configure the selected connection for internal lanes and restart the server."
+  | Config_missing -> "Model setup required: runtime configuration is missing. Open connection settings, configure a model, and resume model setup."
+  | Config_unreadable -> "Model setup required: runtime configuration could not be read. Check workspace configuration access and resume model setup."
+  | Config_invalid -> "Model setup required: runtime configuration has no valid initialized runtime. Review connection settings and resume model setup."
+  | Exact_output_unavailable -> "Model authority setup required: internal model lanes or their credentials are unavailable. Configure the selected connection for internal lanes and resume model setup."
 let to_json () =
   let status, reason, detail = match get () with
     | Not_initialized -> "not_initialized", `Null, `Null

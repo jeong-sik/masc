@@ -2088,6 +2088,17 @@ let add_routes ~sw ~clock router =
                       ])
                     reqd)))
          request reqd)
+  |> Http.Router.post "/api/v1/runtime/setup/resume" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           match Server_model_setup_resume.request
+             ~base_path:(Mcp_server.workspace_config state).base_path with
+           | Error error -> respond_dashboard_error ~status:`Service_unavailable
+               ~request:req reqd (Server_model_setup_resume.error_message error)
+           | Ok authority_available -> respond_json_value_with_cors req reqd
+               (`Assoc ["runtime_ready", `Bool true;
+                 "exact_output_authority_available", `Bool authority_available;
+                 "model_setup", Runtime_startup_state.to_json ()])) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->

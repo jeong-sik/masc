@@ -67,7 +67,26 @@ uv run harbor run -d terminal-bench@2.0 -i gpt2-codegolf \
 오매핑되므로 `--ak runtime_id=kimi_coding.kimi-for-coding` 명시가 필수.
 `GH_TOKEN`은 keeper_up preflight(gh auth) 때문에 필요.
 
-<!-- ARM_B_RESULT -->
+### arm B 결과 (attempt 3, 파이프라인 end-to-end 성공)
+
+- **reward 0.0** (verifier 기록됨), 에피소드 state=**Timeout** (EPISODE_TIMEOUT_SEC=2400 소진,
+  keeper는 kill 시점까지 정상 턴 진행 중이었음 — 패스/타임아웃 모두 Phase 0 목표인
+  파이프라인 검증에는 해당)
+- harbor 예외 `NonZeroAgentExitCodeError`는 run_episode.sh가 Succeeded가 아니면 exit 1을
+  반환하는 설계상 예정된 신호이며, `finally` 경로로 result.json 회수·context 채움 확인.
+- agent_result.metadata: `masc_state=Timeout, duration_ms=2410000, tool_calls=48,
+  duplicate_tool_calls=3, arm=b, runtime_id=kimi_coding.kimi-for-coding`
+- 토큰: input 2,722,487 (cached 2,626,816), output 62,958
+- 에이전트 실행 40m42s, 잡 전체 49m28s
+- 산출물: `results/jobs/phase0-arm-b/gpt2-codegolf__CaMemWf/`
+  (trial result.json + 회수된 `agent/result.json` 포함)
+
+### 두 arm 비교 (n=1, 스모크 — 성능 판결 아님)
+
+| arm | 하네스 | reward | 에이전트 시간 | output tokens |
+|-----|--------|--------|--------------|---------------|
+| A   | kimi-cli | 1.0 | 44m35s | 59,375 |
+| B   | MASC (arm b) | 0.0 (Timeout@2400s) | 40m42s | 62,958 |
 
 ### install-only 검증
 

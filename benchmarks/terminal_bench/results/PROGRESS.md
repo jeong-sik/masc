@@ -4,8 +4,15 @@
 
 - Plan: `docs/superpowers/plans/2026-09-10-masc-harness-benchmark.md` (worktree 내)
 - Spec: `docs/superpowers/specs/2026-09-09-masc-harness-benchmark-design.md`
-- Branch: `bench/harness-design` @ `3a00bcf69d`
-- Task 1-6 완료+리뷰 통과. Task 7 완료(단서 조항 있음, 아래). 다음은 Task 8 (mini-suite + run_matrix.sh + aggregate.py) → Task 9 (Phase 0 harbor 스모크) → Task 10 (Phase 1 매트릭스).
+- Branch: `bench/harness-design`
+- Task 1-8 완료. **Task 9 완료** (Phase 0 harbor 스모크, 아래 요약). 다음은 Task 10 (Phase 1 매트릭스: `./run_matrix.sh a,b,c,e,f,h 3`).
+
+## Task 9 결과 요약 (상세: results/phase0-notes.md)
+
+- install-only 성공 (0 exceptions, bootstrap exit 0): `results/jobs/phase0-install-check/`
+- arm A = **kimi-cli** (terminus-2 대체 — kimi-for-coding이 reasoning-only 응답 + 빈 assistant 메시지를 코딩 엔드포인트가 400 거부; 3회 시도 기록됨): **reward 1.0**, 44m35s, `results/jobs/phase0-arm-a/`
+- arm B = MASC arm b: **reward 0.0, state=Timeout@2400s**, tool_calls=48, metadata/토큰 회수 확인, `results/jobs/phase0-arm-b/`
+- 수정사항(커밋됨): masc-exec-shim 업로드, **dist는 x64 필수** (`MASC_LINUX_ARCH=x64 bash image/fetch_masc.sh`), setup multiplier 5 필요, `EPISODE_TIMEOUT_SEC=2400` 주입(harbor 2700s cap 전에 result.json 쓰기), aggregate.py를 실측 레이아웃(agent_result, job-level 스킵, trial_name 컬럼)으로 보정. `uv run pytest tests/ -q` 14 passed.
 
 ## 중요한 판정 변경 — 기본 모델 레인
 

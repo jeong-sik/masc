@@ -867,7 +867,12 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "Execute"
+    [ (* BrowserInteract's receipt and BrowserRead's whole-object envelope
+         were declared in 414d720a4a; both producers are probed in
+         test_keeper_tool_dispatch_runtime's composable_output_probes. *)
+      "BrowserInteract"
+    ; "BrowserRead"
+    ; "Execute"
     ; "keeper_artifact_read"
     ; "keeper_lane_status"
       (* keeper_spawn answers a start with the handle every later spawn call

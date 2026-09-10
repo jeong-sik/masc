@@ -7197,6 +7197,14 @@ type output_probe =
 let probe ?(needs_sandbox = false) tool_name args =
   { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
+(* Browser lane verbs race a timeout on the process-wide Time_compat clock,
+   which a test arms explicitly (test_browser_controls does the same). The
+   fixture binds an Eio clock; adopt it before issuing a lane verb. *)
+let arm_browser_probe_clock () =
+  match Eio_context.get_clock_opt () with
+  | Some clock -> Time_compat.set_clock clock
+  | None -> fail "composable-output fixture lost its bound Eio clock"
+
 let composable_output_probes =
   [ probe
       ~needs_sandbox:true
@@ -7312,6 +7320,79 @@ let composable_output_probes =
            in
            `Assoc [ "sha256", `String reference.Tool_output.sha256 ])
     }
+    (* The automation lane's executor is an installable seam
+       (Browser_lane.install_automation_executor), the same one
+       test_browser_controls drives a stub backend through, so the two
+       browser probes run the real producers
+       (Tool_misc_browser_lane.handle_interact_with_phase / handle_read)
+       without a browser. The finally in
+       test_composable_outputs_satisfy_declared_schema disarms the seam. *)
+  ; { tool_name = "BrowserInteract"
+    ; needs_sandbox = false
+    ; prepare =
+        (fun ~config:_ ~meta:_ ->
+           arm_browser_probe_clock ();
+           Browser_lane.install_automation_executor
+             (Some
+                (function
+                  | Browser_lane.Page_interact { tab_id; _ } ->
+                    Browser_lane.Answered
+                      (`Assoc
+                        [ "ok", `Bool true
+                        ; ( "data"
+                          , `Assoc
+                              [ "tabId", `Int tab_id
+                              ; "url", `String "https://probe.invalid/after"
+                              ; "urlBefore", `String "https://probe.invalid/before"
+                              ; "action", `String "click"
+                              ] )
+                        ])
+                  | verb ->
+                    Browser_lane.Refused
+                      ("unexpected browser verb: "
+                       ^ Browser_lane.verb_to_string verb)));
+           `Assoc
+             [ "lane", `String "automation"
+             ; "tabId", `Int 1
+             ; "action", `String "click"
+             ; "selector", `String "a"
+             ])
+    }
+    (* BrowserRead's declared schema is the deliberately permissive
+       whole-object envelope (browser_read_output_schema in
+       keeper_tool_descriptor.ml: mode-specific payloads), so the plain text
+       mode is the producer path this probe puts in front of it. *)
+  ; { tool_name = "BrowserRead"
+    ; needs_sandbox = false
+    ; prepare =
+        (fun ~config:_ ~meta:_ ->
+           arm_browser_probe_clock ();
+           Browser_lane.install_automation_executor
+             (Some
+                (function
+                  | Browser_lane.Page_read _ ->
+                    Browser_lane.Answered
+                      (`Assoc
+                        [ "ok", `Bool true
+                        ; ( "data"
+                          , `Assoc
+                              [ "url", `String "https://probe.invalid/after"
+                              ; "title", `String "probe"
+                              ; "text", `String "probe page text"
+                              ; "chars", `Int 15
+                              ; "truncated", `Bool false
+                              ] )
+                        ])
+                  | verb ->
+                    Browser_lane.Refused
+                      ("unexpected browser verb: "
+                       ^ Browser_lane.verb_to_string verb)));
+           `Assoc
+             [ "lane", `String "automation"
+             ; "tabId", `Int 1
+             ; "mode", `String "text"
+             ])
+    }
   ]
 
 let test_every_composable_tool_has_an_output_probe () =
@@ -7422,7 +7503,16 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~bind_eio_context:true
     "keeper_tool_dispatch_runtime_composable_output"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ()))
+       Fun.protect
+         ~finally:(fun () ->
+           ignore (Msx_lane.eject ());
+           (* The browser probes arm the automation lane's executor seam; an
+              executor left installed would answer browser verbs for every
+              later test in this executable. *)
+           Browser_lane.install_automation_executor None;
+           (* The same probes arm the process-wide Time_compat clock; a
+              stale clock would serve later sleeps in this executable. *)
+           Time_compat.clear_clock ())
        @@ fun () ->
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)

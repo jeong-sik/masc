@@ -3,6 +3,7 @@
  (modules test_keeper_tool_dispatch_runtime)
  (libraries
   masc_test_deps
+  masc.browser_lane
   masc.msx_lane
   fs_compat_test_support
   masc.skill_config

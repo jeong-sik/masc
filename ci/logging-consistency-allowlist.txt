@@ -141,3 +141,7 @@ bin/masc_cli_model_resume.ml
 bin/masc_cli_onboarding.ml
 bin/masc_cli_owner_upgrade.ml
 bin/masc_cli_prerequisites.ml
+
+# Codex model discovery is a one-shot CLI before any workspace log sink exists.
+# Refusals go to its operator terminal while stdout is reserved for JSON.
+bin/masc_cli_codex_models.ml

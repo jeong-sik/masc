@@ -53,7 +53,7 @@ curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.s
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-After installation, run this separate command to update PATH in the current terminal.
+The installer offers to add MASC to your shell profile. Select your shell and open a new terminal afterward. To use it immediately in the current terminal, run this optional separate command:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -78,12 +78,12 @@ checksum stops the install.
 `--no-wizard` skips model selection. `--provider <id>` selects a configured
 provider for automation. The interactive wizard lets you select several
 connections and models, then choose which imp should try first and the fallback
-order. It stores environment variable names for API credentials, never their values.
+order. API keys can be entered in a hidden field and saved in a private user-owned file for future terminals. Existing environment-variable and CLI account references are preserved.
 
 ## First-install wizard
 
 Use **↑/↓ to move, Space to select several items, and Enter to continue**.
-Single-choice screens use Enter. Press `q` to return or cancel. Terminals without
+Enter also accepts the focused item when nothing is marked. Fast setup shows detected connections first; **Browse all connections** opens the full catalog. Press `q` to return or cancel. Terminals without
 cursor support show numbered choices; enter `1,3` to select multiple items.
 
 The model list comes from your CLI cache, HTTP server, existing workspace
@@ -126,29 +126,35 @@ change existing Keeper configurations in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.5 binary** installs one `imp` with `activation_mode = "manual"` and the
-`browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
-started by hand once a model and an execution environment are ready. The
-installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
-model CLIs, API keys, Docker, Apple Container, SSH servers,
-browsers/extensions, Slack/Discord accounts, and autostart services are not
-installed. Detecting which execution environments are available does not
-stand in for installing or authenticating them.
+The **0.35.5 binary** declares one `imp` with `activation_mode = "manual"`
+and the `browser-lanes` skill. Setup prepares the selected sandbox, starts imp,
+and opens the first conversation. The manual activation mode means a later
+server restart does not silently enable autonomous imp activity.
+
+Missing Claude Code, Codex and Antigravity clients can be installed through
+selected official installer actions. Sandbox setup offers supported installation
+and service-start actions, including Apple Container and Docker Desktop on
+compatible Macs. Linux Docker setup explains account access and can resume in a
+new group session. Each action is followed by a fresh readiness check; installing
+a client does not sign in or establish model access. Model weights, SSH servers,
+browser extensions and external messaging accounts need their own setup.
 
 ## Choosing a model connection
 
 AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
 They are outside the 0.35.5 installation and verification scope.
 
-Select existing API providers, Claude Code, Codex, or local Ollama models.
-Use **Add another server URL** for llama.cpp, vLLM, another OpenAI-compatible
-server, or Ollama on another computer. Existing Antigravity connections remain
-listed, but a runtime without a supported real verification adapter cannot pass
-the interactive readiness check.
+Select an existing API provider, Claude Code, Codex, Antigravity, or a local
+server. The catalog includes hosted API and coding-plan connections; subscription,
+credit and model availability depend on the selected account. **Add another server
+URL** connects llama.cpp, vLLM, rapid-mlx, Unsloth serving endpoints and other
+OpenAI-compatible servers, or Ollama on another computer. Choose a protocol that
+the running server exposes. Installing and loading a local model server is a
+separate step.
 
 The wizard reads context windows from model metadata or the exact connection's
 existing declaration. For a fresh Codex home, it reads the installed CLI's bundled
-model catalog without authentication or a model call. API catalog suggestions
+model catalog without a model call. **Refresh** asks the official client for current account metadata in an isolated home; the original account files remain unchanged. API catalog suggestions
 do not supply a Codex context limit; model availability is checked separately. For Ollama it reads the configured or running context and
 loads only selected models when needed; it does not allocate the architectural
 maximum. For a single-model llama.cpp server it can read the configured context

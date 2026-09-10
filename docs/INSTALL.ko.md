@@ -39,7 +39,7 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
 
-기본 sandbox에는 실행 중인 Docker 엔진이 필요하며, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. `masc setup` 전에 준비해 주세요.
+설정 화면에서 sandbox 서비스와 필요한 준비 사항을 확인합니다. 지원되는 Apple Silicon Mac은 Apple Container를, macOS와 Linux는 Docker를 선택할 수 있습니다. 모델에는 해당 공급자의 구독이나 API 크레딧이 필요할 수 있습니다. Claude Code·Codex 로그인은 연결 검사 실패 화면에서 시작하고 선택한 모델로 다시 검사할 수 있습니다.
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
@@ -52,7 +52,7 @@ curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.s
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+설치 중 shell profile에 MASC 경로를 추가하는 선택지가 나옵니다. 사용하는 shell을 고르고 새 터미널을 열면 됩니다. 현재 터미널에서 바로 쓰려면 아래 명령을 따로 실행할 수 있습니다.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -73,12 +73,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 `--no-wizard`는 모델 선택을 건너뜁니다. 자동화에서는 `--provider <id>`로
 기존 공급자를 선택합니다. 대화형 마법사는 여러 연결과 모델을 함께 고른 뒤 imp의
-기본 연결과 대체 순서를 선택합니다. API 키 값은 저장하지 않고 환경변수 이름만 사용합니다.
+기본 연결과 대체 순서를 선택합니다. API 키는 숨김 입력 후 사용자 전용 파일에 저장하여 다음 터미널에서도 사용할 수 있습니다. 기존 환경변수와 CLI 계정 참조는 보존합니다.
 
 ## 첫 설치 마법사
 
 **↑/↓로 이동하고 Space로 여러 항목을 선택한 뒤 Enter로 진행**합니다.
-하나를 고르는 화면에서는 Enter로 선택합니다. `q`로 돌아가거나 취소할 수 있습니다.
+선택 표시가 없으면 Enter로 현재 항목을 고릅니다. Fast setup에는 감지된 연결이 먼저 나오고 **Browse all connections**에서 전체 목록을 엽니다. `q`로 돌아가거나 취소할 수 있습니다.
 커서 조작을 지원하지 않는 터미널은 번호를 표시하며, `1,3`처럼 여러 번호를 입력합니다.
 
 모델 목록은 CLI 캐시, HTTP 서버, 기존 연결, 설치된 catalog에서 읽습니다.
@@ -88,7 +88,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 실행 상황 | 동작 |
 |---|---|
-| 터미널에서 첫 설치 | 여러 연결·모델 선택 후 실제 응답·도구 검사 |
+| 터미널에서 첫 설치 | workspace → 모델 연결 → sandbox → 첫 대화까지 설치된 설정 여정 진행 |
 | 입력 파이프/자동화, 출처가 하나 | 해당 출처 선택; 연결 probe 결과 별도 표시 |
 | 입력 파이프/자동화, 출처가 없거나 여러 개 | 선택 보류; 강제 `--wizard`는 `--provider` 필요 |
 | `--provider <id>` | 기존 workspace에서도 지정 공급자 선택 |
@@ -119,22 +119,35 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.5 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
-`imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
-설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
-Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
-설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
+**0.35.5 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와
+`browser-lanes` skill을 선언합니다. 설정 여정이 선택한 sandbox를 준비하고 imp를
+시작한 뒤 첫 대화를 엽니다. manual 모드는 나중에 서버를 재시작했다고 imp의
+자율 활동이 자동으로 켜지지 않는다는 뜻입니다.
+
+Claude Code·Codex·Antigravity가 없으면 공식 설치 작업을 선택할 수 있습니다.
+sandbox 화면은 지원되는 설치·서비스 시작 작업을 제공합니다. 호환되는 Mac에서는
+Apple Container와 Docker Desktop 설치를, Linux Docker에서는 계정 권한과
+새 그룹 세션에서 이어하기를 안내합니다. 실행 후 상태를 다시 검사하며, CLI 설치가
+로그인이나 모델 사용 권한을 뜻하지는 않습니다. 모델 가중치, SSH 서버, 브라우저
+확장과 외부 메시징 계정은 각각 준비해야 합니다.
 
 ## 모델 연결 선택
 
+AWS Bedrock과 GCP/Vertex 연결은 후속 릴리스의 TODO로 남깁니다.
+0.35.5 설치·검증 범위에 포함하지 않습니다.
+
 Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록에서 context 한도를
 읽습니다. 인증이나 모델 호출은 하지 않으며, API catalog의 최대값을 Codex 한도로
-사용하지 않습니다. 실제 모델 사용 가능 여부는 저장 전 응답·도구 검사로 확인합니다.
+사용하지 않습니다. **Refresh**는 원래 계정 파일을 바꾸지 않는 별도 실행 공간에서
+공식 CLI에 최신 계정 메타데이터를 요청합니다. 실제 모델 사용 가능 여부는 저장 전
+응답·도구 검사로 확인합니다.
 
-기존 API 공급자, Claude Code, Codex, 로컬 Ollama 모델을 목록에서 선택합니다.
-**Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
-다른 컴퓨터의 Ollama를 연결할 수 있습니다. 기존 Antigravity 연결도 표시되지만
-실제 검증 어댑터가 없는 런타임은 대화형 준비 검사를 통과할 수 없습니다.
+기존 API 공급자, Claude Code, Codex, Antigravity 또는 로컬 서버를 선택합니다.
+catalog에는 호스팅 API와 coding plan 연결이 표시되며 구독·크레딧·모델 권한은
+선택한 계정에 따릅니다. **Add another server URL**에서는 llama.cpp, vLLM,
+rapid-mlx, Unsloth의 serving endpoint와 기타 OpenAI-compatible 서버, 다른
+컴퓨터의 Ollama를 연결합니다. 실제 서버가 제공하는 프로토콜을 고르세요.
+로컬 모델 서버 설치와 가중치 로드는 별도로 준비합니다.
 
 컨텍스트 크기는 모델 메타데이터나 동일한 연결의 기존 설정에서 읽습니다.
 Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실행 중인 컨텍스트를

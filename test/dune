@@ -5540,6 +5540,11 @@
  (name test_owner_process_identity)
  (modules test_owner_process_identity)
  (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
+
+(test
+ (name test_server_upgrade_preparation)
+ (modules test_server_upgrade_preparation)
+ (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_onboarding_journey.inc)
 

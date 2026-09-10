@@ -63,7 +63,7 @@ RELEASE_BASE_URL="${MASC_RELEASE_BASE_URL:-https://github.com/$REPO/releases/dow
 VERSION="${MASC_VERSION:-}"
 PREFIX="${MASC_PREFIX:-$HOME/.local/bin}"
 MASC_PORT="${MASC_PORT:-8935}"
-BASE_PATH=""
+BASE_PATH="${MASC_BASE_PATH:-}"
 SEED_CONFIG=1
 FORCE=0
 RESET_CONFIG=0
@@ -850,18 +850,45 @@ with_terminal_input() {
   if [ -t 0 ] || ! is_tty; then "$@"; else "$@" </dev/tty; fi
 }
 
-choose_install_base_path() {
+resolve_install_base_path() {
   [ -z "$BASE_PATH" ] || return 0
-  local suggested="$PWD" answer
-  if [ "$WIZARD" != "0" ] && is_tty; then
-    [ -d "$PWD/.masc/config" ] || suggested="$HOME"
-    printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
-    printf '? Workspace directory [%s]: ' "$suggested" >&2
-    read_terminal_line answer || die "workspace selection cancelled"
-    BASE_PATH="${answer:-$suggested}"
-  else
-    BASE_PATH="$suggested"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] would read the installed workspace registry and offer ~/MASC if none is saved; pass --base-path for a concrete workspace plan"
+    return 0
   fi
+  local observation suggested selected
+  observation=$(mktemp)
+  PARTIAL_FILES+=("$observation")
+  "$DEST" doctor --json > "$observation" || die "could not inspect the saved workspace; pass --base-path explicitly"
+  suggested=$(python3 - "$observation" <<'PYWORKSPACE'
+import json, sys
+try:
+    state = json.load(open(sys.argv[1]))
+    value = state.get('base_path')
+    if state.get('schema') != 'masc.onboarding_status.v1' or (value is not None and (not isinstance(value, str) or not value)):
+        raise ValueError('invalid workspace observation')
+    print(value or '')
+except (OSError, ValueError, TypeError):
+    sys.exit('invalid native workspace observation')
+PYWORKSPACE
+  ) || die "native workspace observation was invalid; no workspace was initialized"
+  if [ "$WIZARD" != "0" ] && is_tty; then
+    [ -n "$suggested" ] || suggested="$HOME/MASC"
+    printf '\nChoose a workspace before MASC creates configuration or data.\n  1) Use %s\n  2) Choose another directory\n  3) Finish later\n' "$suggested" >&2
+    printf '? Workspace [1]: ' >&2
+    read_terminal_line selected || die "workspace selection cancelled"
+    case "${selected:-1}" in
+      1) BASE_PATH="$suggested" ;;
+      2) printf '? Workspace directory: ' >&2; read_terminal_line BASE_PATH || die "workspace selection cancelled";
+         [ -n "$BASE_PATH" ] || die "workspace directory is required" ;;
+      *) die "workspace selection deferred; no workspace was initialized" ;;
+    esac
+  elif [ -n "$suggested" ]; then
+    BASE_PATH="$suggested"
+  else
+    die "no default workspace is saved; pass --base-path for a noninteractive installation, or use --wizard in a terminal"
+  fi
+  BASE_PATH=$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")
 }
 
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
@@ -1115,7 +1142,6 @@ if [ -n "$WIZARD_SANDBOX" ] && [ -z "$TEAM" ]; then
   die "--sandbox requires --team; existing keepers use their own sandbox_profile"
 fi
 
-choose_install_base_path
 
 # Releases use a checksummed private runtime before invoking Python (the
 # system python3 may be a Command Line Tools installer stub).
@@ -1346,14 +1372,14 @@ if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
   case "$PREFIX" in '~') PREFIX="$HOME" ;; '~/'*) PREFIX="$HOME/${PREFIX#\~/}" ;; esac
   case "$BASE_PATH" in '~') BASE_PATH="$HOME" ;; '~/'*) BASE_PATH="$HOME/${BASE_PATH#\~/}" ;; esac
   case "$PREFIX" in /*) ;; *) PREFIX="$PWD/$PREFIX" ;; esac
-  case "$BASE_PATH" in /*) ;; *) BASE_PATH="$PWD/$BASE_PATH" ;; esac
+  if [ -n "$BASE_PATH" ]; then case "$BASE_PATH" in /*) ;; *) BASE_PATH="$PWD/$BASE_PATH" ;; esac; fi
 else
 require python3
 PREFIX="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$PREFIX")"
-BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
+if [ -n "$BASE_PATH" ]; then
+  BASE_PATH="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$BASE_PATH")"
 fi
-log "workspace: $BASE_PATH"
-log "configuration and data: $BASE_PATH/.masc"
+fi
 
 # --- 3. download binary -------------------------------------------------------
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
@@ -1552,9 +1578,6 @@ install_guest_shim() {
   fi
 }
 
-if [ "$GUEST_SHIM" -eq 1 ]; then
-  install_guest_shim
-fi
 
 # Fetch and verify both halves before publishing the new runtime. The helper
 # installs an immutable release directory and one atomic executable pointer;
@@ -1598,6 +1621,12 @@ else
   log "installed verified binary/dashboard: $DEST"
 fi
 
+resolve_install_base_path
+if [ -n "$BASE_PATH" ]; then
+  log "workspace: $BASE_PATH"
+  log "configuration and data: $BASE_PATH/.masc"
+fi
+
 # Check persisted state before init or Skill seeding can touch an existing workspace.
 if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   workspace_helper=$(mktemp)
@@ -1609,10 +1638,19 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
 fi
 
+# The final preflight choice owns all workspace writes, including the guest shim.
+if [ "$GUEST_SHIM" -eq 1 ]; then
+  if [ -z "$BASE_PATH" ]; then
+    log "[dry-run] would install the guest shim after workspace selection"
+  else
+    install_guest_shim
+  fi
+fi
+
 # --- 4. seed minimum config ---------------------------------------------------
 # Record existing workspaces even when an overlay is missing or seeding is disabled.
-[ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
-if [ "$SEED_CONFIG" -eq 1 ]; then
+[ -z "$BASE_PATH" ] || [ ! -d "$BASE_PATH/.masc/config" ] || CONFIG_PREEXISTING=1
+if [ "$SEED_CONFIG" -eq 1 ] && [ -n "$BASE_PATH" ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
@@ -1658,7 +1696,7 @@ fi
 case ":$PATH:" in *":$PREFIX:"*) ;; *) PATH="$PREFIX:$PATH"; export PATH; hash -r ;; esac
 
 # --- 4b. first-run wizard ------------------------------------------------------
-if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
+if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ] || [ -z "$BASE_PATH" ]; then
   if [ -n "$WIZARD_PROVIDER" ]; then
     log "[dry-run] requested provider: $WIZARD_PROVIDER; catalog validation and runtime selection require the planned bundled Python and installed binary"
   elif [ "$WIZARD" != 0 ]; then

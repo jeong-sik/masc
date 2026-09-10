@@ -178,6 +178,11 @@ type t =
   ; mutable reversed_trail : trail_node list
   ; mutable next_tool_local_id : int
   ; mutable phase : phase
+  ; mutable ended_at : float option
+        (* [Some] the instant the run said it was over -- finished or failed.
+           An age drawn after that instant is a lie about a live turn: the
+           numbers would keep climbing while nothing ran. The end instant
+           turns the open-ended age into the turn's span. *)
   ; mutable interrupt : interrupt
   ; mutable checkpoints : int
   ; mutable unreadable_count : int
@@ -211,6 +216,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; reversed_trail = []
   ; next_tool_local_id = 0
   ; phase = Waiting
+  ; ended_at = None
   ; interrupt = Not_requested
   ; checkpoints = 0
   ; unreadable_count = 0
@@ -1112,9 +1118,17 @@ let unreadable_text t =
 (* An age, not a duration budget: the row says how long this turn has been
    outstanding so a watcher can tell slow from stuck. Rendered from a clock the
    caller passes rather than one read here, so a test can state the instant.
-   A clock that moved backwards says nothing instead of a negative age. *)
+   A clock that moved backwards says nothing instead of a negative age.
+
+   Once the run has said it is over, the age stops: the row answers with the
+   turn's span instead, so a settled turn does not read as one that keeps
+   getting older while nothing runs. *)
 let elapsed_text ~now t =
-  Masc_tui_message_layout.age_text ~now ~since:t.started_at
+  match t.ended_at with
+  | Some ended ->
+      if ended < t.started_at then None
+      else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
+  | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
 let progress_text ~now t =
   match elapsed_text ~now t with
@@ -1467,8 +1481,12 @@ let apply_delta ~now t (delta : Live.delta) =
       (* The turn handed work to something outside it and that work finished.
          It is not a turn outcome: the run says when it ends. *)
       ()
-  | Live.Run_failed { message } -> t.phase <- Stream_failed message
-  | Live.Run_finished -> t.phase <- Stream_ended
+  | Live.Run_failed { message } ->
+      t.phase <- Stream_failed message;
+      t.ended_at <- Some now
+  | Live.Run_finished ->
+      t.phase <- Stream_ended;
+      t.ended_at <- Some now
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
       t.reply <-
         Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref }

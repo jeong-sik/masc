@@ -730,6 +730,30 @@ let test_progress_row_carries_the_turn_age () =
       check string "a backwards clock drops the age" "working" text
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
+(* The age answers "how long has this been going". Once the run said it was
+   over that question is closed: the row keeps the turn's span instead, so a
+   settled turn does not read as one that keeps getting older while nothing
+   runs. *)
+let test_a_settled_turn_reports_its_span_not_a_growing_age () =
+  let t = fresh () in
+  feed ~now:(origin +. 10.) t [ Live.Run_started ];
+  feed ~now:(origin +. 70.) t [ Live.Run_finished ];
+  (* The span is dispatch to finish, so the first ten waiting seconds are part
+     of it: 1m10s, not the 1m00s the run alone ran. *)
+  (match rows ~now:(origin +. 70.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check bool "the settled row keeps the turn's span" true
+         (contains ~needle:"1m10s" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (* Minutes later the row must not have aged: nothing is running. *)
+  match rows ~now:(origin +. 600.) t with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the span does not grow after the run ended" true
+        (contains ~needle:"1m10s" text);
+      check bool "the row says the run finished" true
+        (contains ~needle:"stream ended" text)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
 (* Slow or stuck is the question an operator holds while the row is up, and a
    count of calls cannot answer it: seven tools reads the same whether all
    seven came back and the model is writing, or two are still out. *)
@@ -2047,6 +2071,8 @@ let () =
             test_a_registered_length_name_passes_through_whole
         ; test_case "the progress row carries the turn age" `Quick
             test_progress_row_carries_the_turn_age
+        ; test_case "a settled turn reports its span, not a growing age" `Quick
+            test_a_settled_turn_reports_its_span_not_a_growing_age
         ; test_case "the row says how long the open call has been open" `Quick
             test_the_row_says_how_long_the_open_call_has_been_open
         ] )

@@ -51,10 +51,43 @@ class NativeDiscovery(unittest.TestCase):
         spec.write_text(json.dumps(dict(choice='openai_compatible', endpoint=self.endpoint, **fields)))
         env = dict(os.environ, HOME=self.home.name, XDG_CONFIG_HOME=self.home.name + '/config')
         for key in list(env):
-            if key.startswith('MASC_') or key.startswith('AGENT_CORE_'):
+            if key.startswith('MASC_') or key.startswith('AGENT_CORE_') or key in ('OPENAI_API_KEY', 'OLLAMA_CLOUD_API_KEY', 'OLLAMA_API_KEY'):
                 env.pop(key)
         return subprocess.run([BINARY, 'runtime-discover-models', '--spec', str(spec)],
                               capture_output=True, text=True, env=env, timeout=30)
+
+    def test_malformed_credential_references_make_no_request(self):
+        for fields in [dict(credential_file=12), dict(credential_file=''),
+                       dict(credential_file=' /private/key'), dict(credential_file=None),
+                       dict(api_key_env=12), dict(api_key_env=''), dict(api_key_env=None),
+                       dict(credential_file='/private/key', api_key_env='A_KEY')]:
+            with self.subTest(fields=fields):
+                result = self.invoke(**fields)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.calls, [])
+
+    def test_duplicate_credential_reference_is_refused(self):
+        spec = Path(self.home.name, 'duplicate.json')
+        spec.write_text('{"choice":"openai_compatible","endpoint":' + json.dumps(self.endpoint)
+                        + ',"api_key_env":"FIRST","api_key_env":"SECOND"}')
+        result = subprocess.run([BINARY, 'runtime-discover-models', '--spec', str(spec)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.calls, [])
+
+    def test_missing_explicit_or_registry_credential_makes_no_request(self):
+        for fields in [dict(api_key_env='MASC_DISCOVERY_MISSING_KEY'), dict(provider_id='openai')]:
+            with self.subTest(fields=fields):
+                result = self.invoke(**fields)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("credential is unavailable", result.stderr)
+                self.assertEqual(self.calls, [])
+
+    def test_anonymous_local_server_remains_supported(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.calls), 1)
+        self.assertNotIn('authorization', self.calls[0][1])
 
     def test_file_credential_is_sent_only_as_header_and_dates_are_not_release_dates(self):
         key = Path(self.home.name, 'key')

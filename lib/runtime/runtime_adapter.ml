@@ -222,8 +222,12 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 (* --- Provider kind resolution --- *)
 
 let resolve_api_key ~provider_id ~credential =
-  api_key_of_credential ?registry_entry:(find_registry_entry provider_id) credential
-  |> Result.map Llm_provider.Secret.of_string
+  let effective = effective_credential_reference ~provider_id credential in
+  match api_key_of_credential effective with
+  | Error _ as error -> error
+  | Ok value when Option.is_some effective && String.trim value = "" ->
+    Error "Required provider credential is unavailable"
+  | Ok value -> Ok (Llm_provider.Secret.of_string value)
 ;;
 
 (* CLI subprocess provider kinds were removed in the agent_core pin bump

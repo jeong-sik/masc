@@ -367,7 +367,7 @@ async function pageCapture(args) {
     mimeType: "image/png", data: dataUrl.slice(prefix.length), viewport};
 }
 
-function interactInPage(args) {
+function  interactInPage(args) {
   let effectStarted = false;
   try {
   if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)

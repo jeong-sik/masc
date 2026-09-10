@@ -2620,6 +2620,23 @@ let setup_preflight_cmd =
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
 
+let doctor_cmd =
+  let json = Arg.(value & flag & info ["json"]
+    ~doc:"Print the shared read-only onboarding state as JSON.") in
+  let inspect requested json =
+    let selected = match requested with
+      | Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    let state = Onboarding_status.inspect ~base_path:selected in
+    print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
+                   else Onboarding_status.to_text state);
+    (* Reporting incomplete preparation is successful observation, never a
+       claim that authentication, model calls or sandbox execution passed. *)
+    0
+  in
+  Cmd.v (Cmd.info "doctor" ~doc:"Show workspace and imp preparation without starting models or changing files.")
+    Term.(const inspect $ run_base_path $ json)
+
 (* cmdliner cannot fail a flag on the value of another flag, so the pairing
    rule (a backend only means something under microvm) is checked here and
    reported as a usage error rather than being silently ignored. *)
@@ -2725,6 +2742,7 @@ let cmd =
     ; sandbox_image_cmd
     ; setup_cmd
     ; setup_preflight_cmd
+    ; doctor_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

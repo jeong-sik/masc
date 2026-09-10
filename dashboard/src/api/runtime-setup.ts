@@ -1,6 +1,6 @@
 import { post } from './core'
 import { isRecord } from '../lib/type-guards'
-export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string }
+export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string }
 export interface Source { integration_id: string; endpoint?: string; api_key?: string }
 export interface Model { id: string; label: string; context: number | null; tools: boolean | null }
 export type Selection = { kind: 'existing'; id: string; label: string } | { kind: 'new'; source: Source; model: Model; label: string }
@@ -31,4 +31,10 @@ export async function saveSetupSelections(revision: string, choices: Selection[]
     || new Set(response.runtime_ids).size !== response.runtime_ids.length
     || response.runtime_ids.some(id => typeof id !== 'string' || !id)
     || response.runtime_id !== response.runtime_ids[0]) throw new Error('Unconfirmed configuration save')
+}
+
+export async function prepareSetupModel(source: Source, model: Model, load: boolean): Promise<Model> {
+  const response = await post<unknown>('/api/v1/setup/context', { source, model: model.id, load })
+  if (!isRecord(response) || response.model !== model.id || !positive(response.context)) throw new Error('Context not confirmed')
+  return { ...model, context: response.context, tools: typeof response.tools === 'boolean' ? response.tools : model.tools }
 }

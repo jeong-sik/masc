@@ -49,7 +49,7 @@ it('keeps selected revision across inventory changes and hides backend errors', 
   view.rerender(html`<${RuntimeSetupPicker} inventory=${{ ...initial, setup_revision: 'new-revision' }} onSaved=${vi.fn()} />`)
   vi.mocked(post).mockRejectedValue(new Error('private-backend-secret'))
   fireEvent.click(screen.getByText('검증 후 선택 저장'))
-  await screen.findByText(/연결을 저장하지 못했습니다/)
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', { revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'old.id' }] })
   expect(post).not.toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
   expect(document.body.textContent).not.toContain('private-backend-secret')
@@ -69,7 +69,7 @@ it('binds a discovered key and models to their original endpoint and revision be
   view.rerender(html`<${RuntimeSetupPicker} inventory=${changed} onSaved=${vi.fn()} />`)
   fireEvent.click(screen.getByLabelText('Model A')); fireEvent.click(screen.getByText('선택한 모델 추가'))
   fireEvent.click(screen.getByText('검증 후 선택 저장'))
-  await screen.findByText(/연결을 저장하지 못했습니다/)
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
   const body = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))?.[1]
   expect(body).toEqual({ revision: 'paired-revision', connections: [{
     source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'endpoint-a-private-key' },
@@ -85,4 +85,40 @@ it('invalidates discovered models when the account key changes', async () => {
   fireEvent.input(screen.getByLabelText('새 연결 API 키'), { target: { value: 'different-account' } })
   expect(screen.queryByLabelText('Model A')).toBeNull()
   expect(screen.queryByText('선택한 모델 추가')).toBeNull()
+})
+
+it('keeps saved success distinct when server activation fails', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/모델 저장과 응답·도구 검증은 완료했습니다/)
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+  expect(modelSetupResumeState.value.kind).toBe('failed')
+})
+it('prepares only the chosen model without a numeric input', async () => {
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/models')
+    ? { models: [{ id: 'unknown', label: 'Unknown', context: null, tools: null }] }
+    : { model: 'unknown', context: 32768, tools: true, context_source: 'serving_endpoint' })
+  render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByText('이 모델만 준비')
+  fireEvent.click(screen.getByText('이 모델만 준비'))
+  await screen.findByText(/실행 context를 확인했습니다/)
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/context', { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1' }, model: 'unknown', load: false })
+  expect((screen.getByLabelText('Unknown') as HTMLInputElement).disabled).toBe(false)
+  expect(document.querySelector('input[type=number]')).toBeNull()
+})
+it('uses native Codex discovery without endpoint or credential-path inputs', async () => {
+  vi.mocked(post).mockResolvedValue({ models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null }] })
+  const cli = { ...inventory, integrations: [{ id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByLabelText('Fresh')
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/models', { integration_id: 'codex' })
+  expect(screen.queryByLabelText('서버 API 주소')).toBeNull()
+  expect(screen.queryByLabelText('새 연결 API 키')).toBeNull()
 })

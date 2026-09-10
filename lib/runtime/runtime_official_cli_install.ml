@@ -10,10 +10,10 @@ let script = function
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
 let executable client =
   let command = name client in
-  let directories = match client, Sys.getenv_opt "CODEX_INSTALL_DIR" with
+  let directories = match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
     | Codex, Some path when String.trim path <> "" -> [path]
-    | _ -> (match Sys.getenv_opt "HOME" with Some home -> [Filename.concat home ".local/bin"] | None -> []) in
-  let path = Option.value (Sys.getenv_opt "PATH") ~default:"" |> String.split_on_char ':' in
+    | _ -> (match Env_config_core.raw_value_opt "HOME" with Some home -> [Filename.concat home ".local/bin"] | None -> []) in
+  let path = Option.value (Env_config_core.raw_value_opt "PATH") ~default:"" |> String.split_on_char ':' in
   (directories @ path) |> List.find_map (fun directory ->
     if directory = "" then None else
     let candidate = Filename.concat directory command in

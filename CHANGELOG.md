@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.35.4] - 2026-09-10
+
+### Installation and startup
+
+- Start up when a saved model catalog overlay carries entries the current binary no longer understands. Unknown fields and dead entries are skipped with a warning that names the file and the entry, instead of refusing to boot — a fresh install over an older workspace hit that refusal.
+- Say when a failure is the configuration, not the model connection. A config load error now names the file and the parse problem instead of the blanket "Model connection failed" that pointed operators at the wrong fix.
+
 ## [0.35.3] - 2026-09-10
 
 ### Installation

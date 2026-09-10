@@ -5545,4 +5545,4 @@
 (test
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
- (libraries masc alcotest unix yojson))
+ (libraries masc masc.server fs_compat alcotest unix yojson))

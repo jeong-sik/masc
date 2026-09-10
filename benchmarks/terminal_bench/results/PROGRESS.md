@@ -7,12 +7,15 @@
 - Branch: `bench/harness-design`
 - Task 1-8 완료. **Task 9 완료** (Phase 0 harbor 스모크, 아래 요약). 다음은 Task 10 (Phase 1 매트릭스: `./run_matrix.sh a,b,c,e,f,h 3`).
 
-## 제품 픽스 2건 (2026-09-10, 별도 worktree/브랜치 — 벤치 발견사항의 upstream 수정)
+## 제품 픽스 2건 — 전부 머지 + v0.35.6 릴리스 완료 (2026-09-10/11)
 
-- **PR #35168** (`fix/anthropic-tool-schema-oneof`, origin/main 기반): `backend_anthropic.ml`에 Anthropic-kind 전용 top-level oneOf/anyOf/allOf projection 추가 (OpenAI #34054와 같은 층). Kimi kind은 통과(해당 엔드포인트는 top-level 허용, 라이브 검증). combinator-only 스키마는 `type:object` 합성. 적대적 리뷰 통과(블로커 0). **merge + release 후 anthropic 레인 재개 가능.**
-- **PR #35169** (`fix/keeper-capability-gate`, origin/main 기반): keeper TOML `[keeper.tools] deny = [...]` 추가 — model-visible 이름으로 built-in tool을 capability surface에서 완전 제거(dispatch bundle/digest 포함, frozen-surface admission이 dispatch 거부). 적대적 리뷰 통과(블로커 0). **merge + release 후 arm c/d 렌더러가 skills.names 외에 `tools.deny = ["keeper_spawn","keeper_spawn_read","keeper_spawn_wait","keeper_spawn_stop","masc_keeper_delegate","masc_keeper_delegate_status","masc_keeper_delegate_cancel"]`를 추가로 쏘도록 renderer 갱신 필요** — 그 전까지 arm c는 composition skill 2개만 게이트되고 spawn/delegate는 전 arm에서 visible(단 우리 토폴로지에서 spawn-Start는 remote_ssh profile이라 어차피 Policy_rejection).
+- **PR #35168 merged** (anthropic projection), **PR #35169 merged** (tools.deny). 둘 다 적대적 리뷰 블로커 0, CI green.
+- #35169 CI가 한 번 실패했던 원인: OCaml warning 16 — optional 뒤에 labelled만 있으면 erase 불가. `~tool_deny` 필수 인자로 교정(c90e0b6f2e).
+- **v0.35.6 릴리스 완료** (assets 37개, masc-linux-x64 포함): 첫 태그는 version truth 불일치로 실패 → #35180(version bump) 머지 → 재태그 성공. **주의**: version bump는 dune-project + masc.opam + ROADMAP.md + CHANGELOG.md + **docs/PRODUCT-OPERATING-PLAN.md** 5곳 (lint의 doc-truth check가 마지막 것도 비교 — #35191로 후속 수정, 머지 진행 중).
+- **벤치 채택 완료** (a769343e08, pytest 15개 통과): renderer가 `tools.deny` 발행 — spawn 4개(keeper_spawn/read/wait/stop)는 parallel=False arm(b,c,d)에서, delegate 3개(masc_keeper_delegate/status/cancel)는 keepers=1 arm(b-e)에서 deny. arm f/g/h는 deny 없음. anthropic arm의 [[one_of]] 벤치 strip 워크어라운드 제거. fetch_masc.sh 기본 0.35.6. dist/ 는 이미 v0.35.6 x64로 갱신됨.
+- **진행 중**: anthropic 레인 스모크 (v0.35.6, arm b, gpt2-codegolf, `ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_MASC"`, job-name `phase0-arm-b-anthropic`) — 백그라운드 실행 중. 400 해소 + keeper turn 진행 확인이 목표.
 - spawn의 실제 모델 이름은 `keeper_spawn`(start) — `keeper_spawn_start` 아님.
-- 벤치가 쓰는 release 바이너리(v0.35.2)엔 두 픽스 모두 없음. matrix 전에 release 포함 여부를 결정할 것: 포함되면 arm c/d 정직해지고 anthropic 레인 복귀, 안 되면 현재 한계를 리포트에 명시.
+- 다음: 스모크 확인 → Task 10 매트릭스 (`./run_matrix.sh a,b,c,e,f,h 3`).
 
 ## Task 9 결과 요약 (상세: results/phase0-notes.md)
 

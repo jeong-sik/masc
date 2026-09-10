@@ -301,10 +301,9 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-let ok_json (reading : vision_reading) =
+let ok_data (reading : vision_reading) =
   record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  Yojson.Safe.to_string
-    (`Assoc
+  (`Assoc
        [ "ok", `Bool true
        ; "text", `String reading.text
        ; "runtime_id", `String reading.runtime_id
@@ -710,7 +709,7 @@ let failed ~failure_class ?detail code =
 ;;
 
 let execution_of_vision_outcome = function
-  | Vo_ok text -> Keeper_tool_execution.success (ok_json text)
+  | Vo_ok text -> Keeper_tool_execution.success_data (ok_data text)
   | Vo_invalid_request detail ->
     failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->

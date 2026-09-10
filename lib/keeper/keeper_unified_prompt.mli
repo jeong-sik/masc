@@ -192,3 +192,7 @@ module For_testing : sig
   (** Structured scheduled-wake observation immediately before prompt-field
       quoting. *)
 end
+
+val answered_ask_inputs : Keeper_world_observation.world_observation -> (string * string) list
+(** Ask correlation identity and the same attributed, quoted row used in the
+    ordinary user turn. Excludes all other world observations. *)

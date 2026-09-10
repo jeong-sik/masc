@@ -43,7 +43,7 @@ let revision (first,second) =
   Revision (Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first;item second])))))
 let same_file a b = match a,b with
   | None,None -> true
-  | Some (a:Fs_compat.owned_regular_file_contents),Some b -> a.content=b.content
+  | Some (a:Fs_compat.owned_regular_file_contents),Some (b:Fs_compat.owned_regular_file_contents) -> a.content=b.content
     && Fs_compat.equal_owned_regular_file_snapshot a.snapshot b.snapshot
   | _ -> false
 let same (a,b) (c,d) = same_file a c && same_file b d

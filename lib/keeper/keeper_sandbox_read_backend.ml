@@ -186,7 +186,8 @@ let run_endpoint_command_with_status
       ~remote_root:(Keeper_sandbox_remote.remote_root endpoint) ~keeper:meta.name
       host_root
   in
-  let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
+  let stdout_mode = match max_bytes with None -> Keeper_sandbox_remote.Binary_bytes | Some _ -> Keeper_sandbox_remote.Text_paths in
+  let runner = Keeper_sandbox_remote.runner ~stdout_mode ~timeout_sec endpoint in
   let outcome =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
       ~argv:command_argv ~env:[||] ~cwd:(Some cwd)

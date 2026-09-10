@@ -646,7 +646,9 @@ let execution_observation_to_yojson = function
           "shim_error", `Bool (Option.is_some outcome.shim_error)]]
 ;;
 
-let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
+type stdout_mode = Text_paths | Binary_bytes
+
+let runner ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
      instead of producing one is [Transport_failed]. Every arm below that
      used to return [Unix.WEXITED 1, _, <error>] was a transport failure the
@@ -711,7 +713,11 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
                Keeper_remote_path.rewrite_stream_chunk stream,
                (fun () -> Keeper_remote_path.finish_stream stream)
            in
-           let stdout_path_stream = Option.map path_stream on_stdout_chunk in
+           let binary_output = match stdout_mode with Binary_bytes -> Some (Buffer.create 4096) | Text_paths -> None in
+           let stdout_path_stream = match binary_output with
+             | None -> Option.map path_stream on_stdout_chunk
+             | Some buffer -> Some ((fun chunk -> Buffer.add_string buffer chunk;
+                 Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =
              { callback = Option.map fst stderr_path_stream; tail = "" }
@@ -777,7 +783,7 @@ let runner ?(mode = Exec_ssh_protocol.Effect) ?on_receipt ~timeout_sec t =
              in
              flush_stderr_payload stderr_stream streamed_payload;
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
-             let stdout = rewrite stdout in
+             let stdout = match binary_output with Some buffer -> Buffer.contents buffer | None -> rewrite stdout in
              let payload_stderr = rewrite payload_stderr in
              (match local_timed_out, transport_failure t status with
               | true, _ ->

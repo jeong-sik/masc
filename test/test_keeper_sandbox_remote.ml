@@ -9,6 +9,8 @@
 open Alcotest
 open Masc
 
+let binary_fixture () = "RIFF" ^ String.concat "" (List.init 100000 (fun _ -> "/masc-work/keeper-a/payload\000\255"))
+
 let write_all fd content =
   let bytes = Bytes.unsafe_of_string content in
   let rec loop offset =
@@ -95,6 +97,10 @@ let stub_main () =
     Exec_ssh_protocol.render_trailer { v; exit; signal; timed_out; shim_error }
   in
   match mode with
+  | "binary" ->
+    write_all Unix.stdout (binary_fixture ());
+    write_all Unix.stderr (trailer ~exit:0 ());
+    exit 0
   | "timeout-receipt" ->
     let execution_receipt : Exec_ssh_protocol.execution_receipt =
       { mode = request.mode; boundary = Sandbox_applied } in
@@ -291,6 +297,20 @@ let run_request runner ?(env = [| "LANG=C" |]) ?(cwd = None) () =
     (runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:(Some "in")
        ~argv:[ "/usr/bin/printf"; "hello" ] ~env ~cwd)
 ;;
+
+let test_binary_stdout_is_complete_and_not_rewritten () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"binary" in
+  let state = make_state ~base_path ~cli in
+  let runner = Keeper_sandbox_remote.runner ~stdout_mode:Keeper_sandbox_remote.Binary_bytes ~timeout_sec:10. state in
+  let status, stdout, _ = run_request runner ~cwd:None () in
+  check status_testable "binary exit" (Unix.WEXITED 0) status;
+  let expected = binary_fixture () in
+  check int "complete length" (String.length expected) (String.length stdout);
+  check string "exact binary SHA" Digestif.SHA256.(digest_string expected |> to_hex)
+    Digestif.SHA256.(digest_string stdout |> to_hex);
+  check string "remote path bytes unchanged" expected stdout
 
 let test_frame_exit_and_injected_env () =
   with_eio @@ fun () ->
@@ -631,6 +651,7 @@ let () =
               test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick
               test_openssh_probe_stays_one_word
+          ; test_case "binary transport retains complete raw bytes" `Quick test_binary_stdout_is_complete_and_not_rewritten
           ; test_case "frame, exit and injected env" `Quick
               test_frame_exit_and_injected_env
           ; test_case "the requested mode travels in the frame" `Quick

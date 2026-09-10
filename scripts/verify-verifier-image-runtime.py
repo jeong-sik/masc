@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--expected-commit', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--port', type=int, default=18945)
+    parser.add_argument('--image-file', type=Path, default=Path(__file__).resolve().parents[1] / 'test/fixtures/verifier-images/page.png')
     parser.add_argument('--expected-outcome', choices=['image_delivery', 'aggregate_rejection'], default='image_delivery')
     a = parser.parse_args()
     manifest = json.loads((a.binary_dir / 'manifest.json').read_text())
@@ -50,7 +51,7 @@ def main():
     keeper = 'image-producer'
     artifact_root = base / '.masc/playground/docker' / keeper
     artifact_root.mkdir(parents=True)
-    png = (Path(__file__).resolve().parents[1] / 'test/fixtures/verifier-images/page.png').read_bytes()
+    png = a.image_file.read_bytes()
     refs = ['artifact:page1.png', 'artifact:page2.png', 'artifact:page3.png']
     for reference in refs:
         (artifact_root / reference.removeprefix('artifact:')).write_bytes(png)
@@ -260,7 +261,7 @@ def main():
         assert not fixture_errors, fixture_errors
         if a.expected_outcome == 'aggregate_rejection':
             combined = json.dumps(requests['producer'])
-            assert 'artifact total size 497844 bytes exceeds limit 51200 bytes' in combined
+            assert f'artifact total size {len(png) * 3} bytes exceeds limit 51200 bytes' in combined
             assert not requests['verifier']
         else:
             while not image_capture_complete.is_set():

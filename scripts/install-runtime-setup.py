@@ -767,7 +767,11 @@ def prerequisite_menu(binary, dependency):
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
     if state == 'failed' or result.returncode:
-        print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+        reason = receipt.get('reason')
+        if isinstance(reason, str) and reason.strip():
+            print(terminal_text(reason), file=sys.stderr)
+        else:
+            print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
     elif state == 'external_step_pending':
         print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
     elif state == 'commands_completed_recheck_required':

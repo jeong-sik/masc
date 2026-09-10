@@ -16,10 +16,12 @@ val install : executable_path:string -> run:runner -> elevate:terminal_runner ->
     input/output for the administrator password prompt.
     Elevates this same canonical packaged executable. The privileged command
     stages a root-owned copy and validates that copy before installation. *)
+
 val install_privileged : run:runner -> source:string -> sha256:string -> size:int -> (unit, error) result
 (** Root-only command implementation; never trust an unprivileged verification
     receipt. Copies, hashes, checks publisher/notarization, then installs only the
     root-owned copy. Always removes that private copy after completion. *)
+
 val remove : verified_artifact -> unit
 val to_json : verified_artifact -> Yojson.Safe.t
 val error_message : error -> string

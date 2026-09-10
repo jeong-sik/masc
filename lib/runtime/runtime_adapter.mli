@@ -32,6 +32,12 @@ val binding_to_provider_config
   -> (Llm_provider.Provider_config.t, string) result
 (** Materialize one binding into the hot-path {!Llm_provider.Provider_config.t}.
 
+    HTTP file credentials contain one raw API key at an absolute path. The
+    process-owned regular file is read at materialization; whitespace is
+    trimmed. Missing, unreadable, empty, relative, and JSON document references
+    return a safe error without including their path or contents. CLI-owned
+    credentials retain their adapter-specific interpretation.
+
     Resolution chain (no routing):
     - [binding.provider_id] -> {!Runtime_schema.provider_of_id}
     - [binding.model_id] -> {!Runtime_schema.model_of_id}

@@ -1,4 +1,4 @@
-module Upgrade = Masc.Released_workspace_upgrade
+module Upgrade = Released_workspace_upgrade
 type action = Inspect | Apply of { keeper_name : string; source_sha256 : string }
   | Restore of { backup_id : string }
 let ( let* ) = Result.bind

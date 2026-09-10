@@ -441,11 +441,68 @@ let test_antigravity_private_tool_roundtrip () =
       (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
 ;;
 
+let test_vertex_native_binding () =
+  let contents = {|
+[runtime]
+default = "vertex.gemini"
+[providers.vertex]
+display-name = "Vertex AI"
+protocol = "vertex-gemini"
+endpoint = "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google"
+[models.gemini]
+api-name = "gemini-3.7-flash"
+max-context = 1048576
+tools-support = true
+streaming = true
+[vertex.gemini]
+|} in
+  let config = match Runtime_toml.parse_string contents with
+    | Ok config -> config | Error _ -> fail "native Vertex TOML must parse" in
+  let binding = List.hd config.bindings in
+  let provider_config = match Runtime_adapter.binding_to_provider_config config binding with
+    | Ok config -> config | Error reason -> fail reason in
+  check bool "native Gemini codec" true (provider_config.kind = Llm_provider.Provider_config.Gemini);
+  check bool "OAuth bearer selected explicitly" true
+    (provider_config.auth_scheme = Llm_provider.Provider_config.Bearer_token);
+  check bool "no ADC token materialized at config load" true (Llm_provider.Secret.is_empty provider_config.api_key);
+  (match provider_config.credential_source with
+   | Llm_provider.Provider_config.Refreshable_credential _ -> ()
+   | Static_credential -> fail "Vertex must refresh ADC at dispatch");
+  let unsafe_config = { config with providers = List.map (fun (p : Runtime_schema.provider) ->
+    {p with transport=Http "https://other.example/v1"}) config.providers } in
+  check bool "ADC cannot attach to arbitrary endpoint" true
+    (Result.is_error (Runtime_adapter.binding_to_provider_config unsafe_config binding))
+;;
+
+let test_vertex_live_catalog_pagination () =
+  let base_url = "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google" in
+  let requests = ref [] in
+  let get ~url =
+    requests := url :: !requests;
+    let token = Uri.get_query_param (Uri.of_string url) "pageToken" in
+    match token with
+    | None -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-one","displayName":"One"}],"nextPageToken":"next+page"}|}
+    | Some "next+page" -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-two"}]}|}
+    | Some _ -> Error "wrong page token" in
+  let models = match Runtime_vertex_models.discover_with ~get ~base_url with
+    | Ok models -> models | Error reason -> fail reason in
+  check (list string) "every current API page preserved" ["model-one";"model-two"]
+    (List.map (fun (m : Runtime_vertex_models.model) -> m.id) models);
+  check int "actual pagination" 2 (List.length !requests);
+  List.iter (fun url -> check string "publisher API, not project training model registry"
+    "/v1beta1/publishers/google/models" (Uri.path (Uri.of_string url))) !requests;
+  check bool "repeated page token fails explicitly" true
+    (Result.is_error (Runtime_vertex_models.discover_with ~base_url
+       ~get:(fun ~url:_ -> Ok {|{"nextPageToken":"repeat"}|})))
+;;
+
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
+      , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
+        ; test_case "Vertex live catalog pagination" `Quick test_vertex_live_catalog_pagination
+        ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target

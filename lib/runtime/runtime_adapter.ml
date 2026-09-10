@@ -270,6 +270,7 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
           HTTP provider"
          provider.id
          provider.protocol)
+  | Gemini_api | Vertex_gemini_api -> Ok Llm_provider.Provider_config.Gemini
   | Ollama_api -> Ok Llm_provider.Provider_config.Ollama
   | Chat_completions_api ->
     (* Chat-completions keeps the historical OpenAI-compatible fallback when
@@ -496,6 +497,18 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
+    let ( let* ) = Result.bind in
+    let* auth_scheme, credential_source =
+      match provider.api_format with
+      | Vertex_gemini_api ->
+        let* _ = Llm_provider.Vertex_endpoint.parse_base_url base_url in
+        (match provider.credentials with
+         | Some _ -> Error "vertex-gemini uses Google Application Default Credentials, not a saved API key"
+         | None -> Ok (Llm_provider.Provider_config.Bearer_token, Runtime_google_adc.credential_source ()))
+      | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
+      | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
+        Ok (Llm_provider.Provider_config.Provider_default, Llm_provider.Provider_config.Static_credential)
+    in
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Ok kind ->
        let model_capabilities_override =
@@ -503,6 +516,13 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
            ~wire:kind
            ~provider_id:provider.id
            spec
+       in
+       let model_capabilities_override =
+         match model_capabilities_override, provider.api_format with
+         | None, (Gemini_api | Vertex_gemini_api) ->
+           Llm_provider.Capabilities.for_provider_model_id ~wire:(Some kind)
+             ~allow_bare_fallback:true ~provider_label:"gemini" ~model_id:spec.api_name
+         | existing, _ -> existing
        in
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
@@ -540,6 +560,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~model_id:spec.api_name
             ~base_url
             ~api_key
+            ~auth_scheme
+            ~credential_source
             ~headers
             ~request_path
             ?max_context:spec.max_context
@@ -799,7 +821,7 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
           antigravity_cli_execution provider spec
         | Runtime_schema.Claude_code_runtime ->
           claude_code_execution provider spec
-        | Messages_api | Chat_completions_api | Ollama_api ->
+        | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
             (fun provider_config -> Runtime_execution.Agent_core provider_config)
             (binding_to_provider_config cfg binding)))

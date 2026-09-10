@@ -7,3 +7,6 @@ val base_url : project:string -> location:location -> (string, string) result
     Project and region are explicit resource identifiers, never inferred from
     a model name.
     {{:https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference}Official inference reference}. *)
+
+val parse_base_url : string -> ((string * location), string) result
+(** Validate an exact native Google publisher prefix before attaching ADC. *)

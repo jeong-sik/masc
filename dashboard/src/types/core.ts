@@ -1330,6 +1330,8 @@ export function sandboxContainerCli(raw: string | null | undefined): string | nu
 }
 
 export interface Keeper {
+  declaration_only?: boolean
+  preparation_requirements?: Array<'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid'>
   name: string
   keeper_id?: string | null
   pipeline_stage?: PipelineStage

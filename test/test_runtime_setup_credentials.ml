@@ -86,7 +86,12 @@ default = "fixture-http.chat"
      | Some (Runtime_schema.File actual) -> check string "committed exact file reference" reference actual
      | _ -> fail "committed provider must use the private file");
     check string "committed raw credential remains usable" "committed-fixture-key"
-      (In_channel.with_open_text reference In_channel.input_all))
+      (In_channel.with_open_text reference In_channel.input_all);
+    let binding = List.find (fun (b : Runtime_schema.binding) -> b.provider_id = "fixture-http") config.bindings in
+    match Runtime_adapter.binding_to_provider_config config binding with
+    | Error error -> fail error
+    | Ok materialized -> check string "native request materializes saved key" "committed-fixture-key"
+        (Llm_provider.Secret.header_value materialized.api_key))
 
 let () = run "private setup credentials" ["storage", [
   test_case "applied provider retains its file" `Quick test_applied_key_is_retained;

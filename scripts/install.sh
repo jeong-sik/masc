@@ -1628,7 +1628,7 @@ if [ -n "$BASE_PATH" ]; then
 fi
 
 # Check persisted state before init or Skill seeding can touch an existing workspace.
-if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
+if [ "$DRY_RUN" -eq 0 ] && { [ "$SEED_CONFIG" -eq 1 ] || [ "$GUEST_SHIM" -eq 1 ] || [ -n "$TEAM" ] || [ "$WIZARD" != 0 ]; }; then
   workspace_helper=$(mktemp)
   workspace_receipt=$(mktemp)
   PARTIAL_FILES+=("$workspace_helper" "$workspace_receipt")

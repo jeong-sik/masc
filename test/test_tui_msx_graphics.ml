@@ -25,19 +25,27 @@ let frame ?(w = 256) ?(h = 192) ?(mode = "screen2") () =
   }
 ;;
 
-let drawn ?(f = frame ()) ?notice () =
+(* Stage 1: the picture arrives as a surface frame. The pixels match what
+   [frame] used to carry in msx_rgb, so the drawing assertions below are
+   unchanged — they now prove the renderer reads them through the contract. *)
+let surface_of ?(w = 256) ?(h = 192) () =
+  Masc_tui_interactive.Pixels { width = w; height = h; rgb = String.make (w * h * 3) '\128' }
+;;
+
+let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
   let buf = Buffer.create 65536 in
   Msx.render
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
     ?notice
-    (Some f);
+    (Some f)
+    (Some surface);
   Buffer.contents buf
 ;;
 
 let drawn_empty ~connection =
   let buf = Buffer.create 4096 in
-  Msx.render ~write:(Buffer.add_string buf) ~connection None;
+  Msx.render ~write:(Buffer.add_string buf) ~connection None None;
   Buffer.contents buf
 ;;
 
@@ -121,7 +129,7 @@ let test_every_other_terminal_still_gets_the_mosaic () =
 let test_a_512_wide_frame_keeps_its_width () =
   let wide = frame ~w:512 ~mode:"GRAPHIC6" () in
   with_protocol Graphics.Kitty_protocol (fun () ->
-    let out = drawn ~f:wide () in
+    let out = drawn ~f:wide ~surface:(surface_of ~w:512 ()) () in
     check bool "the raw pixels went out at the frame's width" true
       (mentions ~needle:"s=512" out);
     check bool "and height" true (mentions ~needle:"v=192" out);
@@ -131,10 +139,28 @@ let test_a_512_wide_frame_keeps_its_width () =
 let test_the_mosaic_takes_a_512_wide_frame () =
   let wide = frame ~w:512 ~mode:"GRAPHIC6" () in
   with_protocol Graphics.Unsupported_protocol (fun () ->
-    let out = drawn ~f:wide () in
+    let out = drawn ~f:wide ~surface:(surface_of ~w:512 ()) () in
     check bool "the mosaic drew from the wide frame" true
       (mentions ~needle:"\027[38;2;" out);
     check bool "no pixel protocol leaked" false (mentions ~needle:"f=24" out))
+;;
+
+(* Stage 1 contract: the picture is the surface frame. The meta's pixel
+   fields are not read — changing them alone must not transmit pixels. *)
+let test_meta_pixels_do_not_draw () =
+  with_protocol Graphics.Kitty_protocol (fun () ->
+    ignore (drawn ());
+    let f = frame () in
+    let meta_changed = { f with Types.msx_rgb = String.make (256 * 192 * 3) '\001' } in
+    let buf = Buffer.create 1024 in
+    Msx.render
+      ~write:(Buffer.add_string buf)
+      ~connection:Types.Connected
+      (Some meta_changed)
+      (Some (surface_of ()));
+    check bool "a changed meta rgb with the same surface sends no pixels"
+      false
+      (mentions ~needle:"f=24" (Buffer.contents buf)))
 ;;
 
 let test_checkpoint_bindings_and_result_are_visible () =
@@ -237,7 +263,9 @@ let test_no_cell_size_leaves_the_rows_alone () =
 
 let draw_frame f =
   let buf = Buffer.create 1024 in
-  Msx.render ~write:(Buffer.add_string buf) ~connection:Types.Connected (Some f);
+  Msx.render ~write:(Buffer.add_string buf) ~connection:Types.Connected (Some f)
+    (Some (Masc_tui_interactive.Pixels
+             { width = f.Types.msx_width; height = f.Types.msx_height; rgb = f.Types.msx_rgb }));
   Buffer.contents buf
 
 let test_retained_pixels () =
@@ -262,7 +290,8 @@ let test_failed_write_and_layout () =
     ignore (drawn ());
     let failed =
       try
-        Msx.render ~write:(fun _ -> raise Exit) ~connection:Types.Connected (Some (frame ()));
+        Msx.render ~write:(fun _ -> raise Exit) ~connection:Types.Connected
+          (Some (frame ())) (Some (surface_of ()));
         false
       with Exit -> true
     in
@@ -317,6 +346,8 @@ let () =
             test_a_512_wide_frame_keeps_its_width
         ; test_case "the mosaic takes a 512-wide frame" `Quick
             test_the_mosaic_takes_a_512_wide_frame
+        ; test_case "meta pixels do not draw" `Quick
+            test_meta_pixels_do_not_draw
         ; test_case "checkpoint bindings and outcome" `Quick
             test_checkpoint_bindings_and_result_are_visible
         ] )

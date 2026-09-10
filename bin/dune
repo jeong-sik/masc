@@ -1215,6 +1215,7 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
   masc_tui_terminal_profile
@@ -1436,6 +1437,7 @@
  (modules masc_tui_msx)
  (libraries
   masc_tui_types
+  masc_tui_interactive
   masc_tui_ansi
   masc_tui_graphics
   masc_tui_image_mosaic))

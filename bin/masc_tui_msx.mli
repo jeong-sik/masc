@@ -32,9 +32,15 @@ val render :
   -> connection:Masc_tui_types.connection_status
   -> ?notice:string
   -> Masc_tui_types.msx_frame option
+  -> Masc_tui_interactive.frame option
   -> unit
 (** Retain Kitty pixels across polls, repainting only changed pixels. Other
     terminals use the truecolor mosaic. Layout changes repaint the whole terminal.
+
+    The first frame carries the observation meta (title line); the second is
+    the surface contract's picture this renderer draws (RFC
+    msx-surface-focus-mode stage 1) — the renderer reads pixels only through
+    it and never from the meta's pixel fields.
 
     [None] is drawn as an empty body under a line that says why it is empty,
     and [connection] is what decides which reason. The cache is [None] both

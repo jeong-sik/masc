@@ -1,0 +1,21 @@
+{
+  "id": "task-001",
+  "title": "Three synthetic rendering attachments",
+  "description": "Transport three exact PNG artifact images to the independent verifier. Synthetic fixture, no visual quality requirement.",
+  "priority": 1,
+  "files": [],
+  "created_at": "2026-09-10T00:02:51Z",
+  "created_by": "admin",
+  "handoff_context": {
+    "summary": "Synthetic image delivery mismatch.",
+    "reason": "Synthetic image delivery mismatch.",
+    "evidence_refs": [
+      "vrf-bead32b7fc6f2b0bfb0960e136b4d239"
+    ],
+    "updated_at": "2026-09-10T00:02:51Z",
+    "updated_by": "verifier_exact"
+  },
+  "status": "in_progress",
+  "assignee": "image-producer",
+  "started_at": "2026-09-10T00:02:51Z"
+}

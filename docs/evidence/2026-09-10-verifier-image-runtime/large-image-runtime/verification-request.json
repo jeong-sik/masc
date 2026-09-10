@@ -1,0 +1,47 @@
+{
+  "id": "vrf-788f11e65028f26a6e9faa094061d7b0",
+  "task_id": "task-001",
+  "output": {
+    "evidence_refs": [
+      "artifact:page1.png",
+      "artifact:page2.png",
+      "artifact:page3.png",
+      "note:Submitted three complete synthetic rendered PNG pages for independent byte-delivery inspection."
+    ],
+    "task_title": "Three synthetic rendering attachments",
+    "required_artifacts": [],
+    "submitted_evidence": [
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:page1.png",
+        "bytes": 165948,
+        "sha256": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+        "format": "png",
+        "body": "evidence/vrf-788f11e65028f26a6e9faa094061d7b0/0.bin"
+      },
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:page2.png",
+        "bytes": 165948,
+        "sha256": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+        "format": "png",
+        "body": "evidence/vrf-788f11e65028f26a6e9faa094061d7b0/1.bin"
+      },
+      {
+        "kind": "artifact_binary",
+        "reference": "artifact:page3.png",
+        "bytes": 165948,
+        "sha256": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+        "format": "png",
+        "body": "evidence/vrf-788f11e65028f26a6e9faa094061d7b0/2.bin"
+      },
+      {
+        "kind": "note",
+        "content": "Submitted three complete synthetic rendered PNG pages for independent byte-delivery inspection."
+      }
+    ]
+  },
+  "criteria": [],
+  "worker": "image-producer",
+  "created_at": 1788998996.548468
+}

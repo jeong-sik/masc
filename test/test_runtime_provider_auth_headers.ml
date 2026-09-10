@@ -1057,6 +1057,9 @@ let test_runtime_adapter_file_credentials () =
            (Llm_provider.Secret.header_value config.api_key);
          check int "secret not duplicated in headers" 0
            (normalized_header_count "Authorization" config.headers));
+      Unix.chmod path 0o644;
+      reject path "API credential file must be owned by the current user and private";
+      Unix.chmod path 0o600;
       Unix.symlink path link;
       reject link "API credential file could not be read as an owned regular file";
       write {|{"access_token":"fixture-secret-token"}|};

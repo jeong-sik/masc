@@ -181,12 +181,15 @@ let api_key_from_file path =
     (* Keep filesystem diagnostics private: paths and exception messages can
        contain credential material supplied by configuration. *)
     match
-      Fs_compat.load_owned_regular_file
+      Fs_compat.load_owned_regular_file_with_snapshot
         ~ownership_root:(Filename.dirname path) path
     with
     | Error _ -> Error "API credential file could not be read as an owned regular file"
     | Ok None -> Error "API credential file is missing"
-    | Ok (Some content) ->
+    | Ok (Some { snapshot; _ })
+      when snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0 ->
+      Error "API credential file must be owned by the current user and private"
+    | Ok (Some { content; _ }) ->
       let value = String.trim content in
       if value = "" then Error "API credential file is empty"
       else

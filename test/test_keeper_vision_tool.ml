@@ -1482,10 +1482,10 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
       (Runtime_agent.For_testing.required_modalities_of_content_blocks original
        = [ "image" ]))
 
-(* The projector is built once per lane walk and its exclusion is fixed there,
-   so the read boundary has to receive it on every call rather than only the
-   first. A projector that dropped it would send the delegation back to the
-   accounts the walk just spent (#34829). *)
+(* The projector is built once per lane walk and carries that walk's spent
+   accounts. A projector that dropped them would send the delegation back to
+   the runtimes the walk just tried (#34829). One eager read per turn is the
+   budget ([max_eager_reads_per_turn]), so the boundary is observed once. *)
 let test_fallback_read_receives_the_walks_excluded_runtimes () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-fallback-exclusion" in
@@ -1505,17 +1505,12 @@ let test_fallback_read_receives_the_walks_excluded_runtimes () =
         ~read ~keeper_name ()
     in
     ignore (project ~mode:Vi.Eager [ image ]);
-    (* A second block that is not the cached one reaches the read again. *)
-    let other =
-      Agent_core.Types.image_block ~media_type:"image/png"
-        ~data:(Base64.encode_string (bytes ^ "-other")) ()
-    in
-    ignore (project ~mode:Vi.Eager [ other ]);
-    assert (List.length !seen = 2);
-    List.iter
-      (fun ids ->
-         assert (ids = [ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ]))
-      !seen)
+    match !seen with
+    | [ ids ] ->
+      assert (ids = [ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ])
+    | other ->
+      failwith
+        (Printf.sprintf "expected one delegated read, got %d" (List.length other)))
 
 let test_fallback_semantic_read_is_cached_after_completion () =
   with_temp_base (fun _ ->

@@ -581,6 +581,15 @@ let prepare_for_login ~runtime_root ~owner_leaf =
 
 let oauth_path t = t.oauth_path
 let home_dir t = t.home_dir
+let write_context_observation_settings t ~command =
+  let settings = `Assoc [
+    "statusLine", `Assoc ["type", `String "command"; "command", `String command; "enabled", `Bool true];
+    "altScreenMode", `String "never";
+    "permissions", `Assoc ["allow", `List []; "deny", `List (List.map (fun name -> `String name)
+      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"; "unsandboxed(*)"])]] in
+  write_private_file ~make_error:(fun path detail -> Settings_write_failed {path;detail})
+    t.settings_path (Yojson.Safe.to_string settings)
+
 let keychain_state t = t.keychain
 
 let keychain_state_to_string = function

@@ -1495,7 +1495,7 @@ let test_fallback_read_receives_the_walks_excluded_runtimes () =
         ~data:(Base64.encode_string bytes) ()
     in
     let seen = ref [] in
-    let read ?(exclude_runtime_ids = []) ~media_type:_ ~bytes:_ =
+    let read ~exclude_runtime_ids ~media_type:_ ~bytes:_ =
       seen := exclude_runtime_ids :: !seen;
       Some (Ok "reading")
     in
@@ -1524,7 +1524,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
     let image = Agent_core.Types.image_block ~media_type:"image/png"
         ~data:(Base64.encode_string bytes) () in
     let calls = ref 0 in
-    let read ?exclude_runtime_ids:_ ~media_type ~bytes:received =
+    let read ~exclude_runtime_ids:_ ~media_type ~bytes:received =
       incr calls;
       assert (media_type = "image/png" && received = bytes);
       Some (Ok "The screenshot says deployment failed, code 413.")
@@ -1558,7 +1558,7 @@ let test_cancelled_fallback_read_can_retry_without_cached_failure () =
         ~data:(Base64.encode_string "\x89PNG\r\n\x1a\nretry-fixture") () in
     let cancelled = Eio.Cancel.Cancelled (Failure "cancel image reading") in
     let calls = ref 0 in
-    let read ?exclude_runtime_ids:_ ~media_type:_ ~bytes:_ =
+    let read ~exclude_runtime_ids:_ ~media_type:_ ~bytes:_ =
       incr calls;
       if !calls = 1 then raise cancelled;
       Some (Ok "The retried image contains a green checkmark.")

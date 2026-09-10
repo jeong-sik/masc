@@ -121,7 +121,11 @@ let raw_bytes_of_image_data data =
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
    emits an unread placeholder. Provider cancellation, when configured, is
    owned by the shared Provider boundary. *)
-let eager_read ?(exclude_runtime_ids = []) ~media_type ~bytes
+(* [exclude_runtime_ids] is required rather than optional: an optional argument
+   in front of labelled ones only cannot be erased (warning 16), and a new
+   caller of the read boundary should have to decide what its walk already
+   spent rather than inherit an empty set by default. *)
+let eager_read ~exclude_runtime_ids ~media_type ~bytes
   : (string, string) result option
   =
   match
@@ -269,7 +273,12 @@ let evict_blocks ~mode ~delegate ~keeper_name blocks =
          | Eager -> max_eager_reads_per_turn
          | Store_only -> 0)
     in
-    List.map (evict_block ~read:eager_read ~mode ~keeper_name ~eager_budget) blocks)
+    (* This path has no lane walk behind it, so nothing is spent yet. *)
+    List.map
+      (evict_block
+         ~read:(eager_read ~exclude_runtime_ids:[])
+         ~mode ~keeper_name ~eager_budget)
+      blocks)
   else blocks
 ;;
 

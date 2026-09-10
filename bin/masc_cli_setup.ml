@@ -293,11 +293,3 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
       | Setup_error message -> Log.Misc.error "setup: %s" message; 1
       | Unix.Unix_error (error, operation, path) ->
         Log.Misc.error "setup: %s %s: %s" operation path (Unix.error_message error); 1)
-
-(* Existing non-wizard entry point. The selection-aware wizard supplies image
-   preparation from the resolved backend through [run_with_selection]. *)
-let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
-    ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =
-  run_with_selection ~network_mode:None ~base_path ~port ~initialize
-    ~prepare_image:(fun ~selection:_ -> prepare_image ()) ~validate_runtime ~login
-    ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend

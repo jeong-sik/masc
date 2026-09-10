@@ -3,9 +3,9 @@
  * response interception, local build, attach or deployment are performed. */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile, appendFile, readFile } from 'node:fs/promises'
+import { mkdir, writeFile, appendFile, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, relative, isAbsolute, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
@@ -14,12 +14,13 @@ const { values } = parseArgs({ options: {
   'expected-addon': { type: 'string', multiple: true },
   keeper: { type: 'string' }, 'token-env': { type: 'string' },
   'timeout-ms': { type: 'string', default: '60000' },
+  'verify-evidence-files': { type: 'boolean', default: false },
   headed: { type: 'boolean', default: false }, help: { type: 'boolean', default: false },
 } })
 if (values.help) {
   process.stdout.write(`Usage: node scripts/lane-addons/browser-proof.mjs --url URL --out DIR
   [--expected-addon ID] [--expected-addon ID] [--keeper NAME]
-  [--token-env EXISTING_ENV_NAME] [--timeout-ms 60000] [--headed]
+  [--token-env EXISTING_ENV_NAME] [--timeout-ms 60000] [--headed] [--verify-evidence-files]
 
 URL/DIR may instead use MASC_LANE_ADDON_DASHBOARD_URL and MASC_LANE_ADDON_EVIDENCE_DIR.
 The URL must serve the already built candidate Dashboard and its real API.
@@ -28,6 +29,7 @@ This runner refreshes, drags the timeline, submits a slice, and preserves one ro
 Keeper delivery occurs ONLY when --keeper is explicitly supplied; default is preserve only.
 Output contains raw API replies, request bodies (never auth headers), screenshots and a summary.
 A preservation receipt is recorded separately from independent file verification or Keeper consumption.
+--verify-evidence-files additionally reads the candidate's local retained files and checks their hashes.
 No dev server, build, deploy, package attach, response mocking, or data seeding is performed.
 `)
   process.exit(0)
@@ -99,8 +101,12 @@ try {
   await panel.getByRole('table').waitFor({ state: 'visible' })
   await panel.getByText('Reading retained observations…', { exact: true }).waitFor({ state: 'hidden' })
   const health = await context.request.get(new URL('/health?full=1', target).href)
-  await writeFile(join(output, 'health.json'), await health.text())
+  const healthText = await health.text()
+  await writeFile(join(output, 'health.json'), healthText)
   summary.health_http_status = health.status()
+  assert(health.ok(), 'candidate health must answer successfully')
+  const healthData = JSON.parse(healthText)
+  summary.host_build = healthData.build
 
   const inspectWait = page.waitForResponse(response => endpoint(response, '/api/v1/lane-addons', 'GET'))
   await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
@@ -129,8 +135,11 @@ try {
     const matrix = line.getScreenCTM()
     if (!matrix) throw new Error('timeline has no screen transform')
     const left = line.x1.baseVal.value, right = line.x2.baseVal.value, y = line.y1.baseVal.value
-    const from = new DOMPoint(left + (right - left) * 0.15, y).matrixTransform(matrix)
-    const to = new DOMPoint(left + (right - left) * 0.85, y).matrixTransform(matrix)
+    // Start inside the SVG's right margin and release past the plot's left
+    // edge. The component clamps this reverse drag to the observed extent,
+    // including real events at both endpoints instead of an empty middle.
+    const from = new DOMPoint(right + 2, y).matrixTransform(matrix)
+    const to = new DOMPoint(left - 2, y).matrixTransform(matrix)
     return { from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y } }
   })
   await page.mouse.move(drag.from.x, drag.from.y)
@@ -150,8 +159,10 @@ try {
   assert.equal(Number(query.get('until')), until, 'submitted until must equal the selected window')
   const slice = await captureResponse(sliceResponse, 'slice.json')
   assert(Array.isArray(slice.rows) && Array.isArray(slice.coverage) && typeof slice.complete === 'boolean', 'slice must carry rows, coverage and completeness')
+  const slicedLanes = [...new Set(slice.rows.map(row => row.lane_id))]
+  assert(slicedLanes.length >= 2, 'the actual selected interval must contain at least two lanes')
   await panel.getByText(/^Slice: /).waitFor({ state: 'visible' })
-  summary.selected_window = { since, until, returned_rows: slice.rows.length, complete: slice.complete }
+  summary.selected_window = { since, until, returned_rows: slice.rows.length, lane_ids: slicedLanes, complete: slice.complete }
   await screenshot(panel.getByLabel('Source coverage', { exact: true }), 'slice-coverage.png')
   await panel.getByRole('button', { name: 'Clear slice', exact: true }).click()
 
@@ -188,6 +199,34 @@ try {
   await screenshot(receipt, 'evidence-receipt.png')
   summary.evidence = { instance_id: instance.instance_id, row_id: row.id, ...preserved.evidence,
     delivery_status: preserved.delivery?.status ?? 'not_requested' }
+  if (values['verify-evidence-files']) {
+    assert(typeof healthData.paths?.effective_masc_root === 'string', 'health must name the candidate runtime root')
+    const evidenceRoot = await realpath(join(healthData.paths.effective_masc_root, 'lane-addons/evidence'))
+    async function verifyFile(ref) {
+      assert(typeof ref.path === 'string' && typeof ref.sha256 === 'string', 'retained reference needs a path and digest')
+      const path = await realpath(ref.path)
+      const within = relative(evidenceRoot, path)
+      assert(within && within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within), 'retained file must be inside the candidate evidence directory')
+      const raw = await readFile(path)
+      const digest = createHash('sha256').update(raw).digest('hex')
+      assert.equal(digest, ref.sha256, 'independently read file digest must match the server receipt')
+      return { content: JSON.parse(raw.toString()), record: { path, sha256: digest, bytes: raw.byteLength } }
+    }
+    const manifest = await verifyFile(preserved.evidence)
+    assert(Array.isArray(manifest.content.observations), 'frozen manifest must identify retained observation records')
+    const records = []
+    const retainedRows = new Set()
+    for (const ref of manifest.content.observations) {
+      const record = await verifyFile(ref)
+      records.push(record.record)
+      for (const retained of record.content.output.rows) retainedRows.add(retained.id)
+    }
+    for (const id of request.row_ids) assert(retainedRows.has(id), 'selected row must be present in verified original records')
+    await writeJson('independent-evidence-verification.json', {
+      manifest: manifest.record, records, selected_ids_present: true, after_rotation_verified: false,
+    })
+    summary.evidence_file_independently_verified = true
+  }
   summary.status = 'passed'
   await journal('completed', { evidence_row: row.id, keeper_delivery: summary.evidence.delivery_status })
 } catch (error) {

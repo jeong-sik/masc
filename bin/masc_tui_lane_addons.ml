@@ -100,7 +100,16 @@ let timeline_lines ~width rows =
       let label_width = min 28 (max 8 (width / 3)) in
       let axis_width = max 2 (width - label_width - 3) in
       let lanes = List.map (fun (row : Row.row) -> row.lane_id) rows |> List.sort_uniq String.compare in
-      let label text = Masc_tui_message_layout.fit_width text label_width in
+      let label lane =
+        match String.index_opt lane '/' with
+        | Some separator when separator > 0 ->
+            let instance = String.sub lane 0 (min 8 separator) in
+            let local = String.sub lane (separator + 1) (String.length lane - separator - 1) in
+            let suffix = " · " ^ instance in
+            let local_width = label_width - Masc_tui_message_layout.display_width suffix in
+            if local_width > 0 then Masc_tui_message_layout.fit_width local local_width ^ suffix
+            else Masc_tui_message_layout.fit_width local label_width
+        | _ -> Masc_tui_message_layout.fit_width lane label_width in
       let position time = if since = until then axis_width / 2 else
         let span = until -. since in
         let fraction = if Float.is_finite span then (time -. since) /. span

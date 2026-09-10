@@ -47,6 +47,20 @@ describe('optional Lane Add-on surface', () => {
     fireEvent.click(detach)
     await waitFor(() => expect(api.detachLaneAddon).toHaveBeenCalledWith('instance-1'))
   })
+  it('distinguishes semantic lanes from the same package and keeps their full identities accessible', async () => {
+    const instance = '14f6117d-6e50-4f10-850e-a3f15cca3312'
+    const lanes = [`${instance}/custom/expectation`, `${instance}/custom/browser`]
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows:
+      lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text')]
+    expect(labels.map(label => label.lastChild?.textContent)).toEqual([
+      'custom/browser · 14f6117d', 'custom/expectation · 14f6117d',
+    ])
+    expect(labels.map(label => label.getAttribute('aria-label')).sort()).toEqual([...lanes].sort())
+    expect(labels.map(label => label.querySelector('title')?.textContent).sort()).toEqual([...lanes].sort())
+  })
   it('queries the selected time and lane, showing partial coverage and explicit evidence action', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
     api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [row], coverage, complete: false }))

@@ -7,6 +7,20 @@ export function formatLaneTime(value: number) {
   return Number.isNaN(date.getTime()) ? `${value} Unix seconds` : date.toISOString()
 }
 
+function laneLabel(lane: string) {
+  const separator = lane.indexOf('/')
+  if (separator < 1) {
+    const label = Array.from(lane)
+    return label.length > 34 ? label.slice(0, 33).join('') + '…' : lane
+  }
+  const instance = lane.slice(0, separator)
+  const local = Array.from(lane.slice(separator + 1))
+  const shortInstance = instance.slice(0, 8)
+  const available = 34 - shortInstance.length - 3
+  const label = local.length > available ? local.slice(0, available - 1).join('') + '…' : local.join('')
+  return `${label} · ${shortInstance}`
+}
+
 /** Coordinates only: time proximity and connecting lines do not assert cause. */
 export function LaneAddonsTimeline({ rows, onWindow }: {
   rows: LaneAddonRow[]
@@ -61,7 +75,7 @@ export function LaneAddonsTimeline({ rows, onWindow }: {
       }} onPointerCancel=${() => { start.current = null }}
       onLostPointerCapture=${() => { start.current = null }}>
       ${lanes.map(lane => html`<g key=${lane}>
-        <text x="0" y=${y(lane) + 4} fill="currentColor" font-size="12"><title>${lane}</title>${lane.length > 34 ? lane.slice(0, 33) + '…' : lane}</text>
+        <text x="0" y=${y(lane) + 4} fill="currentColor" font-size="12" aria-label=${lane}><title>${lane}</title>${laneLabel(lane)}</text>
         <line x1=${labelWidth} x2=${width - 20} y1=${y(lane)} y2=${y(lane)} stroke="currentColor" opacity="0.25" />
       </g>`)}
       ${rows.filter(row => row.kind === 'relation').flatMap(row => row.related_ids.map(id => {

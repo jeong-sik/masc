@@ -83,12 +83,18 @@ try {
   await note.scrollIntoViewIfNeeded()
   await page.screenshot({ path: resolve(output, 'task-decision-mobile.png') })
   const overflow = await dialog.evaluate(node => ({ width: node.clientWidth, scrollWidth: node.scrollWidth }))
+  const overflowElements = await dialog.evaluate(node => {
+    const right = node.getBoundingClientRect().right
+    return [...node.querySelectorAll('*')].filter(child => child.getBoundingClientRect().right > right + 1 || child.scrollWidth > child.clientWidth + 1)
+      .map(child => ({ tag: child.tagName, class: child.className, width: child.clientWidth,
+        scroll_width: child.scrollWidth, text: child.textContent?.slice(0, 160) }))
+  })
   assert.deepEqual(pageErrors, [])
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({
     observed_at: new Date().toISOString(), scope: 'Actual Keeper decision read from the isolated backend and rendered by exact CI preview; not production deployment or original PDF Task completion',
     preview_manifest: manifest, expected_backend_commit: expectedBackendHead, health, decision, history, fusion, browser_history: browserHistory,
     checks: ['exact_ci_asset_hashes', 'exact_runtime_commit', 'same_task_run_decision_in_two_readbacks', 'actual_task_history_render'],
-    page_errors: pageErrors, blocked_requests: blocked, mobile_dialog: overflow,
+    page_errors: pageErrors, blocked_requests: blocked, mobile_dialog: overflow, mobile_overflow_elements: overflowElements,
   }, null, 2) + '\n')
   console.log(JSON.stringify({ output, decision_id: decision.decision_id, mobile_dialog: overflow }))
 } finally { await browser.close() }

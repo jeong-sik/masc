@@ -35,6 +35,7 @@ let request_fingerprint
                      ; provider_id
                      ; model_id
                      ; base_url
+                     ; credential_source
                      ; auth_scheme
                      ; api_key
                      ; headers
@@ -82,6 +83,9 @@ let request_fingerprint
      counter; [supports_*_override] and [model_capabilities_override] gate
      which of the fields below may be sent at all, and those fields are
      already in the key. *)
+  (* Refreshable credentials have no stable account identity in this snapshot.
+     Complete disables response caching for them before calling this function. *)
+  ignore credential_source;
   ignore max_request_body_bytes;
   ignore connect_timeout_s;
   ignore max_concurrent_requests;

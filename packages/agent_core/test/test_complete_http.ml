@@ -3992,9 +3992,12 @@ let test_vertex_native_transport () =
         let tools = [`Assoc ["name", `String "inspect_workspace";
           "description", `String "Inspect workspace";
           "input_schema", `Assoc ["type", `String "object"; "properties", `Assoc []]]] in
+        let cache : Cache.t = {
+          get=(fun ~key:_ -> fail "refreshable account must not read a static response cache");
+          set=(fun ~key:_ ~ttl_sec:_ _ -> fail "refreshable account must not populate a static response cache") } in
         let result = if stream then Complete.complete_stream ~sw ~net:env#net ~config
             ~messages ~tools ~on_event:(fun _ -> ()) ()
-          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools () in
+          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache () in
         (match result with
          | Error _ -> fail "native Vertex-shaped transport failed"
          | Ok response -> check bool "native function call survives transport" true

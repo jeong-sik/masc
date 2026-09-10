@@ -928,18 +928,30 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     return True
 
 
+def installed_client(command, choice):
+    found = shutil.which(command)
+    if found:
+        return found
+    standard = {'codex': 'codex', 'claude_code': 'claude', 'antigravity': 'agy'}.get(choice)
+    if standard is None or command != standard:
+        return None  # An explicit custom executable path is not a vendor alias.
+    directory = (os.environ.get('CODEX_INSTALL_DIR') if choice == 'codex' else None) or str(Path.home() / '.local/bin')
+    candidate = Path(directory) / standard
+    return str(candidate.resolve()) if candidate.is_file() and os.access(candidate, os.X_OK) else None
+
+
 def prepare_connection(source, credentials):
     source = dict(source)
     if source.get('setup_support') == 'unsupported' or source['choice'] is None:
         raise SetupError(source['label'] + ' is listed for visibility but its setup integration is not available yet')
     if CHOICES[source['choice']][1] is not None:
         command = source.get('command') or CHOICES[source['choice']][1]
-        while not shutil.which(command):
-            client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(source['choice'])
+        while not installed_client(command, source['choice']):
+            client = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity'}.get(source['choice'])
             if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
                 raise SetupError('Install the selected client, then return to connection setup')
+        source['command'] = installed_client(command, source['choice'])
         if source['choice'] == 'antigravity':
-            source['command'] = shutil.which(command)
             return prepare_antigravity_account(source, credentials)
         return source
     if not source['endpoint']:

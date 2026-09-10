@@ -3,7 +3,7 @@
 # linux container of the target architecture. No local build (constitution).
 set -euo pipefail
 
-MASC_VERSION="${MASC_VERSION:-0.35.2}"
+MASC_VERSION="${MASC_VERSION:-0.35.6}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="${SCRIPT_DIR}/../dist"
 ARCH="${MASC_LINUX_ARCH:-arm64}"   # Apple Silicon docker → arm64; Intel/amd64 호스트면 x64

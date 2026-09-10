@@ -91,3 +91,26 @@ def test_arm_f_renders_four_keepers():
     out = render_arm("f", runtime_id="anthropic.claude-fable-5", effort="high")
     keepers = sorted((out / "keepers").glob("bench-*.toml"))
     assert len(keepers) == 4
+
+
+SPAWN = ["keeper_spawn", "keeper_spawn_read", "keeper_spawn_wait", "keeper_spawn_stop"]
+DELEGATE = ["masc_keeper_delegate", "masc_keeper_delegate_status", "masc_keeper_delegate_cancel"]
+
+
+def test_tools_deny_maps_spawn_to_parallel_and_delegate_to_keepers():
+    # v0.35.6 (#35169): tools.deny로 built-in을 surface에서 제거한다.
+    # spawn = parallel 기구 → parallel=False arm(b, c, d)에서 deny.
+    # delegate = 다 keeper 위임 → keepers=1 arm(b-e)에서 deny.
+    for arm in ("b", "c", "d"):
+        keeper = keeper_toml(arm, 1)
+        assert "tools.deny = [" in keeper
+        for name in SPAWN + DELEGATE:
+            assert f'"{name}"' in keeper, f"arm {arm} must deny {name}"
+    keeper_e = keeper_toml("e", 1)
+    assert "tools.deny = [" in keeper_e
+    for name in SPAWN:
+        assert f'"{name}"' not in keeper_e, f"arm e keeps {name}"
+    for name in DELEGATE:
+        assert f'"{name}"' in keeper_e, f"arm e denies {name}"
+    for arm in ("f", "g", "h"):
+        assert "tools.deny" not in keeper_toml(arm, 1), f"arm {arm} denies nothing"

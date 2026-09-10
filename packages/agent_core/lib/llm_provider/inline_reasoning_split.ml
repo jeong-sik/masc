@@ -12,6 +12,13 @@ type state =
   ; mutable pending : string
   }
 
+type snapshot = mode * string
+
+let snapshot state = state.mode, state.pending
+let restore state (mode, pending) =
+  state.mode <- mode;
+  state.pending <- pending
+
 let create () = { mode = Outside; pending = "" }
 let inside state = state.mode = Inside
 

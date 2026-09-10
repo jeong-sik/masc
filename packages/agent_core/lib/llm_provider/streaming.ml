@@ -874,6 +874,7 @@ type openai_projection_undo =
 type openai_projection_tx =
   { state : openai_stream_state
   ; scalar_snapshot : openai_projection_scalar_snapshot
+  ; inline_snapshot : (Inline_reasoning_split.state * Inline_reasoning_split.snapshot) option
   ; mutable undo : openai_projection_undo list
   }
 
@@ -889,6 +890,7 @@ let begin_openai_projection state =
       ; snapshot_next_block_index = state.next_block_index
       ; snapshot_thinking_state = state.thinking_state
       }
+  ; inline_snapshot = Option.map (fun split -> split, Inline_reasoning_split.snapshot split) state.inline_reasoning
   ; undo = []
   }
 ;;
@@ -909,6 +911,7 @@ let rollback_openai_projection tx =
   state.text_block_index <- snapshot.snapshot_text_block_index;
   state.next_block_index <- snapshot.snapshot_next_block_index;
   state.thinking_state <- snapshot.snapshot_thinking_state;
+  Option.iter (fun (split, captured) -> Inline_reasoning_split.restore split captured) tx.inline_snapshot;
   List.iter
     (function
       | Undo_tool_block_by_id (id, previous) ->
@@ -3923,4 +3926,32 @@ let%test "inline answer emits incrementally after reasoning before terminal" =
   let second, _ = openai_chunk_to_events state (test_content_chunk "lo") in
   let visible events = List.filter_map (function ContentBlockDelta {delta=TextDelta text;_} -> Some text | _ -> None) events in
   visible first = ["hel"] && visible second = ["lo"]
+;;
+
+let%test "rejected tool chunk restores inline mode and held tag bytes" =
+  let check prefix rejected continuation expected =
+    let state = create_openai_stream_state ~inline_reasoning:true () in
+    let tool id =
+      { tc_index = 0; tc_id = id; tc_name = Some "fixture";
+        tc_arguments = Some (Args_fragment "") } in
+    let initial = { (test_content_chunk prefix) with delta_tool_calls = [tool None] } in
+    let before, _ = openai_chunk_to_events state initial in
+    (* A provider identity cannot replace the synthesized identity of that
+       existing call. The preceding content in this same chunk must roll back. *)
+    let invalid = { (test_content_chunk rejected) with
+      delta_tool_calls = [tool (Some "late-provider-id")] } in
+    let rejected_events, _ = openai_chunk_to_events state invalid in
+    let after, _ = openai_chunk_to_events state
+      { (test_content_chunk continuation) with finish_reason = Some "stop" } in
+    let payloads = List.filter_map (function
+      | ContentBlockDelta {delta = TextDelta text; _} -> Some (`Text text)
+      | ContentBlockDelta {delta = ThinkingDelta text; _} -> Some (`Thinking text)
+      | _ -> None) (before @ after) in
+    (match rejected_events with [SSEParseFailed _] -> true | _ -> false)
+    && payloads = expected
+  in
+  check "<thi" "nk>discarded</think>" "nk>private</think>reply"
+    [`Thinking "private"; `Text "reply"]
+  && check "<think>private</thi" "nk>discarded" "nk>reply"
+    [`Thinking "private"; `Text "reply"]
 ;;

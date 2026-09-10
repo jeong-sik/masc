@@ -317,7 +317,7 @@ type read_file_attempt =
   | Read_failed_payload of string
   | Read_failed_message of string
 
-let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes =
+let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
   let* target =
     resolve_read_file_target ~config ~meta ~args:(`Assoc []) ~raw_path:path
     |> Result.map_error (function Read_path_error detail -> detail)

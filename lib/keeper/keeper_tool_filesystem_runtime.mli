@@ -39,7 +39,7 @@ val read_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  path:string -> max_bytes:int ->
+  path:string -> max_bytes:int -> unit ->
   (string, string) result
 (** Resolve like Read, enforce this Keeper's containment, and read binary bytes
     through the existing sandbox runner. Never falls back to a host read. *)

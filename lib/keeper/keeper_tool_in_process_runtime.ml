@@ -2305,6 +2305,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
              let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_bytes
                  ?turn_sandbox_factory ~config ~meta ~path
                  ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1)
+                 ()
                  |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "sandbox_image_read_failed", detail) in
              let* () = Keeper_vision_tool.validate_image_size bytes
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in

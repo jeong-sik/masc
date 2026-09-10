@@ -5536,6 +5536,7 @@
 (include stanzas/test_onboarding_status.inc)
 (include stanzas/test_sandbox_readiness.inc)
 (include stanzas/test_sandbox_prerequisites.inc)
+(include stanzas/test_onboarding_journey.inc)
 
 (include stanzas/test_docker_desktop_install.inc)
 

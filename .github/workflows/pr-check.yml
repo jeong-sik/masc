@@ -106,6 +106,7 @@ jobs:
           python3 test/test_installer_upgrade.py -v
           python3 test/test_installer_uninstall.py -v
           python3 test/test_install_runtime_setup.py -v
+          python3 test/test_onboarding_journey.py -v
 
       - name: Verify onboarding oracle ordering and sibling selection
         run: |

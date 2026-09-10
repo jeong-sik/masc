@@ -1139,7 +1139,12 @@ let initialize_owner_state_blocking
         reason)
     (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
   (match runtime_initialization, runtime_config_path with
-   | Ok _, Some path -> configure_exact_output_registry ~config_root:(Filename.dirname path) ()
+   | Ok _, Some path ->
+     (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
+      | Env_config_core.Config_error _ ->
+        Runtime.enter_setup_required ~reason:Runtime_startup_state.Exact_output_unavailable ();
+        Log.Server.warn "%s Owner-authenticated settings remain available."
+          (Runtime_startup_state.message Exact_output_unavailable))
    | Error _, _ | Ok _, None -> ());
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);

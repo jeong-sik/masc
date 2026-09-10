@@ -17,7 +17,7 @@ BINARY = None
 
 class OwnerWithoutModel(unittest.TestCase):
     def test_owner_auth_and_settings_survive_missing_or_invalid_runtime(self):
-        for contents, reason in [(None, 'config_missing'), ('[runtime]\ndefault = "missing.model"\n', 'config_invalid')]:
+        for contents, reason in [(None, 'config_missing'), ('[runtime]\ndefault = "missing.model"\n', 'config_invalid'), ('seed_without_lanes', 'exact_output_unavailable')]:
             with self.subTest(reason=reason), tempfile.TemporaryDirectory(prefix='masc-owner-no-model-') as tmp:
                 base = Path(tmp)
                 env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': tmp,
@@ -25,6 +25,13 @@ class OwnerWithoutModel(unittest.TestCase):
                 subprocess.run([BINARY, 'init', '--base-path', tmp], env=env, check=True,
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
                 runtime = base/'.masc/config/runtime.toml'
+                if contents == 'seed_without_lanes':
+                    kept, skip = [], False
+                    for line in runtime.read_text().splitlines(keepends=True):
+                        if line.lstrip().startswith('['):
+                            skip = line.lstrip().startswith('[runtime.exact_output_lanes.')
+                        if not skip: kept.append(line)
+                    contents = ''.join(kept)
                 if contents is None: runtime.unlink()
                 else: runtime.write_text(contents)
                 with socket.socket() as sock:
@@ -68,7 +75,7 @@ class OwnerWithoutModel(unittest.TestCase):
                         with self.assertRaises(HTTPError) as rejected:
                             urlopen(request, timeout=5)
                         self.assertEqual(rejected.exception.code, 503)
-                        self.assertIn('Model setup required', rejected.exception.read().decode())
+                        self.assertIn('setup required', rejected.exception.read().decode())
                         self.assertFalse((base/'.masc/keepers/imp.json').exists())
                         self.assertEqual(runtime.read_text() if runtime.exists() else None, contents)
                     finally:

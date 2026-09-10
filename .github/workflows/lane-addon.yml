@@ -65,6 +65,7 @@ jobs:
           opam exec -- dune build --profile release \
             test/test_lane_addon.exe test/test_lane_addon_worker.exe \
             test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe test/test_tui_command.exe \
+            test/test_tui_palette_matching.exe \
             test/test_lane_addon_sources.exe test/test_browser_lane.exe \
             test/test_browser_webdriver.exe test/test_msx_tools.exe \
             bin/main_eio.exe bin/masc_tui.exe 2>&1 | tee proof/build.log
@@ -82,6 +83,7 @@ jobs:
           _build/default/test/test_msx_tools.exe 2>&1 | tee proof/msx-tests.log
           _build/default/test/test_lane_addon_store_query.exe 2>&1 | tee proof/store-query-tests.log
           _build/default/test/test_tui_command.exe 2>&1 | tee proof/tui-command-tests.log
+          _build/default/test/test_tui_palette_matching.exe 2>&1 | tee proof/tui-palette-tests.log
       - name: Package exact Linux candidate
         run: |
           set -euo pipefail

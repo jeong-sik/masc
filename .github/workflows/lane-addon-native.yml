@@ -45,8 +45,9 @@ jobs:
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe test/test_lane_addon.exe \
             test/test_lane_addon_worker.exe test/test_lane_addon_sources.exe \
-            test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe 2>&1 | tee proof/build.log
-          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query; do
+            test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe \
+            test/test_tui_palette_matching.exe 2>&1 | tee proof/build.log
+          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_tui_palette_matching; do
             "_build/default/test/$test.exe" 2>&1 | tee "proof/$test.log"
           done
       - name: Package using the release runtime bundler

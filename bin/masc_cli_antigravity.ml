@@ -50,8 +50,9 @@ let account ~base_path ~cli_path ~timeout_s ~action =
 
 let with_catalog_home ~oauth_source f =
   try
-    let runtime_root = Filename.concat (Filename.get_temp_dir_name ()) ("masc-agy-models-" ^ Random_id.hex ~bytes:16) in
-    Unix.mkdir runtime_root 0o700;
+    (* macOS TMPDIR commonly passes through /var -> /private/var. Canonicalize
+       the newly owned directory before the runtime-home ownership checks. *)
+    let runtime_root = Filename.temp_dir "masc-agy-models-" "" |> Unix.realpath in
     Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) (fun () ->
       let* home = Setup.prepare_from_credential_file ~runtime_root ~account_id:"catalog" ~oauth_source in
       f home)

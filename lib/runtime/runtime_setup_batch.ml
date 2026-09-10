@@ -118,7 +118,7 @@ let publish_using ~write changes =
         if restore written then Error Write_failed else Error Rollback_failed in
   (* Cancellation cannot interrupt the two replacements or their rollback. *)
   Eio.Cancel.protect (fun () -> commit [] changes)
-let configure_locked ~binary ~base ~expected_revision ~specs ~selected ~verify =
+let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~specs ~selected ~verify =
   let* original = snapshot base in
   if revision original <> expected_revision then Error Changed_configuration else
   let first,second = original in
@@ -154,12 +154,15 @@ let configure_locked ~binary ~base ~expected_revision ~specs ~selected ~verify =
   if not (same original current) then Error Changed_configuration else
   let _,runtime,overlay = paths base in
   let changes = (if overlay_added="" then [] else [overlay,second,overlay_text]) @ [runtime,first,validated] in
-  let* () = publish_using ~write changes in
+  let* () = Eio.Cancel.protect (fun () ->
+    let* () = publish_using ~write changes in
+    List.iter Runtime_setup_credentials.retain pending_credentials;
+    Ok ()) in
   match selected with
   | [] -> Error Invalid_selection
   | primary::_ -> Ok {runtime_id=primary;runtime_ids=selected;
       models=List.map Runtime_setup_spec.model_id specs; readiness=(if verify then Verified else Not_probed)}
-let configure ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
+let configure ?(pending_credentials=[]) ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
   if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
      || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
   io (fun () ->
@@ -168,7 +171,7 @@ let configure ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default
     let selected = default_runtime_id :: List.filter ((<>) default_runtime_id) (unique runtime_ids) in
     (* Keep typed operation failures separate from the lock's string diagnostics. *)
     match Runtime.with_config_lock ~runtime_config_path:runtime (fun () ->
-      Ok (configure_locked ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
+      Ok (configure_locked ~pending_credentials ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
     | Ok result -> result | Error _ -> Error Lock_unavailable)
 let receipt_json receipt = `Assoc [
   "runtime_id",`String receipt.runtime_id;

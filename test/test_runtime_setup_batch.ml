@@ -109,8 +109,37 @@ let test_rollback () = fixture (fun _base runtime _binary _spec original ->
     Alcotest.check Alcotest.bool "new overlay removed by rollback" false (Sys.file_exists overlay);
     Alcotest.check Alcotest.int "rollback retains permissions" 0o640 (Unix.stat runtime).st_perm)
     [Fs_compat.Before_rename;Fs_compat.After_rename])
+let test_credential_commit_join () = fixture (fun base _runtime binary _spec _original ->
+  Eio.Switch.run (fun sw ->
+    let previous = Sys.getenv_opt "XDG_CONFIG_HOME" in
+    Unix.putenv "XDG_CONFIG_HOME" base;
+    Eio.Switch.on_release sw (fun () -> Unix.putenv "XDG_CONFIG_HOME" (Option.value previous ~default:""));
+    let pending = match Runtime_setup_credentials.save ~secret:"fixture-private-api-key" () with
+      | Ok pending -> pending | Error e -> Alcotest.fail (Runtime_setup_credentials.error_message e) in
+    Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted pending);
+    let path = Runtime_setup_credentials.reference_path pending in
+    let spec = match Runtime_setup_spec.of_json (`Assoc [
+      "choice",`String "openai_compatible";"model",`String "selected-model";
+      "max_context",`Int 1024;"tools",`Bool true;"streaming",`Bool true;
+      "endpoint",`String "https://fixture.invalid/v1";"credential_file",`String path]) with
+      | Ok spec -> spec | Error e -> Alcotest.fail (Runtime_setup_spec.error_message e) in
+    let id = (Runtime_setup_spec.render spec).runtime_id in
+    let revision=get (Batch.observe ~base_path:base) in
+    fake base binary "pass";
+    ignore (get (Batch.configure ~pending_credentials:[pending] ~binary ~base_path:base
+      ~expected_revision:revision ~specs:[spec] ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ()));
+    Runtime_setup_credentials.remove_uncommitted pending;
+    Alcotest.check Alcotest.bool "committed key survives caller cleanup" true (Sys.file_exists path);
+    let rejected = match Runtime_setup_credentials.save ~secret:"unused-fixture-key" () with
+      | Ok pending -> pending | Error e -> Alcotest.fail (Runtime_setup_credentials.error_message e) in
+    let rejected_path=Runtime_setup_credentials.reference_path rejected in
+    ignore (Batch.configure ~pending_credentials:[rejected] ~binary ~base_path:base
+      ~expected_revision:revision ~specs:[] ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ());
+    Runtime_setup_credentials.remove_uncommitted rejected;
+    Alcotest.check Alcotest.bool "stale transaction does not retain unused key" false (Sys.file_exists rejected_path)))
 let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
   Alcotest.test_case "runtime and overlay compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
-  Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback]]
+  Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
+  Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

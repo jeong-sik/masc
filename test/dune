@@ -5512,3 +5512,8 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+
+(test
+ (name test_keeper_declared_roster)
+ (modules test_keeper_declared_roster)
+ (libraries masc_test_deps))

@@ -501,6 +501,14 @@ let keepers_json
                 None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
+  let declarations =
+    match Keeper_meta_store.persisted_keeper_names_result config with
+    | Error _ -> [] (* A failed read cannot establish that a Keeper never started. *)
+    | Ok persisted_names ->
+      Keeper_declared_roster.missing ~base_path:config.base_path ~persisted_names
+      |> List.map Keeper_declared_roster.to_json
+  in
+  let rows = rows @ declarations in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
 ;;
 

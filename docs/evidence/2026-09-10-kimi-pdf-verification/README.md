@@ -34,8 +34,11 @@ while the active Colima VM shared only `/Users/dancer` via virtiofs. The produce
 never needed a guest filesystem operation, so snapshot ingress succeeded while
 later Docker reads failed. This is a probe placement/infrastructure mismatch,
 not evidence that the PDF or summary was absent. Future live-lookup probes should
-use an output directory visible to the selected Docker daemon. No live config
-was changed and port 18937 was untouched.
+use an output directory visible to the selected Docker daemon. A separate HOME-visible bind-mount check then read all five copied source files
+through the same Docker engine with matching SHA-256 values; its exact argv,
+exit status and hashes are in `home-visible-bind-readback.json`. This check
+invoked neither a server nor a model and does not replace the recorded failed
+live lookups. No live config was changed and port 18937 was untouched.
 
 ## Observer correction and shutdown
 

@@ -1,5 +1,5 @@
 {
-  "README.md": "b57e70976b20761b4f7f1bbb02284a38914a8b3dd03e60b4036f5f4b4ee16bb3",
+  "README.md": "872d4651c589121ebcb5f610fd08fab6377e4133d1935f95b00d673883b2bd15",
   "runtime/agent-core-models-overlay.toml": "bede619962b4fed99207a975508f68cf5fa8f677d0c185551223b4e69cf79ce1",
   "runtime/authenticated-operation-observation.json": "d2946211caca8f2187234eb0f7113ae0a6e406b053f40be92b7d9c9fa0dc6e06",
   "runtime/colima-mounts.txt": "ac9db95fe0f054468733e4b5690a2454888dcc775fb3bda11d8c80bc3fadf58a",
@@ -7,6 +7,7 @@
   "runtime/external-observer-receipt.json": "8d08323d523b4b82161db421f8c844f7168a843280bb6d0a5fcb61f625738ee8",
   "runtime/harness-at-run.py": "40625c757f2b0b4cd0426f6594c65c2be3091c67d8c5f6d93e637124d993c06f",
   "runtime/health.json": "4e29b125800e3b5956de567e70ac27ee73f96eb31c8d493bb198b3d501a5061d",
+  "runtime/home-visible-bind-readback.json": "b3bfcac71b1fa12f15da146c1e845768d2c873d652c19032f158d6795f21553a",
   "runtime/operation-external-readback.json": "07897e1e1b2488838da95dc562b84e107531bb940117c2ab17027e4790b8f899",
   "runtime/receipt-before-observer-correction.json": "dfc6558857f845b2a956c3b0e24e1bd8543788f325fefb78a7234cee2af132c5",
   "runtime/receipt.json": "693823181aad43a973b4ebb998a721cd102848a6142286e15dd28bc806fbfc0c",

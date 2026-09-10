@@ -34,7 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary-dir', type=Path, required=True)
     parser.add_argument('--expected-commit', required=True)
-    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True, help='Fresh output directory visible to the configured Docker engine; default Colima shares HOME, not /private/tmp.')
     parser.add_argument('--port', type=int, default=18946)
     parser.add_argument('--source-bundle', type=Path, required=True)
     parser.add_argument('--live-config-dir', type=Path, required=True)

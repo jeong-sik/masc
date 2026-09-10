@@ -2545,6 +2545,12 @@ let runtime_model_list_cmd =
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client or, with --provider, a named catalog provider; account availability is not verified.")
     Term.(const run $ client $ provider)
 
+let runtime_codex_models_cmd =
+  let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let run cli_path = Masc_cli_codex_models.run ~cli_path ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
+    Term.(const run $ cli)
+
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
     ~doc:"Private JSON connection specification containing credential references, never raw secrets.") in
@@ -2857,6 +2863,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
+    ; runtime_codex_models_cmd
     ; runtime_discover_models_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd

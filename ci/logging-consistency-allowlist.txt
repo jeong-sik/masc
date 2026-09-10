@@ -46,6 +46,9 @@ bin/masc_cli_onboarding.ml
 # masc_cli_antigravity prompts the user on stderr before launching the
 # interactive sign-in flow; user-facing CLI output, not server logging.
 bin/masc_cli_antigravity.ml
+# masc_cli_codex_models reports online refresh failure on stderr before
+# returning an exit code to the setup wizard; user-facing CLI output.
+bin/masc_cli_codex_models.ml
 # gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml

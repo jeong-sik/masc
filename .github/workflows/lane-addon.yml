@@ -65,12 +65,11 @@ jobs:
           opam exec -- dune build --profile release \
             test/test_lane_addon_worker.exe \
             bin/main_eio.exe bin/masc_tui.exe 2>&1 | tee proof/build.log
-      - name: Run host and worker behavior tests
+      - name: Run worker behavior tests
         env:
           ALCOTEST_VERBOSE: '1'
         run: |
           set -euo pipefail
-          _build/default/2>&1 | tee proof/host-tests.log
           _build/default/test/test_lane_addon_worker.exe 2>&1 | tee proof/worker-tests.log
       - name: Package exact Linux candidate
         run: |
@@ -94,7 +93,7 @@ jobs:
               'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
               'platform': platform.platform(), 'architecture': platform.machine(),
               'archive': archive.name, 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
-              'qualification': 'host and hermetic subprocess tests; live Keeper/game qualification remains separate',
+              'qualification': 'worker hermetic subprocess tests; Lane integration and live Keeper/game qualification remain separate',
           }
           Path('proof/candidate-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY

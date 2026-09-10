@@ -12,7 +12,7 @@ type mount = { source : string; destination : string }
 type t = {
   id : string;
   name : string;
-  client : Agent_core.Mcp.t;
+  mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
   mutex : Eio.Mutex.t;
   mutable stopping : bool;
@@ -203,7 +203,7 @@ let stop t =
   else
     let* () = t.cleanup () in
     t.removed <- true;
-    (try Agent_core.Mcp.close t.client with
+    (try Option.iter Agent_core.Mcp.close t.client with
      | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ());
     Ok ()
 
@@ -276,8 +276,18 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     fail_start (Docker_failed { operation = "create"; detail = "invalid container ID" })
   else begin
     identity := Some id;
-    let connected = ref None in
+    let stderr_source = ref None in
+    let worker_cleanup () =
+      let* () = cleanup () in
+      Option.iter (fun source ->
+        try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
+      stderr_source := None;
+      Ok () in
+    let worker = { id; name; client = None; cleanup = worker_cleanup;
+                   mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
+      on_created worker;
+      let* () = if worker.stopping then Error Stopped else Ok () in
       let* inspected = run ~operation:"inspect" [ "container"; "inspect"; id ] in
       let* inspected_id = verify_container ~name ~resources:package.resources inspected in
       if not (String.equal inspected_id id) then
@@ -287,6 +297,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
            host log or allocate an unbounded buffer. A noisy package may block
            itself; the owner and other Add-ons do not share this pipe. *)
         let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+        stderr_source := Some stderr_r;
         let protocol_error error = Protocol_failed (Agent_core.Error.to_string error) in
         let* client = Agent_core.Mcp.connect ~sw ~mgr ~command:docker_command
             ~args:[ "container"; "start"; "--attach"; "--interactive"; id ]
@@ -294,15 +305,8 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
             ~max_response_bytes:package.resources.max_reply_bytes ()
           |> Result.map_error protocol_error in
         Eio.Flow.close stderr_w;
-        connected := Some client;
-        let cleanup () =
-          let* () = cleanup () in
-          (try Eio.Flow.close stderr_r with Eio.Io _ | Unix.Unix_error _ -> ());
-          Ok ()
-        in
-        let worker = { id; name; client; cleanup; mutex = Eio.Mutex.create ();
-                       stopping = false; removed = false } in
-        on_created worker;
+        worker.client <- Some client;
+        let* () = if worker.stopping then Error Stopped else Ok () in
         let* () = Agent_core.Mcp.initialize client |> Result.map_error protocol_error in
         let* tools = Agent_core.Mcp.list_tools_full client |> Result.map_error protocol_error in
         if not (List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
@@ -317,7 +321,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     match result with
     | Ok _ -> result
     | Error error ->
-        Option.iter Agent_core.Mcp.close !connected;
+        Option.iter Agent_core.Mcp.close worker.client;
         fail_start error
   end
 
@@ -330,7 +334,9 @@ let observe t ~binding ~sources =
     if t.stopping then Error Stopped
     else
       try
-        let* result = Agent_core.Mcp.call_tool_full t.client ~name:"lane_observe"
+        let* client = match t.client with
+          | Some client -> Ok client | None -> Error (Protocol_failed "worker initialization pending") in
+        let* result = Agent_core.Mcp.call_tool_full client ~name:"lane_observe"
             ~arguments:(`Assoc [ "binding", binding; "sources", sources ])
           |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
         if t.stopping then Error Stopped

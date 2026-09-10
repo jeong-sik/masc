@@ -35,6 +35,10 @@ if action == "create":
     path(cid).write_text(json.dumps(config))
     print(cid, flush=True)
 elif action == "inspect":
+    cid = args[-1]
+    if load(cid)["mode"] == "hang_inspect":
+        (root / (cid + ".blocked")).write_text(action)
+        while True: signal.pause()
     output([load(args[-1])])
 elif action == "ls":
     condition = value("--filter")
@@ -213,6 +217,28 @@ let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir 
   unwrap (recover "worker-test");
   unwrap (Worker.stop worker))
 
+exception Owner_detached
+
+let test_created_identity_precedes_blocked_inspection () = with_fixture (fun env sw dir docker ->
+  let allocated, resolver = Eio.Promise.create () in
+  let starting = Eio.Fiber.fork_promise ~sw (fun () ->
+    try Eio.Switch.run (fun owner_sw ->
+      Worker.start ~sw:owner_sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"inspect-test"
+        ~package:(package dir "hang_inspect") ~docker_command:docker
+        ~on_created:(fun worker -> Eio.Promise.resolve resolver (worker, owner_sw)) ())
+    with Owner_detached -> Error Worker.Stopped) in
+  let worker, owner_sw = Eio.Promise.await allocated in
+  await_marker (Eio.Stdenv.clock env)
+    (Filename.concat dir (Worker.container_id worker ^ ".blocked"));
+  unwrap (Worker.stop worker);
+  check bool "created container removed without waiting for inspect" false
+    (Sys.file_exists (Filename.concat dir (Worker.container_id worker ^ ".json")));
+  (* The binding owner retires its control CLI only after cleanup is proven. *)
+  Eio.Switch.fail owner_sw Owner_detached;
+  check bool "only binding startup is cancelled" true
+    (Result.is_error (Eio.Promise.await_exn starting));
+  check bool "primary switch remains active" true (Eio.Switch.get_error sw = None))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;
@@ -220,4 +246,5 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "resource refusal and bounded response" `Quick test_resource_refusal_and_bounded_reply;
   test_case "cleanup failure remains retryable" `Quick test_cleanup_failure_can_be_retried;
   test_case "restart cleanup verifies exact owner" `Quick test_restart_cleanup_requires_exact_owner;
+  test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
 ]]

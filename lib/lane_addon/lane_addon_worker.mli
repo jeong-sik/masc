@@ -12,9 +12,9 @@ type error =
 
 type mount = { source : string; destination : string }
 
-(** [on_created] runs after acquiring/verifying the exact container and MCP
-    transport, before waiting for initialization. Store the handle to allow
-    concurrent detach even if initialization never responds. Packages expose
+(** [on_created] runs as soon as the exact created-container ID is known,
+    before waiting for inspect or protocol initialization. Store the handle to
+    allow concurrent detach even if either operation never responds. Packages expose
     [lane_observe] in the initial MCP tools/list page. [docker_command] is an
     executable path, also allowing hermetic control-protocol tests. *)
 val start :

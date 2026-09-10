@@ -569,12 +569,13 @@ def pick(title, labels, multiple=False, defaults=()):
         for index, label in enumerate(labels, 1):
             print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter keeps marked choices; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
             if not answer:
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -593,7 +594,7 @@ def pick(title, labels, multiple=False, defaults=()):
             start = min(max(0, current - count + 1), max(0, len(labels) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            lines = [terminal_text(title), '↑/↓ move · Space select · Enter continue · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
+            lines = [terminal_text(title), '↑/↓ move · Space mark several · Enter choose · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
             for index in range(start, min(len(labels), start + count)):
                 marker = '[x]' if index in selected else '[ ]'
                 lines.append(('› ' if index == current else '  ') + (marker + ' ' if multiple else '') + terminal_text(labels[index]))
@@ -628,6 +629,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 
@@ -683,9 +685,9 @@ def source_label(source):
     elif source.get('credential_file'):
         status = 'saved private API key; access will be checked'
     elif command:
-        status = 'CLI found' if shutil.which(command) else 'CLI not found'
+        status = 'CLI found; sign-in checked after selection' if shutil.which(command) else 'CLI needs installation'
     elif key:
-        status = key + (' is set' if os.environ.get(key) else ' is not set')
+        status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
     else:
         status = endpoint or 'configured connection'
     return source['label'] + ' — ' + status
@@ -1043,10 +1045,32 @@ def resolve_model_spec(source, model, timeout, binary=None):
     return render(spec)[0], spec
 
 
+def pick_connection_sources(sources):
+    def detected(source):
+        return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
+                and (bool(source.get('command') and shutil.which(source['command']))
+                     or bool(source.get('credential_file'))
+                     or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
+    found = [source for source in sources if detected(source)]
+    show_all = not found
+    while True:
+        shown = sources if show_all else found
+        labels = [source_label(source) for source in shown] + ['Add another server URL', 'Configure later']
+        if not show_all:
+            labels.append('Browse all providers and advanced connections')
+        title = 'Choose connections' if show_all else 'Fast setup · clients and account keys found on this computer'
+        chosen = pick(title + ' (Space marks several; Enter chooses)', labels, multiple=True)
+        if not show_all and len(shown) + 2 in chosen:
+            if len(chosen) != 1:
+                print('Choose Browse all on its own, or select the connections to use.', file=sys.stderr)
+                continue
+            show_all = True
+            continue
+        return shown, chosen
+
+
 def select_connections(binary, inventory, timeout, credentials=None):
-    sources = connection_sources(inventory)
-    labels = [source_label(source) for source in sources] + ['Add another server URL', 'Configure later']
-    chosen = pick('Select model connections (you can choose several)', labels, multiple=True)
+    sources, chosen = pick_connection_sources(connection_sources(inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
             raise SetupError('choose Configure later alone, or select connections')

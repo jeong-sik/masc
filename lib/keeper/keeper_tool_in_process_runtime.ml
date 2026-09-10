@@ -2282,11 +2282,62 @@ let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
     | _ -> status
 ;;
 
-(* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the
-   vision sub-call shell in [Keeper_vision_tool], which threads the Eio net/clock
-   it receives (the read-only sub-call needs net like masc_fusion needs it). *)
-let handle_analyze_image_with_outcome ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
-  Keeper_vision_tool.handle_with_outcome ?sw ?clock ?net ~meta ~args ()
+(* Image files use the existing sandbox Read boundary before entering the
+   same per-Keeper artifact/vision path as browser screenshots and uploads. *)
+let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
+    ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
+  let invalid detail = Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (Yojson.Safe.to_string (`Assoc ["ok", `Bool false;
+        "error", `String "invalid_args"; "failure_class", `String "policy_rejection"; "detail", `String detail])) in
+  match args with
+  | (`Assoc fields as args) ->
+  (match Json_util.assoc_member_opt "path" args,
+        Json_util.assoc_member_opt "artifact" args with
+  | None, _ ->
+      Keeper_vision_tool.handle_with_outcome ?complete ?sw ?clock ?net ~meta ~args ()
+  | Some _, Some _ -> invalid "Provide exactly one of artifact or path."
+  | Some (`String path), None when String.trim path <> "" ->
+      (match Json_util.assoc_member_opt "query" args, config, sw, clock, net with
+       | Some (`String query), Some config, Some _, Some _, Some _ when String.trim query <> "" ->
+           let prepared =
+             let ( let* ) = Result.bind in
+             let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_bytes
+                 ?turn_sandbox_factory ~config ~meta ~path
+                 ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1)
+                 |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "sandbox_image_read_failed", detail) in
+             let* () = Keeper_vision_tool.validate_image_size bytes
+                 |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in
+             let* _ = Keeper_vision_tool.sniff_image_media_type bytes
+                 |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "invalid_media_type", detail) in
+             Keeper_vision_tool.store_artifact
+               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes
+               |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail)
+           in
+           (match prepared with
+            | Error (class_, code, detail) ->
+                Keeper_tool_execution.failure ~class_
+                  (Yojson.Safe.to_string (`Assoc ["ok", `Bool false;
+                    "error", `String code; "failure_class", `String (Tool_result.tool_failure_class_to_string class_); "detail", `String detail]))
+            | Ok handle ->
+                let handle = Multimodal.Vision_artifact_store.to_string handle in
+                let args = `Assoc (("artifact", `String handle) :: List.remove_assoc "path" fields) in
+                let result = Keeper_vision_tool.handle_with_outcome ?complete ?sw ?clock ?net ~meta ~args () in
+                (match result.disposition, result.data with
+                 | Tool_result.Completed (), Some (`Assoc output) ->
+                     Keeper_tool_execution.success_data
+                       (`Assoc (("artifact", `String handle) :: ("source_path", `String path) :: output))
+                 | Tool_result.Completed (), (None | Some _) ->
+                     Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+                       "Vision result omitted its structured success data."
+                 | (Tool_result.Failed _ | Tool_result.Deferred _), _ -> result))
+       | Some (`String query), _, _, _, _ when String.trim query <> "" ->
+           Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+             (Yojson.Safe.to_string (`Assoc ["ok", `Bool false;
+               "error", `String "eio_context_unavailable"; "failure_class", `String "runtime_failure"]))
+       | _ -> invalid "query must be a non-empty string.")
+  | Some _, None -> invalid "path must be a non-empty sandbox image path.")
+  | _ -> invalid "Image analysis arguments must be an object."
 ;;
 
 let handle_masc_local_runtime_with_outcome

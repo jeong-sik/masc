@@ -2158,7 +2158,77 @@ let test_artifact_failures_are_classified () =
         ; corrupt, "artifact_load_failed", "runtime_failure"
         ; unreadable, "artifact_load_failed", "runtime_failure" ])))
 
+(* Real PNG bytes through the production sandbox runner and store, with a fake
+   Docker transport and provider spy. This proves byte admission/transport, not
+   an actual container execution or semantic image understanding. *)
+let test_generated_sandbox_image_reaches_vision () =
+  with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+    with_temp_base (fun base ->
+      let meta = { (make_meta "generated-image") with
+        sandbox_profile = Masc.Keeper_types_profile_sandbox.Docker;
+        sandbox_image = Some "alpine:test" } in
+      let config = Masc.Workspace.default_config base in
+      let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      let rec mkdir path =
+        if not (Sys.file_exists path) then (mkdir (Filename.dirname path); Unix.mkdir path 0o755)
+      in
+      mkdir root;
+      let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let source = Filename.concat root "generated.png" in
+      write_file source bytes;
+      let docker = Filename.concat base "docker" in
+      let script = Printf.sprintf
+        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
+        (Filename.quote source) in
+      write_file docker script; Unix.chmod docker 0o755;
+      with_env "PATH" (base ^ ":" ^ Sys.getenv "PATH") (fun () ->
+      with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+          incr calls;
+          let expected = Vt.message_of_request
+              { Va.query = "read generated image"; image_media_type = "image/png"; image_bytes = bytes } in
+          assert (messages = [expected]);
+          Ok (ok_response "generated image read") in
+        let invoke args = Masc.Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
+            ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args () in
+        let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        assert (result.disposition = Tool_result.Completed ());
+        let output = json_of_output result.raw_output in
+        let handle = assoc_string "artifact" output in
+        assert (assoc_string "text" output = "generated image read");
+        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name) (Store.of_string handle) = Ok bytes);
+        let again = invoke (`Assoc ["artifact", `String handle; "query", `String "read generated image"]) in
+        assert (again.disposition = Tool_result.Completed ());
+        assert (!calls = 2);
+        let bad_query = invoke (`Assoc ["path", `String "generated.png"; "query", `Int 7]) in
+        assert (assoc_string "error" (json_of_output bad_query.raw_output) = "invalid_args");
+        let bad_mime = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"; "media_type", `String "text/plain"]) in
+        assert (assoc_string "error" (json_of_output bad_mime.raw_output) = "invalid_media_type");
+        let invalid = invoke (`Assoc ["artifact", `String handle; "path", `String source; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output invalid.raw_output) = "invalid_args");
+        let escaped = invoke (`Assoc ["path", `String "/etc/passwd"; "query", `String "read generated image"]) in
+        assert (escaped.disposition <> Tool_result.Completed ());
+        assert (!calls = 2);
+        Unix.symlink "/etc/passwd" (Filename.concat root "outside.png");
+        let symlink = invoke (`Assoc ["path", `String "outside.png"; "query", `String "read generated image"]) in
+        assert (symlink.disposition <> Tool_result.Completed ());
+        write_file source "not an image";
+        let non_image = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output non_image.raw_output) = "invalid_media_type");
+        with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "32" (fun () ->
+          write_file source bytes;
+          let oversized = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+          assert (assoc_string "error" (json_of_output oversized.raw_output) = "image_too_large"));
+        assert (!calls = 2)
+      )))))))
+
 let () =
+  test_generated_sandbox_image_reaches_vision ();
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_rejects_invalid_observation ();

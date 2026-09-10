@@ -25,7 +25,9 @@ type turn_prompt_parts = {
           to the persisted message history. *)
   user_message : string;
       (** Current user-turn input. Operator utterances are durable. An
-          autonomous continuation uses the fleet wake prompt, which is also
+          answered Ask carries its attributed answer here so it survives
+          subsequent tool rounds and checkpoint reloads. An autonomous
+          continuation uses the fleet wake prompt, which is also
           durable: each cycle is an ordinary next user turn followed by its
           assistant/tool suffix. HITL resolutions are appended by the turn
           driver. *)

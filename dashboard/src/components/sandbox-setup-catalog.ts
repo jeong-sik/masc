@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { fetchSandboxCatalog, prepareSandbox, sandboxNames, type SandboxBackend, type NetworkMode, type SandboxCatalog } from '../api/sandbox-setup'
+import { fetchSandboxCatalog, prepareSandbox, sandboxNames, type SandboxBackend, type NetworkMode, type SandboxCatalog, type SandboxCandidate } from '../api/sandbox-setup'
 
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 import { bootKeeper } from '../api/keeper-lifecycle'
@@ -20,6 +20,14 @@ export function SandboxSetupCatalog() {
     try { setCatalog(await fetchSandboxCatalog()) }
     catch { setCatalog(null); setError('sandbox 상태를 확인하지 못했습니다. 서버 연결과 sandbox 실행 도구의 상태를 확인한 뒤 다시 시도하세요.') }
     finally { setBusy(false) }
+  }
+  function chooseSandbox(row: SandboxCandidate) {
+    const configured = catalog?.configured?.network
+    const network = configured && row.networkModes.includes(configured)
+      ? configured
+      : row.networkModes.includes('inherit') ? 'inherit' : row.networkModes[0] ?? 'none'
+    setSelected(row.id)
+    setNetwork(network)
   }
   async function startImp() {
     if (busy || !catalog || !selected) return
@@ -51,7 +59,7 @@ export function SandboxSetupCatalog() {
     ${error ? html`<p role="status">${error}</p>` : null}
     <ul>${candidates.map(row => html`<li key=${row.id}><strong>${sandboxNames[row.id]}</strong>${row.configured ? ' · 현재 설정' : ''}${row.recommended ? ' · 추천' : ''}
       <p>${row.state === 'service_ready' ? '서비스 감지됨 · guest 준비와 실행 확인 필요' : row.reason}</p>
-      ${row.state === 'service_ready' ? html`<button type="button" class="btn" disabled=${busy} onClick=${() => { setSelected(row.id); setNetwork(row.networkModes.includes('inherit') ? 'inherit' : row.networkModes[0] ?? 'none') }}>${sandboxNames[row.id]} 선택</button>` : null}
+      ${row.state === 'service_ready' ? html`<button type="button" class="btn" disabled=${busy} onClick=${() => chooseSandbox(row)}>${sandboxNames[row.id]} 선택</button>` : null}
       ${row.networkModes.length ? html`<p class="set-hint">지원하는 guest 네트워크: ${row.networkModes.map(mode => networks[mode]).join(', ')}</p>` : null}</li>`)}</ul>
     ${selected ? html`<label>선택한 sandbox 네트워크 <select disabled=${busy} value=${network} onChange=${(event: Event) => setNetwork((event.currentTarget as HTMLSelectElement).value as NetworkMode)}>
       ${(catalog?.candidates.find(row => row.id === selected)?.networkModes ?? []).map(mode => html`<option value=${mode}>${networks[mode]}</option>`)}</select></label>

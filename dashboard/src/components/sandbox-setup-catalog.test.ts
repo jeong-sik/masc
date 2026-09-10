@@ -78,7 +78,7 @@ it('prepares chosen sandbox before existing model resume and boot, keeping saved
   vi.mocked(bootKeeper).mockResolvedValue({ ok: false, error: 'fixture-private-diagnostic' })
   render(html`<${SandboxSetupCatalog} />`)
   fireEvent.click(await screen.findByText('Docker 선택'))
-  fireEvent.change(screen.getByLabelText('선택한 sandbox 네트워크'), { target: { value: 'none' } })
+  expect((screen.getByLabelText('선택한 sandbox 네트워크') as HTMLSelectElement).value).toBe('none')
   fireEvent.click(screen.getByText('sandbox 준비 후 imp 시작'))
   await screen.findByText(/sandbox 준비·저장은 완료했지만 imp 시작을 확인하지 못했습니다/)
   expect(postControlPlane).toHaveBeenCalledWith('/api/v1/setup/sandbox/prepare', { backend: 'docker', network_mode: 'none', revision: 'fixture-revision' })
@@ -101,7 +101,7 @@ it('does not boot after an unconfirmed prepare and clears selection when refresh
 it('identifies an already-running imp without claiming it restarted or verified guest tools', async () => {
   vi.mocked(get).mockResolvedValue(catalog())
   vi.mocked(postControlPlane).mockResolvedValue({ schema: 'masc.sandbox_preparation.v1', configuration_saved: true, image_prepared: true,
-    backend: 'docker', network_mode: 'inherit', model_verification: 'not_run', guest_verification: 'not_run' })
+    backend: 'docker', network_mode: 'none', model_verification: 'not_run', guest_verification: 'not_run' })
   vi.mocked(resumeSavedModelSetup).mockResolvedValue({ kind: 'active', exactOutputAvailable: false })
   vi.mocked(bootKeeper).mockResolvedValue({ ok: true, already_live: true })
   render(html`<${SandboxSetupCatalog} />`)
@@ -109,4 +109,35 @@ it('identifies an already-running imp without claiming it restarted or verified 
   await screen.findByText(/기존 imp가 계속 실행 중입니다/)
   expect(document.body.textContent).not.toContain('imp를 시작했습니다.')
   expect(screen.getByText(/이 준비 단계는 모델·guest 도구 검증을 대신하지 않습니다/)).toBeTruthy()
+})
+
+
+it('keeps an existing network policy when selecting a compatible backend until explicitly changed', async () => {
+  const data = catalog()
+  data.configured_selection = { backend: 'apple_container', network_mode: 'policy' }
+  const apple = row('apple_container', false, true)
+  apple.capabilities.network_modes = ['inherit', 'none', 'policy']
+  data.candidates = [apple, row('docker', false)]
+  vi.mocked(get).mockResolvedValue(data)
+  vi.mocked(postControlPlane).mockResolvedValue({ schema: 'masc.sandbox_preparation.v1', configuration_saved: true, image_prepared: true,
+    backend: 'apple_container', network_mode: 'inherit', model_verification: 'not_run', guest_verification: 'not_run' })
+  vi.mocked(resumeSavedModelSetup).mockResolvedValue({ kind: 'active', exactOutputAvailable: false })
+  vi.mocked(bootKeeper).mockResolvedValue({ ok: true })
+  render(html`<${SandboxSetupCatalog} />`)
+  fireEvent.click(await screen.findByText('Apple Container 선택'))
+  const select = screen.getByLabelText('선택한 sandbox 네트워크') as HTMLSelectElement
+  expect(select.value).toBe('policy')
+  fireEvent.change(select, { target: { value: 'inherit' } })
+  fireEvent.click(screen.getByText('sandbox 준비 후 imp 시작'))
+  await screen.findByText(/imp를 시작했습니다/)
+  expect(postControlPlane).toHaveBeenCalledWith('/api/v1/setup/sandbox/prepare', { backend: 'apple_container', network_mode: 'inherit', revision: 'fixture-revision' })
+})
+
+it('preserves offline mode when choosing a different compatible sandbox', async () => {
+  const data = catalog()
+  data.candidates.push(row('apple_container', false))
+  vi.mocked(get).mockResolvedValue(data)
+  render(html`<${SandboxSetupCatalog} />`)
+  fireEvent.click(await screen.findByText('Apple Container 선택'))
+  expect((screen.getByLabelText('선택한 sandbox 네트워크') as HTMLSelectElement).value).toBe('none')
 })

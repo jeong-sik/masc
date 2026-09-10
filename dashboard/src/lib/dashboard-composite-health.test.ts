@@ -108,7 +108,7 @@ describe('projectDashboardCompositeHealth', () => {
       full_health_snapshot: null,
     })
 
-    expect(result.issues[0].detail).toContain('keeper_event_queue:runnable_backlog=18')
+    expect(result.issues[0]?.detail).toContain('keeper_event_queue:runnable_backlog=18')
   })
 
   it('does not repeat a reason the action list already carries', () => {
@@ -123,7 +123,7 @@ describe('projectDashboardCompositeHealth', () => {
       full_health_snapshot: null,
     })
 
-    const detail = result.issues[0].detail
+    const detail = result.issues[0]?.detail ?? ''
     expect(detail).toContain('keeper_event_queue:paused_dead_backlog=41')
     expect(detail.split('keeper_event_queue:recoverable_backlog=105').length - 1).toBe(1)
   })

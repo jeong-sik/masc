@@ -28,7 +28,49 @@ server log. They contain only controlled fixture data. `sha256.json` binds the
 stored bytes. Synthetic provider responses are transport fixtures and do not
 establish document readability or semantic model approval.
 
-## Repaired production reviewer route
+## Production reviewer capability selection: small images
 
-Pending the repaired candidate and isolated run. No positive delivery or visual
-verification claim is made yet.
+Both isolated runs used the same actual candidate `1ef7ce2ec7` and three 69-byte
+valid PNGs (207 bytes total, below the still-present aggregate submit gate).
+The Keeper and completion authority used real production dispatch and HTTP
+runtime selection; no reviewer callback was replaced.
+
+- `text-only-runtime/`: the AG catalog declared image support, but the concrete
+  MASC runtime model omitted its `supports-image-input` capability. The runtime
+  projected all three images to text references. The synthetic provider received
+  zero image parts and reported REJECT. The primary Task returned to in_progress;
+  the exact committed verdict and operation terminal state were observed before
+  shutdown. This was a fixture declaration error, not an ingress regression.
+- `image-capable-runtime/`: the concrete runtime model also declares image input.
+  The actual provider request contains three PNG data URIs. Each decodes to 69
+  bytes with SHA-256 `b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640`,
+  matching all three persisted snapshot bodies. The primary Task is done and its
+  committed approved verdict binds request `vrf-f6d6abf55bf11a14f0c45026db305558`
+  to evaluator runtime `image_fixture.vision`. The actual model ID was
+  `image-verifier`; the Keeper operation was
+  `kmsg-77f45c20a232fb22636391f348376215`.
+
+The synthetic provider checks byte equality and returns a controlled verdict.
+This proves production image assembly and capability selection, not visual
+quality, actual GLM/Kimi image interpretation, or large-page admission.
+Each directory contains raw provider requests, exact primary Task/verdict/request
+records, the resolved input config, snapshot bodies, and SHA manifests.
+
+## Actual PDF verifier lane audit
+
+Read-only inspection of the existing isolated PDF server's current runtime TOML
+found verifier slots `glm-coding.glm-5-3` then
+`ollama_cloud.ollama-cloud-deepseek-v4-flash`. GLM's concrete runtime model omits
+image support and DeepSeek explicitly disables it. The production source applies
+runtime model media capabilities over the broader AG catalog, defaulting an
+omitted image capability to false. Existing Kimi mappings declare image input,
+but neither is selected in this verifier lane. Actual prior verdict logs name
+`glm-coding.glm-5-3`. No live config was changed and no real external model was
+called by this audit. A genuinely capable selected runtime and an actual visual
+acceptance run remain necessary for the PDF scenario.
+
+## Large-image aggregate repair
+
+Pending the repaired macOS candidate. No claim that the 497844-byte three-page
+submission reaches the provider is made yet. The small-image positive result
+cannot establish removal of the aggregate gate.

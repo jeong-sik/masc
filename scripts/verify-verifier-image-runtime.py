@@ -116,6 +116,8 @@ def main():
             else:
                 raw = json.dumps({'id': f'{lane}-fixture', 'model': body['model'], 'choices': [{'index': 0, 'message': message, 'finish_reason': finish}], 'usage': usage}).encode()
                 content_type = 'application/json'
+            save(out / f'{lane}-response-{index:03}.json',
+                 {'status': 200, 'content_type': content_type, 'raw': raw.decode()})
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(raw)))

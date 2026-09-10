@@ -2165,7 +2165,7 @@ let test_generated_sandbox_image_reaches_vision () =
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
     with_temp_base (fun base ->
       let meta = { (make_meta "generated-image") with
-        sandbox_profile = Masc.Keeper_types_profile_sandbox.Docker;
+        sandbox_profile = Keeper_types_profile_sandbox.Docker;
         sandbox_image = Some "alpine:test" } in
       let config = Masc.Workspace.default_config base in
       let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in

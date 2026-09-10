@@ -48,7 +48,12 @@ let same_file a b = match a,b with
   | _ -> false
 let same (a,b) (c,d) = same_file a c && same_file b d
 let io action = try action () with Unix.Unix_error _ | Sys_error _ -> Error Configuration_unavailable
-let observe ~base_path = io (fun () -> let* files = snapshot (Unix.realpath base_path) in Ok (revision files))
+let observe_inventory ~base_path = io (fun () ->
+  let base=Unix.realpath base_path in
+  let* files=snapshot base in
+  let _,path,_=paths base in
+  Ok (revision files,Runtime.config_observation ~path (content (fst files))))
+let observe ~base_path = observe_inventory ~base_path |> Result.map fst
 let stage_env base =
   let config,_,_ = paths base in
   let replaced = ["MASC_BASE_PATH";"MASC_CONFIG_DIR"] in

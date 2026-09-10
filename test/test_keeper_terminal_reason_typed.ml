@@ -976,6 +976,49 @@ let () =
     }
   in
   let direct_outcome =
+    let () =
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+      let meta =
+        { meta with runtime =
+            { meta.runtime with usage =
+                { meta.runtime.usage with total_turns = 1 } } }
+      in
+      let call tool_name execution_outcome : Masc.Keeper_agent_result.tool_call_detail =
+        { tool_name; provider = "test"; execution_outcome; typed_outcome = None
+        ; latency_ms = 1.0; task_id = None; route_evidence = None
+        ; input_fingerprint = None; output_fingerprint = None }
+      in
+      let result =
+        { (run_result ()) with tool_calls =
+            [ call "tool_read_file" Masc.Tool_result.Ok
+            ; call "tool_read_file" Masc.Tool_result.Ok
+            ; call "tool_write_file" Masc.Tool_result.Error ] }
+      in
+      let observation = Masc.Keeper_world_observation.observe
+        ~pending_board_events:(Some []) ~config ~meta in
+      Masc.Keeper_unified_metrics_decision.append_decision_record
+        ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
+        ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+        ~result:(Some result) ();
+      let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+      let row = Fs_compat.load_file log_path |> String.split_on_char '\n'
+        |> List.filter (fun row -> row <> "") |> List.rev |> List.hd
+        |> Yojson.Safe.from_string in
+      check "decision persists executed call count including failed calls"
+        (Yojson.Safe.Util.member "tool_call_count" row = `Int 3);
+      check "decision preserves repeated canonical tool names"
+        (Yojson.Safe.Util.member "tools_used" row =
+         `List [ `String "tool_read_file"; `String "tool_read_file";
+                 `String "tool_write_file" ]);
+      let aggregate = Model_inference_metrics.compute ~base_path:workspace_dir
+        ~window_minutes:60 in
+      let total_calls = List.fold_left
+        (fun total (stats : Model_inference_metrics.model_stats) ->
+           total + stats.total_tool_calls) 0 aggregate.models in
+      check "persisted decision reaches dashboard model metrics" (total_calls = 3)
+    in
     Masc.Keeper_execution_outcome.create
       ~lane:Masc.Keeper_execution_outcome.Direct
       (run_result ())

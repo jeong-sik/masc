@@ -316,9 +316,12 @@ let complete_http
                })
         , None ))
       else (
-        let base_headers =
-          config.headers @ Provider_config.auth_headers_for_config config
+        let ( let* ) result f = match result with
+          | Ok value -> f value
+          | Error reason -> Error (Http_client.AcceptRejected { reason }), None
         in
+        let* auth_headers = Provider_config.resolve_auth_headers config in
+        let base_headers = config.headers @ auth_headers in
         let request_headers =
           ("content-length", string_of_int body_len)
           :: (match connection_cache with

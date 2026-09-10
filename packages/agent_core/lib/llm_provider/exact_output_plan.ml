@@ -396,7 +396,8 @@ let preflight
       Prepared_completion_request.prepare ~config ~messages ?body_timeout_s ()
     in
     let request = Prepared_completion_request.request prepared in
-    let auth_headers = Provider_config.auth_headers_for_config config in
+    let* auth_headers = Provider_config.resolve_auth_headers config
+      |> Result.map_error (fun reason -> Provider_request_rejected (Http_client.AcceptRejected { reason })) in
     if request_uses_exact_cross_feature request
     then Error Unsupported_exact_cross_feature
     else if Option.is_some config.max_concurrent_requests

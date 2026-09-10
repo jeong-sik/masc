@@ -350,11 +350,28 @@ hooks = true
       ["apps"; "plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"]
 ;;
 
+let test_google_adc_refresh_boundary () =
+  let expected = ["gcloud"; "auth"; "application-default"; "print-access-token"; "--quiet"] in
+  let calls = ref 0 in
+  let run argv =
+    check (list string) "ADC uses application-default identity" expected argv;
+    incr calls; Ok ("fixture-token-" ^ string_of_int !calls ^ "\n") in
+  List.iter (fun expected_token ->
+    match Runtime_google_adc.refresh_with ~run () with
+    | Ok token -> check string "fresh token each request" expected_token (Llm_provider.Secret.header_value token)
+    | Error _ -> fail "ADC fixture failed") ["fixture-token-1"; "fixture-token-2"];
+  List.iter (fun response ->
+    match Runtime_google_adc.refresh_with ~run:(fun _ -> Ok response) () with
+    | Error Llm_provider.Provider_config.Invalid_credential_response -> ()
+    | _ -> fail "empty or multiple-line ADC output must fail") [""; "token\nextra"]
+;;
+
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
+      , [ test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
+        ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success

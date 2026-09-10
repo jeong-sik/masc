@@ -914,7 +914,7 @@ uninstall_masc() {
   if [ "$PURGE_DATA" -eq 1 ] && [ "$BASE_PATH_EXPLICIT" -ne 1 ]; then
     die "--purge-data requires an explicit --base-path"
   fi
-  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name
+  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name record
   case "$uninstall_prefix" in '~') uninstall_prefix="$HOME" ;; '~/'*) uninstall_prefix="$HOME/${uninstall_prefix#\~/}" ;; esac
   case "$uninstall_base" in '~') uninstall_base="$HOME" ;; '~/'*) uninstall_base="$HOME/${uninstall_base#\~/}" ;; esac
   case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
@@ -931,6 +931,13 @@ uninstall_masc() {
   if [ "$PURGE_DATA" -eq 1 ]; then
     case "$uninstall_base" in /*) ;; *) uninstall_base="$PWD/$uninstall_base" ;; esac
     targets+=("$uninstall_base/.masc")
+    # `masc init` records this workspace as the default for later commands.
+    # Leaving the record behind after purging the workspace it names would
+    # point the next install at a directory that is gone.
+    record="${XDG_CONFIG_HOME:-$HOME/.config}/masc/default-base-path"
+    if [ -f "$record" ] && [ "$(head -n 1 "$record" 2>/dev/null)" = "$uninstall_base" ]; then
+      targets+=("$record")
+    fi
   fi
   log "stop running MASC servers and TUI sessions before uninstalling; no processes will be killed"
   for target in "${targets[@]}"; do

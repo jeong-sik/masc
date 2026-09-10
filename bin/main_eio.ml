@@ -1294,6 +1294,24 @@ let init_cmd_exit base_path force skills_only =
   let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
     result.written result.skipped result.failed skills target_root;
+  (* A seeded workspace is the one thing a later bare `masc` needs to know
+     about, and until now nothing wrote it down: the operator had to re-supply
+     --base-path or MASC_BASE_PATH on every command. Recorded on success only,
+     and never fatal -- a workspace that seeded is worth more than a record of
+     it. *)
+  if result.failed = 0 then (
+    match Env_config.record_default_base_path base_path with
+    | Env_config.Recorded path ->
+      Printf.printf "default workspace recorded: %s\n" path
+    | Env_config.No_record_location ->
+      Printf.printf
+        "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; \
+         pass --base-path to later commands\n"
+    | Env_config.Record_failed { record; reason } ->
+      Printf.printf
+        "default workspace not recorded: could not write %s (%s); pass --base-path \
+         to later commands\n"
+        record reason);
   if result.failed > 0 then 1 else 0
 
 let init_cmd =

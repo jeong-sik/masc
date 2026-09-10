@@ -171,7 +171,42 @@ val host_fd_pressure_poll_interval_sec : unit -> float
 
 val base_path_env_key : string
 val base_path_input_env_key : string
-val base_path_source_opt : unit -> (string * string) option
+
+type base_path_source =
+  | From_env of string
+  | From_persisted_default of string
+      (** Path of the record file the installer wrote, not an env var. *)
+
+val base_path_source_opt : unit -> (base_path_source * string) option
+(** Resolution order: [MASC_BASE_PATH_INPUT] > [MASC_BASE_PATH] > the workspace
+    a past [masc setup] recorded. Explicit input always wins over the record.
+    A record that no longer holds a [.masc] directory is not used. *)
+
+type persisted_default =
+  | No_record
+  | Usable of { record : string; base_path : string }
+  | Stale of { record : string; recorded_path : string }
+
+val persisted_default_base_path : unit -> persisted_default
+(** [Stale] is kept apart from [No_record] so the "not set" error can say that
+    a recorded default was found and ignored, and why. *)
+
+type record_outcome =
+  | Recorded of string
+  | No_record_location
+  | Record_failed of { record : string; reason : string }
+
+val record_default_base_path : string -> record_outcome
+(** Record [path] as the default for later commands. Callers do this after the
+    workspace has actually served a command, so a path that failed to boot is
+    not remembered. Failure is returned, never raised: not recording a default
+    must not fail the command that succeeded. *)
+
+val base_path_not_set_message : unit -> string
+(** The sentence both base-path reporters use when nothing resolved: this
+    module and the workspace resolver in [lib/workspace]. Names the flag, the
+    env var, and how to record a default; adds why a recorded default was
+    ignored when one was found and is stale. *)
 
 (* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
    longer part of the public surface.  External callers read the

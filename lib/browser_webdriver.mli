@@ -7,6 +7,10 @@ val create : ?binary:string -> start_downloads:Browser_downloads.start -> reques
 (** [binary] is forwarded verbatim to moz:firefoxOptions.binary. Missing means
     geckodriver discovers its default Firefox; an invalid explicit path fails. *)
 val execute : t -> Browser_lane.verb -> Browser_lane.answer
+val observe_document_if_idle : t -> tab_id:int -> Browser_lane.answer
+(** Observe the already selected document only when no owned command is active.
+    Does not create a session, switch tab/frame, release actions, or enqueue
+    behind a busy driver. Refusal describes missing optional coverage. *)
 (** [request] supplies a transport with its own lifetime during server teardown.
     The owned session is cleared only after a confirmed deletion. *)
 val close : ?request:request -> t -> (unit, error) result

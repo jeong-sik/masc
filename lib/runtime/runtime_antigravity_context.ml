@@ -166,8 +166,9 @@ let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
   then Error Command_failed
   else (
     try
-      let python_path = Unix.realpath python_path in
-      let cli_path = Unix.realpath cli_path in
+      let ( let* ) = Result.bind in
+      let* python_path = executable_path python_path in
+      let* cli_path = executable_path cli_path in
       let runtime_root =
         Filename.temp_dir "masc-antigravity-context-" "" |> Unix.realpath
       in

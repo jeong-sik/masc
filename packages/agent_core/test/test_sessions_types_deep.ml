@@ -236,6 +236,53 @@ let test_raw_trace_validation_empty_checks () =
     v
 ;;
 
+let mk_worker_run status : Sessions.worker_run =
+  { worker_run_id = Printf.sprintf "wr-%s" (Sessions.show_worker_status status)
+  ; worker_id = Some "w-001"
+  ; agent_name = "tester"
+  ; runtime_actor = Some "rt-1"
+  ; role = Some "exec"
+  ; aliases = [ "t"; "test" ]
+  ; primary_alias = Some "t"
+  ; provider = Some "anthropic"
+  ; model = Some "sonnet-5"
+  ; requested_provider = Some "anthropic"
+  ; requested_model = Some "sonnet-5"
+  ; resolved_provider = Some "anthropic"
+  ; resolved_model = Some "claude-sonnet-5-20260101"
+  ; status
+  ; trace_capability = Sessions.Raw
+  ; validated = status = Sessions.Completed
+  ; tool_names = [ "bash"; "read" ]
+  ; final_text =
+      (match status with
+       | Sessions.Completed -> Some "OK"
+       | _ -> None)
+  ; stop_reason =
+      (match status with
+       | Sessions.Completed -> Some "end_turn"
+       | _ -> None)
+  ; error =
+      (match status with
+       | Sessions.Failed -> Some "timeout"
+       | _ -> None)
+  ; failure_reason =
+      (match status with
+       | Sessions.Failed -> Some "timeout"
+       | _ -> None)
+  ; accepted_at = Some 1.7e9
+  ; ready_at = Some 1.7e9
+  ; first_progress_at = Some (1.7e9 +. 1.0)
+  ; started_at = Some 1.7e9
+  ; finished_at =
+      (match status with
+       | Sessions.Completed | Sessions.Failed -> Some (1.7e9 +. 60.0)
+       | _ -> None)
+  ; last_progress_at = Some (1.7e9 +. 30.0)
+  ; paired_tool_result_count = 3
+  }
+;;
+
 let test_worker_run_all_statuses () =
   List.iter
     (fun status ->

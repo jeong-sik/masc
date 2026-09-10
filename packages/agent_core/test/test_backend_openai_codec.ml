@@ -2491,8 +2491,12 @@ let test_tool_image_followups_preserve_batch_order () =
      = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
   let followup = List.nth wire 4 |> member "content" |> to_list in
   check_bool "OpenAI gets image_url bytes" true
-    (List.exists (fun item -> item |> member "image_url" |> member "url"
-      = `String ("data:image/png;base64," ^ png)) followup);
+    (List.exists (fun item ->
+       match item |> member "image_url" with
+       | `Assoc fields ->
+         List.assoc_opt "url" fields = Some (`String ("data:image/png;base64," ^ png))
+       | `Null -> false
+       | _ -> Alcotest.fail "image_url must be an object") followup);
   check_string "original result summary" "read a"
     (List.nth wire 2 |> member "content" |> to_string);
   let ollama = ollama_messages ~supports_image_input:true messages in

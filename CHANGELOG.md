@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.35.5] - 2026-09-10
+
+### Installation
+
+- Run `masc` and `masc start` without repeating `--base-path` or exporting `MASC_BASE_PATH`. `masc setup` and `masc init` record the workspace they prepared, an explicit `masc start --base-path` records it too, and the server accepts that recorded workspace at startup. A record whose path no longer holds a `.masc` directory is ignored, and the error says which record was skipped and why.
+- Choose the sandbox imp runs its turns on: `masc setup --sandbox-profile docker|microvm|remote_ssh`, with `--microvm-backend` for the microVM runtime. The chosen profile is written into imp's keeper file, and setup checks what that profile needs on this host. With no flag it reads the profile imp already declares instead of asking for Docker regardless.
+- Read what a missing sandbox dependency was. An absent `docker` reported `create_process docker: No such file or directory`; it now names Docker and points at Apple Container together with the flags that move imp onto it.
+
+### Health
+
+- See which section set the overall status, and read only the reasons an operator has to answer.
+
 ## [0.35.4] - 2026-09-10
 
 ### Installation and startup

@@ -277,6 +277,8 @@ def main():
         database = base / '.masc/keepers' / keeper / 'chat-operations.sqlite3'
         waiting = None
         while True:
+            if server.poll() is not None:
+                raise RuntimeError('Server exited before original Gate wait')
             with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as db:
                 db.row_factory = sqlite3.Row
                 operations = [dict(row) for row in db.execute('SELECT * FROM operations')]

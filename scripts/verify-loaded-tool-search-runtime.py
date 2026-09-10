@@ -1,8 +1,4 @@
-"""Real installed-tool search and execution with a synthetic Keeper provider.
-
-The verifier reads a fixture file through the production tool before reporting
-APPROVE. No Goal, proof or confirmation ledger is manufactured by this script.
-"""
+"""Observe installed tool search, then execute and read back the same run plan."""
 import argparse
 import hashlib
 import json
@@ -10,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
@@ -39,9 +36,6 @@ def main():
     base = out / 'base'
     config = base / '.masc/config'
     config.mkdir(parents=True)
-    artifact = base / '.masc/playground/fixture/evidence.txt'
-    artifact.parent.mkdir(parents=True)
-    artifact.write_text('synthetic goal evidence: exactly one marker\n')
     requests = []
     token = secrets.token_hex(32)
 
@@ -79,12 +73,12 @@ def main():
                 delta = choice['message']
                 if 'tool_calls' in delta:
                     delta['tool_calls'][0]['index'] = 0
-                chunks = [ {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'model': 'goal-fixture', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]},
+                chunks = [ {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'model': 'search-fixture', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]},
                     {'id': 'goal-proof-fixture', 'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': choice['finish_reason']}], 'usage': usage} ]
                 raw = (''.join('data: ' + json.dumps(chunk) + '\n\n' for chunk in chunks) + 'data: [DONE]\n\n').encode()
                 content_type = 'text/event-stream'
             else:
-                raw = json.dumps({'id': 'goal-proof-fixture', 'model': 'goal-fixture', 'choices': [choice], 'usage': usage}).encode()
+                raw = json.dumps({'id': 'goal-proof-fixture', 'model': 'search-fixture', 'choices': [choice], 'usage': usage}).encode()
                 content_type = 'application/json'
             self.send_response(200)
             self.send_header('Content-Type', content_type)
@@ -96,20 +90,19 @@ def main():
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
-    runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["goal_fixture.proof"]\n'
-    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\nmax-request-body-bytes = 1048576\n'
+    runtime += f'\n[providers.search_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "search-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[search_fixture.proof]\nmax-request-body-bytes = 1048576\n'
     overlay = (fixtures / 'agent-core-models-overlay.toml').read_text()
     overlay += f'''
 [[providers]]
-id = "goal_fixture"
+id = "search_fixture"
 kind = "openai_compat"
 base_url = "http://127.0.0.1:{provider.server_port}/v1"
 request_path = "/chat/completions"
 api_key_env = ""
 capabilities_base = "openai_chat"
 [[models]]
-id_prefix = "goal-fixture"
-provider_name = "goal_fixture"
+id_prefix = "search-fixture"
+provider_name = "search_fixture"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 1024
@@ -118,9 +111,9 @@ supports_tool_choice = true
 supports_response_format_json = true
 supports_native_streaming = true
 [[targets]]
-id = "goal_fixture.proof"
-provider_ref = "goal_fixture"
-model_id = "goal-fixture"
+id = "search_fixture.proof"
+provider_ref = "search_fixture"
+model_id = "search-fixture"
 '''
     (config / 'runtime.toml').write_text(runtime)
     (config / 'agent-core-models-overlay.toml').write_text(overlay)
@@ -185,7 +178,8 @@ model_id = "goal-fixture"
         save(out / 'health.json', health)
         http('/mcp', {'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'goal-confirmation-fixture', 'version': '1'}}})
         mcp('masc_run_init', {'task_id': 'task-search-fixture', 'agent_name': 'search-proof'})
-        mcp('masc_keeper_up', {'name': 'search-proof', 'instructions': 'Synthetic installed tool protocol probe.', 'activation_mode': 'manual', 'runtime_id': 'goal_fixture.proof'})
+        mcp('masc_keeper_up', {'name': 'search-proof', 'instructions': 'Synthetic installed tool protocol probe.', 'activation_mode': 'manual', 'runtime_id': 'search_fixture.proof'})
+        save(out / 'admission-pending.json', {'keeper': 'search-proof', 'action': 'one admission; never resubmit'})
         admission = mcp('masc_keeper_msg', {'name': 'search-proof', 'message': 'Search for the installed plan tool then record the fixture plan.'})
         operation_id = admission['operation_id']
         save(out / 'admission.json', admission)
@@ -205,18 +199,38 @@ model_id = "goal-fixture"
         assert observed['state'] == 'Succeeded' and len(requests) == 3
         plan = mcp('masc_run_get', {'task_id': 'task-search-fixture'})
         save(out / 'plan-readback.json', plan)
-        assert 'Synthetic installed-tool execution proof' in json.dumps(plan)
+        assert plan['plan'] == 'Synthetic installed-tool execution proof'
+        assert plan['run']['task_id'] == 'task-search-fixture'
         receipt.update(status='verified', operation_id=operation_id, provider_requests=len(requests))
         save(out / 'receipt.json', receipt)
     except Exception as error:
-        receipt.update(status='failed', error=str(error))
+        receipt.update(status='observation_incomplete', error=str(error), server_pid=server.pid,
+                       action='preserve server and provider; read-only observation; never resubmit')
         save(out / 'receipt.json', receipt)
-        raise
-    finally:
+        # Keep the responder thread alive too: unwinding main would kill it.
+        while server.poll() is None:
+            try:
+                database = base / '.masc/keepers/search-proof/chat-operations.sqlite3'
+                if database.exists():
+                    with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as db:
+                        db.row_factory = sqlite3.Row
+                        operations = [dict(row) for row in db.execute('SELECT operation_id,state FROM operations')]
+                    save(out / 'recovery-observation.json', {'operations': operations,
+                         'action': 'read existing operation identities only; no admission'})
+                    if len(operations) == 1:
+                        recovered = mcp('masc_keeper_delegate_status', {'target': {'kind': 'keeper', 'name': 'search-proof'},
+                            'operation_id': operations[0]['operation_id']})
+                        save(out / 'recovered-operation.json', recovered)
+            except (URLError, ConnectionError, sqlite3.Error, AssertionError, ValueError, KeyError) as observation_error:
+                save(out / 'recovery-observation-error.json', {'error': str(observation_error)})
+            time.sleep(0.5)
+        receipt.update(server_exit_code=server.returncode)
+        save(out / 'receipt.json', receipt)
+    else:
         server.terminate()
         server.wait()
-        provider.shutdown()
-        log.close()
+    provider.shutdown()
+    log.close()
 
 
 if __name__ == '__main__':

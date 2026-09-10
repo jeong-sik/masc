@@ -507,7 +507,8 @@ let messages_of_message_with
 ;;
 
 let openai_messages_of_message msg =
-  messages_of_message_with ~tool_calls_fn:tool_calls_to_openai_json msg
+  Tool_result_projection.with_image_followups [ msg ]
+  |> List.concat_map (messages_of_message_with ~tool_calls_fn:tool_calls_to_openai_json)
 ;;
 
 type history_projection =
@@ -622,7 +623,7 @@ let render_history_projection
          in
          List.rev_append rendered projected)
       []
-      projection.messages
+      (Tool_result_projection.with_image_followups projection.messages)
     |> List.rev
   in
   { messages = projected_messages
@@ -839,6 +840,7 @@ let ollama_messages_of_history
   match validate messages with
   | Error _ as error -> error
   | Ok () ->
+    let messages = Tool_result_projection.with_image_followups messages in
     (match Tool_result_projection.of_messages messages with
      | Error error -> Error (Tool_result_projection.error_to_string error)
      | Ok projection ->

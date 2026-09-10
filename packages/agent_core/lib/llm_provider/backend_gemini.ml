@@ -525,6 +525,7 @@ let parts_of_content_blocks ~role tool_signatures blocks =
 (* ── Message list -> (contents, systemInstruction option) ── *)
 
 let contents_of_messages (messages : message list) =
+  let messages = Tool_result_projection.with_image_followups messages in
   let messages = Api_common.merge_tool_result_followup_user_messages messages in
   let projection =
     match Tool_result_projection.of_messages messages with

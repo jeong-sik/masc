@@ -2469,11 +2469,69 @@ let test_conformant_tool_description_is_unique_on_wire () =
     cases
 ;;
 
+let test_tool_image_followups_preserve_batch_order () =
+  let open Yojson.Safe.Util in
+  let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
+  let image = image_block ~media_type:"image/png" ~data:png () in
+  let result id blocks =
+    ToolResult { tool_use_id = id; content = "read " ^ id; outcome = Tool_succeeded
+               ; json = None; content_blocks = blocks }
+  in
+  let messages =
+    [ msg User [ Text "Inspect both artifacts" ]
+    ; msg Assistant [ ToolUse { id="a"; name="Read"; input=`Assoc [] }
+                    ; ToolUse { id="b"; name="Read"; input=`Assoc [] } ]
+    ; msg Tool [ result "a" (Some [ Text "first image"; image ]) ]
+    ; msg Tool [ result "b" None ] ]
+  in
+  let dialect = Reasoning_dialect.of_capabilities Capabilities.default_capabilities in
+  let wire = dialect_messages_of_history dialect messages in
+  check_bool "all tool replies precede image user followup" true
+    (List.map (fun item -> item |> member "role" |> to_string) wire
+     = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
+  let followup = List.nth wire 4 |> member "content" |> to_list in
+  check_bool "OpenAI gets image_url bytes" true
+    (List.exists (fun item -> item |> member "image_url" |> member "url"
+      = `String ("data:image/png;base64," ^ png)) followup);
+  check_string "original result summary" "read a"
+    (List.nth wire 2 |> member "content" |> to_string);
+  let ollama = ollama_messages ~supports_image_input:true messages in
+  check_bool "Ollama batch closes before image" true
+    (List.map (fun item -> item |> member "role" |> to_string) ollama
+     = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
+  check_bool "Ollama gets image bytes" true
+    (List.nth ollama 4 |> member "images" = `List [ `String png ]);
+  let caps = Capabilities.default_capabilities in
+  check_bool "unsupported image capability still rejects" true
+    (Result.is_error
+       (Serialize.ollama_messages_of_history ~modality_priority:caps.modality_priority
+          ~supports_image_input:false ~supports_document_input:false messages));
+  let gemini, _ = Backend_gemini.contents_of_messages messages in
+  let parts = List.concat_map (fun item -> item |> member "parts" |> to_list) gemini in
+  let rec check_after_results count = function
+    | [] -> Alcotest.fail "Gemini image omitted"
+    | part :: _ when part |> member "inlineData" <> `Null ->
+      check_int "both function responses precede image" 2 count;
+      check_string "Gemini gets inline image bytes" png
+        (part |> member "inlineData" |> member "data" |> to_string)
+    | part :: rest ->
+      check_after_results
+        (count + if part |> member "functionResponse" = `Null then 0 else 1) rest
+  in
+  check_after_results 0 parts;
+  check_bool "canonical image-bearing history unchanged" true
+    (match (List.nth messages 2).content with
+     | [ ToolResult { content_blocks = Some [ Text "first image"; actual ]; _ } ] -> actual = image
+     | _ -> false)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
     [ ( "serialize"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
+            test_tool_image_followups_preserve_batch_order
+        ; Alcotest.test_case
             "content parts cover modalities"
             `Quick
             test_content_parts_cover_modalities

@@ -366,9 +366,8 @@ let attempt_runtime_candidates
             this lane start from it (idx 0 or a failover success alike).
 
             Only a candidate the lane declares. The media walk reaches past
-            the lane -- into media_failover and, today, every other declared
-            runtime -- and a winner from out there cannot be remembered for
-            this lane: [prefer_order] would find it in no lane list and
+            the lane into media_failover, and a winner from out there cannot
+            be remembered for this lane: [prefer_order] would find it in no lane list and
             promote nothing, while the record has already replaced the last
             in-lane success. The next text turn then starts from the declared
             head again, and if that head is the one that was failing, it

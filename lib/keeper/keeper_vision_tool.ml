@@ -87,8 +87,11 @@ let vision_runtime_candidates ~now
      modality reroute, the capability gate, and this vision pick must share one
      predicate or a vision pick can land on a runtime the gate then rejects.
      The candidate order is the RFC-0440 set the keeper reroute walks
-     ([Runtime_agent.media_candidates] with no lane: [runtime.media_failover]
-     first, then the remaining declared runtimes). Only [Agent_core] runtimes
+     ([Runtime_agent.media_candidates] with no lane, which is
+     [runtime.media_failover] in declared order). A declared runtime outside
+     that list is not offered here: it is the one boot does not validate
+     dispatch caps for, and this tool dispatches what it is handed
+     (#34823). Only [Agent_core] runtimes
      qualify here because this tool calls the provider itself; an official
      client carries inline images for the reroute but has no provider config.
      The set is held in quota-window order ([Runtime_quota_window.demote_order],

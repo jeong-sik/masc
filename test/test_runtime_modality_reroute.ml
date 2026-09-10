@@ -665,9 +665,13 @@ max-request-body-bytes = 65536
 
 (* RFC-0440 — the media candidate set is one ordered, id-unique list: the lane
    first, then [runtime.media_failover] resolved in declared order (ids that
-   resolve to nothing are skipped), then the remaining declared runtimes. No
-   capability filter: a text-only lane candidate stays in the set and the
-   reroute decision passes over it. *)
+   resolve to nothing are skipped). No capability filter: a text-only lane
+   candidate stays in the set and the reroute decision passes over it.
+
+   [fixture.b] is declared and image-capable and appears in neither list, so
+   it is not a candidate for anyone. That tail used to follow media_failover,
+   and once #34720 made the set a walk rather than a single pick, it was
+   dispatching the runtimes boot deliberately does not validate (#34823). *)
 let test_media_candidates_order_dedupe_and_reroute () =
   let fixture =
     {|[runtime]
@@ -711,16 +715,16 @@ supports-image-input = true
       Runtime_agent.media_candidates_of ~lane ~runtimes ~media_failover
     in
     check (list string)
-      "lane, then media_failover, then the rest; ids unique"
-      [ "fixture.d"; "fixture.text"; "fixture.c"; "fixture.a"; "fixture.b" ]
+      "lane, then media_failover; ids unique; fixture.b is in neither"
+      [ "fixture.d"; "fixture.text"; "fixture.c"; "fixture.a" ]
       (ids (candidates ~lane:[ d; text ]));
     check (list string)
-      "no lane: media_failover leads, an unresolved id is skipped"
-      [ "fixture.c"; "fixture.a"; "fixture.text"; "fixture.b"; "fixture.d" ]
+      "no lane: media_failover alone, an unresolved id is skipped"
+      [ "fixture.c"; "fixture.a" ]
       (ids (candidates ~lane:[]));
     check (list string)
-      "no media_failover: declaration order"
-      [ "fixture.text"; "fixture.a"; "fixture.b"; "fixture.c"; "fixture.d" ]
+      "no lane and no media_failover: nothing is a candidate"
+      []
       (ids
          (Runtime_agent.media_candidates_of ~lane:[] ~runtimes
             ~media_failover:[]));

@@ -594,10 +594,10 @@ let render_history_projection
      verified 2026-08-24). *)
   let reasoning_wire_field =
     match dialect.Reasoning_dialect.streaming with
-    | Reasoning_dialect.Delta_field field -> field
-    | Reasoning_dialect.No_streaming_reasoning
-    | Reasoning_dialect.Delta_reasoning_details
-    | Reasoning_dialect.Template_parser -> "reasoning_content"
+    | Reasoning_dialect.Delta_field field
+    | Reasoning_dialect.Delta_field_and_details field -> field
+    | Reasoning_dialect.No_streaming_reasoning | Reasoning_dialect.Template_parser ->
+      "reasoning_content"
   in
   let projected_messages =
     List.fold_left

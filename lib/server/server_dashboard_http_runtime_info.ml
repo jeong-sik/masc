@@ -1530,6 +1530,9 @@ let reasoning_streaming_format_json
   | No_reasoning_streaming -> `Assoc [ "kind", `String "none" ]
   | Delta_reasoning_field field ->
     `Assoc [ "kind", `String "delta-reasoning-field"; "field", `String field ]
+  | Delta_reasoning_field_and_details field ->
+    `Assoc
+      [ "kind", `String "delta-reasoning-field-and-details"; "field", `String field ]
   | Template_reasoning_streaming -> `Assoc [ "kind", `String "template" ]
 ;;
 

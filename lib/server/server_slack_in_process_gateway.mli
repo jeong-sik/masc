@@ -42,11 +42,9 @@ type trigger_policy_load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
-  | Trigger_policy_env_invalid of { detail : string }
-(** Fail-closed configuration errors. They are never converted to the env or
-    default policy. Both configured planes fail the same way: an unparseable
-    [MASC_SLACK_TRIGGER_POLICY] is an error exactly like an unparseable
-    [slack.trigger_policy] in runtime.toml. *)
+(** Fail-closed configuration errors. They are never converted to the default
+    policy: an unparseable [slack.trigger_policy] stops the gateway rather than
+    running it on a stance the operator did not write. *)
 
 val load_trigger_policy_from_toml :
   path:string -> (trigger_policy_toml_load, trigger_policy_load_error) result
@@ -56,11 +54,11 @@ val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
 
 val resolved_trigger_policy :
   unit -> (Slack_gateway_state.trigger_policy, trigger_policy_load_error) result
-(** Env > TOML > default, the same precedence the Discord sibling applies.
-    [MASC_SLACK_TRIGGER_POLICY] wins when set and valid; an invalid env value
-    is a load error (never a silent default); a blank/unset env falls through
-    to the [slack.trigger_policy] runtime.toml key, and a missing file/key
-    yields {!default_trigger_policy}. *)
+(** runtime.toml > default, the same precedence the Discord sibling applies.
+    The [slack.trigger_policy] key answers when present and valid; an invalid
+    value is a load error (never a silent default); a missing file, missing key
+    or blank value yields {!default_trigger_policy}. There is no env plane —
+    which inbound messages start a turn is written in the config file. *)
 
 module For_testing : sig
   val submit_event :

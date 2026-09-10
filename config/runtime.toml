@@ -1070,19 +1070,27 @@ candidates = [
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"
 
-# ── Discord ──────────────────────────────────────────────────────────
-# Trigger policy controls which inbound Discord events the bot responds to.
+# ═══ Connectors ══════════════════════════════════════════════════════
+# 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는
+# 입장이라 설정 파일에서만 읽는다 — 환경변수 경로는 없다.
+#
 #   mention_or_thread  — 스레드에서 자동 응답, 일반 채널은 멘션 필요 (기본값)
 #   mention_only       — @멘션된 메시지만 응답
 #   all                — 모든 메시지에 응답
-#   user_only:<snowflake> — 특정 사용자만
-# Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
+#   user_only:<id>     — 특정 사용자만 (discord=snowflake, slack=member id)
+#
+# 값을 잘못 적으면 게이트웨이가 뜨지 않는다. 오타를 기본값으로 바꿔 읽으면
+# 운영자가 적지 않은 입장으로 봇이 돌기 때문이다 (masc#29078).
 #
 # 이 값은 서버가 부팅할 때 한 번 읽는다. TUI 의 Config → params 화면에서
-# discord.trigger_policy 를 고르면 그 선택이 이 파일과 환경변수보다 앞서고,
-# 재시작 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
-# 우선순위: params 화면 선택 > MASC_DISCORD_TRIGGER_POLICY > 이 값 > mention_or_thread
+# <connector>.trigger_policy 를 고르면 그 선택이 이 파일보다 앞서고, 재시작
+# 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
+# 우선순위: params 화면 선택 > 이 값 > mention_or_thread
+
 [discord]
+trigger_policy = "mention_or_thread"
+
+[slack]
 trigger_policy = "mention_or_thread"
 
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────

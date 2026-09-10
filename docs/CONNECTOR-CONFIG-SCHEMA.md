@@ -45,11 +45,17 @@ the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
 | Env var | Required | Notes |
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | **yes** | Developer Portal → Bot → Reset Token. Read at every `send_message` call, so token rotation does not require a server restart. If unset the gateway logs a warning and skips startup; the rest of the server boots normally. |
-| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_or_thread`) | Closed sum: `mention_only`, `mention_or_thread`, `user_only:<discord_user_id>`, or `all`. Resolution is the `discord.trigger_policy` runtime param > env > `[discord].trigger_policy` in resolved `runtime.toml` > default. A non-empty invalid env or TOML value is a typed configuration error and the Discord gateway does not start; it is never coerced to a fallback policy. |
+The trigger policy is not an env var. Which inbound messages start a turn is a
+stance the operator writes down, so it is read from `[discord].trigger_policy`
+in the resolved `runtime.toml` and nowhere else. Resolution is the
+`discord.trigger_policy` runtime param > `[discord].trigger_policy` > default
+(`mention_or_thread`). Closed sum: `mention_only`, `mention_or_thread`,
+`user_only:<discord_user_id>`, or `all`. A non-empty invalid value is a typed
+configuration error and the Discord gateway does not start; it is never coerced
+to a fallback policy.
 
-An absent or blank env value is unset and falls through to TOML. A missing
-`runtime.toml`, missing `[discord].trigger_policy`, or blank TOML value is also
-unset and yields the default only after both configured planes are absent.
+A missing `runtime.toml`, a missing `[discord].trigger_policy`, or a blank
+value are three ways of saying unset and yield the default.
 
 The runtime param sits above both file planes and is where an operator changes
 the policy without a restart: the gateway client reads it before every step, so
@@ -64,9 +70,8 @@ Changes persist in `.masc/runtime_params.json` and are recorded in
 connector status JSON, not the value anything is judged by; a param change
 carries it along so the screen does not contradict the change.
 
-Slack's `[slack].trigger_policy` / `MASC_SLACK_TRIGGER_POLICY` /
-`slack.trigger_policy` param work the same way, through the same shared
-resolution (`Connector_trigger_policy`).
+Slack's `[slack].trigger_policy` and its `slack.trigger_policy` param work the
+same way, through the same shared resolution (`Connector_trigger_policy`).
 
 Channel→keeper bindings live where they always did:
 `Channel_gate_discord_state.bind` / `unbind` write to
@@ -179,7 +184,10 @@ module `lib/gate/channel_gate_slack_state.{ml,mli}`; env reads live in
 |---|---|---|
 | `SLACK_APP_TOKEN` | **yes** | `xapp-…` app-level token for `apps.connections.open`. If unset the gateway does not start; the rest of the server boots normally. |
 | `SLACK_BOT_TOKEN` | **yes** | `xoxb-…` bot token for outbound `chat.postMessage`. Read at call time, so rotation does not require a restart. If unset the gateway connects but every reply fails, and the connector reports `available:false`. |
-| `MASC_SLACK_TRIGGER_POLICY` | no | Closed sum: `mention_only`, `mention_or_thread`, `user_only:<slack_user_id>`, or `all`. |
+
+The Slack trigger policy is not an env var either: `[slack].trigger_policy` in
+the resolved `runtime.toml` is the only configured plane. Closed sum:
+`mention_only`, `mention_or_thread`, `user_only:<slack_user_id>`, or `all`.
 
 Channel→keeper bindings: `Channel_gate_slack_state.bind` / `unbind` write to
 `.gate/runtime/slack/bindings.json` (overridable via

@@ -26,6 +26,3 @@ val app_token_opt : unit -> string option
     [auth.test] bot-identity resolution. *)
 val bot_token_opt : unit -> string option
 
-(** [MASC_SLACK_TRIGGER_POLICY] — raw policy override, parsed by
-    {!Slack_gateway_state.parse_trigger_policy} via the gateway. *)
-val trigger_policy_opt : unit -> string option

@@ -11,8 +11,3 @@ open Env_config_core
 
 let bot_token_opt () = Sys.getenv_opt "DISCORD_BOT_TOKEN" |> trim_opt
 
-(* The trigger policy keeps the [MASC_DISCORD_] namespace: it is a
-   MASC-internal policy override, not a credential. Mirrors
-   [Env_config_slack.trigger_policy_opt]; the gateway held its own
-   getenv+trim until the policy gained a second reader. *)
-let trigger_policy_opt () = Sys.getenv_opt "MASC_DISCORD_TRIGGER_POLICY" |> trim_opt

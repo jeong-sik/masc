@@ -91,9 +91,9 @@ val surfaces : surface list
 
 val discord_trigger_policy : Discord_gateway_state.trigger_policy Runtime_params.param
 (** Which Discord messages start a turn. With no override the value is what the
-    gateway resolved at startup from [MASC_DISCORD_TRIGGER_POLICY] and
-    [discord.trigger_policy] in runtime.toml, so clearing the override returns
-    to the configured file/env answer rather than to the hardcoded baseline. *)
+    gateway resolved at startup from [discord.trigger_policy] in runtime.toml,
+    so clearing the override returns to the configured answer rather than to
+    the hardcoded baseline. *)
 
 val slack_trigger_policy : Slack_gateway_state.trigger_policy Runtime_params.param
 (** Which Slack messages start a turn. Mirrors {!discord_trigger_policy}. *)

@@ -2685,6 +2685,24 @@ let runtime_resume_cmd =
   Cmd.v (Cmd.info "runtime-resume" ~doc:"Apply saved model settings to this running workspace after sign-in.")
     Term.(const run $ base_path $ port $ login_agent)
 
+let workspace_upgrade_cmd =
+  let apply = Arg.(value & opt (some string) None & info ["apply"] ~docv:"KEEPER"
+    ~doc:"Back up and upgrade this selected Keeper's known released configuration.") in
+  let source_sha256 = Arg.(value & opt (some string) None & info ["source-sha256"] ~docv:"SHA256"
+    ~doc:"Require the exact configuration digest displayed during assessment.") in
+  let restore = Arg.(value & opt (some string) None & info ["restore"] ~docv:"BACKUP_ID"
+    ~doc:"Restore a selected backup only while its upgrade output remains unchanged.") in
+  let run base_path apply source_sha256 restore =
+    let action = match apply, source_sha256, restore with
+      | None, None, None -> Some Masc_cli_workspace_upgrade.Inspect
+      | Some keeper_name, Some source_sha256, None -> Some (Apply {keeper_name; source_sha256})
+      | None, None, Some backup_id -> Some (Restore {backup_id})
+      | _ -> None in
+    match action with Some action -> Masc_cli_workspace_upgrade.run ~base_path ~action
+    | None -> prerr_endline "Choose inspection, --apply KEEPER with --source-sha256, or --restore BACKUP_ID."; 1 in
+  Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect known configuration upgrades and private recovery backups.")
+    Term.(const run $ base_path $ apply $ source_sha256 $ restore)
+
 let sandbox_catalog_cmd =
   let inspect requested =
     let base_path = match requested with Some path -> Some path
@@ -2872,6 +2890,7 @@ let cmd =
     ; setup_cmd
     ; setup_preflight_cmd
     ; runtime_resume_cmd
+    ; workspace_upgrade_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
     ; token_cmd

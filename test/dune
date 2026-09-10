@@ -1812,6 +1812,13 @@
  (modules test_server_health_rollup)
  (libraries alcotest masc_server yojson))
 
+; What check-pr-hygiene.sh attributes to a pull request, run against the
+; shallow clone shape CI has (#35012).
+(test
+ (name test_pr_hygiene_range)
+ (modules test_pr_hygiene_range)
+ (libraries alcotest unix))
+
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
 (test

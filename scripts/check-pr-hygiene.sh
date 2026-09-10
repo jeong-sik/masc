@@ -58,35 +58,28 @@ if [[ "$DUPLICATE_POLICY" != "warn" && "$DUPLICATE_POLICY" != "fail" ]]; then
   exit 2
 fi
 
-# On a shallow clone `git merge-base` does not fail when the real ancestor was
-# never fetched — it returns a grafted boundary commit and exits 0. The range
-# then spans everything that was fetched, and every commit in it is reported as
-# this PR's. CI fetches the base at --depth=100, so a branch whose ancestor sits
-# further back (a merge commit pulls main history in, which is enough) had
-# masc's oldest commits attributed to it.
+# What this pull request added is "reachable from HEAD and not from the base",
+# which is what `--not "$BASE_REF"` asks. The merge-base this used to compute
+# is not needed for that question, and on a shallow clone it cannot answer it:
 #
-# Deepening is the recovery the `if ! merge_base=...` guard in ci.yml was
-# written for and never reached, because the command it tests does not fail.
-MERGE_BASE="$(git merge-base "$BASE_REF" "$HEAD_REF")"
-
-if [[ -f "$(git rev-parse --git-dir)/shallow" ]]; then
-  while grep -qx "$MERGE_BASE" "$(git rev-parse --git-dir)/shallow"; do
-    echo "merge-base ${MERGE_BASE:0:12} is a shallow boundary; deepening" >&2
-    before="$MERGE_BASE"
-    git fetch --deepen=500 --quiet origin "$BASE_REF" 2>/dev/null \
-      || git fetch --deepen=500 --quiet 2>/dev/null \
-      || break
-    MERGE_BASE="$(git merge-base "$BASE_REF" "$HEAD_REF")"
-    [[ "$MERGE_BASE" == "$before" ]] && break
-  done
-fi
-
-RANGE="${MERGE_BASE}..${HEAD_REF}"
+#   - it returns a grafted boundary and exits 0, so the range spans everything
+#     that was fetched and base commits are reported as this pull request's --
+#     #35012 saw a main commit, bfc1d630, reported as an empty commit of
+#     PR #34929, which never contained it
+#   - or it finds no common ancestor at all and exits 1, and under `set -e`
+#     this script then died before printing anything, so the lint reported a
+#     failure with no line saying why (reproduced in a --depth=2 clone of a
+#     branch that merged its base)
+#
+# Excluding the base directly has neither failure. It also drops the deepening
+# loop that stood here, which only recovered when the merge-base came back as
+# a commit listed in .git/shallow and not when the graft named another.
+RANGE="${HEAD_REF} --not ${BASE_REF}"
 
 RANGE_COMMITS=()
 while IFS= read -r commit; do
   RANGE_COMMITS+=("$commit")
-done < <(git rev-list --reverse "$RANGE")
+done < <(git rev-list --reverse "$HEAD_REF" --not "$BASE_REF")
 
 if [[ ${#RANGE_COMMITS[@]} -eq 0 ]]; then
   echo "No commits in range ${RANGE}"
@@ -95,6 +88,7 @@ fi
 
 empty_failures=0
 duplicate_hits=0
+NON_MERGE_COMMITS=()
 
 BASE_PATCH_FILE="$(mktemp)"
 SEEN_PATCH_FILE="$(mktemp)"
@@ -117,6 +111,7 @@ for commit in "${RANGE_COMMITS[@]}"; do
   if [[ "$parent_count" -gt 1 ]]; then
     continue
   fi
+  NON_MERGE_COMMITS+=("$commit")
 
   parent="$(awk '{print $2}' <<<"$parents_line")"
   if [[ -n "$parent" ]]; then
@@ -172,7 +167,16 @@ priority_erasure=0
 while IFS= read -r line; do
   echo "::error title=Priority type erasure::Added line matches erased priority pattern: ${line}"
   priority_erasure=1
-done < <(git diff "$MERGE_BASE" "$HEAD_REF" -- '*.ml' '*.mli' | grep '^+' | grep -v '^+++' | grep -E 'priority\s*:\s*\(\)|~priority:\(\)' || true)
+# The patches of this pull request's own commits, rather than a two-point diff
+# against a merge-base. Same added lines, and no merge-base to be wrong about
+# on a shallow clone. Merge commits are left out: their combined diff carries
+# whatever the merge brought in, which this pull request did not write.
+done < <(
+  for pr_commit in ${NON_MERGE_COMMITS+"${NON_MERGE_COMMITS[@]}"}; do
+    git show --format= --patch "$pr_commit" -- '*.ml' '*.mli'
+  done \
+    | grep '^+' | grep -v '^+++' \
+    | grep -E 'priority\s*:\s*\(\)|~priority:\(\)' || true)
 if [[ "$priority_erasure" -ne 0 ]]; then
   echo "PR hygiene check failed: Request_priority type erasure detected. See #4186." >&2
   exit 1

@@ -3,6 +3,24 @@
 Scope: all 18 user-reported gaps after 0.35.2, plus the supplied product contract.
 No row is complete. A prompt change is an intervention, not behavioral proof.
 
+## Current evidence at 2026-09-10T15:09Z
+
+- Binary write references #35158 and typed image transport #35159 are merged
+  after their exact-head checks and targeted tests passed. No runtime replacement
+  is claimed; the composite candidate is now e3e1fe9865 with its TUI peer-tool
+  classification repaired after an actual Release build failure.
+- Overview freshness #35183 has 14 passing component tests, TypeScript checks,
+  independent review and browser before/after evidence. The live backend's
+  636-second-old response is explicitly shown as refreshing. This remains a
+  source preview until deployment.
+- Local27B finished the designer group: seven claims and one conflict, with all
+  eleven source references accounted for. Source review found a malformed price
+  already present in the input, so factual promotion is not accepted. The editor
+  group and workspace synthesis remain unfinished.
+- Tool-count writer #35178 is still under CI: the source fix is reviewed, and its
+  new behavioral fixture now initializes/restores the required runtime after the
+  actual preceding run failed on uninitialized attribution.
+
 ## Current evidence at 2026-09-10T14:50Z
 
 - The original exhibition Goal remains Executing after actual Kimi proof

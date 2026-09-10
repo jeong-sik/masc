@@ -1,8 +1,8 @@
 {
   "branch": "test/collaboration-multimodal-candidate",
-  "commit": "744b490445540900b7719af18a5b34ad48373221",
-  "targeted_test_run": 34492290376,
-  "release_run": 34491994983,
+  "commit": "e3e1fe9865c549676023d93ad94571caa55f882a",
+  "targeted_test_run": 34493042309,
+  "release_run": 34493046046,
   "source_review": "two independent reviews found no blocker after exact-read and UTF8-safe failure fixes",
   "runtime_replaced": false,
   "goal_retried": false,
@@ -12,9 +12,34 @@
   },
   "metrics_fix": {
     "pr": 35178,
-    "head": "8250cd93b6",
-    "targeted_test_run": 34492252444,
-    "previous_run": 34491334590,
-    "previous_test_step": "failed; source inspection found and fixed public Tool_result module qualification; full original log not yet downloadable"
+    "head": "8b8f921613",
+    "targeted_test_run": 34493604024,
+    "previous_run": 34492252444,
+    "previous_test_step": "failed: fixture had no initialized default runtime. Source module qualifier failure confirmed in earlier34491334590 log; explicit runtime initialization/restoration added."
+  },
+  "previous_candidates": [
+    {
+      "commit": "744b490445540900b7719af18a5b34ad48373221",
+      "targeted_test_run": 34492290376,
+      "release_run": 34491994983,
+      "result": "Release build failed: TUI exhaustive match omitted Tool_peer_artifact; repaired by fea6fb0092."
+    },
+    {
+      "commit": "96cc5157ab",
+      "targeted_test_run": 34492716454,
+      "result": "Test-only provider JSON fixture correction; superseded by TUI production repair, cancellation requested."
+    }
+  ],
+  "merged_foundations": {
+    "35158": "0b91aeca787ccda3a7b2089905e573566251f21d",
+    "35159": "78c11df7322d33987addf304823f18e2d7b575ec"
+  },
+  "freshness_ui": {
+    "pr": 35183,
+    "head": "cf62ae376e909f4002713ee941ab2dc963943612",
+    "typecheck": "passed",
+    "component_tests": 14,
+    "browser": "recorded stale before/after and actual backend stale state visible",
+    "deployed": false
   }
 }

@@ -1,13 +1,16 @@
 {
-  "observed_at": "2026-09-10T14:53:36.397203+00:00",
+  "observed_at": "2026-09-10T15:09:35.670540+00:00",
   "session_handle": 90493,
   "completed_proposal": false,
   "progress": [
     {
       "path": "groups/keeper-bc87119183cc5bff915fa42bac3d29b2489242a3bf39aa85e508e9f7ecdbe58b/progress.json",
       "progress": {
-        "phase": "requesting",
-        "observed_at": "2026-09-10T14:52:17.266865+00:00"
+        "phase": "receiving",
+        "chunks": 8400,
+        "content_characters": 0,
+        "thinking_characters": 33782,
+        "observed_at": "2026-09-10T15:09:35.633584+00:00"
       }
     },
     {

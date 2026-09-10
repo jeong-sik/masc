@@ -383,3 +383,20 @@ reads were repaired. Targeted CI and a Release workflow are running on branch
 `test/collaboration-multimodal-candidate`; the old runtime remains unchanged.
 The current local27B pass retains its original live process; progress is saved
 separately, without claiming a completed synthesis or publication.
+
+
+## First local memory group and source review
+
+The original local27B process completed the designer group after 1,608.45 seconds
+and continued into the editor group. Its result has seven shared claims and one
+conflict. The canonical result SHA matches the model receipt; the formatted file
+has its own separately recorded hash. All eleven cited source records were
+accounted for in independent review.
+
+The first claim reproduces malformed admission-price wording already present in
+the designer's memory. Source faithfulness does not make that wording true.
+Deletion-history claims are bounded to that snapshot; they do not undo the real
+collaboration. The vision-versus-pixel-analysis conflict is useful, but reading a
+script and executing a pixel check remain distinct. See
+[the partial semantic audit](local-curation-first-group/source-review.json).
+The whole workspace pass is unfinished and no proposal has been published.

@@ -5545,4 +5545,6 @@
 
 (include stanzas/test_docker_desktop_install.inc)
 
+(include stanzas/test_docker_account_access.inc)
+
 (include stanzas/test_apple_container_install.inc)

@@ -133,6 +133,37 @@ let scroll_up ~entry_count ~content_height scroll =
 let scroll_down ~entry_count ~content_height scroll =
   Masc_tui_scroll.down ~count:entry_count ~height:content_height scroll
 
+let page_up ~entry_count ~content_height scroll =
+  Masc_tui_scroll.page_up ~count:entry_count ~height:content_height scroll
+
+let page_down ~entry_count ~content_height scroll =
+  Masc_tui_scroll.page_down ~count:entry_count ~height:content_height scroll
+
+(* The stored order is chronological because the file is append-only and the
+   decoder reads it that way. The reader wants the other end: opening a
+   Keeper's log is nearly always about the turn that just happened, so
+   [scroll = 0] shows the newest rows and scrolling walks backwards in time.
+
+   Owning the window here rather than in the drawing has a second reason. The
+   renderer indexed the list per row ([List.nth] inside the row loop), so a
+   window of h rows over n entries cost n*h and every frame paid it again.
+   This walks the list once. *)
+let visible ~entries ~content_height ~scroll =
+  let entry_count = List.length entries in
+  let scroll = normalize_scroll ~entry_count ~content_height scroll in
+  (* [scroll] counts rows back from the newest, so the window is the
+     chronological slice [start, stop) read in reverse. *)
+  let stop = entry_count - scroll in
+  let start = max 0 (stop - content_height) in
+  let rec take index acc = function
+    | [] -> acc
+    | entry :: rest ->
+      if index >= stop then acc
+      else if index >= start then take (index + 1) (entry :: acc) rest
+      else take (index + 1) acc rest
+  in
+  take 0 [] entries
+
 let empty_message = function
   | None -> "(no log entries found)"
   | Some (Storage_error _) -> "(log entries unavailable)"

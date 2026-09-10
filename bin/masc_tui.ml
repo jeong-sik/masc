@@ -17811,6 +17811,16 @@ and is loaded on demand through keeper_skill.
                   in
                   search_jump state ~query:state.search_last ~after
                     ~backwards:(String.equal direction "N"))
+       (* The log reads newest first, so Home is the live end of the file and
+          End is the oldest row the tail window holds. An operator who has
+          paged back wants one key to return to now. *)
+       | Some "home" when state.view = Keepers Keeper_logs ->
+           state.log_scroll <- 0
+       | Some "end" when state.view = Keepers Keeper_logs ->
+           state.log_scroll <-
+             Metrics_tail.maximum_scroll
+               ~entry_count:(List.length state.log_entries)
+               ~content_height:(keeper_log_content_height state)
        | Some "home" when state.view = Tools -> state.tools_scroll <- 0
        | Some "end" when state.view = Tools ->
            state.tools_scroll <-
@@ -17925,6 +17935,21 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
                   max 0 (state.detail_scroll + (direction * page))
+            (* The log pane owns its own height, so it pages by that rather
+               than by [page]: the generic surface size counts chrome this
+               pane does not have, and a page that overshoots the window skips
+               rows. Rows are drawn newest first, so PageDown walks back in
+               time. *)
+            | Keepers Keeper_logs ->
+                let entry_count = List.length state.log_entries in
+                let content_height = keeper_log_content_height state in
+                state.log_scroll <-
+                  (if direction > 0 then
+                     Metrics_tail.page_down ~entry_count ~content_height
+                       state.log_scroll
+                   else
+                     Metrics_tail.page_up ~entry_count ~content_height
+                       state.log_scroll)
              | Clients ->
                  let cursor, scroll =
                    move_row_cursor state ~delta:(direction * page)

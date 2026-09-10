@@ -346,9 +346,65 @@ let test_load_is_bounded_by_tail_not_file_size () =
   check bool "tail allocation stays below a whole-file read" true
     (allocated < Float.of_int (4 * 1024 * 1024))
 
+(* The window is the only place that reverses the stored order, so these pin
+   both halves of that: which rows a scroll selects, and which end they come
+   out of. A test that only counted rows passed while the pane drew the file
+   from its start. *)
+let entries_of_counts counts =
+  List.map
+    (fun count ->
+       match Decode.decode_log_entry (heartbeat count) with
+       | Ok entry -> entry
+       | Error detail -> failwith ("fixture row did not decode: " ^ detail))
+    counts
+
+let test_window_reads_newest_first () =
+  let entries = entries_of_counts [ 1; 2; 3; 4; 5 ] in
+  check (list (option int)) "unscrolled window is the newest rows, newest first"
+    [ Some 5; Some 4; Some 3 ]
+    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:0));
+  check (list (option int)) "one row of scroll steps one row back in time"
+    [ Some 4; Some 3; Some 2 ]
+    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:1));
+  check (list (option int)) "the last window ends at the oldest row"
+    [ Some 3; Some 2; Some 1 ]
+    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:2));
+  check (list (option int)) "a scroll past the end is clamped, not empty"
+    [ Some 3; Some 2; Some 1 ]
+    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:99))
+
+let test_window_shorter_than_the_viewport () =
+  let entries = entries_of_counts [ 1; 2 ] in
+  check (list (option int)) "fewer rows than the window still read newest first"
+    [ Some 2; Some 1 ]
+    (message_counts (Tail.visible ~entries ~content_height:5 ~scroll:0));
+  check (list (option int)) "no rows is no rows" []
+    (message_counts (Tail.visible ~entries:[] ~content_height:5 ~scroll:0))
+
+let test_page_keeps_one_row_of_context () =
+  let entry_count = 100 and content_height = 10 in
+  let page_down = Tail.page_down ~entry_count ~content_height in
+  let page_up = Tail.page_up ~entry_count ~content_height in
+  check int "a page moves the window less one kept row" 9 (page_down 0);
+  check int "pages compose" 18 (page_down (page_down 0));
+  check int "paging back returns to where it started" 0 (page_up (page_down 0));
+  check int "page down stops at the oldest row" 90 (page_down 89);
+  check int "page up stops at the newest row" 0 (page_up 5);
+  (* A window at least as tall as the list has nowhere to page. *)
+  check int "a list that fits does not move" 0
+    (Tail.page_down ~entry_count:4 ~content_height:10 0);
+  (* One-row viewport: the step floor keeps the key from doing nothing. *)
+  check int "a one-row window still advances" 1
+    (Tail.page_down ~entry_count:100 ~content_height:1 0)
+
 let () =
   run "tui_metrics_tail"
-    [ ( "strict tail"
+    [ ( "event window"
+      , [ test_case "newest first" `Quick test_window_reads_newest_first
+        ; test_case "short list" `Quick test_window_shorter_than_the_viewport
+        ; test_case "paging" `Quick test_page_keeps_one_row_of_context
+        ] )
+    ; ( "strict tail"
       , [ test_case "physical bound and chronology" `Quick
             test_resolve_is_physical_bounded_and_chronological
         ; test_case "storage and empty selection" `Quick

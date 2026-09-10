@@ -1511,6 +1511,14 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   List.iter
     (fun (entry : Masc_tui_keeper_chat_log.entry) -> apply ~now t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
+  (* A replayed turn has no measured end. Every delta folds at the replay
+     instant while [started_at] is the log's own start, so an [ended_at] taken
+     from that fold would make [ended_at -. started_at] read as "how long the
+     turn took" while it is "how long ago the turn began" -- a turn of forty
+     seconds replayed three hours later would say 3h00m. Absent, so the row
+     answers with the age instead, which is what that number is. The span the
+     stream measures is the live path's, where the two instants are real. *)
+  t.ended_at <- None;
   t
 ;;
 

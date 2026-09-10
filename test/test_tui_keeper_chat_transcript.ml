@@ -754,6 +754,26 @@ let test_a_settled_turn_reports_its_span_not_a_growing_age () =
         (contains ~needle:"stream ended" text)
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
+(* The span above is the live path's, where both instants are real. A replayed
+   turn has neither: [of_log] folds every delta at the replay instant while
+   [started_at] is the log's own start, so a span taken from that fold would
+   say how long ago the turn began while calling it how long the turn took. A
+   forty-second turn replayed three hours later would read 3h00m. *)
+let test_a_replayed_turn_does_not_report_the_replay_gap_as_its_span () =
+  let deltas = [ Live.Run_started; Live.Text "done"; Live.Run_finished ] in
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
+  List.iteri (fun seq delta -> ignore (Log.add log ~seq:(Some seq) delta : bool)) deltas;
+  let three_hours_later = origin +. 10_800. in
+  let replayed = Transcript.of_log ~now:three_hours_later log in
+  match rows ~now:three_hours_later replayed with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the replay gap is not offered as the turn's span" false
+        (contains ~needle:"3h00m" text);
+      (* What it does say is the age, which is what that number is. *)
+      check bool "the row still says the run finished" true
+        (contains ~needle:"stream ended" text)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
 (* Slow or stuck is the question an operator holds while the row is up, and a
    count of calls cannot answer it: seven tools reads the same whether all
    seven came back and the model is writing, or two are still out. *)
@@ -2073,6 +2093,8 @@ let () =
             test_progress_row_carries_the_turn_age
         ; test_case "a settled turn reports its span, not a growing age" `Quick
             test_a_settled_turn_reports_its_span_not_a_growing_age
+        ; test_case "a replayed turn does not report the replay gap as its span"
+            `Quick test_a_replayed_turn_does_not_report_the_replay_gap_as_its_span
         ; test_case "the row says how long the open call has been open" `Quick
             test_the_row_says_how_long_the_open_call_has_been_open
         ] )

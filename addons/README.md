@@ -24,6 +24,15 @@ reply. These values bound these small read-only workers, not Keeper activity.
 Qualification must record the actual applied envelope and measure impact; these
 defaults do not constitute measured performance acceptance.
 
+The worker publishes its exact container ID before inspection and MCP
+initialization, so those operations can be interrupted by explicit detach.
+Cleanup is verified only after the exact container is absent. If the Docker
+daemon never returns the create result, startup and detach remain incomplete;
+this implementation does not claim verified cleanup or restart reconciliation
+for a container whose creation was never acknowledged. Package lifecycle tests
+cover blocked inspection, initialization and observation, independently of
+Docker daemon availability.
+
 The MCP worker exposes `lane_observe`, taking `{binding, sources}` and returning
 `{rows, coverage}` in both `structuredContent` and a JSON text content block.
 `tools/list` supplies `inputSchema` and `outputSchema`. The implemented protocol
@@ -121,7 +130,10 @@ yield no relation.
 
 ## MSX binding and observations
 
-Binding is `{ "machine_id": "game", "incarnation": "load-2" }`. Each `capture`
+Binding is `{ "machine_id": "workspace-msx" }` to follow the existing machine
+across explicitly recorded histories. Optional `incarnation: "load-2"` pins one
+history; absent or null means any observed incarnation, not an invented ID.
+Each `capture`
 observation adds `machine_id`, `incarnation`, nonnegative integer `frame`,
 `screen: {uri, sha256}`, and nullable `input_cursor`. Incarnation must change when
 loading/restoring a machine history so a reset frame is not mistaken for an

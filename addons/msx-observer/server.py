@@ -12,7 +12,7 @@ from protocol import (InvalidInput, Source, evidence, optional_string, row,
 
 def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
     machine_id = string(binding.get("machine_id"), "machine_id")
-    incarnation = string(binding.get("incarnation"), "incarnation")
+    incarnation = optional_string(binding.get("incarnation"), "incarnation")
     rows, coverage = [], []
     for source in sources:
         skipped: set[str] = set()
@@ -32,7 +32,8 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
                        fields={"machine_id": machine, "machine_incarnation": run,
                                "frame": frame, "screen": screen,
                                "input_cursor": optional_string(observation.get("input_cursor"), "input_cursor"),
-                               "matches_binding": machine == machine_id and run == incarnation})
+                               "matches_binding": machine == machine_id
+                               and (incarnation is None or run == incarnation)})
             item["evidence"] = [*item["evidence"], screen]
             rows.append(item)
         coverage.append(source.coverage(skipped))

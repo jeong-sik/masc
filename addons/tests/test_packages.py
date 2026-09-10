@@ -251,6 +251,19 @@ class WebLayer(ProtocolCase):
 
 
 class MsxLayer(ProtocolCase):
+    def test_optional_incarnation_follows_machine_without_merging_clocks(self):
+        captures = [{"id": "capture", "kind": "capture", "observed_at": 1002,
+                     "actor": None, "evidence": [], "machine_id": "workspace-msx",
+                     "incarnation": run, "frame": frame, "screen": reference(run), "input_cursor": None}
+                    for run, frame in (("history-A", 50), ("history-B", 0))]
+        for binding in ({"machine_id": "workspace-msx"},
+                        {"machine_id": "workspace-msx", "incarnation": None}):
+            output = self.call("msx-observer", binding,
+                [source([capture], incarnation=capture["incarnation"]) for capture in captures])
+            self.assertTrue(all(row["fields"]["matches_binding"] for row in output["rows"]))
+            self.assertNotEqual(output["rows"][0]["clock"]["domain"], output["rows"][1]["clock"]["domain"])
+            self.assertEqual([row["clock"]["value"] for row in output["rows"]], ["50", "0"])
+
     def test_snapshots_preserve_machine_state_and_incarnation_clock(self):
         with tempfile.TemporaryDirectory() as path:
             screenshot = Path(path) / "frame.png"

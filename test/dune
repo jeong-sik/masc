@@ -5537,4 +5537,6 @@
 (include stanzas/test_sandbox_readiness.inc)
 (include stanzas/test_sandbox_prerequisites.inc)
 
+(include stanzas/test_docker_desktop_install.inc)
+
 (include stanzas/test_apple_container_install.inc)

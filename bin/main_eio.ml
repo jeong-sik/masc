@@ -1194,11 +1194,16 @@ let path_is_executable candidate =
   | exception Unix.Unix_error _ -> false
 
 let front_door_cmd_exit
-      host port requested_port base_path accept_store_quarantine
+      host requested_port base_path accept_store_quarantine
       provenance_path provenance_sha256 provenance_device provenance_inode =
   let serve () =
-    run_cmd_exit host port base_path accept_store_quarantine provenance_path
-      provenance_sha256 provenance_device provenance_inode
+    match resolve_connection_port base_path requested_port with
+    | Error error ->
+      prerr_endline (Workspace_connection.error_message error);
+      1
+    | Ok port ->
+      run_cmd_exit host (Workspace_connection.to_int port) base_path accept_store_quarantine provenance_path
+        provenance_sha256 provenance_device provenance_inode
   in
   let deployment_flags_present =
     accept_store_quarantine
@@ -1207,13 +1212,19 @@ let front_door_cmd_exit
     || Option.is_some provenance_device
     || Option.is_some provenance_inode
   in
+  (* Routing only constructs an unused TUI argv. Resolve the workspace's saved
+     endpoint only after the interactive journey has chosen its workspace. *)
+  match Workspace_connection.resolve ~base_path:None ~cli:requested_port
+          ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key) with
+  | Error error -> prerr_endline (Workspace_connection.error_message error); 1
+  | Ok routing_port ->
   match
     Masc_front_door.decide
       ~interactive:(stdio_is_a_terminal ())
       ~host
       ~default_host:(Env_config.masc_host ())
       ~deployment_flags_present
-      ~port
+      ~port:(Workspace_connection.to_int routing_port)
       ~base_path
       ~executable_name:Sys.executable_name
       ~path_env:(Sys.getenv_opt "PATH")
@@ -2834,7 +2845,7 @@ let setup_cmd =
   in
   let network_mode = Arg.(value & opt (some string) None & info ["network-mode"]
     ~doc:"Sandbox network mode: inherit, none, or policy where supported.") in
-  let run base_path port requested_port no_tui sandbox_profile microvm_backend network_mode =
+  let run base_path requested_port no_tui sandbox_profile microvm_backend network_mode =
     let network = match network_mode with
       | None -> Ok None
       | Some value -> (match Keeper_types_profile_sandbox.network_mode_of_string value with
@@ -2853,13 +2864,16 @@ let setup_cmd =
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
-        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend network_mode)
+        | Some path ->
+          (match resolve_connection_port (Some path) requested_port with
+           | Ok port -> `Ok (setup_cmd_exit path (Workspace_connection.to_int port) no_tui profile backend network_mode)
+           | Error error -> `Error (false, Workspace_connection.error_message error))
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ run_base_path $ port $ port_argument $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
+    Term.(ret (const run $ run_base_path $ port_argument $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2957,7 +2971,7 @@ let cmd =
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const front_door_cmd_exit $ host $ port $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
     info
     [ init_cmd
     ; start_cmd

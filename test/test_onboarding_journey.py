@@ -493,6 +493,74 @@ class Journey(unittest.TestCase):
                         pass
                     os.waitpid(pid, 0)
 
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_setup_can_leave_remembered_workspace_with_invalid_port(self):
+        with tempfile.TemporaryDirectory() as home:
+            old = Path(home, 'old')
+            config = old / '.masc/config/connection.toml'
+            config.parent.mkdir(parents=True)
+            invalid = '[server]\nhttp_port = "invalid"\n'
+            config.write_text(invalid)
+            record = Path(home, 'config/masc/default-base-path')
+            record.parent.mkdir(parents=True)
+            record.write_text(str(old) + '\n')
+            chosen = Path(home, 'chosen')
+            pid, fd = pty.fork()
+            if pid == 0:
+                environment = {key: value for key, value in os.environ.items()
+                               if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+                environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb')
+                os.chdir(home)
+                os.execve(BINARY, [BINARY, 'setup'], environment)
+            captured = b''
+            exited = False
+
+            def until(expected):
+                nonlocal captured
+                deadline = time.monotonic() + 30
+                while expected not in captured and time.monotonic() < deadline:
+                    if select.select([fd], [], [], 0.2)[0]:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        captured += chunk
+                self.assertIn(expected, captured, captured.decode(errors='replace'))
+
+            try:
+                until(b'Your workspace')
+                os.write(fd, b'2\n')
+                until(b'Workspace directory')
+                os.write(fd, str(chosen).encode() + b'\n')
+                until(b'Connect a model')
+                os.write(fd, b'q\n')
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    if waited == pid:
+                        exited = True
+                        self.assertTrue(os.WIFEXITED(status))
+                        self.assertEqual(os.WEXITSTATUS(status), 1, captured.decode(errors='replace'))
+                        break
+                    if select.select([fd], [], [], 0.1)[0]:
+                        try:
+                            captured += os.read(fd, 65536)
+                        except OSError:
+                            pass
+                self.assertTrue(exited, captured.decode(errors='replace'))
+                self.assertTrue((chosen / '.masc/config/connection.toml').is_file())
+                self.assertEqual(config.read_text(), invalid)
+            finally:
+                os.close(fd)
+                if not exited:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
+
     def test_cancel_fresh_home_does_not_initialize_or_select_models(self):
         with patch.object(SETUP, 'onboarding_status', return_value=observation()), \
                 patch.object(SETUP, 'pick', return_value=[2]), \

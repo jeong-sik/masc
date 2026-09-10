@@ -172,3 +172,29 @@ PR35114 passed its corrected target tests and all PR checks, then merged as
 f56f5fe94fc0c4f9e6db23d3049d65b89917afd8. The integration candidate was rebuilt
 after fixing an optional OCaml argument declaration in the image reader.
 Its current source/run IDs are in recovery-candidate.json.
+
+## Candidate boot and preserved work
+
+The CI macOS probe binary for 9cc33feff4 was downloaded from run34480902517
+and all manifest hashes checked. The helper gracefully stopped owned PID71727,
+observed both its process and listener absent, then started PID30481 on the
+same base/port. Health reports source9cc33feff4, SHA256
+0fecf2e60507d7ef760c5d83cdffbde03c5841a7e604947fdecd81b56621b97e.
+The nine saved Task/Goal/config/artifact hashes were unchanged immediately
+after startup. The managed Docker workspace container also remained available.
+This is a manual candidate upgrade, not automatic failover or release acceptance.
+
+The ten-suite integration test did not run: its build failed because the new
+vision test referenced a private module through Masc. Runtime binary compilation
+had succeeded. A test-only correction is being verified on integration head
+6ebc266c50 in run34482020814; the running binary is still9cc33feff4.
+
+A real GLM tool call after boot confirms the saved runtime assignment took
+effect with the same Keeper history. It requested a malformed63-character
+artifact hash and was correctly rejected. No corrected publication follows
+from that call.
+
+After full startup, the Vite Dashboard showed the old operator message, tool
+timeline, approval/application records, GLM assignment, and task-001 InProgress.
+The client WebSocket remained disconnected even though health reported its
+backend available. The screenshot is partial UI proof and preserves that gap.

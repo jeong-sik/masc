@@ -1,0 +1,17 @@
+[
+  {
+    "ts": 1789046316.592753,
+    "keeper": "exhibit-editor",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "tool": "keeper_artifact_read",
+    "input": {
+      "max_bytes": 6000,
+      "sha256": "76d29380d77c68364af210e09c51463a976d0f4c89ce3da61bd276a9b6d1a00"
+    },
+    "output": "{\"ok\":false,\"error\":\"invalid_artifact_read\",\"message\":\"sha256 is malformed: expected 64 lowercase hexadecimal characters, got length 63\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+    "disposition": "failed",
+    "execution_id": "exec-1789046316592-0001",
+    "trace_id": "trace-1789042595401-00001",
+    "turn": 103
+  }
+]

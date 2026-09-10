@@ -79,7 +79,17 @@ let integrations_json (config : Runtime_schema.config) =
     catalog |> List.filter_map (fun (entry : Catalog_binding.t) ->
       if declared entry.id then None else
       let protocol = protocol_of_catalog_kind entry.kind in
-      let supported = protocol <> None && entry.capabilities.task = None in
+      let task =
+        match entry.default_model with
+        | None -> entry.capabilities.task
+        | Some model_id ->
+          (match Llm_provider.Capabilities.for_provider_model_id
+                   ~wire:(Some entry.kind) ~allow_bare_fallback:false
+                   ~provider_label:entry.id ~model_id with
+           | None -> entry.capabilities.task
+           | Some capabilities -> capabilities.task)
+      in
+      let supported = protocol <> None && task = None in
       Some (integration_json config ~id:entry.id ~display_name:entry.id ~protocol
         ~origin:"agent_core_catalog" ~supported
         (endpoint_fields entry.base_url

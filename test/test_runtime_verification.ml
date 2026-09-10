@@ -231,6 +231,10 @@ wizard-default = true
     let antigravity = integration prototypes "antigravity" in
     check string "unsupported verification is not ready" "unsupported"
       (antigravity |> member "verification_support" |> to_string);
+    List.iter (fun id ->
+      check string "media endpoints are not chat setup connections" "unsupported"
+        (integration prototypes id |> member "setup_support" |> to_string))
+      [ "openai-image"; "zai-image"; "openai-speech" ];
     let gemini = integration prototypes "gemini" in
     check string "missing native Gemini protocol is explicit" "unsupported"
       (gemini |> member "setup_support" |> to_string);

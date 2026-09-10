@@ -1010,6 +1010,37 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, operationId, assistantId, controller)
   let operationAccepted = false
   let toolCallEnded = false
+  // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
+  // while the operation sits queued behind a running turn. [lastEventAt]
+  // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
+  // read a healthily-working keeper as "스트림 지연". The hydrate path already
+  // marks the signal on every poll tick for the same queued state; mark it
+  // here too until the stream's own reply events take over. Poll stops at
+  // the first reply-bearing event (deltas/tool calls stream from here on)
+  // and is abandoned by the stop call below on abort/failure.
+  let queuedSignalPollStopped = false
+  const stopQueuedSignalPoll = () => {
+    queuedSignalPollStopped = true
+  }
+  void (async () => {
+    while (!queuedSignalPollStopped && !controller.signal.aborted) {
+      await sleep(PENDING_KEEPER_CHAT_POLL_MS)
+      if (queuedSignalPollStopped || controller.signal.aborted) return
+      try {
+        const operation = await fetchKeeperChatOperation(keeperName, operationId, {
+          signal: controller.signal,
+        })
+        if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
+          markKeeperStreamSignal(keeperName)
+        } else {
+          return
+        }
+      } catch {
+        // Transient poll failure: the SSE feed still owns terminal
+        // handling; keep retrying until stopped.
+      }
+    }
+  })()
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -1045,6 +1076,16 @@ export async function sendKeeperThreadMessage(
           event,
           { kind: 'operation', operationId },
         )
+        // First reply-bearing event: the stream itself is the liveness
+        // signal now — retire the queued poll.
+        if (
+          event.type === 'TEXT_MESSAGE_CONTENT'
+          || event.type === 'TOOL_CALL_START'
+          || event.type === 'RUN_FINISHED'
+          || event.type === 'RUN_ERROR'
+        ) {
+          stopQueuedSignalPoll()
+        }
         if (error) {
           throw new Error(error)
         }
@@ -1255,6 +1296,9 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
+    // The queued-liveness poll (Gap B above) must never outlive this send:
+    // every exit path stops it here even if no reply event ever arrived.
+    stopQueuedSignalPoll()
     // Release cancellation bookkeeping on every accepted exit. The exact
     // operation ownership is released once by clearActiveStream below; the
     // non-terminal handoff released it early so its own resume was not blocked.

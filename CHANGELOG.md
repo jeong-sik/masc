@@ -2783,6 +2783,22 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
+- **Running turns now yield to waiting connector conversations, and the
+  dashboard no longer misreads a queued send as a dead stream (#25898).** A
+  nonempty-wake turn's post-tool boundary probe chain gains a third probe:
+  a pending ambient `Connector_attention` stimulus (a new Slack/Discord
+  conversation message) now preempts the in-flight source turn at its next
+  tool boundary, closing the same class of priority inversion #20849
+  measured for owner messages. Pure decision exposed as
+  `Keeper_unified_turn.connector_attention_preemption_request` and covered in
+  `test_keeper_hitl_replay_delivery`. RFC-0441 states the policy.
+- **Live chat sends poll the queued operation for liveness while waiting.**
+  `sendKeeperThreadMessage` now marks the stream-liveness signal from the
+  chat operation's `queued`/`running` state during the silent gap between
+  `ACCEPTED` and the first reply event — the same evidence the hydrate path
+  already used — so the composer's 15s stall hint no longer reads a
+  healthily-working keeper as "스트림 지연" while the operator's message waits
+  behind a running turn.
 - **Strict required-tool contracts now use typed tool effects.** MASC passes
   an input-aware required-tool satisfaction predicate into agent_core, so passive
   observation tools such as `masc_status` and `keeper_tasks_list` no longer

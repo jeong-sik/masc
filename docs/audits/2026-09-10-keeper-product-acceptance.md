@@ -3,6 +3,39 @@
 Scope: all 18 user-reported gaps after 0.35.2, plus the supplied product contract.
 No row is complete. A prompt change is an intervention, not behavioral proof.
 
+## Current evidence at 2026-09-10T14:50Z
+
+- The original exhibition Goal remains Executing after actual Kimi proof
+  refutation: its lookup path could not visually inspect the image contents.
+  Task-001 Done and independently correct PDF rasters do not close this Goal.
+- Task-002 produced a 24-frame GIF and 12-second WAV/MP3. Independent full
+  decoding and browser playback passed. Its actual approving verifier received
+  notes and reports, but the media snapshots failed the text-size/UTF-8 capture
+  path. This is a verification gap, not direct media approval evidence.
+- Fresh-library creation (#35149), invalid-UTF-8 lookup rejection (#35153) and
+  visible Goal refutation (#35161) are merged. The current isolated binary is
+  still `9cc33feff4917a1ae91804771a708d4a0e75e152`; these later merges do not
+  establish deployed behavior.
+- Full binary capture, typed visual input and peer file transfer have a combined
+  source candidate in `/tmp/masc-collaboration-multimodal-candidate`. Final review
+  found binary error-output contamination and a peer export that still used the
+  bounded reader. Repairs and CI precede any runtime replacement or Goal retry.
+- A live raw-ledger audit joined 26 decision turns with their exact cost rows.
+  All three API rows matched input/output/cache token totals. All 26 decisions
+  lacked tool-count fields despite 128 separate execution observations in the
+  window; the API therefore reported zero tool calls. #35178 restores writer
+  fields and adds a writer-to-aggregation check. The UI also ignores API cache
+  freshness; one response was 2,228 seconds old. Neither live fix is claimed.
+- Local Qwen 27B is processing the current two-Keeper memory context. Its
+  original process handle is live and the first group is still receiving.
+  There is no completed proposal, publication or Keeper reuse proof. This pass
+  does not replace the earlier full 18-Keeper corpus acceptance requirement.
+
+The next product check remains the same original Goal with genuine visual
+inputs, followed by exact-byte peer delivery and reuse. Statistics and memory
+work advance alongside it; the remaining formats, IDE behavior, proactive
+collaboration, all-runtime continuity and natural failover remain open.
+
 ## Current collaboration evidence at 2026-09-10T13:58Z
 
 The original exhibition task-001 reached Done at13:47:07Z through actual Kimi

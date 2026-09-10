@@ -100,6 +100,7 @@ let handle_content_with_endpoint
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  let content () = match content with Some bytes -> bytes | None -> invalid_arg "Patch has no replacement content" in
   let path = Safe_ops.json_string ~default:"" "path" args in
   let failure ?class_ ~target message =
     Keeper_tool_execution.failure ?class_ (error_json ~fields:[ "path", `String target ] message)
@@ -186,11 +187,11 @@ let handle_content_with_endpoint
                 (fun () ->
                   match mode with
                   | Overwrite ->
-                    write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:content
+                    write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:(content ())
                       ~extra_fields:[]
-                      ~evidence:(Some (Keeper_file_change_evidence.written content))
+                      ~evidence:(Some (Keeper_file_change_evidence.written (content ())))
                   | Append ->
-                    write ~content_mode:Append_tail ~mode_label:"append" ~body:content
+                    write ~content_mode:Append_tail ~mode_label:"append" ~body:(content ())
                       ~extra_fields:[] ~evidence:None
                   | Patch ->
                     let old_string = Safe_ops.json_string ~default:"" "old_string" args in

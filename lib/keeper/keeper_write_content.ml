@@ -1,4 +1,4 @@
-type t = Text of string | Artifact of Tool_output.artifact_ref
+type t = Text of string | Artifact of Tool_output.artifact_ref | Patch_input
 type error = Invalid of string | Unavailable of string
 let of_args = function
   | `Assoc fields ->
@@ -13,19 +13,26 @@ let of_args = function
         | Tool_output.Invalid_normalized_artifact_ref {detail} -> Error (Invalid detail)
         | Tool_output.Not_normalized_artifact_ref -> Error (Invalid "Expected an exported artifact reference"))
      | None, Some (`String content) -> Ok (Text content)
-     | None, None -> Ok (Text "")
+     | None, None ->
+       (match Keeper_tool_write_mode.of_args (`Assoc fields) with
+        | Ok Keeper_tool_write_mode.Patch -> Ok Patch_input
+        | Ok (Keeper_tool_write_mode.Overwrite | Keeper_tool_write_mode.Append) ->
+          Error (Invalid "Write requires explicit content or content_artifact")
+        | Error detail -> Error (Invalid (Keeper_tool_write_mode.rejection_message detail)))
      | None, Some _ -> Error (Invalid "content must be a string"))
   | _ -> Error (Invalid "Write arguments must be an object")
 let bytes ~config = function
-  | Text content -> Ok content
+  | Patch_input -> Ok None
+  | Text content -> Ok (Some content)
   | Artifact reference ->
     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.Workspace.base_path)
          ~sha256:reference.sha256 with
      | Error error -> Error (Unavailable (Tool_blob_store.fetch_error_to_string error))
      | Ok None -> Error (Unavailable "Write artifact is missing")
-     | Ok (Some content) when String.length content = reference.bytes -> Ok content
+     | Ok (Some content) when String.length content = reference.bytes -> Ok (Some content)
      | Ok (Some _) -> Error (Unavailable "Write artifact size mismatch"))
 let fields = function
+  | Patch_input -> []
   | Text content -> ["content", `String content]
   | Artifact reference -> ["content_artifact", Tool_output.normalized_artifact_ref_to_json reference]
 let failure = function

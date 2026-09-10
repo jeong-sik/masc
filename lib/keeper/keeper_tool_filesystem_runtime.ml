@@ -2278,6 +2278,7 @@ let handle_file_write_content_with_outcome
       ~(args : Yojson.Safe.t)
       ()
   =
+  let content () = match content with Some bytes -> bytes | None -> invalid_arg "Patch has no replacement content" in
   (* A tree the endpoint owns is not on this host: every capability below
      would write the bookkeeping bundle and miss the tree. Those writes go
      through the remote lane. *)
@@ -2440,7 +2441,7 @@ let handle_file_write_content_with_outcome
         ~gate_effect
         ~requested_target:target
         ~content_source
-        ~content
+        ~content:(content ())
         ()
     in
     after_gate ~confined ~target ~input
@@ -2496,7 +2497,7 @@ let handle_file_write_content_with_outcome
         meta.name
         target
         mode_label
-        (String.length content);
+        (String.length (content ()));
       Ok
         (Write_succeeded
            { payload =
@@ -2504,12 +2505,12 @@ let handle_file_write_content_with_outcome
                      ([ "ok", `Bool true
                       ; "path", `String target
                       ; "mode", `String mode_label
-                      ; "bytes_written", `Int (String.length content)
+                      ; "bytes_written", `Int (String.length (content ()))
                       ]
                       @ via_field)
            ; file_change_evidence =
                (match mode with
-                | Overwrite -> Some (Keeper_file_change_evidence.written content)
+                | Overwrite -> Some (Keeper_file_change_evidence.written (content ()))
                 | Append | Patch -> None)
            })
     in
@@ -2594,7 +2595,7 @@ let handle_file_write_content_with_outcome
                   ~recovery:publication_recovery_access
                   ~parent:final_parent
                   ~target:recovery_target
-                  content
+                  (content ())
                 |> Result.map_error (fun error ->
                   Content_write_capability { error; created_parents })))
       in
@@ -2656,7 +2657,7 @@ let handle_file_write_content_with_outcome
                     ~parent:final_parent
                     ~leaf
                     ~permissions:created_file_permissions
-                    content
+                    (content ())
                   |> Result.map_error (fun error ->
                     Content_write_capability { error; created_parents })))
         in
@@ -2722,7 +2723,7 @@ let handle_file_write_content_with_outcome
                                  ~keeper_name:meta.name
                                  ~target)
                             file
-                            content))))
+                            (content ())))))
       in
       (match
          Keeper_external_resource_lease.with_lease
@@ -3100,6 +3101,10 @@ end
 
 let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~meta
     ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+    Keeper_tool_filesystem_remote_write.handle ~turn_sandbox_factory ~config ~meta ~args
+  | Keeper_types_profile_sandbox.Shared_mount ->
   match Keeper_write_content.of_args args with
   | Error error -> Keeper_write_content.failure error
   | Ok content_source ->

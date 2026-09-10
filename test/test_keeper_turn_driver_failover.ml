@@ -2722,7 +2722,8 @@ let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate -> Ok runtime_id, None)
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempt_without_effect (Ok runtime_id) None)
       [ "media.fallback_model" ]
   in
   (match result with

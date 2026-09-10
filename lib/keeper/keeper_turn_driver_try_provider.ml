@@ -1512,6 +1512,7 @@ module For_testing = struct
 
   let truncation_recovery = truncation_recovery
   let persist_dropped_response = persist_dropped_response
+  let candidate_without_reasoning_effort = candidate_without_reasoning_effort
   let observe_request_wire_error = observe_request_wire_error
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement

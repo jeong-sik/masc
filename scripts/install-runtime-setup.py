@@ -1181,7 +1181,7 @@ def workspace_check(binary, base_path):
             return dict(base_path=str(base), status='ready')
         if receipt.get('status') != 'needs_attention' or not isinstance(receipt.get('issues'), list):
             raise SetupError('workspace preflight failed; existing data was preserved')
-        print('This workspace contains state that this version cannot open. Its files have not been changed.', file=sys.stderr)
+        print('This workspace contains state that this version cannot open. This preflight check made no changes; earlier upgrade backups remain available.', file=sys.stderr)
         for issue in receipt['issues']:
             print('  ' + terminal_text(issue['path']) + ': ' + terminal_text(issue['detail']), file=sys.stderr)
         if not sys.stdin.isatty():

@@ -333,7 +333,7 @@ let test_model_catalog_overlay_installs_config_root_overlay () =
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
+          Ok (Llm_provider.Model_catalog.empty, []))
         ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     in
@@ -355,7 +355,7 @@ let test_model_catalog_overlay_absent_is_noop () =
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
+          Ok (Llm_provider.Model_catalog.empty, []))
         ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     in
@@ -379,6 +379,64 @@ let test_model_catalog_overlay_invalid_fails_loud () =
     with
     | (_ : string option) ->
       Alcotest.fail "expected Config_error for invalid overlay"
+    | exception Env_config_core.Config_error message ->
+      Alcotest.(check bool)
+        "error names overlay path"
+        true
+        (String_util.contains_substring message "agent-core-models-overlay.toml");
+      Alcotest.(check int) "no install" 0 !set_overlay_calls)
+
+let test_model_catalog_overlay_skips_poisoned_entries () =
+  with_temp_dir "model-catalog-overlay-lenient" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file
+      overlay
+      "[[models]]\n\
+       id_prefix = \"lenient-good-model\"\n\
+       supports_tools = true\n\
+       [[models]]\n\
+       id_prefix = \"lenient-stale-model\"\n\
+       supports_extended_thinking = true\n";
+    let installed = ref None in
+    let result =
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root
+        ~set_overlay:(fun catalog -> installed := Some catalog)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root overlay resolution"
+     | Some path ->
+       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
+    match !installed with
+    | None -> Alcotest.fail "expected the surviving overlay rows to install"
+    | Some catalog ->
+      Alcotest.(check bool)
+        "valid row survives"
+        true
+        (Option.is_some (Llm_provider.Model_catalog.lookup catalog "lenient-good-model"));
+      Alcotest.(check bool)
+        "poisoned row skipped"
+        true
+        (Option.is_none (Llm_provider.Model_catalog.lookup catalog "lenient-stale-model")))
+
+let test_model_catalog_overlay_broken_toml_still_fails_loud () =
+  with_temp_dir "model-catalog-overlay-broken-toml" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file overlay "not toml";
+    let set_overlay_calls = ref 0 in
+    match
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    with
+    | (_ : string option) ->
+      Alcotest.fail "expected Config_error for broken-TOML overlay"
     | exception Env_config_core.Config_error message ->
       Alcotest.(check bool)
         "error names overlay path"
@@ -423,7 +481,7 @@ let test_explicit_model_catalog_replacement_precedes_overlay () =
         ignore
           (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
              ~config_root
-             ~load_catalog:(fun _ -> Ok overlay)
+             ~load_catalog:(fun _ -> Ok (overlay, []))
              ());
         match Llm_provider.Model_catalog.global () with
         | None -> Alcotest.fail "expected explicit global catalog"
@@ -4809,6 +4867,12 @@ let () =
           Alcotest.test_case
             "model catalog overlay invalid fails loud"
             `Quick test_model_catalog_overlay_invalid_fails_loud;
+          Alcotest.test_case
+            "model catalog overlay skips poisoned entries"
+            `Quick test_model_catalog_overlay_skips_poisoned_entries;
+          Alcotest.test_case
+            "model catalog overlay broken TOML still fails loud"
+            `Quick test_model_catalog_overlay_broken_toml_still_fails_loud;
           Alcotest.test_case
             "explicit model catalog replacement precedes overlay"
             `Quick test_explicit_model_catalog_replacement_precedes_overlay;

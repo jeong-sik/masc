@@ -52,8 +52,30 @@ let test_stale_connection_never_receives_key () =
     Runtime_setup_credentials.remove_uncommitted pending;
     check bool "uncommitted key removed" false (Sys.file_exists (Runtime_setup_credentials.reference_path pending)))
 
+let with_fixture_catalog home f =
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore previous_runtime;
+    match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) (fun () ->
+      let catalog_path = Filename.concat home "fixture-models.toml" in
+      Out_channel.with_open_bin catalog_path (fun out -> output_string out {|[[models]]
+id_prefix = "fixture-chat"
+provider_name = "fixture-http"
+base = "openai_chat"
+max_context_tokens = 1024
+max_output_tokens = 128
+supports_tools = true
+|});
+      (match Llm_provider.Model_catalog.load_file catalog_path with
+       | Error error -> fail ("fixture catalog: " ^ error)
+       | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+      f ())
+
 let test_applied_key_is_retained () =
-  with_home (fun home ->
+  with_home (fun home -> with_fixture_catalog home (fun () ->
     let path = Filename.concat home "runtime.toml" in
     let original = {|[providers."fixture-http"]
 display-name = "Fixture HTTP"
@@ -70,6 +92,8 @@ max-context = 1024
 default = "fixture-http.chat"
 |} in
     Out_channel.with_open_bin path (fun out -> output_string out original);
+    (match Runtime.validate_config_text ~runtime_config_path:path original with
+     | Ok () -> () | Error error -> fail ("fixture runtime validation: " ^ error));
     let expected = Runtime.config_observation ~path original in
     let pending = match Runtime_setup_credentials.save ~secret:"committed-fixture-key" () with
       | Ok pending -> pending | Error error -> fail (Runtime_setup_credentials.error_message error) in
@@ -91,7 +115,7 @@ default = "fixture-http.chat"
     match Runtime_adapter.binding_to_provider_config config binding with
     | Error error -> fail error
     | Ok materialized -> check string "native request materializes saved key" "committed-fixture-key"
-        (Llm_provider.Secret.header_value materialized.api_key))
+        (Llm_provider.Secret.header_value materialized.api_key)))
 
 let () = run "private setup credentials" ["storage", [
   test_case "applied provider retains its file" `Quick test_applied_key_is_retained;

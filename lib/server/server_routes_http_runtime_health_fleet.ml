@@ -285,7 +285,7 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
     let backlog_reason name count reasons =
       if count > 0 then Printf.sprintf "%s=%d" name count :: reasons else reasons
     in
-    let status_reasons =
+    let storage_reasons =
       []
       |> (fun reasons ->
         if not counts_complete then "storage_counts_incomplete" :: reasons else reasons)
@@ -295,10 +295,29 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
         if transition_outbox_count > 0
         then "transition_projection_pending" :: reasons
         else reasons)
+    in
+    let status_reasons =
+      storage_reasons
       |> backlog_reason "runnable_backlog" runnable_backlog_count
       |> backlog_reason "recoverable_backlog" recoverable_backlog_count
       |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
       |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
+      |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
+      |> List.rev
+    in
+    (* The subset an operator has to answer, which is not the same list as what
+       is happening. [operator_action_required] above is already the union of
+       the storage predicates and [actionable_backlog_count]; these are the
+       reasons behind exactly that, built from the same combinators.
+       [runnable_backlog] is work in flight, and [retained_disabled] and
+       [paused_dead] are the operator's own standing decision -- #34781 stopped
+       them opening the alarm, and they kept arriving in the operator list
+       anyway, because the health rollup hoisted every [status_reasons] entry
+       of a section whose gate had opened for another reason (#34894). They
+       still travel in [status_reasons], so the backlog stays on screen. *)
+    let operator_action_reasons =
+      storage_reasons
+      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
       |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
       |> List.rev
     in
@@ -308,16 +327,19 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
       |> without "schema"
       |> without "queue_residence"
       |> without "status_reasons"
+      |> without "operator_action_reasons"
       |> without "storage_integrity"
       |> without "work_liveness"
       |> without "backlog_clean"
     in
     `Assoc
-      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v5"
+      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v6"
        ; "queue_residence", queue_residence
        ; "status", `String status
        ; "operator_action_required", `Bool operator_action_required
        ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
+       ; ( "operator_action_reasons"
+         , `List (List.map (fun reason -> `String reason) operator_action_reasons) )
        ; ( "backlog_clean"
          , `Bool
              (counts_complete

@@ -1560,10 +1560,13 @@ describe('fetchDashboardFullHealth', () => {
         last_error_age_sec: null,
       },
       keeper_event_queue: {
-        schema: 'masc.keeper_event_queue.fleet_summary.v5',
+        schema: 'masc.keeper_event_queue.fleet_summary.v6',
         status: 'warning',
         operator_action_required: false,
         status_reasons: ['runnable_backlog=18'],
+        // v6: the subset an operator has to answer. A runnable backlog is work
+        // in flight, so it is on screen and not in here (#34894).
+        operator_action_reasons: [],
         backlog_clean: false,
         storage_integrity: {
           status: 'ok',

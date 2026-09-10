@@ -775,12 +775,13 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         "keeper_board_event_collection" );
     ( "keeper_event_queue",
       `Assoc
-        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v5")
+        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v6")
         ; ("queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
               (Unknown Queue_observation_incomplete)))
         ; ("status", `String status)
         ; ("operator_action_required", `Bool false)
         ; ("status_reasons", `List [])
+        ; ("operator_action_reasons", `List [])
         ; ("backlog_clean", `Bool false)
         ; ( "storage_integrity"
           , `Assoc

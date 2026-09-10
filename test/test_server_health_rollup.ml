@@ -49,6 +49,52 @@ let test_error_grade_raises_a_reason () =
   check (list string) "the blocker is the reason, prefixed"
     [ "keeper_fleet_safety:no owner" ] reasons
 
+(* #34894: keeper_event_queue reports a paused-dead backlog in status_reasons
+   and leaves it out of the actionable ones, because a keeper the operator
+   paused is their own standing decision. Before this, the gate opening for
+   the recoverable backlog carried the paused-dead line up with it. *)
+let test_declared_action_reasons_are_the_ones_carried () =
+  let _, action, reasons =
+    summary
+      ~sections:
+        [ ( "keeper_event_queue"
+          , `Assoc
+              [ "status", `String "degraded"
+              ; "operator_action_required", `Bool true
+              ; ( "status_reasons"
+                , `List
+                    [ `String "recoverable_backlog=105"
+                    ; `String "runnable_backlog=33"
+                    ; `String "paused_dead_backlog=41"
+                    ] )
+              ; ( "operator_action_reasons"
+                , `List [ `String "recoverable_backlog=105" ] )
+              ] )
+        ]
+      ()
+  in
+  check bool "the section still needs an operator" true action;
+  check (list string) "only the declared reason reaches the operator list"
+    [ "keeper_event_queue:recoverable_backlog=105" ] reasons
+
+(* A section that declares none is not silenced: the gate is open, so what is
+   happening is what the operator gets. *)
+let test_a_section_declaring_no_action_reasons_falls_back () =
+  let _, _, reasons =
+    summary
+      ~sections:
+        [ ( "keeper_reaction_ledger"
+          , `Assoc
+              [ "status", `String "error"
+              ; "status_reasons", `List [ `String "reaction_ledger_pending_stimulus" ]
+              ; "operator_action_reasons", `List []
+              ] )
+        ]
+      ()
+  in
+  check (list string) "status_reasons carry when none are declared"
+    [ "keeper_reaction_ledger:reaction_ledger_pending_stimulus" ] reasons
+
 let test_status_reasons_win_over_the_fallback () =
   let _, _, reasons =
     summary
@@ -167,6 +213,10 @@ let () =
     ; ( "reasons"
       , [ test_case "an error grade raises a reason" `Quick
             test_error_grade_raises_a_reason
+        ; test_case "declared action reasons are the ones carried" `Quick
+            test_declared_action_reasons_are_the_ones_carried
+        ; test_case "a section declaring no action reasons falls back" `Quick
+            test_a_section_declaring_no_action_reasons_falls_back
         ; test_case "status_reasons win over the fallback" `Quick
             test_status_reasons_win_over_the_fallback
         ; test_case "a fired boot guard degrades" `Quick

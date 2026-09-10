@@ -36,9 +36,12 @@ type gate_obligation = private
   { approval_id : string; tool_name : string; input_hash : string }
 val gate_obligation : approval_id:string -> tool_name:string -> input_hash:string ->
   (gate_obligation, string) result
+type session_scope
+val session_scope : string list -> (session_scope, string) result
+val session_scope_components : session_scope -> string list
 type gate_wait = private
-  { checkpoint : Keeper_checkpoint_ref.t; obligations : gate_obligation list }
-val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> obligations:gate_obligation list ->
+  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list }
+val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   (gate_wait, string) result
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }

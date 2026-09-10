@@ -5521,3 +5521,7 @@
  (name test_runtime_setup_credentials)
  (modules test_runtime_setup_credentials)
  (libraries masc_test_deps))
+
+(include stanzas/test_sandbox_prerequisites.inc)
+
+(include stanzas/test_apple_container_install.inc)

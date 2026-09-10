@@ -240,6 +240,17 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
             try run_process [ "docker"; "info"; "--format"; "{{.OSType}}" ] with
             | Unix.Unix_error (Unix.ENOENT, _, _) ->
               prerr_endline "The docker executable was not found on PATH.";
+              if Executable_path.command_available "container" then
+                prerr_endline
+                  "Apple Container is installed; Keepers on the microvm \
+                   profile can use it, but imp's default profile needs \
+                   Docker (see docs/INSTALL.md)."
+              else
+                prerr_endline
+                  "On Apple Silicon with macOS 26+, Apple Container is a \
+                   separate supported runtime for Keepers on the microvm \
+                   profile; imp's default profile still requires Docker \
+                   (see docs/INSTALL.md).";
               1);
         require_ok "Sandbox image preparation" prepare_image;
         prepare_server ~base_path ~port ~owned;

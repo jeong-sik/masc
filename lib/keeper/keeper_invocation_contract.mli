@@ -65,4 +65,4 @@ val prompt : request -> string
 val target_of_json : Yojson.Safe.t -> (target, request_error) result
 val target_name_of_target : target -> string
 
-val artifacts : request -> Tool_output.artifact_ref list
+val artifacts : request -> Keeper_peer_artifact_ref.t list

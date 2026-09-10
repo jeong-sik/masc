@@ -7964,7 +7964,7 @@ let test_peer_artifact_materializes_exact_binary () =
       Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value ~default:"" previous_fake)) (fun () ->
     let exported = Masc.Keeper_peer_artifact.handle ~config ~meta:sender
         ~turn_sandbox_factory:None ~write:(fun _ -> fail "export attempted a write")
-        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"]) in
+        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"; "purpose", `String "Poster image"]) in
     check bool "sender export completed" true (exported.disposition = Tool_result.Completed ());
     let exported_json = Yojson.Safe.Util.member "artifact" (parse_json exported.raw_output) in
     let request = match Masc.Keeper_invocation_contract.request_of_json
@@ -7977,13 +7977,13 @@ let test_peer_artifact_materializes_exact_binary () =
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
         ~turn_sandbox_factory:None ~write ~args:(`Assoc ["action", `String "materialize";
-          "path", `String path; "artifact", Tool_output.normalized_artifact_ref_to_json reference]) in
+          "path", `String path; "artifact", Masc.Keeper_peer_artifact_ref.to_json reference]) in
     let result = invoke "received.png" in
     check bool "write completed" true (result.disposition = Tool_result.Completed ());
     let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
     check string "binary exact" bytes (Fs_compat.load_file path);
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
-    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.sha256 0 2)) reference.sha256 in
+    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.blob.sha256 0 2)) reference.blob.sha256 in
     Fs_compat.save_file blob "corrupted";
     check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
 

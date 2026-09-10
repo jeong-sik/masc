@@ -5,7 +5,7 @@ type target = Keeper of Keeper_id.Keeper_name.t
 type request =
   { target : target
   ; prompt : string
-  ; artifacts : Tool_output.artifact_ref list
+  ; artifacts : Keeper_peer_artifact_ref.t list
   }
 
 type direct_message =
@@ -248,11 +248,10 @@ let request_of_json json =
       let rec parse = function
         | [] -> Ok []
         | item :: rest ->
-          (match Tool_output.normalized_artifact_ref_of_json item with
-           | Tool_output.Decoded_normalized_artifact_ref reference ->
+          (match Keeper_peer_artifact_ref.of_json item with
+           | Ok reference ->
              let* rest = parse rest in Ok (reference :: rest)
-           | Tool_output.Not_normalized_artifact_ref
-           | Tool_output.Invalid_normalized_artifact_ref _ ->
+           | Error _ ->
              Error (Invalid_wire_value {field="artifacts"; expected="exported artifact references"})) in
       parse items
     | Some _ -> Error (Invalid_wire_value {field="artifacts"; expected="array"}) in

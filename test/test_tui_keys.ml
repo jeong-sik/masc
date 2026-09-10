@@ -409,7 +409,7 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
 let test_keeper_runs_selection_survives_a_shorter_list () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let keeper name : Tui_decode.keeper =
-    { k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
+    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
     ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
     ; k_last_turn_ts = ""; k_last_proactive_outcome = "never"
     ; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z"

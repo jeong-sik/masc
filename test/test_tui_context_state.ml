@@ -5,7 +5,7 @@ module Context_state = Masc_tui_context_state
 
 let keeper =
   Decode.
-    { k_name = "keeper-main";
+    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = "keeper-main";
       k_trace_id = "trace-current";
       k_paused = false;
       k_current_task_id = None;

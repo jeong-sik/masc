@@ -980,6 +980,27 @@ let () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+      let runtime_path = Filename.concat workspace_dir "runtime.toml" in
+      Fs_compat.save_file runtime_path {|
+[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> () | Error detail -> failwith detail);
       let meta =
         { meta with runtime =
             { meta.runtime with usage =

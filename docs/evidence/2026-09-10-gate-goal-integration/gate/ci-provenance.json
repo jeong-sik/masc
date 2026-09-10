@@ -1,0 +1,35 @@
+{
+  "run_id": 34417696485,
+  "head_sha": "0415aba5b2239db6344ce67e8b66749fde06c8c8",
+  "artifact": {
+    "id": 10129831962,
+    "node_id": "MDg6QXJ0aWZhY3QxMDEyOTgzMTk2Mg==",
+    "name": "runtime-probe-macos-arm64-0415aba5b2239db6344ce67e8b66749fde06c8c8-attempt-1",
+    "size_in_bytes": 49581656,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10129831962",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10129831962/zip",
+    "expired": false,
+    "digest": "sha256:c4c64f45b1e3a4c3ab439edee70d1851f0e0f530ca77bcb00be2f7388fe84140",
+    "created_at": "2026-09-09T23:41:46Z",
+    "updated_at": "2026-09-09T23:41:46Z",
+    "expires_at": "2026-09-16T23:41:39Z",
+    "workflow_run": {
+      "id": 34417696485,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "test/gate-goal-integration",
+      "head_sha": "0415aba5b2239db6344ce67e8b66749fde06c8c8"
+    }
+  },
+  "manifest": {
+    "commit": "0415aba5b2239db6344ce67e8b66749fde06c8c8",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "d32cfcbda061d131784a6b8176b3b8d6cd1b397c45c6793b0eec86af206bd658",
+      "masc_tui.exe": "05005c1f49f73b720fa3cec40974ff6344278a79d6b9d7ed0f9eb20058f1c2e7",
+      "masc_browser_host.exe": "81efacfa537d6e6a42028df3fa5c05d28fadeb69830db4442cb50ae0c5ba246a"
+    }
+  }
+}

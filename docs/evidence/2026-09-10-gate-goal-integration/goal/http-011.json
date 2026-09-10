@@ -1,0 +1,7 @@
+{
+  "path": "/api/v1/goals/confirmation?goal_id=goal-1788997671212-26ab4dbe",
+  "request": null,
+  "authenticated": false,
+  "status": 401,
+  "raw": "{\"error\":\"[AuthError] Unauthorized: Authentication required. Use 'Authorization: Bearer <token>' header.\",\"auth_error_code\":\"missing_token\"}"
+}

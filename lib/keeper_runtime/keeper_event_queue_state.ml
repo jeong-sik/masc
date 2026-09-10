@@ -61,6 +61,7 @@ type projected_source_kind =
   | Source_hitl_resolved
   | Source_ask_answered
   | Source_completion_authority_rejected
+  | Source_task_outcome
   | Source_task_cancelled
   | Source_workspace_message
   | Source_delegate_completed
@@ -250,6 +251,7 @@ let projected_source_kind = function
   | Keeper_event_queue.Ask_answered _ -> Source_ask_answered
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Source_completion_authority_rejected
+  | Keeper_event_queue.Task_outcome _ -> Source_task_outcome
   | Keeper_event_queue.Task_cancelled _ -> Source_task_cancelled
   | Keeper_event_queue.Workspace_message _ -> Source_workspace_message
   | Keeper_event_queue.Delegate_completed _ -> Source_delegate_completed
@@ -725,6 +727,9 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Completion_authority_rejected _
+  (* The approval twin of the rejection: it is not a repair receipt either,
+     and its producer is the one being woken. *)
+  | Keeper_event_queue.Task_outcome _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   (* Transferable receipts are the ones an operator can hand to another
@@ -1587,6 +1592,7 @@ let projected_source_kind_to_string = function
   | Source_hitl_resolved -> "hitl_resolved"
   | Source_ask_answered -> "ask_answered"
   | Source_completion_authority_rejected -> "completion_authority_rejected"
+  | Source_task_outcome -> "task_outcome"
   | Source_task_cancelled -> "task_cancelled"
   | Source_workspace_message -> "workspace_message"
   | Source_delegate_completed -> "keeper_delegate_completed"
@@ -1603,6 +1609,7 @@ let source_kind_of_string = function
   | "hitl_resolved" -> Ok Source_hitl_resolved
   | "ask_answered" -> Ok Source_ask_answered
   | "completion_authority_rejected" -> Ok Source_completion_authority_rejected
+  | "task_outcome" -> Ok Source_task_outcome
   | "task_cancelled" -> Ok Source_task_cancelled
   | "workspace_message" -> Ok Source_workspace_message
   | "keeper_delegate_completed" -> Ok Source_delegate_completed

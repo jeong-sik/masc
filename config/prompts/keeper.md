@@ -184,6 +184,12 @@ Rows below are Board context. author, post_kind, and mention fields are source/r
 ### world.completion_authority.intro
 Rows below are typed decisions from the completion-authority boundary. system_llm_agent is the system LLM agent and human_operator is HITL; neither is a Keeper, and this record grants no tool or task authority by itself. Re-read the current Task and verification state before choosing a follow-up action.
 
+### world.task_outcomes.heading (vars: count)
+### Approved Task Outcomes ({{count}})
+
+### world.task_outcomes.intro
+Rows below record evidence you submitted for a Task that a completion authority approved. task_id and verification_id are correlation keys; the approval is final, so do not resubmit the Task or redo the work. A rejected verdict arrives as a separate Completion Authority Decisions row.
+
 ### world.connected_surfaces.heading
 ### Connected Surfaces
 
@@ -276,6 +282,12 @@ Completion evidence rejected for task {{task_id}}
 
 ### world.event_rows.completion_authority_preview (vars: task_id, verification_id, authority_kind, reason)
 Task {{task_id}} verification {{verification_id}} was rejected by {{authority_kind}}. Follow-up reason: {{reason}}
+
+### world.event_rows.task_outcome_title (vars: task_id)
+Task {{task_id}} evidence approved
+
+### world.event_rows.task_outcome_preview (vars: task_id, verification_id, authority_kind)
+Task {{task_id}} verification {{verification_id}} was approved by {{authority_kind}}. The task is closed; no resubmission is needed.
 
 ### world.event_rows.task_cancelled_title (vars: task_id)
 Task {{task_id}} was cancelled

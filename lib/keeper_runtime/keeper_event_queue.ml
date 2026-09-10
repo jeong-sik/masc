@@ -101,6 +101,30 @@ type stimulus_payload =
      for a median of 21.9s against a median 2.7ms of work. One waited 47
      minutes. *)
   | Composition_completed of composition_completion
+  (* A completion authority approved this Keeper's submitted evidence. The
+     rejection twin ([Completion_authority_rejected]) has always woken the
+     producer; the approval ended the loop in silence — the Board receipt is
+     Unlisted ("approval wakes nobody") and the producer learned its task
+     closed only by noticing its current-task projection empty on some later
+     cycle (#25868). Pointer-only like the twins: the verdict record and the
+     Board receipt stay the content stores, this carries the correlation keys
+     so the producer's next turn can act without a scan. *)
+  | Task_outcome of task_outcome
+
+and task_outcome = {
+  to_task_id : string;
+  (* The task whose evidence was approved; identical to the producer's own
+     submission key. *)
+  to_verification_id : string;
+  (* The verification the authority judged, so the producer can correlate the
+     wake with its own submit record. *)
+  to_producer : string;
+  (* Which Keeper submitted the evidence — the recipient identity. Duplicated
+     in the payload (beyond being the queue key) so a drained stimulus row can
+     name its subject without a backlog read, matching
+     [completion_authority_rejection]'s self-describing shape. *)
+  to_authority : Masc_domain.completion_authority;
+}
 
 and board_attention = {
   candidate_id : string;
@@ -254,6 +278,12 @@ let completion_authority_rejection_post_id
 let task_cancellation_post_id (cancellation : task_cancellation) =
   "task-cancelled:" ^ cancellation.tc_task_id
 
+(* An approval is terminal and one task can be approved at most once, so the
+   task id alone is a complete key — the verification id rides along for
+   correlation, not identity. *)
+let task_outcome_post_id (outcome : task_outcome) =
+  "task-outcome:" ^ outcome.to_task_id
+
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
   | Hitl_rejected _ -> "reject"
@@ -296,7 +326,7 @@ let identity_payload = function
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Ask_answered _
     | Completion_authority_rejected _ | Workspace_message _
-    | Delegate_completed _ | Composition_completed _
+    | Delegate_completed _ | Composition_completed _ | Task_outcome _
     ) as payload ->
     payload
 
@@ -424,6 +454,7 @@ let payload_kind_label = function
   | Workspace_message _ -> "workspace_message"
   | Delegate_completed _ -> "keeper_delegate_completed"
   | Composition_completed _ -> "keeper_composition_completed"
+  | Task_outcome _ -> "task_outcome"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -432,7 +463,7 @@ let is_board_signal = function
   | Ask_answered _
   | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ | Delegate_completed _
-  | Composition_completed _ ->
+  | Composition_completed _ | Task_outcome _ ->
     false
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -449,7 +480,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-  | Delegate_completed _ | Composition_completed _ ->
+  | Delegate_completed _ | Composition_completed _ | Task_outcome _ ->
     None
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -742,6 +773,19 @@ let payload_to_yojson = function
       ; "request_id", `String cc.cc_request_id
       ; "tool", `String cc.cc_tool
       ; "terminal", terminal
+      ]
+  | Task_outcome outcome ->
+    `Assoc
+      [ "kind", `String "task_outcome"
+      ; "task_id", `String outcome.to_task_id
+      ; "verification_id", `String outcome.to_verification_id
+      ; "producer", `String outcome.to_producer
+      ; ( "authority_kind"
+        , `String
+            (Masc_domain.completion_authority_kind outcome.to_authority) )
+      ; ( "authority_actor"
+        , `String
+            (Masc_domain.completion_authority_actor outcome.to_authority) )
       ]
 
 let continuation_channel_field fields =
@@ -1065,6 +1109,49 @@ let payload_of_yojson json =
     Ok
       (Delegate_completed
          { dc_operation_id = operation_id; dc_keeper = keeper; dc_terminal = terminal })
+  | "task_outcome" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:
+          [ "kind"
+          ; "task_id"
+          ; "verification_id"
+          ; "producer"
+          ; "authority_kind"
+          ; "authority_actor"
+          ]
+        fields
+    in
+    let* task_id = string_field ~context "task_id" fields in
+    let* verification_id = string_field ~context "verification_id" fields in
+    let* producer = string_field ~context "producer" fields in
+    let* authority_kind = string_field ~context "authority_kind" fields in
+    let* authority_actor = string_field ~context "authority_actor" fields in
+    let* () =
+      if String.equal (String.trim authority_actor) ""
+      then Error "completion authority actor must not be empty"
+      else Ok ()
+    in
+    let* authority =
+      match authority_kind with
+      | "system_llm_agent" ->
+        Ok (Masc_domain.System_llm_agent { agent_run_id = authority_actor })
+      | "human_operator" ->
+        Ok (Masc_domain.Human_operator { operator_id = authority_actor })
+      | value ->
+        Error
+          (Printf.sprintf
+             "unknown completion authority kind: %s"
+             value)
+    in
+    Ok
+      (Task_outcome
+         { to_task_id = task_id
+         ; to_verification_id = verification_id
+         ; to_producer = producer
+         ; to_authority = authority
+         })
   | "keeper_composition_completed" ->
     let* () =
       exact_fields
@@ -1188,5 +1275,8 @@ let continuation_channel_of_payload = function
   | Delegate_completed _
   (* The submitter is the one being woken; there is nowhere further to
      route it. *)
-  | Composition_completed _ -> None
+  | Composition_completed _
+  (* The producer is the one being woken; there is nowhere further to route
+     it. *)
+  | Task_outcome _ -> None
 ;;

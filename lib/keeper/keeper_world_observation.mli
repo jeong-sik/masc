@@ -53,6 +53,9 @@ type pending_board_event_kind =
           projection. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
+  | Task_outcome of Keeper_event_queue.task_outcome
+      (** The approval twin: a completion authority approved this Keeper's
+          evidence. Payload-carrying like {!Completion_authority_rejected}. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation
       (** Another Keeper cancelled a Task this Keeper authored. Payload-carrying
           like {!Completion_authority_rejected}: the canceller's reason is the
@@ -107,6 +110,11 @@ val is_board_activity_event : pending_board_event -> bool
 val is_scheduled_automation_event : pending_board_event -> bool
 
 val is_completion_authority_rejection_event : pending_board_event -> bool
+
+val is_task_outcome_event : pending_board_event -> bool
+(** The approval twin of [is_completion_authority_rejection_event]: its own
+    system-authority layer, disjoint from Board Activity and Scheduled
+    Automation. *)
 
 val is_task_cancellation_event : pending_board_event -> bool
 (** A cancellation of a Task this Keeper authored. Disjoint from the Board
@@ -264,6 +272,7 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
+  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 
@@ -278,6 +287,7 @@ type turn_reason =
   | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
+  | Task_outcome_pending
   | Task_cancellation_pending
   | Workspace_message_pending
   | Scheduled_autonomous_turn

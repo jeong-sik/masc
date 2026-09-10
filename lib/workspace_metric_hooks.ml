@@ -534,14 +534,53 @@ let install () =
          ~claim);
 
   Atomic.set Workspace_hooks.verification_notify_verdict_fn
-    (fun ~task_id ~authority ~verification_id ~decision ->
+    (fun config ~task_id ~producer ~authority ~verification_id ~decision ->
        match decision with
        | `Approve notes ->
          Verification_protocol.notify_approve_verification
            ~task_id
            ~authority
            ~verification_id
-           ~notes
+           ~notes;
+         (* The approval side of the loop: without this the producer learns
+            its task closed only by noticing its projection empty (#25868).
+            Delivery is best-effort at this boundary — the Board receipt was
+            already committed above, and a Keeper projection must never be
+            able to fail the verdict commit that already happened. *)
+         let delivered =
+           Keeper_task_outcome_wake.wake_approved_producer
+             ~config
+             ~producer
+             ~task_id
+             ~verification_id
+             ~authority
+         in
+         (match delivered with
+          | Keeper_task_outcome_wake.Signaled { keeper_name } ->
+            Log.Misc.info
+              "task outcome approved; producer signaled task_id=%s keeper=%s"
+              task_id keeper_name
+          | Keeper_task_outcome_wake.Durable_deferred { keeper_name; _ } ->
+            Log.Misc.info
+              "task outcome committed; producer wake deferred task_id=%s keeper=%s"
+              task_id keeper_name
+          | Keeper_task_outcome_wake.Durable_wake_failed { keeper_name; detail } ->
+            Log.Misc.warn
+              "task outcome committed; live wake failed task_id=%s keeper=%s detail=%s"
+              task_id keeper_name detail
+          | Keeper_task_outcome_wake.Unroutable_producer { producer; _ } ->
+            Log.Misc.warn
+              "task outcome committed; producer keeper unavailable task_id=%s producer=%s"
+              task_id producer
+          | Keeper_task_outcome_wake.Producer_identity_lookup_failed
+              { producer; detail; _ } ->
+            Log.Misc.warn
+              "task outcome committed; producer lookup failed task_id=%s producer=%s detail=%s"
+              task_id producer detail
+          | Keeper_task_outcome_wake.Durable_queue_failed { keeper_name; detail } ->
+            Log.Misc.error
+              "task outcome durable queue write failed task_id=%s keeper=%s detail=%s"
+              task_id keeper_name detail)
        | `Reject reason ->
          Verification_protocol.notify_reject_verification
            ~task_id

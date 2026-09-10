@@ -598,7 +598,7 @@ let test_rejection_delivery_then_changed_submission_completes () =
        check string "world event verification" first_id rejection.car_verification_id;
        check string "world event reason" reason rejection.car_reason
      | _ -> fail "delivered rejection did not reach the world observation");
-    reviewer_response := Reviewer_verdict (AR.Approve "");
+    reviewer_response := Reviewer_verdict (AR.Approve "solid evidence");
     let revised_refs = [ "note:corrected completion evidence after rejection" ] in
     let second = attempt_done ~config ~meta ~publication_recovery ~ctx_work
       ~task_id:"task-001" ~result:"Corrected the rejected evidence"
@@ -614,6 +614,14 @@ let test_rejection_delivery_then_changed_submission_completes () =
         second
       | ids -> failf "expected two submissions, got %d" (List.length ids)
     in
+    let matching_approval stimulus =
+      match stimulus.Keeper_event_queue.payload with
+      | Keeper_event_queue.Task_outcome outcome ->
+        String.equal outcome.to_verification_id second_id
+      | _ -> false
+    in
+    await_condition ~clock "durable approval delivery"
+      (fun () -> List.exists matching_approval (queue ()));
     check_submitted_evidence config second_id
       (revised_refs @ [ "note:Corrected the rejected evidence" ]);
     (match await_authority_verdict ~clock config "task-001" with

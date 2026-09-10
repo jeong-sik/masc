@@ -761,6 +761,89 @@ let () =
                { rejection with car_reason = "different reason" }
          }));
 
+  (* The approval twin mirrors the rejection block above: typed fields survive
+     the codec, the projection is not Board activity, the trigger is its own
+     constructor (never a rejection), and identity ignores arrival time. *)
+  let outcome : task_outcome =
+    { to_task_id = "task-approved"
+    ; to_producer = "polisher"
+    ; to_verification_id = "vrf-approved"
+    ; to_authority = Masc_domain.System_llm_agent { agent_run_id = "judge-approved" }
+    }
+  in
+  let outcome_stimulus : stimulus =
+    { post_id = task_outcome_post_id outcome
+    ; urgency = Immediate
+    ; arrived_at = 20.0
+    ; payload = Task_outcome outcome
+    }
+  in
+  assert (
+    String.equal (payload_kind_label outcome_stimulus.payload) "task_outcome");
+  assert (
+    String.equal outcome_stimulus.post_id "task-outcome:task-approved:vrf-approved");
+  (match stimulus_of_yojson (stimulus_to_yojson outcome_stimulus) with
+   | Ok
+       { payload =
+           Task_outcome { to_task_id; to_verification_id; to_authority }
+       ; _
+       } ->
+     assert (String.equal to_task_id "task-approved");
+     assert (String.equal to_verification_id "vrf-approved");
+     assert (to_authority = outcome.to_authority)
+   | Ok _ -> Alcotest.fail "task outcome codec changed payload shape"
+   | Error msg -> Alcotest.fail ("task outcome codec failed: " ^ msg));
+  let outcome_event =
+    match
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+        ~meta:(event_queue_test_meta "producer" "trace-producer")
+        outcome_stimulus
+    with
+    | Ok (Some event) -> event
+    | Ok None -> Alcotest.fail "task outcome produced no prompt event"
+    | Error _ -> Alcotest.fail "task outcome prompt projection failed"
+  in
+  assert (
+    match outcome_event.event_kind with
+    | Masc.Keeper_world_observation.Task_outcome decoded -> decoded = outcome
+    | _ -> false);
+  assert (String.equal outcome_event.post_id outcome_stimulus.post_id);
+  assert (
+    String_util.string_contains_substring
+      ~needle:"approved"
+      outcome_event.title);
+  assert (
+    not (Masc.Keeper_world_observation.is_board_activity_event outcome_event));
+  assert (
+    not
+      (Masc.Keeper_world_observation.is_scheduled_automation_event outcome_event));
+  assert (
+    not
+      (Masc.Keeper_world_observation.is_completion_authority_rejection_event
+         outcome_event));
+  assert (Masc.Keeper_world_observation.is_task_outcome_event outcome_event);
+  assert (
+    match
+      Masc.Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus
+        outcome_stimulus
+    with
+    | Some Masc.Keeper_world_observation.Task_outcome_stimulus -> true
+    | Some
+        ( Masc.Keeper_world_observation.Bootstrap_stimulus
+        | Masc.Keeper_world_observation.Scheduled_automation_stimulus
+        | Masc.Keeper_world_observation.Connector_attention_stimulus
+        | Masc.Keeper_world_observation.Ask_answered_stimulus
+        | Masc.Keeper_world_observation.Hitl_resolved_stimulus
+        | Masc.Keeper_world_observation.Completion_authority_rejection_stimulus
+        | Masc.Keeper_world_observation.Task_cancellation_stimulus
+        | Masc.Keeper_world_observation.Workspace_message_stimulus )
+    | None ->
+      false);
+  assert (
+    stimulus_identity_equal
+      outcome_stimulus
+      { outcome_stimulus with arrived_at = 21.0 });
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

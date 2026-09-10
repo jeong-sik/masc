@@ -1504,7 +1504,10 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # `init` writes what is missing and leaves the rest; --force overwrites.
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
-    init_args=(init --base-path "$BASE_PATH")
+    # --record-default: this is the operator's workspace, so later commands
+    # should find it without being told again. `masc init` does not record by
+    # default, because a throwaway workspace must not become the machine's.
+    init_args=(init --base-path "$BASE_PATH" --record-default)
     [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_summary"

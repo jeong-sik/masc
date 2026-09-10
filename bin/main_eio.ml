@@ -1251,6 +1251,15 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let init_record_default =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a throwaway workspace must not become the machine's default. `masc setup` \
+     and the installer pass it."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
+
 let init_skills_only =
   let doc = "Install missing builtin Skills without changing runtime config files" in
   Arg.(value & flag & info ["skills-only"] ~doc)
@@ -1280,7 +1289,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only =
+let init_cmd_exit base_path force skills_only record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1313,8 +1322,13 @@ let init_cmd_exit base_path force skills_only =
      about, and until now nothing wrote it down: the operator had to re-supply
      --base-path or MASC_BASE_PATH on every command. Recorded on success only,
      and never fatal -- a workspace that seeded is worth more than a record of
-     it. *)
-  if result.failed = 0 then (
+     it.
+
+     Off unless asked. `init` is what suites and scripts call to make a
+     throwaway workspace, and a default recorded from one of those points the
+     next process at a directory that is about to vanish. Only the operator
+     paths ask: `masc setup`, and the installer's own seed. *)
+  if record_default && result.failed = 0 then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
       Printf.printf "default workspace recorded: %s\n" path
@@ -1347,7 +1361,10 @@ let init_cmd =
      always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
+  Cmd.v info
+    Term.(
+      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      $ init_record_default)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -2575,7 +2592,9 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
-    ~initialize:(fun () -> init_cmd_exit base_path false false)
+    (* setup is an operator command: the workspace it prepares becomes the
+       default for later ones. *)
+    ~initialize:(fun () -> init_cmd_exit base_path false false true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     (* The image builder already takes a backend; setup passed None, which
        means Docker, whatever profile imp was on. *)

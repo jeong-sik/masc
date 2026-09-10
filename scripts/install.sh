@@ -4,7 +4,6 @@
 # Usage:
 #   TAG=vX.Y.Z
 #   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
-#   less /tmp/masc-install.sh
 #   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
@@ -21,7 +20,9 @@
 #                      an explicit --base-path. External runtime installations remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
-#   --no-wizard        Skip the provider setup wizard
+#   --no-wizard        Skip interactive setup and shell PATH prompts
+#   --shell-path SHELL Enable PATH in zsh or bash startup files (or none);
+#                      default: ask in an interactive wizard
 #   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
 #                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
 #                      host that boots no microvm keeper needs neither
@@ -75,6 +76,7 @@ GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
+SHELL_PATH_MODE=auto
 # Whether the config root was already here before this run. This is what makes
 # the setup wizard a first-time step rather than one that runs on every install.
 CONFIG_PREEXISTING=0
@@ -517,7 +519,7 @@ prompt_provider() {
     done
     printf >&2 '> '
     local choice
-    if ! read -r choice; then
+    if ! read_terminal_line choice; then
       warn "input closed; provider selection cancelled"
       return 1
     fi
@@ -674,7 +676,7 @@ run_selection_wizard() {
   receipt=$(mktemp)
   PARTIAL_FILES+=("$helper" "$receipt")
   fetch_bundle_asset install-runtime-setup.py "$helper"
-  python3 "$helper" --binary "$DEST" --base-path "$base_path" --wizard \
+  with_terminal_input python3 "$helper" --binary "$DEST" --base-path "$base_path" --wizard \
     --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" > "$receipt" \
     || die "model setup stopped; existing connections were preserved"
   python3 - "$receipt" <<'PYRECEIPT'
@@ -789,7 +791,7 @@ run_wizard() {
   echo >&2
   printf '? Test connectivity to provider? [Y/n] ' >&2
   local answer
-  read -r answer || true
+  read_terminal_line answer || true
   case "$answer" in
     [Nn]*) ;;
     *)
@@ -802,7 +804,7 @@ run_wizard() {
           echo >&2
           printf '? Connectivity check failed. [retry/skip/abort] ' >&2
           local action
-          read -r action || true
+          read_terminal_line action || true
           case "$action" in
             retry|Retry|r) run_wizard "$base_path" ;;
             skip|Skip|s) ;;
@@ -848,7 +850,15 @@ maybe_run_wizard() {
 }
 
 # Prompts use stderr; stdout is captured by $(prompt_provider).
-is_tty() { [ -t 0 ] && [ -t 2 ]; }
+is_tty() { [ -t 2 ] && { [ -t 0 ] || ( : </dev/tty ) 2>/dev/null; }; }
+
+read_terminal_line() {
+  if [ -t 0 ]; then IFS= read -r "$1"; else IFS= read -r "$1" </dev/tty; fi
+}
+
+with_terminal_input() {
+  if [ -t 0 ] || ! is_tty; then "$@"; else "$@" </dev/tty; fi
+}
 
 choose_install_base_path() {
   [ -z "$BASE_PATH" ] || return 0
@@ -857,7 +867,7 @@ choose_install_base_path() {
     [ -d "$PWD/.masc/config" ] || suggested="$HOME"
     printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
     printf '? Workspace directory [%s]: ' "$suggested" >&2
-    IFS= read -r answer || die "workspace selection cancelled"
+    read_terminal_line answer || die "workspace selection cancelled"
     BASE_PATH="${answer:-$suggested}"
   else
     BASE_PATH="$suggested"
@@ -879,6 +889,132 @@ require_flag_value() {
   [ -n "$value" ] || die "$flag requires a value"
 }
 
+configure_shell_path() {
+  local mode="$SHELL_PATH_MODE" answer suggested
+  if [ "$mode" = auto ]; then
+    if [ "$WIZARD" = 0 ] || ! is_tty; then
+      log "For new terminals, enable PATH with --shell-path zsh or --shell-path bash."
+      return 0
+    fi
+    suggested=3
+    case "${SHELL:-}" in */zsh|zsh) suggested=1 ;; */bash|bash) suggested=2 ;; esac
+    printf '\nMake masc available in new terminals?\n  1) zsh\n  2) bash\n  3) Leave shell files unchanged\nChoice [%s]: ' "$suggested" >&2
+    read_terminal_line answer || { warn "shell PATH setup deferred"; return 0; }
+    case "${answer:-$suggested}" in 1) mode=zsh ;; 2) mode=bash ;; 3) mode=none ;; *) warn "shell PATH setup deferred: select zsh or bash with --shell-path"; return 0 ;; esac
+  fi
+  [ "$mode" != none ] || return 0
+  [ "$DRY_RUN" -eq 0 ] || { log "[dry-run] would enable masc in $mode startup files"; return 0; }
+  if python3 - "$HOME" "${ZDOTDIR:-}" "$PREFIX" "$mode" <<'PYSHELLPATH'
+import fcntl, os, shlex, stat, sys, tempfile
+from pathlib import Path
+home, zdotdir, prefix, shell = sys.argv[1:]
+start, end = b'# >>> MASC PATH >>>\n', b'# <<< MASC PATH <<<\n'
+
+def owned_read(path):
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None, b''
+    if not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid() or before.st_nlink != 1:
+        raise ValueError('startup file must be an owned regular file, not a link')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        observed = os.fstat(fd)
+        if (observed.st_dev, observed.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError('startup file changed')
+        with os.fdopen(fd, 'rb', closefd=False) as handle:
+            content = handle.read()
+        after = os.fstat(fd)
+        if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns):
+            raise ValueError('startup file changed')
+        return after, content
+    finally:
+        os.close(fd)
+
+def sync_parent(path):
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+def temporary(path, content, mode, suffix):
+    fd, name = tempfile.mkstemp(prefix='.' + path.name + suffix, dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        os.unlink(name)
+        raise
+    return Path(name)
+
+try:
+    if any(c in prefix for c in ('\n', '\r', ':')) or not os.path.isabs(prefix):
+        raise ValueError('installation directory cannot be represented as one PATH entry')
+    root = Path(zdotdir or home) if shell == 'zsh' else Path(home)
+    if not root.is_absolute() or not root.is_dir():
+        raise ValueError('shell configuration directory must already exist')
+    root = root.resolve(strict=True)
+    parent_stat = root.stat()
+    if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
+        raise ValueError('shell configuration directory must be privately writable')
+    if shell == 'zsh':
+        targets = [root/'.zshrc']
+    else:
+        login = next((root/name for name in ('.bash_profile', '.bash_login', '.profile')
+                      if os.path.lexists(root/name)), root/'.bash_profile')
+        targets = [root/'.bashrc', login]
+    # Quote the entire literal PATH entry; never expand $(), backticks or quotes
+    # from an operator-selected installation directory when the shell starts.
+    literal = shlex.quote(prefix)
+    block = start + ('case ":$PATH:" in\n  *:' + literal + ':*) ;;\n  *) export PATH=' + literal + ':"$PATH" ;;\nesac\n').encode() + end
+    for path in targets:
+        lock_path = str(path) + '.masc-path.lock'
+        lock = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            lock_stat = os.fstat(lock)
+            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_uid != os.geteuid() or lock_stat.st_nlink != 1:
+                raise ValueError('untrusted shell configuration lock')
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            before, old = owned_read(path)
+            if start in old or end in old:
+                if old.count(start) != 1 or old.count(end) != 1 or old.index(end) < old.index(start):
+                    raise ValueError('ambiguous existing MASC PATH block; existing file preserved')
+                first, last = old.index(start), old.index(end) + len(end)
+                new = old[:first] + block + old[last:]
+            else:
+                new = old + (b'\n' if old and not old.endswith(b'\n') else b'') + block
+            if new == old:
+                continue
+            backup = temporary(path, old, 0o600, '.masc-path-backup-') if before else None
+            if backup:
+                sync_parent(backup)
+            staged = temporary(path, new, stat.S_IMODE(before.st_mode) if before else 0o600, '.masc-path-stage-')
+            try:
+                after, observed = owned_read(path)
+                identity = lambda s: None if s is None else (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_mode, s.st_uid, s.st_nlink)
+                if identity(after) != identity(before) or observed != old:
+                    raise ValueError('startup file changed; backup retained')
+                os.replace(staged, path)
+                sync_parent(path)
+            finally:
+                if staged.exists():
+                    staged.unlink()
+            print('Enabled masc PATH in ' + str(path))
+            if backup:
+                print('Original shell file backup: ' + str(backup))
+        finally:
+            os.close(lock)
+except (OSError, ValueError):
+    print('Shell PATH setup did not finish. Existing backups were retained; inspect shell files before retrying.', file=sys.stderr)
+    sys.exit(1)
+PYSHELLPATH
+  then log "Open a new terminal to use masc."; else warn "MASC is installed; shell PATH setup needs attention."; fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall|--purge-data|--prefix|--base-path|--dry-run|-h|--help) ;;
@@ -897,6 +1033,10 @@ while [ $# -gt 0 ]; do
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
+    --shell-path)
+      require_flag_value "$1" "${2-}"
+      case "$2" in zsh|bash|none) SHELL_PATH_MODE="$2" ;; *) die "--shell-path must be zsh, bash, or none" ;; esac
+      shift 2 ;;
     --no-guest-shim) GUEST_SHIM=0; shift ;;
     --provider)    require_flag_value "$1" "${2-}"; WIZARD_PROVIDER="$2"; shift 2 ;;
     --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
@@ -1466,7 +1606,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   workspace_receipt=$(mktemp)
   PARTIAL_FILES+=("$workspace_helper" "$workspace_receipt")
   fetch_bundle_asset install-runtime-setup.py "$workspace_helper"
-  python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
+  with_terminal_input python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
     || die "workspace check stopped installation; existing workspace data was preserved"
   BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
 fi
@@ -1516,6 +1656,8 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     [ -e "$RUNTIME_FILE" ] || die "config seed produced no $RUNTIME_FILE"
   fi
 fi
+
+case ":$PATH:" in *":$PREFIX:"*) ;; *) PATH="$PREFIX:$PATH"; export PATH; hash -r ;; esac
 
 # --- 4b. first-run wizard ------------------------------------------------------
 if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
@@ -1644,20 +1786,16 @@ if [ "$DRY_RUN" -eq 0 ]; then
   fi
 fi
 
-# --- 6. PATH guidance ---------------------------------------------------------
-case ":$PATH:" in
-  *":$PREFIX:"*) ;;
-  *) warn "$PREFIX is not in PATH. Add this to your shell rc:
-      export PATH=\"$PREFIX:\$PATH\"" ;;
-esac
-
+# --- 6. New-terminal PATH integration ----------------------------------------
 if [ "$DRY_RUN" -eq 1 ]; then
+  case "$SHELL_PATH_MODE" in zsh|bash) configure_shell_path ;; esac
   printf '\n%s[dry-run] no files written.%s\n\n' "$c_yel" "$c_off"
   exit 0
 fi
 
 python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
 BUNDLE_TRANSACTION_ACTIVE=0
+configure_shell_path
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,

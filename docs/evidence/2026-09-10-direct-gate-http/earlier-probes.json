@@ -1,0 +1,23 @@
+[
+  {
+    "run": 1,
+    "operation_id": "kmsg-e041f82efc36266bd362673b0ae57ea8",
+    "status": "failed",
+    "error": "Original operation did not succeed",
+    "receipt_sha256": "719213782c8a6296648b2e2a01a4d2af7f491168a3755a18d5a70603dd191c33"
+  },
+  {
+    "run": 2,
+    "operation_id": "kmsg-e124b2b990fedebc748ebcfaeacf1682",
+    "status": "failed",
+    "error": "Original user input changed or duplicated",
+    "receipt_sha256": "e72e8e9dcd8ef6de4a8da35ee79b731c1bcb598fd26abe60ae89e920c414ed82"
+  },
+  {
+    "run": 3,
+    "operation_id": "kmsg-e2772792dbbd3ae114dd761ddc360435",
+    "status": "failed",
+    "error": "'operation_id'",
+    "receipt_sha256": "15d4ca9de3d0a78d159860b8d96150dd18f307ccfda650f2cb4fe82e792e8cc3"
+  }
+]

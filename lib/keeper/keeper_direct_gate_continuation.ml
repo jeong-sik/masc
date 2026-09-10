@@ -121,14 +121,22 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
 let suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
   let base_path = config.Workspace.base_path in
   let* existing = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
-  let* obligations = List.fold_left (fun result approval_id ->
-    let* obligations = result in
-    let* obligation = bind ~base_path ~keeper_name approval_id in
-    if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation])) (Ok existing) approval_ids in
-  match obligations with
+  let approval_ids = List.sort_uniq String.compare
+    (approval_ids @ List.map (fun (obligation : Semantic.gate_obligation) -> obligation.approval_id) existing) in
+  match approval_ids with
   | [] -> Ok false
   | _ ->
+    let* runtime_suffix = match runtime_lane with
+      | None -> Ok None
+      | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
+        Semantic.runtime_suffix ~assignment_id:lane.assignment_id ~failed_runtime_id:lane.failed_runtime_id
+          ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids |> Result.map Option.some in
+    let* binding = Semantic.gate_binding ~approval_ids ~obligations:existing ~runtime_suffix in
     let prepare () =
+    let* obligations = List.fold_left (fun result approval_id ->
+      let* obligations = result in
+      let* obligation = bind ~base_path ~keeper_name approval_id in
+      if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation])) (Ok existing) approval_ids in
     let* session_scope = session_scope ~config ~session_dir ~session_id in
     let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
@@ -162,7 +170,7 @@ let suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~sessi
        | None -> Error "original Gate operation disappeared during checkpoint reconciliation"
        | Some operation ->
          let* _ = Owner.defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id
-           ~execution_digest:operation.execution_digest ~obligations ~diagnostic |> owner in
+           ~execution_digest:operation.execution_digest ~binding ~diagnostic |> owner in
          Log.Keeper.warn "Gate operation retained for checkpoint reconciliation: %s" diagnostic;
          Ok true)
 
@@ -259,8 +267,8 @@ let pending ~base_path ~keeper_name ~operation_id =
     match state with
     | Some state -> Ok (Some (Bound_checkpoint state.Semantic.waiting.checkpoint))
     | None ->
-      let* obligations = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
-      if obligations = [] then Ok None
+      let* binding = Owner.direct_gate_binding ~base_path ~keeper_name ~operation_id |> owner in
+      if Option.is_none binding then Ok None
       else
         let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
         match operation with
@@ -268,3 +276,7 @@ let pending ~base_path ~keeper_name ~operation_id =
         | Some {Keeper_chat_operation.state=(Keeper_chat_operation.Running _ | Keeper_chat_operation.Succeeded _
             | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _); _}
         | None -> Ok None
+
+let record_completed ~config ~keeper_name admission =
+  Keeper_approval_queue.ensure_settled_continuation_chat_projection
+    ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution

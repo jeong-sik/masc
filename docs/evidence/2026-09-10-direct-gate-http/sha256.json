@@ -1,0 +1,18 @@
+{
+  "README.md": "68b953a060065868124fefaa219aaa0a13579a8453ba4ccbb4e7c5f608d8912f",
+  "approved-output-ref.json": "dbbcc0cb312c94c5429f8d57f89da61c0a0d51f6fc095281348e2ae5215a46f2",
+  "artifact-read-result.json": "67dbb9cde770ef4eef3f211e341eed3f701db7c7d609d1abe60e8363ad195c71",
+  "completed-before-gate.json": "fa7b05577b79f6c7d69fd4a7a55fd3c8e6a29c605e80f23f6d9ebd6c6d1f6e6d",
+  "continuation.log": "22db437d290c462451e96d6a6365caeae105a0bbe53d821fb1b700b156854b00",
+  "earlier-probes.json": "48759cc1a46badc4ff44d34ddedd74dd36da4b22bdb792fe70bd6677957372bc",
+  "effect.json": "b9d546f878932ad936eac1eaf834e31a723bb08216396b87203ab6e4eaea6a00",
+  "post-shutdown-transcript.json": "5a479180c8375beaf50f1eaef23a5c25e7bc48cd28da36ad49129cca09c8ed23",
+  "receipt.json": "45553660335aac874b7e5018676cee6b119486e3584802950606f3d470adec66",
+  "resumed-admission-operations.json": "6d6c61e4e46a9a20aa71aee62ca00eb1a451ef5be0a2d2fbbb89751f71f3c2d8",
+  "resumed-admission-semantic.json": "cdc61ba00873160a18e30a989c0a4354a8097ceaa9b2597640cb17d72439187b",
+  "runtime-observation.json": "565f93f464beaefc141ca08b87633a63b178f538596fdd8003fe8c8791935cab",
+  "terminal-observation.json": "2f3db471a047f1651409a01ad24b508422f1287bd96d1d60907d700cabe0c2d0",
+  "transcript.json": "6843d43a15c513b911939498cb17aabadac8a7425086f30c841cb178bf4ab139",
+  "waiting-operations.json": "e9dd2001b43d47818ba24db83e59dc030d49cc718aa971296be73eae8c2a9a13",
+  "waiting-semantic.json": "6e146926fc466c11419802c52457708adcecf10c5eb34a2e623ec0b547aa2cc7"
+}

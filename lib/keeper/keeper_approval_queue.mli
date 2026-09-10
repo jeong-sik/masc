@@ -313,6 +313,8 @@ module For_testing : sig
   type strict_snapshot_writer =
     string -> string -> (unit, Fs_compat.atomic_replace_failure) result
 
+  val with_unavailable_workspace : base_path:string -> (unit -> 'a) -> 'a
+  (** Expose the production unavailable-store observation without removing its durable requests. *)
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
   val get_pending_entry_unchecked : id:string -> pending_approval option

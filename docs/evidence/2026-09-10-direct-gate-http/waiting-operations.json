@@ -1,0 +1,17 @@
+[
+  {
+    "operation_id": "kmsg-660934bce13fa46302aebee6ac88059f",
+    "admission_digest": "bdd3496280940397f475e38d819ea04ddac638afbe12a7b835ea6086a9e718b9",
+    "execution_digest": "580a77ed1df79179d3e463688aed6ff9d8ca5ad09eb65870824aecc7b1384c86",
+    "sequence": 0,
+    "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:direct-gate-http-proof\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v1\",\"submitted_by\":\"admin\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:direct-gate-http-proof\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+    "input_json": "{\"attachments\":[],\"message\":\"Synthetic Gate probe: request the supplied one-time file effect, wait for its durable approval, then finish this exact original request.\",\"schema\":\"masc.keeper_chat_operation.input.v1\",\"surface_context\":null,\"turn_instructions\":null,\"user_blocks\":[]}",
+    "state": "queued",
+    "created_at": 1788993991.695768,
+    "started_at": null,
+    "completed_at": null,
+    "outcome_ref": null,
+    "failure_kind": null,
+    "failure_detail": null
+  }
+]

@@ -7669,7 +7669,7 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
-let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -7722,15 +7722,26 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           ~failed_runtime_id:"primary.fixture" ~next_runtime_id:"alternate.fixture"
           ~later_runtime_ids:["final.fixture"]
           ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
+      let suspend () = Gate.suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
       check bool "actual yield parks the same operation" true
-        (Gate.suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] ()
-         |> require "suspend");
+        ((if binding_failure then Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path suspend
+          else suspend ()) |> require "suspend");
       check bool "unresolved request is not claimable" true
         ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
-      if checkpoint_failure then (
+      if checkpoint_failure || binding_failure then (
+        let binding = match Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable binding" with
+          | Some value -> value | None -> fail "missing unresolved Gate binding" in
+        check bool "producer approval identity retained before lookup" true (binding.approval_ids = [approval_id]);
+        (match runtime_lane, binding.runtime_suffix with
+         | None, None -> ()
+         | Some expected, Some actual ->
+           check string "runtime assignment retained without checkpoint authority" expected.assignment_id actual.assignment_id;
+           check bool "runtime suffix retained without checkpoint authority" true
+             (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
+         | None, Some _ | Some _, None -> fail "lost frozen suffix during Gate binding failure");
         let original = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
         check bool "retention failure preserves original input" true
-          (match original with Some operation -> operation.input=Some canonical | None -> false);
+          (match original with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
         check bool "unconfirmed checkpoint is explicit nonterminal state" true
           ((Gate.pending ~base_path ~keeper_name ~operation_id |> require "pending reconciliation")
            = Some Gate.Checkpoint_reconciliation);
@@ -7798,8 +7809,26 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";
+      Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
+        ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry";
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
+      (match Gate.record_completed ~config ~keeper_name admission |> require "completed direct continuation receipt" with
+       | Masc.Keeper_approval_queue.Continuation_projection_recorded -> ()
+       | Masc.Keeper_approval_queue.Continuation_projection_not_ready -> fail "successful direct continuation remained unresolved");
+      let selections = Masc.Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> require "remaining approval wake" in
+      let approval_selection = List.find_opt (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        match selection.source.payload with
+        | Keeper_event_queue.Hitl_resolved resolution -> resolution.approval_id = approval_id
+        | _ -> false) selections in
+      (match approval_selection with
+       | None -> fail "fixture lost its pending Gate wake before reconciliation"
+       | Some selection ->
+         match Masc.Keeper_heartbeat_stimulus_intake.reconcile_spent_selection ~config ~keeper_name selection
+           |> require "retire completed direct continuation wake" with
+         | Masc.Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
+         | Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable
+         | Masc.Keeper_heartbeat_stimulus_intake.Absent_grant_retired _ -> fail "completed Gate requested another model turn");
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
         |> require "same operation completion" |> ignore))
 
@@ -7866,6 +7895,10 @@ let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("direct_gate_resume", [
+      test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unretained checkpoint keeps frozen runtime suffix without replay" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "channel-scoped Gate resumes original input with current channel history" `Quick
         (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "new Gate and runtime failure retain both obligations" `Quick

@@ -88,6 +88,50 @@ let rec with_sandbox (target : Sandbox_target.t) (ir : t) : t =
       }
 ;;
 
+(* A substitution child inherits the parent's dispatch target (above) and,
+   when it declares no cwd of its own, the parent's cwd — bash's rule that
+   [$(pwd)] answers the parent's directory. The parent's cwd already passed
+   the gate's path jail, so an inherited directory stays inside it; leaving
+   the child's cwd [None] would instead run it in the dispatcher's default
+   directory, which the gate never saw. *)
+let rec with_sandbox_cwd
+    (target : Sandbox_target.t)
+    (parent_cwd : Path_scope.t option)
+    (ir : t)
+    : t =
+  let rec arg_rewritten = function
+    | Subst child -> Subst (with_sandbox_cwd target parent_cwd child)
+    | Concat parts -> Concat (List.map arg_rewritten parts)
+    | (Lit _ | Var _) as leaf -> leaf
+  in
+  let stage (simple : simple) : simple =
+    match simple.sandbox with
+    | Sandbox_target.Delegated _ -> simple
+    | Sandbox_target.Host
+    | Sandbox_target.Docker _
+    | Sandbox_target.Micro_vm _
+    | Sandbox_target.Ssh _ ->
+      { simple with
+        sandbox = target
+      ; cwd =
+          (match simple.cwd with
+           | Some _ as declared -> declared
+           | None -> parent_cwd)
+      ; args = List.map arg_rewritten simple.args
+      ; env = List.map (fun (k, v) -> k, arg_rewritten v) simple.env
+      }
+  in
+  match ir with
+  | Simple simple -> Simple (stage simple)
+  | Pipeline stages -> Pipeline (List.map (with_sandbox_cwd target parent_cwd) stages)
+  | Sequence { head; tail } ->
+      Sequence
+        { head = with_sandbox_cwd target parent_cwd head
+        ; tail =
+            List.map (fun (c, ir) -> (c, with_sandbox_cwd target parent_cwd ir)) tail
+        }
+;;
+
 let rec arg_has_variable = function
   | Lit _ -> false
   | Var _ -> true

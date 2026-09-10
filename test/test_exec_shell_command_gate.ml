@@ -362,6 +362,99 @@ let test_subst_bearing_ir_allows_and_lists_children () =
     Alcotest.failf "expected Allow, got %s" (Gate.verdict_tag other)
 ;;
 
+let test_subst_child_nested_pipeline_is_refused () =
+  (* PR review #34929: [structural_refusal] walks a [Subst]'s children. A
+     pipeline nested under a substitution — a shape only a typed caller can
+     build — must answer [Unsupported_nested_pipeline] there, exactly as it
+     would at the top of the IR, instead of dispatching the child and
+     converting its structural failure into empty output. *)
+  let stage =
+    { (make_stage "echo" []) with
+      Masc_exec.Shell_ir.args =
+        [ Masc_exec.Shell_ir.Subst
+            (Masc_exec.Shell_ir.Pipeline
+               [ Masc_exec.Shell_ir.Simple (make_stage "cat" [])
+               ; Masc_exec.Shell_ir.Pipeline
+                   [ Masc_exec.Shell_ir.Simple (make_stage "cat" [])
+                   ; Masc_exec.Shell_ir.Simple (make_stage "cat" []) ]
+               ]) ]
+    }
+  in
+  match
+    Gate.gate_typed
+      ~ir:(Masc_exec.Shell_ir.Simple stage)
+      ~syntax_policy
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Too_complex { reason = Gate.Unsupported_nested_pipeline } -> ()
+  | other ->
+    Alcotest.failf
+      "expected Unsupported_nested_pipeline under a Subst, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_subst_child_under_arity_pipeline_is_refused () =
+  (* Same walk, arity side: a one-stage pipeline hidden in a substitution
+     is the [Cannot_parse] the top-level shape answers with. *)
+  let stage =
+    { (make_stage "echo" []) with
+      Masc_exec.Shell_ir.args =
+        [ Masc_exec.Shell_ir.Subst
+            (Masc_exec.Shell_ir.Pipeline
+               [ Masc_exec.Shell_ir.Simple (make_stage "cat" []) ]) ]
+    }
+  in
+  match
+    Gate.gate_typed
+      ~ir:(Masc_exec.Shell_ir.Simple stage)
+      ~syntax_policy
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
+  | other ->
+    Alcotest.failf
+      "expected Cannot_parse for under-arity pipeline under a Subst, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let parse_to_ir raw =
+  match gate_from_raw ~raw ~syntax_policy ~sandbox:Gate.host_sandbox () with
+  | Gate.Allow context -> context.Gate.ast
+  | other ->
+    Alcotest.failf "expected Allow for %s, got %s" raw (Gate.verdict_tag other)
+;;
+
+let test_glob_inside_substitution_is_injection () =
+  (* PR review #34929: the glob policy traverses a substitution's child —
+     an unquoted glob in the child must answer Injection exactly as the
+     same glob in a direct command does, not pass because the arg holding
+     it is not literal. *)
+  match Policy.validate_command_tool_execute (parse_to_ir "echo $(ls masc-*)") with
+  | Error Injection -> ()
+  | Ok () -> Alcotest.fail "echo $(ls masc-*) must be Injection"
+  | Error _ -> Alcotest.fail "expected Injection, got a different block reason"
+;;
+
+let test_flat_stage_words_parent_leads_children () =
+  (* PR review #34929: a substitution-bearing stage keeps its parent binary
+     first in the sanitized words — sanitizing [rm $(echo target)] must
+     name [rm] (and the placeholder for its argument), not only the child
+     [echo target]. *)
+  let stage =
+    { (make_stage "rm" []) with
+      Masc_exec.Shell_ir.args =
+        [ Masc_exec.Shell_ir.Subst
+            (Masc_exec.Shell_ir.Simple (make_stage "echo" [ "target" ])) ]
+    }
+  in
+  Alcotest.(check (list string))
+    "parent binary leads, placeholder then child words"
+    [ "rm"; "$(...)"; "echo"; "target" ]
+    (Exec_policy.flat_stage_words (Masc_exec.Shell_ir.Simple stage))
+;;
+
 let test_lower_typed_three_stage_matches_raw () =
   (* Plan G2.2 composition contract: typed [a;b;c] and raw "a | b | c"
      must produce the same [Pipeline [Simple a; Simple b; Simple c]]
@@ -589,6 +682,24 @@ let () =
             "subst-bearing IR allows, children listed"
             `Quick
             test_subst_bearing_ir_allows_and_lists_children
+        ; Alcotest.test_case
+            "nested pipeline under a substitution is refused"
+            `Quick
+            test_subst_child_nested_pipeline_is_refused
+        ; Alcotest.test_case
+            "under-arity pipeline under a substitution is refused"
+            `Quick
+            test_subst_child_under_arity_pipeline_is_refused
+        ] )
+    ; ( "subst_review_34929"
+      , [ Alcotest.test_case
+            "unquoted glob inside a substitution is Injection"
+            `Quick
+            test_glob_inside_substitution_is_injection
+        ; Alcotest.test_case
+            "flat_stage_words: parent binary leads its children"
+            `Quick
+            test_flat_stage_words_parent_leads_children
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case

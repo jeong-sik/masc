@@ -258,7 +258,16 @@ let rec structural_refusal (ir : SI.t) =
     Some (`Too_complex (Unsupported_construct `Param_expansion))
   else
   match ir with
-  | SI.Simple _ -> None
+  | SI.Simple s ->
+    (* A [Subst] child is part of the typed IR this gate answers for: a
+       nested pipeline, or an under-arity pipeline, hidden under a
+       substitution gets the same refusal it would get at the top — the
+       gate must not vouch for a shape it did not walk. *)
+    List.find_map
+      structural_refusal
+      (List.concat_map
+         SI.subst_children_of_arg
+         (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
     if List.exists (function SI.Pipeline _ -> true | _ -> false) stages
     then Some (`Too_complex Unsupported_nested_pipeline)

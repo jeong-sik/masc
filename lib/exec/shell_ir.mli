@@ -86,6 +86,13 @@ val with_sandbox : Sandbox_target.t -> t -> t
     under a different target must pass a rewritten IR — the observation
     stage (RFC-0422) does exactly this. *)
 
+val with_sandbox_cwd : Sandbox_target.t -> Path_scope.t option -> t -> t
+(** [with_sandbox_cwd target parent_cwd ir] is {!with_sandbox} with the
+    parent's cwd inherited: a stage that declares no cwd of its own runs in
+    [parent_cwd] — the gate already jailed that directory, so the child
+    stays inside it instead of dropping to the dispatcher's default
+    directory. A stage's own cwd always wins. *)
+
 val has_variable_expansion : t -> bool
 (** Includes argument concatenations, environment prefixes and every stage.
     A variable has no execution-target environment authority in this IR. *)

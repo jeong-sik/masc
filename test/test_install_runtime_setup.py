@@ -105,6 +105,21 @@ class ModelSelection(unittest.TestCase):
             self.assertTrue(key.exists())
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
 
+    def test_antigravity_account_switch_drops_old_models_and_context(self):
+        source = dict(choice='antigravity', endpoint='', api_key_env='',
+                      credential_file='/private/new-account', credential_kind='file',
+                      credential_replaced=True, rows=[
+                          dict(id='old.shared', model='shared-model', max_context=8192),
+                          dict(id='old.exclusive', model='old-account-only', max_context=16384)])
+        with patch.object(SETUP, 'antigravity_models', return_value=[
+                dict(id='shared-model', label='Shared model', context=None),
+                dict(id='new-model', label='New model', context=65536)]):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual([model['id'] for model in models], ['shared-model', 'new-model'])
+        self.assertIsNone(models[0]['context'])
+        self.assertEqual(models[1]['context'], 65536)
+        self.assertTrue(all(model['existing'] is None for model in models))
+
     def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
                       api_key_env='', credential_file='/private/saved-key', credential_kind='file',

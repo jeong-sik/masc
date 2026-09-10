@@ -521,19 +521,38 @@ let build_request_payload
       else ("system", `String s) :: body
     | _ -> body
   in
+  let dialect = Reasoning_dialect.for_provider_config config in
   let body =
     match request_mode, config.temperature with
-    | Completion _, Some t -> ("temperature", `Float t) :: body
+    | Completion _, Some t ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Temperature
+        (`Float t)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
     match request_mode, config.top_p with
-    | Completion _, Some p -> ("top_p", `Float p) :: body
+    | Completion _, Some p ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Top_p
+        (`Float p)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
     match request_mode, config.top_k with
-    | Completion _, Some k -> ("top_k", `Int k) :: body
+    | Completion _, Some k ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Top_k
+        (`Int k)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =

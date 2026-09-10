@@ -5556,3 +5556,8 @@
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio_main masc.server masc.fs_compat))
+
+(test
+ (name test_model_release_evidence)
+ (modules test_model_release_evidence)
+ (libraries masc.runtime alcotest yojson))

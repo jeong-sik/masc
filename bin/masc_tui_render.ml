@@ -4524,8 +4524,11 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
+       (* Every phase counts, or the denominator drops the goals waiting on a
+          human and reports a completion share higher than the truth. *)
        let total_goals =
-         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying + p.pl_rollup.pr_done
+         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying
+         + p.pl_rollup.pr_awaiting_confirmation + p.pl_rollup.pr_done
          + p.pl_rollup.pr_dropped
        in
        let progress_pct =
@@ -4542,11 +4545,14 @@ let render_planning_list (state : state) =
        in
        let phase_counters =
          Printf.sprintf
-           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s✓ Done: %d%s  %s✕ Drop: %d%s"
+           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s◇ Conf: %d%s  %s✓ Done: %d%s  \
+            %s✕ Drop: %d%s"
            (planning_phase_color Goal_phase.Executing)
            p.pl_rollup.pr_active Ansi.reset
            (planning_phase_color Goal_phase.Verifying)
            p.pl_rollup.pr_verifying Ansi.reset
+           (planning_phase_color Goal_phase.Awaiting_confirmation)
+           p.pl_rollup.pr_awaiting_confirmation Ansi.reset
            (planning_phase_color Goal_phase.Completed)
            p.pl_rollup.pr_done Ansi.reset
            (planning_phase_color Goal_phase.Dropped)

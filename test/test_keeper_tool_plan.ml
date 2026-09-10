@@ -1082,10 +1082,16 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ; "updated_at", `String "2026-08-18T00:00:00Z"
                  ]
              ] )
+         (* One counter per Goal_phase constructor, and the declared schema
+            closes the object and requires all of them. A phase added to
+            Goal_phase without its counter here reads as the producer
+            emitting a shape its own schema rejects (#34976 added
+            awaiting_confirmation, #34985 declared its counter). *)
        ; ( "rollup"
          , `Assoc
              [ "active_count", `Int 1
              ; "verifying_count", `Int 0
+             ; "awaiting_confirmation_count", `Int 0
              ; "done_count", `Int 0
              ; "dropped_count", `Int 0
              ] )

@@ -17,7 +17,7 @@ let request base text = `Assoc ["backend",`String "docker";"network_mode",`Strin
   "revision",`String (Setup.For_testing.revision base text)]
 let prepared_receipt () = fixture (fun base path ->
   let count=ref 0 in
-  let image _ = incr count; check string "image preparation precedes publication" contents (In_channel.with_open_bin path In_channel.input_all); Ok () in
+  let image _ ~image:_ = incr count; check string "image preparation precedes publication" contents (In_channel.with_open_bin path In_channel.input_all); Ok () in
   let receipt=Setup.For_testing.prepare ~base_path:base ~run ~image (request base contents) |> Result.get_ok in
   check int "exactly one image operation" 1 !count;
   let stored=In_channel.with_open_bin path In_channel.input_all in
@@ -29,7 +29,7 @@ let prepared_receipt () = fixture (fun base path ->
   check string "no fabricated model verification" "not_run" (receipt |> member "model_verification" |> to_string))
 let concurrent_change () = fixture (fun base path ->
   let changed=contents ^ "# another owner edit\n" in
-  let image _ = save path changed; Ok () in
+  let image _ ~image:_ = save path changed; Ok () in
   check bool "changed declaration prevents publication" true
     (Setup.For_testing.prepare ~base_path:base ~run ~image (request base contents)=Error Setup.Commit_unconfirmed);
   check string "concurrent declaration retained" changed (In_channel.with_open_bin path In_channel.input_all))
@@ -37,20 +37,20 @@ let lifecycle_guard () = fixture (fun base path ->
   let token=Keeper_lifecycle_reservation.acquire ~base_path:base ~keeper_name:"imp" ~purpose:Keepalive_launch |> Result.get_ok in
   Fun.protect ~finally:(fun () -> ignore (Keeper_lifecycle_reservation.release token)) (fun () ->
     let called=ref false in
-    let image _ = called:=true; Ok () in
+    let image _ ~image:_ = called:=true; Ok () in
     check bool "active launch reservation refused" true
       (Setup.For_testing.prepare ~base_path:base ~run ~image (request base contents)=Error Setup.Lifecycle_busy);
     check bool "no image work under conflicting launch" false !called;
     check string "no configuration change" contents (In_channel.with_open_bin path In_channel.input_all)))
 let failed_image () = fixture (fun base path ->
   check bool "failed image not published" true
-    (Setup.For_testing.prepare ~base_path:base ~run ~image:(fun _ -> Error Setup.Image_failed) (request base contents)=Error Setup.Image_failed);
+    (Setup.For_testing.prepare ~base_path:base ~run ~image:(fun _ ~image:_ -> Error Setup.Image_failed) (request base contents)=Error Setup.Image_failed);
   check string "original survives failed preparation" contents (In_channel.with_open_bin path In_channel.input_all))
 let settled_keeper () = fixture (fun base path ->
   let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "imp";"trace_id",`String "fixture-trace";"activation_mode",`String "manual"]) |> Result.get_ok in
   let entry=Keeper_registry.For_testing.register ~base_path:base "imp" meta in
   Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path:base "imp") (fun () ->
-    let image _ = Ok () in
+    let image _ ~image:_ = Ok () in
     check bool "live keeper settings are preserved" true
       (Setup.For_testing.prepare ~base_path:base ~run ~image (request base contents)=Error Setup.Existing_keeper);
     let conditions={Keeper_state_machine.default_conditions with stop_requested=true;drain_complete=true} in
@@ -65,9 +65,24 @@ let settled_keeper () = fixture (fun base path ->
     check bool "settled existing keeper receives new declaration" true (defaults.network_mode=Some Keeper_types_profile_sandbox.Network_none);
     let retained=Keeper_registry.get_with_health ~base_path:base "imp" |> Option.get |> fst in
     check string "existing keeper trace/history identity retained" (Keeper_id.Trace_id.to_string meta.trace_id) (Keeper_id.Trace_id.to_string retained.meta.trace_id)))
+let custom_image_preserved () = fixture (fun base path ->
+  let original=contents ^ "sandbox_image = \"owned-project:fixture\"\n" in
+  save path original;
+  let image _ ~image = check string "selected image comes from keeper declaration" "owned-project:fixture" image; Error Setup.Custom_image_required in
+  check bool "missing custom image is actionable refusal" true
+    (Setup.For_testing.prepare ~base_path:base ~run ~image (request base original)=Error Setup.Custom_image_required);
+  check string "custom image never overwritten" original (In_channel.with_open_bin path In_channel.input_all))
+let semantic_noop () = fixture (fun base path ->
+  let original=String.concat "\n" ["[keeper]";"activation_mode = \"manual\"";"sandbox_profile=\"docker\"";"instructions=\"Keep original formatting.\"";""] in
+  save path original;
+  let requested=`Assoc ["backend",`String "docker";"network_mode",`String "inherit";"revision",`String (Setup.For_testing.revision base original)] in
+  ignore (Setup.For_testing.prepare ~base_path:base ~run ~image:(fun _ ~image:_ -> Ok ()) requested |> Result.get_ok);
+  check string "same effective selection preserves raw formatting and omitted default" original (In_channel.with_open_bin path In_channel.input_all))
 let () = Alcotest.run "web sandbox preparation" ["publication",[
   test_case "image before CAS and honest receipt" `Quick prepared_receipt;
   test_case "concurrent edit is retained" `Quick concurrent_change;
   test_case "lifecycle reservation blocks publication" `Quick lifecycle_guard;
   test_case "image failure preserves original" `Quick failed_image;
-  test_case "settled existing keeper can change without history deletion" `Quick settled_keeper]]
+  test_case "settled existing keeper can change without history deletion" `Quick settled_keeper;
+  test_case "custom image source and settings preserved" `Quick custom_image_preserved;
+  test_case "effective no-op does not normalize declaration" `Quick semantic_noop]]

@@ -25,7 +25,7 @@ export function SandboxSetupCatalog() {
     if (busy || !catalog || !selected) return
     setBusy(true); setError(''); setNotice('선택한 sandbox 이미지를 다운로드·준비하고 설정을 저장합니다.')
     try { await prepareSandbox(catalog, selected, network) }
-    catch { setNotice('sandbox 준비 결과를 확인하지 못했습니다. 상태를 새로고침하세요. 실행 중인 imp의 sandbox를 바꾸려면 먼저 imp를 중지해야 합니다.'); setBusy(false); return }
+    catch { setNotice('sandbox 준비 결과를 확인하지 못했습니다. 상태를 새로고침하세요. 실행 중인 imp의 sandbox를 바꾸려면 먼저 imp를 중지해야 합니다. 사용자 지정 이미지는 선택한 실행 도구에 미리 준비해야 합니다.'); setBusy(false); return }
     setNotice('sandbox 이미지와 설정 준비를 완료했습니다. 모델 설정을 적용하고 imp를 시작합니다.')
     try {
       const resumed = await resumeSavedModelSetup()

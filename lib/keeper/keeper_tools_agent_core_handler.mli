@@ -39,7 +39,7 @@ val make_keeper_tool_handler
   -> ?on_completed:
        (Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)
-  -> ?on_external_effect_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?prepare_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
@@ -72,7 +72,7 @@ val make_keeper_tool_handler_from_meta
   -> ?on_completed:
        (Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)
-  -> ?on_external_effect_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?prepare_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)

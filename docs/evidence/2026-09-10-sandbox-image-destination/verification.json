@@ -1,0 +1,15 @@
+{
+  "source_commit": "de1d81f9662cecad3117e22a17df9bbaff3a86b1",
+  "ci_run": "34404224985",
+  "archive_sha256": "02b3092bf852eab513dcaa71887f166a46faff8916f4ec1af1985e446dd4bf6d",
+  "ci_config_digest": "sha256:03eeb4b99a58db3dbf2db3a0c8bd18fcaf737f94102e8cb8bc5477999bb3a9df",
+  "local_oci_manifest_digest": "sha256:0070775a948cba3d0227fcfe17cec99499ab9c5cf4b755167549b65200b77682",
+  "architecture": "arm64",
+  "os": "linux",
+  "smoke_exit_code": 0,
+  "render_review": [
+    "proof/guide-render.png",
+    "proof/slides-render.png"
+  ],
+  "scope": "Synthetic local Colima image capability; not autonomous Keeper acceptance or production deployment."
+}

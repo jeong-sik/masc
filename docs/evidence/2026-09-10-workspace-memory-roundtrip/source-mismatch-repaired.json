@@ -1,0 +1,37 @@
+{
+  "started_at": "2026-09-09T19:54:07.978593+00:00",
+  "status": "failed",
+  "checks": [],
+  "write_attempted": false,
+  "semantic_verification": "not_performed",
+  "keeper_reuse": "not_measured",
+  "build": {
+    "release_version": "0.35.2",
+    "binary_version": "0.35.2",
+    "repo_version": "0.35.2",
+    "commit": "d8d279905959a307be469076392cc800dcd1df24",
+    "commit_source": "embedded",
+    "binary_commit": "d8d279905959a307be469076392cc800dcd1df24",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "419488e8937808483c1bea7943311f036ca4f731b2dae3c43f14c0171d1fe10a",
+    "binary_commit_unix_ts": 1788978234.0,
+    "binary_commit_age_seconds": 5413,
+    "repo_head_commit": "d8d2799059",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788978234.0,
+    "repo_head_commit_age_seconds": 5413,
+    "executable_path": "/private/tmp/masc-staged-d8d27990-arm64/masc",
+    "executable_dir": "/private/tmp/masc-staged-d8d27990-arm64",
+    "repo_root": "/private/tmp/masc-memory-runtime-candidate",
+    "runtime_instance_id": "01a08784-1eb0-7000-a965-81b9d04ae6c2",
+    "started_at": "2026-09-09T18:52:57Z",
+    "uptime_seconds": 3670
+  },
+  "paths": {
+    "effective_base_path": "/private/tmp/masc-memory-integration-d8d27990",
+    "effective_masc_root": "/private/tmp/masc-memory-integration-d8d27990/.masc"
+  },
+  "error": "observed binary commit differs from expected source",
+  "finished_at": "2026-09-09T19:54:07.984535+00:00"
+}

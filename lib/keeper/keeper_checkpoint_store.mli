@@ -157,6 +157,8 @@ type checkpoint_ref_load_error =
     derived from one immutable byte snapshot. *)
 type exact_checkpoint_snapshot
 
+val exact_snapshot_checkpoint : exact_checkpoint_snapshot -> Agent_core.Checkpoint.t
+
 val exact_snapshot_reference :
   exact_checkpoint_snapshot -> Keeper_checkpoint_ref.t
 

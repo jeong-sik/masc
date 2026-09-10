@@ -82,7 +82,7 @@ let native_tool_result ~call_id ~content =
 type fixture_step =
   | Emit of string
   | Emit_and_read of string
-  | Emit_after_closing_input of string
+  | Close_transport
 
 let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
     lines =
@@ -134,9 +134,7 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = fa
       | Emit_and_read line ->
         output_string output ("emit " ^ shell_quote line ^ "\n");
         output_string output "IFS= read -r ignored_response\n"
-      | Emit_after_closing_input line ->
-        output_string output "exec 0<&-\n";
-        output_string output ("emit " ^ shell_quote line ^ "\n"))
+      | Close_transport -> output_string output "exit 0\n")
     lines;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -1017,9 +1015,15 @@ let test_post_effect_transport_enters_recovery () =
     (fun () ->
        with_fixture
          [ Emit_and_read mcp_initialize
-         ; Emit mcp_initialized_notification
+         (* This notification still has a Claude control request ID, so read
+            its control acknowledgement before the tool-list/call replies. *)
+         ; Emit_and_read mcp_initialized_notification
          ; Emit_and_read mcp_list
-         ; Emit_after_closing_input mcp_call
+         (* Receiving the actual tool reply orders the disconnect after the
+            effect. Closing stdin before emitting the call races the pending
+            control replies and can interrupt before the tool ever executes. *)
+         ; Emit_and_read mcp_call
+         ; Close_transport
          ]
          (fun cli_path ->
             match

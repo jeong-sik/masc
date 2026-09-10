@@ -211,6 +211,28 @@ let test_step_until_change () =
   check bool "a zero budget is refused" true (rejected r)
 ;;
 
+(* Sprites ride an observation only when asked for (task-1484): the table is
+   dead weight in every bitmap-mode screen a playing keeper reads. *)
+let test_sprites_on_request () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes without ROMs" true (is_completed r);
+  let r = dispatch ~base_path "masc_msx_screen" [] in
+  check bool "screen omits sprites by default"
+    true
+    (member "sprites" (Tool_result.data r) = None);
+  let r = dispatch ~base_path "masc_msx_screen" [ ("sprites", `Bool true) ] in
+  check bool "sprites=true includes the table"
+    true
+    (match member "sprites" (Tool_result.data r) with
+     | Some (`List _) -> true
+     | _ -> false);
+  let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 1) ] in
+  check bool "step observations omit sprites"
+    true
+    (member "sprites" (Tool_result.data r) = None)
+;;
+
 let test_press_ledger () =
   with_workspace @@ fun base_path ->
   ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
@@ -765,6 +787,7 @@ let () =
     [ ( "lane"
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "load, step, screen, eject" `Quick test_load_and_clock
+        ; test_case "sprites on request" `Quick test_sprites_on_request
         ; test_case "screen change core (pure)" `Quick test_screen_change_core
         ; test_case "step until change" `Quick test_step_until_change
         ; test_case "press writes the ledger" `Quick test_press_ledger

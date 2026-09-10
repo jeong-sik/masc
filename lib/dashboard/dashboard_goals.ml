@@ -328,6 +328,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
                 [
                   ("executing", `Int (count_phase Goal_phase.Executing));
                   ("verifying", `Int (count_phase Goal_phase.Verifying));
+                  ("awaiting_confirmation", `Int (count_phase Goal_phase.Awaiting_confirmation));
                   ("completed", `Int (count_phase Goal_phase.Completed));
                   ("dropped", `Int (count_phase Goal_phase.Dropped));
                 ] );

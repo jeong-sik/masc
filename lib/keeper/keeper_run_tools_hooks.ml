@@ -960,7 +960,7 @@ let assemble_hooks
                    };
                 let thinking_enabled_effective =
                   match current_params.enable_thinking with
-                  | Some b -> b
+                  | Some b -> Some b
                   | None -> Keeper_config.keeper_enable_thinking ()
                 in
                 Keeper_tool_call_log.set_turn_context
@@ -975,7 +975,7 @@ let assemble_hooks
                           Yojson.Safe.to_string
                             (Agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
-                  ~thinking_enabled:thinking_enabled_effective
+                  ?thinking_enabled:thinking_enabled_effective
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

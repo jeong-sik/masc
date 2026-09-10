@@ -43,7 +43,7 @@ let data t =
 ;;
 
 let to_execution t =
-  Keeper_tool_execution.deferred_external_effect_data
+  Keeper_tool_execution.deferred_external_effect_data ~approval_id:t.approval_id
     ~effect_disposition:Tool_result.Proven_pre_effect (data t)
 ;;
 

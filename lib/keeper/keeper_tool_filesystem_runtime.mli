@@ -121,6 +121,15 @@ val default_owned_target :
     contract directly. *)
 
 module For_testing : sig
+  (** Observe the post-commit, post-snapshot boundary before result manifest I/O. *)
+  val with_before_result_manifest : (unit -> unit) -> (unit -> 'a) -> 'a
+
+  (** Inject a race after write capabilities are pinned and before authorization. *)
+  val with_before_write_authorization : (unit -> unit) -> (unit -> 'a) -> 'a
+
+  (** Run a fiber-local hook immediately before persisting an applied edit snapshot. *)
+  val with_before_edit_snapshot : (unit -> unit) -> (unit -> 'a) -> 'a
+
   type created_directory_fault_stage =
     | Before_create_directory
     | Before_inspect_created_directory

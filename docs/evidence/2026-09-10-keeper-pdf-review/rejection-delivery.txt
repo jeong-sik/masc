@@ -1,0 +1,5 @@
+[2026-09-10 08:16:16] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-d14835a4b1f16ae763aef3f80d91e4ff producer=memory-guide-proof
+[2026-09-10 08:20:54] [INFO] [Misc] system LLM completion authority committed task_id=task-001 verification_id=vrf-d14835a4b1f16ae763aef3f80d91e4ff authority=verifier_exact verdict=REJECT
+[2026-09-10 08:21:44] [INFO] [Keeper] turn entry: completion authority rejection delivered task_id=task-001 verification_id=vrf-d14835a4b1f16ae763aef3f80d91e4ff (keeper=memory-guide-proof)
+[2026-09-10 08:21:44] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=completion-authority-rejected:task-001:vrf-d14835a4b1f16ae763aef3f80d91e4ff urgency=immediate class=completion_authority_rejected (keeper=memory-guide-proof)
+[2026-09-10 08:21:44] [INFO] [Keeper] turn entry: promoted queued observation post_id=completion-authority-rejected:task-001:vrf-d14835a4b1f16ae763aef3f80d91e4ff keeper=memory-guide-proof

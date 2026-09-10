@@ -1,0 +1,102 @@
+{
+  "request": {
+    "name": "memory-guide-proof",
+    "ask_id": "ask6c47b66fc5880606",
+    "answers": [
+      {
+        "question_id": "build_permission",
+        "response": {
+          "kind": "wrote",
+          "text": "요청한 안내 자료 제작을 위해 이 Keeper 샌드박스 안에 SVG/PDF와 제작용 Python 파일을 작성하고 실행하는 범위는 승인되어 있습니다. 기억·설정 변경과 외부 발송은 제외합니다. 각 도구의 실제 승인/재실행 결과를 확인하고 이어가세요. 이미 승인된 Execute는 재제출하지 마세요. 현재 Host Gate 승인은 다음 턴의 재실행을 기다리므로, 대기 중인 결과를 성공으로 보고하지 말고 이 턴을 마친 뒤 전달되는 결과로 계속 진행하세요."
+        }
+      }
+    ]
+  },
+  "response": {
+    "recorded": true,
+    "ask_id": "ask6c47b66fc5880606",
+    "answer_count": 1,
+    "delivered": true,
+    "open_remaining": 0
+  },
+  "readback": {
+    "scope": "fleet",
+    "keeper": null,
+    "keeper_count": 1,
+    "open_count": 0,
+    "returned": 0,
+    "asks": []
+  },
+  "keeper_followthrough_verified": false,
+  "actual_keeper_ask_calls": [
+    {
+      "execution_id": "exec-1788985681795-0009",
+      "input": {
+        "context": "제안 원문(keeper_workspace_memory_read)은 이미 확보했습니다. synthetic-scenario 표시, 상충(s1 PDF vs s2 Markdown), 수치 정정(12초→21초), 세 keeper의 source_bound 누락 예시를 담을 계획입니다. 남은 필요 권한은 (1) 샌드박스 파일 작성(Write), (2) python3 스크립트 실행(예: reportlab로 PDF 생성)입니다.",
+        "questions": [
+          {
+            "header": "제작 권한 승인",
+            "mode": "single",
+            "prompt": "안내 자료(SVG 그림 + PDF)를 샌드박스에 실제 파일로 만들기 위해 파일 작성과 python3 실행 승인이 필요합니다. 현재 Write/Execute가 승인 대기(judge_requested)로 이월된 상태입니다. 어떻게 진행할까요?",
+            "free_text": true,
+            "free_text_hint": "예: 특정 디렉터리만 허용, 또는 사용 가능한 다른 경로 지시",
+            "choices": [
+              {
+                "choice_id": "approve_all",
+                "label": "작성+실행 모두 승인",
+                "description": "샌드박스 내 안내 자료 제작에 필요한 Write 및 python3 실행을 이번 작업 범위에서 승인"
+              },
+              {
+                "choice_id": "approve_write_only",
+                "label": "파일 작성만 승인",
+                "description": "Write는 허용하고 python 실행은 별도 확인. SVG는 확정 가능하나 PDF는 실행 권한 확보 후 제작"
+              },
+              {
+                "choice_id": "hold",
+                "label": "보류하고 재요청",
+                "description": "지금은 승인하지 않고, 이후 턴에서 다시 요청"
+              }
+            ]
+          }
+        ]
+      },
+      "output": "question_id is required\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+      "success": false
+    },
+    {
+      "execution_id": "exec-1788985690633-000a",
+      "input": {
+        "context": "제안 원문(keeper_workspace_memory_read)은 이미 확보했습니다. synthetic-scenario 표시, 상충(s1 PDF vs s2 Markdown), 수치 정정(12초→21초), 세 keeper의 source_bound 누락 예시를 담을 계획입니다. 남은 필요 권한은 (1) 샌드박스 파일 작성(Write), (2) python3 스크립트 실행(예: reportlab로 PDF 생성)입니다.",
+        "questions": [
+          {
+            "header": "제작 권한 승인",
+            "mode": "single",
+            "prompt": "안내 자료(SVG 그림 + PDF)를 샌드박스에 실제 파일로 만들기 위해 파일 작성과 python3 실행 승인이 필요합니다. 현재 Write/Execute가 승인 대기(judge_requested)로 이월된 상태입니다. 어떻게 진행할까요?",
+            "question_id": "build_permission",
+            "free_text": true,
+            "free_text_hint": "예: 특정 디렉터리만 허용, 또는 사용 가능한 다른 경로 지시",
+            "choices": [
+              {
+                "choice_id": "approve_all",
+                "label": "작성+실행 모두 승인",
+                "description": "샌드박스 내 안내 자료 제작에 필요한 Write 및 python3 실행을 이번 작업 범위에서 승인"
+              },
+              {
+                "choice_id": "approve_write_only",
+                "label": "파일 작성만 승인",
+                "description": "Write는 허용하고 python 실행은 별도 확인. SVG는 확정 가능하나 PDF는 실행 권한 확보 후 제작"
+              },
+              {
+                "choice_id": "hold",
+                "label": "보류하고 재요청",
+                "description": "지금은 승인하지 않고, 이후 턴에서 다시 요청"
+              }
+            ]
+          }
+        ]
+      },
+      "output": "{\"ask_id\":\"ask6c47b66fc5880606\",\"keeper_name\":\"memory-guide-proof\",\"questions\":[{\"question_id\":\"build_permission\",\"header\":\"제작 권한 승인\"}],\"open_count\":1}",
+      "success": true
+    }
+  ]
+}

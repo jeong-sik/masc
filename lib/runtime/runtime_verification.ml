@@ -210,7 +210,7 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
            let seed =
              Runtime_inference.seed_of_thinking_support
                ~preserve_thinking:runtime.model.preserve_thinking
-               (Some runtime.model.thinking_support)
+               runtime.model.thinking_support
            in
            let provider_cfg =
              Runtime_agent_core_runner.apply_inference_seed ~seed provider_cfg

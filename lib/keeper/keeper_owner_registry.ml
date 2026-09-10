@@ -594,6 +594,19 @@ let with_owner_command ~base_path ~keeper_name f =
     f owner |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
+let direct_runtime_retry ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.direct_runtime_retry owner ~operation_id)
+;;
+let defer_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~execution_digest ~continuation =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_runtime_retry owner ~operation_id ~execution_digest ~continuation)
+;;
+let resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~observed =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.resume_direct_runtime_retry owner ~operation_id ~observed)
+;;
+
 let exact_operation ~base_path ~keeper_name operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.exact_operation owner operation_id)
@@ -716,3 +729,25 @@ end
    never counts a bucket array another domain is resizing. Never called from
    inside this module's critical sections; the lock is not reentrant. *)
 let heap_root walk = Stdlib.Mutex.protect pools_mu (fun () -> walk (Obj.repr pools))
+
+let direct_gate_state ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_gate_state owner ~operation_id)
+let direct_gate_waits ~base_path ~keeper_name =
+  with_owner_command ~base_path ~keeper_name Keeper_owner.direct_gate_waits
+let direct_gate_obligations ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_gate_obligations owner ~operation_id)
+let defer_direct_gate ~base_path ~keeper_name ~operation_id ~execution_digest ~waiting =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.defer_direct_gate owner ~operation_id ~execution_digest ~waiting)
+let resolve_direct_gate ~base_path ~keeper_name ~operation_id ~resolution =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.resolve_direct_gate owner ~operation_id ~resolution)
+let resume_direct_gate ~base_path ~keeper_name ~operation_id ~waiting ~resolution =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.resume_direct_gate owner ~operation_id ~waiting ~resolution)
+let discharge_direct_gate ~base_path ~keeper_name ~operation_id ~obligation =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.discharge_direct_gate owner ~operation_id ~obligation)
+
+let defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id ~execution_digest ~binding ~diagnostic =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_gate_reconciliation owner ~operation_id ~execution_digest ~binding ~diagnostic)
+
+let direct_gate_binding ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_gate_binding owner ~operation_id)

@@ -1,0 +1,67 @@
+{
+  "isError": false,
+  "structuredContent": {
+    "runtime_class": "keeper",
+    "schema": "masc.keeper_meta.v2",
+    "name": "memory-guide-proof",
+    "instructions": "공간 기억을 원문과 함께 읽어 운영자에게 이해하기 쉬운 자료를 만드는 Keeper입니다. 사실과 모델 제안을 구분하고 실제 열리는 결과 파일을 제공하세요. 기억과 런타임 설정을 수정하지 말고 외부 메시지를 보내지 마세요.",
+    "trace_id": "trace-1788985052038-00000",
+    "trace_history": [],
+    "last_handoff_ts": 0.0,
+    "created_at": "2026-09-09T20:17:32Z",
+    "updated_at": "2026-09-09T21:25:14Z",
+    "total_turns": 9,
+    "total_input_tokens": 376700,
+    "total_output_tokens": 14440,
+    "total_tokens": 391140,
+    "total_cost_usd": 0.0,
+    "last_turn_ts": 1788989060.807256,
+    "last_input_tokens": 82866,
+    "last_output_tokens": 1484,
+    "last_total_tokens": 84350,
+    "usage_cursor": null,
+    "last_usage_resolution": {
+      "observation": {
+        "input_tokens": 82866,
+        "output_tokens": 1484,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 82688,
+        "cost_usd": null
+      },
+      "usage_scope": "per_request",
+      "basis": {
+        "kind": "per_request"
+      },
+      "delta": {
+        "input_tokens": 82866,
+        "output_tokens": 1484,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 82688,
+        "cost_usd": null
+      },
+      "status": "exact_cost_unavailable",
+      "observed_at": 1788988757.970678
+    },
+    "last_latency_ms": 1492,
+    "proactive_count_total": 3,
+    "last_proactive_ts": 1788987768.569771,
+    "proactive_visible_count_total": 3,
+    "last_visible_proactive_ts": 1788987768.569771,
+    "last_proactive_outcome": "tool_use",
+    "last_proactive_reason": "unified:tools=[keeper_artifact_read,tool_execute,tool_execute,tool_write_file,tool_execute,tool_edit_file,tool_search_files,tool_edit_file,tool_search_files]",
+    "last_proactive_preview": "(tools: keeper_artifact_read, tool_execute, tool_execute, tool_write_file, tool_execute, tool_edit_file, tool_search_files, tool_edit_file, tool_search_files)",
+    "message_scope_ack_id": "msg-1788987768602704-76",
+    "last_runtime_attempt": null,
+    "paused": false,
+    "latched_reason": null,
+    "current_task_id": null,
+    "keeper_id": "keeper-3c8de881-6baa-42a4-9a39-c7a3ef495925",
+    "agent_core_env": {}
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"runtime_class\":\"keeper\",\"schema\":\"masc.keeper_meta.v2\",\"name\":\"memory-guide-proof\",\"instructions\":\"공간 기억을 원문과 함께 읽어 운영자에게 이해하기 쉬운 자료를 만드는 Keeper입니다. 사실과 모델 제안을 구분하고 실제 열리는 결과 파일을 제공하세요. 기억과 런타임 설정을 수정하지 말고 외부 메시지를 보내지 마세요.\",\"trace_id\":\"trace-1788985052038-00000\",\"trace_history\":[],\"last_handoff_ts\":0.0,\"created_at\":\"2026-09-09T20:17:32Z\",\"updated_at\":\"2026-09-09T21:25:14Z\",\"total_turns\":9,\"total_input_tokens\":376700,\"total_output_tokens\":14440,\"total_tokens\":391140,\"total_cost_usd\":0.0,\"last_turn_ts\":1788989060.807256,\"last_input_tokens\":82866,\"last_output_tokens\":1484,\"last_total_tokens\":84350,\"usage_cursor\":null,\"last_usage_resolution\":{\"observation\":{\"input_tokens\":82866,\"output_tokens\":1484,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":82688,\"cost_usd\":null},\"usage_scope\":\"per_request\",\"basis\":{\"kind\":\"per_request\"},\"delta\":{\"input_tokens\":82866,\"output_tokens\":1484,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":82688,\"cost_usd\":null},\"status\":\"exact_cost_unavailable\",\"observed_at\":1788988757.970678},\"last_latency_ms\":1492,\"proactive_count_total\":3,\"last_proactive_ts\":1788987768.569771,\"proactive_visible_count_total\":3,\"last_visible_proactive_ts\":1788987768.569771,\"last_proactive_outcome\":\"tool_use\",\"last_proactive_reason\":\"unified:tools=[keeper_artifact_read,tool_execute,tool_execute,tool_write_file,tool_execute,tool_edit_file,tool_search_files,tool_edit_file,tool_search_files]\",\"last_proactive_preview\":\"(tools: keeper_artifact_read, tool_execute, tool_execute, tool_write_file, tool_execute, tool_edit_file, tool_search_files, tool_edit_file, tool_search_files)\",\"message_scope_ack_id\":\"msg-1788987768602704-76\",\"last_runtime_attempt\":null,\"paused\":false,\"latched_reason\":null,\"current_task_id\":null,\"keeper_id\":\"keeper-3c8de881-6baa-42a4-9a39-c7a3ef495925\",\"agent_core_env\":{}}"
+    }
+  ]
+}

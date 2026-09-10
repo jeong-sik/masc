@@ -49,7 +49,7 @@ let qwen_model =
   ; api_name = "qwen"
   ; tools_support = true
   ; max_context = Some 160000
-  ; thinking_support = true
+  ; thinking_support = Some true
   ; preserve_thinking = Some false
   ; streaming = true
   ; temperature = None
@@ -986,7 +986,7 @@ let test_runtime_toml_accepts_glm_coding_capability () =
   let cfg = glm_coding_runtime_config_or_fail () in
   match cfg.models with
   | [ model ] ->
-    check bool "thinking enabled" true model.thinking_support;
+    check (option bool) "thinking enabled" (Some true) model.thinking_support;
     check (option bool) "preserve thinking" (Some true) model.preserve_thinking;
     (match model.capabilities with
      | Some caps ->

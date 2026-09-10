@@ -67,8 +67,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
     List.map (fun (provider : Runtime_schema.provider) ->
       let supported =
         match provider.api_format with
-        | Runtime_schema.Antigravity_cli_runtime -> false
-        | Messages_api | Chat_completions_api | Ollama_api
+        | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime -> true
       in
       let fields =
@@ -113,7 +112,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
-    ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", false
+    ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
     ; "llama-cpp", "llama.cpp", "openai-compatible-http", None, true

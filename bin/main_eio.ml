@@ -2674,6 +2674,41 @@ let workspace_upgrade_cmd =
     | None -> prerr_endline "Choose inspection, --apply KEEPER with --source-sha256, or --restore BACKUP_ID."; 1 in
   Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect known configuration upgrades and private recovery backups.")
     Term.(const run $ base_path $ apply $ source_sha256 $ restore)
+let antigravity_account_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let sign_in = Arg.(value & flag & info ["sign-in"] ~doc:"Open official sign-in in a private account directory.") in
+  let credential = Arg.(value & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run base_path cli_path sign_in credential =
+    let action = match sign_in, credential with
+      | true, Some _ -> None
+      | true, None -> Some Masc_cli_antigravity.Sign_in
+      | false, Some path -> Some (Use_reference path)
+      | false, None -> Some Import_current in
+    match action with
+    | None -> prerr_endline "Choose sign-in or an existing account reference."; 1
+    | Some action -> Masc_cli_antigravity.account ~base_path ~cli_path
+        ~timeout_s:runtime_probe_subscription_timeout_s ~action in
+  Cmd.v (Cmd.info "runtime-antigravity-account" ~doc:"Select an Antigravity account and list its actual models without a model turn.")
+    Term.(const run $ base_path $ cli_path $ sign_in $ credential)
+
+let antigravity_models_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let run cli_path oauth_source = Masc_cli_antigravity.models ~cli_path ~oauth_source
+    ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
+    Term.(const run $ cli_path $ credential)
+
+let sandbox_catalog_cmd =
+  let inspect requested =
+    let base_path = match requested with Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
+    0 in
+  Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
+    Term.(const inspect $ run_base_path)
+
+
 let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
     ~doc:"Print the shared read-only onboarding state as JSON.") in
@@ -2833,6 +2868,9 @@ let cmd =
     ; setup_preflight_cmd
     ; runtime_resume_cmd
     ; workspace_upgrade_cmd
+    ; antigravity_account_cmd
+    ; antigravity_models_cmd
+    ; sandbox_catalog_cmd
     ; doctor_cmd
     ; token_cmd
     ; build_commit_cmd

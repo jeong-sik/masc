@@ -43,6 +43,9 @@ bin/masc_cost.ml
 # startup failures to the operator's terminal before any runtime exists;
 # user-facing CLI output, not server logging.
 bin/masc_cli_onboarding.ml
+# masc_cli_antigravity prompts the user on stderr before launching the
+# interactive sign-in flow; user-facing CLI output, not server logging.
+bin/masc_cli_antigravity.ml
 # gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml

@@ -256,6 +256,28 @@ let test_identical_edit_preserves_file_and_records_no_change () =
   Alcotest.(check bool) "equal strings do not excuse a missing match" false (parse_ok (run "absent").raw_output)
 ;;
 
+let test_patch_rejection_recovers_with_corrected_arguments () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "recover.ml" in
+  Fs_compat.save_file path "x = 1\nx = 1\n";
+  let edit old_string replace_all = handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(`Assoc ["path", `String path; "mode", `String "patch";
+        "old_string", `String old_string; "new_string", `String "x = 2";
+        "replace_all", `Bool replace_all]) () in
+  List.iter (fun old ->
+    let rejected = edit old false in
+    Alcotest.(check bool) "patch rejection is actionable workflow failure" true
+      (rejected.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+    Alcotest.(check bool) "no change evidence on rejection" true
+      (Option.is_none rejected.file_change_evidence)) ["stale"; "x = 1"];
+  Alcotest.(check string) "failed edits did not write" "x = 1\nx = 1\n" (Fs_compat.load_file path);
+  let corrected = edit "x = 1" true in
+  Alcotest.(check bool) "corrected arguments succeed" true
+    (corrected.disposition = Tool_result.Completed ());
+  Alcotest.(check string) "corrected patch applied" "x = 2\nx = 2\n" (Fs_compat.load_file path)
+;;
+
 let test_patch_unique_match () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
@@ -1635,6 +1657,7 @@ let () =
     [
       ( "patch-mode",
         [
+          Alcotest.test_case "patch rejection recovers with corrected arguments" `Quick test_patch_rejection_recovers_with_corrected_arguments;
           Alcotest.test_case "identical edit is an observed no change" `Quick test_identical_edit_preserves_file_and_records_no_change;
           Alcotest.test_case "unique match replaces" `Quick
             test_patch_unique_match;

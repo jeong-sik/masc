@@ -257,6 +257,26 @@ let test_patch_reads_then_replaces () =
   check string "patched body" "let x = 2\nlet y = 1\n" stdin
 ;;
 
+let test_remote_patch_arguments_recover_but_write_failure_stays_runtime () =
+  with_eio @@ fun () ->
+  List.iter (fun mode ->
+    let f = fixture ~mode in
+    save (f.frame_path ^ ".source") "let x = 1\n";
+    let edit old_string = handle f
+        [ "path", `String "src/a.ml"; "mode", `String "patch"
+        ; "old_string", `String old_string; "new_string", `String "let x = 2" ] in
+    check bool "stale patch is workflow rejection" true
+      (failed_as Tool_result.Workflow_rejection (edit "stale"));
+    check bool "rejection does not write" false (Sys.file_exists (f.frame_path ^ ".write"));
+    let corrected = edit "let x = 1" in
+    check bool "corrected input reaches the write boundary" true
+      (Sys.file_exists (f.frame_path ^ ".write"));
+    match mode with
+    | "ok" -> check bool "corrected patch succeeds" true (completed corrected)
+    | _ -> check bool "actual write failure remains runtime" true
+        (failed_as Tool_result.Runtime_failure corrected)) ["ok"; "fail"]
+;;
+
 let test_identical_remote_patch_does_not_write () =
   with_eio @@ fun () ->
   let f = fixture ~mode:"ok" in
@@ -319,6 +339,7 @@ let () =
               test_overwrite_sends_content_on_stdin
           ; test_case "append uses the append payload" `Quick
               test_append_uses_the_append_payload
+          ; test_case "patch arguments recover and I/O stays runtime" `Quick test_remote_patch_arguments_recover_but_write_failure_stays_runtime
           ; test_case "identical remote patch does not write" `Quick test_identical_remote_patch_does_not_write
           ; test_case "patch reads then replaces" `Quick test_patch_reads_then_replaces
           ; test_case "patch without a source is a workflow rejection" `Quick

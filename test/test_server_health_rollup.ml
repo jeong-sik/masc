@@ -7,7 +7,7 @@
 open Alcotest
 module R = Server_health_rollup
 
-let summary ?(sections = []) ?(runtime_startup_degradation = `Assoc [])
+let rollup ?(sections = []) ?(runtime_startup_degradation = `Assoc [])
     ?(keeper_config_schema_status = "ok") ?(keeper_config_schema_blocking = false)
     ?(keeper_config_schema_terminal_reason = "")
     ?(keeper_config_operator_action_required = false)
@@ -20,6 +20,28 @@ let summary ?(sections = []) ?(runtime_startup_degradation = `Assoc [])
     ~keeper_config_schema_terminal_reason
     ~keeper_config_operator_action_required
     ~lazy_task_boot_guard_fires_total
+
+(* The three the operator-action cases below read. [status_lines] reads the
+   fourth, which answers a different question. *)
+let summary ?sections ?runtime_startup_degradation ?keeper_config_schema_status
+    ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
+    ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total () =
+  let r =
+    rollup ?sections ?runtime_startup_degradation ?keeper_config_schema_status
+      ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
+      ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total ()
+  in
+  (r.R.overall_status, r.R.operator_action_required, r.R.operator_action_reasons)
+
+let status_lines ?sections ?runtime_startup_degradation ?keeper_config_schema_status
+    ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
+    ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total () =
+  let r =
+    rollup ?sections ?runtime_startup_degradation ?keeper_config_schema_status
+      ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
+      ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total ()
+  in
+  r.R.overall_status_reasons
 
 let section name status = (name, `Assoc [ "status", `String status ])
 
@@ -171,6 +193,52 @@ let test_startup_degradation_is_rolled_up_outside_the_cache () =
   check (list string) "its terminal reason is carried"
     [ "runtime_startup_degradation:runtime absent" ] reasons
 
+(* #34895: the gate is rank >= 3 plus Unknown, so a section at Warning with
+   operator_action_required=false raised the grade and left no line anywhere.
+   #34781 made that exact combination the normal one for a queue holding only
+   runnable backlog. *)
+let test_a_warning_section_leaves_a_line_without_demanding_action () =
+  let sections =
+    [ ( "keeper_event_queue"
+      , `Assoc
+          [ "status", `String "warning"
+          ; "operator_action_required", `Bool false
+          ; "status_reasons", `List [ `String "runnable_backlog=18" ]
+          ] )
+    ]
+  in
+  let status, action, reasons = summary ~sections () in
+  check string "the grade still rises" "warning" status;
+  check bool "and still demands nothing" false action;
+  check (list string) "so the operator list stays empty" [] reasons;
+  check (list string) "and the grade is explained"
+    [ "keeper_event_queue:runnable_backlog=18" ]
+    (status_lines ~sections ())
+
+let test_a_section_with_no_reasons_is_named_by_its_status () =
+  check (list string) "the status stands in for a missing reason"
+    [ "dashboard_surface:unknown" ]
+    (status_lines
+       ~sections:[ section "dashboard_surface" "unknown" ]
+       ())
+
+let test_an_ok_section_leaves_no_line () =
+  check (list string) "an ok section explains nothing" []
+    (status_lines ~sections:[ section "keeper_owner" "ok" ] ())
+
+let test_every_raised_section_leaves_a_line () =
+  check (list string) "each one, in section order"
+    [ "keeper_owner:degraded"; "keeper_event_queue:blocked" ]
+    (status_lines
+       ~sections:
+         [ section "keeper_owner" "degraded"; section "keeper_event_queue" "blocked" ]
+       ())
+
+let test_the_boot_guard_explains_the_grade_it_raises () =
+  check (list string) "the fired count is the explanation"
+    [ "lazy_task_boot_guard_fires_total:2" ]
+    (status_lines ~lazy_task_boot_guard_fires_total:2 ())
+
 let test_the_worst_grade_wins () =
   let status, _, _ =
     summary
@@ -204,7 +272,17 @@ let () =
             test_startup_degradation_is_rolled_up_outside_the_cache
         ] )
     ; ( "grades"
-      , [ test_case "a state name is not a grade" `Quick
+      , [ test_case "a warning section leaves a line without demanding action"
+            `Quick test_a_warning_section_leaves_a_line_without_demanding_action
+        ; test_case "a section with no reasons is named by its status" `Quick
+            test_a_section_with_no_reasons_is_named_by_its_status
+        ; test_case "an ok section leaves no line" `Quick
+            test_an_ok_section_leaves_no_line
+        ; test_case "every raised section leaves a line" `Quick
+            test_every_raised_section_leaves_a_line
+        ; test_case "the boot guard explains the grade it raises" `Quick
+            test_the_boot_guard_explains_the_grade_it_raises
+        ; test_case "a state name is not a grade" `Quick
             test_a_state_name_is_not_a_grade
         ; test_case "a field without a status is skipped" `Quick
             test_a_field_without_a_status_is_skipped

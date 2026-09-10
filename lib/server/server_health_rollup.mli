@@ -16,6 +16,27 @@ val is_cached : string -> bool
     The list itself stays inside the module: it is the rollup's own reach, and
     an export with no caller is one the dead-surface ratchet counts. *)
 
+type t =
+  { overall_status : string
+  ; operator_action_required : bool
+  ; operator_action_reasons : string list
+  ; overall_status_reasons : string list
+  }
+(** Two lists, because they answer two questions.
+
+    [operator_action_reasons] is what somebody has to answer, and
+    [operator_action_required] is whether that list holds anything.
+
+    [overall_status_reasons] is what moved [overall_status] off ok, whether or
+    not anyone has to answer it. Every section above rank 0 leaves a line
+    here. Without it a section at Degraded, Stale, Warning or Unavailable with
+    [operator_action_required=false] raised the grade and left no line
+    anywhere: the dashboard renders "Runtime health warning · status=warning ·
+    operator_action_required=false" and stops, so the operator could not tell
+    which section it was (#34895). #34781 made that combination common on
+    purpose -- a queue holding only runnable backlog is warning and needs no
+    answer. *)
+
 val operator_summary :
   sections:(string * Yojson.Safe.t) list ->
   runtime_startup_degradation:Yojson.Safe.t ->
@@ -24,9 +45,8 @@ val operator_summary :
   keeper_config_schema_terminal_reason:string ->
   keeper_config_operator_action_required:bool ->
   lazy_task_boot_guard_fires_total:int ->
-  string * bool * string list
-(** [operator_summary ~sections ...] is
-    [(overall_status, operator_action_required, operator_action_reasons)].
+  t
+(** [operator_summary ~sections ...] rolls the sections up.
 
     Which of [sections] it reads is derived, not listed: a section is rolled up
     when [is_cached] holds for its name and its ["status"] parses as a grade.

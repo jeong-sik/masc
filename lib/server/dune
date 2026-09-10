@@ -21,6 +21,7 @@
   masc.browser_lane
   masc.slack_lane
   masc.keeper_types_profile_sandbox
+  masc.keeper_sandbox_image
   masc.msx_lane
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC

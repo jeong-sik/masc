@@ -300,6 +300,55 @@ class Journey(unittest.TestCase):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
         prerequisites.assert_called_once_with('/bin/masc', 'docker', base_path='/workspace', port=8945)
 
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_official_client_install_rechecks_without_auth_or_model(self):
+        import shlex
+        import sys
+        for dependency, client in [('codex', 'codex'), ('claude-code', 'claude'), ('antigravity', 'agy')]:
+            with self.subTest(client=client), tempfile.TemporaryDirectory() as home:
+                root = Path(home)
+                tools = root / 'tools'
+                tools.mkdir()
+                downloaded = root / 'downloaded-path'
+                target = root / '.local/bin' / client
+                payload = '#!/bin/sh\n[ "$1" = --version ] || exit 77\necho fixture-client-version\n'
+                script = '#!/bin/sh\nmkdir -p ' + shlex.quote(str(target.parent)) + '\nprintf %s ' + shlex.quote(payload) + ' > ' + shlex.quote(str(target)) + '\nchmod 700 ' + shlex.quote(str(target)) + '\n'
+                curl = tools / 'curl'
+                curl.write_text('#!' + sys.executable + '\nimport pathlib,sys\n'
+                    'args=sys.argv[1:]\nassert args[args.index("--proto")+1]=="=https"\n'
+                    'assert args[args.index("--proto-redir")+1]=="=https"\n'
+                    'assert args[-1] in ["https://chatgpt.com/codex/install.sh","https://claude.ai/install.sh","https://antigravity.google/cli/install.sh"]\n'
+                    'path=pathlib.Path(args[args.index("--output")+1])\npath.write_text(' + repr(script) + ')\n'
+                    'pathlib.Path(' + repr(str(downloaded)) + ').write_text(str(path))\n')
+                curl.chmod(0o700)
+                env = dict(os.environ, HOME=home, CODEX_INSTALL_DIR=str(target.parent), PATH=str(tools)+':/usr/bin:/bin')
+                result = subprocess.run([BINARY, 'prerequisite-actions', dependency, '--execute', client+'_native_install'],
+                    env=env, cwd=home, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                receipt = json.loads(result.stdout)
+                self.assertEqual(receipt['status'], 'commands_completed_recheck_required')
+                self.assertEqual(receipt['readiness'], 'not_checked')
+                self.assertTrue(target.is_file())
+                self.assertFalse(Path(downloaded.read_text()).exists())
+                self.assertNotIn('fixture-client-version', result.stdout)
+
+    def test_missing_antigravity_uses_installer_then_detects_user_binary_without_path(self):
+        with tempfile.TemporaryDirectory() as home:
+            source = dict(choice='antigravity', command='agy', label='Antigravity')
+            target = Path(home, '.local/bin/agy')
+            def install(*args):
+                target.parent.mkdir(parents=True)
+                target.write_text('#!/bin/sh\necho fixture\n')
+                target.chmod(0o700)
+                return True
+            credentials = type('Credentials', (), {'binary':'/owned/masc'})()
+            with patch.dict(os.environ, HOME=home), patch.object(SETUP.shutil, 'which', return_value=None), \
+                    patch.object(SETUP, 'prerequisite_menu', side_effect=install) as action, \
+                    patch.object(SETUP, 'prepare_antigravity_account', side_effect=lambda row, _: row):
+                result = SETUP.prepare_connection(source, credentials)
+            action.assert_called_once_with('/owned/masc', 'antigravity')
+            self.assertEqual(result['command'], str(target.resolve()))
+
     def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
         catalog = dict(schema='masc.prerequisite_actions.v1', actions=[
             dict(id='vendor_guide', label='Official guide', requires_admin=False,

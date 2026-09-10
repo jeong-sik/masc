@@ -3573,6 +3573,7 @@ let () =
             "official client quota excludes registry API-key scope"
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
+          Alcotest.test_case
             "attempt loop without lane id does not update sticky preference"
             `Quick
             test_attempt_loop_without_lane_id_does_not_update_sticky_preference;

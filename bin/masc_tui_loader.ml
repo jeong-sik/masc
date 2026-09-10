@@ -1,5 +1,6 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
+module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime
 module Keeper_types_support = Masc.Keeper_types_support
@@ -109,7 +110,9 @@ let load_keepers (base_path : string) : keeper list * string option =
                      keepers, (Printf.sprintf "%s: %s" name err :: errors)))
           ([], []) names
       in
-      ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers
+      let declarations = Keeper_declared_roster.missing ~base_path
+          ~persisted_names:names |> List.map Tui_decode.keeper_of_declaration in
+      ( List.sort (fun a b -> String.compare a.k_name b.k_name) (keepers @ declarations)
       , summarize_errors "keeper metadata read failed" errors )
 
 (** Load tasks from the canonical workspace backlog: the active rows for the

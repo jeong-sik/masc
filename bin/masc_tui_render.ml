@@ -5841,8 +5841,13 @@ let keeper_message_identity ~max_cells state keeper_name =
       in
       (match runtime with
        | None ->
-           fit_identity
-             (status ^ Ansi.dim ^ " \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset)
+           let detail = match keeper.k_origin with
+             | Tui_decode.Declared_keeper requirements ->
+               "아직 시작하지 않음 · " ^ String.concat " · "
+                 (List.map Masc.Keeper_declared_roster.requirement_label requirements)
+             | Persisted_keeper -> status ^ " · —"
+           in
+           fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
            let runtime_id = Terminal_text.single_line row.kr_runtime_id in
            let prefix =
@@ -7831,6 +7836,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Runtime section *)
     add_section "Runtime Stats";
+    (match k.k_origin with
+     | Tui_decode.Persisted_keeper -> ()
+     | Declared_keeper requirements ->
+       add_row "Preparation:" (String.concat " · "
+         (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
     add_row "Total Turns:" (string_of_int k.k_total_turns);
     add_row "Total Tokens:" (string_of_int k.k_total_tokens);
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);

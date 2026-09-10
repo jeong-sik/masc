@@ -293,14 +293,18 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # Anthropic-kind backends refuse an explicit enable_thinking without a
     # catalog-declared thinking policy
     # (backend_anthropic.validate_nonexact_thinking_controls).
-    # adaptive_default = the wire gets {"type":"adaptive"} when thinking is on
-    # and {"type":"disabled"} when off; the model decides depth.
+    # adaptive_only = the wire gets {"type":"adaptive"} when thinking is on
+    # and NO thinking field when off; the model decides depth. fable-5 rejects
+    # {"type":"disabled"} outright (observed v0.35.8 smoke, anthropic4:
+    # '"thinking.type.disabled" is not supported for this model'), which the
+    # no-thinking truncation retry would otherwise emit under
+    # adaptive_default. adaptive_only matches the model's contract.
     # OpenAI chat-completions carries effort only when the model row declares
     # the reasoning_effort thinking-control dialect
     # (reasoning_dialect.validate_request_control_inputs:
     # Chat_completions + Reasoning_effort is the admitted pair).
     if pcfg["capabilities_base"] == "anthropic":
-        thinking_control = 'anthropic_thinking_control = "adaptive_default"\n'
+        thinking_control = 'anthropic_thinking_control = "adaptive_only"\n'
     elif pcfg["capabilities_base"] == "openai":
         thinking_control = 'thinking_control_format = "reasoning_effort"\n'
     else:

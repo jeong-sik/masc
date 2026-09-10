@@ -3,12 +3,22 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import pty
 from pathlib import Path
+import select
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
+BINARY = None
+if len(sys.argv) > 2 and sys.argv[1] == '--binary':
+    BINARY = str(Path(sys.argv.pop(2)).resolve())
+    sys.argv.pop(1)
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('setup', ROOT / 'scripts/install-runtime-setup.py')
 SETUP = importlib.util.module_from_spec(SPEC)
@@ -21,6 +31,41 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_setup_embeds_journey_and_new_home_cancels_without_writes(self):
+        with tempfile.TemporaryDirectory() as home:
+            pid, fd = pty.fork()
+            if pid == 0:
+                environment = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='xterm')
+                for key in list(environment):
+                    if key.startswith('MASC_') or key.startswith('AGENT_CORE_'):
+                        environment.pop(key)
+                os.chdir(home)  # helper cannot depend on the source checkout
+                os.execve(BINARY, [BINARY, 'setup'], environment)
+            captured = b''
+            try:
+                deadline = time.monotonic() + 30
+                while b'Your workspace' not in captured and time.monotonic() < deadline:
+                    if select.select([fd], [], [], 0.2)[0]:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        captured += chunk
+                self.assertIn(b'Your workspace', captured, captured.decode(errors='replace'))
+                os.write(fd, b'q')
+                self.assertFalse(Path(home, 'MASC').exists())
+                self.assertFalse(Path(home, '.masc').exists())
+            finally:
+                os.close(fd)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                os.waitpid(pid, 0)
+
     def test_cancel_fresh_home_does_not_initialize_or_select_models(self):
         with patch.object(SETUP, 'onboarding_status', return_value=observation()), \
                 patch.object(SETUP, 'pick', return_value=[2]), \

@@ -1,0 +1,32 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "kmsg-d88421644c25a0079fceb3f3b3e0cd0c",
+  "sequence": "0",
+  "created_at": 1788999583.991136,
+  "execution_digest": "e1fadf1d2f83df96080b15ebef3f0dd9b3e3d6733c39752d5000d1a7bd982bb4",
+  "source": {
+    "channel": "agent",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:pdf-proof-producer"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v1",
+    "submitted_by": "admin",
+    "surface": {
+      "kind": "agent"
+    },
+    "thread_id": "keeper:pdf-proof-producer",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Succeeded",
+  "completed_at": 1788999584.231176,
+  "outcome_ref": "trace-1788999583922-00000#1"
+}

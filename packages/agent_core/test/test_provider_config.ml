@@ -112,6 +112,29 @@ let test_request_path_override () =
 
 let check_headers = Alcotest.(check (list (pair string string)))
 
+let test_vertex_endpoint_and_bearer () =
+  let base location = match Vertex_endpoint.base_url ~project:"fixture-project" ~location with
+    | Ok value -> value | Error reason -> Alcotest.fail reason in
+  let global = base Vertex_endpoint.Global in
+  Alcotest.check Alcotest.string "global endpoint"
+    "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google" global;
+  Alcotest.check Alcotest.string "regional endpoint"
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google"
+    (base (Vertex_endpoint.Regional "us-central1"));
+  Alcotest.check Alcotest.bool "resource path injection rejected" true
+    (Result.is_error (Vertex_endpoint.base_url ~project:"wrong/path" ~location:Global));
+  let config = Provider_config.make ~kind:Gemini ~model_id:"gemini-3.7-flash"
+      ~base_url:global ~auth_scheme:Bearer_token ~api_key:"fixture-access-token" () in
+  Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.string))
+    "OAuth bearer is not a Gemini API key" ["Authorization", "Bearer fixture-access-token"]
+    (Provider_config.auth_headers_for_config config);
+  Alcotest.check Alcotest.bool "token absent from persistent nonsecret headers" true
+    (not (List.mem_assoc "Authorization" config.headers));
+  Alcotest.check Alcotest.string "native streaming resource"
+    (global ^ "/models/gemini-3.7-flash:streamGenerateContent?alt=sse")
+    (Complete_sampling.gemini_url ~config ~stream:true)
+;;
+
 let test_auth_headers_for_kind_and_key_matches_config () =
   List.iter
     (fun kind ->
@@ -2215,7 +2238,8 @@ let () =
         ; Alcotest.test_case "override" `Quick test_request_path_override
         ] )
     ; ( "auth_headers"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "Vertex endpoint and bearer auth" `Quick test_vertex_endpoint_and_bearer
+        ; Alcotest.test_case
             "kind/key API matches config API"
             `Quick
             test_auth_headers_for_kind_and_key_matches_config

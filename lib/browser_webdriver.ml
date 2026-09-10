@@ -46,11 +46,13 @@ let call t session method_ suffix body =
    lock on cancellation without poisoning it as [use_rw] would. *)
 let with_registered_session_lock t f =
   Eio.Switch.run (fun sw ->
+    (* See [with_session_lock]: balance registration on release; the prior count is unused. *)
     Eio.Switch.on_release sw (fun () -> ignore (Atomic.fetch_and_add t.active (-1)));
     Eio.Mutex.lock t.mutex;
     Eio.Switch.on_release sw (fun () -> Eio.Mutex.unlock t.mutex);
     f ())
 let with_session_lock t f =
+  (* See [observe_document_if_idle]: admission reads the updated count, not its prior value. *)
   ignore (Atomic.fetch_and_add t.active 1);
   with_registered_session_lock t f
 let close_unlocked ?request t = match t.session with

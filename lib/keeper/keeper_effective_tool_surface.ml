@@ -117,7 +117,7 @@ let project
       ~official_client_kind
       ~tool_delivery
       ~native_posture
-      ?(tool_deny = [])
+      ~tool_deny
       ~skill_names
       ~current_task_id
       ~task_skill_references

@@ -100,7 +100,7 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
 ;;
 
 let create
-      ?(tool_deny = [])
+      ~tool_deny
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory

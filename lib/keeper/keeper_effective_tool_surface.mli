@@ -85,7 +85,7 @@ module For_testing : sig
     official_client_kind:string ->
     tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
-    ?tool_deny:string list ->
+    tool_deny:string list ->
     skill_names:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->

@@ -50,7 +50,7 @@ type candidate =
   | Skill of skill_capability
 
 val create
-  :  ?tool_deny:string list
+  :  tool_deny:string list
   -> skill_names:string list option
   -> global_skill_catalog:Keeper_skill_catalog.t
   -> skill_inventory:Keeper_skill_inventory.t
@@ -61,7 +61,9 @@ val create
     refuses; matching descriptors leave the surface entirely, so the tool is
     neither listed to the model nor present in the dispatch bundle built from
     {!descriptors}. Names that match no model-visible descriptor deny
-    nothing -- the setup site logs them. *)
+    nothing -- the setup site logs them. A keeper with no selection passes
+    [[]]: the argument is mandatory because an optional here would sit in
+    front of only labelled arguments, which OCaml never erases. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
 val skill_projection : t -> Keeper_skill_catalog.turn_projection

@@ -129,7 +129,43 @@ SOURCES
   module_suites=$( { printf '%s\n' "${module_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
-  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ]; then
+  # A structural guard is named after what it asserts, not after the module it
+  # reads, so the name mapping above cannot find it -- and the modules those
+  # guards watch are the umbrella ones it deliberately skips. But such a guard
+  # states its own input: every Ast_grep call carries ~module_path:"<file>".
+  # Take the dependency from the declaration rather than from the name.
+  #
+  # The regression this exists for: #35011 changed bin/masc_tui_render.ml,
+  # which test_tui_http_ast watches through 52 such declarations, and the name
+  # mapping looks for test_tui_render_* instead. The pull request merged green
+  # and main was red on that suite until #35019.
+  #
+  # Measured 2026-09-10: 23 source files are named this way across 30 suites,
+  # at most 5 suites per file. The per-module cap above does not apply -- it
+  # guards against a name that is a namespace, and these are declarations.
+  declared_suites=""
+  while IFS= read -r changed_source; do
+    # Trimmed, unlike the loop above: the heredoc indents its first line, and
+    # that loop passes the value to basename, which does not care. This one
+    # matches the path inside a string literal, where two leading spaces match
+    # nothing and the miss is silent.
+    changed_source=$(printf '%s' "${changed_source}" \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "${changed_source}" ] || continue
+    watchers=$( { grep -rl "~module_path:\"${changed_source}\"" \
+      test packages/agent_core/test --include='test_*.ml' 2>/dev/null \
+      || true; } | sort -u)
+    [ -n "${watchers}" ] || continue
+    declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watchers}")
+  done <<DECLARED
+  ${changed_sources}
+DECLARED
+
+  declared_suites=$( { printf '%s\n' "${declared_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
+  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ] \
+    && [ -z "${declared_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -168,6 +204,13 @@ SOURCES
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${declared_suites}" ]; then
+    echo "guards that name the sources this pull request edits:"
+    printf '%s\n' "${declared_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${declared_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
 }
 
 # Fixtures for --self-test. Each is a changed-file list and the suites it must
@@ -199,9 +242,21 @@ self_test() {
   check "a source edit selects the suites named after it" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
-  # A module whose name is a namespace attributes nothing.
-  check "an umbrella module selects nothing" "" \
+  # A module whose name is a namespace attributes nothing by name -- it
+  # prefixes 136 suites, and picking those off one edit says nothing. What it
+  # still selects is the four guards that name the file themselves. The name
+  # mapping and the declared mapping answer different questions, and only the
+  # first one has to stay quiet here.
+  check "an umbrella module selects only the guards that name it" \
+    "test/test_tui_agenda.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml" \
     "bin/masc_tui.ml"
+  # The regression the declared mapping exists for: #35011 changed this file,
+  # test_tui_http_ast watches it through 52 ~module_path declarations, and the
+  # name mapping looks for test_tui_render_* instead. Both mappings answer
+  # here, and the guard is in the answer.
+  check "a watched source reaches the guard that declares it" \
+    "test/test_tui_agenda.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml" \
+    "bin/masc_tui_render.ml"
   check "a doc-only change selects nothing" "" \
     "docs/x.md"
   # A tool definition reaches both: the one that says the asset embeds and

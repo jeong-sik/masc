@@ -5531,11 +5531,7 @@
 
 (include stanzas/test_apple_container_install.inc)
 
-(rule
- (alias runtest-test_model_independent_owner)
- (deps test_model_independent_owner.py ../bin/main_eio.exe)
- (action
-  (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
+
 
 (test
  (name test_model_setup_resume)

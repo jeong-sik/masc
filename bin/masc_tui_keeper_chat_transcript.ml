@@ -554,6 +554,7 @@ let handler_activity_kind handler =
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
+  | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_workspace_memory_read
   | Tool_memory_search

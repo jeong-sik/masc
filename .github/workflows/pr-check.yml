@@ -303,6 +303,24 @@ jobs:
         # type error is deterministic. Do not merge this before that one.
         run: pnpm typecheck
 
+      - name: Run the dashboard tests that read backend source
+        # These suites assert that a TypeScript vocabulary still matches the
+        # OCaml that produces it -- the SSE event union, turn outcomes, keeper
+        # attention reasons, the lane registry fields, lifecycle events, the
+        # TUI answering glow. Nothing else selects them: a backend token rename
+        # touches no file under dashboard/, and the dashboard suite as a whole
+        # is not in CI (#35032). That is how `keepalive_stopped` reached main
+        # with no label on the dashboard side (#35031).
+        #
+        # The list is computed, not kept here, so a seventh such test joins the
+        # lane by existing. 57 tests, ~4s locally.
+        run: |
+          set -euo pipefail
+          coupled=$(python3 scripts/ci/list-dashboard-backend-coupled-tests.py)
+          printf 'backend-coupled dashboard suites:\n%s\n' "${coupled}"
+          cd dashboard
+          pnpm exec vitest run ${coupled}
+
       - name: Build browser preview
         working-directory: dashboard
         run: pnpm exec vite build --config vite.preview.config.ts

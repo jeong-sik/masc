@@ -5,7 +5,7 @@
     by parsing the opaque provider-facing tool body. *)
 type deferred_kind =
   | Generic_deferred
-  | External_effect_deferred
+  | External_effect_deferred of { approval_id : string option }
 
 val deferred_kind_to_string : deferred_kind -> string
 (** Stable producer-owned wire label for deferred settlement evidence. *)
@@ -60,6 +60,7 @@ val deferred_data :
 (** Typed deferral for an external effect whose durable resolution resumes the
     Keeper later. *)
 val deferred_external_effect_data :
+  ?approval_id:string ->
   ?effect_disposition:Tool_result.failure_effect_disposition ->
   ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 

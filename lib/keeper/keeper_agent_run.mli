@@ -1,3 +1,7 @@
+type direct_continuation =
+  | Runtime_continuation of Keeper_direct_runtime_continuation.admission
+  | Gate_continuation of Keeper_direct_gate_continuation.admission
+
 (** Keeper single-turn orchestration via Agent_core.Agent.run().
 
     This module is intentionally a compatibility facade: public types and
@@ -257,6 +261,8 @@ val run_turn
   -> ?degraded_retry_runtime:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
   -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
+  -> ?direct_resume:direct_continuation
+  -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_runtime_retry_deferred:
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
@@ -268,6 +274,7 @@ val run_turn
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_gate_deferred:(string -> unit)
   -> ?autonomous_yield_requested:
        (unit -> (autonomous_yield_request option, string) result)
        (* Evaluated only after a typed AGENT_CORE tool boundary. Snapshot failures

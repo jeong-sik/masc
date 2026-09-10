@@ -181,6 +181,54 @@ describe('PromptRegistryPanel', () => {
     container.remove()
   })
 
+  it('opens all preset source text without changing drafts or saving', async () => {
+    const literal = '<script>do not execute</script>\n{{context}}\nlast line';
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [
+      ...defaultPromptItems(),
+      makePrompt({ key: 'literal', effective: literal, source: 'file' }),
+      makePrompt({ key: 'missing-text', effective: '', source: 'missing' }),
+    ] })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const editor = container.querySelector('textarea') as HTMLTextAreaElement
+    await fireEvent.input(editor, { target: { value: 'unsaved draft' } })
+    const preview = container.querySelector('[data-prompt-preset-content]') as HTMLElement
+    const toggle = preview.querySelector('button') as HTMLButtonElement
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    const literalContent = preview.querySelector('[data-preset-prompt="literal"] pre') as HTMLElement
+    expect(literalContent.textContent).toBe(literal)
+    expect(literalContent.tabIndex).toBe(0)
+    expect(literalContent.getAttribute('role')).toBe('region')
+    expect(literalContent.getAttribute('aria-label')).toBe('literal 원문')
+    literalContent.focus()
+    expect(document.activeElement).toBe(literalContent)
+    expect(literalContent.classList.contains('focus-visible:outline-2')).toBe(true)
+    const originalMembers = Array.from(preview.querySelectorAll('[data-preset-prompt]'))
+      .map(member => member.getAttribute('data-preset-prompt'))
+    const search = container.querySelector('input[aria-label="프롬프트 검색"]') as HTMLInputElement
+    await fireEvent.input(search, { target: { value: 'analysis' } })
+    expect(Array.from(preview.querySelectorAll('[data-preset-prompt]'))
+      .map(member => member.getAttribute('data-preset-prompt'))).toEqual(originalMembers)
+    await fireEvent.input(search, { target: { value: '' } })
+    expect(preview.querySelector('script')).toBeNull()
+    expect(preview.querySelector('[data-preset-prompt="missing-text"]')?.textContent).toContain('원문을 불러올 수 없습니다.')
+    expect(preview.querySelector('[data-preset-prompt="keeper"] pre')?.textContent).toBe('override world')
+    expect(preview.querySelector('[data-preset-prompt="keeper"]')?.textContent).toContain('기준 파일을 수정해도 오버라이드를 해제하기 전에는 이 원문이 유지됩니다.')
+    expect(editor.value).toBe('unsaved draft')
+    expect(mocks.savePromptOverride).not.toHaveBeenCalled()
+    expect(mocks.clearPromptOverride).not.toHaveBeenCalled()
+    const stage = Array.from(container.querySelectorAll('[data-prompt-preset-switcher] button'))
+      .find(button => button.textContent?.includes('System rules')) as HTMLButtonElement
+    await fireEvent.click(stage)
+    expect(preview.querySelector('[data-preset-prompt="literal"]')).toBeNull()
+    expect(preview.querySelector('[data-preset-prompt="keeper"] pre')?.textContent).toBe('override world')
+    expect(editor.value).toBe('unsaved draft')
+    await fireEvent.click(toggle)
+    expect(preview.querySelector('pre')).toBeNull()
+  })
+
   it('renders prompt metadata and switches the editor draft when selection changes', async () => {
     render(html`<${PromptRegistryPanel} />`, container)
     await flush()

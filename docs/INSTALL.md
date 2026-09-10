@@ -2,11 +2,11 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.35.1**. Check tag and asset
+This document is the installation contract for **0.35.2**. Check tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
-The download commands below select `v0.35.1` and its matching installer.
+The download commands below select `v0.35.2` and its matching installer.
 
-The multi-selection wizard described below is on the development branch and requires the next release; the published 0.35.1 installer still uses its original selection flow.
+If you use the 0.35.1 installer, refer to that tag's documentation. Multi-selection requires 0.35.2 or later.
 
 ## Platforms and prerequisites
 
@@ -46,7 +46,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 ```bash
-TAG=v0.35.1
+TAG=v0.35.2
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -125,7 +125,7 @@ change existing Keeper configurations in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.1 binary** installs one `imp` with `activation_mode = "manual"` and the
+The **0.35.2 binary** installs one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
@@ -143,7 +143,9 @@ listed, but a runtime without a supported real verification adapter cannot pass
 the interactive readiness check.
 
 The wizard reads context windows from model metadata or the exact connection's
-existing declaration. For Ollama it reads the configured or running context and
+existing declaration. For a fresh Codex home, it reads the installed CLI's bundled
+model catalog without authentication or a model call. API catalog suggestions
+do not supply a Codex context limit; model availability is checked separately. For Ollama it reads the configured or running context and
 loads only selected models when needed; it does not allocate the architectural
 maximum. For a single-model llama.cpp server it can read the configured context
 from `/props`. An unknown limit offers model selection again or an advanced field
@@ -162,20 +164,21 @@ store. This wizard does not install provider CLIs, model weights, or Docker and
 does not sign you in. **Configure later** defers model setup; imp does not start
 automatically.
 
-## First conversation with `imp` (0.35.1)
+## First conversation with `imp` (0.35.2)
 
-This is the 0.35.1 installation contract. Check the release tag and asset
+This is the 0.35.2 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
-1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
-   the model runtime you own. Runtime setup binds that selection to the helper
-   lanes with `--setup-lanes`; you do not need a second model subscription.
-2. Authenticate that runtime before starting MASC. For Claude Code or Codex,
-   install its CLI and complete its own login, then confirm it can answer a
-   prompt in this terminal. For an API runtime, export the credential variable
-   named by the wizard in this terminal. For a local model, start its server
+1. Prepare the runtime you own before opening the model wizard. For Claude Code
+   or Codex, install its CLI and complete its login, then confirm it can answer a
+   prompt in this terminal. For an API runtime, export its credential variable
+   here (for example, `ZAI_API_KEY` for Z.AI). For a local model, start its server
    and load a model that supports tool calls. MASC does not install or log in
    to these model runtimes.
+2. Run the installer with `--base-path "$HOME/masc-workspace"` and select one or
+   more connections. Choose imp's primary model and fallback order. The wizard
+   checks actual responses and tool use before saving. Helper lanes use your
+   primary model; you do not need a second subscription.
 3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
    or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
    `docker info` must succeed as your current user. Then run:
@@ -422,7 +425,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.35.1` tag to a verified commit publishes the GitHub
+release. Pushing the `v0.35.2` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

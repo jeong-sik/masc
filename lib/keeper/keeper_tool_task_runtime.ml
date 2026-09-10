@@ -299,28 +299,34 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
         (fun ~worker ~relative ->
            let module Store = Workspace_verification_store in
            let max_bytes = Store.verification_evidence_max_bytes in
+           let format = Store.binary_format_of_path relative in
+           let image_media_type = Store.image_media_type_of_binary_format format in
+           let read_max_bytes =
+             match image_media_type with Some _ -> max_bytes + 1 | None -> max_bytes
+           in
            match
              Keeper_sandbox_read_backend.read_file ~config ~meta
-               ~host_path:relative ~max_bytes ~timeout_sec:30. ()
+               (* One byte of lookahead distinguishes a complete artifact from
+                  the backend's capped prefix; partial images cannot be proof. *)
+               ~host_path:relative ~max_bytes:read_max_bytes ~timeout_sec:30. ()
            with
            | Error reason ->
                Error
                  (Store.Evidence_read_error
                     (Printf.sprintf "sandbox_backend_read: %s: %s" worker
                        (Keeper_sandbox_read_backend.read_error_to_string reason)))
+           | Ok content when String.length content > max_bytes ->
+               Error (Store.Evidence_read_error
+                 (Printf.sprintf "image exceeds capture limit %d bytes; submit a complete smaller rendering" max_bytes))
            | Ok content -> (
                (* The reader classifies its bytes with the store's own scan:
                    text answers as text, and non-text bytes become a binary
                    payload -- hash, size, format -- instead of being dropped
                    (RFC-0436 §4.1). *)
-               match Store.scan_utf8 content with
-               | Store.Utf8_valid ->
+               match image_media_type, Store.scan_utf8 content with
+               | None, Store.Utf8_valid ->
                    Ok (Store.Text_payload (content, String.length content, false))
                | _ ->
-                   let format =
-                     let ext = String.lowercase_ascii (Filename.extension relative) in
-                     if ext = "" then "unknown" else ext
-                   in
                    let sha256 =
                      Digestif.SHA256.(digest_string content |> to_hex)
                    in
@@ -332,37 +338,6 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
                         ; format
                         })))
   | Keeper_types_profile_sandbox.Shared_mount -> None
-
-let evidence_artifact_total_bytes ~(config : Workspace.config)
-      ~(meta : keeper_meta) evidence_refs
-  =
-  (* [artifact_reference_size] itself resolves the project root from
-     [base_path], so no separate normalization is needed here. *)
-  let artifact_read = evidence_artifact_reader ~config ~meta () in
-  List.filter_map
-    (fun reference ->
-       Workspace_verification_store.artifact_reference_size
-         ?artifact_read
-         ~base_path:config.base_path
-         ~worker:meta.name
-         reference)
-    evidence_refs
-  |> List.fold_left ( + ) 0
-;;
-
-(* What one submission may hand the reviewer as artifact bytes in total. A
-   resource boundary on the reviewer's inline window, not a behavioural
-   gate: over it, the submitter is told to hand over an excerpt and a
-   pointer instead. *)
-let evidence_total_bytes_limit = 50 * 1024
-
-let evidence_total_size_rejection ~total ~limit =
-  Printf.sprintf
-    "artifact total size %d bytes exceeds limit %d bytes — use note: for \
-     large files. Submit a small excerpt or summary as an artifact: and the \
-     pointer (path, URL, board post) as note:."
-    total limit
-;;
 
 let handle_keeper_task_tool_with_outcome
       ~(config : Workspace.config)
@@ -1138,21 +1113,6 @@ let handle_keeper_task_tool_with_outcome
                   { reason = "keeper_task_done rejected: evidence_refs required" })
              message)
       | Ok evidence_refs ->(
-      (* task-540: refuse oversized artifact: evidence here, before the
-         transition, so the caller learns the byte count and the note: escape
-         hatch while it can still fix the call — instead of the completion
-         authority later staring at a truncated prefix. *)
-      let total = evidence_artifact_total_bytes ~config ~meta evidence_refs in
-      let limit = evidence_total_bytes_limit in
-      if total > limit then
-        Keeper_tool_execution.failure
-          ~class_:Tool_result.Workflow_rejection
-          (workflow_rejection_error_json
-             ~typed_outcome:
-               (Keeper_tool_outcome.Error
-                  { reason = "keeper_task_done rejected: evidence too large" })
-             (evidence_total_size_rejection ~total ~limit))
-      else (
       (* A Keeper submits evidence; only the completion authority can issue the
          terminal verdict. *)
       let action = "submit_for_verification" in
@@ -1199,7 +1159,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload))))
+        Keeper_tool_execution.failure ~class_ payload)))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

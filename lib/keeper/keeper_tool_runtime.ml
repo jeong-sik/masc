@@ -87,6 +87,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
+  | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
@@ -121,6 +122,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -163,6 +165,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_capability_search
   | Tool_context_status
   | Tool_artifact_read
+  | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
@@ -198,6 +201,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
@@ -253,6 +257,8 @@ let handle_in_process ctx descriptor args =
       (Keeper_artifact_read.handle
          ~base_path:ctx.config.base_path
          ~args)
+  | Tool_workspace_memory_read ->
+    Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
   | Tool_memory_search ->
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
@@ -467,14 +473,32 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_masc_fusion_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?gate_context:ctx.gate_context
          ?continuation_channel:ctx.continuation_channel
          ~args
          ())
+  | Tool_masc_fusion_decision ->
+    let result =
+      let open Result.Syntax in
+      let* proposal = Fusion_decision.parse args |> Result.map_error (fun detail -> Fusion_decision.Rejected detail) in
+      let* turn_id = match ctx.gate_context with
+        | Some context -> (match (context ()).Keeper_gate.turn_id with
+            | Some turn_id -> Ok turn_id | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context"))
+        | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context") in
+      Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name
+        ~turn_ref:(Ids.Turn_ref.make
+          ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id) ~absolute_turn:turn_id)
+        proposal in
+    Some (match result with
+      | Ok recorded -> Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true; "decision", recorded.event;
+          "cleanup_warning", (match recorded.cleanup_warning with Some detail -> `String detail | None -> `Null)])
+      | Error error -> Keeper_tool_execution.failure ~class_:(Fusion_decision.failure_class error) (Fusion_decision.error_to_string error))
   | Tool_masc_fusion_status ->
     (* read-only: reads the in-memory run registry, no server context needed. *)
     Some
       (Keeper_tool_execution.success
          (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+            ~config:ctx.config
             ~meta:ctx.meta
             ~args
             ()))

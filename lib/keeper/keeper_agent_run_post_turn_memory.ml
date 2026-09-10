@@ -69,6 +69,25 @@ let counterpart_observations_before_offloaded ~base_dir ~keeper_name ~before =
     counterpart_observations_before ~base_dir ~keeper_name ~before)
 ;;
 
+let goal_context_for_task ~config = function
+  | None -> Keeper_librarian.No_task
+  | Some task ->
+    let task_id = Keeper_id.Task_id.to_string task in
+    let ( let* ) = Result.bind in
+    let criteria =
+      let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+      let ids = List.filter_map (fun (goal_id, tasks) ->
+        if List.mem task_id tasks then Some goal_id else None) links in
+      let* goals = Goal_store.list_goals_result config () in
+      List.fold_right (fun id rest ->
+        let* rest = rest in
+        match List.find_opt (fun (goal : Goal_store.goal) -> String.equal goal.id id) goals with
+        | None -> Error ("Linked Goal is missing: " ^ id)
+        | Some goal -> Ok ((id, goal.phase, Goal_store.criterion_of_goal goal) :: rest)) ids (Ok [])
+    in
+    Keeper_librarian.Task_goals { task_id; criteria }
+;;
+
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
@@ -131,6 +150,7 @@ let run
           let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
           let librarian_input : Keeper_librarian.input =
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+            ; goal_context = goal_context_for_task ~config meta.current_task_id
             ; keeper_instructions = meta.instructions
             ; current = current_selection
             ; messages = librarian_messages
@@ -205,6 +225,7 @@ let run
 ;;
 
 module For_testing = struct
+  let goal_context_for_task = goal_context_for_task
   let counterpart_observations_before = counterpart_observations_before
   let counterpart_observations_before_offloaded = counterpart_observations_before_offloaded
 end

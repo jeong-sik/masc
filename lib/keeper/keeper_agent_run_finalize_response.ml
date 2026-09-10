@@ -260,9 +260,11 @@ let finalize
          }
           : Keeper_librarian.tool_observation))
     in
+    (* Capture the immutable post-tool snapshot: this turn may have claimed,
+       switched, or released its task after admission. *)
     Keeper_agent_run_post_turn_memory.run
       ~config
-      ~meta
+      ~meta:acc.meta
       ~turn:manifest_keeper_turn_id
       ~agent_core_turn_count:result.turns
       ~tool_observations:librarian_tool_observations

@@ -195,7 +195,7 @@ let defer ~goal_id ~reason =
 let bind_review config ~goal_id =
   Goal_store.transact_goal config ~goal_id (fun goal ->
     match goal.Goal_store.phase with
-    | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
       Error "goal is not awaiting verification"
     | Goal_phase.Verifying ->
       Result.bind (Goal_verification.get_record_authoritative config ~goal_id)

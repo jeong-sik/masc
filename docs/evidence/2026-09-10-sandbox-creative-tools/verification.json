@@ -1,0 +1,14 @@
+{
+  "source_commit": "b4e2330c83c3ad3f060ab831fcb2cdfa1448c847",
+  "run_id": 34403318997,
+  "artifact_id": 10124469198,
+  "artifact_step": "success",
+  "downloaded_file_hashes_verified": 14,
+  "visually_inspected": [
+    "guide-render.png",
+    "slides-render.png",
+    "diagram.png"
+  ],
+  "korean_text_readable": true,
+  "scope": "Synthetic nonroot read-only offline image capability proof. No production image rollout or autonomous Keeper completion claim."
+}

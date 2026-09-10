@@ -108,7 +108,7 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
       if not (String.equal evidence.question payload.prompt)
       then Error (Identity_mismatch "evidence question differs from accepted prompt")
       else
-        Fusion_orchestrator.project ~registry ~base_dir:base_path
+        Fusion_orchestrator.project ?source_context:payload.source_context ~registry ~base_dir:base_path
           ~topology:payload.topology ~channel:payload.channel ~request evidence
         |> Result.map_error (fun detail -> Projection_failed detail)
     | Keeper_msg_async.Done { ok = true; data = None; _ } ->

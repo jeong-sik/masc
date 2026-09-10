@@ -296,7 +296,8 @@ let test_to_agent_core_typed_error_ignores_json_metadata () =
   in
   let tr : Tool_result.result =
     Tool_result.Failed
-      { Tool_result.class_ = Tool_result.Runtime_failure
+      { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
       ; message = msg
       ; data = Yojson.Safe.from_string msg
       ; metadata = None

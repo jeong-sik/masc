@@ -4294,6 +4294,7 @@ let planning_phase_column =
 let planning_phase_color = function
   | Goal_phase.Executing -> (Theme.info ())
   | Goal_phase.Verifying -> Theme.category Theme.Slot_2
+  | Goal_phase.Awaiting_confirmation -> Theme.warn ()
   | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> (Theme.muted ())
 
@@ -4318,10 +4319,11 @@ let planning_stage_rail (phase : Goal_phase.t) =
     planning_phase_color Goal_phase.Dropped
     ^ Ansi.bold ^ "[dropped]" ^ Ansi.reset
     ^ Ansi.dim ^ "  (off the line; [o] puts it back on executing)" ^ Ansi.reset
-  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed ->
+  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation | Goal_phase.Completed ->
     String.concat arrow
       [ stop Goal_phase.Executing
       ; stop Goal_phase.Verifying
+      ; stop Goal_phase.Awaiting_confirmation
       ; stop Goal_phase.Completed
       ]
 ;;
@@ -4343,6 +4345,7 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
+  | Goal_phase.Awaiting_confirmation, _ -> (Theme.warn (), "proof passed - operator confirmation required via goal confirmation CLI")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -4979,6 +4982,7 @@ let render_planning_detail (state : state)
           match row.pg_phase with
           | Goal_phase.Executing -> "[exec]"
           | Goal_phase.Verifying -> "[ver ]"
+          | Goal_phase.Awaiting_confirmation -> "[human]"
           | Goal_phase.Completed -> "[done]"
           | Goal_phase.Dropped -> "[drop]"
         in

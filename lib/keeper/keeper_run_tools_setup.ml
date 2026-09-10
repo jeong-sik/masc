@@ -336,6 +336,7 @@ let prepare_agent_setup
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
+      ?on_gate_deferred
       ?composition_plan_index
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
@@ -565,6 +566,7 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ~identity_surface:
         { Keeper_tools_agent_core.offered =
             identity_allow.Keeper_identity_tool_allow.kept

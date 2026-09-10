@@ -141,6 +141,22 @@ module Response = struct
     | (Some status, _) -> status
     | (None, _) -> `OK
 
+  (* [#28400] Same reclassification for string-bodied JSON responses
+     (json_lazy / respond_cached_read family). Envelopes are small error
+     objects, so bound the parse cost and fall back to the caller status. *)
+  let timeout_envelope_status_override_string ?status (body : string) =
+    let ok_status () = match status with Some s -> s | None -> `OK in
+    match !timeout_envelope_recognizer with
+    | None -> ok_status ()
+    | Some _ when status <> None && status <> Some `OK -> ok_status ()
+    | Some recognizes ->
+        if String.length body > 8192 then ok_status ()
+        else
+          match Yojson.Safe.from_string body with
+          | json when recognizes json -> `Gateway_timeout
+          | _ -> ok_status ()
+          | exception Yojson.Json_error _ -> ok_status ()
+
   let rev_prepend_headers headers acc =
     List.fold_left (fun acc header -> header :: acc) acc headers
 
@@ -326,6 +342,7 @@ module Response = struct
     let safe_read = match request.Httpun.Request.meth with `GET | `HEAD -> true | _ -> false in
     if not (safe_read && status = `OK) then
       let body = lazy_body () in
+      let status = timeout_envelope_status_override_string ~status body in
       json ~status ~compress ~extra_headers ~request ~etag body reqd
     else
       let if_none_match =
@@ -345,6 +362,7 @@ module Response = struct
           ""
       | _ ->
         let body = lazy_body () in
+        let status = timeout_envelope_status_override_string ~status body in
         let final_body, compression_headers =
           Http_response_payload.compress_body
             ~compress

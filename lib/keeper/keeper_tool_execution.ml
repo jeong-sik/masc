@@ -1,10 +1,10 @@
 type deferred_kind =
   | Generic_deferred
-  | External_effect_deferred
+  | External_effect_deferred of { approval_id : string option }
 
 let deferred_kind_to_string = function
   | Generic_deferred -> "generic_deferred"
-  | External_effect_deferred -> "external_effect_deferred"
+  | External_effect_deferred _ -> "external_effect_deferred"
 ;;
 
 type terminal_effect_receipt =
@@ -74,14 +74,14 @@ let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?me
   }
 ;;
 
-let deferred_external_effect_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
+let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
   { raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Deferred ()
-  ; deferred_kind = Some External_effect_deferred
+  ; deferred_kind = Some (External_effect_deferred {approval_id})
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
   }
@@ -163,9 +163,14 @@ let with_file_change_evidence evidence result =
 ;;
 
 let of_tool_result
-      ?(failure_effect_disposition = Tool_result.Effect_outcome_unknown)
+      ?failure_effect_disposition
       (result : Tool_result.result)
   =
+  let failure_effect_disposition = match failure_effect_disposition with
+    | Some disposition -> disposition
+    | None -> (match result with
+        | Tool_result.Failed failure -> failure.effect_disposition
+        | Tool_result.Completed _ | Tool_result.Deferred _ -> Tool_result.Effect_outcome_unknown) in
   let raw_output = Tool_result.message result in
   let data = Some (Tool_result.data result) in
   match result with

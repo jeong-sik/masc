@@ -4,6 +4,7 @@ type accepted_payload =
   { keeper_name : string
   ; submitted_by : string
   ; prompt : string
+  ; source_context : Fusion_request_context.t option
   ; preset : string
   ; web_tools : bool
   ; topology : Fusion_types.fusion_topology
@@ -107,6 +108,11 @@ let validate_payload (payload : accepted_payload) =
   in
   let* () = validate_nonblank "submitted_by" payload.submitted_by in
   let* () = validate_nonblank "prompt" payload.prompt in
+  let* () = match payload.source_context with
+    | None -> Ok ()
+    | Some context when Fusion_request_context.keeper context = payload.keeper_name
+        && Fusion_request_context.render context = payload.prompt -> Ok ()
+    | Some _ -> Error (Invalid_payload "request context does not bind Keeper and actual prompt") in
   let* () = validate_utf8 "preset" payload.preset in
   Keeper_continuation_channel.to_yojson payload.channel
   |> Keeper_continuation_channel.of_yojson
@@ -164,14 +170,14 @@ let topology_to_yojson topology =
 
 let payload_to_yojson (payload : accepted_payload) =
   `Assoc
-    [ "keeper_name", `String payload.keeper_name
+    ([ "keeper_name", `String payload.keeper_name
     ; "submitted_by", `String payload.submitted_by
     ; "prompt", `String payload.prompt
     ; "preset", `String payload.preset
     ; "web_tools", `Bool payload.web_tools
     ; "topology", topology_to_yojson payload.topology
     ; "channel", Keeper_continuation_channel.to_yojson payload.channel
-    ]
+    ] @ (match payload.source_context with None -> [] | Some context -> ["source_context", Fusion_request_context.to_yojson context]))
 ;;
 
 let to_yojson record =
@@ -239,7 +245,7 @@ let payload_of_yojson = function
     let* () =
       validate_fields
         ~context:"Fusion delivery payload"
-        ~expected:
+        ~expected:(
           [ "keeper_name"
           ; "submitted_by"
           ; "prompt"
@@ -247,7 +253,7 @@ let payload_of_yojson = function
           ; "web_tools"
           ; "topology"
           ; "channel"
-          ]
+          ] @ (if List.mem_assoc "source_context" fields then ["source_context"] else []))
         fields
     in
     let* keeper_name = string_field "keeper_name" fields in
@@ -266,10 +272,15 @@ let payload_of_yojson = function
       Keeper_continuation_channel.of_yojson channel_json
       |> Result.map_error (fun detail -> Decode_failed detail)
     in
+    let* source_context = match List.assoc_opt "source_context" fields with
+      | None -> Ok None
+      | Some json -> Fusion_request_context.of_yojson json |> Result.map Option.some
+          |> Result.map_error (fun detail -> Decode_failed detail) in
     let payload =
       { keeper_name
       ; submitted_by
       ; prompt
+      ; source_context
       ; preset
       ; web_tools
       ; topology

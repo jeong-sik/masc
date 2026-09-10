@@ -2,11 +2,11 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.35.1 설치 계약**입니다. 태그와 자산 제공 여부는
+이 문서는 **0.35.2 설치 계약**입니다. 태그와 자산 제공 여부는
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-아래 다운로드 명령은 `v0.35.1`과 같은 버전의 설치기를 선택합니다.
+아래 다운로드 명령은 `v0.35.2`과 같은 버전의 설치기를 선택합니다.
 
-아래 다중 선택 마법사는 개발 브랜치의 다음 릴리스 변경입니다. 공개된 0.35.1 설치기는 기존 선택 화면을 사용합니다.
+0.35.1 설치기를 사용 중이라면 해당 태그의 문서를 참고하세요. 다중 선택은 0.35.2부터 지원합니다.
 
 ## 플랫폼과 준비물
 
@@ -45,7 +45,7 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 ## 설치
 
 ```bash
-TAG=v0.35.1
+TAG=v0.35.2
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -118,13 +118,17 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.1 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**0.35.2 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
 설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
 
 ## 모델 연결 선택
+
+Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록에서 context 한도를
+읽습니다. 인증이나 모델 호출은 하지 않으며, API catalog의 최대값을 Codex 한도로
+사용하지 않습니다. 실제 모델 사용 가능 여부는 저장 전 응답·도구 검사로 확인합니다.
 
 기존 API 공급자, Claude Code, Codex, 로컬 Ollama 모델을 목록에서 선택합니다.
 **Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
@@ -147,18 +151,20 @@ Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실�
 CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를 설치하거나 로그인하지
 않습니다. **Configure later**로 미룰 수 있고 imp는 자동으로 시작하지 않습니다.
 
-## `imp`와 첫 대화 (0.35.1)
+## `imp`와 첫 대화 (0.35.2)
 
-이 경로는 `masc setup`이 포함된 **0.35.1 설치 계약**입니다. 다운로드 전에
+이 경로는 `masc setup`이 포함된 **0.35.2 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
-1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
-   런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
-   레인에도 연결합니다. 두 번째 모델 구독은 필요하지 않습니다.
-2. Claude Code·Codex는 CLI를 설치하고 해당 CLI에서 로그인한 뒤 이 터미널에서
-   응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
-   터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
-   모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+1. 모델 선택 화면을 열기 전에 보유한 런타임을 준비합니다. Claude Code·Codex는
+   CLI를 설치하고 로그인한 뒤 이 터미널에서 응답하는지 확인합니다.
+   API 방식은 인증 환경변수(Z.AI는 `ZAI_API_KEY`)를 이 터미널에서 설정합니다.
+   로컬 모델은 서버를 시작하고 도구 호출이 가능한 모델을 로드합니다.
+   MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
+2. 설치기를 `--base-path "$HOME/masc-workspace"`로 실행하고 연결을 여러 개
+   선택할 수 있습니다. imp의 기본 모델과 대체 순서를 고르면 실제 응답·도구
+   검사를 거쳐 저장합니다. 내부 보조 lane은 기본 모델을 사용하므로 별도
+   모델 구독이 필요하지 않습니다.
 3. macOS에서는 [Docker Desktop 설치 안내](https://docs.docker.com/desktop/setup/install/mac-install/),
    Linux에서는 [Docker Engine 설치 안내](https://docs.docker.com/engine/install/)를 따라 설치하고 시작합니다.
    현재 사용자로 `docker info`가 성공하면 다음을 실행합니다.
@@ -362,7 +368,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.35.1` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `v0.35.2` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

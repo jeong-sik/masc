@@ -62,16 +62,41 @@ class ModelSelection(unittest.TestCase):
             self.assertEqual(selected,dict(model='gpt-6-astra',max_context=272000))
             cli.assert_not_called()
 
-    def test_empty_codex_cache_uses_installed_list(self):
+    def test_fresh_codex_uses_client_catalog_before_rendering_connection(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
             def cli(argv, **kwargs):
-                data=({'models':[dict(id='catalog-id',label='Catalog model',max_context=9876)]}
-                      if argv[1]=='runtime-model-list' else dict(model='catalog-id',max_context=9876))
+                if argv[0] == '/owned/codex':
+                    self.assertEqual(argv[1:], ['debug','models','--bundled'])
+                    self.assertNotEqual(kwargs['env']['CODEX_HOME'],directory)
+                    self.assertNotIn('UNRELATED_API_KEY',kwargs['env'])
+                    self.assertNotIn('OPENAI_API_KEY',kwargs['env'])
+                    self.assertEqual(kwargs['cwd'],kwargs['env']['HOME'])
+                    data={'models':[dict(slug='catalog-id',display_name='Client model',visibility='list',
+                                         context_window=272000,max_context_window=872000)]}
+                else:
+                    self.assertEqual(argv[1],'runtime-model-list')
+                    data={'models':[dict(id='catalog-id',label='API model',max_context=1050000)]}
                 return subprocess.CompletedProcess(argv,0,json.dumps(data),'')
-            with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('99\n1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
-                selected=SETUP.select_model('/fixture/masc','codex')
-            self.assertEqual(selected,dict(model='catalog-id',max_context=9876))
-            self.assertIn('not yet verified',terminal.getvalue())
+            source=dict(choice='codex',endpoint='',api_key_env='',command='/owned/codex',rows=[])
+            with patch.dict(os.environ,{'UNRELATED_API_KEY':'canary','OPENAI_API_KEY':'canary'}), patch('subprocess.run',side_effect=cli):
+                models,origin=SETUP.source_models('/fixture/masc',source,10)
+                _,selected=SETUP.resolve_model_spec(source,models[0],10)
+            self.assertEqual(selected['model'],'catalog-id')
+            self.assertEqual(selected['max_context'],272000)
+            self.assertEqual(selected['command'],'/owned/codex')
+            self.assertIn('CLI bundled',origin)
+            self.assertEqual(list(Path(directory).iterdir()),[])
+
+    def test_unavailable_codex_catalog_does_not_inherit_api_capacity(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
+            def cli(argv, **kwargs):
+                if argv[1] == 'debug':
+                    return subprocess.CompletedProcess(argv,1,'','unsupported client command')
+                self.assertEqual(argv[1],'runtime-model-list')
+                return subprocess.CompletedProcess(argv,0,json.dumps({'models':[
+                    dict(id='catalog-id',label='API model',max_context=1050000)]}),'')
+            with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('1\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/fixture/masc','codex')
 
     def test_http_models_offer_actual_server_id_and_configured_limit(self):
         from http.server import BaseHTTPRequestHandler, HTTPServer

@@ -281,7 +281,19 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
                (match
                   Runtime.commit_keeper_assignment ?egress_allow:p.egress_allow_opt runtime_transaction
-                    ~runtime_id:p.runtime_id_opt
+                    ~runtime_id:
+                      (match p.runtime_id_opt with
+                       | Some runtime_id -> Some runtime_id
+                       | None ->
+                         (* Starting a declared Keeper is not an unassign action.
+                            Read the assignment under the publication transaction's
+                            lock so the wizard's explicit lane survives first boot. *)
+                         (match Runtime.keeper_assignment_revision runtime_transaction with
+                          | Runtime.Runtime_config_missing -> None
+                          | Runtime.Runtime_config_present { assignment; _ } ->
+                            (match assignment with
+                             | Runtime.Assignment_missing -> None
+                             | Runtime.Assignment_present runtime_id -> Some runtime_id)))
                 with
                 | Error error ->
                   Keeper_turn_up_config_persistence.Rollback

@@ -1,3 +1,4 @@
+import { ChatEditEvidence } from './edit-evidence'
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
@@ -3342,6 +3343,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
           : null}
         <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
       </button>
+      <${ChatEditEvidence} output=${outputEntry} />
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
@@ -3554,6 +3556,7 @@ function ToolTraceStep({
           <span class="chat-block-tstep-dur">${durLabel}</span>
           ${hasBody ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
         </div>
+        <${ChatEditEvidence} output=${output} />
         ${open && hasBody
           ? html`
             <div class="chat-block-tool-body">

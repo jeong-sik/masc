@@ -569,6 +569,9 @@ let run_keepalive_unified_turn
           Keeper_turn_driver.deferred_runtime_lane -> unit)
   : keepalive_turn_outcome
   =
+    let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta:meta_after_triage with
+      | Ok () -> ()
+      | Error detail -> Log.Keeper.warn "Gate continuation reconciliation: %s" detail in
   if not proactive_warmup_elapsed
   then
     { meta = meta_after_triage

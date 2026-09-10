@@ -31,20 +31,29 @@ let descriptor_for tool_name =
   | descriptor :: _ -> Some descriptor
   | [] -> Descriptor.find_public tool_name
 
-(* Execute resolves its actual cwd, sandbox, grants and effect observation
-   before consulting the durable Gate. The interactive hook has none of that
-   context and must not insert a second permission authority ahead of it. *)
-let execution_gate_owns descriptor =
+type authorization_owner = Execution_gate | Filesystem_boundary
+
+(* The host filesystem producer resolves its confined capability before
+   authorizing own-playground writes or consulting the durable Gate. Its
+   endpoint-owned sibling only admits that playground and refuses external
+   paths. This hook cannot replace either producer's resolved authority. *)
+let producer_authorization_owner descriptor =
   match descriptor.Descriptor.runtime_handler with
-  | Descriptor.Tool_execute -> true
-  | _ -> false
+  | Descriptor.Tool_execute -> Some Execution_gate
+  | Descriptor.Tool_write_file | Descriptor.Tool_edit_file -> Some Filesystem_boundary
+  | _ -> None
+
+let owner_reason = function
+  | Execution_gate -> "the execution Gate decides this call with its resolved context"
+  | Filesystem_boundary -> "the filesystem producer authorizes this call with its resolved capability and Gate"
 
 let rec verdict_for ~composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
   | None -> verdict_for_undescribed ~composition_plan_index ~tool_name ~input
-  | Some descriptor when execution_gate_owns descriptor ->
-      Run { because = "the execution Gate decides this call with its resolved context" }
   | Some descriptor -> (
+      match producer_authorization_owner descriptor with
+      | Some owner -> Run { because = owner_reason owner }
+      | None ->
       match Descriptor.readonly_for_input descriptor ~input with
       | Some true ->
           Run { because = "this call only reads" }
@@ -90,8 +99,10 @@ and node_asks_for_approval node =
      descriptor list before the plan is built. Asked rather than assumed,
      because "no descriptor" is exactly the case this whole arm exists for. *)
   | None -> Some (node, "no descriptor declares what this tool does")
-  | Some descriptor when execution_gate_owns descriptor -> None
   | Some descriptor ->
+    match producer_authorization_owner descriptor with
+    | Some _ -> None
+    | None ->
     (match Descriptor.readonly_static_hint descriptor with
      | Some true -> None
      | Some false | None ->

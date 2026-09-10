@@ -81,7 +81,8 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
           if String.equal name "masc_tool_help" then
             Tool_dispatch.Reject
               (Tool_result.Failed
-                 { Tool_result.class_ = Tool_result.Runtime_failure
+                 { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
+       ; class_ = Tool_result.Runtime_failure
                  ; message = "blocked-by-pre-hook"
                  ; data = `String "blocked-by-pre-hook"
                  ; metadata = None

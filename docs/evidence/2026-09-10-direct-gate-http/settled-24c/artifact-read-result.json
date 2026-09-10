@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "sha256": "64956a6e4b4c6c404a8c10bd8c213f352887437438f74b85d69621d2ab564462",
+  "offset": 0,
+  "next_offset": 655,
+  "total_bytes": 655,
+  "eof": true,
+  "encoding": "utf-8",
+  "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/direct-gate-http-proof\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/direct-gate-http-proof\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/direct-gate-http-proof\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output_completeness\":\"complete\",\"output\":\"gate-effect-written /home/keeper/playground/direct-gate-http-proof/gate-effect.txt\\n\",\"typed\":true,\"execution_time_ms\":111,\"requested_sandbox\":\"docker\",\"via\":\"docker\",\"sandbox_profile\":\"docker\"}"
+}

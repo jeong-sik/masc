@@ -49,6 +49,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
       ?composition_plan_index
@@ -221,7 +222,8 @@ let make_tool_bundle_for_descriptors_with_policy
          Terminal_effect_open
          Deferred_tool_result)
   in
-  let mark_external_effect_deferred () =
+  let mark_external_effect_deferred ~approval_id =
+    Option.iter (fun id -> Option.iter (fun record -> record id) on_gate_deferred) approval_id;
     (* A generic deferred transition may precede the Gate result in one AGENT_CORE
        batch. The external effect owns the user-facing terminal projection, so
        it must promote that generic state rather than being hidden by it. *)
@@ -340,20 +342,25 @@ let make_tool_bundle_for_descriptors_with_policy
                   same effect-outcome-unknown shape Execute has. *)
                | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
                  Some mark_terminal_effect_failed
+               | Keeper_tool_descriptor.Tool_edit_file
+               | Keeper_tool_descriptor.Tool_write_file ->
+                 Some (fun failure ->
+                   match failure.Keeper_tools_agent_core.effect_disposition with
+                   | Tool_result.Proven_post_effect -> mark_terminal_effect_failed failure
+                   | Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown -> ())
                (* A code query starts a language server, but the pool owns it
                   and the turn ends it either way, so a failed call leaves the
                   caller holding nothing. It answers with the readers. *)
                | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
                  | Keeper_tool_descriptor.Tool_search_files
                  | Keeper_tool_descriptor.Tool_read_file
-                 | Keeper_tool_descriptor.Tool_edit_file
-                 | Keeper_tool_descriptor.Tool_write_file
                  | Keeper_tool_descriptor.Tool_time_now
                  | Keeper_tool_descriptor.Tool_lane_status
                  | Keeper_tool_descriptor.Tool_tools_list
                  | Keeper_tool_descriptor.Tool_capability_search
                  | Keeper_tool_descriptor.Tool_context_status
                  | Keeper_tool_descriptor.Tool_artifact_read
+                 | Keeper_tool_descriptor.Tool_workspace_memory_read
                  | Keeper_tool_descriptor.Tool_memory_search
                  | Keeper_tool_descriptor.Tool_memory_retract
                  | Keeper_tool_descriptor.Tool_memory_write
@@ -385,6 +392,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
                  | Keeper_tool_descriptor.Tool_masc_fusion_status
+                 | Keeper_tool_descriptor.Tool_masc_fusion_decision
                  | Keeper_tool_descriptor.Tool_masc_file_dispatch
                  | Keeper_tool_descriptor.Tool_masc_library_dispatch
                  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
@@ -709,6 +717,7 @@ let make_tool_bundle_for_capability_surface
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?identity_surface
       ?composition_plan_index
       ?skill_activation_context
@@ -726,6 +735,7 @@ let make_tool_bundle_for_capability_surface
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+      ?on_gate_deferred
     ~skill_catalog:(Keeper_capability_surface.skill_catalog capability_surface)
     ?identity_surface
     ?composition_plan_index
@@ -748,6 +758,7 @@ let make_tool_bundle_with_policy
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?skill_catalog
       ?identity_surface
       ?composition_plan_index
@@ -766,6 +777,7 @@ let make_tool_bundle_with_policy
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+      ?on_gate_deferred
     ?skill_catalog
     ?identity_surface
     ?composition_plan_index
@@ -786,6 +798,7 @@ module For_testing = struct
         ?continuation_channel
         ?gate_context
         ?hitl_resolution
+      ?on_gate_deferred
         ?skill_catalog
         ?turn_ctx_cell
         ()
@@ -799,6 +812,7 @@ module For_testing = struct
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?on_gate_deferred
       ?skill_catalog
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell

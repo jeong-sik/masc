@@ -111,6 +111,7 @@
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
   test_keeper_librarian_retry
+  test_keeper_librarian_goal_context
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection
@@ -458,6 +459,7 @@
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
   test_keeper_librarian_retry
+  test_keeper_librarian_goal_context
   test_keeper_skill_catalog
   test_surface_ref
   test_inference_inflight_observation
@@ -5478,3 +5480,19 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_setup_cli)))
+
+(test
+ (name test_workspace_memory_proposals)
+ (modules test_workspace_memory_proposals)
+ (libraries alcotest yojson masc masc.server masc.masc_core)
+ (deps ../docs/evidence/2026-09-10-workspace-memory-curator/qwen38-27b/proposal.json))
+
+(test
+ (name test_keeper_direct_runtime_resume)
+ (modules test_keeper_direct_runtime_resume)
+ (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
+
+(test
+ (name test_fusion_decision)
+ (modules test_fusion_decision)
+ (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))

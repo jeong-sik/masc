@@ -1,0 +1,120 @@
+{
+  "head": "46cd44057f8acf30cf47497230f0d77d0913bd2e",
+  "buildReceipt": {
+    "schema": "masc.dashboard-artifact.v1",
+    "source_commit": "46cd44057f8acf30cf47497230f0d77d0913bd2e",
+    "source_tree": "76b91f6ee4ecd5aa5e10f742773fc7812ed318cf",
+    "workflow_run_id": "34412528600",
+    "workflow_run_attempt": "1",
+    "built_at": "2026-09-09T22:31:56.912Z",
+    "archive": "masc-dashboard-46cd44057f8acf30cf47497230f0d77d0913bd2e.tar.gz",
+    "archive_sha256": "f87ac30022fe0d871e17f78203bbe85514bc332919fb4b02650b6dcd8ad32ed0",
+    "index_sha256": "722d886d9c917de17e0e5d635202402d616b35ce25355958453b262ca539394e",
+    "lock_sha256": "cbf48d366fde6039a925c18ae4ea0109c4cd6f99635efa94809e34653689089c",
+    "node_version": "v22.23.2",
+    "pnpm_version": "10.31.0"
+  },
+  "scope": "CI-built UI, synthetic confirmation HTTP; no real Goal mutation or human-auth proof",
+  "posts": [
+    {
+      "goal_id": "fixture-goal",
+      "criterion_revision": "fixture-revision-1",
+      "request_id": "fixture-request-1",
+      "verification_run_id": "fixture-run-1"
+    },
+    {
+      "goal_id": "fixture-goal",
+      "criterion_revision": "fixture-revision-1",
+      "request_id": "fixture-request-1",
+      "verification_run_id": "fixture-run-1"
+    }
+  ],
+  "reads": [
+    {
+      "mode": "success",
+      "completed": false
+    },
+    {
+      "mode": "success",
+      "completed": true
+    },
+    {
+      "mode": "readback-failed",
+      "completed": false
+    },
+    {
+      "mode": "readback-failed",
+      "completed": true
+    },
+    {
+      "mode": "success",
+      "completed": false
+    },
+    {
+      "mode": "denied",
+      "completed": false
+    }
+  ],
+  "blocked": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    }
+  ],
+  "mobileBounds": {
+    "x": 25.75,
+    "y": 354.078125,
+    "width": 338.5,
+    "height": 192.640625
+  },
+  "mobileEvidenceBounds": {
+    "x": 25.75,
+    "y": 1503.078125,
+    "width": 338.5,
+    "height": 384.96875
+  }
+}

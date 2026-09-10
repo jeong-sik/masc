@@ -1,0 +1,65 @@
+{
+  "scope": "actual isolated Keeper Docker creation; PDF quality remains unproven",
+  "candidate": {
+    "commit": "17b9c982af4ab85d120a4afbca6b59de1fc500eb",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "caee438b3b88c80a6e0b16f252fa2fdad32b3e61a80cbc9647abe25f00585a40",
+      "masc_tui.exe": "e8ef1d3aad9da7820f9750dbf2d7e626160529efecadb4c8a9a2af02042fc2c4",
+      "masc_browser_host.exe": "ffd537fe0f09084cb89943b4212c59545aa1bba9e9f63fd9dd4e74c0ae61cc9b"
+    }
+  },
+  "container": {
+    "id": "a193b2f5144a818354668b2e1447d8c8ad60f09eacb1aaaa8e2cebed8eef4ed3",
+    "name": "/masc-keeper-docker-memory-guide-proof-inherit-2e020409-d5efa8026ff483887048a220146cb8cc65c56f2f3e1f09ae19a56bc5fe8ee99b",
+    "requested_image": "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64",
+    "image_id": "sha256:0070775a948cba3d0227fcfe17cec99499ab9c5cf4b755167549b65200b77682",
+    "status": "running",
+    "mounts": [
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/config",
+        "destination": "/tmp/masc-runtime/.masc/config"
+      },
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/tasks",
+        "destination": "/tmp/masc-runtime/.masc/tasks"
+      },
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/goals.json",
+        "destination": "/tmp/masc-runtime/.masc/goals.json"
+      },
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/playground/docker/memory-guide-proof/.docker-identity/passwd",
+        "destination": "/etc/passwd"
+      },
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/playground/docker/memory-guide-proof/.docker-identity/group",
+        "destination": "/etc/group"
+      },
+      {
+        "source": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/playground/docker/memory-guide-proof",
+        "destination": "/home/keeper/playground/memory-guide-proof"
+      }
+    ]
+  },
+  "available": {
+    "reportlab": true,
+    "cairosvg": true,
+    "nanum_gothic": true,
+    "pdftotext": "/usr/bin/pdftotext",
+    "pdftoppm": "/usr/bin/pdftoppm"
+  },
+  "unavailable": [
+    "fitz",
+    "pypdf"
+  ],
+  "pdf_observation": {
+    "bytes": 15691,
+    "sha256": "3b7534e691b1a8cb53b9049a9d931e5a5c8fa37466f62d836aea492d26829e0e",
+    "accepted": false
+  },
+  "operation_id": "kmsg-45f6ebfceaf94164439dd216f917fcc9",
+  "operator_correction_operation_id": "kmsg-47fa0509e8014ff2bedcdec4f1e20208"
+}

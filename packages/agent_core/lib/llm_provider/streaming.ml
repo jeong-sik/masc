@@ -3714,6 +3714,10 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
         ; tool_name = Some "search"
         }
     ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot args }
+      (* [openai_open_block_stops] closes every block this state opened once the
+         terminal chunk arrives, so the tool block's stop belongs between the
+         arguments and the message end. *)
+    ; ContentBlockStop { index = 0 }
     ; MessageDelta { stop_reason = Some StopToolUse; _ }
     ; MessageStop
     ] -> String.starts_with ~prefix:"call_agent_core_" tool_id && args = {|{"q":"hello"}|}

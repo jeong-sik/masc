@@ -21,6 +21,8 @@ type parsed_args =
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
   ; sandbox_profile_opt : string option
+  ; sandbox_image_patch : string option option
+        (** None retains the setting; Some None clears the override; Some (Some image) sets it. *)
   ; microvm_backend_patch : Keeper_microvm_backend.t option option
         (** None omits the edit; Some None clears it; Some (Some backend)
             selects the parsed backend, only for a microvm profile. *)

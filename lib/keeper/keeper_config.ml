@@ -230,11 +230,21 @@ let ensure_runtime_params_init () =
   ()
 
 let keeper_enable_thinking_rp =
-  _rp_bool ~key:"keeper.turn.enable_thinking"
-    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ENABLE_THINKING" ~default:false)
-    ~description:"Pass enable_thinking to AGENT_CORE (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
+  Runtime_params.register ~key:"keeper.turn.enable_thinking"
+    ~default:(fun () ->
+      match Env_config_core.raw_value_opt "MASC_KEEPER_ENABLE_THINKING" with
+      | None -> None
+      | Some raw when String.trim raw = "" -> None
+      | Some _ -> Some (Env_config_core.get_bool_strict
+          ~default:false "MASC_KEEPER_ENABLE_THINKING"))
+    ~validate:(fun _ -> Ok ())
+    ~serialize:Json_util.bool_opt_to_json
+    ~deserialize:(function `Null -> Ok None | `Bool enabled -> Ok (Some enabled)
+      | _ -> Error "expected boolean or null")
+    ~meta:{ Runtime_params.description = "Explicit fleet thinking request; unset preserves provider defaults";
+      value_type = "bool"; min_value = None; max_value = None; choices = [] } ()
 
-let keeper_enable_thinking () : bool =
+let keeper_enable_thinking () : bool option =
   Runtime_params.get keeper_enable_thinking_rp
 
 (* The AGENT_CORE run loop continues after every tool round and stops only when

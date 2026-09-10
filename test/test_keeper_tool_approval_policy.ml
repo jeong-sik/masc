@@ -23,14 +23,15 @@ let test_the_split_over_the_real_catalogue () =
     |> List.partition (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
   in
   check (slist string String.compare) "public tools requiring this chat approval hook"
-    [ "Edit"; "Write" ] asked;
+    [] asked;
   (* This is the chat hook's split, not a proof that every Run is a read or
      already authorized by its executor. BrowserTabs/Read declare readonly;
      the other Browser descriptors declare ordered mutations without
      leaves_masc. Their handlers still validate lane, client and action
-     context. Execute delegates its permission decision to the execution Gate. *)
+     context. Execute delegates to its execution Gate; Write/Edit delegate to
+     their own resolved filesystem authorization. *)
   check (slist string String.compare) "public tools with no additional chat approval"
-    [ "Execute"; "Grep"; "Read"; "WebFetch"; "WebSearch"
+    [ "Execute"; "Edit"; "Write"; "Grep"; "Read"; "WebFetch"; "WebSearch"
     ; "BrowserTabs"; "BrowserRead"; "BrowserSession"; "BrowserGoto"
     ; "BrowserAct"; "BrowserInteract" ] ran
 
@@ -41,10 +42,10 @@ let test_reading_is_never_asked_about () =
   check string "and the reason says why" "this call only reads"
     (because ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
 
-let test_writes_ask_and_execute_delegates () =
-  check bool "editing a file" true
+let test_writes_and_execute_delegate () =
+  check bool "editing delegates to its resolved filesystem boundary" false
     (asks ~composition_plan_index:None ~tool_name:"Edit" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
-  check bool "writing a file" true
+  check bool "writing delegates to its resolved filesystem boundary" false
     (asks ~composition_plan_index:None ~tool_name:"Write" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
   check bool "running a program delegates to its execution Gate" false
     (asks ~composition_plan_index:None ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
@@ -127,19 +128,11 @@ let test_execute_composition_delegates_to_its_node_gate () =
            ~input:no_input))
 ;;
 
-let test_one_writing_node_asks_and_names_itself () =
-  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun index ->
-    check bool "one node that changes something asks for the whole plan" true
+let test_filesystem_composition_delegates_to_its_producers () =
+  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Edit" ] ] (fun index ->
+    check bool "filesystem nodes retain their own authorization" false
       (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_mixed"
-         ~input:no_input);
-    let reason =
-      because ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_mixed"
-        ~input:no_input
-    in
-    (* Without the node name the operator sees a composition name and has to
-       go read the plan to learn why they are being asked. *)
-    check bool "the reason names the node responsible" true
-      (mentions reason "Write"))
+         ~input:no_input))
 ;;
 
 let test_same_name_is_isolated_between_turn_indexes () =
@@ -147,10 +140,10 @@ let test_same_name_is_isolated_between_turn_indexes () =
   let second_turn = Index.create () in
   let composition = "keeper_compose_same-name" in
   Index.record first_turn ~composition ~node_tools:[ "Read" ];
-  Index.record second_turn ~composition ~node_tools:[ "Write" ];
+  Index.record second_turn ~composition ~node_tools:[ "unclassified_fixture_tool" ];
   check bool "first turn keeps its read-only plan" false
     (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input);
-  check bool "second turn sees its writing plan" true
+  check bool "second turn sees its unclassifiable node" true
     (asks ~composition_plan_index:(Some second_turn) ~tool_name:composition ~input:no_input);
   check bool "second writer did not mutate the first turn" false
     (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input)
@@ -177,7 +170,7 @@ let test_no_direct_call_became_asked () =
       |> List.filter (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
     in
     check (slist string String.compare) "the asked set is unchanged"
-      [ "Edit"; "Write" ] asked_now)
+      [] asked_now)
 ;;
 
 
@@ -228,14 +221,14 @@ let test_an_in_process_write_runs () =
     [ "keeper_memory_retract"; "keeper_memory_write" ]
 ;;
 
-let test_a_write_that_leaves_masc_is_asked_about () =
+let test_internal_filesystem_name_delegates () =
   match Policy.verdict_for ~composition_plan_index:None
           ~tool_name:"tool_edit_file"
           ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
   with
-  | Policy.Ask _ -> ()
-  | Policy.Run { because } ->
-    failf "tool_edit_file must be asked about, got Run: %s" because
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+    failf "tool_edit_file must reach its producer, got Ask: %s" because
 ;;
 
 let () =
@@ -245,8 +238,8 @@ let () =
             test_the_split_over_the_real_catalogue
         ; test_case "reading is never asked about" `Quick
             test_reading_is_never_asked_about
-        ; test_case "writes ask and Execute delegates" `Quick
-            test_writes_ask_and_execute_delegates
+        ; test_case "filesystem writes and Execute delegate" `Quick
+            test_writes_and_execute_delegate
         ; test_case "Execute delegates rather than claiming read-only" `Quick
             test_execute_delegation_does_not_claim_readonly
         ] )
@@ -257,16 +250,16 @@ let () =
     ; ( "in-process writes"
       , [ test_case "a write inside masc runs" `Quick
             test_an_in_process_write_runs
-        ; test_case "a write that leaves masc is asked about" `Quick
-            test_a_write_that_leaves_masc_is_asked_about
+        ; test_case "internal filesystem alias delegates" `Quick
+            test_internal_filesystem_name_delegates
         ] )
     ; ( "compositions"
       , [ test_case "a plan of reads runs unasked" `Quick
             test_a_plan_of_reads_runs_unasked
         ; test_case "Execute composition delegates to node Gate" `Quick
             test_execute_composition_delegates_to_its_node_gate
-        ; test_case "one writing node asks and names itself" `Quick
-            test_one_writing_node_asks_and_names_itself
+        ; test_case "filesystem composition delegates to producers" `Quick
+            test_filesystem_composition_delegates_to_its_producers
         ; test_case "same name is isolated between turn indexes" `Quick
             test_same_name_is_isolated_between_turn_indexes
         ; test_case "an unrecorded name is still unclassifiable" `Quick

@@ -140,7 +140,10 @@ let execute_with_observers_with_authority
            (fun evidence ->
               Keeper_tool_call_log.set_file_change_evidence
                 ~invocation
-                ~evidence)
+                ~evidence
+                ~artifact_refs:(match result.data with
+                  | Some data -> Tool_output.normalized_artifact_refs_in_json data
+                  | None -> []))
            result.file_change_evidence)
       agent_core_invocation;
     let raw_result = result.Keeper_tool_execution.raw_output in
@@ -153,6 +156,7 @@ let execute_with_observers_with_authority
         Tool_result.make_err
           ~tool_name:name
           ~class_:failure_class
+          ~effect_disposition:result.failure_effect_disposition
           ~start_time:t0
           ~data:(producer_payload ~raw:raw_result producer_data)
           ?metadata:producer_metadata

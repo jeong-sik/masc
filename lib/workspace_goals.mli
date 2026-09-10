@@ -85,3 +85,9 @@ val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:stri
 (** Recover a missing/stale request only while the current Goal remains Verifying.
     [Ok false] means a concurrent phase change needs no recovery; no request is
     created and no other Goal in the scan is blocked. *)
+
+val confirm_completion : Workspace_utils_backend_setup.config -> goal_id:string ->
+  operator_id:string -> request_id:string -> verification_run_id:string ->
+  criterion_revision:string -> (Yojson.Safe.t, string) result
+(** HTTP-only operator authority. Identity comes from token-bound CanAdmin,
+    never the request body or agent tool surface. Exact current proof required. *)

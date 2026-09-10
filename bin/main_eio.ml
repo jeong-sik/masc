@@ -598,7 +598,9 @@ let run_cmd host port cli_base_path accept_store_quarantine =
    | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
      (match Env_config.record_default_base_path canonical_base_path with
       | Env_config.Recorded _ -> ()
-      | Env_config.No_record_location | Env_config.Record_failed _ ->
+      | Env_config.No_record_location
+      | Env_config.Refused_under_test
+      | Env_config.Record_failed _ ->
         (* Not fatal, and not worth a line on every boot: the server is
            starting on a path the operator just supplied. *)
         ())
@@ -1249,6 +1251,15 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let init_record_default =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a throwaway workspace must not become the machine's default. `masc setup` \
+     and the installer pass it."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
+
 let init_skills_only =
   let doc = "Install missing builtin Skills without changing runtime config files" in
   Arg.(value & flag & info ["skills-only"] ~doc)
@@ -1278,7 +1289,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only =
+let init_cmd_exit base_path force skills_only record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1311,8 +1322,13 @@ let init_cmd_exit base_path force skills_only =
      about, and until now nothing wrote it down: the operator had to re-supply
      --base-path or MASC_BASE_PATH on every command. Recorded on success only,
      and never fatal -- a workspace that seeded is worth more than a record of
-     it. *)
-  if result.failed = 0 then (
+     it.
+
+     Off unless asked. `init` is what suites and scripts call to make a
+     throwaway workspace, and a default recorded from one of those points the
+     next process at a directory that is about to vanish. Only the operator
+     paths ask: `masc setup`, and the installer's own seed. *)
+  if record_default && result.failed = 0 then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
       Printf.printf "default workspace recorded: %s\n" path
@@ -1324,7 +1340,14 @@ let init_cmd_exit base_path force skills_only =
       Printf.printf
         "default workspace not recorded: could not write %s (%s); pass --base-path \
          to later commands\n"
-        record reason);
+        record reason
+    | Env_config.Refused_under_test ->
+      (* Says so rather than staying silent: a suite that expected a default
+         to exist should fail on the missing default, not on its absence
+         being invisible. *)
+      Printf.printf
+        "default workspace not recorded: a test executable does not write the \
+         operator's default\n");
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
@@ -1338,7 +1361,10 @@ let init_cmd =
      always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
+  Cmd.v info
+    Term.(
+      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      $ init_record_default)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -2564,13 +2590,15 @@ let setup_validate_runtime base_path =
 
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
-    ~initialize:(fun () -> init_cmd_exit base_path false false)
+    (* setup is an operator command: the workspace it prepares becomes the
+       default for later ones. *)
+    ~initialize:(fun () -> init_cmd_exit base_path false false true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
-    (* The image builder already takes a backend; setup passed None, which
-       means Docker, whatever profile imp was on. *)
-    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok microvm_backend))
+    ~prepare_image:(fun ~selection ->
+      let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
+      sandbox_image_cmd_exit false None (Ok runtime))
     ~login:(fun () ->
       match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
@@ -2591,6 +2619,23 @@ let setup_preflight_cmd =
   let info = Cmd.info "setup-preflight"
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
+
+let doctor_cmd =
+  let json = Arg.(value & flag & info ["json"]
+    ~doc:"Print the shared read-only onboarding state as JSON.") in
+  let inspect requested json =
+    let selected = match requested with
+      | Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    let state = Onboarding_status.inspect ~base_path:selected in
+    print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
+                   else Onboarding_status.to_text state);
+    (* Reporting incomplete preparation is successful observation, never a
+       claim that authentication, model calls or sandbox execution passed. *)
+    0
+  in
+  Cmd.v (Cmd.info "doctor" ~doc:"Show workspace and imp preparation without starting models or changing files.")
+    Term.(const inspect $ run_base_path $ json)
 
 (* cmdliner cannot fail a flag on the value of another flag, so the pairing
    rule (a backend only means something under microvm) is checked here and
@@ -2671,6 +2716,30 @@ let setup_gc () =
       if gc.minor_heap_size < desired_minor_words then
         Gc.set { gc with minor_heap_size = desired_minor_words }
 
+(* Internal elevation endpoint: no workspace, login, or model initialization. *)
+let sandbox_install_apple_verified_cmd =
+  let run argv = match argv with
+    | [] -> Error ()
+    | executable :: _ ->
+      try
+        let channel = Unix.open_process_args_in executable (Array.of_list argv) in
+        let status = ref None in
+        let output = Fun.protect
+          ~finally:(fun () -> status := Some (Unix.close_process_in channel))
+          (fun () -> In_channel.input_all channel) in
+        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+      with Unix.Unix_error _ | Sys_error _ -> Error () in
+  let execute source sha256 size =
+    match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with
+    | Ok () -> print_endline "Package installed. Sandbox service and guest execution still require verification."; Cmd.Exit.ok
+    | Error error -> prerr_endline (Masc.Apple_container_install.error_message error); Cmd.Exit.some_error in
+  let source = Arg.(required & opt (some string) None & info ["source"]) in
+  let sha256 = Arg.(required & opt (some string) None & info ["sha256"]) in
+  let size = Arg.(required & opt (some int) None & info ["size"]) in
+  Cmd.v (Cmd.info "sandbox-install-apple-verified"
+    ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
+    Term.(const execute $ source $ sha256 $ size)
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -2695,8 +2764,10 @@ let cmd =
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; sandbox_install_apple_verified_cmd
     ; setup_cmd
     ; setup_preflight_cmd
+    ; doctor_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

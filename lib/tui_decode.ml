@@ -15,7 +15,10 @@ type task = {
   goal_ids : string list;
 }
 
+type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+
 type keeper = {
+  k_origin : keeper_origin;
   k_name : string;
   k_trace_id : string;
   k_paused : bool;
@@ -910,6 +913,7 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     else Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts
   in
   {
+    k_origin = Persisted_keeper;
     k_name = meta.name;
     k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
     k_paused = meta.paused;
@@ -925,6 +929,13 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_created_at = meta.created_at;
     k_updated_at = meta.updated_at;
   }
+
+let keeper_of_declaration (row : Keeper_declared_roster.t) =
+  { k_origin = Declared_keeper row.requirements; k_name = row.name;
+    k_trace_id = ""; k_paused = false; k_current_task_id = None;
+    k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.;
+    k_last_turn_ts = ""; k_last_proactive_outcome = "";
+    k_created_at = ""; k_updated_at = "" }
 
 let decode_keeper json =
   let* meta = Keeper_meta_json_parse.meta_of_json json in

@@ -1780,6 +1780,46 @@ let test_media_turn_starts_from_the_live_walk_head () =
               ~first_runtime:assigned
               ~remaining_runtimes:[ text_only ]))))
 
+(* The media walk reaches past the lane, so a winner can be a runtime the lane
+   does not declare. Recording it for the lane erases the last in-lane success
+   and promotes nothing in its place: prefer_order reorders the lane's own
+   candidates, and the winner is in none of them. The next text turn then
+   starts from the declared head again (#34823). *)
+let test_an_out_of_lane_winner_keeps_the_lanes_own_preference () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Runtime_lane_preference.reset_for_testing ();
+    (* An in-lane success the lane is entitled to keep. *)
+    Runtime_lane_preference.note_success ~lane_id:"resilient"
+      ~candidate:"fallback.test_model";
+    let events = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~lane_id:"resilient"
+        ~runtime_id:"resilient"
+        ~runtime_id_of:(fun runtime_id -> runtime_id)
+        ~emit_runtime_manifest:(emit_manifest_collector events)
+        ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+          attempt_without_effect (Ok runtime_id) None)
+        [ "media.out_of_lane_model" ]
+    in
+    (match result with
+     | Ok runtime_id ->
+       Alcotest.(check string)
+         "the out-of-lane candidate served the turn"
+         "media.out_of_lane_model"
+         runtime_id
+     | Error error ->
+       Alcotest.failf "expected candidate success, got %s"
+         (Agent_core.Error.to_string error));
+    match Runtime.get_lane_by_id "resilient" with
+    | None -> Alcotest.fail "expected lane 'resilient' to be configured"
+    | Some lane ->
+      Alcotest.(check (list string))
+        "the in-lane success still leads the lane's order"
+        [ "fallback.test_model"; "primary.test_model" ]
+        (Runtime_lane_preference.prefer_order ~lane_id:"resilient"
+           (Runtime_lane.ordered_candidates lane)))
+
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
@@ -2714,6 +2754,35 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
               ~scope:registry_api_key_scope
               ~now:100.0)))
 
+let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
+  Runtime_lane_preference.reset_for_testing ();
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempt_without_effect (Ok runtime_id) None)
+      [ "media.fallback_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string)
+       "rerouted candidate can still serve turn"
+       "media.fallback_model"
+       runtime_id
+   | Error e ->
+     Alcotest.failf
+       "expected candidate success, got %s"
+       (Agent_core.Error.to_string e));
+  Alcotest.(check (list string))
+    "lane preference remains declared order without lane id"
+    [ "primary.text_model"; "media.fallback_model" ]
+    (Runtime_lane_preference.prefer_order
+       ~lane_id:"resilient"
+       [ "primary.text_model"; "media.fallback_model" ])
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -3455,6 +3524,10 @@ let () =
             `Quick
             test_attempt_loop_moves_past_payment_required;
           Alcotest.test_case
+            "an out-of-lane winner keeps the lane's own preference"
+            `Quick
+            test_an_out_of_lane_winner_keeps_the_lanes_own_preference;
+          Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
@@ -3544,6 +3617,10 @@ let () =
             "official client quota excludes registry API-key scope"
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
+          Alcotest.test_case
+            "attempt loop without lane id does not update sticky preference"
+            `Quick
+            test_attempt_loop_without_lane_id_does_not_update_sticky_preference;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

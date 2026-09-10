@@ -1061,6 +1061,51 @@ let test_autonomous_continuation_is_an_ordinary_user_turn () =
     Masc.Keeper_unified_prompt.autonomous_wake_marker
     user_message
 
+let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.run (fun _ ->
+  let answer = "2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
+  let answered : WO.pending_board_event =
+    { sample_board_event with
+      event_kind = WO.Ask_answered_row
+    ; post_id = "keeper-ask:schedule"
+    ; author = "operator"
+    ; title = "확정 정보"
+    ; preview = answer
+    ; post_kind = Masc.Board.System_post
+    }
+  in
+  let prompt = build_prompt ~meta:minimal_meta
+      { base_observation with pending_board_events = [ sample_board_event; answered ] } in
+  check bool "answer is durable input" true
+    (contains_sub "2026-10-17" prompt.user_message);
+  check bool "answer provenance is durable" true
+    (contains_sub "post_id=\"keeper-ask:schedule\"" prompt.user_message);
+  check bool "answer newlines stay quoted" true
+    (contains_sub "전시실\\n무료" prompt.user_message);
+  check bool "ordinary Board content stays ephemeral" false
+    (contains_sub sample_board_event.preview prompt.user_message);
+  let module Context = Masc.Keeper_context_runtime in
+  let original = Agent_core.Types.user_msg prompt.user_message in
+  let context = Context.append
+      (Context.create ~eio:false ~system_prompt:prompt.system_prompt) original in
+  let later = build_prompt ~meta:minimal_meta base_observation in
+  check string "consumed answer is not reinserted in a fresh wake"
+    Masc.Keeper_unified_prompt.autonomous_wake_marker later.user_message;
+  let context = List.fold_left (fun context _ ->
+      Context.append context (Agent_core.Types.user_msg later.user_message))
+      context (List.init 10 Fun.id) in
+  let checkpoint = Context.checkpoint_of_context context in
+  let reloaded =
+    checkpoint |> Agent_core.Checkpoint.to_json |> Yojson.Safe.to_string
+    |> Yojson.Safe.from_string |> Agent_core.Checkpoint.of_json
+  in
+  match reloaded with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok checkpoint ->
+    let messages = Context.context_of_agent_core_checkpoint checkpoint
+      |> Context.messages_of_context in
+    check int "one complete attributed answer remains after ten later wakes" 1
+      (List.length (List.filter (fun message -> message = original) messages)))
+
 let post_id_exn s =
   match Masc.Board.Post_id.of_string s with
   | Ok id -> id
@@ -1267,6 +1312,8 @@ let () =
     [
       ( "verification_surface",
         [
+          test_case "answered Ask survives later wakes and checkpoint reload" `Quick
+            test_answered_ask_survives_later_turns_and_checkpoint_reload;
           test_case "affordance: no keeper is offered task_verify" `Quick
             test_no_task_verify_affordance_for_any_keeper;
           test_case "affordance: Board activity exposes curation without threshold"

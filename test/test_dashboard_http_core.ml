@@ -2275,7 +2275,12 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
-  let proven = check_surfaces ~phase:"completed" ~proof_state:"proof_proven" in
+  ignore (check_surfaces ~phase:"awaiting_confirmation" ~proof_state:"proof_proven");
+  ignore (get_ok (Lib.Workspace_goals.confirm_completion config ~goal_id
+    ~operator_id:"dashboard-operator" ~request_id
+    ~verification_run_id:"dashboard-proof-run"
+    ~criterion_revision:goal.criterion_revision));
+  let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
   ignore (get_ok (Goal_store.upsert_goal config ~id:goal_id
     ~title:"Measured dashboard Goal" ~target_value:"20" ()));
   let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in

@@ -231,6 +231,31 @@ let with_turn_sandbox_factory ~enabled ~config ~meta f =
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
+let test_identical_edit_preserves_file_and_records_no_change () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "unchanged.ml" in
+  Fs_compat.save_file path "let x = 1\n";
+  Unix.utimes path 100. 100.;
+  let before = Unix.stat path in
+  let run old_string = handle_file_write_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~publication_recovery
+      ~args:(`Assoc ["path", `String path; "mode", `String "patch";
+        "old_string", `String old_string; "new_string", `String old_string]) () in
+  let result = run "let x = 1" in
+  let data = parse result.raw_output in
+  Alcotest.(check bool) "successful no change" true (parse_ok result.raw_output);
+  Alcotest.(check bool) "changed false" false (Json.member "changed" data |> Json.to_bool);
+  Alcotest.(check (option int)) "zero bytes written" (Some 0) (parse_int result.raw_output "bytes_written");
+  Alcotest.(check (option int)) "validated matched occurrence" (Some 1) (parse_int result.raw_output "occurrences");
+  Alcotest.(check bool) "no change evidence" true (Option.is_none result.file_change_evidence);
+  Alcotest.(check bool) "no before/after snapshots" true (Json.member "edit_snapshots" data = `Null);
+  let after = Unix.stat path in
+  Alcotest.(check int) "inode unchanged" before.st_ino after.st_ino;
+  Alcotest.(check (float 0.)) "mtime unchanged" before.st_mtime after.st_mtime;
+  Alcotest.(check string) "bytes unchanged" "let x = 1\n" (Fs_compat.load_file path);
+  Alcotest.(check bool) "equal strings do not excuse a missing match" false (parse_ok (run "absent").raw_output)
+;;
+
 let test_patch_unique_match () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
@@ -1610,6 +1635,7 @@ let () =
     [
       ( "patch-mode",
         [
+          Alcotest.test_case "identical edit is an observed no change" `Quick test_identical_edit_preserves_file_and_records_no_change;
           Alcotest.test_case "unique match replaces" `Quick
             test_patch_unique_match;
           Alcotest.test_case "snapshot store failure preserves successful edit" `Quick

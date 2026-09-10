@@ -497,5 +497,8 @@ val auth_headers_for_kind_and_key
   -> (string * string) list
 
 val resolve_auth_headers : t -> ((string * string) list, string) result
-(** Resolve credentials at the HTTP request boundary. Refresh failures return
-    fixed safe messages; neither an old token nor anonymous dispatch is used. *)
+(** Resolve credentials for a new HTTP request or frozen exact-output preflight.
+    Refresh failures return fixed safe messages; no stale token fallback occurs.
+    Exact-output plans freeze the resolved headers into their fingerprint and
+    do not refresh during execution. After a delay that may outlive a token,
+    prepare a new exact-output plan rather than reuse the old plan. *)

@@ -121,7 +121,7 @@ def main():
             if not os.environ.get(key):
                 raise ValueError('Selected provider credential environment is absent')
             env[key] = os.environ[key]
-        env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='true', MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED='false')
+        env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='true', MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED='false')
         if args.command == 'restart-owned':
             if state.get('pending'):
                 raise ValueError('Unconfirmed effect requires reconciliation before restart')

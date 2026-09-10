@@ -152,3 +152,23 @@ explicit no-match exit status with empty stdout/stderr as absence. Six mocked
 observation cases and a real read of PID71727 passed. No signal was sent. The
 pre-existing Popen-to-new-PID-receipt crash gap remains; crash-atomic upgrade
 is not claimed.
+
+## Runtime steering and Dashboard limitation
+
+Repeated QA feedback did not produce corrected artifacts on Kimi. The operator
+assigned exhibit-editor to glm-coding.glm-5.3. TOML readback confirms the
+assignment; the update returned turn_in_flight and did not restart the lane.
+A real GLM call has not yet been observed. This is manual runtime steering,
+not automatic failover.
+
+The Vite source preview on port18961 connected to the original backend18951
+only showed Loading Keepers and a disconnected WebSocket. The scenario helper
+had explicitly disabled WebSocket, whose product default is enabled. The
+prepared next startup preserves that default. The retained screenshot is a
+failed/incomplete UI observation, not successful Dashboard proof. No backend
+restart was performed to obtain it.
+
+PR35114 passed its corrected target tests and all PR checks, then merged as
+f56f5fe94fc0c4f9e6db23d3049d65b89917afd8. The integration candidate was rebuilt
+after fixing an optional OCaml argument declaration in the image reader.
+Its current source/run IDs are in recovery-candidate.json.

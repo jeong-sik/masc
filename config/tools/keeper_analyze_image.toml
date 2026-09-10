@@ -1,25 +1,16 @@
 name = "keeper_analyze_image"
-description = """
-Read a stored image artifact or an image file in your sandbox and return a text description or answer. \
-Delegates to a vision model in a sub-call; the image is never added to this \
-conversation. Returns the extracted text, or a typed error (invalid_args | \
-eio_context_unavailable | artifact_load_failed | invalid_timeout | \
-image_too_large | invalid_media_type | invalid_request | no_capable_runtime \
-| empty_extraction | truncated_extraction | timeout | provider_error)."""
+description = "Analyze a stored artifact or sandbox image with a vision model. Returns text or a typed failure; image bytes stay outside this conversation. Provide exactly one of artifact or path."
 additional_properties = false
 
 [[params]]
 name = "artifact"
 type = "string"
-description = """
-Handle of a stored image artifact (the content-addressed id returned when \
-the image was stored). Provide exactly one of artifact or path. A file hash alone does not store the file. The raw image is read in a vision sub-call and never \
-enters this conversation."""
+description = "Stored image handle returned by an image tool. A file hash alone does not ingest the file."
 
 [[params]]
 name = "path"
 type = "string"
-description = "Image file in your own sandbox, resolved like Read. Use this for a PNG/JPEG/GIF/WebP you generated. Provide exactly one of path or artifact. Bytes are read through the sandbox, stored under this Keeper, and analyzed; the response includes the stored artifact handle for further questions."
+description = "Image in your own sandbox, resolved like Read. Reads and stores the bytes, then analyzes them; success includes a reusable artifact handle."
 
 [[params]]
 name = "query"
@@ -40,4 +31,4 @@ the bytes when omitted."""
 [[params]]
 name = "runtime_id"
 type = "string"
-description = "Optional exact configured vision runtime identifier. When supplied, only that capable runtime is called; errors do not fall back to a different reader. Omit for automatic selection and failover. Useful for comparing readings of the same artifact."
+description = "Exact configured vision runtime. Omit for automatic selection/failover; an explicit selection never falls back."

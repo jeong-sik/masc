@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 module Setup = Server_sandbox_setup
 let contents = "# preserve\n[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Keep history.\"\n"
 let save path contents = Out_channel.with_open_bin path (fun out -> output_string out contents)

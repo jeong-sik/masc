@@ -19489,7 +19489,7 @@ let render_terminal_too_small state ~rows ~cols =
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
-let render_lane_addons state view =
+let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")

@@ -166,8 +166,16 @@ jobs:
           if-no-files-found: error
 
   packages:
-    name: Package contracts and Docker images
-    runs-on: ubuntu-latest
+    name: Package contracts and Docker images (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -210,6 +218,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lane-addon-packages-linux-x64-${{ env.CANDIDATE_SHA }}
+          name: lane-addon-packages-linux-${{ matrix.arch }}-${{ env.CANDIDATE_SHA }}
           path: proof/
           if-no-files-found: error

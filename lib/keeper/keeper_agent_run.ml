@@ -11,6 +11,14 @@ include Keeper_agent_error
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
+type direct_continuation =
+  | Runtime_continuation of Keeper_direct_runtime_continuation.admission
+  | Gate_continuation of Keeper_direct_gate_continuation.admission
+
+let direct_checkpoint = function
+  | Runtime_continuation admission -> Keeper_direct_runtime_continuation.checkpoint admission
+  | Gate_continuation admission -> Keeper_direct_gate_continuation.checkpoint admission
+
 let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
@@ -768,6 +776,7 @@ let run_turn
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
       ?direct_resume
+      ?on_gate_evidence_admitted
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_deferred_runtime_consumed
@@ -778,6 +787,7 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?hitl_resolution
+      ?on_gate_deferred
       ?autonomous_yield_requested
       ?on_checkpoint_stage
       ()
@@ -859,7 +869,7 @@ let run_turn
   let ctx = match direct_resume with
     | None -> ctx
     | Some admission ->
-      let checkpoint = Keeper_direct_runtime_continuation.checkpoint admission in
+      let checkpoint = direct_checkpoint admission in
       { ctx with Keeper_run_context.ctx_work =
           Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
       ; resume_agent_core_checkpoint = Some checkpoint
@@ -959,6 +969,7 @@ let run_turn
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
+      ?on_gate_deferred
       ?composition_plan_index
       ~turn_ctx_cell
       ~ctx_work
@@ -1007,7 +1018,10 @@ let run_turn
          the stored resolution. Preserve their existing input path until those
          blocks have their own durable admission identity. *)
       match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence, user_blocks with
-      | Some _, Some evidence, None ->
+      | Some _, Some evidence, blocks
+        when Option.is_none blocks || (match direct_resume with
+          | Some (Gate_continuation _) -> true
+          | Some (Runtime_continuation _) | None -> false) ->
         (match Keeper_gate_replay.approval_input evidence with
          | Error error -> Error (Keeper_approval_input_admission.error_to_string error)
          | Ok (identity, message) ->
@@ -1021,9 +1035,17 @@ let run_turn
     match admission with
     | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
     | Ok admitted_checkpoint ->
-    let admitted_checkpoint = match direct_resume with
-      | Some admission -> Some (Keeper_direct_runtime_continuation.checkpoint admission)
-      | None -> admitted_checkpoint in
+    let admitted_checkpoint = match admitted_checkpoint, direct_resume with
+      | Some checkpoint, _ -> Some checkpoint
+      | None, Some admission -> Some (direct_checkpoint admission)
+      | None, None -> None in
+    let evidence_admission = match on_gate_evidence_admitted, admitted_checkpoint with
+      | None, _ -> Ok ()
+      | Some callback, Some checkpoint -> callback checkpoint
+      | Some _, None -> Error "direct Gate continuation has no admitted checkpoint" in
+    match evidence_admission with
+    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    | Ok () ->
     let continue_from_checkpoint = Option.is_some admitted_checkpoint in
     let ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks =
       match admitted_checkpoint with

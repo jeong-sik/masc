@@ -259,7 +259,7 @@ let test_keeper_execution_defer_kind_is_producer_typed () =
     "external deferred execution is explicit"
     true
     (external_effect.deferred_kind
-     = Some Keeper_tool_execution.External_effect_deferred)
+     = Some (Keeper_tool_execution.External_effect_deferred {approval_id=None}))
 ;;
 
 let test_to_json () =

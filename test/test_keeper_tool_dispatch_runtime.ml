@@ -7669,6 +7669,108 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
+let test_direct_gate_current_history_resume decision () =
+  with_exec_fixture "direct_gate_current_history"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
+      let module Registry = Masc.Keeper_owner_registry in
+      let module Gate = Masc.Keeper_direct_gate_continuation in
+      let module Checkpoint = Masc.Keeper_checkpoint_store in
+      let base_path = config.Workspace.base_path and keeper_name = meta.name in
+      let owner = Registry.get ~base_path ~keeper_name |> require "owner" in
+      let operation_id = Keeper_chat_operation.Operation_id.of_string "original-gate-operation"
+        |> require "operation ID" in
+      let input = `Assoc ["message", `String "Finish the original research";
+        "task_id", `String "research-task"; "attachments", `List [`String "original-attachment"];
+        "channel", `String "original-channel"] in
+      let canonical = Keeper_chat_operation.canonical_json input |> require "canonical input" in
+      Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source:(`Assoc []) ~input:canonical
+        |> require "submit original" |> ignore;
+      let claimed = Masc.Keeper_owner.claim_next_operation owner |> require "claim original" in
+      check bool "original claim" true (Option.is_some claimed);
+      Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual |> require "manual mode" |> ignore;
+      let deferred = KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery ~ctx_work
+        ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; snapshot=`Assoc []})
+        ~name:"WebSearch" ~input:(`Assoc ["query", `String "original research evidence"; "limit", `Int 1]) () in
+      let approval_id = match deferred.deferred_kind with
+        | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
+        | None | Some Masc.Keeper_tool_execution.Generic_deferred
+        | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
+      let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let root = Masc.Keeper_fs.session_base_dir config in
+      ignore (Masc.Keeper_fs.ensure_dir root);
+      let session_dir = Filename.concat root session_id in
+      ignore (Masc.Keeper_fs.ensure_dir session_dir);
+      let context = Agent_core.Context.create_sync () in
+      let scope = Keeper_execution_scope_id.direct_operation operation_id in
+      let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh scope) |> require "original scope" in
+      Masc.Keeper_repetition_scope.save context frame;
+      let original = Masc.Keeper_context_runtime.checkpoint_of_context ctx_work in
+      let original = {original with Agent_core.Checkpoint.session_id; context;
+        messages=[Agent_core.Types.user_msg "Finish the original research";
+          Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
+      Checkpoint.save_agent_core_classified ~session_dir original |> require "original checkpoint" |> ignore;
+      check bool "actual yield parks the same operation" true
+        (Gate.suspend ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id]
+         |> require "suspend");
+      check bool "unresolved request is not claimable" true
+        ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
+      (* A different completed turn appends history while the original waits. *)
+      let newer = {original with Agent_core.Checkpoint.messages=original.messages @
+        [Agent_core.Types.user_msg "Independent newer user context"]} in
+      Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" |> ignore;
+      Gate.reconcile ~config ~meta |> require "pending reconciliation";
+      check bool "no resolution invented" true
+        ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
+      Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+        ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
+      (match decision with
+       | Keeper_approval_queue_rules_types.Decision.Approve -> ()
+       | Keeper_approval_queue_rules_types.Decision.Reject _ ->
+         Masc.Keeper_approval_queue.For_testing.reset_runtime_state ();
+         Masc.Keeper_approval_queue.install_persistence ~base_path |> require "restore rejected authority" |> ignore);
+      Gate.reconcile ~config ~meta |> require "resolution wake";
+      let claimed : Keeper_chat_operation.t =
+        match Masc.Keeper_owner.claim_next_operation owner |> require "reclaim original" with
+        | Some operation -> operation | None -> fail "resolved original request not ready" in
+      check bool "same operation and complete original input" true
+        (Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id && claimed.input=Some canonical);
+      let admission = match Gate.load ~config ~meta ~operation_id ~session_dir |> require "admit current history" with
+        | Some value -> value | None -> fail "missing Gate admission" in
+      let checkpoint = Gate.checkpoint admission in
+      check bool "newer history survives" true
+        (List.mem (Agent_core.Types.user_msg "Independent newer user context") checkpoint.messages);
+      let checkpoint = match decision with
+        | Keeper_approval_queue_rules_types.Decision.Reject _ -> checkpoint
+        | Keeper_approval_queue_rules_types.Decision.Approve ->
+          let resolution = Gate.resolution admission in
+          let grant = match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+            | Some value -> value | None -> fail "no approved grant" in
+          let replay () = Masc.Keeper_gate_replay.replay_approved_effect ~config ~meta ~publication_recovery
+            ~turn_sandbox_factory:(Masc_test_deps.fixture_turn_sandbox_factory ~config ~meta)
+            ~grant ~approval_id () in
+          let outcome = Masc.Tool_misc.with_web_search_simulation_for_test
+            ~outcomes:["searxng", `Hits ["Research evidence", "https://example.com/evidence", "actual source evidence"]]
+            replay in
+          (match outcome with Masc.Keeper_gate_replay.Applied _ -> ()
+           | Masc.Keeper_gate_replay.Not_applicable | Masc.Keeper_gate_replay.Applied_with_warning _
+           | Masc.Keeper_gate_replay.Failed _ | Masc.Keeper_gate_replay.Indeterminate _
+           | Masc.Keeper_gate_replay.Repair_required _ | Masc.Keeper_gate_replay.Resolution_absent _ ->
+             fail (Masc.Keeper_gate_replay.outcome_to_string outcome));
+          (* A second entry uses the consumed grant's saved outcome. *)
+          ignore (replay ());
+          let model = Masc.Keeper_gate_replay.user_message_with_hitl_resolution ~base_path
+            ~user_message:"Finish the original research" (Some resolution) in
+          let evidence = match model.replay_evidence with Some value -> value | None -> fail "missing replay evidence" in
+          let identity, message = Masc.Keeper_gate_replay.approval_input evidence |> require "evidence identity" in
+          Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
+      Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
+        ~checkpoint admission |> require "discharge only admitted evidence";
+      check bool "all Gate obligations accounted" true
+        ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
+      Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
+        |> require "same operation completion" |> ignore)
 let test_edit_manifest_through_model_projection () =
   List.iter (fun fail_manifest ->
     with_exec_fixture ~always_allow:true "edit-model-manifest"
@@ -7730,6 +7832,12 @@ let test_edit_manifest_through_model_projection () =
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
+    ("direct_gate_resume", [
+      test_case "approved Gate resumes same input with newer history and exact replay" `Quick
+        (test_direct_gate_current_history_resume Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "denied Gate resumes same input with authoritative denial" `Quick
+        (test_direct_gate_current_history_resume (Keeper_approval_queue_rules_types.Decision.Reject "declined by authority"));
+    ]);
     ("execute_keeper_tool_call_with_outcome", [
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;

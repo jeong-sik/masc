@@ -1727,15 +1727,20 @@ let process_single_turn ~user_row_origin ~submission
       |> Result.map (fun operation_id ->
         Keeper_chat_delivery_identity.Operation operation_id)
   in
-  let pending_direct_runtime_retry () =
+  let pending_direct_continuation () =
     match submission with
     | Owner_operation {operation_id; _} ->
-      Keeper_owner_registry.direct_runtime_retry ~base_path ~keeper_name:payload.name ~operation_id
-      |> Result.map_error Keeper_owner_registry.command_error_to_string
+      let ( let* ) = Result.bind in
+      let* retry = Keeper_owner_registry.direct_runtime_retry ~base_path ~keeper_name:payload.name ~operation_id
+        |> Result.map_error Keeper_owner_registry.command_error_to_string in
+      match retry with
+      | Some retry -> Ok (Some retry.Keeper_semantic_execution.checkpoint)
+      | None -> Keeper_owner_registry.direct_gate_state ~base_path ~keeper_name:payload.name ~operation_id
+          |> Result.map_error Keeper_owner_registry.command_error_to_string
+          |> Result.map (Option.map (fun state -> state.Keeper_semantic_execution.waiting.checkpoint))
   in
   (* Capture this attempt's incoming identity before dispatch consumes it. *)
-  let resumed_from = pending_direct_runtime_retry ()
-    |> Result.map (Option.map (fun (retry : Keeper_semantic_execution.runtime_retry) -> retry.checkpoint)) in
+  let resumed_from = pending_direct_continuation () in
   let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
       ?stream_lifecycle () =
     let ( let* ) = Result.bind in
@@ -2130,7 +2135,7 @@ let process_single_turn ~user_row_origin ~submission
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
-                   match pending_direct_runtime_retry () with
+                   match pending_direct_continuation () with
                    | Error detail -> Error detail
                    | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
                    | Ok None ->
@@ -2630,11 +2635,18 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
         Keeper_chat_operation.No_queued_operation
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
-      let pending_runtime_retry () =
-        Keeper_owner_registry.direct_runtime_retry
-          ~base_path:(Mcp_server.workspace_config state).base_path
+      let pending_continuation () =
+        let ( let* ) = Result.bind in
+        let base_path = (Mcp_server.workspace_config state).base_path in
+        let* retry = Keeper_owner_registry.direct_runtime_retry ~base_path
           ~keeper_name ~operation_id:operation.operation_id
-        |> Result.map_error Keeper_owner_registry.command_error_to_string
+          |> Result.map_error Keeper_owner_registry.command_error_to_string in
+        match retry with
+        | Some _ -> Ok (Some ())
+        | None -> Keeper_owner_registry.direct_gate_state ~base_path
+            ~keeper_name ~operation_id:operation.operation_id
+            |> Result.map_error Keeper_owner_registry.command_error_to_string
+            |> Result.map (Option.map (fun _ -> ()))
       in
       (match operation.input with
        | None ->
@@ -2853,7 +2865,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         | Keeper_turn_outcome.Awaiting_gate_approval
                         | Keeper_turn_outcome.No_visible_reply -> None)
                    | Keeper_chat_events.Run_finished _ ->
-                     (match pending_runtime_retry () with
+                     (match pending_continuation () with
                       | Ok (Some _) -> settle_delivery (Ok ())
                       | Error detail -> settle_delivery (Error detail)
                       | Ok None -> commit
@@ -2906,7 +2918,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ~events
             in
             let delivery = Eio.Promise.await delivery in
-            (match pending_runtime_retry () with
+            (match pending_continuation () with
              | Ok (Some _) -> Keeper_owner.Operation_deferred
              | Error detail -> failed Keeper_chat_operation.Store_unavailable detail
              | Ok None ->

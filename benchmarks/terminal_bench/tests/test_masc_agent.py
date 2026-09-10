@@ -66,6 +66,7 @@ def test_install_uploads_binary_driver_config(tmp_path):
     env = asyncio.run(go())
     kinds = [(k, d) for k, _, d in env.uploads]
     assert ("file", "/opt/masc-bench/bin/masc") in kinds
+    assert ("file", "/opt/masc-bench/bin/masc-exec-shim") in kinds
     assert ("dir", "/opt/masc-bench/driver") in kinds
     assert ("dir", "/opt/masc-bench/config") in kinds
     assert any("bootstrap.sh" in c for c in env.commands)

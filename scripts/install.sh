@@ -1650,9 +1650,10 @@ python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
 BUNDLE_TRANSACTION_ACTIVE=0
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
-# without the setup journey's interactive env (runtime events stay off unless
-# the operator asks for them). The smoke helper env isolation stays the single
-# place runtime events defaults are pinned.
+# without the setup journey's interactive env. No MASC_RUNTIME_EVENTS default
+# here: let the binary's default-on contract apply. The smoke helper env
+# isolation stays the single place runtime events defaults are pinned.
+: "${runtime_events_start_env:=}"
 start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
   start_env="$start_env AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\""

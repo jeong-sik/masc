@@ -198,3 +198,27 @@ After full startup, the Vite Dashboard showed the old operator message, tool
 timeline, approval/application records, GLM assignment, and task-001 InProgress.
 The client WebSocket remained disconnected even though health reported its
 backend available. The screenshot is partial UI proof and preserves that gap.
+
+## Actual generated-image analysis succeeds
+
+In operation kmsg-0317ddcac06a77c7087306c6c0000633, the designer called
+keeper_analyze_image with path=poster.png. The real Kimi vision sub-call
+returned the visible title, online-only badge and TBD event line. The stored
+vision bytes exactly match its generated sandbox PNG (475564 bytes, SHA256
+9ab1edb5e2ac5e633a0b7636eb9ddc5461fd9cc71ecd277dd97ead4bc59479b7).
+The operation then reached Succeeded. This proves generated file→sandbox
+reader→Keeper vision store→real model analysis. The poster still contains
+wrong event information and is not accepted output. An explicit operator
+request narrowed this run to visual reading after the designer's broader
+repair request got stuck in repeated edits.
+
+The new no-change Edit result also ran in the real designer turn: three calls
+returned changed=false, bytes_written=0. The model repeated them anyway, so
+truthful tool output alone did not resolve its behavior. Streamed arguments
+already contained the wrong Korean word; whitespace differences in tool-call
+ledger input came from preview trimming, not actual Edit argument mutation.
+
+Independent pdfinfo inspection confirms booklet.pdf has3 pages. Direct
+pdftoppm rendering of page1 differs from the Keeper-supplied renders/page1.png,
+which make_renders draws separately with PIL. Those PNGs cannot verify the PDF's
+actual layout. Both images and the queued operator feedback are retained.

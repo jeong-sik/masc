@@ -1,9 +1,20 @@
 {
   "branch": "test/collaboration-multimodal-candidate",
   "commit": "744b490445540900b7719af18a5b34ad48373221",
-  "targeted_test_run": 34491991365,
+  "targeted_test_run": 34492290376,
   "release_run": 34491994983,
   "source_review": "two independent reviews found no blocker after exact-read and UTF8-safe failure fixes",
   "runtime_replaced": false,
-  "goal_retried": false
+  "goal_retried": false,
+  "superseded_targeted_test_run": {
+    "run": 34491991365,
+    "reason": "Two supplied suite names did not match checked-in files; own run cancellation requested."
+  },
+  "metrics_fix": {
+    "pr": 35178,
+    "head": "8250cd93b6",
+    "targeted_test_run": 34492252444,
+    "previous_run": 34491334590,
+    "previous_test_step": "failed; source inspection found and fixed public Tool_result module qualification; full original log not yet downloadable"
+  }
 }

@@ -86,7 +86,14 @@ class OwnerWithoutModel(unittest.TestCase):
                         # Model settings are saved by another process, exactly as the CLI
                         # wizard does. Resume must affect this same existing owner.
                         runtime.write_text(seed_without_lanes)
-                        for _ in range(2):
+                        for attempt in range(2):
+                            if attempt == 0:
+                                # Same native command invoked by setup after local login.
+                                result = subprocess.run([BINARY, 'runtime-resume', '--base-path', tmp,
+                                                         '--port', str(port)], env=env,
+                                                        capture_output=True, text=True, timeout=30)
+                                self.assertEqual(result.returncode, 0, result.stderr)
+                                self.assertNotIn(token, result.stdout + result.stderr)
                             request = Request(url+'/api/v1/runtime/setup/resume', data=b'{}',
                                               headers={'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin',
                                                        'Content-Type': 'application/json'})

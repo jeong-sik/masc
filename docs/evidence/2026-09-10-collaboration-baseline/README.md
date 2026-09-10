@@ -62,3 +62,18 @@ ask_answered events still appear in the editor pending event queue; recorded
 delivered=true meant queued wake delivery, not incorporation into model input.
 The poster is retained as a before-correction artifact, not accepted output.
 Do not inject a replacement instruction to conceal this pending-input behavior.
+
+## Answer eventually recognized
+
+Subsequent observation found no pending ask_answered events. The original editor
+operation reached Succeeded. A later editor tool input explicitly states that
+the operator supplied confirmed details, the online-only assumption is invalid,
+and the generated task artifacts need rework. That demonstrates recognition,
+not corrected artifacts. The attempted memory retraction failed with
+fact_not_found because the supplied SHA reference was not a stored memory ID.
+
+Source inspection at the baseline and current main shows the direct turn does
+not supply the optional autonomous-yield callback and its direct observation
+has empty pending messages/events. This supports investigating delayed input
+during a long direct operation. It does not prove permanent answer loss, and
+no speculative runtime patch or forced restart was applied.

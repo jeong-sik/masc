@@ -80,7 +80,12 @@ type finalization_error =
   | Token_measurement_required of Serving_constraint.t
   | Measured_request_mismatch
 
-let fingerprint_to_string (Fingerprint value) = value
+(* Test support. Nothing in production reads a fingerprint as text -- the
+   plan compares fingerprints -- but the inline pin below has to name the
+   value it freezes, and the frozen material domain is the point of that pin.
+   Annotated so the release build, which drops inline tests, does not read it
+   as an unused value. *)
+let[@warning "-32"] fingerprint_to_string (Fingerprint value) = value
 let sha256 value = Sha256.(to_hex (digest_string value))
 
 let rec canonical_json = function

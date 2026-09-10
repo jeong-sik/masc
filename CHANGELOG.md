@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [0.35.8] - 2026-09-11
+
+### Fixed
+
+- The max-tokens truncation recovery no longer dies in request validation on runtimes that declare `reasoning-effort`. The recovery retries the turn with thinking disabled, but the re-dispatched candidate still carried the runtime's `reasoning_effort`, which the Anthropic wire rejects (`cannot set reasoning_effort when enable_thinking=false`) — the retry now strips effort from the candidate alongside `enable_thinking`/`preserve_thinking`, so the continuation it was built to rescue actually runs (#35195).
+
 ## [0.35.7] - 2026-09-11
 
 ### Fixed

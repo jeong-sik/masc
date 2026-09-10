@@ -1,3 +1,124 @@
+module Catalog_binding = Agent_core.Provider_runtime_binding
+
+type setup_support = Existing_binding | New_connection | Unsupported
+
+let setup_support_json = function
+  | Existing_binding -> `String "existing_binding"
+  | New_connection -> `String "new_connection"
+  | Unsupported -> `String "unsupported"
+;;
+
+let endpoint_fields endpoint =
+  let uri = Uri.of_string endpoint in
+  if Uri.userinfo uri <> None || Uri.query uri <> [] || Uri.fragment uri <> None
+  then [ "endpoint_redacted", `Bool true ]
+  else [ "endpoint", `String endpoint ]
+;;
+
+let configured_runtime_ids (config : Runtime_schema.config) provider_id =
+  config.bindings
+  |> List.filter_map (fun (binding : Runtime_schema.binding) ->
+    if String.equal binding.provider_id provider_id
+    then Some (`String (Runtime_schema.binding_key binding)) else None)
+;;
+
+let integration_json config ~id ~display_name ~protocol ~origin ~supported fields =
+  let configured = configured_runtime_ids config id in
+  let setup_support =
+    if not supported then Unsupported
+    else if configured = [] then New_connection else Existing_binding
+  in
+  `Assoc
+    ([ "id", `String id
+     ; "display_name", `String display_name
+     ; "protocol", (match protocol with Some value -> `String value | None -> `Null)
+     ; "origin", `String origin
+     ; "configured_runtime_ids", `List configured
+     ; "setup_support", setup_support_json setup_support
+     ; "verification_support", `String (if supported then "response_tool" else "unsupported")
+     ; "account_availability_verified", `Bool false
+     ] @ fields)
+;;
+
+let protocol_of_catalog_kind = function
+  | Llm_provider.Provider_config.Anthropic | Kimi -> Some "messages-http"
+  | OpenAI_compat | Glm -> Some "openai-compatible-http"
+  | Ollama -> Some "ollama-http"
+  | Gemini -> None
+;;
+
+let integrations_json (config : Runtime_schema.config) =
+  let catalog = Catalog_binding.all () in
+  let configured =
+    List.map (fun (provider : Runtime_schema.provider) ->
+      let supported =
+        match provider.api_format with
+        | Runtime_schema.Antigravity_cli_runtime -> false
+        | Messages_api | Chat_completions_api | Ollama_api
+        | Codex_app_server_runtime | Claude_code_runtime -> true
+      in
+      let fields =
+        match provider.transport with
+        | Runtime_schema.Http endpoint -> endpoint_fields endpoint
+        | Cli command -> [ "command", `String command ]
+      in
+      let credential =
+        match provider.credentials with
+        | Some (Runtime_schema.Env name) -> [ "api_key_env", `String name ]
+        | Some (File _ | Inline _) | None -> []
+      in
+      integration_json config ~id:provider.id ~display_name:provider.display_name
+        ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
+        (fields @ credential @ [ "enabled", `Bool provider.enabled ])) config.providers
+  in
+  let declared id =
+    List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
+      config.providers
+  in
+  let prototypes =
+    catalog |> List.filter_map (fun (entry : Catalog_binding.t) ->
+      if declared entry.id then None else
+      let protocol = protocol_of_catalog_kind entry.kind in
+      let task =
+        match entry.default_model with
+        | None -> entry.capabilities.task
+        | Some model_id ->
+          (match Llm_provider.Capabilities.for_provider_model_id
+                   ~wire:(Some entry.kind) ~allow_bare_fallback:false
+                   ~provider_label:entry.id ~model_id with
+           | None -> entry.capabilities.task
+           | Some capabilities -> capabilities.task)
+      in
+      let supported = protocol <> None && task = None in
+      Some (integration_json config ~id:entry.id ~display_name:entry.id ~protocol
+        ~origin:"agent_core_catalog" ~supported
+        (endpoint_fields entry.base_url
+         @ [ "request_path", `String entry.request_path
+           ; "api_key_env", `String entry.api_key_env
+           ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind entry.kind)
+           ])))
+  in
+  (* Product integration identities declare transport only. Actual server model
+     identity, capabilities and running context still come from discovery. *)
+  let clients =
+    [ "codex", "Codex", "codex-app-server", Some "codex", true
+    ; "claude-code", "Claude Code", "claude-code", Some "claude", true
+    ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", false
+    ; "vllm", "vLLM", "openai-compatible-http", None, true
+    ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
+    ; "llama-cpp", "llama.cpp", "openai-compatible-http", None, true
+    ; "unsloth", "Unsloth served weights", "openai-compatible-http", None, true
+    ]
+    |> List.filter_map (fun (id, display_name, protocol, command, supported) ->
+      if declared id || List.exists (fun (entry : Catalog_binding.t) -> entry.id = id) catalog
+      then None else
+      Some (integration_json config ~id ~display_name ~protocol:(Some protocol)
+        ~origin:"masc_integration" ~supported
+        (match command with None -> [] | Some command -> [ "command", `String command ])))
+  in
+  `List (configured @ prototypes @ clients)
+;;
+
 let to_json (config : Runtime_schema.config) =
   let runtimes =
     List.filter_map
@@ -18,14 +139,7 @@ let to_json (config : Runtime_schema.config) =
              let transport =
                match provider.transport with
                | Runtime_schema.Cli command -> [ "command", `String command ]
-               | Runtime_schema.Http endpoint ->
-                 let uri = Uri.of_string endpoint in
-                 if
-                   Uri.userinfo uri <> None
-                   || Uri.query uri <> []
-                   || Uri.fragment uri <> None
-                 then [ "endpoint_redacted", `Bool true ]
-                 else [ "endpoint", `String endpoint ]
+               | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
              let credential =
                match provider.credentials with
@@ -60,6 +174,7 @@ let to_json (config : Runtime_schema.config) =
         | None -> `Null
         | Some id -> `String id )
     ; "runtimes", `List runtimes
+    ; "integrations", integrations_json config
     ]
 ;;
 

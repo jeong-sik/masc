@@ -2735,7 +2735,7 @@ let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
    | Error e ->
      Alcotest.failf
        "expected candidate success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "lane preference remains declared order without lane id"
     [ "primary.text_model"; "media.fallback_model" ]

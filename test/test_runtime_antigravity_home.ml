@@ -464,6 +464,69 @@ let test_explicit_setup_import_and_login_home () =
      | Error Unsafe_credential -> () | _ -> fail "unsafe canonical source must not fall through to another account"))
 ;;
 
+let test_keychain_selection_and_private_account_switch () =
+  with_temp_root (fun runtime_root ->
+    let module S = Runtime_antigravity_setup in
+    let account = match S.prepare ~runtime_root ~account_id:"switch-account" with
+      | Ok account -> account | Error error -> fail (S.error_message error) in
+    let source_home = Filename.concat runtime_root "source-switch" in
+    Unix.mkdir source_home 0o700;
+    List.iter (fun suffix -> Fs_compat.mkdir_p (Filename.concat source_home suffix))
+      ["Library/Keychains"; ".gemini/antigravity-cli"];
+    let source_keychain = Filename.concat source_home "Library/Keychains/login.keychain-db" in
+    write_file ~mode:0o600 source_keychain "source keychain fixture unchanged";
+    let source_file = Filename.concat source_home ".gemini/antigravity-cli/antigravity-oauth-token" in
+    write_file ~mode:0o600 source_file "stale-file-account";
+    let destination = Filename.concat (S.home_dir account) "Library/Keychains/login.keychain-db" in
+    if not (Sys.file_exists destination) then (
+      Fs_compat.mkdir_p (Filename.dirname destination);
+      write_file ~mode:0o600 destination "private keychain fixture");
+    let active_keychain_account = ref (Some "old-private-account") in
+    let selected_account = ref (Apple_keychain.Found "selected-account-A") in
+    let clears = ref 0 in
+    let read_keychain ~path =
+      check string "reads only explicitly selected source keychain" source_keychain path;
+      !selected_account in
+    let clear_keychain ~path =
+      check string "only managed destination may be changed" destination path;
+      incr clears; active_keychain_account := None; Ok () in
+    let apply () = S.For_testing.import_with ~read_keychain ~clear_keychain ~source_home account in
+    check bool "keychain A imported" true (apply () = Ok ());
+    let reference () = match S.credential_reference account with
+      | Ok (Runtime_schema.File path) -> Fs_compat.load_file path | _ -> fail "private account reference" in
+    check string "keychain wins over stale fallback" "selected-account-A" (reference ());
+    active_keychain_account := Some "selected-account-A";
+    selected_account := Apple_keychain.Found "selected-account-B";
+    check bool "second account imported" true (apply () = Ok ());
+    check (option string) "old destination keychain cannot override B" None !active_keychain_account;
+    check string "selected B copied" "selected-account-B" (reference ());
+    check int "each explicit account switch clears only its private item" 2 !clears;
+    selected_account := Apple_keychain.Unavailable;
+    check bool "inaccessible keychain never falls back to stale file" true (apply () = Error S.Keychain_unavailable);
+    check int "failed source selection leaves destination untouched" 2 !clears;
+    check string "failed source selection preserves B" "selected-account-B" (reference ());
+    selected_account := Apple_keychain.Found "selected-account-C";
+    check bool "destination reset failure rejects switch" true
+      (S.For_testing.import_with ~read_keychain ~clear_keychain:(fun ~path:_ -> Error ())
+        ~source_home account = Error S.Keychain_unavailable);
+    check string "failed destination reset preserves B" "selected-account-B" (reference ());
+    selected_account := Apple_keychain.Missing;
+    check bool "true missing item permits canonical fallback" true (apply () = Ok ());
+    check string "explicit fallback captured" "stale-file-account" (reference ());
+    let fresh_login = ref (Some "fresh-interactive-login") in
+    check bool "capture reads same-home login before clearing private item" true
+      (S.For_testing.import_with ~source_home:(S.home_dir account) account
+         ~read_keychain:(fun ~path ->
+           check string "capture reads own login keychain" destination path;
+           match !fresh_login with Some token -> Apple_keychain.Found token | None -> Unavailable)
+         ~clear_keychain:(fun ~path ->
+           check string "capture clears only own login item" destination path;
+           fresh_login := None; Ok ()) = Ok ());
+    check string "captured login survives private reset" "fresh-interactive-login" (reference ());
+    check string "source keychain never changed" "source keychain fixture unchanged" (Fs_compat.load_file source_keychain);
+    check string "source file never changed" "stale-file-account" (Fs_compat.load_file source_file))
+;;
+
 let test_official_models_response_is_not_model_output () =
   let response turns = Printf.sprintf {|{"status":"SUCCESS","num_turns":%d,"usage":{"total_tokens":0},"command":{"name":"models","data":{"models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"}]}}}|} turns in
   let models = match Runtime_antigravity_setup.parse_models (response 0) with
@@ -499,6 +562,7 @@ let () =
   run
     "runtime_antigravity_home"
     [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;
+      test_case "keychain precedence and repeated account switch" `Quick test_keychain_selection_and_private_account_switch;
                        test_case "official model catalog envelope" `Quick test_official_models_response_is_not_model_output;
                        test_case "selected zero-turn context" `Quick test_selected_model_zero_turn_context] )
     ; ( "layout"

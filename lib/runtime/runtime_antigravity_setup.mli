@@ -1,7 +1,7 @@
 (** Explicit Antigravity account selection, never called by catalog inspection. *)
 type t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
-  | Command_failed | Invalid_catalog
+  | Command_failed | Invalid_catalog | Keychain_unavailable
 val error_message : error -> string
 val prepare : runtime_root:string -> account_id:string -> (t, error) result
 val home_dir : t -> string
@@ -25,3 +25,10 @@ val parse_context : model:model -> cli_version:string -> string -> (context_obse
     model slug and CLI version; model labels are matched exactly, never guessed.
     Missing/zero context is explicitly unknown, not a provider API maximum.
     Nonzero token usage rejects the zero-turn metadata observation. *)
+
+module For_testing : sig
+  val import_with :
+    read_keychain:(path:string -> Apple_keychain.observation) ->
+    clear_keychain:(path:string -> (unit, unit) result) ->
+    source_home:string -> t -> (unit, error) result
+end

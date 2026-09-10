@@ -4264,7 +4264,19 @@ let semantic_status_color status =
       Ansi.dim
   | _ -> Ansi.reset
 
-let planning_phase_label phase = Goal_phase.to_string phase
+(* The screen's word for a phase, not the wire's. [Goal_phase.to_string] is
+   the value a tool filter and a stored goal carry, and one of them is
+   [awaiting_confirmation] at 21 cells. The column below is as wide as the
+   widest label, and TITLE gets what is left, so spelling the wire token here
+   spent twelve columns of every planning row on one phase name and folded
+   titles at 80 and 99 columns alike. Each label is a match arm so a new
+   phase has to be given a word rather than inheriting a long one. *)
+let planning_phase_label = function
+  | Goal_phase.Executing -> "executing"
+  | Goal_phase.Verifying -> "verifying"
+  | Goal_phase.Awaiting_confirmation -> "confirming"
+  | Goal_phase.Completed -> "completed"
+  | Goal_phase.Dropped -> "dropped"
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
    are nine cells and the column was eight, so nearly every planning row read

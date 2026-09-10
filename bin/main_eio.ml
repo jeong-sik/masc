@@ -2716,6 +2716,30 @@ let setup_gc () =
       if gc.minor_heap_size < desired_minor_words then
         Gc.set { gc with minor_heap_size = desired_minor_words }
 
+(* Internal elevation endpoint: no workspace, login, or model initialization. *)
+let sandbox_install_apple_verified_cmd =
+  let run argv = match argv with
+    | [] -> Error ()
+    | executable :: _ ->
+      try
+        let channel = Unix.open_process_args_in executable (Array.of_list argv) in
+        let status = ref None in
+        let output = Fun.protect
+          ~finally:(fun () -> status := Some (Unix.close_process_in channel))
+          (fun () -> In_channel.input_all channel) in
+        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+      with Unix.Unix_error _ | Sys_error _ -> Error () in
+  let execute source sha256 size =
+    match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with
+    | Ok () -> print_endline "Package installed. Sandbox service and guest execution still require verification."; Cmd.Exit.ok
+    | Error error -> prerr_endline (Masc.Apple_container_install.error_message error); Cmd.Exit.some_error in
+  let source = Arg.(required & opt (some string) None & info ["source"]) in
+  let sha256 = Arg.(required & opt (some string) None & info ["sha256"]) in
+  let size = Arg.(required & opt (some int) None & info ["size"]) in
+  Cmd.v (Cmd.info "sandbox-install-apple-verified"
+    ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
+    Term.(const execute $ source $ sha256 $ size)
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -2740,6 +2764,7 @@ let cmd =
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; sandbox_install_apple_verified_cmd
     ; setup_cmd
     ; setup_preflight_cmd
     ; doctor_cmd

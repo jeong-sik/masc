@@ -1,0 +1,9 @@
+{
+  "branch": "test/collaboration-multimodal-candidate",
+  "commit": "744b490445540900b7719af18a5b34ad48373221",
+  "targeted_test_run": 34491991365,
+  "release_run": 34491994983,
+  "source_review": "two independent reviews found no blocker after exact-read and UTF8-safe failure fixes",
+  "runtime_replaced": false,
+  "goal_retried": false
+}

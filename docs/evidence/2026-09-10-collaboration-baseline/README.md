@@ -359,3 +359,27 @@ intent/response handling for HTTP POST, including the two manual approvals. A
 local HTTP fixture confirmed JSON null remains POST after review caught the
 initial body=None ambiguity. Credential-less Codex app-server startup is now
 accepted as CLI-owned authentication; no restart was performed for this change.
+
+
+## Runtime statistics reconciliation and integration preparation
+
+At 14:44Z an independent trace/turn/ordinal join matched 26 decision rows with
+exact cost rows. All input/output/cache totals matched the API's three runtime
+rows. The same window had 128 separate tool execution observations, while all
+26 decision rows omitted tool count/name fields. PR35178 restores these fields
+from actual turn results; its CI is separate from this running old binary.
+
+At 14:50Z the actual Overview preview showed all three API rows with matching
+counts and input/output totals, without browser errors. The API response was
+fresh with cache age36.3 seconds; the UI displayed receipt time but omitted cache
+metadata. An earlier captured response was 2,228 seconds old. See
+[runtime-metrics](runtime-metrics/ledger-audit.json) and its screenshot and saved
+responses. These observations do not prove corrected tool counts or UI freshness.
+
+The combined multimodal candidate contains full binary capture, binary reference
+writes, typed visual tool results, and peer delivery. Two independent source
+reviews found no remaining blocker after raw error diagnostics and complete peer
+reads were repaired. Targeted CI and a Release workflow are running on branch
+`test/collaboration-multimodal-candidate`; the old runtime remains unchanged.
+The current local27B pass retains its original live process; progress is saved
+separately, without claiming a completed synthesis or publication.

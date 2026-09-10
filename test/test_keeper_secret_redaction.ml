@@ -351,6 +351,70 @@ let test_credential_shaped_keys_always_mine_their_scalar () =
     (R.redact_text redaction ("value=" ^ secret_value))
     secret_value
 
+(* The promise the identity switch rests on: a credential-shaped key masks with
+   identity mining off. Each spelling here was NOT credential-shaped before the
+   marker list was widened, so with the identity default now off they would
+   have gone out in chat text and tool output verbatim. *)
+let test_credential_markers_cover_the_common_spellings () =
+  List.iter
+    (fun key ->
+      let base = temp_dir () in
+      Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let secret_value = "opaque-" ^ key in
+      let creds = Filename.concat base "creds.yml" in
+      write_file creds
+        ("service:\n  " ^ key ^ ": " ^ secret_value ^ "\n  user: plain-login\n");
+      let redaction =
+        R.snapshot_with_additional_secret_files
+          ~redact_identity_scalars:false
+          ~additional_secret_files:[ creds ]
+          ~base_path:base
+          ~keeper_name:"marker-coverage"
+      in
+      not_contains
+        (Printf.sprintf "%s masks with identity mining off" key)
+        (R.redact_text redaction ("value=" ^ secret_value))
+        secret_value)
+    [ "api_key"
+    ; "apikey"
+    ; "access_key"
+    ; "private_key"
+    ; "ssh_key"
+    ; "auth"
+    ; "authorization"
+    ; "bearer"
+    ; "cookie"
+    ; "session_id"
+    ; "signature"
+    ]
+
+(* And the other half stays true: an identity key is not credential-shaped, so
+   with the switch off its value reaches the reader. This is the behaviour the
+   default now ships. *)
+let test_identity_key_is_visible_with_the_switch_off () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let creds = Filename.concat base "hosts.yml" in
+  (* Both values clear [min_secret_len] = 8, so each is mined or skipped on
+     what its key says rather than on being too short to notice. *)
+  write_file creds
+    "github.com:\n  user: octocat-operator\n  oauth_token: tok-abcdefghij\n";
+  let redaction =
+    R.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false
+      ~additional_secret_files:[ creds ]
+      ~base_path:base
+      ~keeper_name:"identity-visible"
+  in
+  let rendered =
+    R.redact_text redaction "user=octocat-operator token=tok-abcdefghij"
+  in
+  Alcotest.(check bool) "the account name survives" true
+    (String_util.contains_substring_ci rendered "octocat-operator");
+  not_contains "the token does not" rendered "tok-abcdefghij"
+
 let test_stream_emits_bounded_unterminated_output () =
   let input = String.make 200_000 'x' in
   let state = R.create_stream_state R.empty in
@@ -440,6 +504,10 @@ let () =
             test_identity_scalar_toggle_leaves_credentials_masked;
           Alcotest.test_case "credential-shaped keys always mine their scalar" `Quick
             test_credential_shaped_keys_always_mine_their_scalar;
+          Alcotest.test_case "credential markers cover the common spellings"
+            `Quick test_credential_markers_cover_the_common_spellings;
+          Alcotest.test_case "an identity key is visible with the switch off"
+            `Quick test_identity_key_is_visible_with_the_switch_off;
           Alcotest.test_case "bounds unterminated stream buffering" `Quick
             test_stream_emits_bounded_unterminated_output;
           Alcotest.test_case "streams carriage-return progress" `Quick

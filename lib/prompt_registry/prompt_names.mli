@@ -204,6 +204,8 @@ val keeper_world_scheduled_wake_heading_multi : string
 val keeper_world_scheduled_wake_intro : string
 val keeper_world_completion_authority_heading : string
 val keeper_world_completion_authority_intro : string
+val keeper_world_task_outcomes_heading : string
+val keeper_world_task_outcomes_intro : string
 val keeper_world_task_cancellations_heading : string
 val keeper_world_task_cancellations_intro : string
 val keeper_world_own_recent_actions_heading : string
@@ -235,6 +237,8 @@ val keeper_world_event_rows_ask_title : string
 val keeper_world_event_rows_ask_skipped : string
 val keeper_world_event_rows_completion_authority_title : string
 val keeper_world_event_rows_completion_authority_preview : string
+val keeper_world_event_rows_task_outcome_title : string
+val keeper_world_event_rows_task_outcome_preview : string
 val keeper_world_event_rows_task_cancelled_title : string
 val keeper_world_event_rows_task_cancelled_preview : string
 val keeper_world_event_rows_task_cancelled_no_reason : string

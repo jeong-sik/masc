@@ -274,6 +274,7 @@ let connector_event_ids_of_queue queue =
        | Q.Fusion_completed _ | Q.Schedule_due _ | Q.Hitl_resolved _
       | Q.Ask_answered _
        | Q.Completion_authority_rejected _
+       | Q.Task_outcome _
        | Q.Task_cancelled _ | Q.Workspace_message _
        | Q.Delegate_completed _ | Q.Composition_completed _ -> None)
   |> List.sort String.compare

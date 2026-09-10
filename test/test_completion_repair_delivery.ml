@@ -165,7 +165,22 @@ let test_approval_has_no_repair_obligation () =
     check_pending config 0;
     reconcile config ~delivered:0 ~retained:0;
     Alcotest.(check int) "approval has no rejection stimulus" 0
-      (List.length (queue config)))
+      (List.length (queue config));
+    (* The approval still reaches the producer in its own right: the twin wake
+       carries the typed outcome, with no repair obligation behind it. *)
+    Alcotest.(check (list string)) "approval wake carries the exact verification"
+      [ verification_id ]
+      (List.filter_map
+         (fun stimulus ->
+            match stimulus.Keeper_event_queue.payload with
+            | Keeper_event_queue.Task_outcome outcome ->
+              Alcotest.(check string) "approval task identity" task_id
+                outcome.to_task_id;
+              Alcotest.(check bool) "typed authority" true
+                (human = outcome.to_authority);
+              Some outcome.to_verification_id
+            | _ -> None)
+         (queue config)))
 
 let test_resubmit_supersedes_and_stale_ack_preserves_new_rejection () =
   with_workspace (fun config ->

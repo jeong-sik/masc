@@ -87,6 +87,7 @@ let queued_results ~base_path ~keeper_name =
       | Event_queue.Hitl_resolved _
       | Event_queue.Ask_answered _
       | Event_queue.Completion_authority_rejected _
+      | Event_queue.Task_outcome _
       | Event_queue.Task_cancelled _
       | Event_queue.Workspace_message _
       | Event_queue.Delegate_completed _ -> None)

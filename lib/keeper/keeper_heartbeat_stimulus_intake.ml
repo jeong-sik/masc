@@ -65,7 +65,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
-  | Keeper_event_queue.Composition_completed _ ->
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Task_outcome _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -236,6 +237,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     None
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Some Keeper_world_observation.Completion_authority_rejection_stimulus
+  (* Dedicated turn_reason, same principle as the rejection twin: the producer
+     must be able to tell a verdict wake from an autonomous tick — and an
+     approved turn must never be described as a rejection. *)
+  | Keeper_event_queue.Task_outcome _ ->
+    Some Keeper_world_observation.Task_outcome_stimulus
   (* Dedicated turn_reason: the author has to be able to tell a cancellation
      wake from an autonomous tick, otherwise the turn is indistinguishable from
      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
@@ -428,6 +434,19 @@ let consume_single_heartbeat_stimulus
          | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Task_outcome outcome ->
+      (* The approval twin of the rejection log line beside it: a verdict the
+         Keeper submitted evidence for has landed, surfaced as a
+         pending_board_event so this turn acts on it instead of the producer
+         discovering its closed task by projection drift. *)
+      Log.Keeper.info
+        "turn entry: task outcome delivered task_id=%s verification_id=%s \
+         authority_kind=%s (keeper=%s)"
+        outcome.to_task_id
+        outcome.to_verification_id
+        (Masc_domain.completion_authority_kind outcome.to_authority)
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Workspace_message message ->
       (* The transcript row committed at the delivery boundary carries the
          content and the message lane reads it, so there is no observation to
@@ -479,7 +498,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
-  | Keeper_event_queue.Composition_completed _ ->
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Task_outcome _ ->
     true
 ;;
 
@@ -558,7 +578,8 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
-         | Keeper_event_queue.Composition_completed _ -> None)
+         | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Task_outcome _ -> None)
       (Keeper_event_queue.to_list pending)
 ;;
 
@@ -751,6 +772,9 @@ let reconcile_spent_selection
   | Fusion_completed _
   | Connector_attention _
   | Completion_authority_rejected _
+  (* A committed approval cannot be un-committed, so the selection stays worth
+     a turn — the same rule as the rejection twin beside it. *)
+  | Task_outcome _
   (* A committed cancellation cannot be undone or settled elsewhere, so the
      selection is always still worth a turn. *)
   | Task_cancelled _
@@ -795,7 +819,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Task_cancelled _
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
-    | Keeper_event_queue.Composition_completed _ ->
+    | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ ->
       None
   in
   let ready_batch selections =
@@ -868,7 +893,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Task_cancelled _
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
-    | Keeper_event_queue.Composition_completed _ -> false
+    | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
     let connector_attention_items =
@@ -1039,6 +1065,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Fusion_completed
             | Keeper_world_observation.External_attention _
             | Keeper_world_observation.Completion_authority_rejected _
+            | Keeper_world_observation.Task_outcome _
             | Keeper_world_observation.Task_cancelled _
             | Keeper_world_observation.Delegate_completed
             | Keeper_world_observation.Ask_answered_row

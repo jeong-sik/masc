@@ -1117,8 +1117,13 @@ let commit_verdict_r
                | Masc_domain.Verdict_approved -> `Approve notes
                | Masc_domain.Verdict_rejected { reason } -> `Reject reason
              in
+             (* [producer] is the assignee whose evidence was judged — the
+                same identity [authority_fields] above records — so it is the
+                keeper to wake for either verdict. *)
              (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+               config
                ~task_id
+               ~producer
                ~authority
                ~verification_id
                ~decision);

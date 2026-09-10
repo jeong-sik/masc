@@ -8,6 +8,7 @@ type stimulus_kind =
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Ask_answered  (* A human answered a question this Keeper asked *)
   | Completion_authority_rejected
+  | Task_outcome  (* The approval twin of Completion_authority_rejected *)
   | Task_cancelled
   | Workspace_message
   | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
@@ -49,6 +50,7 @@ let stimulus_kind_to_string = function
   | Hitl_resolved -> "hitl_resolved"
   | Ask_answered -> "ask_answered"
   | Completion_authority_rejected -> "completion_authority_rejected"
+  | Task_outcome -> "task_outcome"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
   | Delegate_completed -> "keeper_delegate_completed"
@@ -68,6 +70,7 @@ let stimulus_kind_of_string = function
   | "hitl_resolved" -> Some Hitl_resolved
   | "ask_answered" -> Some Ask_answered
   | "completion_authority_rejected" -> Some Completion_authority_rejected
+  | "task_outcome" -> Some Task_outcome
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
   | "keeper_delegate_completed" -> Some Delegate_completed
@@ -115,6 +118,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Ask_answered _ -> Ask_answered
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
+  | Keeper_event_queue.Task_outcome _ -> Task_outcome
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
   | Keeper_event_queue.Workspace_message _ -> Workspace_message
   | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
@@ -227,6 +231,12 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "completion_authority_rejected task_id=%s verification_id=%s"
       rejection.car_task_id
       rejection.car_verification_id
+  | Keeper_event_queue.Task_outcome outcome ->
+    Printf.sprintf
+      "task_outcome task_id=%s verification_id=%s authority_kind=%s"
+      outcome.to_task_id
+      outcome.to_verification_id
+      (Masc_domain.completion_authority_kind outcome.to_authority)
   | Keeper_event_queue.Task_cancelled cancellation ->
     Printf.sprintf
       "task_cancelled task_id=%s cancelled_by=%s"
@@ -272,6 +282,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _
     | Keeper_event_queue.Completion_authority_rejected _ -> None
+    | Keeper_event_queue.Task_outcome _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
     | Keeper_event_queue.Delegate_completed _ -> None
@@ -922,6 +933,7 @@ let decode_current_row ~keeper_name row =
       | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved | Ask_answered
         | Completion_authority_rejected
+        | Task_outcome
         | Task_cancelled
         | Workspace_message
         | Delegate_completed
@@ -1517,6 +1529,7 @@ let board_stimulus_token metadata stimulus_kind =
   | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved | Ask_answered
   | Completion_authority_rejected
+  | Task_outcome
   | Task_cancelled
   | Workspace_message
   | Delegate_completed

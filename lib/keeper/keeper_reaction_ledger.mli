@@ -18,6 +18,9 @@ type stimulus_kind =
   | Ask_answered  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
+  | Task_outcome
+      (** The approval twin: a completion authority approved the Keeper's
+          submitted evidence. Terminal — no repair, no resubmission. *)
   | Task_cancelled
       (** Another Keeper cancelled a Task this Keeper authored. *)
   | Workspace_message

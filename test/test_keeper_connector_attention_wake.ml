@@ -324,6 +324,7 @@ let test_external_attention_projects_to_prompt_event () =
    | WO.Fusion_completed
    | WO.Schedule_due _
    | WO.Completion_authority_rejected _
+   | WO.Task_outcome _
    | WO.Task_cancelled _
    | WO.Delegate_completed
    | WO.Ask_answered_row

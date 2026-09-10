@@ -112,7 +112,7 @@ print('init complete')
             binary.chmod(0o755)
             helper = ROOT / 'scripts/install-runtime-setup.py'
             before_wizard = SCRIPT.split('# Check persisted state before init',1)[1].split('# --- 4b. first-run wizard',1)[0]
-            body = ('\nDRY_RUN=0\nSEED_CONFIG=1\nexport TERM=dumb\nBASE_PATH=' + shlex.quote(str(base)) +
+            body = ('\nDRY_RUN=0\nSEED_CONFIG=1\nGUEST_SHIM=0\nexport TERM=dumb\nBASE_PATH=' + shlex.quote(str(base)) +
                     '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' +
                     shlex.quote(str(helper)) + ' "$2"; }\n# Check persisted state before init' + before_wizard +
                     '\nprintf "chosen=%s\\n" "$BASE_PATH"\n')
@@ -165,34 +165,9 @@ print('init complete')
                 thread.join()
 
 
-    def test_new_workspace_prompts_and_defaults_to_home(self):
-        with tempfile.TemporaryDirectory() as directory:
-            result, terminal = run_shell(
-                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
-                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
-        self.assertEqual(result.returncode, 0, terminal)
-        self.assertIn('Workspace directory', terminal)
-        self.assertIn('workspace=' + os.environ['HOME'], result.stdout)
-
-    def test_existing_workspace_remains_the_suggested_location(self):
-        with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / '.masc/config').mkdir(parents=True)
-            result, terminal = run_shell(
-                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
-                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
-            self.assertIn('workspace=' + directory, result.stdout)
-        self.assertEqual(result.returncode, 0, terminal)
-
-    def test_custom_workspace_with_spaces_is_preserved(self):
-        result, terminal = run_shell(
-            '\nBASE_PATH=""\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n',
-            b'/tmp/masc workspace\n')
-        self.assertEqual(result.returncode, 0, terminal)
-        self.assertIn('workspace=/tmp/masc workspace', result.stdout)
-
     def test_explicit_workspace_does_not_prompt(self):
         result, terminal = run_shell(
-            '\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+            '\nresolve_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
         self.assertEqual(result.returncode, 0, terminal)
         self.assertNotIn('Workspace directory', terminal)
         self.assertIn('workspace=/fixture', result.stdout)

@@ -26,4 +26,6 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Test new terminal and piped installer behavior
-        run: python3 test/test_installer_shell_path.py
+        run: |
+          python3 test/test_installer_shell_path.py
+          python3 test/test_installer_workspace.py

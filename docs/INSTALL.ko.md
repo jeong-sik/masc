@@ -62,12 +62,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
 
-`--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
-`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
-제안하므로 그대로 선택하면 데이터는 그 workspace 아래 `.masc`에 생깁니다. 현재 디렉터리에
-기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
-질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
-작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
+`--prefix` 기본값은 `$HOME/.local/bin`입니다. 검증된 바이너리를 설치한 뒤
+네이티브 `doctor --json`으로 저장된 기본 workspace를 읽습니다. `--base-path`,
+`MASC_BASE_PATH`, 저장된 기본 workspace 순서로 적용합니다. 기본값이 없으면
+터미널에서 `$HOME/MASC`를 제안하며, 선택 전에는 workspace 데이터를 만들지 않습니다.
+현재 디렉터리를 검색하거나 암묵적으로 선택하지 않습니다. 저장된 기본값이 없는
+비대화형 설치에는 `--base-path`가 필요합니다. 설치 위치와 작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 

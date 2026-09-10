@@ -63,14 +63,13 @@ Optional inspection: run `less /tmp/masc-install.sh` before installation. Press 
 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
-`--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
-for the workspace path that will hold `.masc`. For a new workspace it
-suggests `$HOME`, so accepting that creates the data in `.masc` under that
-workspace. If the current directory already has a `.masc/config`, it suggests
-that workspace. An explicit `--base-path` is used without asking, and a
-noninteractive run or `--no-wizard` keeps the current directory. `.masc` is
-created under the given base path. The install location and the working-data
-location are independent. The `install.sh` on the release page installs that
+`--prefix` defaults to `$HOME/.local/bin`. After the verified binary is available,
+the installer reads the saved default workspace through native `doctor --json`.
+An explicit `--base-path` takes precedence over `MASC_BASE_PATH`, followed by the
+saved default. Without one, a terminal offers `$HOME/MASC` before creating any
+workspace data. The current directory is never scanned or chosen implicitly.
+Noninteractive installation without a saved default requires `--base-path`.
+The install location and working-data location are independent. The `install.sh` on the release page installs that
 version's assets, and installer fixes are recorded in the release notes with
 their source commit. The binary tag is not changed. A missing or mismatched
 checksum stops the install.

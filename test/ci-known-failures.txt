@@ -73,7 +73,7 @@
 # --- assertions that fail -------------------------------------------------
 # 2026-09-10: dispatched alone on main (run 34434062139) this suite fails two
 # cases, and only one of them is what the row said. The backtrace one is a test
-# artifact and #35012 removes it: raise_with_backtrace extends the installed
+# artifact and #35015 removes it: raise_with_backtrace extends the installed
 # backtrace, so the exact equality this asserted is unreachable (#34519
 # measured the same thing for the sibling suite). What remains is the
 # coordination case below, which is a behaviour claim, not a test shape.

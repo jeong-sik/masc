@@ -5546,3 +5546,9 @@
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
  (libraries masc masc.server fs_compat alcotest unix yojson))
+
+(test
+ (name test_runtime_setup_spec)
+ (modules test_runtime_setup_spec)
+ (libraries alcotest yojson masc.runtime)
+ (deps fixtures/runtime-setup-spec-parity.json))

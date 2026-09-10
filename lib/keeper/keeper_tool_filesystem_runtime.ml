@@ -1506,6 +1506,7 @@ let store_edit_snapshots ~config ~before ~after =
 ;;
 
 type file_write_attempt =
+  | Write_unchanged of Yojson.Safe.t
   | Write_succeeded of
       { payload : Yojson.Safe.t
       ; file_change_evidence : Keeper_file_change_evidence.t option
@@ -2014,6 +2015,7 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 ;;
 
 let rec file_write_attempt_to_execution ~config = function
+  | Write_unchanged payload -> Keeper_tool_execution.success_data payload
   | Write_succeeded { payload; file_change_evidence } ->
     let execution = Eio.Cancel.protect (fun () ->
       let result = Tool_result.make_ok ~tool_name:"tool_write_file"
@@ -2883,6 +2885,7 @@ let handle_file_write_with_outcome
                                  ([ "ok", `Bool true
                                   ; "path", `String target
                                   ; "mode", `String "patch"
+                                  ; "changed", `Bool true
                                   ; "edit_snapshots", store_edit_snapshots ~config ~before ~after:updated
                                   ]
                                   @ operation_fields
@@ -2926,6 +2929,14 @@ let handle_file_write_with_outcome
                 let* (application : Keeper_tool_patch.patch_application) =
                   Keeper_tool_patch.apply operation current
                 in
+                if String.equal current application.updated then
+                  Ok (Write_unchanged (`Assoc
+                    ([ "ok", `Bool true; "changed", `Bool false
+                     ; "path", `String target; "mode", `String "patch"
+                     ; "occurrences", `Int application.occurrence_count
+                     ; "replace_all", `Bool replace_all
+                     ; "bytes_written", `Int 0 ] @ via_field)))
+                else
                 let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect
                     ~parent

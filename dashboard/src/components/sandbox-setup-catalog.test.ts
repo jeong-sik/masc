@@ -97,3 +97,16 @@ it('does not boot after an unconfirmed prepare and clears selection when refresh
   fireEvent.click(screen.getByText('sandbox 상태 새로고침'))
   await waitFor(() => expect(screen.queryByText('sandbox 준비 후 imp 시작')).toBeNull())
 })
+
+it('identifies an already-running imp without claiming it restarted or verified guest tools', async () => {
+  vi.mocked(get).mockResolvedValue(catalog())
+  vi.mocked(postControlPlane).mockResolvedValue({ schema: 'masc.sandbox_preparation.v1', configuration_saved: true, image_prepared: true,
+    backend: 'docker', network_mode: 'inherit', model_verification: 'not_run', guest_verification: 'not_run' })
+  vi.mocked(resumeSavedModelSetup).mockResolvedValue({ kind: 'active', exactOutputAvailable: false })
+  vi.mocked(bootKeeper).mockResolvedValue({ ok: true, already_live: true })
+  render(html`<${SandboxSetupCatalog} />`)
+  fireEvent.click(await screen.findByText('Docker 선택')); fireEvent.click(screen.getByText('sandbox 준비 후 imp 시작'))
+  await screen.findByText(/기존 imp가 계속 실행 중입니다/)
+  expect(document.body.textContent).not.toContain('imp를 시작했습니다.')
+  expect(screen.getByText(/이 준비 단계는 모델·guest 도구 검증을 대신하지 않습니다/)).toBeTruthy()
+})

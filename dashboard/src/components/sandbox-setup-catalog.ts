@@ -32,7 +32,7 @@ export function SandboxSetupCatalog() {
       if (resumed.kind !== 'active') { setNotice('sandbox 준비·저장은 완료했습니다. 먼저 모델을 선택하고 계정 로그인·검증을 마친 뒤 다시 시작하세요.'); return }
       const boot = await bootKeeper('imp')
       setNotice(boot.ok
-        ? 'imp가 시작되었거나 이미 실행 중입니다. 채팅에서 대화, Board·Task 작성, sandbox 파일 조회와 WebFetch를 확인하세요. 이 준비 단계는 모델·guest 도구 검증을 대신하지 않습니다.'
+        ? `${boot.already_live === true ? '기존 imp가 계속 실행 중입니다.' : 'imp를 시작했습니다.'} 채팅에서 대화, Board·Task 작성, sandbox 파일 조회와 WebFetch를 확인하세요. 이 준비 단계는 모델·guest 도구 검증을 대신하지 않습니다.`
         : 'sandbox 준비·저장은 완료했지만 imp 시작을 확인하지 못했습니다. imp 상태와 모델·로그인을 확인한 뒤 다시 시작하세요.')
     } catch { setNotice('sandbox 준비·저장은 완료했습니다. 모델 설정과 imp 상태를 확인한 뒤 다시 시작하세요.') }
     finally { setBusy(false) }

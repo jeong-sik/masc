@@ -116,6 +116,7 @@ type reasoning_streaming_format =
   | Default_reasoning_streaming
   | No_reasoning_streaming
   | Delta_reasoning_field of string
+  | Delta_reasoning_field_and_details of string
   | Template_reasoning_streaming
 [@@deriving show, eq]
 

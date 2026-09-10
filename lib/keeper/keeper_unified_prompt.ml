@@ -2003,7 +2003,22 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ^ "\n\n"
     ^ Keeper_context_layers.assemble ?budget_bytes:context_budget_bytes ~content_of ()
   in
-  let user_message = Env_config_keeper.KeeperAutonomous.wake_prompt () in
+  (* An answered Ask is new conversation input, not just a world observation.
+     Dynamic context is transient across tool rounds and is not checkpointed.
+     Keep the attributed, quoted answer in the ordinary durable user turn;
+     subsequent wakes carry no copy once the answer stimulus is consumed. *)
+  let answered_asks =
+    observation.pending_board_events
+    |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
+      match event.event_kind with
+      | Keeper_world_observation.Ask_answered_row ->
+        Some (format_board_event_text event)
+      | _ -> None)
+  in
+  let user_message =
+    String.concat "\n\n"
+      (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)
+  in
   { system_prompt; world_state; user_message }
 ;;
 

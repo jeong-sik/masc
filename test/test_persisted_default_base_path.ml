@@ -32,7 +32,32 @@ let recorded_path outcome =
   match outcome with
   | EC.Recorded path -> path
   | EC.No_record_location -> fail "a config home was set, so a location exists"
+  | EC.Refused_under_test ->
+    fail "this config home is a temp dir, not the operator's, so it is writable"
   | EC.Record_failed { record; reason } -> failf "recording %s failed: %s" record reason
+
+(* The reason this suite points XDG_CONFIG_HOME at a temp dir. A test binary
+   that lets the write land under the real HOME leaves its sandbox path as the
+   machine's default, and the next process resolves its base path there --
+   measured on 2026-09-10, where it turned two Server_runtime_bootstrap cases
+   red in the release build only. *)
+let test_a_test_binary_does_not_write_the_operators_default () =
+  let previous = Sys.getenv_opt "XDG_CONFIG_HOME" in
+  Unix.putenv "XDG_CONFIG_HOME" "";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "XDG_CONFIG_HOME" (Option.value ~default:"" previous))
+    (fun () ->
+      match Sys.getenv_opt "HOME" with
+      | None | Some "" -> skip ()
+      | Some _ ->
+        (match EC.record_default_base_path (workspace_with_masc_dir ()) with
+         | EC.Refused_under_test -> ()
+         | EC.Recorded path ->
+           failf "a test binary wrote %s as the operator's default" path
+         | EC.No_record_location -> fail "HOME is set, so a location exists"
+         | EC.Record_failed { record; reason } ->
+           failf "refused for the wrong reason: %s (%s)" record reason))
 
 let test_record_then_read () =
   with_config_home (fun config_home ->
@@ -120,5 +145,9 @@ let () =
             "a deleted record reads as absent"
             `Quick
             test_a_deleted_record_reads_as_absent
+        ; test_case
+            "a test binary does not write the operator's default"
+            `Quick
+            test_a_test_binary_does_not_write_the_operators_default
         ] )
     ]

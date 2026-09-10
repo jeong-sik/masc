@@ -1137,6 +1137,11 @@
  (libraries alcotest ast_grep masc_test_deps masc.masc_core))
 
 (test
+ (name test_keeper_hook_thinking_authority)
+ (modules test_keeper_hook_thinking_authority)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_structured_output_schema)
  (modules test_keeper_structured_output_schema)
  (libraries alcotest masc_test_deps masc.fusion_core))
@@ -5512,7 +5517,6 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
-
+(include stanzas/test_onboarding_status.inc)
 (include stanzas/test_sandbox_readiness.inc)
-
 (include stanzas/test_sandbox_prerequisites.inc)

@@ -85,7 +85,28 @@ select_sources() {
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
-test/test_keeper_tool_schema_bytes.ml"
+test/test_keeper_tool_schema_bytes.ml
+test/test_tools_coverage.ml"
+
+  # The per-description bound, one axis in from the whole-surface ceiling.
+  # test_tools_coverage reads Masc.Config.raw_all_tool_schemas -- the embedded
+  # config/tools set -- and bounds each description at max_description_chars.
+  # Nightly 34384710653 failed it on masc_browser_interact at 1,634 chars
+  # against a 1,080 limit, and the pull request that grew it edited no
+  # test/*.ml.
+
+  # config/prompts is the same shape a third time. Every keeper turn is built
+  # from the assembled system prompt, and test_keeper_system_prompt_bytes pins
+  # it byte for byte for fixed inputs; it is the one suite that resolves the
+  # repository's own config/prompts rather than a temp dir it wrote. The 44
+  # other suites that name that directory pin the registry so the build does
+  # not raise inside the dune sandbox, and assert nothing about what ships
+  # there, so mapping them here would spend the whole budget on suites the
+  # change cannot break. The same nightly measured the golden at 4,998 bytes
+  # against an assembled 8,083.
+  prompts_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
+  prompt_guard="test/test_keeper_system_prompt_bytes.ml"
 
 
   # A source edit runs the suites named after it. Before this, only editing a
@@ -227,6 +248,12 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${prompts_changed}" ]; then
+    echo "this pull request changes prompt assets; adding ${prompt_guard}"
+    sources=$(printf '%s\n%s\n' "${sources}" "${prompt_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
   if [ -n "${module_suites}" ]; then
     echo "suites named after the sources this pull request edits:"
     printf '%s\n' "${module_suites}" | sed 's/^/  /'
@@ -320,12 +347,13 @@ self_test() {
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
   check "a tool definition reaches every guard over it" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.
-  check "a prompt asset reaches only the asset guard" \
-    "test/test_managed_assets_sync_from_binary.ml" "config/prompts/foo.md"
+  check "a prompt asset reaches the asset guard and the prompt golden" \
+    "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+    "config/prompts/foo.md"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # Both halves together, deduplicated.

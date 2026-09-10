@@ -95,25 +95,6 @@ let reconcile (sr : Types.stop_reason) ~has_tool_blocks : Types.stop_reason =
   | Types.Unknown _ -> sr
 ;;
 
-(* [true] only for the typed fail-closed value produced when a provider
-   reported a tool-use finish but the assembled response carried no tool
-   block. Consumers that need to distinguish this executable-shape invariant
-   from arbitrary unknown stop reasons should use this predicate. *)
-let is_unmatched_tool_calls = function
-  | Types.UnmatchedToolCalls -> true
-  | Types.Unknown _ -> false
-  | Types.StopToolUse
-  | Types.EndTurn
-  | Types.MaxTokens
-  | Types.StopSequence
-  | Types.Refusal
-  | Types.ContentFilter
-  | Types.RepetitionTruncation
-  | Types.PauseTurn
-  | Types.Compaction
-  | Types.ContextWindowExceeded -> false
-;;
-
 [@@@coverage off]
 
 (* === Inline drift-guard tests ===
@@ -205,13 +186,6 @@ let%test "streaming chain matches parse-time of_finish for stop + tools" =
 let%test "streaming chain matches parse-time of_finish for end_turn + tools" =
   reconcile (provisional_of_string "end_turn") ~has_tool_blocks:true
   = of_finish (wire_finish_of_string "end_turn") ~has_tool_blocks:true
-;;
-
-let%test "is_unmatched_tool_calls recognizes only canonical fail-closed value" =
-  is_unmatched_tool_calls Types.UnmatchedToolCalls
-  && (not (is_unmatched_tool_calls (Types.Unknown "tool_calls")))
-  && (not (is_unmatched_tool_calls (Types.Unknown "other")))
-  && not (is_unmatched_tool_calls Types.StopToolUse)
 ;;
 
 let%test "provisional tool_calls is StopToolUse (faithful wire claim)" =

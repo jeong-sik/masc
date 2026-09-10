@@ -1431,7 +1431,9 @@ let file_write_gate_input
     ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
      ; "requested_target", `String requested_target
      ]
-     @ Keeper_write_content.fields (Option.value ~default:(Keeper_write_content.Text content) content_source)
+     @ Keeper_write_content.fields (match content_source with
+         | Some source -> source
+         | None -> Keeper_write_content.Text content)
      @ optional_string "old_string" old_string
      @ optional_string "new_string" new_string
      @ optional_bool "replace_all" replace_all

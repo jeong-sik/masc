@@ -7999,7 +7999,7 @@ let test_binary_write_reference_survives_replay () =
     let encoded = Yojson.Safe.to_string input in
     check bool "binary never enters approval JSON" false (String_util.contains_substring encoded bytes);
     let persisted = Filename.concat config.base_path "approved-write.json" in
-    Fs_compat.save_file_atomic persisted encoded;
+    (match Fs_compat.save_file_atomic persisted encoded with Ok () -> () | Error detail -> fail detail);
     let replay_args = match Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
         (Yojson.Safe.from_string (Fs_compat.load_file persisted)) with
       | Ok args -> args | Error detail -> fail detail in

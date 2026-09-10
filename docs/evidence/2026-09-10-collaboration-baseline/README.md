@@ -1,4 +1,52 @@
-# One collaboration scenario, before completion
+# One collaboration scenario: original Task verified
+
+## Current result at 2026-09-10 13:53 UTC
+
+The original task-001 is Done, approved at 13:47:07Z by Kimi through verification
+request vrf-1d46f3c204a6906a9cdd574e6752575c. The primary task receipt is
+`task-after-verification.json`; `dashboard-task-done.png` shows the same Done
+status, the GLM editor, Codex designer, and delivered collaborator message.
+The Dashboard is a Vite source preview (frontend10d3f9c02a/backend9cc33feff4),
+not an installed frontend release.
+
+`submitted-publication/` preserves the actual approved editor PDF, poster,
+three page renders, and manifest. Independent pdfinfo reports exactly three A4
+pages. Rendering that PDF independently at150dpi produces pixel-identical images
+for all three submitted PNGs. All five manifest file byte counts and SHA256
+values match. Direct visual inspection reads the confirmed date/time, venue,
+audience, free entry, and fictional-event disclosure without clipped or
+overlapping Korean text. The optional manifest page_render_size metadata says
+1240x1754 while the actual images are1241x1754; this discrepancy remains visible
+in the preserved submission. A queued editor follow-up requests that precise
+metadata correction and the original Goal completion proof.
+
+The designer separately created a corrected poster (SHA2561e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16),
+visually inspected it, corrected its misleading Board text, and delegated a
+handoff to the editor. This is not the poster in the approved Task. The editor
+used the collaborator's visual direction but submitted its own poster
+(SHA2562b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386).
+A later editor attempt to read the designer's sibling sandbox path failed;
+byte transfer between isolated Keeper workspaces is not proven.
+
+Codex configuration passed actual API preview/save and its tool calls then ran
+in the same designer conversation. GLM repaired and submitted the publication.
+These are manual runtime assignments, not automatic failover. Multiple operator
+answers, QA follow-ups, and the candidate upgrade were required. The Task's
+success does not certify spontaneous completion or long-running autonomy.
+
+Two additional runtime defects surfaced: library_add fails on a fresh base
+because docs/library is absent (PR35149); raw PDF/PNG tool_read_file excerpts
+make the verifier completion JSONL row and verification-runs HTTP body invalid
+UTF-8. The valid primary task and committed approval event establish Done, but
+the verifier API is not healthy. The PDF evidence snapshot itself is
+artifact_unreadable/invalid_utf8; independent PDF rendering above is separate
+proof, not a claim that the verifier snapshot decoded PDF content.
+
+The original Goal remains Executing in the saved observation. Goal proof and
+real human final confirmation are outstanding. All18 product requirements and
+1/2/4/24-hour continuity, automatic failover, broader media, workspace memory,
+and IDE acceptance remain open. Sections below are chronological observations;
+their earlier Running/unproven states are historical.
 
 A copied installed 0.35.3 binary starts a fresh HOME-visible base on port 18951.
 Its SHA256 matches the observed production health response. This is installed

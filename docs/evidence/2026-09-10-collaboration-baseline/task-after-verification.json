@@ -1,0 +1,43 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "가상 전시 안내 책자와 포스터 제작",
+      "description": "가상 전시 《기억의 정원》을 처음 접하는 관람객에게 설명할 한국어 안내 책자와 포스터를 준비한다. 편집과 시각 디자인을 결합해야 한다. 운영자는 필요한 행사 정보를 알고 있다.",
+      "priority": 3,
+      "files": [],
+      "created_at": "2026-09-10T12:16:46Z",
+      "created_by": "admin",
+      "contract": {
+        "strict": true,
+        "completion_contract": [
+          "한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.",
+          "인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.",
+          "본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.",
+          "가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.",
+          "검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다."
+        ],
+        "required_evidence": [
+          "artifact:booklet.pdf",
+          "artifact:renders/page1.png",
+          "artifact:renders/page2.png",
+          "artifact:renders/page3.png",
+          "artifact:poster.png",
+          "artifact:evidence.json"
+        ]
+      },
+      "execution_links": {
+        "operation_id": "trace-1789042595401-00001",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "status": "done",
+      "assignee": "exhibit-editor",
+      "completed_at": "2026-09-10T13:47:07Z",
+      "notes": "{\n  \"verification_request\": {\n    \"id\": \"vrf-1d46f3c204a6906a9cdd574e6752575c\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"exhibit-editor\",\n    \"created_at\": 1789047948.813972\n  },\n  \"submitted_evidence_metadata\": {\n    \"access\": \"available\",\n    \"request_id\": \"vrf-1d46f3c204a6906a9cdd574e6752575c\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"exhibit-editor\",\n    \"created_at\": 1789047948.813972,\n    \"items\": [\n      {\n        \"kind\": \"artifact_unreadable\",\n        \"reference\": \"artifact:booklet.pdf\",\n        \"reason\": \"invalid_utf8\"\n      },\n      {\n        \"kind\": \"artifact\",\n        \"reference\": \"artifact:evidence.json\",\n        \"bytes\": 1013,\n        \"truncated\": false\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:poster.png\",\n        \"bytes\": 86709,\n        \"sha256\": \"2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-1d46f3c204a6906a9cdd574e6752575c/2.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page1.png\",\n        \"bytes\": 63827,\n        \"sha256\": \"ef2d89b024d2df6d9f07f57c7f844d6f3a995e0e08d0bf33b09b00d0f50595f5\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-1d46f3c204a6906a9cdd574e6752575c/3.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page2.png\",\n        \"bytes\": 84915,\n        \"sha256\": \"70f3728b3c37da94a771bd3f20bc2b0020688656603d93ba3657db49580f2a50\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-1d46f3c204a6906a9cdd574e6752575c/4.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page3.png\",\n        \"bytes\": 80753,\n        \"sha256\": \"9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-1d46f3c204a6906a9cdd574e6752575c/5.bin\"\n      },\n      { \"kind\": \"note\", \"bytes\": 838 },\n      { \"kind\": \"note\", \"bytes\": 340 },\n      { \"kind\": \"note\", \"bytes\": 495 },\n      { \"kind\": \"note\", \"bytes\": 376 }\n    ]\n  },\n  \"review\": {\n    \"evaluator_runtime\": \"kimi_coding.kimi-for-coding\",\n    \"generator_runtime\": null,\n    \"gate\": \"structured_tool\",\n    \"verdict\": \"approve\",\n    \"authority_kind\": \"system_llm_agent\",\n    \"authority_actor\": \"verifier_exact\"\n  }\n}"
+    }
+  ],
+  "pending_completion_rejections": [],
+  "task_deletion_receipts": [],
+  "last_updated": "2026-09-10T13:47:07Z",
+  "version": 8
+}

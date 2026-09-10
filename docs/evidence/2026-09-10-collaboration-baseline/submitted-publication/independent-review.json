@@ -1,0 +1,73 @@
+{
+  "files": [
+    {
+      "path": "booklet.pdf",
+      "bytes": 101881,
+      "sha256": "2b709d215fd8c62cc8710afdbb50fa13766f497605704b2d6f1ea402064735fb",
+      "declared_match": true
+    },
+    {
+      "path": "poster.png",
+      "bytes": 86709,
+      "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page1.png",
+      "bytes": 63827,
+      "sha256": "ef2d89b024d2df6d9f07f57c7f844d6f3a995e0e08d0bf33b09b00d0f50595f5",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page2.png",
+      "bytes": 84915,
+      "sha256": "70f3728b3c37da94a771bd3f20bc2b0020688656603d93ba3657db49580f2a50",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page3.png",
+      "bytes": 80753,
+      "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62",
+      "declared_match": true
+    }
+  ],
+  "pdfinfo": "Title:           untitled\nSubject:         unspecified\nKeywords:        \nAuthor:          anonymous\nCreator:         ReportLab PDF Library - www.reportlab.com\nProducer:        ReportLab PDF Library - www.reportlab.com\nCreationDate:    Thu Sep 10 22:43:00 2026 KST\nModDate:         Thu Sep 10 22:43:00 2026 KST\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage size:       595.276 x 841.89 pts (A4)\nPage rot:        0\nFile size:       101881 bytes\nOptimized:       no\nPDF version:     1.4\n",
+  "pixel_comparison": [
+    {
+      "page": 1,
+      "independent_size": [
+        1241,
+        1754
+      ],
+      "submitted_size": [
+        1241,
+        1754
+      ],
+      "pixels_identical": true
+    },
+    {
+      "page": 2,
+      "independent_size": [
+        1241,
+        1754
+      ],
+      "submitted_size": [
+        1241,
+        1754
+      ],
+      "pixels_identical": true
+    },
+    {
+      "page": 3,
+      "independent_size": [
+        1241,
+        1754
+      ],
+      "submitted_size": [
+        1241,
+        1754
+      ],
+      "pixels_identical": true
+    }
+  ]
+}

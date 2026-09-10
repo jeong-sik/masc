@@ -100,13 +100,28 @@ let missing_skill_capabilities ~skill_names ~skill_inventory =
 ;;
 
 let create
+      ?(tool_deny = [])
       ~skill_names
       ~global_skill_catalog
       ~skill_inventory
       ~task_skills
   =
+  (* [tool_deny] names model-visible tool names the profile refuses. A denied
+     descriptor leaves the surface entirely -- not listed to the model, not in
+     the dispatch bundle the surface feeds -- rather than staying on the
+     capability list under a new availability: the #31728 comment below
+     records why "present but unreachable" arms are removed from this type,
+     and a denied tool is exactly as absent to the turn as one whose schema
+     failed. The setup site logs any deny entry that named nothing. *)
+  let denied descriptor =
+    tool_deny <> []
+    && List.exists
+         (fun name -> List.mem name tool_deny)
+         (Keeper_tool_descriptor.keeper_model_names descriptor)
+  in
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
+    |> List.filter (fun descriptor -> not (denied descriptor))
   in
   let skill_projection =
     Keeper_skill_catalog.project_turn
@@ -116,6 +131,7 @@ let create
   in
   let tool_capabilities =
     Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter (fun descriptor -> not (denied descriptor))
     |> List.map (fun descriptor ->
       { descriptor
         (* A descriptor that names itself to the model is in the surface, and

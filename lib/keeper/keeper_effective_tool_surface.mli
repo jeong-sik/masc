@@ -38,6 +38,10 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; skill_names : string list option
         (** [None] means all; [Some []] means the profile explicitly selects none. *)
+  ; tool_deny : string list
+        (** Model-visible built-in tool names the profile refuses; matching
+            descriptors were dropped from the capability surface, so they are
+            absent from {!tools} rather than marked. *)
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -81,6 +85,7 @@ module For_testing : sig
     official_client_kind:string ->
     tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
+    ?tool_deny:string list ->
     skill_names:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->

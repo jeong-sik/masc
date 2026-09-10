@@ -5514,3 +5514,8 @@
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
 
 (include stanzas/test_sandbox_readiness.inc)
+
+(test
+ (name test_model_release_evidence)
+ (modules test_model_release_evidence)
+ (libraries masc alcotest yojson))

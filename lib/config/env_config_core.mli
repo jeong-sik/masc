@@ -197,6 +197,10 @@ val persisted_default_base_path : unit -> persisted_default
 type record_outcome =
   | Recorded of string
   | No_record_location
+  | Refused_under_test
+      (** A test executable asked. It never writes the operator's default:
+          a suite that seeds a workspace in a temp dir would otherwise leave
+          that path as the machine's default until the directory vanished. *)
   | Record_failed of { record : string; reason : string }
 
 val record_default_base_path : string -> record_outcome

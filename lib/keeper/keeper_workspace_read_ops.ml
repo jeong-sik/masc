@@ -203,21 +203,20 @@ let try_handle_with_outcome
                     else [ "error_detail", `String trimmed_out ]
                   in
                   let payload =
-                    Yojson.Safe.to_string
-                      (`Assoc
-                          ([ "ok", `Bool is_ok
-                           ; "op", `String op
-                           ; "path", `String target
-                           ; "pattern", `String pattern
-                           ; "via", `String Keeper_sandbox_read_runner.backend_via
-                           ; "status", Keeper_alerting_path.process_status_to_json st
-                           ; "matches", (if is_ok then lines_to_json ~limit out else `List [])
-                           ]
-                           @ error_detail))
+                    `Assoc
+                        ([ "ok", `Bool is_ok
+                         ; "op", `String op
+                         ; "path", `String target
+                         ; "pattern", `String pattern
+                         ; "via", `String Keeper_sandbox_read_runner.backend_via
+                         ; "status", Keeper_alerting_path.process_status_to_json st
+                         ; "matches", (if is_ok then lines_to_json ~limit out else `List [])
+                         ]
+                         @ error_detail)
                   in
                   if is_ok
-                  then Keeper_tool_execution.success payload
-                  else Keeper_tool_execution.failure payload)
+                  then Keeper_tool_execution.success_data payload
+                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
@@ -267,20 +266,19 @@ let try_handle_with_outcome
                      else [ "error_detail", `String trimmed_stderr ]
                    in
                    let payload =
-                     Yojson.Safe.to_string
-                       (`Assoc
-                          ([ "ok", `Bool is_ok
-                           ; "op", `String op
-                           ; "path", `String target
-                           ; "pattern", `String pattern
-                           ; "via", `String "host"
-                           ; "status", Keeper_alerting_path.process_status_to_json result.status
-                           ; "matches", lines_to_json ~limit result.stdout
-                           ]
-                           @ error_detail))
+                     `Assoc
+                        ([ "ok", `Bool is_ok
+                         ; "op", `String op
+                         ; "path", `String target
+                         ; "pattern", `String pattern
+                         ; "via", `String "host"
+                         ; "status", Keeper_alerting_path.process_status_to_json result.status
+                         ; "matches", lines_to_json ~limit result.stdout
+                         ]
+                         @ error_detail)
                    in
                    if is_ok
-                   then Keeper_tool_execution.success payload
-                   else Keeper_tool_execution.failure payload)))))
+                   then Keeper_tool_execution.success_data payload
+                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))))))
   | _ -> None
 ;;

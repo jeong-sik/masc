@@ -86,12 +86,11 @@ let run ~endpoint ~cwd ~argv ~stdin =
     ~argv ~env:[||] ~cwd:(Some cwd)
 ;;
 
-let success_payload ~target ~(meta : keeper_meta) fields =
-  Yojson.Safe.to_string
-    (`Assoc
-        ([ "ok", `Bool true; "path", `String target ]
-         @ fields
-         @ [ "via", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) ]))
+let success_payload ~target ~(meta : keeper_meta) fields : Yojson.Safe.t =
+  `Assoc
+      ([ "ok", `Bool true; "path", `String target ]
+       @ fields
+       @ [ "via", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) ])
 ;;
 
 let handle_with_endpoint
@@ -159,7 +158,7 @@ let handle_with_endpoint
                     "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d via=remote"
                     meta.name target mode_label (String.length body);
                   let execution =
-                    Keeper_tool_execution.success
+                    Keeper_tool_execution.success_data
                       (success_payload ~target ~meta
                          [ "mode", `String mode_label
                          ; "bytes_written", `Int (String.length body)

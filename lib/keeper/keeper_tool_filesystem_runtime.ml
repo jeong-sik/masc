@@ -313,7 +313,7 @@ let resolve_read_file_target
 ;;
 
 type read_file_attempt =
-  | Read_succeeded of string
+  | Read_succeeded of Yojson.Safe.t
   | Read_failed_payload of string
   | Read_failed_message of string
 
@@ -366,17 +366,16 @@ let handle_read_file_with_outcome
             ]
         in
         Read_succeeded
-          (Yojson.Safe.to_string
-             (`Assoc
-                 ([ "ok", `Bool true
-                  ; "path", `String target
-                  ; "bytes", `Int (String.length slice.window_content)
-                  ; "truncated", `Bool slice.window_truncated
-                  ; "offset", `Int window.start_line
-                  ; "returned_lines", `Int slice.returned_lines
-                  ; "content", `String slice.window_content
-                  ]
-                  @ optional_fields)))
+          (`Assoc
+              ([ "ok", `Bool true
+               ; "path", `String target
+               ; "bytes", `Int (String.length slice.window_content)
+               ; "truncated", `Bool slice.window_truncated
+               ; "offset", `Int window.start_line
+               ; "returned_lines", `Int slice.returned_lines
+               ; "content", `String slice.window_content
+               ]
+               @ optional_fields))
     in
     let run_read () =
          (* RFC-0006 Phase B-1: Docker keepers are always contained to their
@@ -444,7 +443,7 @@ let handle_read_file_with_outcome
                   content))
     in
     (match run_read () with
-     | Ok (Read_succeeded json) -> Keeper_tool_execution.success json
+     | Ok (Read_succeeded json) -> Keeper_tool_execution.success_data json
      | Ok (Read_failed_payload payload) -> Keeper_tool_execution.failure payload
      | Ok (Read_failed_message msg) ->
        Keeper_tool_execution.failure
@@ -652,19 +651,18 @@ let handle_owned_read_file_with_outcome
                  else [])
               ]
           in
-          Keeper_tool_execution.success
-            (Yojson.Safe.to_string
-               (`Assoc
-                   ([ "ok", `Bool true
-                    ; "path", `String target
-                    ; "bytes", `Int (String.length slice.window_content)
-                    ; "file_bytes", `Int prefix.file_size
-                    ; "truncated", `Bool slice.window_truncated
-                    ; "offset", `Int window.start_line
-                    ; "returned_lines", `Int slice.returned_lines
-                    ; "content", `String slice.window_content
-                    ]
-                    @ optional_fields)))))
+          Keeper_tool_execution.success_data
+            (`Assoc
+                ([ "ok", `Bool true
+                 ; "path", `String target
+                 ; "bytes", `Int (String.length slice.window_content)
+                 ; "file_bytes", `Int prefix.file_size
+                 ; "truncated", `Bool slice.window_truncated
+                 ; "offset", `Int window.start_line
+                 ; "returned_lines", `Int slice.returned_lines
+                 ; "content", `String slice.window_content
+                 ]
+                 @ optional_fields))))
 ;;
 
 (* RFC-0378 §5.1 — resolve a write's file path to its attribution.

@@ -1,0 +1,16 @@
+name = "keeper_artifact_transfer"
+description = "Export your own sandbox file as a durable binary artifact, or materialize an exported artifact at your own relative sandbox path. Pass exported references through masc_keeper_delegate artifacts. Bytes move inside the runtime, never through model base64. Materialize uses the existing filesystem write authority."
+additional_properties = false
+[[params]]
+name = "action"
+type = "string"
+required = true
+enum = ["export", "materialize"]
+[[params]]
+name = "path"
+type = "string"
+required = true
+[[params]]
+name = "artifact"
+type = "object"
+description = "Exact artifact object from export, required for materialize."

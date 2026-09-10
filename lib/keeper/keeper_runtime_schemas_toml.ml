@@ -37,6 +37,7 @@ let schema_of_name name : Masc_domain.tool_schema =
 let fusion = schema_of_name "masc_fusion"
 let fusion_decision = schema_of_name "masc_fusion_decision"
 let fusion_status = schema_of_name "masc_fusion_status"
+let peer_artifact = schema_of_name "keeper_artifact_transfer"
 let artifact_read = schema_of_name "keeper_artifact_read"
 let keeper_analyze_image = schema_of_name "keeper_analyze_image"
 (* RFC-0430 Phase 3 — provider Files tools. *)
@@ -47,7 +48,8 @@ let file_list = schema_of_name "masc_file_list"
 (* The order a model reads these in; [Config.raw_all_tool_schemas] splices
    this list into the catalog. *)
 let schemas =
-  [ artifact_read
+  [ peer_artifact
+  ; artifact_read
   ; fusion
   ; fusion_decision
   ; fusion_status

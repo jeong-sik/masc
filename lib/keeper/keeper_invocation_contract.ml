@@ -5,6 +5,7 @@ type target = Keeper of Keeper_id.Keeper_name.t
 type request =
   { target : target
   ; prompt : string
+  ; artifacts : Tool_output.artifact_ref list
   }
 
 type direct_message =
@@ -143,7 +144,7 @@ let request ~keeper_name ~prompt =
   in
   if String.equal prompt ""
   then Error Empty_prompt
-  else Ok { target = Keeper keeper_name; prompt }
+  else Ok { target = Keeper keeper_name; prompt; artifacts=[] }
 ;;
 
 let nonempty_trimmed_option = function
@@ -227,7 +228,7 @@ let request_of_json json =
   let* () =
     exact_fields
       ~field:"delegate"
-      ~allowed:[ "target"; "capability"; "prompt" ]
+      ~allowed:[ "target"; "capability"; "prompt"; "artifacts" ]
       fields
   in
   let* target_json = required_field ~field:"delegate" "target" fields in
@@ -241,7 +242,21 @@ let request_of_json json =
   in
   let* prompt_json = required_field ~field:"delegate" "prompt" fields in
   let* prompt = string_value ~field:"delegate.prompt" prompt_json in
-  if String.equal prompt "" then Error Empty_prompt else Ok { target; prompt }
+  let* artifacts = match List.assoc_opt "artifacts" fields with
+    | None -> Ok []
+    | Some (`List items) ->
+      let rec parse = function
+        | [] -> Ok []
+        | item :: rest ->
+          (match Tool_output.normalized_artifact_ref_of_json item with
+           | Tool_output.Decoded_normalized_artifact_ref reference ->
+             let* rest = parse rest in Ok (reference :: rest)
+           | Tool_output.Not_normalized_artifact_ref
+           | Tool_output.Invalid_normalized_artifact_ref _ ->
+             Error (Invalid_wire_value {field="artifacts"; expected="exported artifact references"})) in
+      parse items
+    | Some _ -> Error (Invalid_wire_value {field="artifacts"; expected="array"}) in
+  if String.equal prompt "" then Error Empty_prompt else Ok { target; prompt; artifacts }
 ;;
 
 let request_error_to_string = function
@@ -261,3 +276,5 @@ let target_name (request : request) =
 ;;
 
 let prompt (request : request) = request.prompt
+
+let artifacts (request : request) = request.artifacts

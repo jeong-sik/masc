@@ -7937,9 +7937,31 @@ let test_edit_manifest_through_model_projection () =
 
 ;;
 
+let test_peer_artifact_materializes_exact_binary () =
+  with_exec_fixture "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+    let peer = { meta with name = "receiving-peer" } in
+    let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in
+    let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let reference = Tool_blob_store.put_durable store ~bytes ~mime:"image/png" in
+    let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
+    let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
+        ~turn_sandbox_factory:None ~write ~args:(`Assoc ["action", `String "materialize";
+          "path", `String path; "artifact", Tool_output.normalized_artifact_ref_to_json reference]) in
+    let result = invoke "received.png" in
+    check bool "write completed" true (result.disposition = Tool_result.Completed ());
+    let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
+    check string "binary exact" bytes (Fs_compat.load_file path);
+    check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
+    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.sha256 0 2)) reference.sha256 in
+    Fs_compat.save_file blob "corrupted";
+    check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ()))
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
+    ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
     ("direct_gate_resume", [
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);

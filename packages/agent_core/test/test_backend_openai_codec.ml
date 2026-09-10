@@ -2506,6 +2506,19 @@ let test_tool_image_followups_preserve_batch_order () =
     (Result.is_error
        (Serialize.ollama_messages_of_history ~modality_priority:caps.modality_priority
           ~supports_image_input:false ~supports_document_input:false messages));
+  let native_config supports_image_input =
+    Provider_config.make ~kind:Ollama ~model_id:"tool-image-fixture"
+      ~base_url:"http://127.0.0.1:11434" ~max_tokens:1024
+      ~model_capabilities_override:{ caps with supports_image_input } ()
+  in
+  (match Backend_ollama.build_request ~config:(native_config false) ~messages () with
+   | _ -> Alcotest.fail "production request accepted undeclared image capability"
+   | exception Invalid_argument _ -> ());
+  let native_request = Backend_ollama.build_request
+      ~config:(native_config true) ~messages () |> Yojson.Safe.from_string in
+  check_bool "production request carries image under declared capability" true
+    (native_request |> member "messages" |> to_list
+     |> List.exists (fun item -> item |> member "images" = `List [ `String png ]));
   let gemini, _ = Backend_gemini.contents_of_messages messages in
   let parts = List.concat_map (fun item -> item |> member "parts" |> to_list) gemini in
   let rec check_after_results count = function

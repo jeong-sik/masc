@@ -1609,12 +1609,18 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
+  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
+     always emits failure.detail, so omitting the key here made a consumer's
+     read of it depend on which producer answered. [detail] is what the caller
+     was told and would otherwise drop. *)
+  let unavailable ?detail code message =
     print_endline (Yojson.Safe.to_string (`Assoc [
       "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
       "model", `Null; "observed_model", `Null; "status", `String "unavailable";
       "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+      "failure", `Assoc [
+        "code", `String code; "message", `String message;
+        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1626,7 +1632,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."

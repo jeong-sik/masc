@@ -512,28 +512,11 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
-(* A provider rate-limit ([429]) or capacity failure route means the lane
-   itself is the thing that must back off: re-running the turn at the plain
-   cadence keeps hammering the provider while the crash-accounting streak
-   climbs like a clock (#26068). [rate_limited_backoff_sec] derives the
-   backoff from the route's own [Retry-After] hint when present, else from
-   the cadence, and always clamps to the configured cap so a misread hint
-   (or an out-of-range env override) cannot park the lane for longer than
-   the cap. A queued stimulus does not cut it short: the sleep runs under
+(* The backoff rule itself lives with the failure route
+   ({!Keeper_runtime_failure_route.retry_backoff_sec}) so the heartbeat cycle
+   sleep and the chat lane's deferred-retry [not_before] cannot diverge. A
+   queued stimulus does not cut the sleep short: it runs under
    [Serve_wakeup_after_duration] (#34653). *)
-let rate_limited_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
-  let cap_sec = Float.max 0.0 cap_sec in
-  let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
-  (* A garbage [Retry-After] (negative, NaN, infinite) is still a signal the
-     provider rate-limited this lane, but carries no usable duration: both
-     degrade to the same bounded default rather than diverging. *)
-  let base =
-    if Float.is_nan retry_after_hint || retry_after_hint <= 0.0
-    then Float.max cadence_sec 60.0
-    else Float.max retry_after_hint cadence_sec
-  in
-  Float.min cap_sec base
-;;
 
 (* Autoboot warmup is a dispatch delay, not an extra heartbeat cadence. The
    first cycle runs before warmup and skips intake; sleeping the full cadence
@@ -1520,7 +1503,7 @@ let run_heartbeat_loop
           match turn_outcome.provider_backoff with
           | Some { retry_after_hint; wake_policy } ->
             let backoff =
-              rate_limited_backoff_sec
+              Keeper_runtime_failure_route.retry_backoff_sec
                 ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
                 ~retry_after_hint:(Some retry_after_hint)
                 ~cadence_sec
@@ -1595,7 +1578,6 @@ module For_testing = struct
     batch_disposition_records_continuation
   ;;
 
-  let rate_limited_backoff_sec = rate_limited_backoff_sec
   let next_keepalive_sleep_duration_sec = next_keepalive_sleep_duration_sec
   let failure_route_rate_limited_backoff_hint = failure_route_rate_limited_backoff_hint
 end

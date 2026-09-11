@@ -39,6 +39,11 @@ let test_http_effect_checkpoint_owner_restart_alternate () =
         Cohttp_eio.Server.respond_string ~status:`OK
           ~body:{|{"id":"tool-once","model":"resume-fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"effect-once","type":"function","function":{"name":"record_effect","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}|} ()
       else Cohttp_eio.Server.respond_string ~status:`Too_many_requests
+        (* The 429 carries a Retry-After hint so the deferred retry's
+           not_before lands 1s out: phase 2's owner restart re-arms the wake
+           and the alternate resumes once the hint elapses — the production
+           cooling path, at test speed. *)
+        ~headers:(Cohttp.Header.init_with "Retry-After" "1")
         ~body:{|{"error":{"message":"fixture provider rate limited","type":"rate_limit_error"}}|} ())
     else (
       alternate_bodies := body :: !alternate_bodies;

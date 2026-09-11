@@ -1500,7 +1500,7 @@ let set_loaded
     ; config_path = Some config_path
     ; startup_degradation
     };
-  Runtime_startup_state.set Available
+  Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
   let* loaded, _exact_output_lane_decls =
@@ -2321,6 +2321,13 @@ let with_runtime_config_write_lock path f =
 
 let attach_lock_warnings warnings receipt =
   { receipt with lock_warnings = receipt.lock_warnings @ warnings }
+;;
+
+let with_config_lock ~runtime_config_path action =
+  let* locked = with_runtime_config_write_lock runtime_config_path action in
+  List.iter (function Config_lock_release_unconfirmed detail ->
+    Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
+  locked.value
 ;;
 
 let runtime_config_atomic_failure

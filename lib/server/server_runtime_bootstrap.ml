@@ -1142,9 +1142,7 @@ let initialize_owner_state_blocking
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
       | Env_config_core.Config_error _ ->
-        Runtime.enter_setup_required ~reason:Runtime_startup_state.Exact_output_unavailable ();
-        Log.Server.warn "%s Owner-authenticated settings remain available."
-          (Runtime_startup_state.message Exact_output_unavailable))
+        Log.Server.warn "Exact-output authority unavailable; conversational runtime remains available. Configure internal lanes to enable affected features.")
    | Error _, _ | Ok _, None -> ());
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
@@ -1488,6 +1486,40 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
 let start_goal_verifier ~sw (state : Mcp_server.server_state) =
   Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
 
+let resume_model_configuration () =
+  match Runtime.config_path () with
+  | None -> Error Server_model_setup_resume.Configuration_unavailable
+  | Some path ->
+    let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
+      let catalog_ready =
+        try
+          let (_ : string option) =
+            configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
+          in
+          true
+        with Env_config_core.Config_error _ -> false
+      in
+      if not catalog_ready then Error "configuration unavailable" else
+      match Runtime.init_default_degraded_report ~config_path:path with
+      | Error _ -> Error "configuration unavailable"
+      | Ok _ ->
+        let authority_available =
+          try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
+          with Env_config_core.Config_error _ -> false
+        in
+        let withdrawn =
+          if authority_available then Ok ()
+          else Runtime_exact_output_registry.unpublish ()
+        in
+        match withdrawn with
+        | Error _ -> Error "authority publication busy"
+        | Ok () ->
+          Runtime_startup_state.set Available;
+          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          Ok authority_available)
+    in
+    Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
+
 let start_post_ready_owner_lanes
       ~sw
       ~clock
@@ -1497,9 +1529,18 @@ let start_post_ready_owner_lanes
   (* Keep the transport-neutral post-readiness order in one place. Both HTTP
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
-  if not (Runtime_startup_state.requires_setup ()) then (
+  Server_model_setup_resume.install ~sw
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    ~resume:resume_model_configuration;
+  let start_authority () =
     start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw state);
+    start_goal_verifier ~sw state
+  in
+  if Runtime_startup_state.requires_setup () then
+    Eio.Fiber.fork ~sw (fun () ->
+      Runtime_startup_state.await_available ();
+      start_authority ())
+  else start_authority ();
 
   start_microvm_guest_maintenance ~sw
     ~sweep:(fun () -> startup_sweep_microvm_guests state);

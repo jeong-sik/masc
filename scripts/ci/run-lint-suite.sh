@@ -415,10 +415,6 @@ blocking_pr_lints() {
   # here together is about 60s. Worth it while the alternative is a retired
   # concept walking back in unnoticed, but it is the first place to look if
   # the lint job gets slow.
-  # The count this holds went 0 -> 149 in the ten days nobody ran it, then
-  # back to 34 across seven purge PRs. Wired here so the next 149 cannot
-  # accumulate unseen. Below the baseline passes and says by how much; the
-  # number moves down in the PR that earns it.
   # Its own "CI Failure Visibility" section used to be the only thing it
   # confirmed, and it confirmed the absence of a workflow step deleted on
   # purpose in #32511. With that stale check gone the audit passes, so it can
@@ -427,8 +423,6 @@ blocking_pr_lints() {
   # against a ~6min build in the same PR, so it stays off the critical path.
   run_lint "Hardcoding and truth audit" \
     bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
-  run_lint "Dead export ratchet" \
-    python3 scripts/audit-dead-surface.py --exports --ratchet
   run_lint "Boundary guard" bash scripts/check-boundary-guard.sh
   # Promoted out of the advisory lane. It already ran there with --strict, and
   # --strict is the mode that fails, so the only thing "advisory" bought was

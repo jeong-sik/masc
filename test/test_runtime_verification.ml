@@ -97,7 +97,10 @@ let test_invalid_call_and_errors () =
        let result = measure (fun _ ~prompt:_ -> Error failure) in
        check bool "provider/config failure not success" false result.tool_roundtrip;
        check bool "no response fabricated" false result.response)
-    [ Verify.Provider_rejected; Timed_out; Unavailable Missing_credential ]
+    [ Verify.Provider_rejected "the provider returned HTTP 400"
+    ; Timed_out
+    ; Unavailable Missing_credential
+    ]
 ;;
 
 (* The three client failures used to fold into one code with one message, so a
@@ -145,7 +148,20 @@ let test_client_failures_stay_apart () =
     "a failure with nothing to add reports no detail"
     true
     (failure_field result "detail" = `Null);
-  check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
+  check int "an unavailable client still exits 2" 2 (Verify.exit_code result);
+  (* provider_rejected covered both a wire refusal and a request the provider
+     never accepted, and reported neither. Twelve OpenRouter runtimes failed on
+     one missing [reasoning-effort] key under this code, while the message told
+     the operator to check credentials that were fine (masc#35139). *)
+  let rejected, rejected_detail =
+    case (Verify.Provider_rejected "runtime declares no reasoning effort ladder")
+  in
+  check string "a refusal keeps its own code" "provider_rejected" rejected;
+  check
+    string
+    "a refusal carries the reason the caller had in hand"
+    "runtime declares no reasoning effort ladder"
+    (Yojson.Safe.Util.to_string rejected_detail)
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =

@@ -23,7 +23,7 @@ let fake_docker_configured () =
 ;;
 
 let refuse_real_daemon_under_test ~what =
-  if Env_config_core.running_under_test_executable ()
+  if Host_config.is_test_mode (Host_config.host ()).test_mode
      && not (fake_docker_configured ())
   then (
     let allowed = Env_config_core.real_docker_allowed_under_test () in

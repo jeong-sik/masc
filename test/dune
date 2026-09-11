@@ -5559,6 +5559,7 @@
  (modules test_lane_addon_worker)
  (libraries masc alcotest eio eio_main yojson unix))
 (include stanzas/test_runtime_model_discovery.inc)
+(include stanzas/test_runtime_model_discovery.inc)
 
 (test
  (name test_runtime_setup_credentials)

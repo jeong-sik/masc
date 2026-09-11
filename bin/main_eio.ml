@@ -1,6 +1,6 @@
 (** MASC MCP Server - Eio Native Entry Point
     MCP Streamable HTTP Transport with Eio concurrency (OCaml 5.x)
-
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
     Uses h2-eio for HTTP/2 with unlimited SSE streams per connection.
     HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
@@ -968,6 +968,7 @@ let token_agent_arg =
   Arg.(required & pos 0 (some string) None & info [] ~docv:"AGENT" ~doc)
 
 let token_credentials base_path =
+let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (base_path, Auth.list_credentials base_path)
 
@@ -1609,12 +1610,18 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
+  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
+     always emits failure.detail, so omitting the key here made a consumer's
+     read of it depend on which producer answered. [detail] is what the caller
+     was told and would otherwise drop. *)
+  let unavailable ?detail code message =
     print_endline (Yojson.Safe.to_string (`Assoc [
       "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
       "model", `Null; "observed_model", `Null; "status", `String "unavailable";
       "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+      "failure", `Assoc [
+        "code", `String code; "message", `String message;
+        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1626,7 +1633,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
@@ -2647,6 +2662,7 @@ let setup_validate_runtime base_path =
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
     (* setup is an operator command: the workspace it prepares becomes the
        default for later ones. *)
@@ -2682,7 +2698,6 @@ let doctor_cmd =
   let inspect requested json =
     let selected = match requested with
       | Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
     let state = Onboarding_status.inspect ~base_path:selected in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);
@@ -2747,9 +2762,11 @@ let setup_cmd =
     Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
   in
   let run base_path port no_tui sandbox_profile microvm_backend =
+  let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
+      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
       if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
       else
@@ -2757,6 +2774,7 @@ let setup_cmd =
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
         | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in

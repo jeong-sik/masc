@@ -108,6 +108,13 @@ val keepers_dir_for_base_path : base_path:string -> string
 (** [keepers_dir_for_base_path ~base_path] returns the keepers directory for an
     explicit workspace base path. *)
 
+val prompts_dir_for_base_path : base_path:string -> string
+(** [prompts_dir_for_base_path ~base_path] returns the prompt markdown
+    directory for an explicit workspace base path. Unlike {!prompts_dir} it
+    does not consult the process cwd or ambient [MASC_BASE_PATH], so a server
+    given its base path gets that workspace's prompts and a test can name the
+    workspace it is measuring. *)
+
 val runtime_toml_path_for_base_path : base_path:string -> string
 (** Canonical [runtime.toml] path for an explicit workspace, honoring the same
     config-root override and base-path rules as {!resolve_for_base_path}. The

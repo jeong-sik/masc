@@ -712,6 +712,37 @@ let test_double_tilde_strikes_and_single_tilde_does_not () =
   Alcotest.(check bool) "the struck run is marked" true (holds "<s>gone</s>");
   Alcotest.(check bool) "a lone tilde stays text" true (holds "~7 more")
 
+let test_reflow_reasoning_joins_broken_prose () =
+  let input = "This is a\nshort sentence\nbroken across\nseveral lines." in
+  let expected = "This is a short sentence broken across several lines." in
+  Alcotest.(check string) "prose lines joined" expected (Markdown.reflow_reasoning input)
+
+let test_reflow_reasoning_preserves_paragraphs () =
+  let input = "Para 1 line 1\nline 2\n\nPara 2 line 1\nline 2" in
+  let expected = "Para 1 line 1 line 2\n\nPara 2 line 1 line 2" in
+  Alcotest.(check string) "paragraphs preserved" expected (Markdown.reflow_reasoning input)
+
+let test_reflow_reasoning_preserves_markdown_lists () =
+  let input = "- Item 1\n- Item 2\n  - Subitem 2a\n  - Subitem 2b\n1. First\n2. Second" in
+  let expected = "- Item 1\n- Item 2\n  - Subitem 2a\n  - Subitem 2b\n1. First\n2. Second" in
+  Alcotest.(check string) "lists preserved" expected (Markdown.reflow_reasoning input)
+
+let test_reflow_reasoning_preserves_fences_and_tables () =
+  let input = "Reasoning:\n```ocaml\nlet x = 1\nlet y = 2\n```\n| A | B |\n| - | - |\n| 1 | 2 |" in
+  let expected = "Reasoning:\n```ocaml\nlet x = 1\nlet y = 2\n```\n| A | B |\n| - | - |\n| 1 | 2 |" in
+  Alcotest.(check string) "fences and tables preserved" expected (Markdown.reflow_reasoning input)
+
+let test_reflow_reasoning_preserves_hard_breaks () =
+  let input = "Line 1  \nLine 2\\\nLine 3" in
+  let expected = "Line 1\nLine 2\nLine 3" in
+  Alcotest.(check string) "hard breaks preserved" expected (Markdown.reflow_reasoning input)
+
+let test_reflow_reasoning_repairs_fragmented_list_items () =
+  let input = "2.\nMy task\n: None\nclaimed." in
+  let expected = "2. My task : None claimed." in
+  Alcotest.(check string) "broken list item repaired" expected (Markdown.reflow_reasoning input)
+
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -822,5 +853,19 @@ let () =
     ; ( "strike"
       , [ Alcotest.test_case "two tildes strike, one does not" `Quick
             test_double_tilde_strikes_and_single_tilde_does_not
+        ] )
+    ; ( "reflow_reasoning"
+      , [ Alcotest.test_case "joins broken prose lines" `Quick
+            test_reflow_reasoning_joins_broken_prose
+        ; Alcotest.test_case "preserves blank paragraph breaks" `Quick
+            test_reflow_reasoning_preserves_paragraphs
+        ; Alcotest.test_case "preserves markdown lists" `Quick
+            test_reflow_reasoning_preserves_markdown_lists
+        ; Alcotest.test_case "preserves fences and tables" `Quick
+            test_reflow_reasoning_preserves_fences_and_tables
+        ; Alcotest.test_case "preserves hard breaks" `Quick
+            test_reflow_reasoning_preserves_hard_breaks
+        ; Alcotest.test_case "repairs fragmented list items" `Quick
+            test_reflow_reasoning_repairs_fragmented_list_items
         ] )
     ]

@@ -1012,3 +1012,75 @@ let render_streaming ~palette ~width text =
   }
 
 let render ~palette ~width text = (render_streaming ~palette ~width text).rows
+
+let is_markdown_block_line line =
+  is_rule line
+  || Option.is_some (heading_level line)
+  || Option.is_some (quote_body line)
+  || Option.is_some (bullet_item line)
+  || Option.is_some (ordered_item line)
+  || Option.is_some (fence_marker line)
+  || Option.is_some (table_cells line)
+;;
+
+let reflow_reasoning text =
+  let lines = String.split_on_char '\n' text in
+  let reflowed = ref [] in
+  let in_fence = ref false in
+  let current_para = ref [] in
+  let flush_para () =
+    match List.rev !current_para with
+    | [] -> ()
+    | para_lines ->
+        let joined = ref [] in
+        let buf = ref "" in
+        let prev_had_hard_break = ref false in
+        List.iter
+          (fun line ->
+            let trimmed = String.trim line in
+            let has_hard_break =
+              String.ends_with ~suffix:"  " line
+              || String.ends_with ~suffix:"\\" line
+            in
+            if is_markdown_block_line line || !prev_had_hard_break then begin
+              if !buf <> "" then begin
+                joined := !buf :: !joined;
+                buf := ""
+              end;
+              if is_markdown_block_line line then
+                joined := line :: !joined
+              else
+                buf := trimmed
+            end
+            else begin
+              if !buf = "" then
+                buf := trimmed
+              else
+                buf := !buf ^ " " ^ trimmed
+            end;
+            prev_had_hard_break := has_hard_break)
+          para_lines;
+        if !buf <> "" then joined := !buf :: !joined;
+        reflowed := List.rev !joined @ !reflowed;
+        current_para := []
+  in
+  List.iter
+    (fun line ->
+      let trimmed = String.trim line in
+      match fence_marker line with
+      | Some _ ->
+          flush_para ();
+          in_fence := not !in_fence;
+          reflowed := line :: !reflowed
+      | None when !in_fence ->
+          reflowed := line :: !reflowed
+      | None when trimmed = "" ->
+          flush_para ();
+          reflowed := "" :: !reflowed
+      | None ->
+          current_para := line :: !current_para)
+    lines;
+  flush_para ();
+  String.concat "\n" (List.rev !reflowed)
+;;
+

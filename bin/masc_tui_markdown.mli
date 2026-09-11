@@ -128,3 +128,13 @@ val inline_segments : string -> (string * string) list
     printable [" (target)"] as ["link_target"], so the two remain distinct in
     copied and NO_COLOR text. Exposed so the marker handling can be read
     directly. *)
+
+val is_markdown_block_line : string -> bool
+(** Whether a line begins a Markdown block element (heading, list item,
+    blockquote, rule, code fence, or table). *)
+
+val reflow_reasoning : string -> string
+(** Reflow reasoning prose by joining consecutive non-block lines into
+    coherent paragraphs while preserving deliberate Markdown structures (list
+    items, headings, blockquotes, code fences, tables, blank paragraph breaks,
+    and trailing double-space or backslash hard breaks). *)

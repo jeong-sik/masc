@@ -462,8 +462,9 @@ let cached_chat_markdown ~theme ~(entry : Message_layout.entry) ~width =
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
 let folded_thinking_summary body =
+  let reflowed = Markdown.reflow_reasoning body in
   let lines =
-    String.split_on_char '\n' body
+    String.split_on_char '\n' reflowed
     |> List.filter (fun line -> String.trim line <> "")
   in
   match lines with
@@ -471,7 +472,7 @@ let folded_thinking_summary body =
      saves nothing. It also promised an expansion: every committed reasoning
      block is the withheld-step count alone, and Ctrl-R on it redrew the same
      sentence. A block with nothing to fold draws as itself. *)
-  | [] | [ _ ] -> body
+  | [] | [ _ ] -> reflowed
   | lines ->
       Printf.sprintf
         "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
@@ -9228,7 +9229,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | Keeper_chat_transcript.Compact ->
                   (gate_fold ~chat_cols ~role_label_column message)
                     .Masc_tui_gate_text.fa_text)
-          | Message_thinking | Message_user _ | Message_keeper
+          | Message_thinking ->
+              Markdown.reflow_reasoning message.me_text
+          | Message_user _ | Message_keeper
           | Message_autonomous
           | Message_status | Message_local | Message_error ->
               message.me_text
@@ -10017,10 +10020,11 @@ let render_keeper_message (state : state) =
                             state.msg_reasoning_visibility) ->
                     None
                 | Keeper_chat_transcript.Drawn_thinking lines ->
+                    let raw_body = String.concat "\n" lines in
                     let body =
                       if state.msg_reasoning_visibility = Reasoning_folded
-                      then folded_thinking_summary (String.concat "\n" lines)
-                      else String.concat "\n" lines
+                      then folded_thinking_summary raw_body
+                      else Markdown.reflow_reasoning raw_body
                     in
                     entry Message_layout.Thinking (label "THINKING") (annotate_body body)
                 | Keeper_chat_transcript.Drawn_tools block ->

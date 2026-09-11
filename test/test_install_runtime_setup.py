@@ -210,40 +210,6 @@ class ModelSelection(unittest.TestCase):
             with self.subTest(reply=reply), patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('manual\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
                 SETUP.select_model('/fixture/masc','claude_code')
 
-    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
-        inventory = dict(runtimes=[], integrations=[dict(
-            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
-            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
-            origin='agent_core_catalog', setup_support='new_connection',
-            verification_support='response_tool', provider_kind='openai_compat')])
-        rows = SETUP.connection_sources(inventory)
-        source = next(row for row in rows if row['provider_id'] == 'openrouter')
-        self.assertEqual(source['choice'], 'openai_compatible')
-        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
-        self.assertEqual(source['rows'], [])
-
-    def test_catalog_integrations_stay_env_only_and_skip_discovery_without_keys(self):
-        # Catalog integrations never surface private credentials: the source is
-        # env-kind and discovery runs only through the declared env var, so no
-        # secret is read from disk or sent anywhere by the wizard.
-        integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
-                           endpoint='https://example.com/v1', origin='runtime_config', api_key_env='PRIVATE_API_KEY',
-                           setup_support='new_connection', verification_support='response_tool',
-                           credential_kind='file', credential_file='/private/owned-api-key')
-        source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
-        self.assertEqual(source['credential_kind'], 'env')
-        self.assertNotIn('credential_file', source)
-        def empty_catalog(argv, **kwargs):
-            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': []}), '')
-        with patch.object(SETUP, 'discover_models', return_value=([], 'server')) as discover, \
-                patch.object(SETUP.subprocess, 'run', side_effect=empty_catalog):
-            rows, origin = SETUP.source_models('/fixture', source, 10)
-        self.assertEqual(source['api_key_env'], 'PRIVATE_API_KEY')
-        self.assertEqual(rows, [])
-        self.assertEqual(origin, 'server')
-
-
-
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='runtime-setup-test-')

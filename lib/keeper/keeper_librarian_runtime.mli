@@ -34,15 +34,56 @@ type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
 
+(** What one slot's pre-flight projection said: it fits, it is over the slot's
+    request-body limit, or the projection refused the request outright -- a
+    capability or serialization refusal, which is structural, not a size. *)
+type slot_projection =
+  | Slot_fits
+  | Slot_too_large
+  | Slot_unusable of string
+
+(** The ladder's pre-flight verdict: which slot ids still impose the
+    request-body bound, which are structurally unusable (with the refusal
+    reason), and whether every usable slot's body fits its limit. *)
+type lane_fit = {
+  usable : string list;
+  unusable : (string * string) list;
+  fits : bool;
+}
+
+(** The size decision, pure over one projection per slot in ladder order.
+    Structurally unusable slots leave the decision: they impose no bound
+    because they cannot run, and one such slot used to fail the whole
+    pre-flight, taking every usable slot down with it (2026-09-11,
+    openrouter.openrouter-deepseek-v4-flash). *)
+val fit_decision : (string * slot_projection) list -> lane_fit
+
+(** Slot ids and refusal reasons on one line, for the exclusion WARN and the
+    all-slots-refused error. *)
+val slot_reason_pairs : ?sep:string -> (string * string) list -> string
+
+val project_lane
+  :  selected_slots:Runtime_exact_output_registry.selected_slot list
+  -> messages:Agent_core.Types.message list
+  -> lane_fit
+(** One real projection per admitted slot. *)
+
 val fitted_messages
   :  selected_slots:Runtime_exact_output_registry.selected_slot list
   -> full_messages:Agent_core.Types.message list
   -> render_at:(int -> (Agent_core.Types.message list, extraction_error) result)
-  -> (Agent_core.Types.message list * int option, extraction_error) result
-(** Pre-flight size discipline (lane audit W1/W2): the full prompt is kept when it fits every admitted
-    slot's request-body limit; otherwise the message window binary-searches
-    down through [render_at] and the fitted count rides along as [Some k].
-    Zero-message overflow is [Exact_input_over_budget]. *)
+  -> ( (Agent_core.Types.message list * int option)
+       * (string * string) list
+     , extraction_error )
+     result
+(** Pre-flight size discipline (lane audit W1/W2): the full prompt is kept
+    when it fits every usable slot's request-body limit; otherwise the
+    message window binary-searches down through [render_at] and the fitted
+    count rides along as [Some k]. Zero-message overflow is
+    [Exact_input_over_budget]. A slot whose projection is refused outright is
+    excluded from the bound and returned in the report so the caller can say
+    which slots the run is without; a ladder with no projectable slot at all
+    is [Exact_request_projection_failed], naming each refusal. *)
 
 
 (** Which failure kind this error records in the memory journal. The vocabulary

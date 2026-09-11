@@ -228,7 +228,7 @@ let test_fit_shrinks_to_slot_budget_and_reports_zero_fit () =
        ~render_at
    with
    | Ok (_, None) -> fail "an oversized prompt reported no shrink"
-   | Ok (fitted, Some count) ->
+   | Ok ((fitted, Some count), _) ->
      check bool "shrunk window is non-empty" true (count >= 0);
      check bool "fitted prompt is smaller than the full prompt" true
        (match fitted with
@@ -249,6 +249,128 @@ let test_fit_shrinks_to_slot_budget_and_reports_zero_fit () =
          (Runtime.extraction_error_to_string error))
 ;;
 
+(* The decision layer, pure. *)
+let test_fit_decision_excludes_structural_failures () =
+  let fit =
+    Runtime.fit_decision
+      [ ("slot-a", Runtime.Slot_fits)
+      ; ("slot-bad", Runtime.Slot_unusable "wire_admission_rejected:unsupported_image_input")
+      ; ("slot-c", Runtime.Slot_too_large)
+      ]
+  in
+  check (list string) "usable keeps ladder order minus refusals"
+    [ "slot-a"; "slot-c" ] fit.Runtime.usable;
+  check (list (pair string string)) "the refusal carries its slot and reason"
+    [ ("slot-bad", "wire_admission_rejected:unsupported_image_input") ]
+    fit.Runtime.unusable;
+  check bool "a too-large usable slot still fails the fit" false fit.Runtime.fits;
+  check string "the report line names slot and reason"
+    "slot-bad: wire_admission_rejected:unsupported_image_input"
+    (Runtime.slot_reason_pairs fit.Runtime.unusable)
+;;
+
+let test_fit_decision_with_every_slot_refused_imposes_no_bound () =
+  let fit =
+    Runtime.fit_decision
+      [ ("slot-a", Runtime.Slot_unusable "invalid_connect_timeout")
+      ; ("slot-b", Runtime.Slot_unusable "request_serialization_rejected")
+      ]
+  in
+  check (list string) "no usable slot remains" [] fit.Runtime.usable;
+  check bool "an empty usable set is not a fit" false fit.fits
+;;
+
+(* 2026-09-11 regression: a failover slot whose request cannot be projected
+   at all -- a structural refusal, not a size -- must not fail the lane's
+   pre-flight. The appended openrouter.openrouter-deepseek-v4-flash refused
+   projection on every librarian run of that evening and took the healthy
+   slots down with it. A negative connect timeout is one structural refusal
+   the real projection reports, so this exercises the production path. *)
+let test_unusable_slot_leaves_the_usable_slots_running () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  let server =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let message text =
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text text ]
+  in
+  let publish slots =
+    let snapshot =
+      Fixture.resolver_snapshot
+        ~source:"librarian-preflight-exclusion"
+        ~connect_timeouts:[ ("librarian-bad", -1.0) ]
+        [ { Fixture.id = "librarian-ok"; base_url = server.base_url }
+        ; { Fixture.id = "librarian-bad"; base_url = server.base_url }
+        ]
+    in
+    (match
+       Runtime_exact_output_registry.publish
+         ~lanes:
+           [ { Runtime_schema.id = "librarian_exact"
+             ; slot_ids = slots
+             ; cli_slot_ids = []
+             } ]
+         snapshot
+     with
+     | Ok _ -> ()
+     | Error error ->
+       fail (Runtime_exact_output_registry.publication_error_to_string error));
+    match Runtime_exact_output_registry.current () with
+    | Error error ->
+      fail (Runtime_exact_output_registry.publication_error_to_string error)
+    | Ok registry ->
+      (match
+         Runtime_exact_output_registry.resolve_lane registry
+           ~lane_id:"librarian_exact"
+       with
+       | Ok resolved -> resolved.Runtime_exact_output_registry.selected_slots
+       | Error error ->
+         fail
+           (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+  in
+  let selected_slots = publish [ "librarian-ok"; "librarian-bad" ] in
+  (match
+     Runtime.fitted_messages
+       ~selected_slots
+       ~full_messages:[ message "one small prompt" ]
+       ~render_at:(fun _ -> Ok [ message "one small prompt" ])
+   with
+   | Ok ((_, None), unusable) ->
+     check (list (pair string string))
+       "the refused slot is reported, not fatal"
+       [ ("librarian-bad", "wire_admission_rejected:invalid_connect_timeout") ]
+       unusable
+   | Ok (_, Some _) -> fail "a fitting prompt reported a shrink"
+   | Error error ->
+     fail (Runtime.extraction_error_to_string error));
+  let selected_slots = publish [ "librarian-bad" ] in
+  (match
+     Runtime.fitted_messages
+       ~selected_slots
+       ~full_messages:[ message "one small prompt" ]
+       ~render_at:(fun _ -> Ok [ message "one small prompt" ])
+   with
+   | Ok _ -> fail "a ladder with no projectable slot fitted"
+   | Error error ->
+     let text = Runtime.extraction_error_to_string error in
+     check bool "the failure names the refusing slot" true
+       (Astring.String.is_infix ~affix:"librarian-bad" text);
+     check bool "the failure names the refusal reason" true
+       (Astring.String.is_infix ~affix:"invalid_connect_timeout" text))
+;;
+
 let () =
   run
     "Keeper Librarian exact-lane preference"
@@ -261,6 +383,13 @@ let () =
             "fit shrinks to slot budget and types zero-fit"
             `Quick
             test_fit_shrinks_to_slot_budget_and_reports_zero_fit
+        ; test_case "fit decision excludes structural failures" `Quick
+            test_fit_decision_excludes_structural_failures
+        ; test_case "fit decision with every slot refused imposes no bound"
+            `Quick
+            test_fit_decision_with_every_slot_refused_imposes_no_bound
+        ; test_case "unusable slot leaves the usable slots running" `Quick
+            test_unusable_slot_leaves_the_usable_slots_running
         ] )
     ]
 ;;

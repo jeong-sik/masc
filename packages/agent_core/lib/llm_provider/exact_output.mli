@@ -478,6 +478,12 @@ val project_request_body
   -> output_requirement
   -> (request_body_projection, admission_error) result
 
+val admission_error_reason : admission_error -> string
+(** One readable line naming the refusing condition ("unsupported_image_input",
+    "wire_admission_rejected:unsupported_target_model(...)"), for logs and
+    failure records. Kind names match the evidence-JSON kinds so one grep
+    finds both spellings. *)
+
 (** Pure admission. It performs no token-count request, estimation, provider
     completion, or global admission. The returned immutable plan freezes one
     selected target and one serialized request. *)

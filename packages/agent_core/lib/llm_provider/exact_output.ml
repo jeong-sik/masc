@@ -910,6 +910,52 @@ let admission_error_evidence_json = function
       ]
 ;;
 
+(* One readable line naming the refusing condition, for log and failure
+   records. The evidence JSON serves registries; a person reading a WARN
+   needs the reason in the line itself. Kind names match the evidence kinds
+   so a grep finds both spellings. The match is exhaustive on purpose: a
+   new wire error variant must be named here to compile, not fall into an
+   unnamed bucket. *)
+let wire_admission_error_reason = function
+  | Capability_snapshot_missing -> "capability_snapshot_missing"
+  | Output_contract_unavailable -> "output_contract_unavailable"
+  | Cross_feature_not_allowed -> "cross_feature_not_allowed"
+  | Global_admission_not_allowed -> "global_admission_not_allowed"
+  | Invalid_connect_timeout -> "invalid_connect_timeout"
+  | Invalid_body_timeout -> "invalid_body_timeout"
+  | Caller_supplied_header_not_allowed ->
+    "caller_supplied_header_not_allowed"
+  | Unsupported_image_input -> "unsupported_image_input"
+  | Unsupported_document_input -> "unsupported_document_input"
+  | Unsupported_audio_input -> "unsupported_audio_input"
+  | Unsupported_system_prompt -> "unsupported_system_prompt"
+  | Token_measurement_required _ -> "token_measurement_required"
+  | Context_limit_unavailable -> "context_limit_unavailable"
+  | Invalid_context_limit -> "invalid_context_limit"
+  | Output_reservation_unavailable -> "output_reservation_unavailable"
+  | Measured_context_window_exceeded _ -> "measured_context_window_exceeded"
+  | Measured_serving_constraint_rejected _ ->
+    "measured_serving_constraint_rejected"
+  | Token_measurement_failed -> "token_measurement_failed"
+  | Unsupported_target_model { model_id } ->
+    Printf.sprintf "unsupported_target_model(%s)" model_id
+  | Target_request_rejected -> "target_request_rejected"
+  | Request_body_too_large { actual_bytes; limit_bytes } ->
+    Printf.sprintf "request_body_too_large(%d/%d)" actual_bytes limit_bytes
+  | Request_serialization_rejected -> "request_serialization_rejected"
+;;
+
+let admission_error_reason = function
+  | Provider_schema_unavailable -> "provider_schema_unavailable"
+  | Unsupported_schema_keyword keyword ->
+    Printf.sprintf "unsupported_schema_keyword(%s)" keyword
+  | Unsupported_schema_type schema_type ->
+    Printf.sprintf "unsupported_schema_type(%s)" schema_type
+  | Invalid_schema -> "invalid_schema"
+  | Wire_admission_rejected cause ->
+    "wire_admission_rejected:" ^ wire_admission_error_reason cause
+;;
+
 let target_selection_error_evidence_json = function
   | Missing_target_credential { target_ref; environment_variable } ->
     `Assoc

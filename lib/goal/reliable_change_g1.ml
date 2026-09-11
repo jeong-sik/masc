@@ -517,11 +517,20 @@ let check_observations
        let cumulative_attempts =
          List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
        in
+       (* Key on the snapshot's own identity: the contract's canonical
+          cumulative shape records several progressive snapshots of one
+          attempt (attempt-2-snap-1 / -snap-2) under the same
+          request_or_task_identity and attempt_sequence, and the totals rule
+          below requires exactly that aggregate. What counts as duplicated is
+          the same snapshot recorded twice, not a later snapshot of the same
+          attempt. *)
        let cumulative_keys =
          List.map
            (fun o ->
-              ( (match o.request_or_task_identity with Some r -> r | None -> o.run_id)
-              , o.attempt_sequence ))
+              ( match o.run_turn_attempt_identity with
+                | Some id -> id
+                | None -> o.run_id )
+              , o.attempt_sequence )
            cumulative_attempts
        in
        let unique_cumulative_keys =
@@ -948,8 +957,18 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     ]
 ;;
 
-let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) result =
+let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) result =
   try
+    (* Harness and roadmap rows are flat: they have no nested "usage",
+       "phase_timestamps" or similar objects. [member] on `Null raises
+       "Can't get member ... of non-object type null", so normalize the root
+       (and treat any absent nested object the same way below) instead of
+       making every member lookup null-safe by hand. *)
+    let json =
+      match json0 with
+      | `Null -> `Assoc []
+      | other -> other
+    in
     let case_id = json |> member "case_id" |> to_string in
     let repeat_index =
       match json |> member "repeat_index" |> to_int_option with
@@ -1039,7 +1058,11 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
       | None -> None
     in
     let usage =
-      let u = json |> member "usage" in
+      let u =
+        match json |> member "usage" with
+        | `Null -> `Assoc []
+        | other -> other
+      in
       let reported =
         match u |> member "reported" |> to_bool_option with
         | Some b -> b
@@ -1114,7 +1137,11 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
         in
         Usage_missing reason
     in
-    let pt = json |> member "phase_timestamps" in
+    let pt =
+      match json |> member "phase_timestamps" with
+      | `Null -> `Assoc []
+      | other -> other
+    in
     let phase_timestamps =
       { queue_started_at = pt |> member "queue_started_at" |> to_float_option
       ; model_started_at = pt |> member "model_started_at" |> to_float_option

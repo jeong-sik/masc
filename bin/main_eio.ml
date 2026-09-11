@@ -1612,7 +1612,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
   let unavailable ?detail code message =
     print_endline
       (Yojson.Safe.to_string
-         (Runtime_verification.unavailable_to_json ?detail ~runtime_id ~code ~message));
+         (Runtime_verification.unavailable_to_json ?detail ~runtime_id ~code ~message ()));
     2
   in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then

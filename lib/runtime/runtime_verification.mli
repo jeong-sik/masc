@@ -51,6 +51,7 @@ val unavailable_to_json
   -> runtime_id:string
   -> code:string
   -> message:string
+  -> unit
   -> Yojson.Safe.t
 val exit_code : result -> int
 

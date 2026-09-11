@@ -147,7 +147,7 @@ let to_json result =
     ]
 ;;
 
-let unavailable_to_json ?detail ~runtime_id ~code ~message =
+let unavailable_to_json ?detail ~runtime_id ~code ~message () =
   `Assoc
     [ "schema", `String "masc.runtime_verification.v1"
     ; "runtime_id", `String runtime_id

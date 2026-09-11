@@ -214,6 +214,17 @@ val record_default_base_path : string -> record_outcome
     not remembered. Failure is returned, never raised: not recording a default
     must not fail the command that succeeded. *)
 
+val default_base_path_record_path_opt : unit -> string option
+(** Path of the record file [record_default_base_path] writes, when a
+    user-level config dir can be named: [$XDG_CONFIG_HOME/masc] or
+    [~/.config/masc]. [None] when neither can be resolved. The record
+    cannot live inside the workspace: a caller that does not know the
+    base path yet cannot read a file under it. *)
+(** Record [path] as the default for later commands. Callers do this after the
+    workspace has actually served a command, so a path that failed to boot is
+    not remembered. Failure is returned, never raised: not recording a default
+    must not fail the command that succeeded. *)
+
 val base_path_not_set_message : unit -> string
 (** The sentence both base-path reporters use when nothing resolved: this
     module and the workspace resolver in [lib/workspace]. Names the flag, the

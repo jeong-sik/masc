@@ -72,7 +72,8 @@ let all_events : E.keeper_chat_event list =
   ; E.Continuation_checkpoint { message = "paused"; request_id = Some "req-9" }
   ; E.Continuation_checkpoint { message = "paused"; request_id = None }
   ; E.Agent_core_stream_connected
-  ; E.Agent_core_runtime_attempt_started
+  ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
+  ; E.Agent_core_runtime_attempt_started { runtime_id = None; attempt_index = None }
   ; E.Agent_core_stream_message_start
       { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
   ; E.Agent_core_stream_message_start
@@ -627,7 +628,7 @@ let golden_events : E.keeper_chat_event list =
       ; media_ref = "/api/v1/media/tok-golden"
       }
   ; E.Agent_core_stream_protocol_error protocol_error_full
-  ; E.Agent_core_runtime_attempt_started
+  ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_stream_message_delta
       { stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial

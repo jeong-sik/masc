@@ -46,6 +46,13 @@ type result =
   }
 
 val to_json : result -> Yojson.Safe.t
+val unavailable_to_json
+  :  ?detail:string
+  -> runtime_id:string
+  -> code:string
+  -> message:string
+  -> unit
+  -> Yojson.Safe.t
 val exit_code : result -> int
 
 val initial_runtime_id
@@ -59,7 +66,8 @@ val initial_runtime_id
     or claim an empty lane has a usable target. Pass materialized lanes. *)
 
 val verify
-  :  sw:Eio.Switch.t
+  :  ?secure_random:Eio.Flow.source_ty Eio.Resource.t
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock

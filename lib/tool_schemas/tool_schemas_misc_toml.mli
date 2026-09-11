@@ -27,3 +27,11 @@ val msx_step : Masc_domain.tool_schema
 val msx_step_until_change : Masc_domain.tool_schema
 val msx_peek : Masc_domain.tool_schema
 val msx_ram_diff : Masc_domain.tool_schema
+
+(** Optional Lane Add-on observation and lifecycle tools. *)
+val lane_attach : Masc_domain.tool_schema
+val lane_inspect : Masc_domain.tool_schema
+val lane_observe : Masc_domain.tool_schema
+val lane_slice : Masc_domain.tool_schema
+val lane_detach : Masc_domain.tool_schema
+val lane_evidence : Masc_domain.tool_schema

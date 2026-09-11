@@ -446,13 +446,16 @@ function validateKeeperCustomPayload(
 ): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
-    'KEEPER_RUNTIME_ATTEMPT_STARTED',
     'KEEPER_STREAM_MESSAGE_STOP',
     'KEEPER_STREAM_PING',
   ].includes(name)) {
     return payload === null
       ? ok(true)
       : fail('ag_ui_event.value', `Expected null ${name} payload`)
+  }
+
+  if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED' && payload === null) {
+    return ok(true)
   }
 
   if (name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
@@ -488,7 +491,7 @@ function validateKeeperCustomPayload(
   // record stays a statement about the wire rather than about this function.
   const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
     KEEPER_CONNECTED: [],
-    KEEPER_RUNTIME_ATTEMPT_STARTED: [],
+    KEEPER_RUNTIME_ATTEMPT_STARTED: ['runtime_id', 'attempt_index'],
     KEEPER_STREAM_MESSAGE_STOP: [],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
@@ -581,13 +584,17 @@ function validateKeeperCustomPayload(
       return requiredInteger(value, 'queued_count')
     }
     case 'KEEPER_CONNECTED':
-    case 'KEEPER_RUNTIME_ATTEMPT_STARTED':
     case 'KEEPER_STREAM_MESSAGE_STOP':
     case 'KEEPER_STREAM_PING':
       // Answered above, before the field map: these carry a null payload.
       // Listed so the switch stays total. The nested-shape event is narrowed
       // out of the union by its own early return and cannot appear here.
       return ok(true)
+    case 'KEEPER_RUNTIME_ATTEMPT_STARTED': {
+      const runtimeId = optionalString(value, 'runtime_id')
+      if (!runtimeId.success) return runtimeId
+      return value.attempt_index === undefined ? ok(true) : requiredInteger(value, 'attempt_index', 0)
+    }
     case 'KEEPER_THINKING_DELTA': {
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta') : index

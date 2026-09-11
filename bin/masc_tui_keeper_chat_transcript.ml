@@ -146,6 +146,7 @@ type trail_node =
   | Node_tool of int
   | Node_superseded of
       { attempt : int
+      ; runtime_id : string option
       ; nodes : trail_node list  (** In arrival order. *)
       }
       (** Everything one earlier runtime attempt produced, kept whole when
@@ -197,6 +198,10 @@ type t =
     mutable admission : (Live.admission * int) option
   ; mutable attempt : int
         (* 0-based runtime attempt the growing trail belongs to. *)
+  ; mutable current_runtime_id : string option
+        (* Currently observed runtime identity serving this attempt. *)
+  ; mutable endpoint_streaming : bool
+        (* Whether tokens have started streaming from the runtime endpoint. *)
   ; mutable reply : reply option
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
@@ -225,12 +230,15 @@ let create ~keeper_name ~request_id ~started_at =
   ; last_approval_settlement = None
   ; admission = None
   ; attempt = 0
+  ; current_runtime_id = None
+  ; endpoint_streaming = false
   ; reply = None
   ; revision = 0
   }
 
 let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
+let current_runtime_id t = t.current_runtime_id
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
@@ -909,6 +917,7 @@ type trail_item =
   | Trail_text of string
   | Trail_superseded of
       { attempt : int
+      ; runtime_id : string option
       ; items : trail_item list
       }
 
@@ -948,12 +957,12 @@ let trail t =
         match call_of local_id with
         | Some call -> walk acc (call :: group) rest
         | None -> walk acc group rest)
-    | Node_superseded { attempt; nodes } :: rest ->
+    | Node_superseded { attempt; runtime_id; nodes } :: rest ->
         let acc = flush_tools acc group in
         let acc =
           match walk [] [] nodes with
           | [] -> acc
-          | items -> Trail_superseded { attempt; items } :: acc
+          | items -> Trail_superseded { attempt; runtime_id; items } :: acc
         in
         walk acc [] rest
     | Node_thinking buffer :: rest ->
@@ -1074,10 +1083,30 @@ let phase_text ~now t =
           | Some age -> Printf.sprintf " · in this call %s" age)
       in
       let work =
-        if calls = 0 then "working" ^ in_this_call
+        if calls = 0 then
+          match t.current_runtime_id, t.endpoint_streaming with
+          | Some rid, true ->
+              Printf.sprintf "streaming from [%s]%s" rid in_this_call
+          | Some rid, false when t.attempt > 0 ->
+              Printf.sprintf "failover: connecting to [%s] (attempt %d)%s"
+                rid t.attempt in_this_call
+          | Some rid, false ->
+              Printf.sprintf "connecting to [%s]%s" rid in_this_call
+          | None, _ when t.attempt > 0 ->
+              Printf.sprintf "failover working (attempt %d)%s" t.attempt in_this_call
+          | None, _ -> "working" ^ in_this_call
         else
-          Printf.sprintf "working · %s%s%s · %s"
-            (plural calls "tool") running in_this_call
+          let runtime_tag =
+            match t.current_runtime_id with
+            | Some rid when t.attempt > 0 ->
+                Printf.sprintf "failover [%s] (attempt %d) · " rid t.attempt
+            | Some rid -> Printf.sprintf "working [%s] · " rid
+            | None when t.attempt > 0 ->
+                Printf.sprintf "failover (attempt %d) · " t.attempt
+            | None -> "working · "
+          in
+          Printf.sprintf "%s%s%s%s · %s"
+            runtime_tag (plural calls "tool") running in_this_call
             (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
@@ -1317,7 +1346,7 @@ let apply_delta ~now t (delta : Live.delta) =
       (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
-  | Live.Runtime_attempt_started ->
+  | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       (* The per-attempt totals start over; the trail does not. What the
          earlier attempt produced -- finished stretches and the one still
          growing -- is folded into one superseded node so the reader keeps
@@ -1342,19 +1371,35 @@ let apply_delta ~now t (delta : Live.delta) =
       (match since with
        | [] -> ()
        | nodes ->
-           t.reversed_trail <- Node_superseded { attempt = t.attempt; nodes } :: older);
-      t.attempt <- t.attempt + 1;
+           t.reversed_trail <-
+             Node_superseded
+               { attempt = t.attempt
+               ; runtime_id = t.current_runtime_id
+               ; nodes
+               }
+             :: older);
+      (match attempt_index with
+       | Some idx -> t.attempt <- idx
+       | None -> t.attempt <- t.attempt + 1);
+      if Option.is_some runtime_id then t.current_runtime_id <- runtime_id;
+      t.endpoint_streaming <- false;
       t.awaiting <- None;
       (match t.phase with
        | Waiting | Working -> t.phase <- Working
        | Stream_ended | Stream_failed _ -> ())
+  | Live.Stream_model_started { model } ->
+      if Option.is_none t.current_runtime_id then t.current_runtime_id <- Some model;
+      t.endpoint_streaming <- true
   | Live.Text text ->
+      t.endpoint_streaming <- true;
       Buffer.add_string t.text_buffer text;
       trail_text t text
   | Live.Thinking text ->
+      t.endpoint_streaming <- true;
       Buffer.add_string t.thinking_buffer text;
       trail_thinking t text
   | Live.Tool_started { occurrence; tool_name } ->
+      t.endpoint_streaming <- true;
       (match
          List.find_opt
            (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
@@ -1483,6 +1528,12 @@ let apply_delta ~now t (delta : Live.delta) =
          It is not a turn outcome: the run says when it ends. *)
       ()
   | Live.Run_failed { message } ->
+      let message =
+        match t.current_runtime_id with
+        | Some rid when not (String.contains message '[') ->
+            Printf.sprintf "[%s] %s" rid message
+        | _ -> message
+      in
       t.phase <- Stream_failed message;
       t.ended_at <- Some now
   | Live.Run_finished ->
@@ -1587,6 +1638,7 @@ type drawn =
 
 type drawn_item =
   { superseded : int option
+  ; superseded_runtime_id : string option
   ; drawn : drawn
   }
 
@@ -1594,15 +1646,19 @@ type drawn_item =
    streamed. Superseded blocks are siblings in the trail, never nested (see
    [trail_item]), so one level of flattening is the whole of it. *)
 let drawn t =
-  let rec flatten superseded = function
-    | Trail_thinking lines -> [ { superseded; drawn = Drawn_thinking lines } ]
-    | Trail_skill skill -> [ { superseded; drawn = Drawn_skill skill } ]
-    | Trail_tools block -> [ { superseded; drawn = Drawn_tools block } ]
-    | Trail_text text -> [ { superseded; drawn = Drawn_text text } ]
-    | Trail_superseded { attempt; items } ->
-        List.concat_map (flatten (Some attempt)) items
+  let rec flatten superseded superseded_runtime_id = function
+    | Trail_thinking lines ->
+        [ { superseded; superseded_runtime_id; drawn = Drawn_thinking lines } ]
+    | Trail_skill skill ->
+        [ { superseded; superseded_runtime_id; drawn = Drawn_skill skill } ]
+    | Trail_tools block ->
+        [ { superseded; superseded_runtime_id; drawn = Drawn_tools block } ]
+    | Trail_text text ->
+        [ { superseded; superseded_runtime_id; drawn = Drawn_text text } ]
+    | Trail_superseded { attempt; runtime_id; items } ->
+        List.concat_map (flatten (Some attempt) runtime_id) items
   in
-  let items = List.concat_map (flatten None) (trail t) in
+  let items = List.concat_map (flatten None None) (trail t) in
   let current_text = function
     | { superseded = None; drawn = Drawn_text _ } -> true
     | { superseded = Some _; _ }
@@ -1640,7 +1696,12 @@ let drawn t =
          the terminal message, the last stretch of the current attempt. The
          record is the store's text for it and stands where that stretch
          was, typed as the record -- whatever the stream's copy read. *)
-      let reply_item = { superseded = None; drawn = Drawn_reply (safe_block reply_text) } in
+      let reply_item =
+        { superseded = None
+        ; superseded_runtime_id = None
+        ; drawn = Drawn_reply (safe_block reply_text)
+        }
+      in
       match last_text with
       | None ->
           (* Nothing streamed for the reply: the record is all there is. *)
@@ -1653,6 +1714,7 @@ let drawn t =
          ended comes from the recorded reply. *)
       items
       @ [ { superseded = None
+          ; superseded_runtime_id = None
           ; drawn =
               Drawn_status
                 (safe_block

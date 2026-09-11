@@ -11,6 +11,7 @@ type assessment =
 
 val assess_keeper : path:string -> string -> assessment
 val plan_to_json : plan -> Yojson.Safe.t
+val source_sha256 : plan -> string
 
 type receipt
 

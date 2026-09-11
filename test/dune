@@ -172,7 +172,6 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
-  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -523,7 +522,6 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
-  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -5099,7 +5097,7 @@
 (test
  (name test_browser_lane)
  (modules test_browser_lane)
- (libraries alcotest eio_main eio masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
+ (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_native_host.inc)
 
@@ -5519,6 +5517,19 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+(include stanzas/test_onboarding_status.inc)
+(include stanzas/test_onboarding_journey.inc)
+(include stanzas/test_sandbox_readiness.inc)
+(include stanzas/test_runtime_model_discovery.inc)
+
+(test
+ (name test_runtime_setup_credentials)
+ (modules test_runtime_setup_credentials)
+ (libraries masc_test_deps))
+
+(include stanzas/test_sandbox_prerequisites.inc)
+
+(include stanzas/test_apple_container_install.inc)
 
 (rule
  (alias runtest-test_model_independent_owner)
@@ -5527,37 +5538,26 @@
   (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
 
 (test
+ (name test_model_setup_resume)
+ (modules test_model_setup_resume)
+ (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))
+
+(test
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
  (libraries masc masc.server fs_compat alcotest unix yojson))
 
 (test
- (name test_keeper_declared_roster)
- (modules test_keeper_declared_roster)
- (libraries masc_test_deps))
-(include stanzas/test_onboarding_status.inc)
-(include stanzas/test_sandbox_readiness.inc)
-
-(test
  (name test_owner_process_identity)
  (modules test_owner_process_identity)
- (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
+ (libraries alcotest unix masc.owner_process_identity))
 
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
-(include stanzas/test_sandbox_prerequisites.inc)
-(include stanzas/test_onboarding_journey.inc)
-
-(include stanzas/test_docker_desktop_install.inc)
-
-(include stanzas/test_docker_account_access.inc)
-
-(include stanzas/test_apple_container_install.inc)
 
 (test
- (name test_lane_addon_worker)
- (modules test_lane_addon_worker)
- (libraries masc alcotest eio eio_main yojson unix))
-(include stanzas/test_runtime_model_discovery.inc)
+ (name test_keeper_declared_roster)
+ (modules test_keeper_declared_roster)
+ (libraries masc_test_deps))

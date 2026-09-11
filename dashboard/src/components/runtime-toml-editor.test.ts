@@ -1,3 +1,5 @@
+import * as coreApi from '../api/core'
+import { modelSetupResumeState } from '../lib/model-setup-resume'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
@@ -165,6 +167,9 @@ describe('RuntimeTomlEditor', () => {
   }
 
   beforeEach(() => {
+    modelSetupResumeState.value = { kind: 'idle' }
+    vi.spyOn(coreApi, 'post').mockResolvedValue({ runtime_ready: true,
+      exact_output_authority_available: true, model_setup: { status: 'available' } })
     container = document.createElement('div')
     document.body.appendChild(container)
     apiMocks.fetchRuntimeTomlConfig.mockReset()
@@ -472,9 +477,10 @@ describe('RuntimeTomlEditor', () => {
       expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('default', 'openai.gpt')
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
     })
+    expect(coreApi.post).toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved'))
     expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
   it('updates the assignment select after patching a keeper runtime', async () => {

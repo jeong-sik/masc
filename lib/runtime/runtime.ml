@@ -1500,7 +1500,7 @@ let set_loaded
     ; config_path = Some config_path
     ; startup_degradation
     };
-  Runtime_startup_state.set Available
+  Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
   let* loaded, _exact_output_lane_decls =
@@ -2323,6 +2323,13 @@ let attach_lock_warnings warnings receipt =
   { receipt with lock_warnings = receipt.lock_warnings @ warnings }
 ;;
 
+let with_config_lock ~runtime_config_path action =
+  let* locked = with_runtime_config_write_lock runtime_config_path action in
+  List.iter (function Config_lock_release_unconfirmed detail ->
+    Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
+  locked.value
+;;
+
 let runtime_config_atomic_failure
     ~replacement_visible
     ~observation
@@ -2951,6 +2958,55 @@ let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
             ~path:(lane_table_path lane_id)
             ~key:"candidates"
             ~values:runtime_ids
+        in
+        commit_runtime_config_text ~path next)
+    in
+    let* receipt = locked.value in
+    Ok (attach_lock_warnings locked.warnings receipt))
+;;
+
+(* Exact-output lanes name their walk order in [slots]; the routing API edits
+   them the same way conversation lanes edit [candidates]. *)
+let exact_lane_table_path lane_name =
+  let bare =
+    String.for_all
+      (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
+      lane_name
+  in
+  if bare && not (String.equal lane_name "")
+  then Printf.sprintf "runtime.exact_output_lanes.%s" lane_name
+  else
+    (* [escape_string] escapes the contents; the quotes are the caller's. *)
+    Printf.sprintf "runtime.exact_output_lanes.\"%s\"" (Toml_line_editor.escape_string lane_name)
+;;
+
+let set_exact_output_lane_slots ?runtime_config_path ~lane_name ~slots () =
+  let lane_name = String.trim lane_name in
+  let slots = List.map String.trim slots in
+  if String.equal lane_name ""
+  then Error "exact-output lane name must not be empty"
+  else if contains_newline lane_name
+  then Error "exact-output lane name must not contain newlines"
+  else if slots = []
+  then
+    (* Mandatory exact lanes fail the boot fail-closed without a slot; a lane
+       that resolves to nothing is not the edit an operator is making. *)
+    Error "an exact-output lane needs at least one slot"
+  else if List.exists (String.equal "") slots
+  then Error "slots must not contain empty entries"
+  else if List.exists contains_newline slots
+  then Error "slots must not contain newlines"
+  else (
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* locked =
+      with_runtime_config_write_lock path (fun () ->
+        let* content = load_file_result path in
+        let next =
+          Toml_line_editor.edit_table_multiline_array
+            content
+            ~path:(exact_lane_table_path lane_name)
+            ~key:"slots"
+            ~values:slots
         in
         commit_runtime_config_text ~path next)
     in

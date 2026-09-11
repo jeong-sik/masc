@@ -98,7 +98,39 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
   Lane.install_automation_executor None;
   check bool "automation still needs its native executor" true
     (Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))
+
+let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
+  let info = connect Lane.Firefox in
+  let selected = target info.client_id in
+  let primary = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_for ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+  let primary_command = take info in
+  let client = match selected with Lane.Live_client client -> client | Lane.Automation -> fail "live target expected" in
+  check bool "optional observation refuses while primary request waits" true
+    (Lane.issue_document_if_idle ~target:selected ~tab_id:1 ~timeout_sec:1.
+       = Lane.Refused "optional_document_observation_busy");
+  check int "primary waiter remains owned" 1 (Hashtbl.length client.waiters);
+  check int "optional observation queued nothing" 0 (Eio.Stream.length client.commands);
+  ignore (Lane.deliver_result ~client_id:info.client_id ~id:primary_command.id ~payload:(payload "primary"));
+  answered primary "primary";
+  let observation = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_document_if_idle ~target:selected ~tab_id:1 ~timeout_sec:1.) in
+  let command = take info in
+  check bool "source uses the existing page.read transport" true
+    (Yojson.Safe.Util.(command.verb_json |> member "verb") = `String "page.read");
+  check bool "only the optional read asks for HTML" true
+    (Yojson.Safe.Util.(command.verb_json |> member "args" |> member "includeHtml") = `Bool true);
+  ignore (Lane.deliver_result ~client_id:info.client_id ~id:command.id
+    ~payload:(`Assoc ["ok", `Bool true; "data", `Assoc ["documentId", `String "document"]]));
+  (match Eio.Promise.await observation with
+   | Ok (Lane.Answered json) ->
+     check string "actual native client is carried with source" (Lane.client_id_to_string info.client_id)
+       Yojson.Safe.Util.(json |> member "data" |> member "clientId" |> to_string)
+   | _ -> fail "idle optional document did not complete");
+  check int "optional waiter was released" 0 (Hashtbl.length client.waiters))
+
 let () = run "browser client routing" ["ownership", [
+  test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;

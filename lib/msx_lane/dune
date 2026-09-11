@@ -3,4 +3,4 @@
 (library
  (name msx_lane)
  (public_name masc.msx_lane)
- (libraries ocaml-msx.msx yojson base64 digestif))
+ (libraries ocaml-msx.msx yojson base64 digestif masc.masc_random_id))

@@ -691,13 +691,31 @@ let known_custom_names =
   @ current_custom_names
 
 let null_custom_names =
-  [ "KEEPER_CONNECTED"; "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  [ "KEEPER_CONNECTED"
   ; "KEEPER_STREAM_MESSAGE_STOP"; "KEEPER_STREAM_PING"
   ]
 
 let validate_custom_value ~name value =
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     Result.map (fun _ -> ()) (decode_acceptance value)
+  else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
+    match value with
+    | `Null -> Ok ()
+    | `Assoc fields ->
+      let has_invalid_fields =
+        List.exists
+          (fun (k, _) -> not (List.mem k [ "runtime_id"; "attempt_index" ]))
+          fields
+      in
+      if has_invalid_fields then
+        Error
+          (Malformed_event
+             "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED has unexpected fields")
+      else Ok ()
+    | _ ->
+      Error
+        (Malformed_event
+           "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null or an object")
   else if List.mem name null_custom_names && value <> `Null
   then
     Error

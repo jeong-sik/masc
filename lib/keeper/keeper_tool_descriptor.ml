@@ -2813,6 +2813,14 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
        "config" "masc_config"
        ~readonly:true
+  (* Optional layers contribute observations; their replies do not gate
+     existing Keeper work or replace the machine/browser owners. *)
+  ; masc_misc_descriptor "lane_attach" "masc_lane_attach" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
+  ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true
+  ; masc_misc_descriptor "lane_detach" "masc_lane_detach" ~readonly:false
+  ; masc_misc_descriptor "lane_evidence" "masc_lane_evidence" ~readonly:false
   (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
      none of these opts into concurrent batches. *)
   ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false

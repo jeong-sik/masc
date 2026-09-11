@@ -29,6 +29,15 @@ type provider_kind = Provider_kind.t =
     helper to avoid the two fields drifting out of sync. *)
 val request_path_default_for_kind : provider_kind -> string
 
+(** Authentication is independent of the inference wire. Vertex uses the
+    Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
+type auth_scheme = Provider_default | Bearer_token
+
+type credential_refresh_error = Credential_unavailable | Invalid_credential_response
+type credential_source =
+  | Static_credential
+  | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -37,6 +46,9 @@ type t =
         known; AGENT_CORE never reconstructs a provider id from URL or model syntax. *)
   ; model_id : string
   ; base_url : string
+  ; credential_source : credential_source
+  ; auth_scheme : auth_scheme
+    (** Credential header contract, independent of request-body wire. *)
   ; api_key : Secret.t
     (** API key / token as an abstract secret.  Never log or serialize
         this field directly; use {!auth_headers_for_config} at HTTP request
@@ -213,6 +225,8 @@ val make
   -> model_id:string
   -> base_url:string
   -> ?provider_id:string
+  -> ?credential_source:credential_source
+  -> ?auth_scheme:auth_scheme
   -> ?api_key:string
   -> ?headers:(string * string) list
   -> ?request_path:string
@@ -481,3 +495,10 @@ val auth_headers_for_kind_and_key
   :  kind:provider_kind
   -> api_key:string
   -> (string * string) list
+
+val resolve_auth_headers : t -> ((string * string) list, string) result
+(** Resolve credentials for a new HTTP request or frozen exact-output preflight.
+    Refresh failures return fixed safe messages; no stale token fallback occurs.
+    Exact-output plans freeze the resolved headers into their fingerprint and
+    do not refresh during execution. After a delay that may outlive a token,
+    prepare a new exact-output plan rather than reuse the old plan. *)

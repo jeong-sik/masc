@@ -150,6 +150,30 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match Tool_schemas_misc.misc_operation_of_tool_name name with
   | None -> None
+  | Some Tool_schemas_misc.Misc_lane_attach ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Attach args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
+  | Some Tool_schemas_misc.Misc_lane_inspect ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Inspect args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
+  | Some Tool_schemas_misc.Misc_lane_observe ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Observe args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
+  | Some Tool_schemas_misc.Misc_lane_slice ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Slice args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
+  | Some Tool_schemas_misc.Misc_lane_detach ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Detach args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
+  | Some Tool_schemas_misc.Misc_lane_evidence ->
+      Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error detail -> Tool_result.make_err ~tool_name:name ~start_time:start ~class_:Tool_result.Runtime_failure detail)
   | Some Tool_schemas_misc.Misc_config ->
       Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_dashboard ->
@@ -223,6 +247,12 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* ================================================================ *)
 
 let is_read_only = function
+  | Tool_schemas_misc.Misc_lane_inspect
+  | Tool_schemas_misc.Misc_lane_slice -> true
+  | Tool_schemas_misc.Misc_lane_attach
+  | Tool_schemas_misc.Misc_lane_observe
+  | Tool_schemas_misc.Misc_lane_detach
+  | Tool_schemas_misc.Misc_lane_evidence -> false
   | Tool_schemas_misc.Misc_dashboard
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help

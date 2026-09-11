@@ -31,6 +31,204 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
+        catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
+                       models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
+        rows = SETUP.antigravity_catalog_rows(catalog)
+        self.assertEqual(rows, [dict(id='exact-model-high', label='Exact model (High)', context=None)])
+        source = dict(choice='antigravity', command='/owned/agy', rows=[], endpoint='', api_key_env='',
+                      credential_file='/private/account', credential_kind='file', account_catalog=rows)
+        observed, _ = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(observed[0]['id'], 'exact-model-high')
+        self.assertIsNone(observed[0]['context'])  # architecture capacity is never substituted
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_antigravity_account_import_keeps_original_and_lists_exact_models(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home, 'workspace')
+            (base / '.masc').mkdir(parents=True, mode=0o700)
+            original = Path(home, '.gemini/antigravity-cli/antigravity-oauth-token')
+            original.parent.mkdir(parents=True)
+            original.write_text('fixture-private-oauth-never-print')
+            original.chmod(0o600)
+            catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
+                           command=dict(name='models', data=dict(models=[dict(id='account-only-id', label='Account only model')])))
+            client = Path(home, 'fake-agy')
+            client.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                              'assert sys.argv[1:] == ["--output-format","json","models"]\n'
+                              'assert os.environ["HOME"] != ' + repr(home) + '\n'
+                              'print(' + repr(json.dumps(catalog)) + ')\n')
+            client.chmod(0o700)
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config')
+            result = subprocess.run([BINARY, 'runtime-antigravity-account', '--base-path', str(base),
+                                     '--cli-path', str(client)], env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertFalse(receipt['invocation_verified'])
+            self.assertEqual(receipt['catalog']['models'][0]['id'], 'account-only-id')
+            selected = Path(receipt['credential_file'])
+            self.assertNotEqual(selected, original)
+            self.assertEqual(selected.read_bytes(), original.read_bytes())
+            self.assertEqual(selected.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(original.read_text(), 'fixture-private-oauth-never-print')
+            self.assertNotIn(original.read_text(), result.stdout + result.stderr)
+    def test_upgrade_selection_uses_reviewed_digest_and_stops_after_failed_file(self):
+        plans = [dict(keeper_name=name, plan=dict(activation_mode='on_demand', source_sha256=name + '-digest'))
+                 for name in ('imp', 'helper', 'third')]
+        with patch.object(SETUP, 'pick', return_value=[0, 1, 2]), \
+                patch.object(SETUP, 'workspace_upgrade_action', side_effect=[True, False]) as apply, \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_workspace_upgrades('/owned/masc', '/workspace', plans)
+        self.assertEqual(apply.call_count, 2)
+        self.assertEqual(apply.call_args_list[0].args[2], ['--apply', 'imp', '--source-sha256', 'imp-digest'])
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_released_configuration_upgrade_and_backup_recovery(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home, 'workspace')
+            keepers = base / '.masc/config/keepers'
+            keepers.mkdir(parents=True)
+            path = keepers / 'imp.toml'
+            original = ('# Preserve this exact prompt.\n[keeper]\nname = "imp"\n'
+                        'instructions = "Remember the user"\nautoboot_enabled = true\n'
+                        'proactive_enabled = false\nsandbox_profile = "microvm"\n'
+                        'microvm_backend = "docker"\n[keeper.tools]\nnative = "read"\n')
+            path.write_text(original)
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config',
+                       MASC_BASE_PATH_LEASE_DIR=home + '/leases')
+            Path(env['MASC_BASE_PATH_LEASE_DIR']).mkdir()
+            def command(*args):
+                return subprocess.run([BINARY, 'workspace-upgrade', '--base-path', str(base), *args],
+                                      env=env, capture_output=True, text=True, timeout=30)
+            listed = command()
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            plan = json.loads(listed.stdout)['keepers'][0]['plan']
+            self.assertEqual(path.read_text(), original)
+            rejected = command('--apply', 'imp', '--source-sha256', 'wrong-reviewed-digest')
+            self.assertEqual(rejected.returncode, 1)
+            self.assertEqual(path.read_text(), original)
+            self.assertFalse((base / '.masc/upgrades').exists())
+            applied = command('--apply', 'imp', '--source-sha256', plan['source_sha256'])
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            backup = Path(json.loads(applied.stdout)['backup_path'])
+            self.assertEqual(backup.read_text(), original)
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            updated = path.read_text()
+            self.assertIn('activation_mode = "on_demand"', updated)
+            backups = json.loads(command().stdout)['backups']
+            self.assertEqual(len(backups), 1)
+            backup_id = backups[0]['backup_id']
+            path.write_text(updated + '# a later user edit\n')
+            self.assertEqual(command('--restore', backup_id).returncode, 1)
+            self.assertTrue(path.read_text().endswith('# a later user edit\n'))
+            path.write_text(updated)
+            restored = command('--restore', backup_id)
+            self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(backup.read_text(), original)
+
+    def test_sandbox_selection_uses_native_backend_arguments(self):
+        catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
+            id='apple_container', state='service_ready', reason='service only', advanced=False,
+            recommended=True, setup_args=['--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container'],
+            capabilities=dict(network_modes=['none', 'inherit', 'policy']))])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pick', return_value=[0]):
+            self.assertEqual(SETUP.select_sandbox('/bin/masc', '/workspace'), [
+                '--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container', '--network-mode', 'inherit'])
+
+    def test_existing_network_policy_is_preserved_unless_explicitly_changed(self):
+        for mode in ('none', 'policy', 'inherit'):
+            catalog = dict(schema='masc.sandbox_readiness.v1', configured_selection=dict(
+                backend='apple_container', network_mode=mode), candidates=[dict(
+                id='apple_container', state='service_ready', reason='service only', advanced=False,
+                recommended=True, setup_args=['--sandbox-profile','microvm','--microvm-backend','apple_container'],
+                capabilities=dict(network_modes=['none','inherit','policy']))])
+            response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+            with self.subTest(mode=mode), patch.object(SETUP.subprocess, 'run', return_value=response), \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+                result = SETUP.select_sandbox('/bin/masc', '/workspace')
+                self.assertNotIn('--network-mode', result)
+        # Open Advanced, select the same backend, explicitly select offline.
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pick', side_effect=[[2], [0], [2]]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_sandbox('/bin/masc', '/workspace')[-2:], ['--network-mode','none'])
+
+    def test_unavailable_sandbox_never_selects_host_or_another_backend(self):
+        catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
+            id='docker', state='missing_prerequisite', reason='Docker is missing', advanced=False,
+            recommended=False, setup_args=['--sandbox-profile', 'docker'],
+            capabilities=dict(network_modes=['none', 'inherit']))])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
+                patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
+        prerequisites.assert_called_once_with('/bin/masc', 'docker')
+
+    def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[
+            dict(id='vendor_guide', label='Official guide', requires_admin=False,
+                 detail='Read the vendor steps', source_url='https://example.org/guide'),
+            dict(id='install', label='Install selected dependency', requires_admin=True,
+                 detail='Install then recheck', source_url='https://example.org/install')])
+        for status, code in [('external_step_pending', 0),
+                             ('commands_completed_recheck_required', 0), ('failed', 1)]:
+            responses = [subprocess.CompletedProcess([], 0, json.dumps(catalog), ''),
+                         subprocess.CompletedProcess([], code, json.dumps(dict(
+                             schema='masc.prerequisite_action_result.v1', status=status,
+                             readiness='not_checked')), '')]
+            with self.subTest(status=status), patch.object(SETUP.subprocess, 'run', side_effect=responses) as run, \
+                    patch.object(SETUP, 'pick', return_value=[1]), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'docker'))
+            self.assertEqual(run.call_args.args[0], ['/owned/masc', 'prerequisite-actions', 'docker', '--execute', 'install'])
+            self.assertNotIn('stdin', run.call_args.kwargs)  # inherit the operator's terminal
+            self.assertNotIn('stderr', run.call_args.kwargs)
+            if status == 'external_step_pending':
+                self.assertIn('Complete the vendor installation window', output.getvalue())
+            elif status == 'failed':
+                self.assertIn('did not finish', output.getvalue())
+
+    def test_prerequisite_failure_keeps_safe_reason_visible(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[dict(
+            id='install', label='Install', requires_admin=True,
+            detail='Verify package', source_url='https://example.org/install')])
+        for reason, expected in [('Package publisher mismatch\x1b[2J', 'Package publisher mismatch'),
+                                 (None, 'The selected step did not finish')]:
+            receipt = dict(schema='masc.prerequisite_action_result.v1', status='failed',
+                           readiness='not_checked', reason=reason)
+            responses = [subprocess.CompletedProcess([], 0, json.dumps(catalog)),
+                         subprocess.CompletedProcess([], 1, json.dumps(receipt))]
+            with self.subTest(reason=reason), patch.object(SETUP.subprocess, 'run', side_effect=responses), \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'apple_container'))
+            self.assertIn(expected, output.getvalue())
+            self.assertNotIn('\x1b', output.getvalue())
+
+    def test_prerequisite_refresh_and_back_never_execute(self):
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        for choice, expected in [(0, True), (1, False)]:
+            with self.subTest(choice=choice), patch.object(SETUP.subprocess, 'run', return_value=response) as run, \
+                    patch.object(SETUP, 'pick', return_value=[choice]):
+                self.assertEqual(SETUP.prerequisite_menu('/owned/masc', 'docker'), expected)
+            self.assertEqual(run.call_count, 1)
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_prerequisite_listing_and_unknown_action_have_no_install_effect(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config')
+            listed = subprocess.run([BINARY, 'prerequisite-actions', 'codex'], env=env,
+                                    capture_output=True, text=True, check=True)
+            catalog = json.loads(listed.stdout)
+            self.assertEqual(catalog['schema'], 'masc.prerequisite_actions.v1')
+            self.assertTrue(catalog['actions'])
+            rejected = subprocess.run([BINARY, 'prerequisite-actions', 'codex', '--execute', 'not-an-action'],
+                                      env=env, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertEqual(list(Path(home).iterdir()), [])
+
     @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
     def test_native_setup_embeds_journey_and_new_home_cancels_without_writes(self):
         with tempfile.TemporaryDirectory() as home:
@@ -99,6 +297,7 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
+                    patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
                     patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
                     contextlib.redirect_stderr(io.StringIO()):
@@ -133,6 +332,7 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
+                patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \
                 patch.object(SETUP.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 1)]), \
                 contextlib.redirect_stderr(io.StringIO()):

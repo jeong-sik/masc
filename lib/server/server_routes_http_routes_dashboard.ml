@@ -535,21 +535,31 @@ type runtime_route_lane =
       (** A [\[runtime.lanes."<id>"\]] failover ladder. The id is a runtime id:
           a lane shadows the runtime it is named after, which is how an
           assignment reaches it. *)
+  | Runtime_exact_lane of string
+      (** A [\[runtime.exact_output_lanes."<name>"\]] walk order, e.g.
+          verifier_exact or librarian_exact. The "exact/" prefix keeps the
+          name space disjoint from conversation-lane runtime ids. *)
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
+  | Runtime_exact_lane name -> "exact/" ^ name
 
 (* An unrecognised name used to be rejected outright, which left the Runtime
    screen's failover picker with nowhere to post: it names the lane under the
    cursor, and those are runtime ids. A name is admitted when the runtime
    resolver knows it — [resolve_assignment] answers [`Missing] for an id that
    is neither a declared lane nor a configured runtime — so a typo is still
-   refused, and it is refused with the name it could not find. *)
+   refused, and it is refused with the name it could not find. An exact-output
+   lane name is not a runtime id and never reaches that resolver: the prefix
+   names which name space the rest of the string belongs to, and the setter's
+   own validation rejects a name the loaded config does not declare. *)
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "media_failover" -> Ok Runtime_media_failover
+  | lane when String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/" ->
+    Ok (Runtime_exact_lane (String.sub lane 6 (String.length lane - 6)))
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -610,7 +620,7 @@ let parse_runtime_route_body body_str =
          | Error _ as err -> err
          | Ok parsed_lane ->
            (match parsed_lane with
-            | Runtime_media_failover ->
+            | Runtime_media_failover | Runtime_exact_lane _ ->
               (match required_string_array_field json "runtime_ids" with
                | Error _ as err -> err
                | Ok runtime_ids ->
@@ -1605,6 +1615,98 @@ let add_routes ~sw ~clock router =
                     ])
                  reqd
            end) request reqd)
+  |> Http.Router.get "/api/v1/setup/inventory" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let base_path=(Mcp_server.workspace_config state).base_path in
+           match Runtime_setup_batch.observe_inventory ~base_path with
+           | Ok (revision,observation) ->
+             (match Runtime_toml.parse_string observation.source_text with
+              | Error _ -> Http.Response.json_value ~status:`Bad_request ~request:req
+                  (`Assoc ["error", `String "Runtime configuration needs correction."]) reqd
+              | Ok config -> Http.Response.json_value ~request:req
+                  (match Runtime_wizard_inventory.to_json config with
+                   | `Assoc fields -> `Assoc (("setup_revision",`String (Runtime_setup_batch.revision_to_string revision))
+                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))::fields)
+                   | value -> value) reqd)
+           | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
+  |> Http.Router.post "/api/v1/setup/models" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match Eio_context.get_net_opt () with
+               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | Some net ->
+                 (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+                  | None -> Error Server_runtime_setup_actions.Invalid_request
+                  | Some json -> Server_runtime_setup_actions.discover ~binary:Sys.executable_name ~sw ~net
+                      ~base_path:(Mcp_server.workspace_config state).base_path json) in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/antigravity" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.import_account ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/context" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match Eio_context.get_net_opt () with
+               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | Some net ->
+                 (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+                  | None -> Error Server_runtime_setup_actions.Invalid_request
+                  | Some json -> Server_runtime_setup_actions.context ~binary:Sys.executable_name ~net
+                      ~base_path:(Mcp_server.workspace_config state).base_path json) in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/connections" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.save ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/credential" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let reject message = Http.Response.json_value ~status:`Bad_request ~request:req
+               (`Assoc ["ok", `Bool false; "error", `String message]) reqd in
+             let decoded = try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None in
+             match decoded with
+             | Some (`Assoc fields) when List.length fields = 3 ->
+               (match List.assoc_opt "provider_id" fields, List.assoc_opt "secret" fields, List.assoc_opt "source_revision" fields, Runtime.config_path () with
+                | Some (`String provider_id), Some (`String secret), Some (`String expected_source_revision), Some runtime_config_path ->
+                  (match Runtime_setup_credentials.save ~secret () with
+                   | Error error -> reject (Runtime_setup_credentials.error_message error)
+                   | Ok pending -> Eio.Switch.run (fun sw ->
+                     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted pending);
+                     match Runtime_setup_credentials.apply_to_provider ~runtime_config_path ~provider_id ~expected_source_revision pending with
+                     | Error error -> reject (Runtime_setup_credentials.error_message error)
+                     | Ok _ -> Http.Response.json_value ~request:req
+                         (`Assoc ["ok", `Bool true; "configured", `Bool true;
+                                  "verification", `String "not_run"]) reqd))
+                | _ -> reject "Select a configured provider and enter its API key.")
+             | _ -> reject "Expected a provider selection and API key.")) request reqd)
   |> Http.Router.get "/api/v1/setup/status" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -2095,6 +2197,17 @@ let add_routes ~sw ~clock router =
                       ])
                     reqd)))
          request reqd)
+  |> Http.Router.post "/api/v1/runtime/setup/resume" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           match Server_model_setup_resume.request
+             ~base_path:(Mcp_server.workspace_config state).base_path with
+           | Error error -> respond_dashboard_error ~status:`Service_unavailable
+               ~request:req reqd (Server_model_setup_resume.error_message error)
+           | Ok authority_available -> respond_json_value_with_cors req reqd
+               (`Assoc ["runtime_ready", `Bool true;
+                 "exact_output_authority_available", `Bool authority_available;
+                 "model_setup", Runtime_startup_state.to_json ()])) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
@@ -2194,6 +2307,26 @@ let add_routes ~sw ~clock router =
                     ~operation:
                       (Runtime_config_routing_list
                          (Runtime_named_lane lane_id, runtime_ids))
+                    ~receipt req reqd)
+             | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd
+                 "exact-output lane runtime_ids required"
+             | Ok (Runtime_route_runtime_ids (Runtime_exact_lane lane_name, slots))
+               ->
+               (match Runtime.set_exact_output_lane_slots ~lane_name ~slots () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list
+                         (Runtime_exact_lane lane_name, slots))
+                    ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list
+                         (Runtime_exact_lane lane_name, slots))
                     ~receipt req reqd)
              | Ok (Runtime_route_runtime_ids (lane, _)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd

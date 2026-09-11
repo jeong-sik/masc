@@ -21,13 +21,14 @@ class NativeDiscovery(unittest.TestCase):
         self.home = tempfile.TemporaryDirectory()
         self.addCleanup(self.home.cleanup)
         self.calls = []
+        self.posts = []
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 owner.calls.append((self.path, {key.lower(): value for key, value in self.headers.items()}))
                 code, headers, body = owner.respond(self.path)
-                payload = json.dumps(body).encode()
+                payload = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(code)
                 for key, value in headers.items():
                     self.send_header(key, value)
@@ -38,6 +39,16 @@ class NativeDiscovery(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                owner.posts.append((self.path, {key.lower(): value for key, value in self.headers.items()}, body))
+                code, payload = owner.respond_post(self.path, body)
+                payload = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+                self.send_response(code)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
         self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -45,6 +56,7 @@ class NativeDiscovery(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         self.endpoint = 'http://127.0.0.1:' + str(self.server.server_port)
         self.respond = lambda path: (200, {}, {'data': []})
+        self.respond_post = lambda path, body: (200, {})
 
     def invoke(self, **fields):
         spec = Path(self.home.name, 'connection.json')
@@ -106,6 +118,101 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(self.calls[0][0], '/models')
         self.assertEqual(self.calls[0][1].get('authorization'), 'Bearer secret-probe-key')
         self.assertNotIn('secret-probe-key', result.stdout + result.stderr)
+
+    def serving_context(self, choice, model='selected-model', load=False):
+        key = Path(self.home.name, 'serving-key')
+        key.write_text('private-serving-key')
+        key.chmod(0o600)
+        spec = Path(self.home.name, 'serving.json')
+        spec.write_text(json.dumps(dict(choice=choice, endpoint=self.endpoint,
+                                        credential_file=str(key))))
+        return subprocess.run([BINARY, 'runtime-serving-context', '--spec', str(spec), '--model', model]
+                              + (['--load'] if load else []), capture_output=True, text=True, timeout=30)
+
+    def test_ollama_selected_model_uses_running_window_and_private_credential(self):
+        self.respond_post = lambda path, body: (200, dict(
+            capabilities=['completion', 'tools'], parameters='', model_info={'qwen.context_length': 999999})
+            if path == '/api/show' else dict(done=True))
+        self.respond = lambda path: (200, {}, dict(models=[dict(name='selected-model', context_length=16384)]))
+        result = self.serving_context('ollama', load=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['context'], 16384)
+        self.assertEqual(data['context_source'], 'running_model')
+        self.assertEqual([path for path, _, _ in self.posts], ['/api/show', '/api/generate'])
+        for _, headers, body in self.posts:
+            self.assertEqual(headers['authorization'], 'Bearer private-serving-key')
+            self.assertEqual(body['model'], 'selected-model')
+        self.assertEqual(self.calls[0][1]['authorization'], 'Bearer private-serving-key')
+        self.assertNotIn('private-serving-key', result.stdout + result.stderr)
+
+    def test_ollama_architecture_limit_is_not_a_serving_window(self):
+        self.respond_post = lambda path, body: (200, dict(parameters='', model_info={'qwen.context_length': 999999}))
+        self.respond = lambda path: (200, {}, dict(models=[]))
+        result = self.serving_context('ollama')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['context'])
+        self.assertEqual([path for path, _, _ in self.posts], ['/api/show'])
+
+    def test_ollama_invalid_running_metadata_does_not_fall_back_to_configured_window(self):
+        self.respond_post = lambda path, body: (200, dict(parameters='num_ctx 8192'))
+        responses = [dict(models=[dict(name='selected-model', context_length=value)])
+                     for value in (None, 0, -1, '16384', True)]
+        responses += [dict(models=[dict(name='selected-model', context_length=8192),
+                                   dict(name='selected-model', context_length=16384)]),
+                      dict(models=[dict(name='selected-model', context_length=8192)] * 2),
+                      dict(models=[dict(name='selected-model', model='different', context_length=8192)]),
+                      b'{"models":[{"name":"selected-model","context_length":8192,"context_length":16384}]}',
+                      b'{"models":[],"models":[{"name":"selected-model","context_length":16384}]}']
+        for response in responses:
+            with self.subTest(response=response):
+                self.respond = lambda path: (200, {}, response)
+                result = self.serving_context('ollama')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+
+    def test_ollama_only_absent_running_metadata_uses_explicit_configuration(self):
+        self.respond_post = lambda path, body: (200, dict(parameters='num_ctx 8192'))
+        for rows in ([], [dict(name='selected-model')]):
+            self.respond = lambda path: (200, {}, dict(models=rows))
+            result = self.serving_context('ollama')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['context'], 8192)
+            self.assertEqual(json.loads(result.stdout)['context_source'], 'configured_model')
+
+    def test_llama_invalid_or_duplicate_props_are_not_missing_metadata(self):
+        props = [dict(default_generation_settings=dict(n_ctx=value))
+                 for value in (None, 0, -1, '32768', True)]
+        props += [dict(default_generation_settings=None),
+                  b'{"default_generation_settings":{"n_ctx":8192,"n_ctx":32768}}',
+                  b'{"default_generation_settings":{},"default_generation_settings":{"n_ctx":32768}}']
+        for response in props:
+            with self.subTest(response=response):
+                self.respond = lambda path: (200, {}, dict(data=[dict(id='selected-model')])
+                                             if path == '/models' else response)
+                result = self.serving_context('llama_cpp')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+        self.respond = lambda path: (200, {}, dict(data=[dict(id='selected-model')])
+                                     if path == '/models' else dict(default_generation_settings={}))
+        result = self.serving_context('llama_cpp')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['context'])
+
+    def test_llama_router_context_is_not_assigned_to_a_different_model(self):
+        self.respond = lambda path: (200, {}, dict(data=[dict(id='one'), dict(id='two')]))
+        result = self.serving_context('llama_cpp', model='one')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['context'])
+        self.assertEqual([path for path, _ in self.calls], ['/models'])
+
+    def test_llama_single_served_model_reads_its_actual_n_ctx(self):
+        self.respond = lambda path: (200, {}, dict(data=[dict(id='selected-model')]) if path == '/models'
+                                     else dict(default_generation_settings=dict(n_ctx=32768)))
+        result = self.serving_context('llama_cpp')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['context'], 32768)
+        self.assertEqual([path for path, _ in self.calls], ['/models', '/props'])
 
     def test_messages_auth_and_all_pages_use_native_api(self):
         key = Path(self.home.name, 'key')

@@ -12,8 +12,12 @@ import { useFocusScope } from './use-focus-scope'
 // Flush Preact's useEffect macrotasks. Preact 10 schedules effects via
 // the host's queueMicrotask + a follow-up timer in happy-dom; a single
 // setTimeout wait covers both phases reliably.
-const flushUi = (): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, 20))
+// The focus move lands after the render, so the assertion waits for the id it
+// expects rather than for a duration. A fixed window is a bet on how much CPU
+// the worker gets: 20ms held on an idle machine and lost one run in three under
+// the full parallel suite (#35032).
+const expectFocus = (id: string): Promise<void> =>
+  vi.waitFor(() => { expect(document.activeElement?.id).toBe(id) })
 
 let container: HTMLElement
 let outsideButton: HTMLButtonElement
@@ -54,16 +58,14 @@ describe('useFocusScope', () => {
   it('activates on mount: focus moves to first tabbable inside the container', async () => {
     render(html`<${Probe} />`, container)
     // Allow Preact's effect to flush.
-    await flushUi()
-    expect(document.activeElement?.id).toBe('b1')
+    await expectFocus('b1')
   })
 
   it('restores focus on unmount', async () => {
     outsideButton.focus()
     expect(document.activeElement?.id).toBe('outside')
     render(html`<${Probe} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('b1')
+    await expectFocus('b1')
 
     render(null, container)
     expect(document.activeElement?.id).toBe('outside')
@@ -72,35 +74,34 @@ describe('useFocusScope', () => {
   it('active=false at mount does not move focus', async () => {
     outsideButton.focus()
     render(html`<${Probe} active=${false} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('outside')
+    await expectFocus('outside')
   })
 
   it('toggling active false → true activates the scope', async () => {
     outsideButton.focus()
     render(html`<${Probe} active=${false} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('outside')
+    await expectFocus('outside')
 
     render(html`<${Probe} active=${true} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('b1')
+    await expectFocus('b1')
   })
 
   it('toggling active true → false deactivates and restores focus', async () => {
     outsideButton.focus()
     render(html`<${Probe} active=${true} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('b1')
+    await expectFocus('b1')
 
     render(html`<${Probe} active=${false} />`, container)
-    await flushUi()
-    expect(document.activeElement?.id).toBe('outside')
+    await expectFocus('outside')
   })
 
   it('Tab cycles inside the container while active (loop default true)', async () => {
     render(html`<${Probe} />`, container)
-    await flushUi()
+    // Waiting for the scope element is not enough: it exists as soon as render
+    // returns, while the Tab handler arrives with the activation effect. The
+    // effect's own observable is the initial focus move, so that is what this
+    // waits on -- which is what the 20ms window was buying.
+    await expectFocus('b1')
     const scopeEl = container.querySelector('[data-testid="scope"]')! as HTMLElement
     const last = scopeEl.querySelector('#b2') as HTMLButtonElement
     last.focus()
@@ -127,8 +128,7 @@ describe('useFocusScope', () => {
       `
     }
     render(html`<${Capturing} />`, container)
-    await flushUi()
-    expect(captured).not.toBeNull()
+    await vi.waitFor(() => { expect(captured).not.toBeNull() })
     expect(typeof captured!.scope.focusLast).toBe('function')
     captured!.scope.focusLast()
     expect(document.activeElement?.id).toBe('x2')

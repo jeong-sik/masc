@@ -51,6 +51,7 @@ import {
   isRemoteAccess,
 } from '../api/core'
 import type { DashboardConfigResolutionItem } from '../types'
+import { OnboardingSettings } from './onboarding-settings'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
@@ -1559,6 +1560,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtime' && html`
+              <${OnboardingSettings} />
               <div class="settings-runtime-live" data-testid="runtime-settings-live">
                 <div class="settings-runtime-live-h">
                   <div>

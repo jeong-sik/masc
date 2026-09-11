@@ -50,6 +50,10 @@ type config =
         turn's text when the field is present. *)
   }
 
+val official_client_environment : ?home_dir:string -> unit -> string array
+(** Provider-owned account environment with an optional isolated HOME. This
+    excludes API-key/provider-routing variables and user tool configuration. *)
+
 val default_config : cwd:string -> model:string -> config
 
 type conversation_mode =

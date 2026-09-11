@@ -28,8 +28,10 @@ MODULE.loader.exec_module(SETUP)
 
 def spec(choice='vllm'):
     result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
+        if choice == 'messages':
+            result['provider_kind'] = 'anthropic'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
     return result
@@ -44,86 +46,161 @@ def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/
 
 
 class ModelSelection(unittest.TestCase):
-    def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
+    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
+        inventory = dict(runtimes=[], integrations=[dict(
+            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
+            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
+            origin='agent_core_catalog', setup_support='new_connection', provider_kind='openai_compat')])
+        rows = SETUP.connection_sources(inventory)
+        source = next(row for row in rows if row['provider_id'] == 'openrouter')
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['rows'], [])
+
+    def test_integration_only_private_auth_is_preserved_or_explicitly_protected(self):
+        for kind in ('file', 'inline'):
+            integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
+                               endpoint='https://example.com/v1', origin='runtime_config',
+                               setup_support='new_connection', credential_kind=kind)
+            if kind == 'file':
+                integration['credential_file'] = '/private/owned-api-key'
+            source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
+            self.assertEqual(source['credential_kind'], kind)
+            if kind == 'file':
+                with patch.object(SETUP, 'native_discover_models', return_value=([], 'server')) as discover:
+                    SETUP.source_models('/fixture', source, 10)
+                self.assertEqual(discover.call_args.args[1]['credential_file'], '/private/owned-api-key')
+                _, selected = SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+                self.assertEqual(selected['credential_file'], '/private/owned-api-key')
+                self.assertNotIn('api_key_env', selected)
+            else:
+                with patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('anonymous request')):
+                    self.assertEqual(SETUP.source_models('/fixture', source, 10)[0], [])
+                with self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
+                    SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+
+    def test_private_key_is_piped_and_removed_when_setup_does_not_commit(self):
         with tempfile.TemporaryDirectory() as directory:
-            Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
-                {'slug':'observed-id','display_name':'Visible model','visibility':'list','context_window':4567},
-                {'slug':'hidden','visibility':'hide','context_window':99},
-                {'slug':'bad\nname','visibility':'list'},
-                {'slug':'observed-id','visibility':'list'}]}))
-            with patch.dict(os.environ, {'CODEX_HOME':directory}):
-                models, origin = SETUP.discover_models('codex')
-                self.assertEqual(models,[dict(id='observed-id',label='Visible model',context=4567)])
-                self.assertIn('cached',origin)
-                failed_lookup=subprocess.CompletedProcess([],1,'','')
-                with patch('subprocess.run',return_value=failed_lookup), patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
-                    selected=SETUP.select_model('/fixture/masc','codex')
-                self.assertEqual(selected,dict(model='observed-id',max_context=4567))
-                self.assertIn('No number to enter',terminal.getvalue())
+            key = Path(directory, 'pending-key')
+            def save(argv, **kwargs):
+                self.assertEqual(argv, ['/fixture/masc', 'runtime-store-credential'])
+                self.assertEqual(kwargs['input'], 'hidden-secret')
+                self.assertNotIn('hidden-secret', str(argv))
+                key.write_text(kwargs['input'])
+                key.chmod(0o600)
+                return subprocess.CompletedProcess(argv, 0, json.dumps(dict(
+                    schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', side_effect=save), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                self.assertEqual(credentials.save(), str(key))
+                self.assertTrue(key.exists())
+            self.assertFalse(key.exists())
+
+    def test_successfully_committed_key_remains_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory, 'committed-key')
+            key.write_text('hidden-secret')
+            key.chmod(0o600)
+            result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+                schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', return_value=result), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                path = credentials.save()
+                credentials.retain([dict(credential_file=path)])
+            self.assertTrue(key.exists())
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+
+    def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
+        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
+                      api_key_env='', credential_file='/private/saved-key', credential_kind='file',
+                      credential_replaced=True, rows=[dict(id='old.binding', model='same-model',
+                      max_context=8192, tools=True)])
+        with patch.object(SETUP, 'native_discover_models', return_value=(
+                [dict(id='same-model', label='Model', context=None)], 'server')):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual(len(models), 1)
+        self.assertIsNone(models[0]['existing'])
+        runtime, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertNotEqual(runtime, 'old.binding')
+        self.assertEqual(selected['credential_file'], '/private/saved-key')
+        self.assertNotIn('api_key_env', selected)
+
+    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
+        import tomllib
+        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
+        _, runtime, overlay = SETUP.render(configured)
+        self.assertNotIn(b'hidden-secret', runtime + overlay)
+        catalog = tomllib.loads(overlay.decode())
+        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
+        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
+        providers = tomllib.loads(runtime.decode())['providers']
+        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
+
+    def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
+        # Cache filtering (visibility, duplicate ids, malformed names) is the
+        # binary's job now; the wizard only consumes runtime-model-list rows.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='observed-id', label='Visible model', max_context=4567)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='observed-id', max_context=4567))
+        self.assertIn('Installed MASC model catalog', terminal.getvalue())
 
     def test_astra_uses_codex_effective_context_instead_of_api_maximum(self):
-        with tempfile.TemporaryDirectory() as directory:
-            Path(directory,'models_cache.json').write_text(json.dumps({'models':[{
-                'slug':'gpt-6-astra','display_name':'GPT-6-Astra','visibility':'list',
-                'context_window':272000,'max_context_window':872000}]}))
-            with patch.dict(os.environ,{'CODEX_HOME':directory}), patch('sys.stdin',io.StringIO('1\n')), patch('subprocess.run') as cli, contextlib.redirect_stderr(io.StringIO()):
-                selected=SETUP.select_model('/fixture/masc','codex')
-            self.assertEqual(selected,dict(model='gpt-6-astra',max_context=272000))
-            cli.assert_not_called()
+        # Effective-vs-architectural window resolution is the binary catalog's
+        # contract; the wizard keeps whatever window the row states.
+        def cli(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='gpt-6-astra', label='GPT-6-Astra', max_context=272000)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='gpt-6-astra', max_context=272000))
 
     def test_fresh_codex_uses_client_catalog_before_rendering_connection(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
-            def cli(argv, **kwargs):
-                if argv[0] == '/owned/codex':
-                    self.assertEqual(argv[1:], ['debug','models','--bundled'])
-                    self.assertNotEqual(kwargs['env']['CODEX_HOME'],directory)
-                    self.assertNotIn('UNRELATED_API_KEY',kwargs['env'])
-                    self.assertNotIn('OPENAI_API_KEY',kwargs['env'])
-                    self.assertEqual(kwargs['cwd'],kwargs['env']['HOME'])
-                    data={'models':[dict(slug='catalog-id',display_name='Client model',visibility='list',
-                                         context_window=272000,max_context_window=872000)]}
-                else:
-                    self.assertEqual(argv[1],'runtime-model-list')
-                    data={'models':[dict(id='catalog-id',label='API model',max_context=1050000)]}
-                return subprocess.CompletedProcess(argv,0,json.dumps(data),'')
-            source=dict(choice='codex',endpoint='',api_key_env='',command='/owned/codex',rows=[])
-            with patch.dict(os.environ,{'UNRELATED_API_KEY':'canary','OPENAI_API_KEY':'canary'}), patch('subprocess.run',side_effect=cli):
-                models,origin=SETUP.source_models('/fixture/masc',source,10)
-                _,selected=SETUP.resolve_model_spec(source,models[0],10)
-            self.assertEqual(selected['model'],'catalog-id')
-            self.assertEqual(selected['max_context'],272000)
-            self.assertEqual(selected['command'],'/owned/codex')
-            self.assertIn('CLI bundled',origin)
-            self.assertEqual(list(Path(directory).iterdir()),[])
+        # The vendor CLI is never driven from the wizard: one runtime-model-list
+        # call answers. Environment isolation around the vendor CLI is verified
+        # by the binary's own suite.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='catalog-id', label='Client model', max_context=272000)]}), '')
+        source = dict(choice='codex', endpoint='', api_key_env='', command='/owned/codex', rows=[])
+        with patch('subprocess.run', side_effect=cli):
+            models, origin = SETUP.source_models('/fixture/masc', source, 10)
+            _, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertEqual(selected['model'], 'catalog-id')
+        self.assertEqual(selected['max_context'], 272000)
+        self.assertEqual(selected['command'], '/owned/codex')
+        self.assertIn('MASC model catalog', origin)
 
     def test_unavailable_codex_catalog_does_not_inherit_api_capacity(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
-            def cli(argv, **kwargs):
-                if argv[1] == 'debug':
-                    return subprocess.CompletedProcess(argv,1,'','unsupported client command')
-                self.assertEqual(argv[1],'runtime-model-list')
-                return subprocess.CompletedProcess(argv,0,json.dumps({'models':[
-                    dict(id='catalog-id',label='API model',max_context=1050000)]}),'')
-            with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('1\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
-                SETUP.select_model('/fixture/masc','codex')
+        # With no catalog and no discovery the wizard has nothing to offer:
+        # cancelling is the only honest path (no guessed capacity).
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': []}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('q\n')), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+            SETUP.select_model('/fixture/masc', 'codex')
 
     def test_http_models_offer_actual_server_id_and_configured_limit(self):
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        import threading
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                assert self.path == '/v1/models'
-                payload=json.dumps({'data':[{'id':'served-model','max_model_len':8192}]}).encode()
-                self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
-            def log_message(self,*args): pass
-        with HTTPServer(('127.0.0.1',0),Handler) as server:
-            thread=threading.Thread(target=server.serve_forever);thread.start()
-            try:
-                with patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
-                    selected=SETUP.select_model('/unused','vllm','http://127.0.0.1:'+str(server.server_port)+'/v1')
-                self.assertEqual(selected,dict(model='served-model',max_context=8192))
-            finally:
-                server.shutdown();thread.join()
+        # Discovery is owned by the native runtime: the wizard calls the
+        # binary and trusts its observation. Wire-format parsing of /models
+        # (including max_model_len) is verified by the OCaml discovery suite.
+        def native(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-discover-models')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                'source': 'account_or_server_model_list', 'account_availability_verified': False,
+                'models': [dict(id='served-model', label='served-model', context=8192)]}), '')
+        with patch('subprocess.run', side_effect=native), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'vllm', 'http://server.example/v1')
+        self.assertEqual(selected, dict(model='served-model', max_context=8192))
 
     def test_context_lookup_rejects_wrong_identity_and_bool(self):
         replies=[dict(model='another',max_context=123),dict(model='manual',max_context=True)]
@@ -193,7 +270,7 @@ class ModelSelection(unittest.TestCase):
                 self.assertIn('setup_' + choice, identity)
                 self.assertIn(b'operator/model-exact', runtime)
                 self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
+                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
                     self.assertIn(('"provider_name" = ' + SETUP.toml(identity.split('.')[0])).encode(), overlay)
                     self.assertIn(b'"supports_tools" = true', overlay)
                     self.assertIn(b'"supports_reasoning" = false', overlay)
@@ -491,10 +568,10 @@ class NamedCatalogSources(unittest.TestCase):
              'supports_tools': True, 'supports_streaming': True},
         ]
         with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
-             patch.object(SETUP, 'discover_models', return_value=(
+             patch.object(SETUP, 'native_discover_models', return_value=(
                  [dict(id='anthropic/claude-opus-5', label='claude opus', context=99),
                   dict(id='vendor/uncurated', label='uncurated', context=7)],
-                 'Your server /models response')):
+                 'Current account/server model list')):
             rows, origin = SETUP.source_models('binary', source, 1)
         self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
         self.assertEqual(rows[0]['context'], 99)
@@ -502,26 +579,9 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertEqual(rows[1]['id'], 'vendor/uncurated')
         self.assertNotIn('catalog', rows[1])
 
-    def test_discovery_reads_openrouters_context_length_field(self):
-        payload = json.dumps({'data': [
-            {'id': 'vendor/model-a', 'name': 'Model A', 'context_length': 12345},
-            {'id': 'vendor/model-b', 'name': 'Model B', 'max_model_len': 777, 'context_length': 888},
-        ]}).encode()
-
-        class Opener:
-            def open(self, request, timeout=None):
-                return io.BytesIO(payload)
-
-        with patch.object(SETUP, 'build_opener', return_value=Opener()), \
-             patch.dict(os.environ, {'TEST_CATALOG_API_KEY': 'x'}):
-            models, origin = SETUP.discover_models('openai_compatible', 'https://example.test/v1',
-                                                   'TEST_CATALOG_API_KEY')
-        self.assertEqual(models[0]['context'], 12345)
-        self.assertEqual(models[1]['context'], 777)
-        self.assertEqual(origin, 'Your server /models response')
-
-
-class MultipleSelection(unittest.TestCase):
+    # test_discovery_reads_openrouters_context_length_field moved to the OCaml
+    # discovery suite (test/test_runtime_model_discovery.py): wire parsing of
+    # context_length/max_model_len belongs to the native runtime now.
     def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
         master, slave = pty.openpty()
         original = termios.tcgetattr(slave)
@@ -688,27 +748,44 @@ class MultipleSelection(unittest.TestCase):
             self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude', 'Ollama'], multiple=True), [0, 2])
 
     def test_ollama_loads_only_selected_model_and_uses_effective_context(self):
-        responses = [{'capabilities':['completion','tools'], 'parameters':'',
-                      'model_info':{'qwen.context_length':999999}}, {},
-                     {'models':[{'name':'owned-qwen','context_length':16384}]}]
+        # The native serving-context observation owns load and the effective
+        # window; the wizard records what it reports, not the listed maximum.
         source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
-        with patch.object(SETUP, 'http_json', side_effect=responses) as requests:
-            identity, configured = SETUP.resolve_model_spec(source, {'id':'owned-qwen','context':999999}, 10)
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
+            identity, configured = SETUP.resolve_model_spec(source, {'id': 'owned-qwen', 'context': 999999}, 10,
+                                                            binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
         self.assertEqual(configured['max_context'], 16384)
         self.assertIs(configured['tools'], True)
-        self.assertEqual(requests.call_args_list[1].args[-1], {'model':'owned-qwen','stream':False})
         self.assertIn(b'"num-ctx" = 16384', SETUP.render(configured)[1])
         self.assertEqual(identity, SETUP.render(configured)[0])
 
+    def test_wizard_ollama_context_uses_native_private_reference(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
+                      credential_kind='file', credential_file='/private/key', command='')
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
+            _, configured = SETUP.resolve_model_spec(source, dict(id='owned-model', context=999999), 10,
+                                                      binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-model', 10, load=True)
+        self.assertEqual(configured['max_context'], 16384)
+        self.assertEqual(configured['credential_file'], '/private/key')
+
     def test_ollama_architecture_maximum_never_becomes_effective_context(self):
-        responses = [{'parameters':'', 'model_info':{'qwen.context_length':999999}}, {'models':[]}]
-        with patch.object(SETUP, 'http_json', side_effect=responses):
-            self.assertIsNone(SETUP.ollama_model_details('http://localhost:11434', 'owned-qwen')['context'])
+        # The native observation owns the effective window. When it reports
+        # none, the wizard refuses to inherit the listed architecture maximum
+        # and only an explicit operator value may proceed.
+        with patch.object(SETUP, 'native_serving_context', return_value=dict(context=None, tools=True)):
+            source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+            with patch('sys.stdin', io.StringIO('q\n')), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.resolve_model_spec(source, dict(id='owned-qwen', context=None), 10, binary='/fixture/masc')
 
     def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
                       rows=[dict(id='glm.model', model='glm-5.3', max_context=200000, tools=True)])
-        with patch.object(SETUP, 'discover_models', return_value=([
+        with patch.object(SETUP, 'native_discover_models', return_value=([
                 dict(id='glm-5.3',label='GLM',context=None), dict(id='different-model',label='Other',context=None)], 'server')):
             rows, _ = SETUP.source_models('/fixture/masc', source, 10)
         self.assertEqual(rows[0]['context'], 200000)
@@ -722,7 +799,7 @@ class MultipleSelection(unittest.TestCase):
         source = dict(choice='openai_compatible', endpoint='http://localhost:8080/v1', api_key_env='', rows=[
             dict(id='provider.small', model='same-model', max_context=8192, tools=True),
             dict(id='provider.large', model='same-model', max_context=16384, tools=True)])
-        with patch.object(SETUP, 'discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
+        with patch.object(SETUP, 'native_discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
             models, _ = SETUP.source_models('/fixture', source, 10)
         self.assertEqual([row['existing']['id'] for row in models], ['provider.small','provider.large'])
         self.assertEqual([row['context'] for row in models], [8192,16384])

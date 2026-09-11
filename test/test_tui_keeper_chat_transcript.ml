@@ -613,22 +613,22 @@ let test_run_failure_and_finish_set_the_phase () =
    moments apart. A turn still working has no far end to name. *)
 let test_settled_at_takes_the_first_end_of_turn_delta () =
   let settled = fresh () in
-  check (option float) "a working turn has not settled" None
+  check (option (float 0.001)) "a working turn has not settled" None
     (Transcript.settled_at settled);
   feed ~now:(origin +. 120.) settled
     [ Live.Run_started; Live.Run_finished ];
-  check (option float) "RUN_FINISHED stamps the settle instant"
+  check (option (float 0.001)) "RUN_FINISHED stamps the settle instant"
     (Some (origin +. 120.))
     (Transcript.settled_at settled);
   feed ~now:(origin +. 125.) settled [ reply_details () ];
-  check (option float) "a later reply does not move it" (Some (origin +. 120.))
+  check (option (float 0.001)) "a later reply does not move it" (Some (origin +. 120.))
     (Transcript.settled_at settled)
 
 let test_settled_at_keeps_a_failure_instant_too () =
   let failed = fresh () in
   feed ~now:(origin +. 45.) failed
     [ Live.Run_started; Live.Run_failed { message = "provider 429" } ];
-  check (option float) "a failed turn settled when it failed"
+  check (option (float 0.001)) "a failed turn settled when it failed"
     (Some (origin +. 45.))
     (Transcript.settled_at failed)
 

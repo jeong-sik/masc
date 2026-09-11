@@ -147,6 +147,31 @@ let to_json result =
     ]
 ;;
 
+let unavailable_to_json ?detail ~runtime_id ~code ~message =
+  `Assoc
+    [ "schema", `String "masc.runtime_verification.v1"
+    ; "runtime_id", `String runtime_id
+    ; "model", `Null
+    ; "observed_model", `Null
+    ; "status", `String "unavailable"
+    ; ( "checks"
+      , `Assoc
+          [ "response", `Bool false
+          ; "tool_called", `Bool false
+          ; "tool_roundtrip", `Bool false
+          ] )
+    ; ( "failure"
+      , `Assoc
+          [ "code", `String code
+          ; "message", `String message
+          ; ( "detail"
+            , match detail with
+              | None -> `Null
+              | Some d -> `String d )
+          ] )
+    ]
+;;
+
 let exit_code result =
   match result.failure with
   | None -> 0

@@ -143,8 +143,13 @@ let test_time_parse_iso8601_empty () =
    Test Runners
    ============================================================ *)
 
+let test_get_agent_profile () =
+  let profile = Dashboard_execution_helpers.get_agent_profile "my-agent" in
+  check string "emoji" "🤖" profile.emoji;
+  check string "korean_name" "my-agent" profile.korean_name
+
 let () =
-  run "Dashboard & Resilience Coverage" [
+  run "dashboard_resilience" [
     "dashboard.constants", [
       test_case "max_path_length" `Quick test_dashboard_max_path_length;
       test_case "max_message_length" `Quick test_dashboard_max_message_length;
@@ -167,6 +172,9 @@ let () =
       test_case "invalid" `Quick test_parse_iso_timestamp_invalid;
       test_case "empty" `Quick test_parse_iso_timestamp_empty;
       test_case "partial" `Quick test_parse_iso_timestamp_partial;
+    ];
+    "dashboard.agent_profile", [
+      test_case "default profile" `Quick test_get_agent_profile;
     ];
     "resilience.thresholds", [
       test_case "warning threshold" `Quick test_resilience_default_warning_threshold;

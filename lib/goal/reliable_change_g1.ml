@@ -1,13 +1,5 @@
 open Yojson.Safe.Util
 
-(* Yojson.Safe.Util has no *_option family for lists (only for scalars), so
-   calls below that read an optional JSON array go through this helper. *)
-let to_list_option json =
-  match json with
-  | `Null -> None
-  | other -> Some (to_list other)
-;;
-
 type scenario =
   | Success
   | Exit_nonzero
@@ -1005,10 +997,10 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
       | None -> target_revision
     in
     let artifact_references =
-      match json |> member "artifact_references" |> to_list_option with
+      match json |> member "artifact_references" |> to_option to_list with
       | Some list -> List.map to_string list
       | None ->
-        (match json |> member "edited_target_files" |> to_list_option with
+        (match json |> member "edited_target_files" |> to_option to_list with
          | Some list -> List.map to_string list
          | None -> [])
     in

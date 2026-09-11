@@ -80,14 +80,88 @@ let source_template ~sw ~pending config request =
       | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
     | None -> Error Unsupported_connection in
   Ok (("choice",`String choice)::transport @ metadata @ credentials @ timeout,id)
-let discover ~sw:_ ~net ~base_path request =
+let native_json ~binary args =
+  match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
+  | Ok (Unix.WEXITED 0,body,_) ->
+    (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error _ -> Error Unsupported_connection)
+  | Ok _ | Error _ -> Error Unsupported_connection
+let positive = function `Int n when n>0 -> Some n | _ -> None
+let project_client_models ~source ~catalog json =
+  let* root=match json with `Assoc fields -> Ok fields | _ -> Error Unsupported_connection in
+  let* models=list (value "models" root) in
+  let rec project seen = function
+    | [] -> Ok []
+    | (`Assoc row)::tail ->
+      let* id=text (value "id" row) in
+      let* ()=if List.mem id seen then Error Unsupported_connection else Ok () in
+      let label=match value "label" row with `String label -> label | _ -> id in
+      let context=value (if catalog then "max_context" else "context") row in
+      let context=match positive context with Some n -> `Int n | None -> `Null in
+      let* tail=project (id::seen) tail in
+      Ok (`Assoc ["id",`String id;"label",`String label;"context",context;"tools",`Null]::tail)
+    | _ -> Error Unsupported_connection in
+  let* rows=project [] models in
+  Ok (`Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows])
+let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
     let* template,id=source_template ~sw ~pending config request in
-    let* connection = Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
-      |> Result.map_error (fun _ -> Unsupported_connection) in
-    Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error))
+    match value "choice" template with
+    | `String "codex" ->
+      let* command=text (value "command" template) in
+      let* json=native_json ~binary ["runtime-codex-models";"--cli-path";command] in
+      project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
+    | `String "claude_code" ->
+      let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
+      project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
+    | `String "antigravity" ->
+      let* command=text (value "command" template) in
+      let* credential=text (value "credential_file" template) in
+      let* json=native_json ~binary ["runtime-antigravity-models";"--cli-path";command;"--credential-file";credential] in
+      project_client_models ~source:"antigravity_selected_account_models" ~catalog:false json
+    | _ ->
+      let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
+        |> Result.map_error (fun _ -> Unsupported_connection) in
+      Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error))
+let context ~binary ~net ~base_path request =
+  Eio.Switch.run (fun sw ->
+    let* request=fields ["source";"model";"load"] ["source";"model";"load"] request in
+    let* model=text (value "model" request) in
+    let* load=match value "load" request with `Bool value -> Ok value | _ -> Error Invalid_request in
+    let* config=config ~base_path in
+    let pending=ref [] in
+    let* template,id=source_template ~sw ~pending config (value "source" request) in
+    let observed = match value "choice" template with
+      | `String "antigravity" ->
+        let* command=text (value "command" template) in
+        let* credential=text (value "credential_file" template) in
+        native_json ~binary ["runtime-antigravity-context";"--cli-path";command;"--credential-file";credential;"--model";model]
+      | `String ("codex"|"claude_code") -> Error Unsupported_connection
+      | _ ->
+        let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
+          |> Result.map_error (fun _ -> Unsupported_connection) in
+        Runtime_serving_context.observe ~sw ~net connection ~model ~load
+          |> Result.map_error (fun error -> Discovery_failed error) in
+    let verified json = match json with
+      | `Assoc row when value "model" row=`String model && positive (value "context" row)<>None -> Some json
+      | _ -> None in
+    (match observed with
+       | Ok json when verified json<>None -> Ok json
+       | _ ->
+         (* API catalog metadata is provider-scoped. Local transports and CLI
+            windows must be observed; they never inherit model architecture. *)
+         let declared = match value "choice" template with
+           | `String ("openai_compatible"|"messages") ->
+             (match Llm_provider.Model_catalog.load_default () with
+              | Error _ -> None
+              | Ok catalog -> Runtime_model_context_metadata.find ~provider_id:id ~model
+                  (Llm_provider.Model_catalog.model_entries catalog))
+           | _ -> None in
+         match declared with
+         | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
+             "context_source",`String "installed_provider_catalog";"tools",`Null])
+         | None -> observed))
 let model_spec template request =
   let* fields=fields ["id";"context";"streaming"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in

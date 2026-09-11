@@ -85,7 +85,7 @@ let test_account_reference () = fixture (fun base _runtime binary _net ->
   let receipt=get (Actions.import_account ~binary ~base_path:base (`Assoc ["integration_id",`String "antigravity"])) in
   let open Yojson.Safe.Util in
   let reference=receipt |> member "account_ref" |> to_string in
-  Alcotest.check Alcotest.bool "opaque account identity" true (Masc.Auth.is_generated_token_shape reference);
+  Alcotest.check Alcotest.bool "opaque account identity" true (Auth.is_generated_token_shape reference);
   Alcotest.check Alcotest.bool "import is not invocation verification" false (receipt |> member "invocation_verified" |> to_bool);
   Alcotest.check (Alcotest.list Alcotest.string) "safe import response only"
     (List.sort String.compare ["schema";"account_ref";"account_imported";"invocation_verified";"catalog"])

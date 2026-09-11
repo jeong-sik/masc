@@ -64,7 +64,7 @@ let settled_keeper () = fixture (fun base path ->
     let defaults=Keeper_types_profile.materialization_defaults_of_content ~path stored |> Result.get_ok in
     check bool "settled existing keeper receives new declaration" true (defaults.network_mode=Some Keeper_types_profile_sandbox.Network_none);
     let retained=Keeper_registry.get_with_health ~base_path:base "imp" |> Option.get |> fst in
-    check string "existing keeper trace/history identity retained" (Keeper_id.Trace_id.to_string meta.trace_id) (Keeper_id.Trace_id.to_string retained.meta.trace_id)))
+    check string "existing keeper trace/history identity retained" (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (Keeper_id.Trace_id.to_string retained.meta.runtime.trace_id)))
 let custom_image_preserved () = fixture (fun base path ->
   let original=contents ^ "sandbox_image = \"owned-project:fixture\"\n" in
   save path original;

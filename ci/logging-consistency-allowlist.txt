@@ -148,3 +148,7 @@ bin/masc_cli_prerequisites.ml
 # runtime-resume prints operator error messages directly to the calling
 # terminal during setup resume, like the setup CLI above.
 bin/masc_cli_model_resume.ml
+# owner-upgrade prints upgrade outcomes straight to the operator's
+# terminal; it runs before any server or log sink exists, like the
+# other setup CLIs above.
+bin/masc_cli_owner_upgrade.ml

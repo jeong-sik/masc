@@ -177,6 +177,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
       , match config.default_runtime_id with
         | None -> `Null
         | Some id -> `String id )
+    ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config
     ]

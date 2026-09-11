@@ -100,11 +100,29 @@ let test_listing_date_cannot_be_release () =
     (Result.is_error (R.of_json listing))
 ;;
 
+let test_picker_projection () =
+  let catalog = R.load_default () |> Result.get_ok in
+  let json = R.catalog_to_json ~as_of:(date "2026-09-30") catalog in
+  let open Yojson.Safe.Util in
+  let rows = json |> member "models" |> to_list in
+  let sonnet = List.find (fun row -> row |> member "publisher" |> to_string = "anthropic"
+    && row |> member "model_id" |> to_string = "claude-sonnet-5") rows in
+  let release = sonnet |> member "release" in
+  check string "month-end inclusive release recommendation" "within_three_calendar_months"
+    (release |> member "recency" |> to_string);
+  check string "official date retained" "2026-06-30"
+    (release |> member "released_on" |> to_string);
+  check string "source retained" "https://www.anthropic.com/news/claude-sonnet-5"
+    (release |> member "source_url" |> to_string);
+  check string "account remains unverified" "not_checked"
+    (release |> member "account_availability" |> to_string)
+
 let () =
   run
     "model release evidence"
     [ ( "recency and identity"
-      , [ test_case "calendar window boundaries" `Quick test_calendar_window
+      , [ test_case "picker provenance projection" `Quick test_picker_projection
+        ; test_case "calendar window boundaries" `Quick test_calendar_window
         ; test_case
             "embedded exact publisher and model provenance"
             `Quick

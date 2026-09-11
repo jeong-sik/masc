@@ -54,6 +54,8 @@ as release evidence. Unsupported and empty/unavailable discovery remain explicit
 Account model names can themselves be private; do not publish local reports.
 
 This first stage provides typed evidence and daily observation, not an automatic
-new-model release curator or an account-wide background scheduler. Native
-inventory/picker recommendation integration and reviewed metadata update PRs
-are subsequent stages. Bedrock, GCP and Vertex account discovery are excluded.
+new-model release curator or an account-wide background scheduler. Native inventory and the model picker consume this exact-identity evidence: existing
+connections stay first, followed by general releases inside the three-calendar-month
+window. Limited releases and previews are labeled separately; unknown dates do not
+hide models. Context windows and account verification remain separate checks.
+Reviewed metadata update PRs and an installed-client refresh cache remain subsequent stages. Bedrock, GCP and Vertex account discovery are excluded.

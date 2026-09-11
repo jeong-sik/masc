@@ -507,6 +507,40 @@ for line in sys.stdin:
             self.assertNotIn('private', result.stdout)
 
 
+class ModelReleaseSelection(unittest.TestCase):
+    def test_discovery_release_join_keeps_context_and_unknown_models(self):
+        recent = dict(status='official_release', kind='general_availability',
+                      released_on='2026-07-09', recency='within_three_calendar_months',
+                      source_url='https://official.example/release')
+        release_catalog = dict(schema='masc.model_release_catalog.v1', models=[
+            dict(publisher='openai', model_id='exact-recent', release=recent),
+            dict(publisher='anthropic', model_id='other-publisher', release=recent)])
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[],
+                      model_release_catalog=release_catalog)
+        observed = [dict(id='unknown', label='Unknown', context=272000, created=9999999999),
+                    dict(id='exact-recent', label='Recent', context=272000),
+                    dict(id='exact-recent-alias', label='Unproven alias', context=1000),
+                    dict(id='other-publisher', label='Other publisher', context=2000)]
+        with patch.object(SETUP, 'catalog_models', return_value=observed):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(rows[0]['id'], 'exact-recent')
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(len(rows), 4)
+        self.assertIn('recent release', SETUP.model_choice_label(rows[0]))
+        for row in rows[1:]:
+            self.assertIsNone(row['release'])
+            self.assertIn('release date unknown', SETUP.model_choice_label(row))
+        self.assertIn('model catalog', origin)
+        # An explicit gateway is not an official publisher identity.
+        self.assertIsNone(SETUP.release_metadata(dict(source, endpoint='https://gateway.example'), 'exact-recent'))
+
+    def test_limited_release_is_visible_without_general_release_recommendation(self):
+        row = dict(id='limited', label='Limited', release=dict(status='official_release',
+            kind='limited_release', released_on='2026-09-03', recency='within_three_calendar_months'))
+        self.assertFalse(SETUP.recently_released(row))
+        self.assertIn('limited release 2026-09-03', SETUP.model_choice_label(row))
+
+
 class NamedCatalogSources(unittest.TestCase):
     INVENTORY = {'runtimes': [], 'integrations': [
         {'id': 'openrouter', 'display_name': 'openrouter', 'protocol': 'openai-compatible-http',

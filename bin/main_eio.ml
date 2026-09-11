@@ -2528,7 +2528,10 @@ let runtime_model_list_cmd =
                 |> List.filter_map (fun model ->
                      Option.map (fun context -> `Assoc [ "id", `String model
                                                        ; "label", `String model
-                                                       ; "max_context", `Int context ])
+                                                       ; "max_context", `Int context
+                                                       ; "release", Model_release_evidence.default_model_json
+                                                           ~publisher:(match client with Wizard_claude_code -> "anthropic" | Wizard_codex -> "openai")
+                                                           ~model_id:model ])
                        (wizard_model_context model entries)))))
       | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
     in

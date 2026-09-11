@@ -1447,6 +1447,15 @@ reasoning-effort = "high"
 [openrouter.openrouter-deepseek-v4-flash]
 wizard-default = true
 
+[models.openrouter-deepseek-v4-1-flash]
+api-name = "deepseek/deepseek-v4.1-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-1-flash]
+
 [models.openrouter-deepseek-v4-pro]
 api-name = "deepseek/deepseek-v4-pro"
 tools-support = true

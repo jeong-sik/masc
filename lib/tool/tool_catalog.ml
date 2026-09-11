@@ -226,6 +226,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_status", read_state_tool);
     ("masc_tasks", read_state_tool);
     ("masc_messages", with_semantic_flags ~mcp_context_required:true read_state_tool);
+    ("masc_lane_attach", mutating_tool);
+    ("masc_lane_inspect", read_state_tool);
+    ("masc_lane_observe", mutating_tool);
+    ("masc_lane_slice", read_state_tool);
+    ("masc_lane_detach", mutating_tool);
+    ("masc_lane_evidence", mutating_tool);
     ("masc_msx_screen", read_state_tool);
     ("masc_msx_load", mutating_tool);
     ("masc_msx_eject", mutating_tool);

@@ -1,7 +1,8 @@
-(** MCP session persistence -- capture and restore server connection info.
+(** MCP session capture for the checkpoint record.
 
-    Captures serializable parts of MCP connections (specs + tool schemas)
-    for checkpoint/resume cycles.
+    Captures the serializable parts of MCP connections (specs + tool schemas)
+    onto [Checkpoint.mcp_sessions]. Nothing reconnects from them: [Agent.resume]
+    takes its tools from the caller.
 
     @stability Internal
     @since 0.93.1 *)
@@ -25,14 +26,6 @@ type info =
 
 val capture : Mcp.managed -> info
 val capture_all : Mcp.managed list -> info list
-val to_server_spec : info -> Mcp.server_spec
-
-val reconnect_all
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> info list
-  -> Mcp.managed list * (info * Error.t) list
 
 (** {2 JSON serialization} *)
 

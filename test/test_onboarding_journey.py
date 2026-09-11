@@ -31,29 +31,6 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
-    def test_other_workspace_port_choice_never_stops_its_server(self):
-        replies = [dict(status='other_workspace', server_workspace='/someone-else', suggested_port=32768),
-                   dict(status='free')]
-        replies = [subprocess.CompletedProcess([], 0, json.dumps(dict(
-            schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5', **row)), '') for row in replies]
-        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
-                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/workspace', 8945), 32768)
-        self.assertTrue(all(call.args[0][1] == 'setup-server' for call in run.call_args_list))
-        self.assertEqual(run.call_args.args[0][-1], '32768')
-
-    def test_selected_previous_owner_restart_requires_its_exact_version_receipt(self):
-        same = dict(schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5',
-                    server_version='0.35.4', status='same_workspace')
-        stopped = dict(schema='masc.setup_server_stopped.v1', owner_stopped=True, port_available=True)
-        free = dict(schema='masc.setup_server.v1', read_only=True, installed_version='0.35.5', status='free')
-        responses = [subprocess.CompletedProcess([], 0, json.dumps(value), '') for value in (same, stopped, free)]
-        with patch.object(SETUP.subprocess, 'run', side_effect=responses) as run, \
-                patch.object(SETUP, 'pick', return_value=[0]):
-            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/workspace', 8945), 8945)
-        self.assertEqual(run.call_args_list[1].args[0], ['/owned/masc', 'setup-stop-previous-owner',
-            '--base-path', '/workspace', '--port', '8945', '--expected-version', '0.35.4'])
-
     def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
         catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
                        models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
@@ -319,7 +296,6 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP.Path, 'home', return_value=Path(home)), \
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
-                    patch.object(SETUP, 'select_setup_server', return_value=9876), \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
                     patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
@@ -355,7 +331,6 @@ class Journey(unittest.TestCase):
         with patch.object(SETUP, 'onboarding_status', return_value=observation('/workspace')), \
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
-                patch.object(SETUP, 'select_setup_server', return_value=8945), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
                 patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \

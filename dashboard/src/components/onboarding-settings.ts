@@ -2,6 +2,9 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status, type Inventory } from '../api/onboarding'
 
+import { ModelSetupResumeControl } from './model-setup-resume-control'
+import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
+
 const labels = { satisfied: '확인됨', needs_setup: '설정 필요', needs_verification: '검증 필요', invalid: '설정 확인 필요' }
 
 export function OnboardingSettings() {
@@ -23,6 +26,10 @@ export function OnboardingSettings() {
     } catch { setInventory(null) }
   }
   useEffect(() => { void refresh() }, [])
+  const resumeState = modelSetupResumeState.value
+  useEffect(() => {
+    if (resumeState.kind === 'active' || resumeState.kind === 'failed') void refresh()
+  }, [resumeState])
   async function save(event: Event) {
     event.preventDefault()
     if (busy || !provider || !secret.trim() || !inventory) return
@@ -31,8 +38,8 @@ export function OnboardingSettings() {
     setSecret('')
     try {
       await saveSetupCredential(provider, entered, inventory.source_revision)
-      await refresh()
-      setNotice('API 키를 비공개 파일에 저장하고 연결 설정에 적용했습니다. 모델 응답과 도구 검증은 아직 필요합니다.')
+      await resumeSavedModelSetup()
+      setNotice('API 키를 비공개 파일에 저장했습니다. 모델 응답과 도구 검증은 아직 필요합니다.')
     } catch { setNotice('API 키를 적용하지 못했습니다. 연결 설정과 비공개 저장소 권한을 확인하세요.') }
     finally { setBusy(false) }
   }
@@ -50,6 +57,7 @@ export function OnboardingSettings() {
       <label>API 키 <input type="password" autoComplete="off" value=${secret} disabled=${busy} onInput=${(event: Event) => setSecret((event.currentTarget as HTMLInputElement).value)} /></label>
       <button class="btn" type="submit" disabled=${busy || !provider || !secret.trim()}>비공개로 저장</button>
     </form>
+    <${ModelSetupResumeControl} disabled=${busy} />
     ${notice ? html`<p role="status">${notice}</p>` : null}
   </section>`
 }

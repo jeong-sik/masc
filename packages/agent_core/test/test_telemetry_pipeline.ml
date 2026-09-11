@@ -308,7 +308,7 @@ let test_checkpoint_sink_after_tool_feedback () =
           ; required = true
           }
         ]
-      (fun _input -> Ok { Types.content = "12:00 UTC"; _meta = None })
+      (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
   in
   let context_injector ~tool_name:_ ~input:_ ~output:_ =
     Some
@@ -511,7 +511,7 @@ let test_post_hook_failure_commits_tool_result_before_surface () =
         ]
       (fun _input ->
          incr tool_runs;
-         Ok { Types.content = "12:00 UTC"; _meta = None })
+         Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
   in
   let hooks =
     { Hooks.empty with post_tool_use = Some (fun _ -> failwith "post hook failed") }
@@ -600,7 +600,7 @@ let test_context_injection_failure_keeps_base_tool_result () =
           ; required = true
           }
         ]
-      (fun _input -> Ok { Types.content = "12:00 UTC"; _meta = None })
+      (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
   in
   let context_injector ~tool_name:_ ~input:_ ~output:_ =
     failwith "context projection failed"
@@ -672,7 +672,7 @@ let test_journal_observer_failure_rethrows_after_tool_result_checkpoint () =
           ; required = true
           }
         ]
-      (fun _input -> Ok { Types.content = "12:00 UTC"; _meta = None })
+      (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
   in
   let agent =
     make_checkpoint_agent

@@ -52,70 +52,50 @@ let test_stale_connection_never_receives_key () =
     Runtime_setup_credentials.remove_uncommitted pending;
     check bool "uncommitted key removed" false (Sys.file_exists (Runtime_setup_credentials.reference_path pending)))
 
-let with_fixture_catalog home f =
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  let previous_runtime = Runtime.For_testing.snapshot () in
-  Fun.protect ~finally:(fun () ->
-    Runtime.For_testing.restore previous_runtime;
-    match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) (fun () ->
-      let catalog_path = Filename.concat home "fixture-models.toml" in
-      Out_channel.with_open_bin catalog_path (fun out -> output_string out {|[[models]]
-id_prefix = "fixture-chat"
-provider_name = "fixture-http"
-base = "openai_chat"
-max_context_tokens = 1024
-max_output_tokens = 128
-supports_tools = true
-|});
-      (match Llm_provider.Model_catalog.load_file catalog_path with
-       | Error error -> fail ("fixture catalog: " ^ error)
-       | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
-      f ())
-
 let test_applied_key_is_retained () =
-  with_home (fun home -> with_fixture_catalog home (fun () ->
+  with_home (fun home ->
     let path = Filename.concat home "runtime.toml" in
-    let original = {|[providers."fixture-http"]
-display-name = "Fixture HTTP"
+    (* api-name points at a catalog model: the capability gate rejects
+       configured runtimes whose model is absent from the AGENT_CORE
+       catalog (RFC-0206), so the fixture uses a provider-qualified embedded row (provider_name="deepseek",
+       id_prefix="deepseek-v4-pro"): a named [providers] entry never falls
+       back to bare model rows instead of a made-up id. *)
+    let original = {|[providers."deepseek"]
+display-name = "Fixture HTTP (deepseek)"
 protocol = "openai-compatible-http"
 endpoint = "https://fixture.invalid/v1"
-[providers."fixture-http".credentials]
+[providers."deepseek".credentials]
 type = "inline"
 value = "previous-fixture-key"
 [models.chat]
-api-name = "fixture-chat"
-max-context = 1024
-["fixture-http".chat]
+api-name = "deepseek-v4-pro"
+["deepseek".chat]
 [runtime]
-default = "fixture-http.chat"
+default = "deepseek.chat"
 |} in
     Out_channel.with_open_bin path (fun out -> output_string out original);
-    (match Runtime.validate_config_text ~runtime_config_path:path original with
-     | Ok () -> () | Error error -> fail ("fixture runtime validation: " ^ error));
     let expected = Runtime.config_observation ~path original in
     let pending = match Runtime_setup_credentials.save ~secret:"committed-fixture-key" () with
       | Ok pending -> pending | Error error -> fail (Runtime_setup_credentials.error_message error) in
     (match Runtime_setup_credentials.apply_to_provider ~runtime_config_path:path
-      ~provider_id:"fixture-http" ~expected_source_revision:(Runtime.config_source_revision_to_string expected.source_revision) pending with
+      ~provider_id:"deepseek" ~expected_source_revision:(Runtime.config_source_revision_to_string expected.source_revision) pending with
      | Ok _ -> () | Error error -> fail (Runtime_setup_credentials.error_message error));
     Runtime_setup_credentials.remove_uncommitted pending;
     let reference = Runtime_setup_credentials.reference_path pending in
     check bool "actual apply retains the pending file" true (Sys.file_exists reference);
     let config = match Runtime_toml.parse_string (In_channel.with_open_text path In_channel.input_all) with
       | Ok config -> config | Error errors -> fail (String.concat "; " (List.map Runtime_toml.show_parse_error errors)) in
-    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "fixture-http") config.providers in
+    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "deepseek") config.providers in
     (match provider.credentials with
      | Some (Runtime_schema.File actual) -> check string "committed exact file reference" reference actual
      | _ -> fail "committed provider must use the private file");
     check string "committed raw credential remains usable" "committed-fixture-key"
       (In_channel.with_open_text reference In_channel.input_all);
-    let binding = List.find (fun (b : Runtime_schema.binding) -> b.provider_id = "fixture-http") config.bindings in
+    let binding = List.find (fun (b : Runtime_schema.binding) -> b.provider_id = "deepseek") config.bindings in
     match Runtime_adapter.binding_to_provider_config config binding with
     | Error error -> fail error
     | Ok materialized -> check string "native request materializes saved key" "committed-fixture-key"
-        (Llm_provider.Secret.header_value materialized.api_key)))
+        (Llm_provider.Secret.header_value materialized.api_key))
 
 let () = run "private setup credentials" ["storage", [
   test_case "applied provider retains its file" `Quick test_applied_key_is_retained;

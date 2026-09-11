@@ -296,6 +296,73 @@ let anthropic_message_to_json (msg : message) =
     ]
 ;;
 
+(* The Anthropic Messages API rejects a tool whose input_schema carries a
+   combinator at the top level, answering the whole request with a 400:
+   "tools.N.custom.input_schema: input_schema does not support oneOf, allOf,
+   or anyOf at the top level". Nested uses are accepted, so this drops only
+   the top level.
+
+   masc emits one: [config/tools/tool_execute.toml] declares [[one_of]] blocks
+   for "argv or script, not both", which the TOML reader renders as a
+   top-level [oneOf] sitting next to [type]/[properties]. Measured 2026-09-09,
+   every turn of every anthropic keeper lane failed on this alone (release
+   v0.35.1/v0.35.2), making the lane unusable end to end.
+
+   What is lost is the model's hint, not the rule. The dispatcher's
+   [[params]] validation remains the authority for what a tool accepts, so a
+   model that names both script and argv is answered by the tool instead of
+   being told in advance. Same rationale as the OpenAI projection in
+   backend_openai_serialize.ml, except Anthropic's restriction is
+   provider-wide rather than model-specific, and the Kimi endpoint served
+   through this same backend accepts the top level (verified live), so the
+   projection applies to the Anthropic kind only. *)
+let anthropic_top_level_unsupported = [ "oneOf"; "anyOf"; "allOf" ]
+
+let strip_top_level_combinators tool =
+  match tool with
+  | `Assoc fields -> (
+    match List.assoc_opt "input_schema" fields with
+    | Some (`Assoc schema_fields)
+      when List.exists
+             (fun (key, _) -> List.mem key anthropic_top_level_unsupported)
+             schema_fields ->
+      let stripped =
+        List.filter
+          (fun (key, _) -> not (List.mem key anthropic_top_level_unsupported))
+          schema_fields
+      in
+      (* A schema that was only combinators would strip to [{}], which the API
+         rejects for not being an object schema; MCP-sourced tools flow their
+         input_schema through this path verbatim, so pin the type rather than
+         trust every external server to carry one. *)
+      let stripped =
+        if List.mem_assoc "type" stripped
+        then stripped
+        else ("type", `String "object") :: stripped
+      in
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "input_schema" then key, `Assoc stripped else key, value)
+           fields)
+    | _ -> tool)
+  | _ -> tool
+;;
+
+let project_tools_for_kind kind tools =
+  match kind with
+  | Provider_config.Anthropic -> List.map strip_top_level_combinators tools
+  (* build_request_payload rejects the four non-Anthropic-wire kinds before
+     the tools body is built; these arms exist for exhaustiveness. Kimi is
+     the one other kind that reaches the projection, and its endpoint
+     accepts the top level, so its tools pass through verbatim. *)
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> tools
+;;
+
 let build_request_payload
       ~request_mode
       ?anthropic_thinking_control
@@ -454,19 +521,38 @@ let build_request_payload
       else ("system", `String s) :: body
     | _ -> body
   in
+  let dialect = Reasoning_dialect.for_provider_config config in
   let body =
     match request_mode, config.temperature with
-    | Completion _, Some t -> ("temperature", `Float t) :: body
+    | Completion _, Some t ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Temperature
+        (`Float t)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
     match request_mode, config.top_p with
-    | Completion _, Some p -> ("top_p", `Float p) :: body
+    | Completion _, Some p ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Top_p
+        (`Float p)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
     match request_mode, config.top_k with
-    | Completion _, Some k -> ("top_k", `Int k) :: body
+    | Completion _, Some k ->
+      Backend_openai_request.add_sampling_field
+        dialect
+        config
+        Capabilities.Top_k
+        (`Int k)
+        body
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
@@ -483,6 +569,7 @@ let build_request_payload
     match tools with
     | [] -> body
     | ts ->
+      let ts = project_tools_for_kind config.kind ts in
       if config.cache_system_prompt
       then (
         (* Add cache_control to last tool for extended cache prefix *)

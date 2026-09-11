@@ -65,8 +65,17 @@ let browser_lane_schemas =
 (* [schemas] is the public misc schema set, now read from
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
    dedicated projections above. *)
+let lane_addon_schemas : tool_schema list =
+  [ Tool_schemas_misc_toml.lane_attach
+  ; Tool_schemas_misc_toml.lane_inspect
+  ; Tool_schemas_misc_toml.lane_observe
+  ; Tool_schemas_misc_toml.lane_slice
+  ; Tool_schemas_misc_toml.lane_detach
+  ; Tool_schemas_misc_toml.lane_evidence
+  ]
+
 let schemas : tool_schema list =
-  msx_schemas @ Tool_schemas_operator_surface.schemas
+  lane_addon_schemas @ msx_schemas @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
   | Start
@@ -117,6 +126,12 @@ let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations
    insert, so the last registrar wins. Registration now walks this list, so the
    set advertised here and the set routed here are the same set. *)
 type misc_operation =
+  | Misc_lane_attach
+  | Misc_lane_inspect
+  | Misc_lane_observe
+  | Misc_lane_slice
+  | Misc_lane_detach
+  | Misc_lane_evidence
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw
@@ -149,6 +164,12 @@ type misc_operation =
 let misc_operations = all_of_misc_operation
 
 let misc_tool_name = function
+  | Misc_lane_attach -> "masc_lane_attach"
+  | Misc_lane_inspect -> "masc_lane_inspect"
+  | Misc_lane_observe -> "masc_lane_observe"
+  | Misc_lane_slice -> "masc_lane_slice"
+  | Misc_lane_detach -> "masc_lane_detach"
+  | Misc_lane_evidence -> "masc_lane_evidence"
   | Misc_ask -> "masc_ask"
   | Misc_ask_status -> "masc_ask_status"
   | Misc_ask_withdraw -> "masc_ask_withdraw"
@@ -196,6 +217,12 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_read
   | Misc_browser_session
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact -> None
+  | Misc_lane_attach
+  | Misc_lane_inspect
+  | Misc_lane_observe
+  | Misc_lane_slice
+  | Misc_lane_detach
+  | Misc_lane_evidence
   | Misc_msx_load
   | Misc_msx_eject
   | Misc_msx_save

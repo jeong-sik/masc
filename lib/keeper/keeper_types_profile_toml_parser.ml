@@ -46,6 +46,11 @@ let keeper_toml_fields =
        is declared for the same reason: an unlisted sibling fails the load
        rather than being read as no selection at all. *)
   ; "tools.attached_allow", Field_string_array
+    (* Per-keeper deny over the ordinary built-ins, by model-visible name.
+       Sits in the same [keeper.tools] table; [defer_loading] is global and
+       per tool, so a keeper that must not see spawn/delegate at all had no
+       axis until this one. *)
+  ; "tools.deny", Field_string_array
   ; "skills.names", Field_string_array
   ]
 
@@ -165,6 +170,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     then Some (strs "tools.attached_allow" |> dedupe_keep_order)
     else None
   in
+  (* Unlike [tools.attached_allow], absent and explicit [] mean the same thing
+     here -- deny nothing -- so a plain list carries no lost distinction. *)
+  let tool_deny = strs "tools.deny" |> dedupe_keep_order in
   let result =
     Result.bind result (fun () ->
         validate_known_keeper_field_types doc)
@@ -349,6 +357,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
         skill_names;
         attached_tool_allow;
+        tool_deny;
         agent_core_env;
       })
       max_context_override_result)
@@ -401,6 +410,7 @@ let merge_keeper_profile_defaults
     skill_names = prefer overlay.skill_names base.skill_names;
     attached_tool_allow =
       prefer overlay.attached_tool_allow base.attached_tool_allow;
+    tool_deny = merge_string_list ~base:base.tool_deny overlay.tool_deny;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

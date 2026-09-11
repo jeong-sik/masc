@@ -812,6 +812,33 @@ let test_subscription_probe_stops_before_thread () =
         check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
 ;;
 
+let test_metadata_listing_pages_without_turn () =
+  let capture = Filename.temp_file "masc-model-list-capture-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+      {|{"id":3,"result":{"data":[{"id":"first-ui","model":"exact-first","displayName":"First","isDefault":true}],"nextCursor":"page-two"}}|};
+      {|{"id":4,"result":{"data":[{"id":"second-ui","model":"exact-second","displayName":"Second","isDefault":false}],"nextCursor":null}}|}]
+      (fun path ->
+        let outcome = Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
+          Runtime_codex_app_server.list_models ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+        let rows = match outcome with Ok rows -> rows | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+        check (list string) "exact models across pages" ["exact-first";"exact-second"]
+          (List.map (fun (row : Runtime_codex_app_server.listed_model) -> row.model) rows);
+        let channel = open_in capture in
+        let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+          let rec read acc = match input_line channel with
+            | line -> read (Yojson.Safe.from_string line :: acc)
+            | exception End_of_file -> List.rev acc in read []) in
+        let open Yojson.Safe.Util in
+        check (list string) "no thread or turn request"
+          ["initialize";"initialized";"account/read";"model/list";"model/list"]
+          (List.map (fun json -> json |> member "method" |> to_string) requests);
+        let last = List.nth requests 4 in
+        check string "opaque cursor forwarded" "page-two" (last |> member "params" |> member "cursor" |> to_string)))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -2100,7 +2127,7 @@ let fixture_tool ?(parameters = []) ~name ~description () =
     ~name
     ~description
     ~parameters
-    (fun _ -> Ok { Agent_core.Types.content = "fixture"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
 ;;
 
 let production_keeper_meta ~base_path ~trace_id =
@@ -2609,7 +2636,7 @@ let test_keeper_projects_codex_live_stream () =
           }
         ]
       (fun _ ->
-         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   with_fixture
     [ init_result
@@ -2768,7 +2795,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
            "RAW fixture tool sees actual input"
            "from-codex"
            Yojson.Safe.Util.(input |> member "marker" |> to_string);
-         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -3966,7 +3993,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
           "typed tool input"
           "from-codex"
           Yojson.Safe.Util.(input |> member "marker" |> to_string);
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   let hooks : Agent_core.Hooks.hooks =
     { Agent_core.Hooks.empty with
@@ -4260,7 +4287,7 @@ let test_live_keeper_dynamic_tool_subscription () =
         ~parameters:[]
         (fun _ ->
           incr tool_calls;
-          Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+          Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
     in
     let base_path = temp_workspace "masc-codex-live-tool-raw-" in
     let raw_trace_path = Filename.concat base_path "live-tool-raw.jsonl" in
@@ -4487,6 +4514,7 @@ let () =
             "probe stops before thread"
             `Quick
             test_subscription_probe_stops_before_thread
+        ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

@@ -317,6 +317,18 @@ type read_file_attempt =
   | Read_failed_payload of string
   | Read_failed_message of string
 
+let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
+  let* target =
+    resolve_read_file_target ~config ~meta ~args:(`Assoc []) ~raw_path:path
+    |> Result.map_error (function Read_path_error detail -> detail)
+  in
+  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
+    ~host_path:target ~max_bytes
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
+  |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
+;;
+
 let handle_read_file_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -1362,7 +1374,7 @@ let approved_write_of_gate_input input =
     let carried =
       List.filter_map
         (fun name -> Option.map (fun value -> name, value) (field name))
-        [ "content"; "old_string"; "new_string"; "replace_all"; "insert_before_line"; "insert_text" ]
+        [ "content"; "content_artifact"; "old_string"; "new_string"; "replace_all"; "insert_before_line"; "insert_text" ]
     in
     Ok { target; mode; carried }
   | _ -> Error "approved Gate input is not a JSON object"
@@ -1395,6 +1407,7 @@ let file_write_gate_input
       ~gate_effect
       ~requested_target
       ~content
+      ?content_source
       ?old_string
       ?new_string
       ?replace_all
@@ -1417,8 +1430,10 @@ let file_write_gate_input
   `Assoc
     ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
      ; "requested_target", `String requested_target
-     ; "content", `String content
      ]
+     @ Keeper_write_content.fields (match content_source with
+         | Some source -> source
+         | None -> Keeper_write_content.Text content)
      @ optional_string "old_string" old_string
      @ optional_string "new_string" new_string
      @ optional_bool "replace_all" replace_all
@@ -2252,7 +2267,8 @@ let content_write_observation = function
     }
 ;;
 
-let handle_file_write_with_outcome
+let handle_file_write_content_with_outcome
+      ~content_source ~content
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -2264,6 +2280,7 @@ let handle_file_write_with_outcome
       ~(args : Yojson.Safe.t)
       ()
   =
+  let content () = match content with Some bytes -> bytes | None -> invalid_arg "Patch has no replacement content" in
   (* A tree the endpoint owns is not on this host: every capability below
      would write the bookkeeping bundle and miss the tree. Those writes go
      through the remote lane. *)
@@ -2286,7 +2303,6 @@ let handle_file_write_with_outcome
     | None -> []
   in
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let content = Safe_ops.json_string ~default:"" "content" args in
   (* Absent, non-string and unknown modes are all rejected; see
      [Keeper_tool_write_mode.of_args] for why there is no default. *)
   let mode_result = Keeper_tool_write_mode.of_args args in
@@ -2426,7 +2442,8 @@ let handle_file_write_with_outcome
       file_write_gate_input
         ~gate_effect
         ~requested_target:target
-        ~content
+        ~content_source
+        ~content:(content ())
         ()
     in
     after_gate ~confined ~target ~input
@@ -2482,7 +2499,7 @@ let handle_file_write_with_outcome
         meta.name
         target
         mode_label
-        (String.length content);
+        (String.length (content ()));
       Ok
         (Write_succeeded
            { payload =
@@ -2490,12 +2507,12 @@ let handle_file_write_with_outcome
                      ([ "ok", `Bool true
                       ; "path", `String target
                       ; "mode", `String mode_label
-                      ; "bytes_written", `Int (String.length content)
+                      ; "bytes_written", `Int (String.length (content ()))
                       ]
                       @ via_field)
            ; file_change_evidence =
                (match mode with
-                | Overwrite -> Some (Keeper_file_change_evidence.written content)
+                | Overwrite -> Some (Keeper_file_change_evidence.written (content ()))
                 | Append | Patch -> None)
            })
     in
@@ -2580,7 +2597,7 @@ let handle_file_write_with_outcome
                   ~recovery:publication_recovery_access
                   ~parent:final_parent
                   ~target:recovery_target
-                  content
+                  (content ())
                 |> Result.map_error (fun error ->
                   Content_write_capability { error; created_parents })))
       in
@@ -2642,7 +2659,7 @@ let handle_file_write_with_outcome
                     ~parent:final_parent
                     ~leaf
                     ~permissions:created_file_permissions
-                    content
+                    (content ())
                   |> Result.map_error (fun error ->
                     Content_write_capability { error; created_parents })))
         in
@@ -2708,7 +2725,7 @@ let handle_file_write_with_outcome
                                  ~keeper_name:meta.name
                                  ~target)
                             file
-                            content))))
+                            (content ())))))
       in
       (match
          Keeper_external_resource_lease.with_lease
@@ -2914,9 +2931,12 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* (application : Keeper_tool_patch.patch_application) =
-                  Keeper_tool_patch.apply operation current
-                in
+                match Keeper_tool_patch.apply operation current with
+                | Error message ->
+                  Ok (Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Workflow_rejection })
+                | Ok application ->
                 if String.equal current application.updated then
                   Ok (Write_unchanged (`Assoc
                     ([ "ok", `Bool true; "changed", `Bool false
@@ -3080,3 +3100,18 @@ module For_testing = struct
     Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
   ;;
 end
+
+let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
+    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned ->
+    Keeper_tool_filesystem_remote_write.handle ~turn_sandbox_factory ~config ~meta ~args
+  | Keeper_types_profile_sandbox.Shared_mount ->
+  match Keeper_write_content.of_args args with
+  | Error error -> Keeper_write_content.failure error
+  | Ok content_source ->
+    (match Keeper_write_content.bytes ~config content_source with
+     | Error error -> Keeper_write_content.failure error
+     | Ok content -> handle_file_write_content_with_outcome ~content_source ~content
+         ~turn_sandbox_factory ~config ~meta ~publication_recovery
+         ?continuation_channel ?gate_context ?gate_grant ~args ())

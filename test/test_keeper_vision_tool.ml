@@ -554,11 +554,18 @@ max-request-body-bytes = 65536
 (* Vision falls back to every image-capable runtime after explicit
    media_failover ordering. The uncapped fallback is therefore genuinely
    reachable even though neither [runtime].default nor media_failover names it. *)
+(* [p4.vision-a] is the image-capable runtime this case wants reached, and it
+   is named in [media_failover] because that is what declares a runtime as an
+   image candidate for a keeper that does not route to it. It used to be
+   reachable by being declared at all, which is the tail #34823 removed: that
+   tail was the set boot does not validate dispatch caps for. The capped
+   [p0.text] stays ahead of it, which is the point -- the vision path must not
+   inherit that cap. *)
 let uncapped_vision_fallback_runtime_toml =
   {|
 [runtime]
 default = "p0.text"
-media_failover = ["p0.text"]
+media_failover = ["p0.text", "p4.vision-a"]
 
 [providers.p0]
 protocol = "openai-compatible-http"
@@ -1482,6 +1489,36 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
       (Runtime_agent.For_testing.required_modalities_of_content_blocks original
        = [ "image" ]))
 
+(* The projector is built once per lane walk and carries that walk's spent
+   accounts. A projector that dropped them would send the delegation back to
+   the runtimes the walk just tried (#34829). One eager read per turn is the
+   budget ([max_eager_reads_per_turn]), so the boundary is observed once. *)
+let test_fallback_read_receives_the_walks_excluded_runtimes () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-exclusion" in
+    let bytes = "\x89PNG\r\n\x1a\nexclusion-fixture" in
+    let image =
+      Agent_core.Types.image_block ~media_type:"image/png"
+        ~data:(Base64.encode_string bytes) ()
+    in
+    let seen = ref [] in
+    let read ~exclude_runtime_ids ~media_type:_ ~bytes:_ =
+      seen := exclude_runtime_ids :: !seen;
+      Some (Ok "reading")
+    in
+    let project =
+      Vi.For_testing.fallback_projector
+        ~exclude_runtime_ids:[ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ]
+        ~read ~keeper_name ()
+    in
+    ignore (project ~mode:Vi.Eager [ image ]);
+    match !seen with
+    | [ ids ] ->
+      assert (ids = [ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ])
+    | other ->
+      failwith
+        (Printf.sprintf "expected one delegated read, got %d" (List.length other)))
+
 let test_fallback_semantic_read_is_cached_after_completion () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-fallback-read" in
@@ -1489,7 +1526,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
     let image = Agent_core.Types.image_block ~media_type:"image/png"
         ~data:(Base64.encode_string bytes) () in
     let calls = ref 0 in
-    let read ~media_type ~bytes:received =
+    let read ~exclude_runtime_ids:_ ~media_type ~bytes:received =
       incr calls;
       assert (media_type = "image/png" && received = bytes);
       Some (Ok "The screenshot says deployment failed, code 413.")
@@ -1523,7 +1560,7 @@ let test_cancelled_fallback_read_can_retry_without_cached_failure () =
         ~data:(Base64.encode_string "\x89PNG\r\n\x1a\nretry-fixture") () in
     let cancelled = Eio.Cancel.Cancelled (Failure "cancel image reading") in
     let calls = ref 0 in
-    let read ~media_type:_ ~bytes:_ =
+    let read ~exclude_runtime_ids:_ ~media_type:_ ~bytes:_ =
       incr calls;
       if !calls = 1 then raise cancelled;
       Some (Ok "The retried image contains a green checkmark.")
@@ -2158,7 +2195,77 @@ let test_artifact_failures_are_classified () =
         ; corrupt, "artifact_load_failed", "runtime_failure"
         ; unreadable, "artifact_load_failed", "runtime_failure" ])))
 
+(* Real PNG bytes through the production sandbox runner and store, with a fake
+   Docker transport and provider spy. This proves byte admission/transport, not
+   an actual container execution or semantic image understanding. *)
+let test_generated_sandbox_image_reaches_vision () =
+  with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+    with_temp_base (fun base ->
+      let meta = { (make_meta "generated-image") with
+        sandbox_profile = Keeper_types_profile_sandbox.Docker;
+        sandbox_image = Some "alpine:test" } in
+      let config = Masc.Workspace.default_config base in
+      let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      let rec mkdir path =
+        if not (Sys.file_exists path) then (mkdir (Filename.dirname path); Unix.mkdir path 0o755)
+      in
+      mkdir root;
+      let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let source = Filename.concat root "generated.png" in
+      write_file source bytes;
+      let docker = Filename.concat base "docker" in
+      let script = Printf.sprintf
+        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
+        (Filename.quote source) in
+      write_file docker script; Unix.chmod docker 0o755;
+      with_env "PATH" (base ^ ":" ^ Sys.getenv "PATH") (fun () ->
+      with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+          incr calls;
+          let expected = Vt.message_of_request
+              { Va.query = "read generated image"; image_media_type = "image/png"; image_bytes = bytes } in
+          assert (messages = [expected]);
+          Ok (ok_response "generated image read") in
+        let invoke args = Masc.Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
+            ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args () in
+        let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        assert (result.disposition = Tool_result.Completed ());
+        let output = json_of_output result.raw_output in
+        let handle = assoc_string "artifact" output in
+        assert (assoc_string "text" output = "generated image read");
+        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name) (Store.of_string handle) = Ok bytes);
+        let again = invoke (`Assoc ["artifact", `String handle; "query", `String "read generated image"]) in
+        assert (again.disposition = Tool_result.Completed ());
+        assert (!calls = 2);
+        let bad_query = invoke (`Assoc ["path", `String "generated.png"; "query", `Int 7]) in
+        assert (assoc_string "error" (json_of_output bad_query.raw_output) = "invalid_args");
+        let bad_mime = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"; "media_type", `String "text/plain"]) in
+        assert (assoc_string "error" (json_of_output bad_mime.raw_output) = "invalid_media_type");
+        let invalid = invoke (`Assoc ["artifact", `String handle; "path", `String source; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output invalid.raw_output) = "invalid_args");
+        let escaped = invoke (`Assoc ["path", `String "/etc/passwd"; "query", `String "read generated image"]) in
+        assert (escaped.disposition <> Tool_result.Completed ());
+        assert (!calls = 2);
+        Unix.symlink "/etc/passwd" (Filename.concat root "outside.png");
+        let symlink = invoke (`Assoc ["path", `String "outside.png"; "query", `String "read generated image"]) in
+        assert (symlink.disposition <> Tool_result.Completed ());
+        write_file source "not an image";
+        let non_image = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output non_image.raw_output) = "invalid_media_type");
+        with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "32" (fun () ->
+          write_file source bytes;
+          let oversized = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+          assert (assoc_string "error" (json_of_output oversized.raw_output) = "image_too_large"));
+        assert (!calls = 2)
+      )))))))
+
 let () =
+  test_generated_sandbox_image_reaches_vision ();
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();
   test_browser_screenshot_rejects_invalid_observation ();
@@ -2213,6 +2320,7 @@ let () =
   test_fallback_projection_preserves_artifacts_and_caches_each_mode ();
   test_fallback_reference_projection_is_explicitly_unread ();
   test_fallback_semantic_read_is_cached_after_completion ();
+  test_fallback_read_receives_the_walks_excluded_runtimes ();
   test_cancelled_fallback_read_can_retry_without_cached_failure ();
   test_vision_candidate_cancellation_does_not_failover ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();

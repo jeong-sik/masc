@@ -1450,6 +1450,8 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_fusion_status"
     ; "masc_get_metrics"
     ; "masc_goal_list"
+    ; "masc_lane_inspect"
+    ; "masc_lane_slice"
     ; "masc_plan_get_task"
     ; "masc_run_list"
     ; "masc_task_history"

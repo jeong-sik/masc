@@ -422,6 +422,30 @@ let default_base_path_record_path_opt () =
   in
   Option.map (fun dir -> Filename.concat dir "default-base-path") masc_config_dir
 
+(** [running_under_test_executable ()] mirrors the convention in
+    {!Config_dir_resolver}: the process's [Sys.executable_name]
+    basename starts with ["test_"]. Used to gate production-path
+    safeguards. *)
+let running_under_test_executable () =
+  let basename =
+    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
+  in
+  String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
+
+(* A test executable must not write the operator's own default. One did: a
+   suite that seeds a workspace under a dune sandbox left that temp path in
+   ~/.config/masc/default-base-path, and the next process resolved its base
+   path there until the directory vanished.
+
+   Scoped to a record under the process HOME, the way
+   [sanitize_inherited_test_base_path_opt] scopes its own stripping: a suite
+   that points XDG_CONFIG_HOME at a temp dir is exercising this function and
+   writes nowhere the operator will see. *)
+let record_is_the_operators record =
+  match home_dir_opt () with
+  | Some home -> String.starts_with ~prefix:(home ^ Filename.dir_sep) record
+  | None -> false
+
 (* A record that no longer names a workspace is not the same as no record: the
    operator moved or deleted that directory, and saying so is the difference
    between a puzzling error and an obvious one. *)
@@ -429,10 +453,22 @@ type persisted_default =
   | No_record
   | Usable of { record : string; base_path : string }
   | Stale of { record : string; recorded_path : string }
+  | Unread_under_test of { record : string }
 
 let persisted_default_base_path () =
   match default_base_path_record_path_opt () with
   | None -> No_record
+  (* The read side of [record_is_the_operators]. A test binary that resolves a
+     base path from the operator's record runs against whatever workspace the
+     machine last named -- and the release evidence run names a temp directory,
+     which is how two Server_runtime_bootstrap cases went red in the release
+     build on 2026-09-10 while every local run was green.
+
+     Answered before the file is opened, so this says the location was not
+     consulted, not that a record was there. *)
+  | Some record
+    when running_under_test_executable () && record_is_the_operators record ->
+    Unread_under_test { record }
   | Some record ->
     if not (existing_file record)
     then No_record
@@ -475,7 +511,7 @@ let base_path_source_opt () =
          (match persisted_default_base_path () with
           | Usable { record; base_path } ->
             Some (From_persisted_default record, base_path)
-          | No_record | Stale _ -> None))
+          | No_record | Stale _ | Unread_under_test _ -> None))
 
 let base_path_raw_opt () =
   match base_path_source_opt () with
@@ -485,15 +521,6 @@ let base_path_raw_opt () =
 let base_path_opt () =
   base_path_raw_opt () |> Option.map normalize_masc_base_path_input
 
-(** [running_under_test_executable ()] mirrors the convention in
-    {!Config_dir_resolver}: the process's [Sys.executable_name]
-    basename starts with ["test_"]. Used to gate production-path
-    safeguards. *)
-let running_under_test_executable () =
-  let basename =
-    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
-  in
-  String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
 
 (** #9903: production base-path safeguard for test executables.
 
@@ -572,13 +599,21 @@ let base_path_prod_guard path =
    named only the env var -- not --base-path, and not the recorded default that
    `masc setup` now writes. *)
 let base_path_not_set_message () =
-  let stale_note =
+  let record_note =
     match persisted_default_base_path () with
     | Stale { record; recorded_path } ->
       Printf.sprintf
         " The recorded default %s in %s no longer holds a %s directory, so it was \
          ignored."
         recorded_path record Common.masc_dirname
+    | Unread_under_test { record } ->
+      (* Without this the developer reads "not set" while their shell resolves
+         that default fine, and looks for the bug in the wrong place. *)
+      Printf.sprintf
+        " This is a test binary (%s), so it does not read the recorded default \
+         in %s; pass the workspace explicitly."
+        (Filename.basename Sys.executable_name)
+        record
     | No_record | Usable _ -> ""
   in
   "MASC_BASE_PATH is not set. Pass --base-path <workspace>, or set \
@@ -586,7 +621,7 @@ let base_path_not_set_message () =
   ^ Common.masc_dirname
   ^ "/ directory. Running `masc setup --base-path <workspace>` records that \
      workspace as the default for later commands."
-  ^ stale_note
+  ^ record_note
 
 (** Project base path. [MASC_BASE_PATH] is required. *)
 let base_path () =
@@ -602,19 +637,6 @@ type record_outcome =
   | Refused_under_test
   | Record_failed of { record : string; reason : string }
 
-(* A test executable must not write the operator's own default. One did: a
-   suite that seeds a workspace under a dune sandbox left that temp path in
-   ~/.config/masc/default-base-path, and the next process resolved its base
-   path there until the directory vanished.
-
-   Scoped to a record under the process HOME, the way
-   [sanitize_inherited_test_base_path_opt] scopes its own stripping: a suite
-   that points XDG_CONFIG_HOME at a temp dir is exercising this function and
-   writes nowhere the operator will see. *)
-let record_is_the_operators record =
-  match home_dir_opt () with
-  | Some home -> String.starts_with ~prefix:(home ^ Filename.dir_sep) record
-  | None -> false
 
 let record_default_base_path path =
   match default_base_path_record_path_opt () with

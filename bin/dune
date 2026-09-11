@@ -10,7 +10,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_owner_upgrade)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade)
  (public_name masc)
  (package masc)
  (libraries
@@ -394,6 +394,12 @@
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
  (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_lane_addons)
+ (wrapped false)
+ (modules masc_tui_lane_addons)
+ (libraries masc masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_command)
@@ -999,6 +1005,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_lane_addons
   masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
@@ -1179,6 +1186,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_lane_addons
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

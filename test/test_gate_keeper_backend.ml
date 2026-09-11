@@ -1618,7 +1618,7 @@ let test_keeper_stream_bridge_terminalizes_superseded_attempt_tool () =
        in
        (match superseded.chat_events with
         | [ Keeper_chat_events.Agent_core_stream_protocol_error error
-          ; Keeper_chat_events.Agent_core_runtime_attempt_started
+          ; Keeper_chat_events.Agent_core_runtime_attempt_started _
           ] ->
           check string "typed attempt terminal" "tool_attempt_superseded"
             (Keeper_chat_events.stream_protocol_error_kind_to_string error.kind);
@@ -1676,7 +1676,7 @@ let test_keeper_stream_bridge_preserves_authoritative_attempt_tool () =
            finalized.bridge_state
        in
        match preserved.chat_events with
-       | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+       | [ Keeper_chat_events.Agent_core_runtime_attempt_started _ ] -> ()
        | _ -> fail "authoritative prior tool was quarantined at fallback boundary")
 
 let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
@@ -1721,7 +1721,7 @@ let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
                 failed.bridge_state
             in
             match fallback.chat_events with
-            | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+            | [ Keeper_chat_events.Agent_core_runtime_attempt_started _ ] -> ()
             | _ -> fail (label ^ " re-quarantined the same occurrence"))
          [ ( "sse-error"
            , SSEError
@@ -1804,7 +1804,7 @@ let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
            ~previous_scope:Keeper_chat_events.Abandon_previous_scope after_late
        in
        (match fallback.chat_events with
-        | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+        | [ Keeper_chat_events.Agent_core_runtime_attempt_started _ ] -> ()
         | _ -> fail "fallback re-quarantined an already frozen occurrence");
        let fresh =
          translate ~stream_scope:1 fallback.bridge_state

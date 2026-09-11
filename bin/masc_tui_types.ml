@@ -3836,14 +3836,17 @@ type state = {
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
+  mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
   (* The clients roster, off the ring under Runtime the way Lanes is. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;
   mutable clients_surface_error: string option;
+  mutable clients_surface_inflight: bool;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
   mutable clients_surface_generation: int;
@@ -3891,6 +3894,7 @@ type state = {
   mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
+  mutable connectors_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
@@ -3970,6 +3974,7 @@ type state = {
   mutable code_dir: string;
   mutable code_entries: Tui_decode.workspace_tree_node list;
   mutable code_entries_error: string option;
+  mutable code_entries_inflight: bool;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -4074,6 +4079,7 @@ type state = {
   mutable changes_tree_diff_path: string option;
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
+  mutable harness_inflight: bool;
   mutable harness_scroll: int;
   mutable harness_cursor: int;
   (* The verdict opened from the list. Task id alone is not an identity: the
@@ -5190,11 +5196,14 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
+  keeper_lanes_inflight = false;
   standalone_lanes = None;
   standalone_lanes_error = None;
+  standalone_lanes_inflight = false;
   standalone_lanes_generation = 0;
   clients_surface = None;
   clients_surface_error = None;
+  clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
   clients_surface_generation = 0;
@@ -5235,6 +5244,7 @@ let create_state
   browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
+  connectors_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
@@ -5298,6 +5308,7 @@ let create_state
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
+  code_entries_inflight = false;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
@@ -5332,6 +5343,7 @@ let create_state
   changes_tree_diff_path = None;
   harness = None;
   harness_error = None;
+  harness_inflight = false;
   harness_scroll = 0;
   harness_cursor = 0;
   harness_detail = None;

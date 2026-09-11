@@ -635,14 +635,16 @@ let snapshot_json
       else []
     in
   let board_attention_quarantines =
-  timed "board_attention_quarantines" (fun () ->
-    if initialized && include_keepers
-    then
-      Keeper_board_attention_quarantine_command.inventory_json
-        ~base_path:config.base_path
-        ~keeper_names
-    else `Assoc [ "count", `Int 0; "items", `List []; "errors", `List [] ])
-in
+    timed "board_attention_quarantines" (fun () ->
+      if initialized && include_keepers
+      then
+        let cache_key = "operator:board-quarantines:" ^ config.base_path in
+        Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+          Keeper_board_attention_quarantine_command.inventory_json
+            ~base_path:config.base_path
+            ~keeper_names)
+      else `Assoc [ "count", `Int 0; "items", `List []; "errors", `List [] ])
+  in
   let result =
       `Assoc
         ([ "trace_id", `String trace_id

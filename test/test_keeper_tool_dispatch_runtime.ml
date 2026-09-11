@@ -7,6 +7,8 @@ open Alcotest
    see nothing. Same repo-root idiom test_tool_task_coverage uses — that
    executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
 let () =
+  let prompt_dir = Masc_test_deps.source_path "config/prompts" in
+  Prompt_registry.set_markdown_dir prompt_dir;
   Masc.Prompt_defaults.init ()
 ;;
 
@@ -163,6 +165,36 @@ let make_ctx () =
    masc-keeper-sandbox:local while a sandboxed run reached for
    masc-sandbox:general, so a host holding the first one answered "available"
    and the run failed on the second. *)
+let docker_shares_a_temp_workspace =
+  lazy
+    (let dir = temp_dir "mount-premise" in
+     let sentinel = Filename.concat dir "mount-premise" in
+     let shared =
+       try
+         Fun.protect
+           ~finally:(fun () -> cleanup_dir dir)
+           (fun () ->
+              write_file sentinel "visible";
+              Sys.command
+                (Printf.sprintf
+                   "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
+                    /masc-mount-premise/mount-premise >/dev/null 2>&1"
+                   (Filename.quote dir)
+                   (Filename.quote Keeper_sandbox_image.default_tag))
+              = 0)
+       with _ -> false
+     in
+     if not shared
+     then
+       Printf.eprintf
+         "SKIPPING cases requiring live sandbox: this host's docker does not share \
+          %s into a container, so a case's temp workspace arrives empty and \
+          every read answers \"No such file or directory\". A colima context \
+          mounts $HOME only; add this path to its mount list, or run the suite \
+          from a workspace under a shared path.\n%!"
+         (Filename.dirname dir);
+     shared)
+
 let is_sandbox_available =
   lazy (
     match Masc_test_deps.fixture_sandbox_profile () with
@@ -173,6 +205,7 @@ let is_sandbox_available =
               "docker image inspect %s > /dev/null 2>&1"
               (Filename.quote Keeper_sandbox_image.default_tag))
          = 0
+         && Lazy.force docker_shares_a_temp_workspace
        with _ -> false)
     | _ -> false
   )

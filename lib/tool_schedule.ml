@@ -526,6 +526,72 @@ let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
         ])
 ;;
 
+(* Notes append to the store directly (task-381): the note tool owns the
+   argument contract while the store owns identity and ordering. The author
+   defaults to the caller, mirroring [scheduled_by] on create. *)
+let handle_note_add ~tool_name ~start_time ctx args =
+  match
+    let* schedule_id = required_string args "schedule_id" in
+    let* body = required_string args "body" in
+    let author_id =
+      match string_opt args "author_id" with
+      | Some explicit -> explicit
+      | None -> ctx.agent_name
+    in
+    let* author_kind =
+      actor_kind_of_arg args "author_kind" Schedule_domain.Automated_actor
+    in
+    let now = Time_compat.now () in
+    let* note, note_count =
+      Schedule_store.append_note
+        ctx.config
+        ~schedule_id
+        ~author_id
+        ~author_kind
+        ~body
+        ~now
+      |> Result.map_error Schedule_store.store_error_to_string
+    in
+    Ok (note, note_count)
+  with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok (note, note_count) ->
+    ok ~tool_name ~start_time
+      (`Assoc
+        [ "status", `String "ok"
+        ; "note", Schedule_domain.schedule_note_to_yojson note
+        ; "note_count", `Int note_count
+        ])
+;;
+
+let handle_notes_list ~tool_name ~start_time ctx args =
+  match required_string args "schedule_id" with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok schedule_id ->
+    let raw_limit = optional_int args "limit" |> Option.value ~default:50 in
+    let limit = min 200 (max 1 raw_limit) in
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
+     | Ok state ->
+       let notes =
+         Schedule_store.notes_for_schedule state ~schedule_id
+         |> fun notes ->
+         let count = List.length notes in
+         if count <= limit then notes
+         else
+           (* Oldest-first promise stays intact: trim from the head, keep the
+              newest [limit], still returned oldest first. *)
+           List.filteri (fun i _ -> i >= count - limit) notes
+       in
+       ok ~tool_name ~start_time
+         (`Assoc
+           [ "status", `String "ok"
+           ; "schedule_id", `String schedule_id
+           ; "limit", `Int limit
+           ; "notes", `List (List.map Schedule_domain.schedule_note_to_yojson notes)
+           ]))
+;;
+
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start_time = Time_compat.now () in
   let handle f =
@@ -545,6 +611,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Cancel_request; _ } ->
       handle (fun ~tool_name ~start_time ctx ->
           handle_cancel ~tool_name ~start_time ctx.config)
+  | Some { action = Add_note; _ } -> handle handle_note_add
+  | Some { action = List_notes; _ } -> handle handle_notes_list
   (* [None] is "not a schedule tool". Spelling it out rather than [_] keeps the
      action match exhaustive, so an action added to Tool_schemas_schedule is a
      compile error here instead of an advertised name with no route. *)

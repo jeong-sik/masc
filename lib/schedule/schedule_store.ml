@@ -828,7 +828,7 @@ let accept_running ?finished_at config ~now ~schedule_id ?detail () =
                ; error = None
                })
         in
-        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -917,7 +917,7 @@ let retry_running ?finished_at config ~now ~schedule_id ~reason =
           update_latest_running_wake state.wakes ~schedule_id
             (fail_wake_for_recovery ~now:finished_at ~reason)
         in
-        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -969,7 +969,7 @@ let recover_running_on_startup config ~now =
     if recovered = 0 then
       Ok (state, 0)
     else
-      let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
+      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
       let* () = write_state config next_state in
       Ok (next_state, recovered))
 ;;

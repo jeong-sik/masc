@@ -198,3 +198,6 @@ memory/
 
 # remote-ssh shim binaries (built by scripts/remote-ssh/build-shim.sh)
 /dist/
+
+# Local sandbox builds vendor the pinned ocaml-msx here (never commit).
+/vendor/

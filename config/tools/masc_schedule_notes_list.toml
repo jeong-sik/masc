@@ -1,0 +1,19 @@
+name = "masc_schedule_notes_list"
+description = """List the durable notes of one scheduled request, oldest first. Notes are
+keyed by the stable schedule_id and survive definition replacements
+(masc_schedule_update) and terminal schedule states. Use them to read why a
+schedule exists, what changed and when, and the context a Keeper needs when
+it wakes."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Stable id of the schedule whose notes are listed."
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Maximum notes to return (default 50, max 200). The newest notes are returned first when trimming."

@@ -4,6 +4,8 @@ type action =
   | List_requests
   | Get_request
   | Cancel_request
+  | Add_note
+  | List_notes
 [@@deriving enumerate]
 
 type definition =

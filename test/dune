@@ -173,6 +173,8 @@
   test_eio_context_fiber_local
   test_pool
   test_pool_dead_server_fd
+  test_pool_dead_server_fd
+  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -5538,6 +5540,17 @@
   (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
 
 (test
+ (name test_model_setup_resume)
+ (modules test_model_setup_resume)
+ (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))
+
+(rule
+ (alias runtest-test_model_independent_owner)
+ (deps test_model_independent_owner.py ../bin/main_eio.exe)
+ (action
+  (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
+
+(test
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
  (libraries masc masc.server fs_compat alcotest unix yojson))
@@ -5572,7 +5585,7 @@
  (modules test_lane_addon_worker)
  (libraries masc alcotest eio eio_main yojson unix))
 
-(include stanzas/test_runtime_model_discovery.inc)
+
 (include stanzas/test_runtime_model_discovery.inc)
 
 (test

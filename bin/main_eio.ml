@@ -1,7 +1,6 @@
 (** MASC MCP Server - Eio Native Entry Point
     MCP Streamable HTTP Transport with Eio concurrency (OCaml 5.x)
 
-    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
     Uses h2-eio for HTTP/2 with unlimited SSE streams per connection.
     HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
@@ -969,7 +968,6 @@ let token_agent_arg =
   Arg.(required & pos 0 (some string) None & info [] ~docv:"AGENT" ~doc)
 
 let token_credentials base_path =
-let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (base_path, Auth.list_credentials base_path)
 
@@ -2568,22 +2566,6 @@ let runtime_store_credential_cmd =
   Cmd.v (Cmd.info "runtime-store-credential" ~doc:"Save an API key from a private stdin pipe for local setup.")
     Term.(const run $ const ())
 
-let runtime_serving_context_cmd =
-  let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private connection JSON with credential references.") in
-  let model = Arg.(required & opt (some string) None & info ["model"] ~doc:"Exact selected model ID.") in
-  let load = Arg.(value & flag & info ["load"] ~doc:"Preload only the selected Ollama model before observing its running context.") in
-  let run path model load =
-    let connection = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
-      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
-    match connection with
-    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
-    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-        match Runtime_serving_context.observe ~sw ~net:(Eio.Stdenv.net env) connection ~model ~load with
-        | Ok observation -> print_endline (Yojson.Safe.to_string observation); 0
-        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
-  Cmd.v (Cmd.info "runtime-serving-context" ~doc:"Observe a selected Ollama or llama.cpp serving window with its protected credential.")
-    Term.(const run $ spec $ model $ load)
-
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
@@ -2657,7 +2639,6 @@ let setup_validate_runtime base_path =
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
-  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
     (* setup is an operator command: the workspace it prepares becomes the
        default for later ones. *)
@@ -2693,6 +2674,7 @@ let doctor_cmd =
   let inspect requested json =
     let selected = match requested with
       | Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
     let state = Onboarding_status.inspect ~base_path:selected in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);
@@ -2757,11 +2739,9 @@ let setup_cmd =
     Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
   in
   let run base_path port no_tui sandbox_profile microvm_backend =
-  let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
-      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
       if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
       else
@@ -2769,7 +2749,6 @@ let setup_cmd =
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
-        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
         | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
@@ -2839,7 +2818,6 @@ let cmd =
     ; runtime_model_list_cmd
     ; runtime_discover_models_cmd
     ; runtime_store_credential_cmd
-    ; runtime_serving_context_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

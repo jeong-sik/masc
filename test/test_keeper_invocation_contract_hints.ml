@@ -126,7 +126,7 @@ let test_capability_is_not_advertised () =
   let props = List.sort compare (advertised_properties ()) in
   Alcotest.(check (list string))
     "the submitter is offered only what it can decide"
-    [ "prompt"; "target" ]
+    [ "artifacts"; "prompt"; "target" ]
     props
 
 let test_capability_is_still_accepted_on_the_wire () =

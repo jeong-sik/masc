@@ -655,13 +655,23 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       message_error ~class_:Tool_result.Policy_rejection
         (Turn.preflight_keeper_delegate ctx request)
     in
+    let references = Keeper_invocation_contract.artifacts request in
+    let* () = List.fold_left (fun result reference ->
+      let* () = result in
+      Keeper_peer_artifact.fetch ~config:ctx.config reference
+      |> Result.map (fun _ -> ())
+      |> message_error ~class_:Tool_result.Runtime_failure) (Ok ()) references in
+    let message = match references with
+      | [] -> Keeper_invocation_contract.prompt request
+      | _ -> Keeper_invocation_contract.prompt request ^ "\n\nExported peer artifacts (materialize with keeper_artifact_transfer into your own relative path):\n"
+          ^ Yojson.Safe.to_string (`List (List.map Keeper_peer_artifact_ref.to_json references)) in
     submit_agent_operation
       ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
       ?continuation_channel:
         (delegate_continuation_channel ~config:ctx.config ~submitted_by)
       ~submitted_by
       ~keeper_name:(Keeper_invocation_contract.target_name request)
-      ~message:(Keeper_invocation_contract.prompt request)
+      ~message
       ~user_blocks:[]
       ~turn_instructions:None
       ~surface_context:None

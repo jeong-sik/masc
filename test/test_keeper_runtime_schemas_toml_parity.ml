@@ -26,7 +26,8 @@ open Alcotest
    tools are #33639 (RFC-0430 Phase 3); keeper_analyze_image carries the
    runtime_id parameter #34561 added. *)
 let expected =
-  [ "keeper_artifact_read"
+  [ "keeper_artifact_transfer"
+  ; "keeper_artifact_read"
   ; "masc_fusion"
   ; "masc_fusion_decision"
   ; "masc_fusion_status"

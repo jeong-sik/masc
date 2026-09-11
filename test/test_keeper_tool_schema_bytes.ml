@@ -153,7 +153,11 @@ open Alcotest
    notes -- why a schedule exists, what changed across masc_schedule_update
    replacements, and what a Keeper needs when it wakes; append-only, keyed by the
    stable schedule_id, surviving terminal states. *)
-let ceiling_bytes = 105_415
+(* 2026-09-11: 106,394 across 122 tools. PR adds keeper_artifact_transfer
+   (+979 bytes). What it bought: a Keeper hands a generated binary to a peer
+   through the workspace blob store, without either side touching the other's
+   host paths. *)
+let ceiling_bytes = 106_394
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -220,6 +224,7 @@ let all_surface_golden_names =
   (* Unread artifact handles need a model-callable vision reader. *)
   ; "keeper_analyze_image"
   ; "keeper_artifact_read"
+  ; "keeper_artifact_transfer"
   ; "keeper_broadcast"
   ; "keeper_code_query"
   ; "keeper_context_status"

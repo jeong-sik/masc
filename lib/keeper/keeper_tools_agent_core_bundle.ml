@@ -342,6 +342,7 @@ let make_tool_bundle_for_descriptors_with_policy
                   same effect-outcome-unknown shape Execute has. *)
                | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
                  Some mark_terminal_effect_failed
+               | Keeper_tool_descriptor.Tool_peer_artifact
                | Keeper_tool_descriptor.Tool_edit_file
                | Keeper_tool_descriptor.Tool_write_file ->
                  Some (fun failure ->

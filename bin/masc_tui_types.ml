@@ -6210,16 +6210,36 @@ type runtime_picker_projection = {
   rlp_choices : Tui_decode.runtime_option list;
 }
 
+(* The picker serves both lane kinds. A conversation lane names its runtime id
+   and reads its current order from the runtime surface's resolved lanes; an
+   exact-output lane arrives as "exact/<name>" and reads its walk order from
+   the standalone-lane observation, which carries the admitted slots. *)
+let lane_picker_existing_slots (state : state) (lane : string) =
+  let exact_prefix = "exact/" in
+  if String.length lane > String.length exact_prefix
+     && String.equal (String.sub lane 0 (String.length exact_prefix)) exact_prefix
+  then
+    let name = String.sub lane (String.length exact_prefix) (String.length lane - String.length exact_prefix) in
+    match state.standalone_lanes with
+    | None -> []
+    | Some snapshot ->
+        snapshot.Tui_decode.sls_lanes
+        |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
+             String.equal row.Tui_decode.sl_lane_id name)
+        |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
+        |> Option.value ~default:[]
+  else
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot ->
+        snapshot.Tui_decode.rss_resolved.rrs_lanes
+        |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
+        |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
+        |> Option.value ~default:[]
+
 let runtime_picker_projection (state : state) =
   Option.map (fun lane ->
-    let already = match state.runtime_surface with
-      | None -> []
-      | Some snapshot ->
-          snapshot.Tui_decode.rss_resolved.rrs_lanes
-          |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
-          |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
-          |> Option.value ~default:[]
-    in
+    let already = lane_picker_existing_slots state lane in
     let providers = already |> List.filter_map (fun id ->
       state.runtime_catalog
       |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)

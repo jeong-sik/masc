@@ -1176,7 +1176,23 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  let project_images = Keeper_vision_ingest.fallback_projector ~keeper_name () in
+  (* The vision delegation must not spend this turn's candidates twice. Its own
+     candidate set is the global media list, and the quota window moves an
+     account that answered a hard rejection behind the live ones without
+     removing it -- so a walk that just collected 402s would ask those same
+     accounts once more through the projector before the text fallback starts
+     (#34829).
+     The excluded set is the walk's declared candidates rather than the prefix
+     it has reached: every one of them has either been dispatched to already or
+     is about to be by this same walk, so a delegation to either is work the
+     walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
+     signature and its mutable state out of the delegation. *)
+  let project_images =
+    Keeper_vision_ingest.fallback_projector
+      ~exclude_runtime_ids:lane_candidate_ids
+      ~keeper_name
+      ()
+  in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return.
      Modality reroutes are capability routing decisions, not provider-failure

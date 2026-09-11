@@ -2100,7 +2100,7 @@ let fixture_tool ?(parameters = []) ~name ~description () =
     ~name
     ~description
     ~parameters
-    (fun _ -> Ok { Agent_core.Types.content = "fixture"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
 ;;
 
 let production_keeper_meta ~base_path ~trace_id =
@@ -2609,7 +2609,7 @@ let test_keeper_projects_codex_live_stream () =
           }
         ]
       (fun _ ->
-         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   with_fixture
     [ init_result
@@ -2768,7 +2768,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
            "RAW fixture tool sees actual input"
            "from-codex"
            Yojson.Safe.Util.(input |> member "marker" |> to_string);
-         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -3966,7 +3966,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
           "typed tool input"
           "from-codex"
           Yojson.Safe.Util.(input |> member "marker" |> to_string);
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   let hooks : Agent_core.Hooks.hooks =
     { Agent_core.Hooks.empty with
@@ -4260,7 +4260,7 @@ let test_live_keeper_dynamic_tool_subscription () =
         ~parameters:[]
         (fun _ ->
           incr tool_calls;
-          Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+          Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
     in
     let base_path = temp_workspace "masc-codex-live-tool-raw-" in
     let raw_trace_path = Filename.concat base_path "live-tool-raw.jsonl" in

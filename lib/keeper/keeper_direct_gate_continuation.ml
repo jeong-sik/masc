@@ -152,7 +152,7 @@ let suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~sessi
     let* waiting = match runtime_lane with
       | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
       | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
-        let* runtime_retry = Semantic.runtime_retry ~checkpoint:reference ~assignment_id:lane.assignment_id
+        let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
           ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
         Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
     let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in

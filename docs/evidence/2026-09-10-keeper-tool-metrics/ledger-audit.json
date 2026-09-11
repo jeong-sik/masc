@@ -1,0 +1,160 @@
+{
+  "observed_at": "2026-09-10T14:44:40.739717+00:00",
+  "binary_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "api_response": "operator-response-058.private.json",
+  "cache": {
+    "state": "stale_refreshing",
+    "generated_at": 1789051399.314778,
+    "age_s": 87.06302905082703
+  },
+  "reconstructed_snapshot_end": 1789051312.251749,
+  "cutoff": 1789047712.251749,
+  "source_files": [
+    {
+      "path": ".masc/keepers/exhibit-designer.decisions.jsonl",
+      "sha256": "533976cbd2b7a753deb1eee7d9fcca6fc8757270c00dd8f409a068ac24499901",
+      "bytes": 145982
+    },
+    {
+      "path": ".masc/keepers/exhibit-editor.decisions.jsonl",
+      "sha256": "844ac974bc1528ef45fa970c4f2eaedbe80e97436e386543e4051193382679e0",
+      "bytes": 265999
+    },
+    {
+      "path": ".masc/costs/2026-09/10.jsonl",
+      "sha256": "4f0799d333feb653bda77278108a1304bd123993f828a449b37f8e75bbca73ea",
+      "bytes": 264576
+    }
+  ],
+  "decision_turn_count": 26,
+  "tool_exec_count": 128,
+  "decision_turns_missing_tool_count": 26,
+  "exact_cost_join_gaps": [],
+  "comparisons": [
+    {
+      "model_id": "runtime_lane_85c67b3487a8",
+      "checks": {
+        "total_input_tokens": {
+          "ledger": 1952622,
+          "api": 1952622,
+          "match": true
+        },
+        "total_output_tokens": {
+          "ledger": 3446,
+          "api": 3446,
+          "match": true
+        },
+        "total_cache_read_tokens": {
+          "ledger": 1933184,
+          "api": 1933184,
+          "match": true
+        },
+        "total_cache_creation_tokens": {
+          "ledger": 0,
+          "api": 0,
+          "match": true
+        },
+        "entry_count": {
+          "ledger": 13,
+          "api": 13,
+          "match": true
+        }
+      }
+    },
+    {
+      "model_id": "runtime_lane_c888938c4d08",
+      "checks": {
+        "total_input_tokens": {
+          "ledger": 1191495,
+          "api": 1191495,
+          "match": true
+        },
+        "total_output_tokens": {
+          "ledger": 8946,
+          "api": 8946,
+          "match": true
+        },
+        "total_cache_read_tokens": {
+          "ledger": 1086656,
+          "api": 1086656,
+          "match": true
+        },
+        "total_cache_creation_tokens": {
+          "ledger": 0,
+          "api": 0,
+          "match": true
+        },
+        "entry_count": {
+          "ledger": 12,
+          "api": 12,
+          "match": true
+        }
+      }
+    },
+    {
+      "model_id": "runtime_lane_be28342d8855",
+      "checks": {
+        "total_input_tokens": {
+          "ledger": 104130,
+          "api": 104130,
+          "match": true
+        },
+        "total_output_tokens": {
+          "ledger": 464,
+          "api": 464,
+          "match": true
+        },
+        "total_cache_read_tokens": {
+          "ledger": 102400,
+          "api": 102400,
+          "match": true
+        },
+        "total_cache_creation_tokens": {
+          "ledger": 0,
+          "api": 0,
+          "match": true
+        },
+        "entry_count": {
+          "ledger": 1,
+          "api": 1,
+          "match": true
+        }
+      }
+    }
+  ],
+  "all_comparisons_match": true,
+  "tool_names": {
+    "keeper_capability_search": 7,
+    "tool_read_file": 7,
+    "tool_edit_file": 8,
+    "tool_execute": 16,
+    "keeper_analyze_image": 11,
+    "masc_board_post_update": 4,
+    "keeper_artifact_read": 12,
+    "masc_board_comment": 4,
+    "masc_keeper_delegate": 1,
+    "keeper_tasks_list": 8,
+    "masc_keeper_delegate_status": 3,
+    "masc_board_post_get": 6,
+    "masc_keeper_delegate_cancel": 1,
+    "keeper_task_claim": 1,
+    "tool_write_file": 5,
+    "keeper_task_done": 2,
+    "masc_board_post": 4,
+    "masc_library_add": 2,
+    "keeper_memory_search": 12,
+    "tool_search_files": 1,
+    "masc_goal_list": 3,
+    "masc_goal_transition": 1,
+    "keeper_memory_write": 2,
+    "masc_board_list": 2,
+    "keeper_surface_read": 1,
+    "masc_ask": 2,
+    "keeper_memory_retract": 2
+  },
+  "limitations": [
+    "Snapshot end reconstructed from cache response generated_at minus age_s; source records captured after API read.",
+    "Tool execution events are separate raw observations, not assumed one-to-one with completed-turn totals.",
+    "Does not prove rendered browser values or live fix."
+  ]
+}

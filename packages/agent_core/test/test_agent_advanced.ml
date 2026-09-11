@@ -127,7 +127,7 @@ let time_tool ?descriptor ?result on_execute =
        on_execute ();
        match result with
        | Some result -> result
-       | None -> Ok { Types.content = "12:00 UTC"; _meta = None })
+       | None -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
 ;;
 
 let messages_contain_text expected messages =

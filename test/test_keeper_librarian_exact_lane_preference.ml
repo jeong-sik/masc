@@ -227,7 +227,7 @@ let test_fit_shrinks_to_slot_budget_and_reports_zero_fit () =
        ~full_messages:[ message big ]
        ~render_at
    with
-   | Ok (_, None) -> fail "an oversized prompt reported no shrink"
+   | Ok ((_, None), _) -> fail "an oversized prompt reported no shrink"
    | Ok ((fitted, Some count), _) ->
      check bool "shrunk window is non-empty" true (count >= 0);
      check bool "fitted prompt is smaller than the full prompt" true

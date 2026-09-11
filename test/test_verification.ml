@@ -3514,6 +3514,37 @@ let test_checkout_relative_artifact_is_not_guessed () =
    longer stops the review before an evaluator runs. What this pins is that
    the judge is handed enough to answer with — which reference failed and why
    — rather than a bundle that silently omits it. *)
+(* A producer that joined over MCP has no keeper TOML and nothing created a
+   playground for it. Resolving its artifact root used to ask the sandbox
+   profile resolver, which raises for every undeclared producer, so a submit
+   carrying an artifact reference died in the resolver instead of recording
+   what the judge needs: the reference, and that it could not be read. *)
+let test_undeclared_producer_artifact_is_typed_missing () =
+  with_eio_temp_dir (fun base_path ->
+    let snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"mcp-client"
+        [ "artifact:proof.txt"; "note:summary" ]
+    in
+    let open Yojson.Safe.Util in
+    let unreadable =
+      snapshot
+      |> to_list
+      |> List.filter_map (fun item ->
+        match item |> member "kind" |> to_string with
+        | "artifact_unreadable" ->
+          Some
+            ( item |> member "reference" |> to_string
+            , item |> member "reason" |> to_string )
+        | _ -> None)
+    in
+    Alcotest.(check (list (pair string string)))
+      "the artifact is recorded as missing under the producer's own root"
+      [ "artifact:proof.txt", VS.evidence_read_failure_code VS.Evidence_missing ]
+      unreadable)
+;;
+
 let test_unreadable_artifacts_reach_the_judge () =
   let items =
     [ VS.Evidence_note "narrative evidence"
@@ -3773,6 +3804,8 @@ let () =
         test_keeper_task_projection_never_exposes_snapshot_or_verdict_action;
       Alcotest.test_case "an unreadable artifact reaches the judge, not a defer" `Quick
         test_unreadable_artifacts_reach_the_judge;
+      Alcotest.test_case "an undeclared producer's artifact is typed missing, not a raise" `Quick
+        test_undeclared_producer_artifact_is_typed_missing;
       Alcotest.test_case "a checkout-relative artifact path is not guessed" `Quick
         test_checkout_relative_artifact_is_not_guessed;
       Alcotest.test_case "an injected artifact read answers the snapshot" `Quick

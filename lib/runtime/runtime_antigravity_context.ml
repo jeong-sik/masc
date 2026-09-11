@@ -141,7 +141,9 @@ let executable_path command =
   let candidates =
     if Filename.is_implicit command
     then
-      Option.value (Sys.getenv_opt "PATH") ~default:""
+      (match Env_config_core.raw_value_opt "PATH" with
+        | Some path -> path
+        | None -> "")
       |> String.split_on_char ':'
       |> List.map (fun directory -> Filename.concat directory command)
     else [ command ]

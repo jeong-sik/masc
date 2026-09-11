@@ -1425,10 +1425,11 @@ let persist_dropped_response
 ;;
 
 (* Effort is a thinking modifier: the wires that admit it at all reject the
-   pair enable_thinking=false + reasoning_effort (the request validator that
-   some backends apply fails the pair outright), so the no-thinking retry
-   below must strip it from the candidate — otherwise the retry dies in
-   request validation instead of continuing the turn it was meant to rescue. *)
+   pair enable_thinking=false + reasoning_effort
+   (backend_anthropic.validate_thinking_controls fails the request), so the
+   no-thinking retry below must strip it from the candidate — otherwise the
+   retry dies in request validation instead of continuing the turn it was
+   meant to rescue. *)
 let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runtime_candidate.t =
   Runtime_candidate.of_provider_config
     { (Runtime_candidate.provider_cfg candidate) with

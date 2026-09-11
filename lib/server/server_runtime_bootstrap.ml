@@ -2067,6 +2067,11 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
+    (* The listener is bound. Persist only the desired connection, not readiness. *)
+    (match Workspace_connection.port config.port with
+     | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)
+     | Ok port -> (match Workspace_connection.save ~base_path ~port with
+       | Ok () -> () | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)));
     let addr_label = Printf.sprintf "%s:%d" config.host config.port in
     match http_mode with
     | `H2_only ->

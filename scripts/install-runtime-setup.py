@@ -1405,7 +1405,25 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
-def select_setup_server(binary, base_path, port, require_new_owner=False):
+def workspace_port(binary, base_path, requested=None, save=False):
+    argv = [str(binary), 'workspace-connection', '--base-path', str(base_path)]
+    if requested is not None:
+        argv += ['--port', str(requested)]
+    if save:
+        argv += ['--save']
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if (response.returncode or observed.get('schema') != 'masc.workspace_connection.v1'
+                or observed.get('readiness') != 'not_checked'
+                or not positive_integer(observed.get('port')) or observed['port'] > 65535):
+            raise ValueError('invalid connection')
+        return observed['port']
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('The workspace HTTP port could not be resolved or saved. Check connection.toml or supply --port.')
+
+
+def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
     while True:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1420,6 +1438,8 @@ def select_setup_server(binary, base_path, port, require_new_owner=False):
             return port
         if state == 'same_workspace':
             server_version = observed['server_version']
+            if resume_existing and not require_new_owner and server_version == observed['installed_version']:
+                return port
             choices = [('use', 'Continue with this running workspace'),
                        ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
                        ('later', 'Finish later')]
@@ -1536,7 +1556,14 @@ def journey(binary, base_path, port, timeout, resume=False):
     if (resume and state.get('base_path') and conditions.get('workspace') == 'satisfied'
             and conditions.get('keeper_persistence') == 'satisfied'
             and 'invalid' not in conditions.values()):
-        return open_workspace(binary, state['base_path'], port)
+        base = state['base_path']
+        try:
+            saved_port = workspace_port(binary, base, port)
+        except SetupError as error:
+            print(terminal_text(str(error)) + '\nChoose a workspace to continue.', file=sys.stderr)
+        else:
+            selected_port = select_setup_server(binary, base, saved_port, resume_existing=True)
+            return 1 if selected_port is None else open_workspace(binary, base, selected_port)
     print('\nWelcome. Let’s make a home for you and imp.\n'
           'Choose with arrows and Enter; Space selects several connections.', file=sys.stderr)
     proposed = state.get('base_path') or str(Path.home() / 'MASC')
@@ -1545,8 +1572,13 @@ def journey(binary, base_path, port, timeout, resume=False):
         return 0
     base = proposed if selection == 0 else ask_text('Workspace directory')
     base = workspace_check(binary, base)['base_path']
+    port = workspace_port(binary, base, port)
+    port = select_setup_server(binary, base, port)
+    if port is None:
+        return 1
     if subprocess.run([str(binary), 'init', '--base-path', base], stdout=sys.stderr).returncode != 0:
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
+    workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
     configured = wizard(binary, base, timeout)
     if configured.get('readiness') != 'verified':
@@ -1556,6 +1588,8 @@ def journey(binary, base_path, port, timeout, resume=False):
 
 
 def sandbox_journey(binary, base, port, refresh_owner=False):
+    if port is None:
+        port = workspace_port(binary, base)
     if refresh_owner:
         port = select_setup_server(binary, base, port, require_new_owner=True)
         if port is None:
@@ -1585,7 +1619,7 @@ def main():
     parser.add_argument('--journey', action='store_true')
     parser.add_argument('--sandbox-step', action='store_true', help='continue saved model setup at the sandbox step')
     parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--port', type=int, default=8945)
+    parser.add_argument('--port', type=int)
     parser.add_argument('--spec')
     parser.add_argument('--wizard', action='store_true')
     parser.add_argument('--workspace-check', action='store_true')

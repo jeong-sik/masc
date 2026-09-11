@@ -350,3 +350,15 @@ let edit_table_multiline_array content ~path ~key ~values =
   with_table content ~path ~on_missing:append_table ~edit:(fun section ->
     replace_or_append_multiline_array section ~key ~values)
 ;;
+
+let edit_table_int content ~path ~key ~value =
+  let line = Printf.sprintf "%s = %d" key value in
+  let append lines = lines @ (if lines = [] then [] else [""]) @ [Printf.sprintf "[%s]" path; line] in
+  with_table content ~path ~on_missing:append ~edit:(fun section ->
+    let rec replace acc = function
+      | [] -> List.rev_append acc [line]
+      | existing :: rest ->
+        (match key_of_line existing with
+         | Some current when String.equal current key -> List.rev_append acc (line :: rest)
+         | _ -> replace (existing :: acc) rest) in
+    replace [] section)

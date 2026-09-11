@@ -812,6 +812,20 @@ val set_runtime_lane_candidates :
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. *)
 
+val set_exact_output_lane_slots :
+  ?runtime_config_path:string ->
+  lane_name:string ->
+  slots:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Persist [\[runtime.exact_output_lanes."<lane_name>"\]].slots the same way
+    {!set_runtime_lane_candidates} persists conversation-lane candidates: the
+    SSOT writer, full validation, atomic write, cache refresh. The list order
+    is the walk order of the lane. Creates the lane table when the name has
+    none. An empty [slots] is rejected — mandatory exact lanes fail the boot
+    fail-closed without one, so a lane that resolves to nothing is not the
+    edit an operator is making. *)
+
 val default_max_context : unit -> int
 (** Effective context-window budget of the default runtime's model (RFC-0206
     single-binding), clamped by the AGENT_CORE provider capability catalog when that

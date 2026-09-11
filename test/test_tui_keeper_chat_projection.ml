@@ -395,20 +395,34 @@ let test_lifecycle_identity_is_exact () =
   | Error error -> fail (Chat.stream_error_to_string error)
   | Ok _ -> fail "unknown custom event was accepted"
 
-let test_runtime_attempt_requires_null_payload () =
-  let malformed_runtime_attempt =
+let test_runtime_attempt_payload_contract () =
+  let malformed_scalar =
     event "CUSTOM"
       [ "runId", `String run_id
       ; "name", `String "KEEPER_RUNTIME_ATTEMPT_STARTED"
-      ; "value", `Assoc []
+      ; "value", `String "invalid"
       ]
   in
-  match decode [ acceptance (); run_started; malformed_runtime_attempt ] with
+  (match decode [ acceptance (); run_started; malformed_scalar ] with
   | Error (Chat.Malformed_event detail) ->
-    check bool "the payload contract is named" true
-      (String_util.contains_substring detail "value must be null")
+    check bool "the scalar payload contract is named" true
+      (String_util.contains_substring detail "must be null or an object")
   | Error error -> fail (Chat.stream_error_to_string error)
-  | Ok _ -> fail "non-null runtime-attempt payload was accepted"
+  | Ok _ -> fail "scalar runtime-attempt payload was accepted");
+  let unexpected_fields =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_RUNTIME_ATTEMPT_STARTED"
+      ; "value", `Assoc [ "unknown_field", `String "val" ]
+      ]
+  in
+  match decode [ acceptance (); run_started; unexpected_fields ] with
+  | Error (Chat.Malformed_event detail) ->
+    check bool "the unexpected fields contract is named" true
+      (String_util.contains_substring detail "unexpected fields")
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "runtime-attempt payload with unexpected fields was accepted"
+;;
 
 let test_current_nonterminal_event_set () =
   let custom name =
@@ -1290,8 +1304,8 @@ let () =
         ; test_case "current wire only" `Quick test_current_wire_only
         ; test_case "exact lifecycle identities" `Quick
             test_lifecycle_identity_is_exact
-        ; test_case "runtime attempt requires null payload" `Quick
-            test_runtime_attempt_requires_null_payload
+        ; test_case "runtime attempt payload contract" `Quick
+            test_runtime_attempt_payload_contract
         ; test_case "current nonterminal event set" `Quick
             test_current_nonterminal_event_set
         ; test_case "tool result requires exact canonical identity" `Quick

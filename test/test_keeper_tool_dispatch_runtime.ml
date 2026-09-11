@@ -8,7 +8,7 @@ open Alcotest
    executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
 let () =
   let prompt_dir = Masc_test_deps.source_path "config/prompts" in
-  Masc.Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.set_markdown_dir prompt_dir;
   Masc.Prompt_defaults.init ()
 ;;
 

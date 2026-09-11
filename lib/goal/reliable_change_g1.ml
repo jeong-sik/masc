@@ -1,5 +1,13 @@
 open Yojson.Safe.Util
 
+(* Yojson.Safe.Util has no *_option family for lists (only for scalars), so
+   calls below that read an optional JSON array go through this helper. *)
+let to_list_option json =
+  match json with
+  | `Null -> None
+  | other -> Some (to_list other)
+;;
+
 type scenario =
   | Success
   | Exit_nonzero
@@ -436,8 +444,12 @@ let check_observations
   let matrix_expected = 18 in
   let live_expected = 3 in
 
-  let matrix_obs = List.filter (fun o -> o.execution_mode = "matrix") observations in
-  let live_obs = List.filter (fun o -> o.execution_mode = "live") observations in
+  let matrix_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "matrix")
+      observations in
+  let live_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "live")
+      observations in
 
   (* Group observations by run key: (case_id, repeat_index) *)
   let run_keys_matrix =
@@ -446,7 +458,8 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) matrix_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+         matrix_obs)
   in
   let matrix_observed = List.length run_keys_matrix in
 
@@ -456,7 +469,8 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) live_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+         live_obs)
   in
   let live_observed = List.length run_keys_live in
 
@@ -481,7 +495,8 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+              o.case_id = case_id && o.repeat_index = repeat_index)
            matrix_obs
        in
        let sorted_attempts =
@@ -718,7 +733,8 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+              o.case_id = case_id && o.repeat_index = repeat_index)
            live_obs
        in
        let sorted_attempts =

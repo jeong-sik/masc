@@ -731,6 +731,7 @@ let run_vision
 let failed ~failure_class ?detail code =
   Keeper_tool_execution.failure
     ~class_:failure_class
+    ~effect_disposition:Tool_result.Proven_pre_effect
     (err_json ~failure_class ?detail code)
 ;;
 
@@ -772,20 +773,16 @@ let handle_with_outcome
   | _, _, Error detail ->
       failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
   | None, _, _ | _, None, _ ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Policy_rejection
-      (err_json
-         ~failure_class:Tool_result.Policy_rejection
-         ~detail:"requires string fields: artifact, query"
-         "invalid_args")
+    failed
+      ~failure_class:Tool_result.Policy_rejection
+      ~detail:"requires string fields: artifact, query"
+      "invalid_args"
   | Some handle_str, Some query, Ok runtime_id ->
     (match sw, net, clock with
      | None, _, _ | _, None, _ | _, _, None ->
-       Keeper_tool_execution.failure
-         ~class_:Tool_result.Runtime_failure
-         (err_json
-            ~failure_class:Tool_result.Runtime_failure
-            "eio_context_unavailable")
+       failed
+         ~failure_class:Tool_result.Runtime_failure
+         "eio_context_unavailable"
      | Some sw, Some net, Some clock ->
        let dir = vision_store_dir ~keeper_name:meta.name in
          (match load_artifact ~dir (Store.of_string handle_str) with
@@ -797,27 +794,24 @@ let handle_with_outcome
                 "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
             | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
                 "artifact_load_failed", "The stored image could not be read with verified integrity." in
-          Keeper_tool_execution.failure ~class_:failure_class
-            (err_json ~failure_class
-               ~detail:(Store.load_error_to_string error ^ " " ^ recovery) code)
+          failed
+            ~failure_class
+            ~detail:(Store.load_error_to_string error ^ " " ^ recovery)
+            code
         | Ok bytes ->
           (match validate_image_size bytes with
              | Error msg ->
-               Keeper_tool_execution.failure
-                 ~class_:Tool_result.Runtime_failure
-                 (err_json
-                    ~failure_class:Tool_result.Runtime_failure
-                    ~detail:msg
-                    "image_too_large")
+               failed
+                 ~failure_class:Tool_result.Runtime_failure
+                 ~detail:msg
+                 "image_too_large"
            | Ok () ->
              (match media_type_for_request ~bytes args with
               | Error msg ->
-                Keeper_tool_execution.failure
-                  ~class_:Tool_result.Policy_rejection
-                  (err_json
-                     ~failure_class:Tool_result.Policy_rejection
-                     ~detail:msg
-                     "invalid_media_type")
+                failed
+                  ~failure_class:Tool_result.Policy_rejection
+                  ~detail:msg
+                  "invalid_media_type"
               | Ok media_type ->
                 run_vision
                   ?complete

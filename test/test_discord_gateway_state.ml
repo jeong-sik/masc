@@ -1704,6 +1704,28 @@ let test_heartbeat_ack_timeout () =
   check bool "Schedule_backoff emitted" true
     (has_schedule_backoff effects)
 
+(* Heartbeats start at Hello, so an unanswered one while Identifying is a
+   dead socket as well. On 2026-09-11 an Identify never received READY and
+   the ack timeout was ignored 114 times over 78 minutes; only a server
+   restart reconnected. *)
+let test_heartbeat_ack_timeout_while_identifying () =
+  let m = S.create ~config:(mk_config ()) in
+  let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
+  let m, _ =
+    S.step m ~now_mono:1.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  (match S.state m with
+   | S.Identifying -> ()
+   | _ -> fail "expected Identifying after Hello");
+  let m', effects = S.step m ~now_mono:50.0 S.Heartbeat_ack_timeout in
+  (match S.state m' with
+   | S.Reconnect_pending { resumable = false; _ } -> ()
+   | _ -> fail "expected Reconnect_pending resumable=false: no session yet");
+  check bool "Close_wss emitted" true (has_close_wss effects);
+  check bool "Schedule_backoff emitted" true
+    (has_schedule_backoff effects)
+
 let test_op_reconnect_from_server () =
   let m =
     connected_at
@@ -2540,6 +2562,9 @@ let () =
         ; test_case
             "Heartbeat_ack_timeout (Connected) → Close_wss + Schedule_backoff"
             `Quick test_heartbeat_ack_timeout
+        ; test_case
+            "Heartbeat_ack_timeout (Identifying) → Close_wss + fresh reconnect"
+            `Quick test_heartbeat_ack_timeout_while_identifying
         ; test_case
             "Op_reconnect from server → Close_wss + Schedule_backoff"
             `Quick test_op_reconnect_from_server

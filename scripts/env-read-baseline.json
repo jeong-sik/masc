@@ -8,8 +8,6 @@
     "lib/dashboard/dashboard_cache.ml": 1,
     "lib/dashboard_tla_specs/dashboard_tla_specs.ml": 2,
     "lib/exec_shim/exec_shim.ml": 1,
-    "lib/graphql_client.ml": 1,
-    "lib/graphql_endpoint.ml": 2,
     "lib/host_config/host_config.ml": 3,
     "lib/http_server_eio.ml": 1,
     "lib/keeper/keeper_event_bridge.ml": 1,

@@ -18,8 +18,8 @@ let normalize_actor_name = function
       if trimmed <> "" then trimmed else "dashboard"
   | None -> "dashboard"
 
-let snapshot_cache_ttl_s = 5.0
-let digest_cache_ttl_s = 5.0
+let snapshot_cache_ttl_s = 10.0
+let digest_cache_ttl_s = 10.0
 let snapshot_publication_mu = Stdlib.Mutex.create ()
 let snapshot_invalidation_generation_ref = Atomic.make 0
 let snapshot_generation_observer : (int -> unit) option Atomic.t = Atomic.make None
@@ -47,6 +47,7 @@ let invalidate_snapshot_json ~config =
   let generation =
     Stdlib.Mutex.protect snapshot_publication_mu (fun () ->
       Dashboard_cache.invalidate_prefix (actor_cache_key config "snapshot" "");
+      Dashboard_cache.invalidate_prefix (actor_cache_key config "digest" "");
       Dashboard_cache.invalidate_prefix "operator_snapshot:";
       Atomic.fetch_and_add snapshot_invalidation_generation_ref 1 + 1)
   in

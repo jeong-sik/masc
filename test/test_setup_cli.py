@@ -85,7 +85,7 @@ class Setup(unittest.TestCase):
                 # Refused as usage: nothing was seeded on the way out.
                 self.assertFalse((base/'.masc').exists(), 'a usage error must not seed a workspace')
 
-    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False):
+    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False, reject_resume=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)
             commands = base / 'commands'
@@ -133,6 +133,7 @@ supports_native_streaming = true
                 token.parent.mkdir(parents=True, exist_ok=True)
                 token.write_text('revoked-operator-token')
             posted = []
+            accepted_auth = []
             model_requests = []
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
@@ -180,12 +181,23 @@ supports_native_streaming = true
                         self.send_response(401)
                         self.end_headers()
                         return
-                    posted.append((self.path, json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
-                    self.send({'ok': True, 'action': 'up', 'name': 'imp',
-                               'detail': {'name': 'imp'}})
-                def send(self, body):
+                    body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                    posted.append((self.path, body))
+                    accepted_auth.append((self.path, self.headers.get('Authorization'), self.headers.get('x-masc-agent')))
+                    if self.path == '/api/v1/runtime/setup/resume':
+                        if reject_resume:
+                            self.send({'error': 'fixture resume unavailable'}, status=503)
+                        else:
+                            self.send({'runtime_ready': True, 'exact_output_authority_available': False,
+                                       'model_setup': {'status': 'available', 'reason': None, 'message': None}})
+                    elif self.path == '/api/v1/keepers/imp/boot':
+                        self.send({'ok': True, 'action': 'up', 'name': 'imp',
+                                   'detail': {'name': 'imp'}})
+                    else:
+                        self.send({'error': 'unexpected setup request'}, status=404)
+                def send(self, body, status=200):
                     data = json.dumps(body).encode()
-                    self.send_response(200)
+                    self.send_response(status)
                     self.send_header('Content-Type', 'application/json')
                     self.send_header('Content-Length', str(len(data)))
                     self.end_headers()
@@ -225,14 +237,25 @@ supports_native_streaming = true
                 self.assertEqual(posted, [])
                 self.assertFalse((base / '.masc/auth/local-admin.token').exists())
                 self.assertIn('MASC_SETUP_TEST_KEY' if missing_key else 'microsandbox cannot express' if unsupported_sandbox else 'Port belongs to workspace', result.stderr)
+            elif reject_resume:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [('/api/v1/runtime/setup/resume', {})])
+                self.assertIn('Activating saved model settings', result.stderr)
             else:
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(posted, [('/api/v1/keepers/imp/boot', {'name': 'imp'})])
+                self.assertEqual(posted, [('/api/v1/runtime/setup/resume', {}),
+                                          ('/api/v1/keepers/imp/boot', {'name': 'imp'})])
+                persisted = (base / '.masc/auth/local-admin.token').read_text().strip()
+                self.assertTrue(all(auth == 'Bearer ' + persisted for _, auth, _ in accepted_auth))
+                self.assertEqual(accepted_auth[0][2], 'local-admin')
                 self.assertIn('Model response and harmless tool roundtrip verified.', result.stdout)
                 self.assertEqual(len(model_requests),4)
                 self.assertTrue(all(request['model']=='setup-fixture-owned-model' for request in model_requests))
                 self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))
                 self.assertNotIn((base / '.masc/auth/local-admin.token').read_text().strip(), result.stdout)
+
+    def test_resume_refusal_prevents_keeper_boot(self):
+        self.scenario(reject_resume=True)
 
     def test_failed_new_sandbox_preserves_existing_manifest(self):
         self.scenario(unsupported_sandbox=True)

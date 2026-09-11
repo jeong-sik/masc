@@ -9912,80 +9912,93 @@ let render_keeper_message (state : state) =
         List.filter_map Fun.id
         @@ List.mapi
              (fun entry_index (item : Keeper_chat_transcript.drawn_item) ->
-               let label text =
-                 match item.superseded with
-                 | Some attempt ->
-                     Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
-                 | None -> text
-               in
-               let markdown_source =
-                 Message_layout.Markdown_growing
-                   { keeper_name; request_id; entry_index }
-               in
-               let entry style role_label body =
-                 (* One alignment, on the label the row actually carries.
-                    Aligning the continuation mark and then aligning the
-                    result again pays the badge's width twice, so the second
-                    call trims what the first had already fitted. *)
-                 Some
-                   ({ style;
-                      timestamp = keeper_message_clock started_at;
-                      timeline_bucket;
-                      role_label =
-                        Message_layout.align_role_label
-                          ~column:role_label_column
-                          (* Same reasoning as the history rows above: the
-                             column says who, not a mark inside the label. *)
-                          ~style role_label;
-                      role_label_mark_cells =
-                        Message_layout.role_label_mark_cells
-                          ~column:role_label_column ~style ();
-                      request_label;
-                      body;
-                      markdown_source;
-                      turn_rail =
-                        turn_rail_of ~siding:None
-                          ~edge:Masc_tui_types.Turn_continues ~style;
-                      (* A live turn draws its Gate steps as status text the
-                         transcript composed, not as the store's argument, so
-                         there is no argument here to unfold. *)
-                      action = Message_layout.Action_none;
-                    }
-                     : Message_layout.entry)
-               in
-               match item.drawn with
-               | Keeper_chat_transcript.Drawn_thinking _
-                 when not
-                        (Masc_tui_types.reasoning_drawn
-                           state.msg_reasoning_visibility) ->
-                   None
-               | Keeper_chat_transcript.Drawn_thinking lines ->
-                   entry Message_layout.Thinking (label "THINKING")
-                     (if state.msg_reasoning_visibility = Reasoning_folded
+                let label text =
+                  match item.superseded with
+                  | Some attempt ->
+                      Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                  | None -> text
+                in
+                let annotate_body body =
+                  match item.superseded_runtime_id with
+                  | Some rid when String.trim rid <> "" ->
+                      let attempt_num =
+                        match item.superseded with
+                        | Some a -> a + 1
+                        | None -> 1
+                      in
+                      Printf.sprintf "*(attempt %d: %s)*\n%s" attempt_num rid body
+                  | _ -> body
+                in
+                let markdown_source =
+                  Message_layout.Markdown_growing
+                    { keeper_name; request_id; entry_index }
+                in
+                let entry style role_label body =
+                  (* One alignment, on the label the row actually carries.
+                     Aligning the continuation mark and then aligning the
+                     result again pays the badge's width twice, so the second
+                     call trims what the first had already fitted. *)
+                  Some
+                    ({ style;
+                       timestamp = keeper_message_clock started_at;
+                       timeline_bucket;
+                       role_label =
+                         Message_layout.align_role_label
+                           ~column:role_label_column
+                           (* Same reasoning as the history rows above: the
+                              column says who, not a mark inside the label. *)
+                           ~style role_label;
+                       role_label_mark_cells =
+                         Message_layout.role_label_mark_cells
+                           ~column:role_label_column ~style ();
+                       request_label;
+                       body;
+                       markdown_source;
+                       turn_rail =
+                         turn_rail_of ~siding:None
+                           ~edge:Masc_tui_types.Turn_continues ~style;
+                       (* A live turn draws its Gate steps as status text the
+                          transcript composed, not as the store's argument, so
+                          there is no argument here to unfold. *)
+                       action = Message_layout.Action_none;
+                     }
+                      : Message_layout.entry)
+                in
+                match item.drawn with
+                | Keeper_chat_transcript.Drawn_thinking _
+                  when not
+                         (Masc_tui_types.reasoning_drawn
+                            state.msg_reasoning_visibility) ->
+                    None
+                | Keeper_chat_transcript.Drawn_thinking lines ->
+                    let body =
+                      if state.msg_reasoning_visibility = Reasoning_folded
                       then folded_thinking_summary (String.concat "\n" lines)
-                      else String.concat "\n" lines)
-               | Keeper_chat_transcript.Drawn_tools block ->
-                   let projection =
-                     Keeper_chat_transcript.project_tool_block
-                       (tool_projection_mode state) block
-                   in
-                   entry (tool_block_style projection) (label "TOOLS")
-                     (String.concat "\n" (projected_tool_rows projection))
-               | Keeper_chat_transcript.Drawn_skill skill ->
-                   entry
-                     (Message_layout.Skill (skill_tone_of_state skill.state))
-                     (label "SKILL")
-                     (String.concat "\n"
-                        (* Full on the block too: the same reason the
-                           committed skill rows are always full — the skill's
-                           delivery and observed actions are the feature this
-                           row reports, not a detail behind the tool toggle. *)
-                        (Keeper_chat_transcript.skill_rows ~full:true skill))
-               | Keeper_chat_transcript.Drawn_text text
-               | Keeper_chat_transcript.Drawn_reply text ->
-                   entry Message_layout.Keeper (label keeper_label) text
-               | Keeper_chat_transcript.Drawn_status text ->
-                   entry Message_layout.Status (label "STATUS") text)
+                      else String.concat "\n" lines
+                    in
+                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                | Keeper_chat_transcript.Drawn_tools block ->
+                    let projection =
+                      Keeper_chat_transcript.project_tool_block
+                        (tool_projection_mode state) block
+                    in
+                    let body = String.concat "\n" (projected_tool_rows projection) in
+                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                | Keeper_chat_transcript.Drawn_skill skill ->
+                    entry
+                      (Message_layout.Skill (skill_tone_of_state skill.state))
+                      (label "SKILL")
+                      (String.concat "\n"
+                         (* Full on the block too: the same reason the
+                            committed skill rows are always full — the skill's
+                            delivery and observed actions are the feature this
+                            row reports, not a detail behind the tool toggle. *)
+                         (Keeper_chat_transcript.skill_rows ~full:true skill))
+                | Keeper_chat_transcript.Drawn_text text
+                | Keeper_chat_transcript.Drawn_reply text ->
+                    entry Message_layout.Keeper (label keeper_label) (annotate_body text)
+                | Keeper_chat_transcript.Drawn_status text ->
+                    entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)
       in
       { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
@@ -10519,8 +10532,14 @@ let render_keeper_message (state : state) =
            match Keeper_chat_transcript.phase live with
            | Keeper_chat_transcript.Waiting -> "○", "WAITING TO START"
            | Working ->
+               let heading =
+                 if Keeper_chat_transcript.attempt live > 0 then
+                   "FAILOVER IN PROGRESS"
+                 else
+                   "IN PROGRESS"
+               in
                Masc_tui_answering.running_glyph ~frame:state.activity_frame,
-               "IN PROGRESS"
+               heading
            | Stream_ended -> "○", "FINALIZING"
            | Stream_failed _ -> "!", "REQUEST ERROR"
          in

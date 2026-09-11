@@ -2393,7 +2393,8 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.External_effect_completed
   | Masc_tui_keeper_chat_live.Reply_details _ | Masc_tui_keeper_chat_live.Run_failed _
   | Masc_tui_keeper_chat_live.Run_finished
-  | Masc_tui_keeper_chat_live.Runtime_attempt_started
+  | Masc_tui_keeper_chat_live.Runtime_attempt_started _
+  | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta

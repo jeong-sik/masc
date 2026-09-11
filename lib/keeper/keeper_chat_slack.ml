@@ -714,7 +714,7 @@ let adapter_loop_with_transport
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
           ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
           ~post_attempts_left:2
-    | Agent_core_runtime_attempt_started ->
+    | Agent_core_runtime_attempt_started _ ->
         continue ~acc_text:"" ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()

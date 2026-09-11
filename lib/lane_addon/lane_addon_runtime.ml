@@ -78,6 +78,11 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
 let release_detached m e =
   if e.phase = Detached && not e.running && not e.cleanup_running
   then Hashtbl.remove m.entries e.instance_id
+let publish_resource lifecycle e container_id detail =
+  Lane_addon_resource_events.publish lifecycle
+    { instance_id = e.instance_id; run_id = e.run_id;
+      package_id = e.package.id; package_revision = e.package.revision;
+      container_id; detail }
 let stop_entry ~sw m e =
   if not e.cleanup_running then
     match e.connection with
@@ -89,9 +94,19 @@ let stop_entry ~sw m e =
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn) in
           (match result with
-           | Ok () -> e.phase <- Detached; wake e;
-               Option.iter (fun cancel -> cancel ()) e.cancel_worker
-           | Error message -> e.phase <- Failed ("cleanup incomplete: " ^ message));
+           | Ok () ->
+               let already_detached = (e.phase = Detached) in
+               e.phase <- Detached; wake e;
+               Option.iter (fun cancel -> cancel ()) e.cancel_worker;
+               (* start-hang can run stop twice; the release is announced
+                  once, at the transition into Detached. *)
+               if not already_detached then
+                 publish_resource Lane_addon_resource_events.Release_confirmed e
+                   (Some c.container_id) None
+           | Error message ->
+               e.phase <- Failed ("cleanup incomplete: " ^ message);
+               publish_resource Lane_addon_resource_events.Release_incomplete e
+                 (Some c.container_id) (Some message));
           (match persist m e with Ok () -> () | Error message ->
             e.phase <- Failed ("cleanup state persistence: " ^ message));
           e.cleanup_running <- false;
@@ -107,11 +122,14 @@ let run ~sw backend m e =
       Eio.Switch.run (fun worker_sw ->
         e.cancel_worker <- Some (fun () -> Eio.Switch.fail worker_sw Worker_detached);
         let created c = e.connection <- Some c;
+          publish_resource Lane_addon_resource_events.Acquired e (Some c.container_id) None;
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
           if e.stopping then stop_entry ~sw m e in
         match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~on_created:created with
         | Error message ->
+            publish_resource Lane_addon_resource_events.Acquire_failed e
+              (Option.map (fun c -> c.container_id) e.connection) (Some message);
             if e.stopping then (
               match e.connection with None -> e.phase <- Failed ("startup/cleanup: " ^ message)
               | Some _ -> stop_entry ~sw m e)
@@ -218,6 +236,9 @@ let historical_detach ~sw m fields =
     let* container_id = text fields "container_id" in
     let* package = match List.assoc_opt "package" fields with
       | Some json -> object_ json | None -> Error "missing persisted package" in
+    let* run_id = text fields "run_id" in
+    let* package_id = text package "id" in
+    let* package_revision = text package "revision" in
     let* resources = match List.assoc_opt "resources" package with
       | Some json -> object_ json | None -> Error "missing persisted resource settings" in
     let* max_reply_bytes = match List.assoc_opt "max_reply_bytes" resources with
@@ -235,6 +256,13 @@ let historical_detach ~sw m fields =
         | exn -> Error (Printexc.to_string exn) in
       let phase = match result with
         | Ok () -> Detached | Error message -> Failed ("cleanup incomplete: " ^ message) in
+      Lane_addon_resource_events.publish
+        (match result with
+         | Ok () -> Lane_addon_resource_events.Release_confirmed
+         | Error _ -> Lane_addon_resource_events.Release_incomplete)
+        { instance_id = id; run_id; package_id; package_revision;
+          container_id = Some container_id;
+          detail = (match result with Ok () -> None | Error message -> Some message) };
       let json = replace_phase fields phase in
       let persisted = offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id json) in
       Hashtbl.remove m.recovering id;
@@ -397,8 +425,13 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
        | Some e ->
            (match e.phase with Detached -> () | _ ->
              e.stopping <- true; e.phase <- Detaching; wake e; stop_entry ~sw m e;
-             if not e.running && Option.is_none e.connection then
-               e.phase <- Failed "startup ended without a retained container identity; cleanup is unverified");
+             if not e.running && Option.is_none e.connection then begin
+               let unverified =
+                 "startup ended without a retained container identity; cleanup is unverified" in
+               e.phase <- Failed unverified;
+               publish_resource Lane_addon_resource_events.Release_incomplete e None
+                 (Some unverified)
+             end);
            let* () = persist m e in Ok (entry_json e)))
 module For_testing = struct
   type nonrec connection = connection = {

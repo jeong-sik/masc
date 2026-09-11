@@ -7939,10 +7939,14 @@ let test_edit_manifest_through_model_projection () =
 ;;
 
 let test_peer_artifact_materializes_exact_binary () =
-  with_exec_fixture "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
       sandbox_image = Some "alpine:peer-fixture" } in
     let peer = { sender with name = "receiving-peer" } in
+    (* The materialize write lands in the peer's own playground bind, which the
+       sandbox creates when the peer registers; this fixture builds the peer
+       inline, so it owns creating that root the same way. *)
+    Fs_compat.mkdir_p (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer);
     let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
     let chunk = "/masc-work/receiving-peer/image\000\255" in

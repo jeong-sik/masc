@@ -148,7 +148,11 @@ open Alcotest
 (* 2026-09-11: 103,716 across 119 tools. PR adds 6 lane tools: masc_lane_attach,
    masc_lane_detach, masc_lane_evidence, masc_lane_inspect, masc_lane_observe,
    masc_lane_slice (+3,260 bytes). What it bought: Codex lane-addon runtime operations. *)
-let ceiling_bytes = 103_716
+(* 2026-09-11: 104,675 across 120 tools. PR adds keeper_artifact_transfer
+   (+959 bytes). What it bought: a Keeper hands a generated binary to a peer
+   through the workspace blob store, without either side touching the other's
+   host paths. *)
+let ceiling_bytes = 104_675
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -215,6 +219,7 @@ let all_surface_golden_names =
   (* Unread artifact handles need a model-callable vision reader. *)
   ; "keeper_analyze_image"
   ; "keeper_artifact_read"
+  ; "keeper_artifact_transfer"
   ; "keeper_broadcast"
   ; "keeper_code_query"
   ; "keeper_context_status"

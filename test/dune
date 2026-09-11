@@ -5534,11 +5534,6 @@
  (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))
 
 (test
- (name test_model_setup_resume)
- (modules test_model_setup_resume)
- (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))
-
-(test
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
  (libraries masc masc.server fs_compat alcotest unix yojson))

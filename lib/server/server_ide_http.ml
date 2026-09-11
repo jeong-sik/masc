@@ -168,7 +168,17 @@ let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
     ; "unattributed_over_budget", `Int unattributed_over_budget
     ; "unattributed_malformed", `Int unattributed_malformed
     ]
+;;
 
+let file_activity_cache_ttl_sec = 10.0
+
+let cached_file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
+  let cache_key =
+    Printf.sprintf "ide:file-activity:%s:%s:%s:%.1f"
+      codebase repo_id file_path window_hours
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec (fun () ->
+    file_activity_json ~codebase ~repo_id ~file_path ~window_hours)
 ;;
 
 let parse_int_query uri name =
@@ -402,7 +412,7 @@ let add_routes router =
                  | Ok _ ->
                    Http.Response.json_value ~compress:true ~request
                      (json_ok
-                        (file_activity_json
+                        (cached_file_activity_json
                            ~codebase ~repo_id ~file_path ~window_hours))
                      reqd)))
       request reqd)

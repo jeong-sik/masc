@@ -617,6 +617,19 @@ let plan_and_window_model_input
      | _ -> cut_planned planned history_atom_count)
 ;;
 
+let projected_initial_message_count ~provider_config initial_messages =
+  match initial_messages with
+  | [] -> 0
+  | initial ->
+    (match
+       Agent_core.Llm_provider.Complete_common.transmitted_history
+         ~config:provider_config
+         initial
+     with
+     | Ok projected -> List.length projected
+     | Error _ -> List.length initial)
+;;
+
 (* The bounded transmission view runs here rather than in the caller because
    its budget is [ctx.model_input_capacity_bytes], which
    [Keeper_turn_driver.validate_provider_request_cap] resolves per runtime
@@ -638,6 +651,9 @@ let bounded_model_input_projection
         ~capacity_bytes
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools)
+  in
+  let initial_message_index =
+    projected_initial_message_count ~provider_config ctx.initial_messages
   in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:
@@ -729,7 +745,7 @@ let bounded_model_input_projection
         let demote_before =
           Runtime_model_input_tail_window.first_atom_at_or_after
             messages
-            ~message_index:(List.length ctx.initial_messages)
+            ~message_index:initial_message_index
         in
         match
           plan_and_window_model_input
@@ -824,6 +840,9 @@ let uncapped_model_input_projection
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
+  let initial_message_index =
+    projected_initial_message_count ~provider_config ctx.initial_messages
+  in
   let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
   let fallback_reported = ref false in
   fun messages ->
@@ -839,7 +858,7 @@ let uncapped_model_input_projection
         then (
           fallback_reported := true;
           Log.Keeper.warn
-            "%s: model input measured against durable shape; reasoning \
+            "%s: uncapped model input falling back to durable shape; reasoning \
              projection declined: %s"
             ctx.keeper_name
             (Agent_core.Llm_provider.Reasoning_history_projection
@@ -858,7 +877,7 @@ let uncapped_model_input_projection
         let demote_before =
           Runtime_model_input_tail_window.first_atom_at_or_after
             messages
-            ~message_index:(List.length ctx.initial_messages)
+            ~message_index:initial_message_index
         in
         if demote_before <= 0
         then messages
@@ -879,6 +898,12 @@ let uncapped_model_input_projection
                 ~pending
                 planned.Keeper_model_input_demotion.messages
             in
+            if outcome.Keeper_model_input_demotion.reverted > 0
+            then
+              Log.Keeper.warn
+                "%s: %d historical tool results reverted to inline due to blob storage failure"
+                ctx.keeper_name
+                outcome.Keeper_model_input_demotion.reverted;
             outcome.Keeper_model_input_demotion.messages
     in
     match ctx.model_input_projection with

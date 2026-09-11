@@ -47,7 +47,7 @@ let protocol_of_catalog_kind = function
   | Gemini -> None
 ;;
 
-let integrations_json (config : Runtime_schema.config) =
+let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
     List.map (fun (provider : Runtime_schema.provider) ->
@@ -65,7 +65,11 @@ let integrations_json (config : Runtime_schema.config) =
       let credential =
         match provider.credentials with
         | Some (Runtime_schema.Env name) -> [ "api_key_env", `String name ]
-        | Some (File _ | Inline _) | None -> []
+        | Some (File path) ->
+          [ "credential_kind", `String "file" ]
+          @ (if include_credential_references then [ "credential_file", `String path ] else [])
+        | Some (Inline _) -> [ "credential_kind", `String "inline" ]
+        | None -> []
       in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
@@ -119,7 +123,7 @@ let integrations_json (config : Runtime_schema.config) =
   `List (configured @ prototypes @ clients)
 ;;
 
-let to_json (config : Runtime_schema.config) =
+let to_json ?(include_credential_references=false) (config : Runtime_schema.config) =
   let runtimes =
     List.filter_map
       (fun (binding : Runtime_schema.binding) ->
@@ -145,7 +149,9 @@ let to_json (config : Runtime_schema.config) =
                match provider.credentials with
                | Some (Runtime_schema.Env name) ->
                  [ "credential_kind", `String "env"; "api_key_env", `String name ]
-               | Some (Runtime_schema.File _) -> [ "credential_kind", `String "file" ]
+               | Some (Runtime_schema.File path) ->
+                 [ "credential_kind", `String "file" ]
+                 @ (if include_credential_references then [ "credential_file", `String path ] else [])
                | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
                | None -> [ "credential_kind", `String "none" ]
              in
@@ -174,7 +180,7 @@ let to_json (config : Runtime_schema.config) =
         | None -> `Null
         | Some id -> `String id )
     ; "runtimes", `List runtimes
-    ; "integrations", integrations_json config
+    ; "integrations", integrations_json ~include_credential_references config
     ]
 ;;
 

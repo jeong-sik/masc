@@ -136,8 +136,6 @@ installed. Detecting which execution environments are available does not
 stand in for installing or authenticating them.
 
 
-AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
-They are outside the 0.35.5 installation and verification scope.
 ## Choosing a model connection
 
 Select existing API providers, Claude Code, Codex, or local Ollama models.

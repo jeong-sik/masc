@@ -103,6 +103,10 @@ type 'a config_lock_receipt = private
   ; warnings : config_lock_warning list
   }
 
+val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) result) -> ('a, string) result
+(** Serialize an owner configuration activation with the existing file writers.
+    The action must not recursively invoke a config writer. *)
+
 val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 

@@ -24,6 +24,7 @@ type config = {
   max_total_idle    : int;
   idle_ttl_seconds  : float;
   connect_timeout_seconds : float;
+  connect_failure_cooldown_seconds : float;
 }
 
 let default_config = {
@@ -31,6 +32,11 @@ let default_config = {
   max_total_idle    = 256;
   idle_ttl_seconds  = 60.0;
   connect_timeout_seconds = 5.0;
+  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. 5 s caps
+     connect attempts against a dead host at one per 5 s (was: 9 per
+     2 s), while a restarted server is picked up again within one
+     operator-perceptible delay. *)
+  connect_failure_cooldown_seconds = 5.0;
 }
 
 (* ── Host_key ──────────────────────────────────────────────────── *)
@@ -116,6 +122,12 @@ type t = {
   config   : config;
   mu       : Eio.Mutex.t;
   mutable idle : idle_entry list Host_map.t;
+  (* Last connect-failure timestamp per host. A host inside
+     [connect_failure_cooldown_seconds] of its last failure fast-fails
+     without opening a socket. Entries age out by time comparison, so
+     the map needs no sweeper; it holds at most one float per distinct
+     failing host. *)
+  mutable connect_failures : float Host_map.t;
   stop     : bool Atomic.t;
   counters : stats_counters;
 }
@@ -207,6 +219,7 @@ let create ~sw ~env ?(config = default_config) () : t =
     config;
     mu = Eio.Mutex.create ();
     idle = Host_map.empty;
+    connect_failures = Host_map.empty;
     stop = Atomic.make false;
     counters = new_counters ();
   } in
@@ -288,15 +301,97 @@ let try_acquire_idle t key ~now =
     !expired;
   client
 
-(* Build a fresh piaf client.  Returns [Result] mirroring piaf's API
-   so callers can surface DNS/TCP/TLS failures distinctly. *)
-let create_fresh t uri =
-  match Piaf.Client.create ~sw:t.sw t.env uri with
-  | Ok c ->
-    t.counters.create_count_total <- t.counters.create_count_total + 1;
-    Ok c
-  | Error err ->
-    Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+(* ── Connect backoff ───────────────────────────────────────────── *)
+
+let now_ts t =
+  Eio.Time.now (Eio.Stdenv.clock t.env)
+
+let connect_backoff_active t key ~now =
+  with_mu t (fun () ->
+    match Host_map.find_opt key t.connect_failures with
+    | Some ts -> now -. ts < t.config.connect_failure_cooldown_seconds
+    | None -> false)
+
+let record_connect_failure t key ~now =
+  with_mu t (fun () ->
+    t.connect_failures <- Host_map.add key now t.connect_failures)
+
+(* ── Probe-first connect ───────────────────────────────────────── *)
+
+(* TCP-reachability probe on a short-lived child switch. piaf 0.2.0
+   (pinned) does not release the socket when [Piaf.Client.create]'s
+   connect fails, and the client would be bound to the pool's
+   long-lived switch, so nothing ever reclaims it — one fd per failed
+   request (#dead-server-emfile, 2026-09-10). Probing first confines
+   the failure socket to [probe_sw], whose teardown closes it
+   immediately.
+
+   Cost: one extra TCP connect+close per fresh client, only on cache
+   miss; idle-reuse requests skip this entirely. The probe is
+   TCP-level for https too — TLS problems still surface from
+   [Piaf.Client.create] and feed the same backoff.
+
+   A success here followed by a refused [Piaf.Client.create] (server
+   died in between) can still leak one fd; the window is narrow and
+   the backoff bounds the rate. Cancelled must propagate so a dying
+   fiber unwinds instead of reporting "unreachable" (RFC-0106). *)
+let probe_connectable t key =
+  let net = Eio.Stdenv.net t.env in
+  let clock = Eio.Stdenv.clock t.env in
+  let addrs =
+    try
+      Eio.Net.getaddrinfo_stream net key.Host_key.host
+        ~service:(string_of_int key.Host_key.port)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
+  in
+  let try_addr addr =
+    Eio.Fiber.first
+      (fun () ->
+         Eio.Switch.run (fun probe_sw ->
+           try
+             let flow = Eio.Net.connect ~sw:probe_sw net addr in
+             Eio.Flow.close flow;
+             true
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _ -> false))
+      (fun () ->
+         Eio.Time.sleep clock t.config.connect_timeout_seconds;
+         false)
+  in
+  List.exists try_addr addrs
+
+(* Build a fresh piaf client for [key], gated on the per-host
+   connect-failure backoff and a TCP reachability probe (see
+   [probe_connectable]). Returns [Result] mirroring piaf's API so
+   callers can surface DNS/TCP/TLS failures distinctly. *)
+let create_fresh t key uri =
+  let now = now_ts t in
+  if connect_backoff_active t key ~now then
+    Error
+      (Printf.sprintf
+         "connect backoff: %s failed recently (cooldown %.0fs)"
+         (Host_key.to_string key)
+         t.config.connect_failure_cooldown_seconds)
+  else if not (probe_connectable t key) then begin
+    record_connect_failure t key ~now:(now_ts t);
+    Error
+      (Printf.sprintf "connect refused: %s unreachable"
+         (Host_key.to_string key))
+  end
+  else
+    match Piaf.Client.create ~sw:t.sw t.env uri with
+    | Ok c ->
+      t.counters.create_count_total <- t.counters.create_count_total + 1;
+      Ok c
+    | Error err ->
+      (* Probe passed but create failed (TLS error, or the server died
+         in the narrow window): feed the same backoff so a broken
+         endpoint is not hammered either. *)
+      record_connect_failure t key ~now:(now_ts t);
+      Error (Piaf.Error.to_string (err :> Piaf.Error.t))
 
 (* Count idle entries (host_map -> int). For [max_total_idle]. *)
 let count_idle t =
@@ -448,7 +543,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   let acquired =
     match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
-    | None -> create_fresh t host_origin
+    | None -> create_fresh t key host_origin
   in
   match acquired with
   | Error e -> Error e
@@ -650,7 +745,7 @@ let do_request_streaming
   let acquired =
     match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
-    | None -> create_fresh t host_origin
+    | None -> create_fresh t key host_origin
   in
   match acquired with
   | Error e -> Error e

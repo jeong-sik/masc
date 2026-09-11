@@ -128,10 +128,9 @@ let footer () =
 
 (* RFC-msx-surface-focus-mode stage 1: the pixels this view draws arrive as a
    surface frame ([Masc_tui_interactive.frame]) — the renderer knows the
-   contract, not [Masc_tui_types.msx_frame]'s pixel fields. [Rows] is another
-   surface's shape and draws nothing here. The meta frame (mode, media, who
-   pressed) still rides the old type; only the picture went through the
-   contract. *)
+   contract, not [Masc_tui_types.msx_frame]'s pixel fields. The meta frame
+   (mode, media, who pressed) still rides the old type; only the picture went
+   through the contract. *)
 let render ~(write : string -> unit)
     ~(connection : Masc_tui_types.connection_status) ?notice
     (frame : Masc_tui_types.msx_frame option)
@@ -139,7 +138,7 @@ let render ~(write : string -> unit)
   let dims =
     match surface with
     | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
-    | Some (Rows _) | None -> None
+    | None -> None
   in
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let header_rows = if Option.is_some notice then 2 else 1 in

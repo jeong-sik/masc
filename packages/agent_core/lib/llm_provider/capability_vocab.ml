@@ -103,6 +103,7 @@ type reasoning_streaming_format =
   | Default_reasoning_streaming
   | No_reasoning_streaming
   | Delta_reasoning_field of string
+  | Delta_reasoning_field_and_details of string
   | Template_reasoning_streaming
 
 type sampling_parameter =
@@ -624,7 +625,7 @@ let content_inline_reasoning_of_string raw =
 ;;
 
 let reasoning_streaming_format_values =
-  [ "default"; "none"; "template_parser"; "delta:<field>" ]
+  [ "default"; "none"; "template_parser"; "delta:<field>"; "delta_details:<field>" ]
 ;;
 
 let reasoning_streaming_format_syntax =
@@ -632,21 +633,35 @@ let reasoning_streaming_format_syntax =
 ;;
 
 let reasoning_streaming_delta_prefix = "delta:"
+let reasoning_streaming_delta_details_prefix = "delta_details:"
+
+(* Both prefixes name the delta member that carries reasoning text.
+   [delta_details:] additionally reads the sibling [reasoning_details] array,
+   which is the only place OpenRouter puts an encrypted or signed reasoning
+   item: gpt-5.5 streams [reasoning: null] with the real item in
+   [reasoning_details[0]] (live probe 2026-09-10). Declaring [delta:] for such
+   a model reads the null text and drops the item. *)
+let delta_field_of_normalized ~prefix normalized =
+  let prefix_len = String.length prefix in
+  let field = String.sub normalized prefix_len (String.length normalized - prefix_len) in
+  if field = "" || String.contains field ' ' then None else Some field
+;;
 
 let reasoning_streaming_format_of_string raw =
   match normalize raw with
   | "" | "default" -> Some Default_reasoning_streaming
   | "none" -> Some No_reasoning_streaming
   | "template_parser" -> Some Template_reasoning_streaming
+  | normalized
+    when String.starts_with
+           ~prefix:reasoning_streaming_delta_details_prefix
+           normalized ->
+    delta_field_of_normalized ~prefix:reasoning_streaming_delta_details_prefix normalized
+    |> Option.map (fun field -> Delta_reasoning_field_and_details field)
   | normalized when String.starts_with ~prefix:reasoning_streaming_delta_prefix normalized
     ->
-    let prefix_len = String.length reasoning_streaming_delta_prefix in
-    let field =
-      String.sub normalized prefix_len (String.length normalized - prefix_len)
-    in
-    if field = "" || String.contains field ' '
-    then None
-    else Some (Delta_reasoning_field field)
+    delta_field_of_normalized ~prefix:reasoning_streaming_delta_prefix normalized
+    |> Option.map (fun field -> Delta_reasoning_field field)
   | _ -> None
 ;;
 

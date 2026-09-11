@@ -34,17 +34,24 @@ type t
 
     [connect_timeout_seconds]: max wait when establishing a fresh
     connection. Surfaces as [Error "connect timeout ..."] to the
-    caller. *)
+    caller.
+
+    [connect_failure_cooldown_seconds]: after a connect to a host fails,
+    requests to that host fast-fail without opening a socket for this
+    long. Bounds both the probe traffic against a dead server and any
+    residual fd growth from the create path. *)
 type config = {
   max_idle_per_host : int;
   max_total_idle    : int;
   idle_ttl_seconds  : float;
   connect_timeout_seconds : float;
+  connect_failure_cooldown_seconds : float;
 }
 
 val default_config : config
 (** [{ max_idle_per_host = 8; max_total_idle = 256;
-       idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0 }]. *)
+       idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0;
+       connect_failure_cooldown_seconds = 5.0 }]. *)
 
 val shutdown : t -> unit
 (** Idempotently stop accepting idle connections and close parked clients.

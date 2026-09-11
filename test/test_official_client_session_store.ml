@@ -1065,7 +1065,7 @@ let fixture_tool ?(parameters = []) ~name ~description () =
     ~name
     ~description
     ~parameters
-    (fun _ -> Ok { Agent_core.Types.content = "fixture"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
 ;;
 
 let test_tool_surface_fingerprint_is_canonical () =

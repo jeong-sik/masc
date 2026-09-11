@@ -762,6 +762,7 @@ let run_turn
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
+      ?(answered_ask_inputs = [])
       ?(history_user_source = "direct_user")
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       ?(history_assistant_source = "direct_assistant")
@@ -779,6 +780,7 @@ let run_turn
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
+      ?on_runtime_attempt_failed
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
@@ -1027,9 +1029,17 @@ let run_turn
          | Ok (identity, message) ->
            let checkpoint = Keeper_context_runtime.checkpoint_of_context ctx_work in
            let checkpoint = { checkpoint with Agent_core.Checkpoint.session_id = trace_id } in
-           Keeper_approval_input_checkpoint.admit
-             ~session_dir:session.session_dir ~identity ~message checkpoint
-           |> Result.map (fun checkpoint -> Some checkpoint))
+           let co_inputs = List.fold_left (fun result (ask_id, text) ->
+             Result.bind result (fun inputs ->
+               let evidence_fingerprint = Digestif.SHA256.(digest_string text |> to_hex) in
+               Keeper_approval_input_admission.answered_ask_identity ~ask_id ~evidence_fingerprint
+               |> Result.map_error Keeper_approval_input_admission.error_to_string
+               |> Result.map (fun identity -> inputs @ [identity, Agent_core.Types.user_msg text])))
+             (Ok []) answered_ask_inputs in
+           Result.bind co_inputs (fun co_inputs ->
+             Keeper_approval_input_checkpoint.admit ~co_inputs
+               ~session_dir:session.session_dir ~identity ~message checkpoint
+             |> Result.map (fun checkpoint -> Some checkpoint)))
       | _ -> Ok None
     in
     match admission with
@@ -1463,7 +1473,16 @@ let run_turn
                            current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
-                        (fun ~runtime_id:_ ~attempt _error ->
+                        (fun ~runtime_id ~attempt _error ->
+                           (* The candidate that answered with this error.
+                              The caller's decision record has no other
+                              source for it: a failure returns no
+                              [run_result], and the lane the turn was
+                              budgeted under is not always the candidate
+                              that dispatched (masc#35043). *)
+                           Option.iter
+                             (fun callback -> callback ~runtime_id)
+                             on_runtime_attempt_failed;
                            (* [on_runtime_attempt] observes only materialized
                               runtimes immediately before provider dispatch.
                               A candidate that disappeared from the runtime

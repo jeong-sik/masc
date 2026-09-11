@@ -628,11 +628,12 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
     ; "activation_mode", "true", "string"
     ; "max_context_override", "\"128001\"", "integer"
     ; "mention_targets", "true", "string array"
+    ; "tools.deny", "true", "string array"
     ]
 
-(* RFC-0390: [keeper.tools] carries exactly one key. The declared kind list
-   makes any sibling an unknown key, so a typo cannot silently keep the
-   runtime's default posture. *)
+(* [keeper.tools] now carries three keys ([native], [attached_allow],
+   [deny]). The declared kind list makes any sibling an unknown key, so a
+   typo cannot silently keep the runtime's default posture. *)
 let test_profile_parses_tools_native () =
   List.iter
     (fun (raw, expected) ->
@@ -732,6 +733,53 @@ let test_skill_names_preserve_absent_empty_and_exact_values () =
       ~overlay:{ KTP.empty_keeper_profile_defaults with skill_names = Some [] }
   in
   check (option (list string)) "explicit empty overrides inherited names" (Some []) merged.skill_names
+;;
+
+let test_tool_deny_parses_absent_empty_and_exact_values () =
+  let parse input =
+    match TL.parse_toml input with
+    | Error error -> fail error
+    | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok defaults -> defaults
+       | Error detail -> fail detail)
+  in
+  let absent = parse "[keeper]\ninstructions = \"test\"\n" in
+  check (list string) "absent denies nothing" [] absent.KTP.tool_deny;
+  let empty = parse "[keeper.tools]\ndeny = []\n" in
+  check (list string) "explicit empty denies nothing" [] empty.KTP.tool_deny;
+  let exact =
+    parse
+      "[keeper.tools]\ndeny = [\"keeper_spawn\", \"masc_keeper_delegate\", \"keeper_spawn\"]\n"
+  in
+  check
+    (list string)
+    "values are deduplicated in order"
+    [ "keeper_spawn"; "masc_keeper_delegate" ]
+    exact.KTP.tool_deny;
+  let merged =
+    KTP.merge_keeper_profile_defaults
+      ~base:{ KTP.empty_keeper_profile_defaults with
+              tool_deny = [ "keeper_spawn" ] }
+      ~overlay:{ KTP.empty_keeper_profile_defaults with
+                 tool_deny = [ "masc_keeper_delegate" ] }
+  in
+  check
+    (list string)
+    "a non-empty overlay replaces the inherited deny"
+    [ "masc_keeper_delegate" ]
+    merged.tool_deny;
+  let inherited =
+    KTP.merge_keeper_profile_defaults
+      ~base:{ KTP.empty_keeper_profile_defaults with
+              tool_deny = [ "keeper_spawn" ] }
+      ~overlay:KTP.empty_keeper_profile_defaults
+  in
+  check
+    (list string)
+    "an empty overlay keeps the inherited deny"
+    [ "keeper_spawn" ]
+    inherited.tool_deny
 ;;
 
 let test_activation_modes () =
@@ -2012,6 +2060,8 @@ let () =
             test_each_keeper_field_kind_rejects_a_wrong_typed_value;
           test_case "Skill names preserve three-state selection" `Quick
             test_skill_names_preserve_absent_empty_and_exact_values;
+          test_case "tool deny parses and merges" `Quick
+            test_tool_deny_parses_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick

@@ -482,7 +482,7 @@ let stage_release_mirror base_path =
    | _ -> fail "release fixture binary must report embedded commit");
   let runtime_args =
     match suffix with
-    | "macos-arm64" | "macos-x64" ->
+    | "macos-arm64" | "macos-x64" | "linux-arm64" | "linux-x64" ->
       let runtime_root = Filename.concat dir "fixture-runtime" in
       let runtime_archive = Filename.concat dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
       (* This forwards to the test host's interpreter. It exercises the verified

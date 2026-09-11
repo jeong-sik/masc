@@ -27,10 +27,17 @@ let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) 
   None
 ;;
 
+(* [executed_runtime_id] is the candidate that answered; [runtime_id] is the
+   lane it answered on. Sticky lane ordering can make those different
+   runtimes, and this function's callers ask the first question, so prefer
+   the answerer wherever the producer recorded one. Records written before
+   masc#35043, and turns that failed before any candidate reported in, carry
+   the lane alone. *)
 let runtime_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
-  match json_string_field_opt "runtime_id" fields with
-  | Some runtime_id -> Some (runtime_id ^ " (runtime)")
-  | None -> None
+  let named key = json_string_field_opt key fields in
+  match named "executed_runtime_id" with
+  | Some _ as executed -> Option.map (fun id -> id ^ " (runtime)") executed
+  | None -> Option.map (fun id -> id ^ " (runtime)") (named "runtime_id")
 ;;
 
 let assoc_fields_opt key fields =

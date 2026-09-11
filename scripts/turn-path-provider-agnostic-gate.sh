@@ -28,6 +28,16 @@
 
 set -euo pipefail
 
+# The gate must stay executable: CI and local hooks invoke it directly on
+# some paths and via `bash` on others. A mode regression (755 -> 644) passes
+# silently through the `bash` paths and breaks the direct ones later, so the
+# script enforces its own bit. Registered after PR #35200 review (analyst).
+if [ ! -x "${0}" ]; then
+  echo "turn-path gate: lost its execute bit (${0} is not +x)" >&2
+  echo "restore with: chmod +x ${0}" >&2
+  exit 3
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -44,6 +54,25 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # typed-capability rule still applies, but this gate will not be what catches
 # it.
 VENDOR_PATTERN='glm|deepseek|kimi|anthropic|openai|gemini|ollama|minimax|mimo|qwen|zai'
+
+# Documented, legitimate vendor mentions that must survive the gate.
+#
+# This is deliberately NOT the pattern-exclusion precedent used for 'claude'
+# and 'gpt-': removing 'anthropic' from VENDOR_PATTERN would also blind the
+# gate to a turn-path *logic* branch on anthropic ("this gate will not be
+# what catches it", per the limitation note above). A phrase allowlist keeps
+# the scan strict: a line passes only when stripping every allowed phrase
+# also strips every vendor name. Any other mention — including a vendor
+# branch on the same line as an allowed phrase — still fails.
+#
+# Entry provenance: keeper_turn_driver_try_provider.ml:1427-1432 documents
+# backend_anthropic.validate_thinking_controls (the serialization-boundary
+# validator that rejects enable_thinking=false + reasoning_effort pairs).
+# Serialization may know the vendor; deciding a turn may not — this comment
+# documents the serialization side, so it stays.
+ALLOWED_PHRASES=(
+  'backend_anthropic.validate_thinking_controls'
+)
 
 # Turn-path surface. Globs, not a fixed file list, so a new file that joins the
 # turn path is covered the moment it is named like its siblings.
@@ -66,6 +95,20 @@ collect_files() {
 
 # bash 3.2 (the macOS default) has no `mapfile`, so the file list travels as a
 # NUL-delimited stream rather than an array.
+# Strip every allowed phrase from a line. A hit line passes only when this
+# also removes every vendor name it carried.
+strip_allowed() {
+  local line="$1" phrase
+  for phrase in "${ALLOWED_PHRASES[@]}"; do
+    line="${line//"${phrase}"/}"
+  done
+  printf '%s' "${line}"
+}
+
+# Scan, but only report hit lines that still carry a vendor name after every
+# allowed phrase has been stripped. This is what keeps the gate strict: an
+# allowlist entry co-located with a vendor branch on the same line still
+# fails, because the branch's vendor name is not part of the allowed phrase.
 scan() {
   local root="$1"
   local list
@@ -75,10 +118,21 @@ scan() {
     echo "the globs no longer match anything, so the gate would pass vacuously" >&2
     return 2
   fi
-  printf '%s\n' "${list}" \
-    | tr '\n' '\0' \
-    | xargs -0 rg --ignore-case --line-number --with-filename "${VENDOR_PATTERN}" 2>/dev/null \
-    || true
+  local raw_hit allowed_stripped
+  while IFS= read -r raw_hit; do
+    [ -z "${raw_hit}" ] && continue
+    allowed_stripped="$(strip_allowed "${raw_hit#*: *: }")"
+    # Re-run the vendor pattern on the stripped text; report the line only
+    # when a vendor name survives the strip.
+    if printf '%s' "${allowed_stripped}" | rg -q --ignore-case "${VENDOR_PATTERN}"; then
+      printf '%s\n' "${raw_hit}"
+    fi
+  done < <(
+    printf '%s\n' "${list}" \
+      | tr '\n' '\0' \
+      | xargs -0 rg --ignore-case --line-number --with-filename "${VENDOR_PATTERN}" 2>/dev/null \
+      || true
+  )
 }
 
 self_test() {
@@ -112,7 +166,51 @@ self_test() {
     return 1
   fi
 
-  echo "turn-path gate self-test passed (detects a planted vendor branch, ignores a clean one)"
+  # Allowlist axis: the documented phrase alone must PASS, but the same
+  # phrase co-located with a vendor branch on one line must still FAIL.
+  # This is the property the pattern-exclusion precedent cannot express.
+  tmp="$(mktemp -d)"
+  mkdir -p "${tmp}/lib/keeper"
+  printf '(* backend_anthropic.validate_thinking_controls rejects the pair *)\n' \
+    >"${tmp}/lib/keeper/keeper_turn_selftest_fixture.ml"
+  local allowed_only
+  allowed_only="$(scan "${tmp}")"
+  if [ -n "${allowed_only}" ]; then
+    rm -rf "${tmp}"
+    echo "turn-path gate self-test FAILED: documented phrase reported a hit:" >&2
+    echo "${allowed_only}" >&2
+    return 1
+  fi
+
+  printf 'let r = if backend_anthropic.validate_thinking_controls x then anthropic_special x\n' \
+    >"${tmp}/lib/keeper/keeper_turn_selftest_fixture.ml"
+  local phrase_plus_branch
+  phrase_plus_branch="$(scan "${tmp}")"
+  rm -rf "${tmp}"
+  if [ -z "${phrase_plus_branch}" ]; then
+    echo "turn-path gate self-test FAILED: vendor branch hidden behind allowed phrase was not detected" >&2
+    return 1
+  fi
+
+  # Execute-bit axis: the gate must refuse to run (exit 3) when its own +x
+  # is stripped. This is what turns a silent mode regression into a loud
+  # one at self-test time instead of at a later direct invocation.
+  local bit_probe
+  bit_probe="$(mktemp)"
+  cp "${0}" "${bit_probe}"
+  chmod 644 "${bit_probe}"
+  if bash "${bit_probe}" --self-test >/dev/null 2>&1; then
+    if [ -x "${bit_probe}" ]; then
+      :
+    else
+      rm -f "${bit_probe}"
+      echo "turn-path gate self-test FAILED: a non-executable copy ran without refusing (mode regression goes undetected)" >&2
+      return 1
+    fi
+  fi
+  rm -f "${bit_probe}"
+
+  echo "turn-path gate self-test passed (detects a planted vendor branch, ignores a clean one, allows documented phrases without allowing branches, refuses to run without its execute bit)"
   return 0
 }
 

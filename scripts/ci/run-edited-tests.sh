@@ -225,9 +225,24 @@ DECLARED
   echo "test sources this pull request edits: ${count}"
   printf '%s\n' "${sources}" | sed 's/^/  /'
 
+  # Past the cap the name-derived lists are dropped and the run continues, so
+  # the path-derived guards below still go. This used to return here, which
+  # meant a pull request over the cap ran nothing at all -- including the
+  # guards over config assets, which cannot be a wrong reading of the
+  # changed-file list. #35025 turned this step from a report into a gate, so
+  # running nothing is now a pull request passing the gate without a suite.
+  # Measured 2026-09-09: #34889 renamed across more than twelve suites and the
+  # log said NOT RUN.
+  #
+  # module_suites and declared_suites go with it. Both are derived from the
+  # same changed-file list the cap distrusts, and both scale with its length;
+  # a prefix match on config/tools does neither.
   if [ "${count}" -gt "${max_suites}" ]; then
-    echo "NOT RUN: more than ${max_suites} suites, which reads as a wrong list"
-      return 1
+    echo "DROPPED: more than ${max_suites} edited suites, which reads as a wrong list"
+    echo "  name-derived lists go with it; the path-derived guards below do not"
+    sources=""
+    module_suites=""
+    declared_suites=""
   fi
 
   # After the cap, not before. The cap is a heuristic against a wrong
@@ -268,6 +283,13 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  # The cap can leave nothing behind: a wide pull request that touches no
+  # config asset drops its whole list here. The caller reads a return of 1 as
+  # "this pull request has no suite to run", which is what that is.
+  if [ -z "$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$')" ]; then
+    echo "no suite left to run"
+    return 1
+  fi
 }
 
 # Fixtures for --self-test. Each is a changed-file list and the suites it must
@@ -346,6 +368,30 @@ self_test() {
     "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
+  # Past the cap the name-derived list is dropped, and the path-derived guards
+  # are not: config/tools cannot be a wrong reading of the changed-file list.
+  # Before this, the cap returned before the guard blocks and the whole run was
+  # nothing -- which #35025 turned from a quiet report into a gate a wide pull
+  # request passes without running a suite.
+  # The other side of the same drop: nothing else changed, so nothing is left
+  # and the caller is told there is no suite -- the behaviour the cap had, kept
+  # for the case the cap was written for.
+  check "past the cap with no asset there is nothing left" \
+    "" \
+    test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
+    test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
+    test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
+    test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml \
+    test/test_wide_13.ml
+
+  check "past the cap a tool definition still reaches its guards" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
+    test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
+    test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
+    test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
+    test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml \
+    test/test_wide_13.ml config/tools/foo.toml
+
   check "a tool definition reaches every guard over it" \
     "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"

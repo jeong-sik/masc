@@ -15,9 +15,17 @@ let install_prompt_registry_observers () =
    and its fallback was that same element — the [Sys.file_exists] probe
    decided nothing. The directory is created on demand by the asset sync
    ([Managed_asset_sync], run by the server bootstrap), so absence at
-   resolve time is not an error either. *)
-let resolve_prompt_markdown_dir ~workspace_path:_ ~base_path:_ =
-  Config_dir_resolver.prompts_dir ()
+   resolve time is not an error either.
+
+   Anchored on the caller's [base_path] rather than [prompts_dir ()], which
+   answers from the process cwd and ambient [MASC_BASE_PATH]: a server handed
+   a workspace got whichever workspace the process happened to sit in, and
+   the tests below asserted about the ambient state instead of the temporary
+   directory they built (masc#35146). [workspace_path] is gone from here
+   because resolution never used it; [bootstrap_runtime] still keeps it for
+   the memo signature. *)
+let resolve_prompt_markdown_dir ~base_path =
+  Config_dir_resolver.prompts_dir_for_base_path ~base_path
 
 let bootstrapped_signature : (string * string) option ref = ref None
 
@@ -131,7 +139,7 @@ let bootstrap_runtime ~workspace_path ~base_path =
   install_prompt_registry_observers ();
   Config_dir_resolver.log_warnings ~context:"PromptDefaults" ();
   let prompt_markdown_dir =
-    resolve_prompt_markdown_dir ~workspace_path ~base_path
+    resolve_prompt_markdown_dir ~base_path
   in
   let signature = (workspace_path, prompt_markdown_dir) in
   if !bootstrapped_signature <> Some signature then (

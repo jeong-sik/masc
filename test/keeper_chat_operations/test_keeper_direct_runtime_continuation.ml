@@ -20,7 +20,7 @@ let checkpoint bytes =
   match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with
   | Ok value -> value | Error _ -> fail "invalid checkpoint fixture"
 let continuation ?(bytes = "original input and three completed tool results") () =
-  Semantic.runtime_retry ~checkpoint:(checkpoint bytes) ~assignment_id:"direct-assignment"
+  Semantic.runtime_retry ~not_before:None ~checkpoint:(checkpoint bytes) ~assignment_id:"direct-assignment"
     ~failed_runtime_id:"rate-limited-runtime" ~next_runtime_id:"alternate-runtime"
     ~later_runtime_ids:["final-runtime"] |> string_ok
 let rec remove path =
@@ -150,6 +150,42 @@ let test_cancel_releases_both_inputs () = with_path (fun path -> with_open path 
   check bool "semantic cancellation" true ((execution store).phase = Semantic.Settled Semantic.Cancelled);
   check bool "both bodies released" true (cancelled.input = None && (execution store).input = None)))
 
+let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun path ->
+  (* 2026-09-10 drain investigation: a deferred retry whose failure was the
+     provider throttling carries [not_before]; claiming it earlier re-issues
+     the rejected call in a tight loop. *)
+  let retry_with_backoff not_before =
+    Semantic.runtime_retry ~not_before:(Some not_before)
+      ~checkpoint:(checkpoint "provider throttled the original call")
+      ~assignment_id:"direct-assignment" ~failed_runtime_id:"rate-limited-runtime"
+      ~next_runtime_id:"alternate-runtime" ~later_runtime_ids:["final-runtime"] |> string_ok in
+  with_open path (fun store ->
+    let original = admitted store in
+    ignore (defer store original (retry_with_backoff 100.) |> ok);
+    (* The idempotent re-defer path keeps the persisted continuation when the
+       identity matches — not_before is scheduling metadata, not identity — so
+       the first backoff wins and the fresh 200. is discarded. Pin that:
+       claimable at 150. proves the persisted value is 100., not 200. *)
+    ignore (defer store original (retry_with_backoff 200.) |> ok);
+    check bool "cooling retry is not claimable" false (Store.has_claimable_queued store ~now:12. |> ok);
+    check bool "claim skips the cooling retry" true ((Store.claim_next store ~now:12. |> ok) = None);
+    let independent = Operation.Operation_id.of_string "independent-work" |> string_ok in
+    Store.submit store ~now:13. ~operation_id:independent ~source ~input |> ok |> ignore;
+    (match Store.claim_next store ~now:14. |> ok with
+     | Some operation -> check bool "new work claimed ahead of the cooling retry" true
+         (Operation.Operation_id.equal independent operation.operation_id)
+     | None -> fail "the cooling head blocked independent work");
+    Store.succeed_running store ~now:15. ~operation_id:independent ~outcome_ref:"done" |> ok |> ignore;
+    check bool "backoff still running" false (Store.has_claimable_queued store ~now:99. |> ok);
+    check bool "first backoff wins over an idempotent re-defer" true (Store.has_claimable_queued store ~now:150. |> ok));
+  with_open path (fun store ->
+    check bool "backoff survives a restart" false (Store.has_claimable_queued store ~now:99. |> ok);
+    check bool "backoff elapsed makes the retry claimable" true (Store.has_claimable_queued store ~now:201. |> ok);
+    match Store.claim_next store ~now:201. |> ok with
+    | Some operation -> check bool "original operation claimed after backoff" true
+        (Operation.Operation_id.equal operation_id operation.operation_id)
+    | None -> fail "cooling retry never became claimable"))
+
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "same operation survives and completes" `Quick test_same_operation_survives_and_completes;
   test_case "restart after claim requires exact checkpoint" `Quick test_restart_after_claim_requires_exact_checkpoint;
@@ -158,4 +194,5 @@ let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "commit faults preserve one continuation" `Quick test_commit_faults_keep_one_bound_continuation;
   test_case "resume uncertain commit readback" `Quick test_resume_uncertain_commit_is_read_back;
   test_case "cancellation settles both records" `Quick test_cancel_releases_both_inputs;
+  test_case "cooling retry waits for not_before" `Quick test_cooling_retry_is_not_claimable_until_not_before;
 ]]

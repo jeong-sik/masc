@@ -34,47 +34,10 @@ The screen is the expensive way to ask what changed; memory answers in bytes. To
 
 Re-verify a saved address after a reload or restore: the layout is usually the same, but confirm with one diff before trusting the table. If a diff after a clearly one-step action shows wholesale change, someone else drove the machine — treat the snapshot as lost and take a fresh peek.
 
-## Sangokushi II: observed starting procedure
+## Per-game Skills
 
-These observations came from a one-human Cao Pi campaign, scenario 6, January 220. Apply them only when the current prompt matches; discover other scenarios from their actual screens.
-
-At the province command prompt `(0–19)?`, Return with an empty entry reveals the command list. Space and F1 did not reveal it. A numeric entry followed by Return instead selects that command.
-
-| Number | Visible command | Meaning |
-| --- | --- | --- |
-| 0 | 待機 | Wait / finish province commands |
-| 1 | 移動 | Move |
-| 2 | 輸送 | Transport |
-| 3 | 戦争 | War |
-| 4 | 軍事 | Military |
-| 5 | 人事 | Personnel |
-| 6 | 外交 | Diplomacy |
-| 7 | 計略 | Plots |
-| 8 | 情報 | Information |
-| 9 | 開発 | Development |
-| 10 | 治水 | Flood control |
-| 11 | 褒美 | Rewards |
-| 12 | 施し | Relief |
-| 13 | 商人 | Merchant |
-| 14 | 徴収 | Levy |
-| 15 | 地図 | Map |
-| 16 | 委任 | Delegate |
-| 17 | 放浪 | Wander |
-| 18 | 特別 | Special |
-| 19 | 機能 | Functions |
-
-Observed transitions: `1`, Return asks for a destination numbered 1–41; `9`, Return asks which officer should develop the province. Neither alone proves movement or improved land. `0`, Return, `y`, Return advanced the initial campaign from province 10 to 18.
-
-Development is a sequence of decisions: at the province command prompt enter `9`, Return; read the officer list and select an officer; capture the resulting amount prompt before entering a cost. A saved or reread officer-list image does not establish the amount prompt after selection. In one observed province 13 action, officer 5 followed by a cost of 50 changed gold from 500 to 450 and a displayed province statistic from 20 to 27, returning to the command prompt with the month unchanged. This demonstrates a completed development action in that state, not a fixed exchange rate or a universally best officer. Compare the actual before/after resources and the statistic affected by the command, then preserve the result before planning another action.
-
-Functions-menu cancellation: in one observed province 11 state, the functions submenu `(1–6)?` remained visible after `0`, Return and after Esc. A subsequent Return by itself (5 held frames, 180 total) returned to the same province's main `(0–19)?` command prompt with resources and month unchanged. Verify that prompt before sending province commands; do not assume Esc universally cancels or that a submenu option labelled "Exit" returns to play. This was a submenu cancellation, not the end of the province or month. From the restored main prompt, `0`, Return followed by `y` advanced province 11 to 8 in the observed campaign, still in January 220.
-
-Game save: `1`, `9`, Return, then `5`, Return opens the save flow. Swap to the user's data disk only when D is requested; follow the slot/name prompts. Swap back to B when requested. Emulator checkpoints and the game's own save/load are distinct behaviors to verify.
-
-Keep local media filenames and the current campaign slot in session memory rather than treating one operator's inventory as universal. A long zero-human observer run ending in year 293 has been observed; it is not proof of a human unification victory. No full winning campaign is established by this Skill.
+Game facts — menu tables, in-game save flows, media-change pitfalls, verified key sequences — live in a Skill named after the game, not here. Before playing a loaded game, open its row in the Skill list; `sangokushi-2` is the first. Where no row exists, learn from the actual screens and report what repeated, so the knowledge can be distilled into one. Keep local media filenames and the current campaign slot in session memory rather than treating one operator's inventory as universal.
 
 ## Recover from a suspected bad transition
 
 Save the abnormal state to a fresh slot before stepping again or restoring. Retain the last good slot, media identity, exact accepted inputs, frame numbers and images. Treat values displayed after corruption as untrusted; a later year or a BIOS logo does not prove a completed turn or a deliberate reboot.
-
-A controlled Sangokushi II replay found that switching from B to A during an active campaign cleared the open file state while the game still needed `PACKDATA.DAT`, which was present on B. Replaying the same accepted inputs from the same earlier checkpoint while retaining B reached a readable diplomacy prompt; including the swap corrupted the screen. This establishes a failure of that media-change sequence, not a requirement to keep B inserted through legitimate save or load prompts. Follow the currently visible request for D or B when the game asks.

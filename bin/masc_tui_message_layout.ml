@@ -1210,22 +1210,6 @@ let short_clock timestamp =
   then String.sub timestamp 0 5
   else timestamp
 
-(* A block drawn from a turn transcript covers a span, not a moment: it
-   opens when the request was dispatched and either still runs or has
-   settled. Its clock says so -- an open end while the turn is in flight,
-   both ends once the outcome landed. Without the span a live block stamped
-   with its opening clock reads as a message that happened before the rows
-   above it, because rows typed while it ran commit with their own later
-   clocks (2026-09-10: a 16:38 turn drawn under a 16:41 reply was read as
-   out-of-order). The arrow is the same character the promoted USER row
-   already uses for "this is going somewhere". Both ends are already
-   minute clocks; the caller trims, this only joins. *)
-let span_clock ~starts_at ends_at =
-  match ends_at with
-  | None -> short_clock starts_at ^ "→"
-  | Some ends -> short_clock starts_at ^ "→" ^ short_clock ends
-;;
-
 (* [Origin_row] leaves the origin on a row of its own. The other two fold it
    into the body's left margin, which buys back a row per message -- eight
    speakers taking turns spent eight of a forty-row pane saying who was

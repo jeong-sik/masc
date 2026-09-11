@@ -598,10 +598,3 @@ val age_text : now:float -> since:float -> string option
     rather than one read here, so a test can state the instant and two rows in
     one frame can share a single read. A clock that moved backwards says
     nothing rather than a negative age. *)
-
-val span_clock : starts_at:string -> string option -> string
-(** The clock for a block drawn from a turn transcript: [starts_at] and the
-    optional settle clock are civil-time strings ("HH:MM:SS" or already
-    trimmed); the result is "HH:MM→" while the turn runs and "HH:MM→HH:MM"
-    once it settled, so the block reads as the span it covered rather than
-    one moment that predates the rows above it. *)

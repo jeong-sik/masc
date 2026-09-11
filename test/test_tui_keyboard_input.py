@@ -5352,15 +5352,13 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             raise AssertionError(
                 f"the sent line is not marked as a user turn: {plain!r}"
             )
-        # The promoted USER row answers the question its reader actually
-        # has -- did this line go? -- rather than naming the queue internal
-        # it travelled under. A truncated request id in that slot read as a
-        # line stuck in a machine (2026-09-10: "is this ever going?").
-        if b"sent \xc2\xb7 the running turn answers it" not in plain:
-            raise AssertionError(
-                f"the sent line does not say the running turn answers it: "
-                f"{plain!r}"
-            )
+        # No needle for the promoted USER row's wording here: this scenario's
+        # line is a direct submission, so it renders through the settled-row
+        # layout path and the promoted block (which says "sent · the running
+        # turn answers it") never draws. Covering that wording needs a
+        # scenario that holds the drained turn open with a second gate
+        # (task-1517); asserting it here failed on a screen that could not
+        # contain it.
         for expected in (
             b"NEXT 1",
             b"queued-one",

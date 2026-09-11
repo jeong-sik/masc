@@ -2189,26 +2189,9 @@ let test_the_operator_badge_keeps_who_it_is () =
     (String.trim (badge wide_label_column None))
 ;;
 
-(* The span clock is what a turn block says instead of a moment: an open end
-   while the turn runs, both ends once it settled. Seconds are trimmed so the
-   span costs the same gutter as every other clock plus the arrow, and an
-   already-trimmed clock passes through untouched. *)
-let test_span_clock_opens_and_closes_the_turn () =
-  check string "a running turn leaves the end open" "16:38→"
-    (Layout.span_clock ~starts_at:"16:38:38" None);
-  check string "a settled turn shows both ends" "16:38→16:41"
-    (Layout.span_clock ~starts_at:"16:38:38" (Some "16:41:46"));
-  check string "an already-trimmed clock is passed through" "16:38→16:41"
-    (Layout.span_clock ~starts_at:"16:38" (Some "16:41"))
-;;
-
 let () =
   run "tui_message_layout"
     [
-      ( "clocks"
-      , [ test_case "span clock opens and closes the turn" `Quick
-            test_span_clock_opens_and_closes_the_turn
-        ] );
       ( "bare links"
       , [ test_case "dressed and bounded" `Quick
             test_bare_links_are_dressed_and_bounded

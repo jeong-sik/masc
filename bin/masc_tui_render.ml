@@ -9941,17 +9941,16 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
-      (* The block's clock is the span, not the dispatch moment: while the
-         turn runs it opens ("16:38→"), and once the outcome lands both ends
-         show. Committed rows around it carry their own write clocks, and a
-         block stamped only with its opening clock read as a message that
-         happened before rows typed during the turn (2026-09-10 misread:
-         a 16:38 turn under a 16:41 reply). *)
-      let turn_clock =
-        Message_layout.span_clock ~starts_at:(keeper_message_clock started_at)
-          (Option.map keeper_message_clock
-             (Keeper_chat_transcript.settled_at transcript))
-      in
+      (* The block's clock stays the dispatch moment. Drawing the span here
+         ("16:38→" running, "16:38→16:41" settled) needs a pane-level clock
+         column: the gutter's width is fixed at [chat_clock_column] cells and
+         is what the body's wrap width is taken from, so a wider span clock
+         wrapped this block's body narrower than the rows around it and, on
+         a tight pane, truncated to an open arrow over a settled turn. The
+         transcript already records the settle instant (settled_at); the
+         span display returns with the clock-column work (task-1516). The
+         2026-09-10 misread it answers: a 16:38 turn drawn under a 16:41
+         reply read as out-of-order. *)
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -9987,7 +9986,7 @@ let render_keeper_message (state : state) =
                      call trims what the first had already fitted. *)
                   Some
                     ({ style;
-                       timestamp = turn_clock;
+                       timestamp = keeper_message_clock started_at;
                        timeline_bucket;
                        role_label =
                          Message_layout.align_role_label

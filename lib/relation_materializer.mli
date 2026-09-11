@@ -1,38 +1,18 @@
-(** Relation_materializer — agent collaboration hook surface.
-    Second Brain GraphQL / Neo4j materialization has been retired.
+(** Relation_materializer — agent collaboration lifecycle hooks.
 
-    Both entry points dispatch a single batched GraphQL mutation
-    (alias-batched: 20 peers = 1 HTTP request) and detach into an
-    Eio fiber when an Eio runtime is available. They never block
-    the caller and never raise — failures are logged via
-    [Log.Misc.error] and dropped.
-
-    Internal helpers ([log_err], [build_batch_mutation],
-    [record_collaborations_async]) are hidden — callers consume
-    only the two lifecycle hooks below, which {!Workspace_hooks} wires
-    in via [Atomic.set] in [Workspace]'s init.
+    Provides workspace lifecycle hooks wired by {!Workspace_hooks}
+    for session end and task completion.
 
     @since 2.112.0 *)
-
-val build_batch_mutation :
-  agent:string -> peers:string list -> context:string -> string
-(** Build a single batched GraphQL mutation with aliased fields.
-    Exposed primarily for unit testing the batching/escape logic. *)
 
 val on_agent_session_ended :
   leaving_agent:string ->
   active_agents:string list ->
   unit
-(** When an agent session ends, record [COLLABORATED_WITH]
-    edges between [leaving_agent] and every other member of
-    [active_agents] (the leaver itself is filtered out). No-op
-    when no peers remain. *)
+(** Workspace hook invoked when an agent session ends. *)
 
 val on_task_done :
   assignee:string ->
   active_agents:string list ->
   unit
-(** When a task completes, record collaboration edges between the
-    [assignee] and every other member of [active_agents]
-    (the assignee itself is filtered out). No-op when no peers
-    remain. *)
+(** Workspace hook invoked when a task completes. *)

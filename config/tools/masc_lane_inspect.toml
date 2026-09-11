@@ -1,0 +1,12 @@
+name = "masc_lane_inspect"
+description = """
+Read retained optional Lane Add-on instances and phases.
+
+Observations and source coverage remain explicit. Does not wait for workers or alter existing activities. Pending, unknown and incomplete observations remain explicit."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+description = "Optional exact attached instance; omit for all instances."

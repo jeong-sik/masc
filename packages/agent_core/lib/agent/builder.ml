@@ -38,7 +38,6 @@ type t =
   ; tracer : Tracing.t
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
-  ; mcp_clients : Mcp.managed list
   ; event_bus : Event_bus.t option
   ; skill_registry : Skill_registry.t option
   ; elicitation : Hooks.elicitation_callback option
@@ -87,7 +86,6 @@ let create ~net ~model =
   ; tracer = Tracing.null
   ; raw_trace = None
   ; context_injector = None
-  ; mcp_clients = []
   ; (* Observability-as-default: every Builder-constructed agent gets a fresh,
        per-agent event bus so Turn/Tool/InferenceTelemetry events are emitted
        without the caller opting in. [create] is a per-call function, so this
@@ -188,7 +186,6 @@ let with_pre_dispatch_serialization_observer observer b =
 let with_serialization_executor executor b = { b with serialization_executor = Some executor }
 ;;
 
-let with_mcp_clients clients b = { b with mcp_clients = clients }
 let with_on_run_complete cb b = { b with on_run_complete = Some cb }
 let with_contract contract b = { b with contract = Contract.merge b.contract contract }
 let with_skill skill b = with_contract (Contract.with_skill skill Contract.empty) b
@@ -217,7 +214,13 @@ let with_periodic_callbacks cbs b =
 
 let build b =
   let tools = b.tools in
-  let mcp_clients = b.mcp_clients in
+  (* Agent Core can hold managed MCP clients, and nothing hands it any: the
+     builder setter that was the only way in had no caller anywhere in the
+     repo and is gone (#34871). [Agent.close] and the agent card's MCP
+     capability read this list, so both have always answered for an empty
+     one. A caller that wants managed clients adds the setter back with
+     itself. *)
+  let mcp_clients = [] in
   let context = Contract.context_with_contract ?context:b.context b.contract in
   let config =
     { name = b.name

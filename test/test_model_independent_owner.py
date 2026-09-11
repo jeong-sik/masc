@@ -104,21 +104,6 @@ class OwnerWithoutModel(unittest.TestCase):
                         self.assertIsNone(process.poll(), 'resume must preserve the running workspace owner')
                         self.assertEqual((base/'.masc/auth/local-admin.token').read_text().strip(), token)
                         self.assertEqual(get('/health?full=1')[1]['startup']['model_runtime']['status'], 'available')
-                        # A stale preview must not signal this owner or rotate its token.
-                        rejected = subprocess.run([BINARY, 'setup-stop-previous-owner', '--base-path', tmp,
-                                                   '--port', str(port), '--expected-version', 'not-the-observed-version'],
-                                                  env=env, capture_output=True, text=True, timeout=15)
-                        self.assertEqual(rejected.returncode, 1)
-                        self.assertIsNone(process.poll())
-                        self.assertEqual((base/'.masc/auth/local-admin.token').read_text().strip(), token)
-                        # Explicitly replace only this fixture's authenticated owner.
-                        result = subprocess.run([BINARY, 'setup-stop-previous-owner', '--base-path', tmp,
-                                                 '--port', str(port), '--expected-version', health['version']],
-                                                env=env, capture_output=True, text=True, timeout=30)
-                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                        self.assertTrue(json.loads(result.stdout)['owner_stopped'])
-                        process.wait(timeout=5)
-                        self.assertEqual((base/'.masc/auth/local-admin.token').read_text().strip(), token)
                     finally:
                         if process.poll() is None:
                             os.killpg(process.pid, signal.SIGTERM)

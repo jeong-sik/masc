@@ -6,7 +6,7 @@ type t = {incumbent:incumbent; observe:unit -> (string,error) result;
   authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
   lock:Eio.Mutex.t; mutable phase:phase}
 let ( let* ) = Result.bind
-let decode_health body =
+let decode ~base_path body =
   let unique = function
     | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Some fields
     | _ -> None in
@@ -19,18 +19,12 @@ let decode_health body =
          (match List.assoc_opt "effective_base_path" paths with
           | Some (`String path) ->
             let actual = Unix.realpath path in
-            if String.trim version = "" then Error Invalid_health
-            else Ok {base_path=actual;version}
+            if actual <> base_path then Error Different_workspace
+            else if String.trim version = "" then Error Invalid_health
+            else Ok {base_path;version}
           | _ -> Error Invalid_health)
        | _ -> Error Invalid_health)
   with Yojson.Json_error _ | Unix.Unix_error _ -> Error Invalid_health
-let decode ~base_path body =
-  let* incumbent = decode_health body in
-  if incumbent.base_path = base_path then Ok incumbent else Error Different_workspace
-let authorize_initial ~base_path ~expected_version ~body ~login =
-  let* incumbent = decode ~base_path body in
-  if incumbent.version <> expected_version then Error Incumbent_changed
-  else if login () then Ok () else Error Admin_required
 let prepare_with ~sw ~base_path ~observe ~authorize ~capture =
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let* body = observe () in

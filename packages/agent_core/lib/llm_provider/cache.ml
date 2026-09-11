@@ -35,6 +35,8 @@ let request_fingerprint
                      ; provider_id
                      ; model_id
                      ; base_url
+                     ; credential_source
+                     ; auth_scheme
                      ; api_key
                      ; headers
                      ; request_path
@@ -80,7 +82,12 @@ let request_fingerprint
      not what is asked; [internal_model_rotation_count] is a local attempt
      counter; [supports_*_override] and [model_capabilities_override] gate
      which of the fields below may be sent at all, and those fields are
-     already in the key. *)
+     already in the key; [credential_source] is where the credential came from
+     rather than what it is, and a refreshable one has no stable account
+     identity in this snapshot -- Complete disables response caching for those
+     before calling this function. *)
+  (* See the exclusion note above for why this one is not in the key. *)
+  ignore credential_source;
   ignore max_request_body_bytes;
   ignore connect_timeout_s;
   ignore max_concurrent_requests;
@@ -96,6 +103,16 @@ let request_fingerprint
       ; "provider_id", opt_json (fun s -> `String s) provider_id
       ; "model_id", `String model_id
       ; "base_url", `String base_url
+        (* Which header carries the credential. The identity below says whose
+           credential it is, not how it is presented, and a provider that
+           accepts one presentation and refuses the other would otherwise be
+           answered from a response the other one earned. Over-separating costs
+           a cache hit; this is the side the comment above puts that on. *)
+      ; ( "auth_scheme"
+        , `String
+            (match auth_scheme with
+             | Provider_config.Provider_default -> "provider_default"
+             | Provider_config.Bearer_token -> "bearer_token") )
       ; ( "api_key_identity"
         , opt_json (fun id -> `Int (Secret.hash_identity id)) (Secret.identity api_key) )
       ; ( "headers"

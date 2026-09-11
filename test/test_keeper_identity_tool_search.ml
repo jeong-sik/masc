@@ -63,7 +63,7 @@ let build (offer : Keeper_identity_tools.offered_tool) =
     offer.Keeper_identity_tools.schema
     (Agent_core.Tool.ignoring_execution_env (fun _ ->
        Ok { Agent_core.Types.content = offer.Keeper_identity_tools.remote_name
-          ; _meta = None
+          ; content_blocks = None; _meta = None
           }))
 ;;
 

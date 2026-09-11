@@ -680,6 +680,13 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
          if should_drain_subscription !pending
          then (
            let events = Runtime_event_bus.drain sub in
+           (* A wake is optional, coalesced metadata. It never moves source
+              bodies into this relay or waits for an Add-on to observe them. *)
+           if List.exists (fun (event : Agent_core.Event_bus.event) ->
+                match event.payload with
+                | Agent_core.Event_bus.ToolCompleted _ -> true
+                | _ -> false) events
+           then Lane_addon_runtime.notify_activity ~config;
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);
          update_relay_queue_depth !pending

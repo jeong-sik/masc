@@ -100,6 +100,9 @@ if sys.argv[1]=='setup-preflight':
  print(json.dumps(dict(status='needs_attention' if old.exists() else 'ready',read_only=True,
   scope='keeper_goal_state_schema',issues=[dict(path=str(old),detail='old state')] if old.exists() else [])))
  sys.exit(1 if old.exists() else 0)
+if sys.argv[1]=='workspace-upgrade':
+ print(json.dumps(dict(schema='masc.workspace_upgrades.v1',read_only=True,keepers=[],backups=[])))
+ sys.exit(0)
 assert sys.argv[1]=='init'
 config=base/'.masc/config';config.mkdir(parents=True,exist_ok=True)
 (config/'runtime.toml').write_text('[runtime]\\n')
@@ -120,6 +123,7 @@ print('init complete')
             import json
             observed = [json.loads(line) for line in calls.read_text().splitlines()]
             self.assertEqual(observed,[['setup-preflight',str(base.resolve())],
+                                       ['workspace-upgrade',str(base.resolve())],
                                        ['setup-preflight',str(chosen)],['init',str(chosen)]])
             self.assertEqual((state.read_bytes(),state.stat().st_ino,state.stat().st_mtime_ns),before)
             self.assertFalse((base/'.masc/config/runtime.toml').exists())

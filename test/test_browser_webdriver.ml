@@ -312,7 +312,64 @@ let test_pointer_release_recovery () =
     check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)
 
+let test_optional_document_never_selects_or_blocks_owner () =
+  Eio_main.run (fun _ ->
+    let calls = ref [] in
+    let blocked = ref false in
+    let entered, enter = Eio.Promise.create () in
+    let release, finish = Eio.Promise.create () in
+    let request ~method_ ~path ~body:_ =
+      calls := (method_, path) :: !calls;
+      match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";
+          "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "current"])
+      | `GET, "/session/owned/window" -> Ok (`String "current")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" ->
+        if !blocked then (Eio.Promise.resolve enter (); Eio.Promise.await release);
+        Ok (`Assoc ["url", `String "https://example.org/app"; "title", `String "Document";
+                   "documentId", `String "document"; "html", `String "<html></html>";
+                   "htmlComplete", `Bool true; "observedAt", `Float 1000.])
+      | _ -> fail ("unexpected optional document request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    (match Driver.observe_document_if_idle driver ~tab_id:1 with
+     | Lane.Refused _ -> () | _ -> fail "optional read must not create a session");
+    check int "closed optional read has no remote calls" 0 (List.length !calls);
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    calls := [];
+    (match Driver.observe_document_if_idle driver ~tab_id:1 with
+     | Lane.Answered json ->
+       check string "existing automation client identity" "automation:owned"
+         Yojson.Safe.Util.(json |> member "data" |> member "clientId" |> to_string)
+     | _ -> fail "current document should be readable");
+    check bool "optional read neither selects a window nor resets a frame" true
+      (List.rev !calls = [`GET, "/session/owned/window"; `POST, "/session/owned/execute/sync"]);
+    calls := [];
+    (match Driver.observe_document_if_idle driver ~tab_id:2 with
+     | Lane.Refused _ -> () | _ -> fail "optional source must not select another tab");
+    check bool "another tab is refused without selection" true
+      (!calls = [`GET, "/session/owned/window"]);
+    Eio.Switch.run (fun sw ->
+      blocked := true;
+      let primary = Eio.Fiber.fork_promise ~sw (fun () ->
+        Driver.execute driver (Lane.Page_read {tab_id=None;max_chars=None})) in
+      Eio.Promise.await entered;
+      let before = List.length !calls in
+      check bool "optional read returns before held primary barrier releases" true
+        (Driver.observe_document_if_idle driver ~tab_id:1
+          = Lane.Refused "optional_document_observation_busy");
+      check int "busy optional source performs no requests" before (List.length !calls);
+      blocked := false;
+      Eio.Promise.resolve finish ();
+      (match Eio.Promise.await primary with
+       | Ok (Lane.Answered _) -> () | _ -> fail "original owner did not finish");
+      (match Driver.observe_document_if_idle driver ~tab_id:1 with
+       | Lane.Answered _ -> () | _ -> fail "primary completion should release optional admission")))
+
 let () = run "native Firefox lane" ["behavior", [
+  test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;

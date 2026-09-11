@@ -37,14 +37,3 @@ val load_default : unit -> (t, string) result
 val lookup : t -> publisher:string -> model_id:string -> release
 
 val to_json : as_of:date -> release -> Yojson.Safe.t
-
-val catalog_to_json : as_of:date -> t -> Yojson.Safe.t
-(** Exact identities and their release evidence for a read-only picker. *)
-
-val current_date : unit -> date
-(** UTC calendar date; never a model listing timestamp. *)
-
-val default_catalog_json : unit -> Yojson.Safe.t
-(** Unavailable embedded evidence is explicit and does not block model discovery. *)
-
-val default_model_json : publisher:string -> model_id:string -> Yojson.Safe.t

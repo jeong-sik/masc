@@ -11,7 +11,7 @@ instructions = "Remember the user's context and ask before publishing."
 autoboot_enabled = %b
 proactive_enabled = %b
 sandbox_profile = "microvm"
-microvm_backend = "docker"
+microvm_backend = "apple_container"
 [keeper.tools]
 native = "read"
 |}
@@ -71,6 +71,7 @@ let test_known_mappings () =
          (U.assess_keeper ~path:"/fixture/imp.toml" body = U.Manual_repair_required))
     [ fixture false true
     ; fixture true true ^ "\nunknown_key = true\n"
+    ; "[keeper]\nname=\"imp\"\ninstructions=\"prompt\"\nautoboot_enabled=true\nproactive_enabled=false\nsandbox_profile=\"microvm\"\nmicrovm_backend=\"docker\"\n"
     ; "[keeper]\nname=\"imp\"\ninstructions=\"prompt\"\nautoboot_enabled=true\n"
     ; "[keeper]\n\
        name=\"imp\"\n\

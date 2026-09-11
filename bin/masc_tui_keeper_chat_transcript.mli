@@ -281,6 +281,7 @@ type trail_item =
   | Trail_text of string  (** One contiguous stretch of reply text. *)
   | Trail_superseded of
       { attempt : int
+      ; runtime_id : string option
       ; items : trail_item list
       }
       (** What runtime attempt [attempt] produced before the next attempt
@@ -295,6 +296,9 @@ val trail : t -> trail_item list
 
 val attempt : t -> int
 (** 0-based runtime attempt the growing trail belongs to. *)
+
+val current_runtime_id : t -> string option
+(** Current resolved-runtime identity, if observed. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)
@@ -339,6 +343,8 @@ type drawn_item =
   { superseded : int option
         (** [Some attempt] when a later runtime attempt superseded this row;
             [None] on the current attempt's rows. *)
+  ; superseded_runtime_id : string option
+        (** The runtime_id that served this superseded row, if known. *)
   ; drawn : drawn
   }
 

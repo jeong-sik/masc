@@ -79,9 +79,12 @@ let of_json ?home_dir = function
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
         | _ -> invalid "provider_kind" in
       let* request_path = optional fields "request_path" in
-      let request_path = Option.value request_path ~default:(match choice with Ollama -> "/api/chat" | Messages -> "/v1/messages" | _ -> "/chat/completions") in
+      let request_path = match request_path with
+        | Some path -> path
+        | None -> (match choice with Ollama -> "/api/chat" | Messages -> "/v1/messages" | _ -> "/chat/completions") in
       let* () = if valid_path request_path then Ok () else invalid "request_path" in
-      Ok (Http {endpoint;credential;kind;request_path;api_key_env=Option.value env ~default:""}))
+      let api_key_env = match env with Some name -> name | None -> "" in
+      Ok (Http {endpoint;credential;kind;request_path;api_key_env}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | _ -> "agy") in

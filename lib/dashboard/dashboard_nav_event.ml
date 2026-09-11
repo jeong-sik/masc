@@ -39,6 +39,7 @@ let valid_sections =
       ; "internal-agents"
       ; "fleet-health"
       ; "lanes"
+      ; "lane-addons"
       ; "transport-health"
       ; "feature-health"
       ; "journey"

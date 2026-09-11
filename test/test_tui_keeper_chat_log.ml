@@ -25,7 +25,11 @@ let occurrence_to_string (o : Live.tool_occurrence) =
 
 let delta_to_string : Live.delta -> string = function
   | Live.Run_started -> "run_started"
-  | Live.Runtime_attempt_started -> "runtime_attempt_started"
+  | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
+      Printf.sprintf "runtime_attempt_started(%s,%s)"
+        (Option.value ~default:"none" runtime_id)
+        (match attempt_index with Some i -> string_of_int i | None -> "none")
+  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
   | Live.Tool_started { occurrence; tool_name } ->
@@ -92,7 +96,7 @@ let test_attempt_advances_on_runtime_attempt_started () =
   let t = log () in
   ignore (Log.add t ~seq:(Some 0) Live.Run_started : bool);
   ignore (Log.add t ~seq:(Some 1) (Live.Text "first try") : bool);
-  ignore (Log.add t ~seq:(Some 2) Live.Runtime_attempt_started : bool);
+  ignore (Log.add t ~seq:(Some 2) (Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }) : bool);
   ignore (Log.add t ~seq:(Some 3) (Live.Text "second try") : bool);
   check int "current attempt" 1 (Log.attempt t);
   check (list int) "each entry keeps the attempt it arrived in"
@@ -271,7 +275,7 @@ let golden : E.keeper_chat_event list =
   ; E.Tool_approval_settled { tool_call_id = "tc-2"; outcome = "allowed" }
   ; E.Status_block { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
   ; E.Continuation_checkpoint { message = "checkpoint"; request_id = Some "req-2" }
-  ; E.Agent_core_runtime_attempt_started
+  ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Text_delta "look."
   ; E.External_effect_completed
       { target = Masc.Keeper_surface_post.Delivered_to_slack { channel_id = "C1"; thread_ts = None } }

@@ -19,9 +19,9 @@ let text = function
     && not (String.exists (function '\000'..'\031'|'\127' -> true | _ -> false) value) -> Ok value
   | _ -> Error Invalid_request
 let list = function `List values -> Ok values | _ -> Error Invalid_request
-let value key fields = Option.value ~default:`Null (List.assoc_opt key fields)
+let value key fields = match List.assoc_opt key fields with Some v -> v | None -> `Null
 let config ~base_path =
-  let path = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "runtime.toml" in
+  let path = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") Config_dir_resolver.runtime_toml_filename in
   match Runtime.load_config_observation ~runtime_config_path:path () with
   | Error _ -> Error Configuration_unavailable
   | Ok observation -> (match Runtime_toml.parse_string observation.source_text with
@@ -56,7 +56,8 @@ let source_template ~sw ~pending ~workspace config request =
     | Some (`String supplied),None -> let* endpoint=text (`String supplied) in Ok (Some (`String endpoint))
     | Some supplied,Some existing when supplied=existing -> Ok (Some existing)
     | _ -> Error Invalid_request in
-  let transport = if http then ["endpoint",Option.value ~default:`Null endpoint]
+  let endpoint_val = match endpoint with Some v -> v | None -> `Null in
+  let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
   let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
   let* account = match List.assoc_opt "account_ref" request with

@@ -14,7 +14,13 @@ type unavailable =
 
 type failure =
   | Unavailable of unavailable
-  | Provider_rejected
+  | Provider_rejected of string
+      (** The provider or client refused the verification request, carrying
+          its own account of the refusal. Both a wire refusal and a request
+          the provider never accepted arrive here, and the message alone sent
+          operators to check credentials that were fine: twelve OpenRouter
+          runtimes failed on one missing [reasoning-effort] key and reported
+          provider_rejected with no detail (masc#35139). *)
   | Timed_out
   | Tool_not_called
   | Tool_result_not_consumed
@@ -40,6 +46,13 @@ type result =
   }
 
 val to_json : result -> Yojson.Safe.t
+val unavailable_to_json
+  :  ?detail:string
+  -> runtime_id:string
+  -> code:string
+  -> message:string
+  -> unit
+  -> Yojson.Safe.t
 val exit_code : result -> int
 
 val initial_runtime_id

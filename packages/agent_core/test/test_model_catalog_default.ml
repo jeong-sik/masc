@@ -524,6 +524,7 @@ let openrouter_rows =
   ; "moonshotai/kimi-k3", 1_048_576, 943_718, 3.0, 15.0, None
   ; "z-ai/glm-5.3-flash", 1_310_720, 131_072, 0.075, 0.25, None
   ; "z-ai/glm-5.3", 1_310_720, 943_718, 1.4, 4.4, Some false
+  ; "deepseek/deepseek-v4.1-flash", 1_048_576, 384_000, 0.3, 1.2, None
   ; "deepseek/deepseek-v4-flash", 1_048_576, 384_000, 0.088606, 0.177212, Some false
   ; "deepseek/deepseek-v4-pro", 1_048_576, 384_000, 0.95526, 1.91052, Some false
   ; "qwen/qwen3.8-max-0902", 1_000_000, 131_072, 2.0, 6.0, None
@@ -653,6 +654,7 @@ let openrouter_effort_ladders =
       ; "openai/gpt-5.6-sol"
       ; "moonshotai/kimi-k3"
       ; "deepseek/deepseek-v4-flash"
+      ; "deepseek/deepseek-v4.1-flash"
       ; "deepseek/deepseek-v4-pro"
       ]
 ;;

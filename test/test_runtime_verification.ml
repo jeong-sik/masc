@@ -97,7 +97,10 @@ let test_invalid_call_and_errors () =
        let result = measure (fun _ ~prompt:_ -> Error failure) in
        check bool "provider/config failure not success" false result.tool_roundtrip;
        check bool "no response fabricated" false result.response)
-    [ Verify.Provider_rejected; Timed_out; Unavailable Missing_credential ]
+    [ Verify.Provider_rejected "the provider returned HTTP 400"
+    ; Timed_out
+    ; Unavailable Missing_credential
+    ]
 ;;
 
 (* The three client failures used to fold into one code with one message, so a
@@ -347,85 +350,27 @@ hooks = true
       ["apps"; "plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"]
 ;;
 
-let antigravity_readiness_fixture = {|#!/usr/bin/env python3
-"""Owned CLI fixture: exercise the real authenticated MCP readiness bridge."""
-import json
-import os
-from pathlib import Path
-import sys
-import urllib.request
-
-prompt = sys.stdin.read()
-assert "runtime_readiness_challenge" in prompt
-home = Path(os.environ["HOME"])
-settings = json.loads((home / ".gemini/antigravity-cli/settings.json").read_text())
-assert settings["permissions"]["allow"] == ["mcp(masc/*)"]
-assert "command(*)" in settings["permissions"]["deny"]
-assert "read_file(*)" in settings["permissions"]["deny"]
-config = json.loads((home / ".gemini/config/mcp_config.json").read_text())
-assert list(config["mcpServers"]) == ["masc"]
-server = config["mcpServers"]["masc"]
-headers = dict(server["headers"], **{"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
-
-def rpc(method, params, request_id=None):
-    payload = {"jsonrpc": "2.0", "method": method, "params": params}
-    if request_id is not None:
-        payload["id"] = request_id
-    request = urllib.request.Request(server["url"], data=json.dumps(payload).encode(), headers=headers)
-    with urllib.request.urlopen(request, timeout=10) as response:
-        body = response.read()
-    return json.loads(body) if body else None
-
-rpc("initialize", {"protocolVersion": "2025-11-25", "clientInfo": {"name": "owned-fixture", "version": "1"}, "capabilities": {}}, 1)
-headers["MCP-Protocol-Version"] = "2025-11-25"
-rpc("notifications/initialized", {})
-listed = rpc("tools/list", {}, 2)
-assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
-result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
-text = result["result"]["content"][0]["text"]
-model = sys.argv[sys.argv.index("--model") + 1]
-print(json.dumps({"event": "init", "conversation_id": "readiness-fixture", "init": {
-    "model": model, "cwd": os.getcwd(), "tools": ["call_mcp_tool"], "permission_mode": "request-review"}}), flush=True)
-print(json.dumps({"event": "result", "result": {"conversation_id": "readiness-fixture", "status": "SUCCESS", "response": text,
-    "duration_seconds": 0.1, "num_turns": 1, "usage": {"input_tokens": 1, "output_tokens": 1,
-    "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}}), flush=True)
-|}
-
-let test_antigravity_private_tool_roundtrip () =
-  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let directory = Filename.temp_file "antigravity-readiness-test-" "" in
-    Unix.unlink directory; Unix.mkdir directory 0o700;
-    Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
-    let source = Filename.concat directory "operator-oauth" in
-    let write path content =
-      Out_channel.with_open_bin path (fun out -> output_string out content);
-      Unix.chmod path 0o600 in
-    write source "fixture-operator-secret";
-    let script = Filename.concat directory "agy-fixture" in
-    write script antigravity_readiness_fixture;
-    Unix.chmod script 0o700;
-    let config = { (Runtime_antigravity.default_config ~cwd:directory ~model:"fixture-selected-model") with
-      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15.; wall_clock_ceiling_s=Some 15. } in
-    let result = Verify.For_testing.measure ~runtime_id:"antigravity.fixture" ~selected_model:"fixture-selected-model"
-      ~challenge:"private-nonce-fixture"
-      ~run:(fun tool ~prompt ->
-        match Runtime_verification_antigravity.run ~secure_random:env#secure_random ~net:env#net
-          ~mgr:env#process_mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
-          ~directory ~oauth_source:source ~config ~tool ~prompt with
-        | Ok result -> Ok { Verify.model=result.model; text=result.text }
-        | Error _ -> Error Verify.Provider_rejected) in
-    check bool "real MCP tool challenge consumed" true result.tool_roundtrip;
-    check (option string) "selected CLI model reported" (Some "fixture-selected-model") result.observed_model;
-    check string "operator auth bytes unchanged" "fixture-operator-secret" (Fs_compat.load_file source);
-    check (list string) "ephemeral HOME and MCP capability removed" ["agy-fixture"; "operator-oauth"]
-      (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
+let test_google_adc_refresh_boundary () =
+  let expected = ["gcloud"; "auth"; "application-default"; "print-access-token"; "--quiet"] in
+  let calls = ref 0 in
+  let run argv =
+    check (list string) "ADC uses application-default identity" expected argv;
+    incr calls; Ok ("fixture-token-" ^ string_of_int !calls ^ "\n") in
+  List.iter (fun expected_token ->
+    match Runtime_google_adc.refresh_with ~run () with
+    | Ok token -> check string "fresh token each request" expected_token (Llm_provider.Secret.header_value token)
+    | Error _ -> fail "ADC fixture failed") ["fixture-token-1"; "fixture-token-2"];
+  List.iter (fun response ->
+    match Runtime_google_adc.refresh_with ~run:(fun _ -> Ok response) () with
+    | Error Llm_provider.Provider_config.Invalid_credential_response -> ()
+    | _ -> fail "empty or multiple-line ADC output must fail") [""; "token\nextra"]
 ;;
 
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
+      , [ test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip

@@ -2393,7 +2393,8 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.External_effect_completed
   | Masc_tui_keeper_chat_live.Reply_details _ | Masc_tui_keeper_chat_live.Run_failed _
   | Masc_tui_keeper_chat_live.Run_finished
-  | Masc_tui_keeper_chat_live.Runtime_attempt_started
+  | Masc_tui_keeper_chat_live.Runtime_attempt_started _
+  | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -3883,6 +3884,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
@@ -4693,8 +4696,10 @@ let keeper_reading (state : state) (keeper : keeper) :
   { name = keeper.k_name
   ; paused = keeper.k_paused
   ; liveness =
-      Masc_tui_keeper_control.liveness_of_roster state.keeper_roster
-        keeper.k_name
+      (match keeper.k_origin with
+       | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
+       | Persisted_keeper ->
+         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
 let acting_flat_entries state =
@@ -5220,6 +5225,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  lane_addons = None;
+  lane_addons_generation = 0;
   browser_lane = None;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
@@ -6828,6 +6835,7 @@ type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
   | Palette_msx
+  | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6933,6 +6941,7 @@ let palette_entries (state : state) =
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

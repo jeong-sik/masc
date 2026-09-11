@@ -26,7 +26,9 @@ type translated_event = {
 val empty_state : unit -> state
 
 val start_runtime_attempt
-  :  previous_scope:Keeper_chat_events.runtime_attempt_scope_disposition
+  :  ?runtime_id:string
+  -> ?attempt_index:int
+  -> previous_scope:Keeper_chat_events.runtime_attempt_scope_disposition
   -> state
   -> translated_event
 (** Reset unfinished text/thinking state at an exact resolved-runtime attempt

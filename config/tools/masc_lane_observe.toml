@@ -1,0 +1,13 @@
+name = "masc_lane_observe"
+description = """
+Request a fresh observation from an attached optional layer.
+
+Returns admission, not completion or proof. Inspect retained state for its result; continue existing work while the observer runs."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+required = true
+description = "Exact attached instance ID."

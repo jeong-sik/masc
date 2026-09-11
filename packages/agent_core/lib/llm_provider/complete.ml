@@ -117,9 +117,10 @@ let complete_prepared_sync
     (* Cache lookup *)
     (* Compute fingerprint once; reuse for both lookup and store *)
     let cache_key =
-      match cache with
-      | Some _ -> Some (Cache.request_fingerprint ~config ~messages ~tools ())
-      | None -> None
+      match cache, config.credential_source with
+      | Some _, Provider_config.Static_credential ->
+        Some (Cache.request_fingerprint ~config ~messages ~tools ())
+      | None, _ | Some _, Provider_config.Refreshable_credential _ -> None
     in
     let cached =
       match cache, cache_key with

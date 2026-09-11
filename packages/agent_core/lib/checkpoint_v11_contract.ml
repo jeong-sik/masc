@@ -341,7 +341,7 @@ let rec validate_tool_result ~scope json =
     validate_object_shape
       ~scope
       ~required:[ "type"; "tool_use_id"; "content"; "is_error" ]
-      ~optional:[ "failure_kind"; "error_class" ]
+      ~optional:[ "failure_kind"; "error_class"; "text_content" ]
       json
   in
   let* type_value = required_field ~scope "type" fields in
@@ -365,6 +365,13 @@ let rec validate_tool_result ~scope json =
       |> result_all
       |> Result.map (fun _ -> ())
     | _ -> json_errorf "%s.content must be a string or an array" scope
+  in
+  let* () =
+    match List.assoc_opt "text_content" fields, content with
+    | None, _ -> Ok ()
+    | Some (`String _), `List _ -> Ok ()
+    | Some _, `List _ -> json_errorf "%s.text_content must be a string" scope
+    | Some _, _ -> json_errorf "%s.text_content requires structured content" scope
   in
   let failure_kind = List.assoc_opt "failure_kind" fields in
   let error_class = List.assoc_opt "error_class" fields in

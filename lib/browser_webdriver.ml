@@ -2,7 +2,7 @@ type error = Transport of string | Protocol of string | Remote of { code : strin
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type pointer_state = Released | Release_required
 type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
-type t = { start_downloads : Browser_downloads.start; binary : string option; request : request; mutex : Eio.Mutex.t; mutable session : session option; mutable next_tab : int }
+type t = { start_downloads : Browser_downloads.start; binary : string option; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int }
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
@@ -30,7 +30,7 @@ let decode_response ~status body =
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
       Error (Remote { code; message })
-let create ?binary ~start_downloads ~request () = { start_downloads; binary; request; mutex = Eio.Mutex.create (); session = None; next_tab = 1 }
+let create ?binary ~start_downloads ~request () = { start_downloads; binary; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let release_resources session =
   Result.iter (fun (d : Browser_downloads.connection) -> d.close ()) session.downloads;
@@ -44,11 +44,17 @@ let call t session method_ suffix body =
 (* State changes below never yield: cancellation can interrupt remote I/O but
    cannot leave a half-written local session. Explicit ownership releases the
    lock on cancellation without poisoning it as [use_rw] would. *)
-let with_session_lock t f =
+let with_registered_session_lock t f =
   Eio.Switch.run (fun sw ->
+    (* See [with_session_lock]: balance registration on release; the prior count is unused. *)
+    Eio.Switch.on_release sw (fun () -> ignore (Atomic.fetch_and_add t.active (-1)));
     Eio.Mutex.lock t.mutex;
     Eio.Switch.on_release sw (fun () -> Eio.Mutex.unlock t.mutex);
     f ())
+let with_session_lock t f =
+  (* See [observe_document_if_idle]: admission reads the updated count, not its prior value. *)
+  ignore (Atomic.fetch_and_add t.active 1);
+  with_registered_session_lock t f
 let close_unlocked ?request t = match t.session with
   | None -> Ok ()
   | Some session ->
@@ -322,6 +328,26 @@ let execute_unlocked t = function
       else script t session
         "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
         [`Int cap])
+  | Browser_lane.Page_document {tab_id=id} ->
+    (* This optional reader must not run [session] recovery, select another
+       window, or reset a frame merely to acquire its observation. *)
+    (match t.session with
+     | None -> Error (Protocol "document observation has no existing browser session")
+     | Some session when session.pointer_state = Release_required ->
+       Error (Protocol "document observation waits for the existing action owner")
+     | Some session ->
+       let* current = call t session `GET "/window" None in
+       (match current with
+        | `String handle when List.assoc_opt handle session.handles = Some id ->
+          let* data = script t session
+            (Browser_scene_script.runtime ^ "\n" ^ Browser_lane.Document.runtime
+             ^ "\nreturn browserDocument();") [] in
+          (match data with
+           | `Assoc fields -> Ok (`Assoc (("tabId", `Int id)
+               :: ("clientId", `String ("automation:" ^ session.id)) :: fields))
+           | _ -> Error (Protocol "invalid document observation"))
+        | `String _ -> Error (Protocol "document observation never switches the owner's current tab")
+        | _ -> Error (Protocol "invalid current browser window")))
   | Browser_lane.Page_interact { tab_id; expected_url; action } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
@@ -459,5 +485,14 @@ let execute t verb =
                 | Some (`Bool false) -> Browser_lane.Rejected_before_effect message
                 | _ -> Browser_lane.Refused message)
            | _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
+      | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
+      | Error error -> Browser_lane.Refused (error_message error))
+
+let observe_document_if_idle t ~tab_id =
+  if not (Atomic.compare_and_set t.active 0 1) then
+    Browser_lane.Refused "optional_document_observation_busy"
+  else
+    with_registered_session_lock t (fun () ->
+      match execute_unlocked t (Browser_lane.Page_document {tab_id}) with
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))

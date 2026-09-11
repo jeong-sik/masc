@@ -25,3 +25,29 @@ Sources: [Docker's non-root post-install procedure](https://docs.docker.com/engi
 and [sg command semantics](https://man7.org/linux/man-pages/man1/sg.1.html).
 This unit provides the native actions and session boundary; the onboarding
 consumer owns the menu, terminal child, and continuation command.
+
+The interactive sandbox prerequisite menu offers account access only when the
+native observation says membership is missing, and a group-session continuation
+when membership exists but this process has not acquired it. It shows the
+root-level Docker privilege before the operator selects the grant. Unsupported
+distributions do not receive a guessed account-management command.
+
+`docker-account-access` exposes the applicable actions as JSON. An explicit
+`--execute grant` invokes the existing native account boundary;
+`--execute handoff --base-path PATH --port PORT` starts the same installed MASC
+through `sg`. Child interaction uses the terminal; the parent receives a separate
+session outcome. A successful child exit ends the old-group setup process and
+is not an imp-readiness receipt.
+
+The internal `docker-session-resume` entry point verifies the expected ordinary
+UID, active group, and ordinary-user Docker service before starting the embedded
+helper's `--sandbox-step`. That step keeps the saved runtime configuration and
+selected port; native `setup --no-tui` still validates the runtime, prepares the
+sandbox, authenticates the operator, and boots imp. A failed session keeps the
+saved model configuration available for retry.
+
+An owner started before the group grant still has its previous Unix groups. The
+resumed sandbox step therefore offers an authenticated graceful restart of an
+existing same-workspace owner (or finishing later), without a reuse option. The
+new native setup starts its owner from the refreshed account session. This uses
+the existing identity-bound owner shutdown path, including same-version owners.

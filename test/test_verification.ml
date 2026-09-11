@@ -3277,6 +3277,58 @@ let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
+let large_binary_format_fixtures () =
+  let pcm = String.make (2 * 1024 * 1024) '\000' in
+  let le32 value = let b = Bytes.create 4 in Bytes.set_int32_le b 0 (Int32.of_int value); Bytes.to_string b in
+  let wav = "RIFF" ^ le32 (36 + String.length pcm) ^ "WAVEfmt " ^ le32 16
+    ^ "\001\000\001\000" ^ le32 44100 ^ le32 88200 ^ "\002\000\016\000data"
+    ^ le32 (String.length pcm) ^ pcm in
+  let tiny_gif = Base64.decode_exn "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" in
+  let comments = String.concat "" (List.init 8192 (fun _ -> "\033\254\255" ^ String.make 255 'x' ^ "\000")) in
+  let gif = String.sub tiny_gif 0 (String.length tiny_gif - 1) ^ comments ^ ";" in
+  let contents = String.concat "" (List.init 8192 (fun _ -> "%" ^ String.make 255 'x' ^ "\n")) in
+  let objects = ["<< /Type /Catalog /Pages 2 0 R >>";
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>";
+    Printf.sprintf "<< /Length %d >>\nstream\n%sendstream" (String.length contents) contents] in
+  let pdf = Buffer.create (String.length contents + 1024) in
+  Buffer.add_string pdf "%PDF-1.7\n";
+  let offsets = List.mapi (fun index body -> let offset = Buffer.length pdf in
+    Buffer.add_string pdf (Printf.sprintf "%d 0 obj\n%s\nendobj\n" (index + 1) body); offset) objects in
+  let xref = Buffer.length pdf in
+  Buffer.add_string pdf "xref\n0 5\n0000000000 65535 f \n";
+  List.iter (fun offset -> Buffer.add_string pdf (Printf.sprintf "%010d 00000 n \n" offset)) offsets;
+  Buffer.add_string pdf (Printf.sprintf "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" xref);
+  ["wav", wav; "pdf", Buffer.contents pdf; "gif", gif]
+
+let test_complete_large_binary_snapshots () =
+  with_temp_dir (fun base_path ->
+    let config = Workspace_core.default_config base_path in
+    let worker = "large-binary-owner" in
+    write_keeper_profile ~base_path ~keeper_name:worker ~sandbox_profile:"docker";
+    ensure_producer_playground config worker;
+    let root = Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:(VS.project_root_of_base_path base_path) ~agent_name:worker in
+    List.iteri (fun index (extension, bytes) ->
+      let name = "complete." ^ extension in
+      let source = Filename.concat root name in
+      Fs_compat.save_file source bytes;
+      let snapshot = VS.snapshot_submitted_evidence_json
+          ~request_id:("large-" ^ string_of_int index) ~base_path ~worker
+          ["artifact:" ^ name] in
+      let open Yojson.Safe.Util in
+      let item = List.hd (to_list snapshot) in
+      Alcotest.(check string) "binary retained" "artifact_binary" (item |> member "kind" |> to_string);
+      Alcotest.(check int) "full size" (String.length bytes) (item |> member "bytes" |> to_int);
+      Alcotest.(check string) "full SHA" Digestif.SHA256.(digest_string bytes |> to_hex)
+        (item |> member "sha256" |> to_string);
+      let body = Filename.concat (CU.masc_dir_from_base_path ~base_path)
+          (item |> member "body" |> to_string) in
+      Fs_compat.save_file source "changed";
+      Unix.unlink source;
+      Alcotest.(check string) "immutable full snapshot" bytes (Fs_compat.load_file body))
+      (large_binary_format_fixtures ()))
+
 let test_a_binary_payload_is_adopted_and_filed () =
   with_temp_dir (fun base_path ->
       let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" in
@@ -3733,6 +3785,7 @@ let () =
         test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
+      Alcotest.test_case "large binary snapshots retain complete immutable bytes" `Quick test_complete_large_binary_snapshots;
       Alcotest.test_case "a binary payload is adopted and filed" `Quick
         test_a_binary_payload_is_adopted_and_filed;
       Alcotest.test_case "a filed body reads back and only images attach" `Quick

@@ -654,8 +654,12 @@ remote_endpoint = "fixture"
       (read_file (Filename.concat (Workspace.masc_root_dir config) body));
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
     (match reader ~worker:meta.name ~relative:"render.PNG" with
-     | Error (Store.Evidence_read_error _) -> ()
-     | _ -> Alcotest.fail "partial endpoint image must not be filed as complete");
+     | Ok (Store.Binary_payload { data; bytes; _ }) ->
+       Alcotest.(check int) "oversize endpoint image retained complete"
+         (String.length png + Store.verification_evidence_max_bytes) bytes;
+       Alcotest.(check string) "retained bytes are the whole file"
+         (png ^ String.make Store.verification_evidence_max_bytes 'x') data
+     | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
      | Ok (Store.Text_payload (text, _, _)) ->
@@ -2568,6 +2572,23 @@ let test_read_lane_still_rejects_exit_1 () =
   | Ok _ -> Alcotest.fail "exit 1 must not be ok when ok_exit_codes = [0]"
   | Error _ -> ()
 
+let test_complete_binary_failure_has_safe_diagnostic () =
+  let script = "#!/bin/sh\ncase \"$1\" in info|image) printf '[]\\n'; exit 0;; run) printf '\\377PNG'; exit 1;; *) exit 2;; esac\n" in
+  with_fake_docker script (fun () ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Workspace.default_config base_path in
+      let meta = { (make_meta ~name:"binary-error" ~sandbox:Keeper_types_profile_sandbox.Docker)
+        with sandbox_image = Some "alpine:test" } in
+      let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "partial.png" in
+      match Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path:path ~timeout_sec:5. () with
+      | Ok _ -> Alcotest.fail "failed binary process was accepted"
+      | Error detail ->
+        Alcotest.(check bool) "diagnostic contains no binary byte" false (String.contains detail '\255');
+        Alcotest.(check bool) "metadata records complete failed output size" true
+          (String_util.contains_substring detail "binary_bytes=4");
+        Alcotest.(check bool) "exit preserved" true (String_util.contains_substring detail "exit=1")))
+
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
@@ -2727,6 +2748,7 @@ let run_tests ~clock () =
             test_transport_failure_is_error_not_empty;
           Alcotest.test_case "grep real no-match stays ok" `Quick
             test_real_no_match_is_ok;
+          Alcotest.test_case "complete binary failure diagnostics are UTF8 safe" `Quick test_complete_binary_failure_has_safe_diagnostic;
           Alcotest.test_case "read lane still rejects exit 1" `Quick
             test_read_lane_still_rejects_exit_1;
         ] );

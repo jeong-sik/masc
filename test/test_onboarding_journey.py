@@ -31,6 +31,111 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        replies = [receipt('masc.setup_server.v1', **same),
+                   receipt('masc.setup_server_stopped.v1', owner_stopped=True),
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ['--expected-version', '0.35.5'])
+        self.assertEqual(len(pick.call_args.args[1]), 2)
+        self.assertTrue(pick.call_args.args[1][0].startswith('Restart'))
+
+    def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
+        with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \
+                patch.object(SETUP, 'select_sandbox') as sandbox, patch.object(SETUP, 'wizard') as models:
+            self.assertEqual(SETUP.sandbox_journey('/owned/masc', '/saved', 9123, refresh_owner=True), 1)
+        owner.assert_called_once_with('/owned/masc', '/saved', 9123, require_new_owner=True)
+        sandbox.assert_not_called()
+        models.assert_not_called()
+
+    def test_saved_sandbox_step_never_reselects_models_or_workspace(self):
+        with patch.object(SETUP, 'wizard') as models, \
+                patch.object(SETUP, 'workspace_check') as workspace, \
+                patch.object(SETUP, 'select_sandbox', return_value=['--sandbox-profile', 'docker']) as sandbox, \
+                patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.sandbox_journey('/owned/masc', '/saved workspace', 9123), 0)
+        models.assert_not_called()
+        workspace.assert_not_called()
+        sandbox.assert_called_once_with('/owned/masc', '/saved workspace', port=9123)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'setup', '--base-path', '/saved workspace',
+                                               '--port', '9123', '--no-tui', '--sandbox-profile', 'docker'])
+        opened.assert_called_once_with('/owned/masc', '/saved workspace', 9123)
+
+    def test_finished_group_session_exits_old_parent_without_repreparation(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.docker_account_action_result.v1', status='session_finished', readiness='not_checked')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run:
+            with self.assertRaises(SETUP.SetupSessionFinished):
+                SETUP.docker_account_action('/owned/masc', '/saved workspace', 9123, 'handoff')
+        self.assertEqual(run.call_args.args[0][-4:], ['--base-path', '/saved workspace', '--port', '9123'])
+        self.assertNotIn('stderr', run.call_args.kwargs)
+        with patch.object(sys, 'argv', ['setup', '--binary', '/owned/masc', '--base-path', '/saved workspace', '--sandbox-step']), \
+                patch.object(SETUP, 'sandbox_journey', side_effect=SETUP.SetupSessionFinished), \
+                patch.object(SETUP, 'journey') as initial:
+            with self.assertRaises(SystemExit) as exited:
+                SETUP.main()
+        self.assertEqual(exited.exception.code, 0)
+        initial.assert_not_called()
+
+    def test_failed_group_session_preserves_saved_tail_and_never_claims_ready(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.docker_account_action_result.v1', status='reauthentication_required',
+            reason='Retry this session', readiness='not_checked')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result), \
+                contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertTrue(SETUP.docker_account_action('/owned/masc', '/saved', 9123, 'handoff'))
+        self.assertIn('Retry this session', output.getvalue())
+
+    def test_docker_privilege_detail_precedes_selection_and_only_selected_action_runs(self):
+        replies = [subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.prerequisite_actions.v1', actions=[]))),
+            subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.docker_account_actions.v1',
+                actions=[dict(id='grant', label='Allow Docker', detail='Grants root-level control through Docker.',
+                              source_url='https://docs.docker.com/engine/install/linux-postinstall/', requires_admin=True)])))]
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            def choose(*_):
+                self.assertIn('root-level control', output.getvalue())
+                return [0]
+            with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                    patch.object(SETUP, 'pick', side_effect=choose), \
+                    patch.object(SETUP, 'docker_account_action', return_value=True) as execute:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'docker', base_path='/saved', port=9123))
+        self.assertTrue(all('--execute' not in call.args[0] for call in run.call_args_list))
+        execute.assert_called_once_with('/owned/masc', '/saved', 9123, 'grant')
+
+    @unittest.skipUnless(BINARY, 'native binary supplied only by CI')
+    def test_native_group_resume_rejects_root_identity_before_helper_or_docker(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home, PATH='')
+            result = subprocess.run([BINARY, 'docker-session-resume', '--base-path', home,
+                                     '--port', '9123', '--expected-uid', '0'],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('Welcome', result.stdout + result.stderr)
+            self.assertFalse(Path(home, '.masc').exists())
+
+    def test_antigravity_context_observation_avoids_numeric_input(self):
+        source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
+                      credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            source='antigravity_statusline', model='selected-model', context=1048576, invocation_verified=False)), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, \
+                patch.object(SETUP, 'pick') as picker, contextlib.redirect_stderr(io.StringIO()):
+            _, spec = SETUP.resolve_model_spec(source, dict(id='selected-model', context=None), 10, binary='/owned/masc')
+        self.assertEqual(spec['max_context'], 1048576)
+        self.assertTrue(spec['streaming'])
+        self.assertEqual(run.call_args.args[0][-2:], ['--model', 'selected-model'])
+        picker.assert_not_called()
+
     def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
         catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
                        models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
@@ -92,7 +197,7 @@ class Journey(unittest.TestCase):
             original = ('# Preserve this exact prompt.\n[keeper]\nname = "imp"\n'
                         'instructions = "Remember the user"\nautoboot_enabled = true\n'
                         'proactive_enabled = false\nsandbox_profile = "microvm"\n'
-                        'microvm_backend = "docker"\n[keeper.tools]\nnative = "read"\n')
+                        'microvm_backend = "apple_container"\n[keeper.tools]\nnative = "read"\n')
             path.write_text(original)
             env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config',
                        MASC_BASE_PATH_LEASE_DIR=home + '/leases')
@@ -165,7 +270,7 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
-        prerequisites.assert_called_once_with('/bin/masc', 'docker')
+        prerequisites.assert_called_once_with('/bin/masc', 'docker', base_path='/workspace', port=8945)
 
     def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
         catalog = dict(schema='masc.prerequisite_actions.v1', actions=[

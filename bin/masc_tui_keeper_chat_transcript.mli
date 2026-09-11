@@ -225,6 +225,12 @@ val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)
 
+val settled_at : t -> float option
+(** The instant the turn's outcome landed: the first of Run_finished,
+    Run_failed or Reply_details, stamped by the {!apply} that carried it. A
+    turn still running is [None]. Together with {!started_at} it bounds the
+    span a block drawn from this transcript covered. *)
+
 val apply : now:float -> t -> Masc_tui_keeper_chat_live.delta -> unit
 (** [now] stamps a tool call as it opens, so the progress row can say how long
     the call in flight has been open rather than only how long the turn has. *)

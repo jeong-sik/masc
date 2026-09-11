@@ -422,7 +422,8 @@ def catalog_models(binary, choice):
             return []
         # The binary's client catalog owns the window: its rows are verified
         # client metadata, so the wizard trusts the stated context as-is.
-        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'])
+        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'],
+                     release=row.get('release'))
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
@@ -552,12 +553,13 @@ def pick(title, labels, multiple=False, defaults=()):
         for index, label in enumerate(labels, 1):
             print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter keeps marked choices; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
             if not answer:
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -587,7 +589,7 @@ def pick(title, labels, multiple=False, defaults=()):
             start = min(max(0, position - count + 1), max(0, len(visible) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · Ctrl-C cancels' if multiple
+            hint = ('↑/↓ move · Space mark several · Enter choose · type to filter · Esc clears · Ctrl-C cancels' if multiple
                     else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
             lines = [terminal_text(title), hint, 'Filter: ' + text_query]
             for slot in range(start, min(len(visible), start + count)):
@@ -658,6 +660,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             elif key == b'\x7f':
                 if query:
                     query.pop()
@@ -721,6 +724,8 @@ def connection_sources(inventory):
         if not any(item['choice'] == choice for item in sources) and shutil.which(command):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
                                 command=command, api_key_env='', rows=[]))
+    for source in sources:
+        source['model_release_catalog'] = inventory.get('model_release_catalog')
     return sources
 
 
@@ -731,9 +736,9 @@ def source_label(source):
     elif source.get('credential_file'):
         status = 'saved private API key; access will be checked'
     elif command:
-        status = 'CLI found' if shutil.which(command) else 'CLI not found'
+        status = 'CLI found; sign-in checked after selection' if shutil.which(command) else 'CLI needs installation'
     elif key:
-        status = key + (' is set' if os.environ.get(key) else ' is not set')
+        status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
     else:
         status = endpoint or 'configured connection'
     return source['label'] + ' — ' + status
@@ -857,7 +862,72 @@ def antigravity_models(binary, source):
         raise SetupError('Antigravity did not return a readable model list')
 
 
-def prerequisite_menu(binary, dependency):
+def antigravity_context(binary, source, model_id):
+    print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
+    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file'], '--model', model_id],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if response.returncode:
+            if observed.get('schema') == 'masc.antigravity_setup_error.v1' and isinstance(observed.get('error'), str):
+                raise SetupError(terminal_text(observed['error']))
+            raise ValueError('invalid error')
+        context = observed['context']
+        if (observed.get('source') != 'antigravity_statusline' or observed.get('model') != model_id
+                or observed.get('invocation_verified') is not False
+                or context is not None and not positive_integer(context)):
+            raise ValueError('invalid context')
+        return context
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity did not return a valid context for the selected model')
+
+
+class SetupSessionFinished(Exception):
+    """The selected group session finished; the old-group parent must exit."""
+
+
+def docker_account_actions(binary):
+    result = subprocess.run([str(binary), 'docker-account-access'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or catalog.get('schema') != 'masc.docker_account_actions.v1'
+                or not isinstance(catalog.get('actions'), list)):
+            raise ValueError('invalid actions')
+        return [dict(row, account_action=True) for row in catalog['actions']]
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect this account’s Docker access')
+
+
+def docker_account_action(binary, base_path, port, action):
+    # Native handoff redirects the child journey to the terminal; stdout remains
+    # its own typed outcome, never mixed with the child's interactive output.
+    result = subprocess.run([str(binary), 'docker-account-access', '--execute', action,
+                             '--base-path', str(base_path), '--port', str(port)],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if (receipt.get('schema') != 'masc.docker_account_action_result.v1'
+                or receipt.get('readiness') != 'not_checked'):
+            raise ValueError('invalid result')
+        state = receipt['status']
+        if state not in ('failed', 'recheck_required', 'session_finished', 'reauthentication_required'):
+            raise ValueError('unknown result')
+        if state == 'session_finished' and result.returncode == 0:
+            raise SetupSessionFinished()
+        if state == 'failed' or state == 'reauthentication_required' or result.returncode:
+            reason = receipt.get('reason')
+            print(terminal_text(reason) if isinstance(reason, str) and reason.strip()
+                  else 'Docker account setup did not complete. Saved model choices are kept; retry when ready.', file=sys.stderr)
+        else:
+            print('Account access updated. Choose Continue saved setup to enter the new group session.', file=sys.stderr)
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Docker account setup did not return a valid result; recheck account access')
+    return True
+
+
+def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
@@ -867,6 +937,11 @@ def prerequisite_menu(binary, dependency):
     except (TypeError, ValueError):
         raise SetupError('MASC could not inspect installation actions for this computer')
     actions = catalog['actions']
+    if dependency == 'docker' and base_path is not None:
+        account_actions = docker_account_actions(binary)
+        for row in account_actions:
+            print(terminal_text(row['detail']), file=sys.stderr)
+        actions = account_actions + actions
     labels = [row['label'] + (' · administrator permission' if row['requires_admin'] else '') for row in actions]
     choice = pick('Install or start the selected prerequisite', labels + ['Refresh detection', 'Back to setup choices'])[0]
     if choice == len(actions) + 1:
@@ -876,6 +951,8 @@ def prerequisite_menu(binary, dependency):
     selected = actions[choice]
     print(terminal_text(selected['detail']), file=sys.stderr)
     print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
+    if selected.get('account_action'):
+        return docker_account_action(binary, base_path, port, selected['id'])
     # The selected native action owns commands and privilege boundaries. Child
     # password prompts and vendor output keep the terminal, not a hidden pipe.
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']],
@@ -1009,6 +1086,41 @@ def refresh_codex_models(binary, source):
         raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
 
 
+def release_metadata(source, model_id):
+    # Transport compatibility does not establish model publisher identity.
+    publisher = None
+    if source.get('provider_kind') == 'glm':
+        publisher = 'zai'
+    elif not source.get('endpoint') and not source.get('provider_kind'):
+        publisher = {'codex': 'openai', 'claude_code': 'anthropic'}.get(source.get('choice'))
+    catalog = source.get('model_release_catalog')
+    if not publisher or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.model_release_catalog.v1':
+        return None
+    matches = [row.get('release') for row in catalog.get('models', [])
+               if isinstance(row, dict) and row.get('publisher') == publisher and row.get('model_id') == model_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def recently_released(model):
+    evidence = model.get('release')
+    return (isinstance(evidence, dict) and evidence.get('status') == 'official_release'
+            and evidence.get('recency') == 'within_three_calendar_months'
+            and evidence.get('kind') == 'general_availability')
+
+
+def model_choice_label(model):
+    evidence = model.get('release')
+    label = model['label'] + (' — existing connection' if model.get('existing') else '')
+    if not isinstance(evidence, dict) or evidence.get('status') != 'official_release':
+        return label + ' — release date unknown'
+    released = evidence.get('released_on')
+    kind = {'general_availability': 'released', 'limited_release': 'limited release', 'preview': 'preview'}.get(evidence.get('kind'))
+    if not model_text(released) or not kind:
+        return label + ' — release date unknown'
+    suffix = ' · recent release' if recently_released(model) else ''
+    return label + ' — ' + kind + ' ' + released + suffix
+
+
 def source_models(binary, source, timeout, refresh=False):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
@@ -1070,6 +1182,11 @@ def source_models(binary, source, timeout, refresh=False):
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
             rows.append(dict(id=row['model'], label=label, context=row['max_context'],
                              existing=None if source.get('credential_replaced') else row))
+    for row in rows:
+        # Rejoin even catalog suggestions through this connection's publisher;
+        # never retain evidence from an unrelated transport-compatible source.
+        row['release'] = release_metadata(source, row['id'])
+    rows.sort(key=lambda row: (not bool(row.get('existing')), not recently_released(row)))
     return rows, origin
 
 
@@ -1112,6 +1229,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
         return render(spec)[0], spec
     context = model.get('context')
+    if choice == 'antigravity' and binary:
+        context = antigravity_context(binary, source, model['id'])
     if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1141,7 +1260,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
@@ -1152,10 +1271,32 @@ def resolve_model_spec(source, model, timeout, binary=None):
     return render(spec)[0], spec
 
 
+def pick_connection_sources(sources):
+    def detected(source):
+        return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
+                and (bool(source.get('command') and shutil.which(source['command']))
+                     or bool(source.get('credential_file'))
+                     or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
+    found = [source for source in sources if detected(source)]
+    show_all = not found
+    while True:
+        shown = sources if show_all else found
+        labels = [source_label(source) for source in shown] + ['Add another server URL', 'Configure later']
+        if not show_all:
+            labels.append('Browse all providers and advanced connections')
+        title = 'Choose connections' if show_all else 'Fast setup · clients and account keys found on this computer'
+        chosen = pick(title + ' (Space marks several; Enter chooses)', labels, multiple=True)
+        if not show_all and len(shown) + 2 in chosen:
+            if len(chosen) != 1:
+                print('Choose Browse all on its own, or select the connections to use.', file=sys.stderr)
+                continue
+            show_all = True
+            continue
+        return shown, chosen
+
+
 def select_connections(binary, inventory, timeout, credentials=None):
-    sources = connection_sources(inventory)
-    labels = [source_label(source) for source in sources] + ['Add another server URL', 'Configure later']
-    chosen = pick('Select model connections (you can choose several)', labels, multiple=True)
+    sources, chosen = pick_connection_sources(connection_sources(inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
             raise SetupError('choose Configure later alone, or select connections')
@@ -1187,7 +1328,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
             models, origin = source_models(binary, source, timeout, refresh=refresh_models)
             refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
-            options = [item['label'] + (' — existing connection' if item.get('existing') else '') for item in models]
+            options = [model_choice_label(item) for item in models]
             actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
             can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
             if can_replace_key:
@@ -1435,7 +1576,64 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
-def select_sandbox(binary, base_path):
+def select_setup_server(binary, base_path, port, require_new_owner=False):
+    while True:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            observed = json.loads(response.stdout)
+            if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
+                raise ValueError('invalid server observation')
+        except (TypeError, ValueError):
+            raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
+        state = observed.get('status')
+        if state == 'free':
+            return port
+        if state == 'same_workspace':
+            server_version = observed['server_version']
+            choices = [('use', 'Continue with this running workspace'),
+                       ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
+                       ('later', 'Finish later')]
+            if require_new_owner:
+                print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
+                choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
+                           ('later', 'Finish later and keep the existing server')]
+            elif server_version != observed['installed_version']:
+                choices[0], choices[1] = choices[1], choices[0]
+            selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
+                                    [label for _, label in choices])[0]][0]
+            if selected == 'use':
+                return port
+            if selected == 'later':
+                raise SetupError('setup paused; the existing workspace server was preserved')
+            result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
+                                     '--port', str(port), '--expected-version', server_version],
+                                    stdout=subprocess.PIPE, text=True)
+            try:
+                receipt = json.loads(result.stdout)
+                if result.returncode:
+                    if receipt.get('schema') == 'masc.setup_server_error.v1':
+                        print(terminal_text(receipt['error']), file=sys.stderr)
+                        return None
+                    raise ValueError('invalid error')
+                if receipt.get('schema') != 'masc.setup_server_stopped.v1' or receipt.get('owner_stopped') is not True:
+                    raise ValueError('invalid shutdown receipt')
+            except (TypeError, KeyError, ValueError):
+                raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            continue  # server or port might have changed during graceful drain
+        if state not in ('other_workspace', 'unknown_server'):
+            raise SetupError('MASC returned an unknown server observation')
+        if state == 'other_workspace':
+            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
+        else:
+            print('Another service is using port ' + str(port), file=sys.stderr)
+        suggested = observed.get('suggested_port')
+        if not positive_integer(suggested) or suggested > 65535:
+            raise SetupError('MASC could not find an unused local port')
+        if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            raise SetupError('setup paused; existing services were preserved')
+        port = suggested
+def select_sandbox(binary, base_path, port=8945):
     advanced = False
     names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
              'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
@@ -1468,7 +1666,7 @@ def select_sandbox(binary, base_path):
         row = rows[action]
         if row['state'] != 'service_ready':
             print(terminal_text(row['reason']), file=sys.stderr)
-            prerequisite_menu(binary, row['id'])
+            prerequisite_menu(binary, row['id'], base_path=base_path, port=port)
             continue
         arguments = list(row['setup_args'])
         configured = catalog.get('configured_selection')
@@ -1525,7 +1723,15 @@ def journey(binary, base_path, port, timeout, resume=False):
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
-    sandbox_args = select_sandbox(binary, base)
+    return sandbox_journey(binary, base, port)
+
+
+def sandbox_journey(binary, base, port, refresh_owner=False):
+    if refresh_owner:
+        port = select_setup_server(binary, base, port, require_new_owner=True)
+        if port is None:
+            return 1
+    sandbox_args = select_sandbox(binary, base, port=port)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
@@ -1548,6 +1754,7 @@ def main():
     parser.add_argument('--binary', required=True)
     parser.add_argument('--base-path')
     parser.add_argument('--journey', action='store_true')
+    parser.add_argument('--sandbox-step', action='store_true', help='continue saved model setup at the sandbox step')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--port', type=int, default=8945)
     parser.add_argument('--spec')
@@ -1561,12 +1768,14 @@ def main():
     parser.add_argument('--discovery-timeout', type=float, default=10)
     args = parser.parse_args()
     try:
-        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey))) != 1:
+        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey, args.sandbox_step))) != 1:
             raise SetupError('choose exactly one setup operation')
         if not args.journey and not args.base_path:
             raise SetupError('--base-path is required for this setup operation')
         if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
             raise SetupError('discovery timeout must be positive')
+        if args.sandbox_step:
+            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port, refresh_owner=True))
         if args.journey:
             raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
         if args.workspace_check:
@@ -1582,6 +1791,8 @@ def main():
         else:
             result = configure_many(args.binary, args.base_path, [json.loads(Path(args.spec).read_text())], verify=args.verify)
         print(json.dumps(result, ensure_ascii=False))
+    except SetupSessionFinished:
+        raise SystemExit(0)
     except (SetupError, OSError, ValueError, subprocess.SubprocessError) as error:
         raise SystemExit('runtime setup failed: ' + str(error))
 

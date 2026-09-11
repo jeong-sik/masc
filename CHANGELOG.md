@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.35.11] - 2026-09-11
+
+### Added
+
+- Prioritize detected connections and allow Enter selection in setup (#35137).
+
+### Fixed
+
+- Restore `runtime-codex-models` command and `--provider` option in `runtime-model-list` dropped during merge conflict resolution (#35233).
+- Keeper chat line display: turn timestamp ranges and queued line state (#35230).
+
+
 ## [0.35.10] - 2026-09-11
 
 ### Added

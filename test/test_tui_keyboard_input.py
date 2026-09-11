@@ -5352,6 +5352,13 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             raise AssertionError(
                 f"the sent line is not marked as a user turn: {plain!r}"
             )
+        # No needle for the promoted USER row's wording here: this scenario's
+        # line is a direct submission, so it renders through the settled-row
+        # layout path and the promoted block (which says "sent · the running
+        # turn answers it") never draws. Covering that wording needs a
+        # scenario that holds the drained turn open with a second gate
+        # (task-1517); asserting it here failed on a screen that could not
+        # contain it.
         for expected in (
             b"NEXT 1",
             b"queued-one",

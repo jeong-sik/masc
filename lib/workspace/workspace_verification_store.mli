@@ -144,8 +144,11 @@ val scan_utf8 : string -> utf8_scan
     reader classifies its bytes with the same scan the store applies, rather
     than a second opinion ({#33816}, RFC-0436 §4.1). *)
 
-val binary_format_of_path : string -> string
-(** Canonical lowercase file extension without the leading dot. *)
+val payload_of_complete_bytes : path:string -> string -> artifact_read_result
+(** Classify a fully read artifact. Known binary formats are adopted whole
+    regardless of size (the delivery ceiling, not the reader, bounds what the
+    judge sees). Anything else must be valid UTF-8: text that is not is the
+    typed [Evidence_invalid_utf8] failure, never a binary payload. *)
 
 val image_media_type_of_binary_format : string -> string option
 (** Whether a binary artifact's [format] is an image a runtime accepts as

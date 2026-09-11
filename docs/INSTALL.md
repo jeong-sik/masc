@@ -47,7 +47,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 ```bash
-TAG=v0.35.10
+TAG=v0.35.11
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -163,10 +163,10 @@ model or connection settings creates a separate declaration.
 
 The same binary validates a staged configuration and verifies every selected
 connection before publishing. Validation or verification failure preserves the
-existing files. API credentials remain in your shell or the CLI's credential
-store. This wizard does not install provider CLIs, model weights, or Docker and
-does not sign you in. **Configure later** defers model setup; imp does not start
-automatically.
+existing files. Credentials use the selected shell, CLI account or private credential
+store. Offered installation and sign-in actions run only when selected; model
+weights are not downloaded automatically. **Configure later** defers model setup;
+imp does not start automatically.
 
 ## First conversation with `imp` (0.35.5)
 

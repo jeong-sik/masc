@@ -9941,6 +9941,16 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
+      (* The block's clock stays the dispatch moment. Drawing the span here
+         ("16:38→" running, "16:38→16:41" settled) needs a pane-level clock
+         column: the gutter's width is fixed at [chat_clock_column] cells and
+         is what the body's wrap width is taken from, so a wider span clock
+         wrapped this block's body narrower than the rows around it and, on
+         a tight pane, truncated to an open arrow over a settled turn. The
+         transcript already records the settle instant (settled_at); the
+         span display returns with the clock-column work (task-1516). The
+         2026-09-10 misread it answers: a 16:38 turn drawn under a 16:41
+         reply read as out-of-order. *)
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -10320,10 +10330,16 @@ let render_keeper_message (state : state) =
     (match promoted with
      | Some entry ->
          let request = entry.sent_request in
+         (* The status in the row says what the operator can act on: the line
+           left and the running turn is answering it. The compact request id
+           that stood here named a queue internal -- a value no reader could
+           resolve -- and its truncation glyph read like damage; the id stays
+           reachable on the settled rows' metadata. The 2026-09-10 misread
+           ("is this line ever going?") came from a row that said where it
+           came from but not that it had gone. *)
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
-           (Printf.sprintf "  [%s]  ▶  YOU  %s"
-              (keeper_message_clock entry.submitted_at)
-              (Keeper_chat.compact_request_id request.request_id));
+           (Printf.sprintf "  [%s]  ▶  YOU  sent · the running turn answers it"
+              (keeper_message_clock entry.submitted_at));
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
            ("    " ^ Terminal_text.single_line request.message)
      | None -> ());

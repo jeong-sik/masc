@@ -139,16 +139,15 @@ lib/keeper/keeper_github_identity.ml
 # terminal before any server or log sink starts. Routing this command output
 # through server logging would hide the read-only preflight result.
 bin/masc_cli_setup.ml
+# Ordinary-account Docker setup is a synchronous CLI; JSON receipts and refusal
+# diagnostics must reach its terminal before a workspace server/log sink exists.
+bin/masc_cli_docker_session.ml
 
-# prerequisite-actions prints human guidance (download progress, elevation
-# prompts, catalog errors) straight to the operator's terminal; it runs before
-# any server or log sink exists, like the setup CLI above.
-bin/masc_cli_prerequisites.ml
-
-# runtime-resume prints operator error messages directly to the calling
-# terminal during setup resume, like the setup CLI above.
+# One-shot onboarding commands report account/login/setup failures directly to
+# the operator and emit machine-readable receipts on stdout. They run before the
+# workspace server logging sink; their terminal diagnostics are command output.
+bin/masc_cli_antigravity.ml
 bin/masc_cli_model_resume.ml
-# owner-upgrade prints upgrade outcomes straight to the operator's
-# terminal; it runs before any server or log sink exists, like the
-# other setup CLIs above.
+bin/masc_cli_onboarding.ml
 bin/masc_cli_owner_upgrade.ml
+bin/masc_cli_prerequisites.ml

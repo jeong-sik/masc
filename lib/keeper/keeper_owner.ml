@@ -559,6 +559,7 @@ let probe_and_heal_store_error t =
              | Ok operation_store ->
                (match read_operation_inventory operation_store with
                 | Error error ->
+                  (* fire-and-forget: best-effort close on unhealable store inventory read failure *)
                   ignore (Chat_operation_store.close operation_store : (unit, _) result);
                   Error error
                 | Ok inventory ->

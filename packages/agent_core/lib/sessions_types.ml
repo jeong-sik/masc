@@ -197,16 +197,6 @@ type raw_trace_run = Raw_trace.run_ref [@@deriving yojson, show]
 type raw_trace_summary = Raw_trace.run_summary [@@deriving yojson, show]
 type raw_trace_validation = Raw_trace.run_validation [@@deriving yojson, show]
 
-type raw_trace_manifest =
-  { session_id : string
-  ; generated_at : float
-  ; latest_raw_trace_run : raw_trace_run option
-  ; raw_trace_runs : raw_trace_run list
-  ; raw_trace_summaries : raw_trace_summary list
-  ; raw_trace_validations : raw_trace_validation list
-  }
-[@@deriving yojson, show]
-
 type worker_status =
   | Planned [@name "planned"]
   | Accepted [@name "accepted"]
@@ -252,35 +242,6 @@ type evidence_capabilities =
   { raw_trace : bool
   ; validated_summary : bool
   ; proof_bundle : bool
-  }
-[@@deriving yojson, show]
-
-type proof_bundle =
-  { session : Runtime.session
-  ; report : Runtime.report
-  ; proof : Runtime.proof
-  ; telemetry : telemetry
-  ; structured_telemetry : structured_telemetry
-  ; evidence : evidence
-  ; hook_summary : hook_summary list
-  ; tool_catalog : tool_contract list
-  ; latest_raw_trace_run : raw_trace_run option
-  ; raw_trace_runs : raw_trace_run list
-  ; raw_trace_summaries : raw_trace_summary list
-  ; raw_trace_validations : raw_trace_validation list
-  ; worker_runs : worker_run list
-  ; latest_accepted_worker_run : worker_run option
-  ; latest_ready_worker_run : worker_run option
-  ; latest_running_worker_run : worker_run option
-  ; latest_worker_run : worker_run option
-  ; latest_completed_worker_run : worker_run option
-  ; latest_validated_worker_run : worker_run option
-  ; latest_failed_worker_run : worker_run option
-  ; validated_worker_runs : worker_run list
-  ; raw_trace_run_count : int
-  ; validated_worker_run_count : int
-  ; trace_capabilities : trace_capability list
-  ; capabilities : evidence_capabilities
   }
 [@@deriving yojson, show]
 

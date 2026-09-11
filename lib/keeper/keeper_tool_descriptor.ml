@@ -660,6 +660,18 @@ let browser_interact_output_schema = `Assoc ["type",`String "object";
 (* [object_output_schema] sits ahead of [public_descriptors] so the
    filesystem tool descriptors can name their schemas; the schemas for tools
    declared later in this file stay next to those declarations. *)
+(* An object this schema does not open: the value must be an object and its
+   contents are owned elsewhere. browser_read_output_schema is the same shape
+   for the same reason. *)
+let opaque_object_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc []
+    ; "required", `List []
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
 let object_output_schema ~properties ~required =
   `Assoc
     [ "type", `String "object"
@@ -756,7 +768,22 @@ let file_write_output_schema =
    the same apply_patch application it already computes evidence from).
    Edit's input schema is closed to the four patch keys, so the insert
    operation the shared runtime handler knows is unreachable from this tool
-   and its fields are not advertised. [via] is absent on the host lane. *)
+   and its fields are not advertised. [via] is absent on the host lane.
+
+   [edit_snapshots] is the patch lane's before/after evidence. It is added at
+   the payload site from [store_edit_snapshots] rather than by the field list
+   around it, which is how it reached the wire undeclared: the
+   composable-output probe rejects an Edit result carrying it, and
+   test_keeper_tool_dispatch_runtime has been red on that since nightly
+   34384710653. [status] is "stored" or "unavailable"; a stored pair carries
+   [before] and [after], an unavailable one carries [detail]. This validator
+   has no oneOf, so both shapes live in one object with [status] the only
+   required key. [before] and [after] are normalized artifact references whose
+   shape Tool_output owns ([normalized_artifact_ref_to_json]); declaring it
+   again here would give that shape a second place to drift from, so they stay
+   objects this schema does not open. Only the host and sandbox patch site
+   emits the field -- Keeper_tool_filesystem_remote_write's patch branch does
+   not -- so it is advertised and not required. *)
 let file_edit_output_schema =
   object_output_schema
     ~properties:
@@ -765,8 +792,22 @@ let file_edit_output_schema =
       ; "mode", `Assoc [ "type", `String "string" ]
       ; "bytes_written", `Assoc [ "type", `String "integer" ]
       ; "via", `Assoc [ "type", `String "string" ]
+      ; "changed", `Assoc [ "type", `String "boolean" ]
       ; "occurrences", `Assoc [ "type", `String "integer" ]
       ; "replace_all", `Assoc [ "type", `String "boolean" ]
+      ; ( "edit_snapshots"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ "status", `Assoc [ "type", `String "string" ]
+                  ; "before", opaque_object_schema
+                  ; "after", opaque_object_schema
+                  ; "detail", `Assoc [ "type", `String "string" ]
+                  ] )
+            ; "required", `List [ `String "status" ]
+            ; "additionalProperties", `Bool false
+            ] )
       ]
     ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
 ;;

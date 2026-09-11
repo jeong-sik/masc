@@ -280,6 +280,29 @@ let retry_after_of_route = function
   | Rotate_now _ -> None
   | Exhausted_visible_alive _ -> None
 
+(* A provider rate-limit ([429]) or capacity failure route means the lane
+   itself is the thing that must back off: re-running the turn at the plain
+   cadence keeps hammering the provider while the crash-accounting streak
+   climbs like a clock (#26068). [retry_backoff_sec] derives the backoff from
+   the route's own [Retry-After] hint when present, else from the cadence, and
+   always clamps to the configured cap so a misread hint (or an out-of-range
+   env override) cannot park the lane for longer than the cap. Both lanes that
+   retry against a provider share this one rule: the heartbeat cycle sleep and
+   the chat lane's deferred-retry [not_before]. *)
+let retry_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
+  let cap_sec = Float.max 0.0 cap_sec in
+  let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
+  (* A garbage [Retry-After] (negative, NaN, infinite) is still a signal the
+     provider rate-limited this lane, but carries no usable duration: both
+     degrade to the same bounded default rather than diverging. *)
+  let base =
+    if Float.is_nan retry_after_hint || retry_after_hint <= 0.0
+    then Float.max cadence_sec 60.0
+    else Float.max retry_after_hint cadence_sec
+  in
+  Float.min cap_sec base
+;;
+
 let route_kind_label = function
   | Retry_after_observed _ -> "retry_after_observed"
   | Rotate_now _ -> "rotate_now"

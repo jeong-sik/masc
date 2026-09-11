@@ -56,6 +56,7 @@ scripts/audit-keeper-credential-drift.sh  # report, and reads the operator's liv
 #   .masc/auth/agents: its only non-zero exit is that directory being absent
 scripts/audit-keeper-credential-uuid-integrity.sh  # tool: reads the live .masc credential store
 scripts/audit-keeper-tool-boundary-matrix.sh  # tool
+scripts/audit-dead-surface.py  # tool: advisory dead export/module inspection tool for periodic chore/refactoring audits
 scripts/audit-rfc-closeout-lag.sh  # report: its only non-zero exit is a usage error
 scripts/verify_audit_claim.sh  # tool: takes <count> <pattern> <path...>
 scripts/check-ollama-model-context.py  # tool: needs OLLAMA_CLOUD_API_KEY and network

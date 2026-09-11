@@ -105,6 +105,67 @@ let test_rementioned_after_reply_is_pending () =
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
+(* 2026-09-10 drain investigation: a checkpoint/defer boundary persists an
+   empty-content assistant Utterance row as the carrier of its typed status
+   block, stamped with the same delivery key as the user message it follows.
+   That row never spoke, so it must not mark the user message answered —
+   before the guard, the user's chat line silently never reached a turn. *)
+let test_empty_carrier_row_does_not_answer_the_delivery () =
+  let provenance slot =
+    let request_id =
+      Keeper_chat_delivery_identity.Request_id.of_string "kmsg-drain-carrier"
+      |> Result.get_ok
+    in
+    Some
+      { Keeper_chat_delivery_identity.delivery_key =
+          Keeper_chat_delivery_identity.Operation request_id
+      ; transcript_slot = slot
+      }
+  in
+  let user =
+    { (msg ~role:Store.Role.User ~id:"u1" ~ts:10.0 "@alice status?") with
+      delivery_provenance = provenance Keeper_chat_delivery_identity.Accepted_user
+    }
+  in
+  let empty_carrier =
+    { (msg ~role:Store.Role.Assistant ~id:"a1" ~ts:11.0 "") with
+      blocks =
+        Some
+          [ Masc.Keeper_chat_blocks.Status
+              { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+          ]
+    ; delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_assistant
+    }
+  in
+  let spoken_reply =
+    { (msg ~role:Store.Role.Assistant ~id:"a2" ~ts:12.0 "on it") with
+      delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_assistant
+    }
+  in
+  (* A media-only reply is persisted with empty content and completes as
+     Delivered — it is the answer, and nothing follows it. *)
+  let media_reply =
+    { (msg ~role:Store.Role.Assistant ~id:"a3" ~ts:12.0 "") with
+      blocks =
+        Some
+          [ Masc.Keeper_chat_blocks.Image
+              { src = "masc://media/1.png"; cap = None }
+          ]
+    ; delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_assistant
+    }
+  in
+  check (list string) "empty carrier row leaves the message pending"
+    [ "@alice status?" ]
+    (contents (MS.pending_mentions_of_messages ~targets [ user; empty_carrier ]));
+  check (list string) "a spoken reply still answers the delivery" []
+    (contents (MS.pending_mentions_of_messages ~targets [ user; spoken_reply ]));
+  check (list string) "a media-only reply answers the delivery" []
+    (contents (MS.pending_mentions_of_messages ~targets [ user; media_reply ]))
+;;
+
 let test_assistant_self_mention_ignored () =
   let messages = [ msg ~role:Store.Role.Assistant ~ts:10.0 "@alice note to self" ] in
   check (list string) "own assistant line is never a pending mention" []
@@ -453,6 +514,8 @@ let () =
         ; test_case "answered_cleared" `Quick test_answered_mention_is_cleared
         ; test_case "rementioned_pending" `Quick test_rementioned_after_reply_is_pending
         ; test_case "assistant_self_ignored" `Quick test_assistant_self_mention_ignored
+        ; test_case "empty_carrier_row_not_an_answer" `Quick
+            test_empty_carrier_row_does_not_answer_the_delivery
         ] )
     ; ( "pending_scope_of_messages"
       , [ test_case "owner_unmentioned_is_scope" `Quick test_owner_unmentioned_line_is_scope

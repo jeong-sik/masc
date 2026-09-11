@@ -169,7 +169,7 @@ let test_agent_run_tool_use () =
             ; required = true
             }
           ]
-        (fun _input -> Ok { Types.content = "12:00 UTC"; _meta = None })
+        (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ time_tool ] url in
     match Agent.run ~sw agent "what time is it?" with
@@ -204,7 +204,7 @@ let test_agent_run_long_tool_sequence_completes () =
             ; required = false
             }
           ]
-        (fun _input -> Ok { Types.content = "looped"; _meta = None })
+        (fun _input -> Ok { Types.content = "looped"; content_blocks = None; _meta = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ loop_tool ] url in
     match Agent.run ~sw agent "complete a long tool sequence" with
@@ -497,7 +497,7 @@ let test_agent_run_pre_tool_hook () =
         ~name:"blocked_tool"
         ~description:"Should be blocked"
         ~parameters:[]
-        (fun _input -> Ok { Types.content = "should not run"; _meta = None })
+        (fun _input -> Ok { Types.content = "should not run"; content_blocks = None; _meta = None })
     in
     let hooks =
       { Hooks.empty with pre_tool_use = Some (fun _event -> Hooks.Block "blocked") }
@@ -689,7 +689,7 @@ let unroutable_tool_name = "Execute-1.1111e1111111"
 
 let execute_tool =
   Tool.create ~name:"Execute" ~description:"Run argv" ~parameters:[] (fun _ ->
-    Ok { Types.content = "ran"; _meta = None })
+    Ok { Types.content = "ran"; content_blocks = None; _meta = None })
 ;;
 
 (* Role matters to the assertions below, so the body is read as messages

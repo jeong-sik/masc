@@ -1,4 +1,5 @@
-type identity = { approval_id : string; evidence_fingerprint : string }
+type input_source = Approval_evidence of string | Answered_ask of string
+type identity = { source : input_source; evidence_fingerprint : string }
 
 type error =
   | Invalid_identity
@@ -17,7 +18,16 @@ let error_to_string = function
 let identity ~approval_id ~evidence_fingerprint =
   if String.trim approval_id = "" || String.trim evidence_fingerprint = ""
   then Error Invalid_identity
-  else Ok { approval_id; evidence_fingerprint }
+  else Ok { source = Approval_evidence approval_id; evidence_fingerprint }
+
+let answered_ask_identity ~ask_id ~evidence_fingerprint =
+  if String.trim ask_id = "" || String.trim evidence_fingerprint = ""
+  then Error Invalid_identity
+  else Ok { source = Answered_ask ask_id; evidence_fingerprint }
+
+let source_field = function
+  | Approval_evidence id -> "approval_id", `String id
+  | Answered_ask id -> "ask_id", `String id
 
 type admission =
   | Admission_new of Agent_core.Checkpoint.t
@@ -47,10 +57,15 @@ let decode_marker = function
       | [ (_, value) ] -> Some value
       | _ -> None
     in
-    (match one "version", one "approval_id", one "evidence_fingerprint", one "message_sha256" with
-     | Some (`Int 1), Some (`String approval_id), Some (`String evidence_fingerprint),
+    (match one "version", (match one "approval_id", one "ask_id" with
+      | Some (`String id), None -> Some (Approval_evidence id)
+      | None, Some (`String id) -> Some (Answered_ask id)
+      | _ -> None), one "evidence_fingerprint", one "message_sha256" with
+     | Some (`Int 1), Some source, Some (`String evidence_fingerprint),
        Some (`String body_digest) ->
-       (match identity ~approval_id ~evidence_fingerprint,
+       (match (match source with
+                | Approval_evidence approval_id -> identity ~approval_id ~evidence_fingerprint
+                | Answered_ask ask_id -> answered_ask_identity ~ask_id ~evidence_fingerprint),
               Digestif.SHA256.consistent_of_hex_opt body_digest with
         | Ok identity, Some hash when String.equal body_digest (Digestif.SHA256.to_hex hash) ->
           Ok (identity, body_digest)
@@ -67,7 +82,7 @@ let contains ~identity:expected ~message messages =
         (match decode_marker marker with
          | Ok (actual, body_digest) ->
            current.Agent_core.Types.role = Agent_core.Types.User
-           && String.equal actual.approval_id expected.approval_id
+           && actual.source = expected.source
            && String.equal actual.evidence_fingerprint expected.evidence_fingerprint
            && String.equal body_digest expected_digest
            && String.equal body_digest (digest (without_marker current))
@@ -89,7 +104,7 @@ let prepare ~identity:expected ~message (checkpoint : Agent_core.Checkpoint.t) =
            (match decode_marker marker with
             | Error _ as error -> error
             | Ok (actual, body_digest) ->
-              if not (String.equal actual.approval_id expected.approval_id)
+              if not (actual.source = expected.source)
               then inspect found (current :: kept) rest
               else if not (String.equal actual.evidence_fingerprint expected.evidence_fingerprint)
               then Error Conflicting_evidence
@@ -114,7 +129,7 @@ let prepare ~identity:expected ~message (checkpoint : Agent_core.Checkpoint.t) =
     | Ok (false, messages) ->
       let marker = `Assoc
         [ "version", `Int 1
-        ; "approval_id", `String expected.approval_id
+        ; source_field expected.source
         ; "evidence_fingerprint", `String expected.evidence_fingerprint
         ; "message_sha256", `String expected_digest
         ]

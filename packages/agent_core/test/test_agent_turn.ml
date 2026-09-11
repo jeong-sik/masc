@@ -63,7 +63,7 @@ let test_prepare_turn_with_tools () =
           ; required = true
           }
         ]
-      (fun _ -> Ok { Types.content = "ok"; _meta = None })
+      (fun _ -> Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let prep =
     Agent_turn.prepare_turn
@@ -90,11 +90,11 @@ let test_prepare_turn_with_tools () =
 let test_prepare_turn_preserves_supplied_tools () =
   let tool_a =
     Tool.create ~name:"a" ~description:"A" ~parameters:[] (fun _ ->
-      Ok { Types.content = ""; _meta = None })
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let tool_b =
     Tool.create ~name:"b" ~description:"B" ~parameters:[] (fun _ ->
-      Ok { Types.content = ""; _meta = None })
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let prep =
     Agent_turn.prepare_turn
@@ -134,7 +134,7 @@ let test_prepare_turn_visible_tool_names_empty () =
 let test_prepare_turn_visible_tool_names_preserves_order () =
   let make n =
     Tool.create ~name:n ~description:n ~parameters:[] (fun _ ->
-      Ok { Types.content = ""; _meta = None })
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let tools = Tool_set.of_list [ make "Bash"; make "Read"; make "Edit" ] in
   let prep =
@@ -449,12 +449,14 @@ let test_make_tool_results () =
       ; tool_name = "tool-1"
       ; input = `Null
       ; content = "success output"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ; { invocation = invocation "t2"
       ; tool_name = "tool-2"
       ; input = `Null
       ; content = "error msg"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Recoverable_tool_error
@@ -562,6 +564,7 @@ let test_apply_context_injection_no_injector () =
       ; tool_name = "search"
       ; input = `Assoc [ "q", `String "test" ]
       ; content = "result"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -591,6 +594,7 @@ let test_apply_context_injection_with_context_update () =
       ; tool_name = "search"
       ; input = `Assoc [ "q", `String "test" ]
       ; content = "found it"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -628,6 +632,7 @@ let test_apply_context_injection_with_extra_messages () =
       ; tool_name = "search"
       ; input = `Assoc [ "q", `String "test" ]
       ; content = "result"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -669,6 +674,7 @@ let test_apply_context_injection_exception_is_error () =
       ; tool_name = "search"
       ; input = `Assoc [ "q", `String "test" ]
       ; content = "result"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -704,6 +710,7 @@ let test_apply_context_injection_preserves_non_retryable_error () =
       ; tool_name = "search"
       ; input = `Assoc [ "q", `String "test" ]
       ; content = "fatal"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Non_retryable_tool_error

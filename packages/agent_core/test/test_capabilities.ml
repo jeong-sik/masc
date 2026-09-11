@@ -309,7 +309,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
      | Reasoning_dialect.Delta_field "reasoning_content" -> ()
      | Reasoning_dialect.Delta_field field ->
        fail ("native latest Kimi reasoning delta field drifted: " ^ field)
-     | Reasoning_dialect.Delta_reasoning_details ->
+     | Reasoning_dialect.Delta_field_and_details _ ->
        fail "native latest Kimi should not use split reasoning_details streaming"
      | Reasoning_dialect.No_streaming_reasoning ->
        fail "native latest Kimi reasoning stream field was dropped"
@@ -500,7 +500,7 @@ let test_lookup_provider_m_qwen3_mtp_explicit_provider () =
      | Reasoning_dialect.Delta_field field ->
        check string "vllm-qwen3-mtp reasoning delta field" "reasoning_content" field
      | Reasoning_dialect.No_streaming_reasoning
-     | Reasoning_dialect.Delta_reasoning_details
+     | Reasoning_dialect.Delta_field_and_details _
      | Reasoning_dialect.Template_parser ->
        fail "vllm-qwen3-mtp should stream reasoning_content as a typed delta field");
     check
@@ -691,7 +691,7 @@ let test_lookup_minimax_m3_official_chat_dialect () =
       bool
       "dialect streams typed reasoning details"
       true
-      (dialect.streaming = Reasoning_dialect.Delta_reasoning_details)
+      (dialect.streaming = Reasoning_dialect.Delta_field_and_details "reasoning_content")
   | None -> fail "should match minimax-m3"
 ;;
 
@@ -1321,7 +1321,8 @@ let streaming_reasoning_to_string = function
   | Reasoning_dialect.No_streaming_reasoning -> "no_streaming_reasoning"
   | Reasoning_dialect.Template_parser -> "template_parser"
   | Reasoning_dialect.Delta_field actual -> "delta_field:" ^ actual
-  | Reasoning_dialect.Delta_reasoning_details -> "delta_reasoning_details"
+  | Reasoning_dialect.Delta_field_and_details actual ->
+    "delta_field_and_details:" ^ actual
 ;;
 
 type thinking_contract =
@@ -1507,7 +1508,7 @@ let check_frontier_model
        check
          string
          (label ^ " reasoning details stream")
-         "delta_reasoning_details"
+         "delta_field_and_details:reasoning_content"
          (streaming_reasoning_to_string dialect.streaming)
      | Template_stream ->
        check

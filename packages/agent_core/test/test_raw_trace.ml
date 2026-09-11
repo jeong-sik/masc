@@ -150,7 +150,7 @@ let test_agent_run_stream_append_only_raw_trace () =
         ]
       (fun input ->
          let rel = Yojson.Safe.Util.(input |> member "path" |> to_string) in
-         Ok { Types.content = read_file (Filename.concat root rel); _meta = None })
+         Ok { Types.content = read_file (Filename.concat root rel); content_blocks = None; _meta = None })
   in
   let file_write_tool =
     Tool.create
@@ -173,7 +173,7 @@ let test_agent_run_stream_append_only_raw_trace () =
          let rel = Yojson.Safe.Util.(input |> member "path" |> to_string) in
          let content = Yojson.Safe.Util.(input |> member "content" |> to_string) in
          write_file (Filename.concat root rel) content;
-         Ok { Types.content = Printf.sprintf "wrote:%s" rel; _meta = None })
+         Ok { Types.content = Printf.sprintf "wrote:%s" rel; content_blocks = None; _meta = None })
   in
   let shell_exec_tool =
     Tool.create
@@ -196,7 +196,7 @@ let test_agent_run_stream_append_only_raw_trace () =
                  (if Sys.file_exists (Filename.concat root "input.txt")
                   then "PASS"
                   else "FAIL")
-             ; _meta = None
+             ; content_blocks = None; _meta = None
              }
          else if String.equal command "grep -q 'copied' output.txt && echo PASS"
          then
@@ -209,7 +209,7 @@ let test_agent_run_stream_append_only_raw_trace () =
                          "source text -> copied"
                   then "PASS"
                   else "FAIL")
-             ; _meta = None
+             ; content_blocks = None; _meta = None
              }
          else
            Error

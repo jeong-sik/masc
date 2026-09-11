@@ -424,10 +424,130 @@ let capabilities_of_catalog_binding
     | None -> Caps.default_capabilities
   in
   let bool_or fallback = Option.value ~default:fallback in
+  let supports_tool_choice = bool_or base.supports_tool_choice model.supports_tool_choice in
+  let supports_required_tool_choice =
+    match model.supports_required_tool_choice with
+    | Some required -> required && supports_tool_choice
+    | None -> base.supports_required_tool_choice && supports_tool_choice
+  in
+  let supports_named_tool_choice =
+    match model.supports_named_tool_choice with
+    | Some named -> named && supports_tool_choice
+    | None -> base.supports_named_tool_choice && supports_tool_choice
+  in
+  let supports_reasoning = bool_or base.supports_reasoning model.supports_reasoning in
+  let accepted_reasoning_efforts =
+    if not supports_reasoning then None
+    else
+      match model.accepted_reasoning_efforts with
+      | Some values ->
+        let efforts = List.filter_map Reasoning_effort.of_string values in
+        Some efforts
+      | None -> base.accepted_reasoning_efforts
+  in
+  let thinking_control_format =
+    match model.thinking_control_format with
+    | Some format -> (format : Caps.thinking_control_format)
+    | None -> base.thinking_control_format
+  in
+  let assistant_tool_content_format =
+    match
+      Option.bind
+        model.assistant_tool_content_format
+        Capability_vocab.assistant_tool_content_format_of_string
+    with
+    | Some format -> format
+    | None -> base.assistant_tool_content_format
+  in
+  let chat_output_budget_field =
+    match
+      Option.bind
+        model.chat_output_budget_field
+        Capability_vocab.chat_output_budget_field_of_string
+    with
+    | Some field -> field
+    | None -> base.chat_output_budget_field
+  in
+  let tool_schema_conformance =
+    match
+      Option.bind
+        model.tool_schema_conformance
+        Capability_vocab.tool_schema_conformance_of_string
+    with
+    | Some conformance -> conformance
+    | None -> base.tool_schema_conformance
+  in
+  let preserve_thinking_control_format =
+    match
+      Option.bind
+        model.preserve_thinking_control_format
+        Capability_vocab.preserve_thinking_control_format_of_string
+    with
+    | Some format -> format
+    | None -> base.preserve_thinking_control_format
+  in
+  let content_inline_reasoning =
+    match
+      Option.bind
+        model.content_inline_reasoning
+        Capability_vocab.content_inline_reasoning_of_string
+    with
+    | Some format -> format
+    | None -> base.content_inline_reasoning
+  in
+  let reasoning_output_format =
+    match
+      Option.bind
+        model.reasoning_output_format
+        Capability_vocab.reasoning_output_format_of_string
+    with
+    | Some format -> format
+    | None -> base.reasoning_output_format
+  in
+  let reasoning_streaming_format =
+    match
+      Option.bind
+        model.reasoning_streaming_format
+        Capability_vocab.reasoning_streaming_format_of_string
+    with
+    | Some format -> format
+    | None -> base.reasoning_streaming_format
+  in
+  let reasoning_replay_override =
+    match
+      Option.bind
+        model.reasoning_replay
+        Capability_vocab.reasoning_replay_override_of_string
+    with
+    | Some replay -> replay
+    | None -> base.reasoning_replay_override
+  in
+  let ignored_sampling_parameters =
+    match model.ignored_sampling_parameters with
+    | Some params -> params
+    | None -> base.ignored_sampling_parameters
+  in
   { base with
     max_context_tokens = prefer_overlay model.max_context_tokens base.max_context_tokens
   ; serving_constraint = prefer_overlay model.serving_constraint base.serving_constraint
   ; max_output_tokens = prefer_overlay model.max_output_tokens base.max_output_tokens
+  ; supports_reasoning
+  ; accepted_reasoning_efforts
+  ; thinking_control_format
+  ; preserve_thinking_control_format
+  ; content_inline_reasoning
+  ; reasoning_output_format
+  ; reasoning_streaming_format
+  ; reasoning_replay_override
+  ; supports_tools = bool_or base.supports_tools model.supports_tools
+  ; supports_tool_choice
+  ; supports_required_tool_choice
+  ; supports_named_tool_choice
+  ; assistant_tool_content_format
+  ; chat_output_budget_field
+  ; tool_schema_conformance
+  ; supports_parallel_tool_calls =
+      bool_or base.supports_parallel_tool_calls model.supports_parallel_tool_calls
   ; supports_response_format_json =
       bool_or base.supports_response_format_json model.supports_response_format_json
   ; supports_structured_output =
@@ -443,9 +563,100 @@ let capabilities_of_catalog_binding
       catalog_modality_priority base.modality_priority model.modality_priority
   ; supports_system_prompt =
       bool_or base.supports_system_prompt model.supports_system_prompt
+  ; supports_native_streaming =
+      bool_or base.supports_native_streaming model.supports_native_streaming
+  ; supports_prompt_caching =
+      bool_or base.supports_prompt_caching model.supports_prompt_caching
+  ; supports_top_k = bool_or base.supports_top_k model.supports_top_k
+  ; supports_min_p = bool_or base.supports_min_p model.supports_min_p
+  ; supports_seed = bool_or base.supports_seed model.supports_seed
+  ; ignored_sampling_parameters
   ; task = prefer_overlay model.task base.task
   ; supported_models = prefer_overlay model.supported_models base.supported_models
   }
+;;
+
+let%test "exact catalog binding preserves reasoning efforts and thinking control" =
+  let toml =
+    "[[providers]]\n\
+     id = \"openrouter\"\n\
+     kind = \"openai_compat\"\n\
+     base_url = \"https://openrouter.ai/api/v1\"\n\
+     request_path = \"/chat/completions\"\n\
+     api_key_env = \"\"\n\
+     capabilities_base = \"openai_chat_extended\"\n\
+     [[models]]\n\
+     id_prefix = \"deepseek/deepseek-v4-flash\"\n\
+     provider_name = \"openrouter\"\n\
+     accepted_reasoning_efforts = [\"none\", \"low\", \"high\"]\n\
+     thinking_control_format = \"reasoning_effort\"\n\
+     supports_reasoning = true\n"
+  in
+  match Model_catalog.of_toml_string ~source:"reasoning test" toml with
+  | Ok catalog ->
+    (match Model_catalog.provider_entries catalog, Model_catalog.model_entries catalog with
+     | [ provider ], [ model ] ->
+       let caps = capabilities_of_catalog_binding provider model in
+       caps.supports_reasoning = true
+       && caps.thinking_control_format = Caps.Reasoning_effort
+       && caps.accepted_reasoning_efforts
+          = Some [ Reasoning_effort.None_; Reasoning_effort.Low; Reasoning_effort.High ]
+     | _ -> false)
+  | Error _ -> false
+;;
+
+let%test "exact catalog binding clears reasoning efforts when reasoning is unsupported" =
+  let toml =
+    "[[providers]]\n\
+     id = \"openrouter\"\n\
+     kind = \"openai_compat\"\n\
+     base_url = \"https://openrouter.ai/api/v1\"\n\
+     request_path = \"/chat/completions\"\n\
+     api_key_env = \"\"\n\
+     capabilities_base = \"openai_chat_extended\"\n\
+     [[models]]\n\
+     id_prefix = \"non-reasoning-model\"\n\
+     provider_name = \"openrouter\"\n\
+     accepted_reasoning_efforts = [\"low\", \"high\"]\n\
+     supports_reasoning = false\n"
+  in
+  match Model_catalog.of_toml_string ~source:"non-reasoning test" toml with
+  | Ok catalog ->
+    (match Model_catalog.provider_entries catalog, Model_catalog.model_entries catalog with
+     | [ provider ], [ model ] ->
+       let caps = capabilities_of_catalog_binding provider model in
+       caps.supports_reasoning = false
+       && caps.accepted_reasoning_efforts = None
+     | _ -> false)
+  | Error _ -> false
+;;
+
+let%test "exact catalog binding gates forced tool choice on supports_tool_choice" =
+  let toml =
+    "[[providers]]\n\
+     id = \"ollama\"\n\
+     kind = \"openai_compat\"\n\
+     base_url = \"http://127.0.0.1:11434\"\n\
+     request_path = \"/v1/chat/completions\"\n\
+     api_key_env = \"\"\n\
+     capabilities_base = \"openai_chat\"\n\
+     [[models]]\n\
+     id_prefix = \"no-tools-model\"\n\
+     provider_name = \"ollama\"\n\
+     supports_tool_choice = false\n\
+     supports_required_tool_choice = true\n\
+     supports_named_tool_choice = true\n"
+  in
+  match Model_catalog.of_toml_string ~source:"tool choice gating test" toml with
+  | Ok catalog ->
+    (match Model_catalog.provider_entries catalog, Model_catalog.model_entries catalog with
+     | [ provider ], [ model ] ->
+       let caps = capabilities_of_catalog_binding provider model in
+       caps.supports_tool_choice = false
+       && caps.supports_required_tool_choice = false
+       && caps.supports_named_tool_choice = false
+     | _ -> false)
+  | Error _ -> false
 ;;
 
 let%test "exact pricing-only overlay preserves functional fields" =

@@ -535,21 +535,31 @@ type runtime_route_lane =
       (** A [\[runtime.lanes."<id>"\]] failover ladder. The id is a runtime id:
           a lane shadows the runtime it is named after, which is how an
           assignment reaches it. *)
+  | Runtime_exact_lane of string
+      (** A [\[runtime.exact_output_lanes."<name>"\]] walk order, e.g.
+          verifier_exact or librarian_exact. The "exact/" prefix keeps the
+          name space disjoint from conversation-lane runtime ids. *)
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
+  | Runtime_exact_lane name -> "exact/" ^ name
 
 (* An unrecognised name used to be rejected outright, which left the Runtime
    screen's failover picker with nowhere to post: it names the lane under the
    cursor, and those are runtime ids. A name is admitted when the runtime
    resolver knows it — [resolve_assignment] answers [`Missing] for an id that
    is neither a declared lane nor a configured runtime — so a typo is still
-   refused, and it is refused with the name it could not find. *)
+   refused, and it is refused with the name it could not find. An exact-output
+   lane name is not a runtime id and never reaches that resolver: the prefix
+   names which name space the rest of the string belongs to, and the setter's
+   own validation rejects a name the loaded config does not declare. *)
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "media_failover" -> Ok Runtime_media_failover
+  | lane when String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/" ->
+    Ok (Runtime_exact_lane (String.sub lane 6 (String.length lane - 6)))
   | lane ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -610,7 +620,7 @@ let parse_runtime_route_body body_str =
          | Error _ as err -> err
          | Ok parsed_lane ->
            (match parsed_lane with
-            | Runtime_media_failover ->
+            | Runtime_media_failover | Runtime_exact_lane _ ->
               (match required_string_array_field json "runtime_ids" with
                | Error _ as err -> err
                | Ok runtime_ids ->
@@ -2297,6 +2307,26 @@ let add_routes ~sw ~clock router =
                     ~operation:
                       (Runtime_config_routing_list
                          (Runtime_named_lane lane_id, runtime_ids))
+                    ~receipt req reqd)
+             | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd
+                 "exact-output lane runtime_ids required"
+             | Ok (Runtime_route_runtime_ids (Runtime_exact_lane lane_name, slots))
+               ->
+               (match Runtime.set_exact_output_lane_slots ~lane_name ~slots () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list
+                         (Runtime_exact_lane lane_name, slots))
+                    ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list
+                         (Runtime_exact_lane lane_name, slots))
                     ~receipt req reqd)
              | Ok (Runtime_route_runtime_ids (lane, _)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd

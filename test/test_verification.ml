@@ -3305,6 +3305,7 @@ let test_complete_large_binary_snapshots () =
   with_temp_dir (fun base_path ->
     let config = Workspace_core.default_config base_path in
     let worker = "large-binary-owner" in
+    write_keeper_profile ~base_path ~keeper_name:worker ~sandbox_profile:"docker";
     ensure_producer_playground config worker;
     let root = Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path:(VS.project_root_of_base_path base_path) ~agent_name:worker in

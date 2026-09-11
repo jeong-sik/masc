@@ -48,12 +48,39 @@ let account ~base_path ~cli_path ~timeout_s ~action =
     with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable in
   report result
 
-let models ~cli_path ~timeout_s ~oauth_source =
-  let result = try
+let with_catalog_home ~oauth_source f =
+  try
     let runtime_root = Filename.concat (Filename.get_temp_dir_name ()) ("masc-agy-models-" ^ Random_id.hex ~bytes:16) in
     Unix.mkdir runtime_root 0o700;
     Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) (fun () ->
       let* home = Setup.prepare_from_credential_file ~runtime_root ~account_id:"catalog" ~oauth_source in
-      Setup.discover_models ~cli_path ~timeout_s home |> Result.map Setup.models_json)
-    with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable in
-  report result
+      f home)
+    with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable
+
+let models ~cli_path ~timeout_s ~oauth_source =
+  with_catalog_home ~oauth_source (fun home ->
+    Setup.discover_models ~cli_path ~timeout_s home |> Result.map Setup.models_json) |> report
+
+let context ~python_path ~cli_path ~timeout_s ~oauth_source ~model_id =
+  let selected = with_catalog_home ~oauth_source (fun home ->
+    let* models = Setup.discover_models ~cli_path ~timeout_s home in
+    match List.find_opt (fun (model : Setup.model) -> model.id = model_id) models with
+    | None -> Error Setup.Invalid_catalog
+    | Some model ->
+      (* Some CLI versions report the label as model.id. Require its unique
+         association with the selected account model before accepting it. *)
+      if List.length (List.filter (fun (row : Setup.model) -> row.label = model.label) models) <> 1 then
+        Error Setup.Invalid_catalog else Ok model)
+    |> Result.map_error Setup.error_message in
+  let result =
+    let* model = selected in
+    Runtime_antigravity_context.observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model
+    |> Result.map_error Runtime_antigravity_context.error_message in
+  match result with
+  | Error message ->
+    print_endline (Yojson.Safe.to_string (`Assoc ["schema", `String "masc.antigravity_setup_error.v1";
+      "error", `String message])); 1
+  | Ok observed ->
+    let context = match observed with Setup.Unknown_context -> `Null | Observed_context tokens -> `Int tokens in
+    print_endline (Yojson.Safe.to_string (`Assoc ["source", `String "antigravity_statusline";
+      "model", `String model_id; "context", context; "invocation_verified", `Bool false])); 0

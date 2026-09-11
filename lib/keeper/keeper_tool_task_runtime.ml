@@ -302,7 +302,7 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
                ~host_path:relative ~timeout_sec:30. () with
            | Error reason -> Error (Store.Evidence_read_error
                (Printf.sprintf "sandbox_backend_read: %s: %s" worker reason))
-           | Ok content -> Ok (Store.payload_of_complete_bytes ~path:relative content))
+           | Ok content -> Store.payload_of_complete_bytes ~path:relative content)
 
   | Keeper_types_profile_sandbox.Shared_mount -> None
 

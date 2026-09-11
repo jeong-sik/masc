@@ -1,6 +1,36 @@
 # Changelog
 
 
+## [0.35.11] - 2026-09-11
+
+### Added
+
+- Prioritize detected connections and allow Enter selection in setup (#35137).
+
+### Fixed
+
+- Restore `runtime-codex-models` command and `--provider` option in `runtime-model-list` dropped during merge conflict resolution (#35233).
+- Keeper chat line display: turn timestamp ranges and queued line state (#35230).
+
+
+## [0.35.10] - 2026-09-11
+
+### Added
+
+- Native Google Vertex Gemini bearer transport and live publisher model discovery (#35094).
+- Verify Antigravity official client response and private MCP challenge roundtrip (#35103).
+- Choose graceful server upgrade and free available ports in setup (#35133).
+- Observe Antigravity context without prompt in onboarding journey (#35135).
+- Append failover slot to standalone lanes from the Lanes screen (#35227).
+- Per-game MSX skills: Sangokushi-2 knowledge and end-command composition (#35228).
+
+### Fixed
+
+- Declare `ocaml-msx` in `dune-project` and regenerate `masc.opam` to fix CI native build failures (#35215).
+- Count unclassified event backlog entries whose keeper owner cannot be resolved in fleet health (#35214).
+- Add missing `--private-credentials` flag to `masc runtime-wizard-catalog` CLI (#35133).
+
+
 ## [0.35.9] - 2026-09-11
 
 ### Added

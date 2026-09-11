@@ -654,8 +654,12 @@ remote_endpoint = "fixture"
       (read_file (Filename.concat (Workspace.masc_root_dir config) body));
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
     (match reader ~worker:meta.name ~relative:"render.PNG" with
-     | Error (Store.Evidence_read_error _) -> ()
-     | _ -> Alcotest.fail "partial endpoint image must not be filed as complete");
+     | Ok (Store.Binary_payload { data; bytes; _ }) ->
+       Alcotest.(check int) "oversize endpoint image retained complete"
+         (String.length png + Store.verification_evidence_max_bytes) bytes;
+       Alcotest.(check string) "retained bytes are the whole file"
+         (png ^ String.make Store.verification_evidence_max_bytes 'x') data
+     | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
      | Ok (Store.Text_payload (text, _, _)) ->

@@ -772,6 +772,9 @@ let payload_of_complete_bytes ~path content =
     | "pdf" | "wav" | "mp3" | "ogg" | "flac" | "mp4" | "zip" -> true
     | _ -> Option.is_some (image_media_type_of_binary_format format) in
   match binary_format, scan_utf8 content with
+  | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid) ->
+    Ok (Binary_payload {data=content; bytes=String.length content; format;
+      sha256=Digestif.SHA256.(digest_string content |> to_hex)})
   | false, Utf8_valid ->
     let bytes = String.length content in
     let truncated = bytes > verification_evidence_max_bytes in
@@ -779,16 +782,14 @@ let payload_of_complete_bytes ~path content =
     let preview = match scan_utf8 preview with
       | Utf8_incomplete_at index -> String.sub preview 0 index
       | Utf8_valid | Utf8_invalid -> preview in
-    Text_payload (preview, bytes, truncated)
-  | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid)
-  | false, (Utf8_incomplete_at _ | Utf8_invalid) -> Binary_payload {data=content; bytes=String.length content; format;
-      sha256=Digestif.SHA256.(digest_string content |> to_hex)}
+    Ok (Text_payload (preview, bytes, truncated))
+  | false, (Utf8_incomplete_at _ | Utf8_invalid) -> Error Evidence_invalid_utf8
 
 let read_regular_file_prefix ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error -> Error (evidence_read_failure_of_owned_read_failure error.failure)
   | Ok None -> Error Evidence_missing
-  | Ok (Some content) -> Ok (payload_of_complete_bytes ~path content)
+  | Ok (Some content) -> payload_of_complete_bytes ~path content
 
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"

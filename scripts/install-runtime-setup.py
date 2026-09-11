@@ -422,7 +422,8 @@ def catalog_models(binary, choice):
             return []
         # The binary's client catalog owns the window: its rows are verified
         # client metadata, so the wizard trusts the stated context as-is.
-        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'])
+        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'],
+                     release=row.get('release'))
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
@@ -552,12 +553,13 @@ def pick(title, labels, multiple=False, defaults=()):
         for index, label in enumerate(labels, 1):
             print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter keeps marked choices; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
             if not answer:
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -587,7 +589,7 @@ def pick(title, labels, multiple=False, defaults=()):
             start = min(max(0, position - count + 1), max(0, len(visible) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · Ctrl-C cancels' if multiple
+            hint = ('↑/↓ move · Space mark several · Enter choose · type to filter · Esc clears · Ctrl-C cancels' if multiple
                     else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
             lines = [terminal_text(title), hint, 'Filter: ' + text_query]
             for slot in range(start, min(len(visible), start + count)):
@@ -658,6 +660,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     return [current]
                 if selected:
                     return sorted(selected)
+                return [current]
             elif key == b'\x7f':
                 if query:
                     query.pop()
@@ -721,6 +724,8 @@ def connection_sources(inventory):
         if not any(item['choice'] == choice for item in sources) and shutil.which(command):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
                                 command=command, api_key_env='', rows=[]))
+    for source in sources:
+        source['model_release_catalog'] = inventory.get('model_release_catalog')
     return sources
 
 
@@ -731,9 +736,9 @@ def source_label(source):
     elif source.get('credential_file'):
         status = 'saved private API key; access will be checked'
     elif command:
-        status = 'CLI found' if shutil.which(command) else 'CLI not found'
+        status = 'CLI found; sign-in checked after selection' if shutil.which(command) else 'CLI needs installation'
     elif key:
-        status = key + (' is set' if os.environ.get(key) else ' is not set')
+        status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
     else:
         status = endpoint or 'configured connection'
     return source['label'] + ' — ' + status
@@ -855,6 +860,27 @@ def antigravity_models(binary, source):
         return antigravity_catalog_rows(json.loads(response.stdout))
     except (TypeError, ValueError):
         raise SetupError('Antigravity did not return a readable model list')
+
+
+def antigravity_context(binary, source, model_id):
+    print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
+    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file'], '--model', model_id],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if response.returncode:
+            if observed.get('schema') == 'masc.antigravity_setup_error.v1' and isinstance(observed.get('error'), str):
+                raise SetupError(terminal_text(observed['error']))
+            raise ValueError('invalid error')
+        context = observed['context']
+        if (observed.get('source') != 'antigravity_statusline' or observed.get('model') != model_id
+                or observed.get('invocation_verified') is not False
+                or context is not None and not positive_integer(context)):
+            raise ValueError('invalid context')
+        return context
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity did not return a valid context for the selected model')
 
 
 def prerequisite_menu(binary, dependency):
@@ -1009,6 +1035,41 @@ def refresh_codex_models(binary, source):
         raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
 
 
+def release_metadata(source, model_id):
+    # Transport compatibility does not establish model publisher identity.
+    publisher = None
+    if source.get('provider_kind') == 'glm':
+        publisher = 'zai'
+    elif not source.get('endpoint') and not source.get('provider_kind'):
+        publisher = {'codex': 'openai', 'claude_code': 'anthropic'}.get(source.get('choice'))
+    catalog = source.get('model_release_catalog')
+    if not publisher or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.model_release_catalog.v1':
+        return None
+    matches = [row.get('release') for row in catalog.get('models', [])
+               if isinstance(row, dict) and row.get('publisher') == publisher and row.get('model_id') == model_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def recently_released(model):
+    evidence = model.get('release')
+    return (isinstance(evidence, dict) and evidence.get('status') == 'official_release'
+            and evidence.get('recency') == 'within_three_calendar_months'
+            and evidence.get('kind') == 'general_availability')
+
+
+def model_choice_label(model):
+    evidence = model.get('release')
+    label = model['label'] + (' — existing connection' if model.get('existing') else '')
+    if not isinstance(evidence, dict) or evidence.get('status') != 'official_release':
+        return label + ' — release date unknown'
+    released = evidence.get('released_on')
+    kind = {'general_availability': 'released', 'limited_release': 'limited release', 'preview': 'preview'}.get(evidence.get('kind'))
+    if not model_text(released) or not kind:
+        return label + ' — release date unknown'
+    suffix = ' · recent release' if recently_released(model) else ''
+    return label + ' — ' + kind + ' ' + released + suffix
+
+
 def source_models(binary, source, timeout, refresh=False):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
@@ -1070,6 +1131,11 @@ def source_models(binary, source, timeout, refresh=False):
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
             rows.append(dict(id=row['model'], label=label, context=row['max_context'],
                              existing=None if source.get('credential_replaced') else row))
+    for row in rows:
+        # Rejoin even catalog suggestions through this connection's publisher;
+        # never retain evidence from an unrelated transport-compatible source.
+        row['release'] = release_metadata(source, row['id'])
+    rows.sort(key=lambda row: (not bool(row.get('existing')), not recently_released(row)))
     return rows, origin
 
 
@@ -1112,6 +1178,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
         return render(spec)[0], spec
     context = model.get('context')
+    if choice == 'antigravity' and binary:
+        context = antigravity_context(binary, source, model['id'])
     if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1141,7 +1209,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
@@ -1152,10 +1220,32 @@ def resolve_model_spec(source, model, timeout, binary=None):
     return render(spec)[0], spec
 
 
+def pick_connection_sources(sources):
+    def detected(source):
+        return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
+                and (bool(source.get('command') and shutil.which(source['command']))
+                     or bool(source.get('credential_file'))
+                     or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
+    found = [source for source in sources if detected(source)]
+    show_all = not found
+    while True:
+        shown = sources if show_all else found
+        labels = [source_label(source) for source in shown] + ['Add another server URL', 'Configure later']
+        if not show_all:
+            labels.append('Browse all providers and advanced connections')
+        title = 'Choose connections' if show_all else 'Fast setup · clients and account keys found on this computer'
+        chosen = pick(title + ' (Space marks several; Enter chooses)', labels, multiple=True)
+        if not show_all and len(shown) + 2 in chosen:
+            if len(chosen) != 1:
+                print('Choose Browse all on its own, or select the connections to use.', file=sys.stderr)
+                continue
+            show_all = True
+            continue
+        return shown, chosen
+
+
 def select_connections(binary, inventory, timeout, credentials=None):
-    sources = connection_sources(inventory)
-    labels = [source_label(source) for source in sources] + ['Add another server URL', 'Configure later']
-    chosen = pick('Select model connections (you can choose several)', labels, multiple=True)
+    sources, chosen = pick_connection_sources(connection_sources(inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
             raise SetupError('choose Configure later alone, or select connections')
@@ -1187,7 +1277,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
             models, origin = source_models(binary, source, timeout, refresh=refresh_models)
             refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
-            options = [item['label'] + (' — existing connection' if item.get('existing') else '') for item in models]
+            options = [model_choice_label(item) for item in models]
             actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
             can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
             if can_replace_key:

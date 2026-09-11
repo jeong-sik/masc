@@ -1252,7 +1252,7 @@ let test_runtime_deferred_child_keeps_same_operation_and_drains () =
   let checkpoint = Keeper_checkpoint_ref.create
       ~trace_id:(Keeper_id.Trace_id.of_string "trace-direct-resume" |> Result.get_ok)
       ~turn_count:3 ~canonical_checkpoint_bytes:"owner fixture checkpoint" |> Result.get_ok in
-  let continuation = Keeper_semantic_execution.runtime_retry ~checkpoint
+  let continuation = Keeper_semantic_execution.runtime_retry ~not_before:None ~checkpoint
       ~assignment_id:"frozen-lane" ~failed_runtime_id:"primary.test_model"
       ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
   let execute ~sw:_ ~keeper_name:_ ~claim =

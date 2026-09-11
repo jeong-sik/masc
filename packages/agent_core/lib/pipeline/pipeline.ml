@@ -918,7 +918,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
     ]
   in
   match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "result1"; _meta = _ }
+  | [ Ok { content = "result1"; _ }
     ; Error { message = "error msg"; recoverable = false; error_class = None }
     ] -> true
   | _ -> false
@@ -1029,7 +1029,7 @@ let%test "last_tool_results_from picks last tool-result message" =
     ]
   in
   match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "second"; _meta = _ } ] -> true
+  | [ Ok { content = "second"; _ } ] -> true
   | _ -> false
 ;;
 

@@ -7,7 +7,21 @@
 open Types
 open Result_syntax
 include Mcp_schema
-module Sdk_client = Mcp_protocol_eio.Client
+module Stdio_transport = struct
+  include Mcp_protocol_eio.Stdio_transport
+
+  let read t =
+    try Mcp_protocol_eio.Stdio_transport.read t with
+    | Eio.Buf_read.Buffer_limit_exceeded ->
+      close t;
+      Some (Error "MCP response exceeds the connection's byte limit")
+    | Stack_overflow ->
+      close t;
+      Some (Error "MCP response nesting exceeds the parser's capacity")
+  ;;
+end
+
+module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)
 
 (* ── Eio stdio transport client ──────────────────────────────────── *)
 
@@ -31,7 +45,12 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
     [sw] controls the process lifetime.  [mgr] spawns the child.
     [command] is the executable path, [args] are command-line arguments.
     [env] optionally overrides the process environment. *)
-let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env () =
+let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
+    ?max_response_bytes ?stderr () =
+  if Option.fold ~none:false ~some:(fun bytes -> bytes <= 0) max_response_bytes then
+    Error (Error.Mcp (ServerStartFailed
+      { command; detail = "max_response_bytes must be positive" }))
+  else
   try
     let r_child_stdin, w_child_stdin = Eio_unix.pipe sw in
     let r_child_stdout, w_child_stdout = Eio_unix.pipe sw in
@@ -41,17 +60,20 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env () =
         mgr
         ~stdin:(r_child_stdin :> Eio.Flow.source_ty Eio.Resource.t)
         ~stdout:(w_child_stdout :> Eio.Flow.sink_ty Eio.Resource.t)
+        ?stderr
         ?env
         (command :: args)
     in
     Eio.Flow.close r_child_stdin;
     Eio.Flow.close w_child_stdout;
-    let client =
-      Sdk_client.create
+    let transport =
+      Stdio_transport.create
         ~stdin:(r_child_stdout :> _ Eio.Flow.source)
         ~stdout:(w_child_stdin :> _ Eio.Flow.sink)
+        ?max_size:max_response_bytes
         ()
     in
+    let client = Sdk_client.create ~transport () in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()
@@ -101,10 +123,22 @@ let initialize t =
 ;;
 
 (** Fetch tools from MCP server and return them. *)
+let list_tools_full t =
+  match Sdk_client.list_tools t.client with
+  | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
+  | Ok tools -> Ok tools
+;;
+
 let list_tools t =
   match Sdk_client.list_tools_all t.client with
   | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
   | Ok tools -> Ok (List.map mcp_tool_of_agent_core_tool tools)
+;;
+
+let call_tool_full t ~name ~arguments =
+  match Sdk_client.call_tool t.client ~name ~arguments () with
+  | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
+  | Ok result -> Ok result
 ;;
 
 let list_resources t =
@@ -145,7 +179,7 @@ let call_tool t ~name ~arguments : Types.tool_result =
     let text = text_of_tool_result result in
     if Option.value ~default:false result.Sdk_types.is_error
     then Error { message = text; recoverable = true; error_class = None }
-    else Ok { content = text; _meta = None }
+    else Ok { content = text; content_blocks = None; _meta = None }
 ;;
 
 (** Convert MCP tools to SDK [Tool.t] list.

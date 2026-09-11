@@ -317,9 +317,10 @@ type read_file_attempt =
   | Read_failed_payload of string
   | Read_failed_message of string
 
-let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
+let read_sandbox_bytes ?turn_sandbox_factory ?cwd ~config ~meta ~path ~max_bytes () =
+  let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* target =
-    resolve_read_file_target ~config ~meta ~args:(`Assoc []) ~raw_path:path
+    resolve_read_file_target ~config ~meta ~args ~raw_path:path
     |> Result.map_error (function Read_path_error detail -> detail)
   in
   let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
@@ -327,6 +328,17 @@ let read_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ~max_bytes () =
     ~host_path:target ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
   |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
+;;
+
+let read_complete_sandbox_bytes ~config ~meta ~path ?cwd () =
+  let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
+  let* target =
+    resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    |> Result.map_error (function Read_path_error detail -> detail)
+  in
+  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  Keeper_sandbox_read_runner.read_complete_file ~config ~meta ~host_path:target
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
 let handle_read_file_with_outcome
@@ -577,6 +589,40 @@ let default_owned_target ~ownership_root ~path =
         | _ -> (ownership_root, path)))
 [@@coverage off]
 
+let resolve_owned_read_target ~ownership_root ~path ~cwd =
+  if String.equal path ""
+  then Error "path is required"
+  else
+    let cwd_abs, target_rel =
+      match cwd with
+      | None -> default_owned_target ~ownership_root ~path
+      | Some cwd ->
+        if Filename.is_relative cwd
+        then (Filename.concat ownership_root cwd, path)
+        else (cwd, path)
+    in
+    match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
+    | Error rejection ->
+      Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+    | Ok Fs_compat.Owned_directory_missing ->
+      Error (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs }))
+    | Ok (Fs_compat.Owned_directory _) ->
+      let target =
+        if Filename.is_relative target_rel
+        then Filename.concat cwd_abs target_rel
+        else target_rel
+      in
+      Ok target
+;;
+
+let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
+  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  match Fs_compat.load_owned_regular_file_prefix ~ownership_root ~max_bytes target with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Error "owned file is missing"
+  | Ok (Some prefix) -> Ok prefix.content
+;;
+
 let handle_owned_read_file_with_outcome
       ~ownership_root
       ~(args : Yojson.Safe.t)
@@ -584,32 +630,7 @@ let handle_owned_read_file_with_outcome
   let path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
   let max_bytes = read_file_default_max_bytes in
   let cwd = string_opt_nonempty "cwd" args in
-  let resolve_target () =
-    if String.equal path ""
-    then Error "path is required"
-    else
-      let cwd_abs, target_rel =
-        match cwd with
-        | None -> default_owned_target ~ownership_root ~path
-        | Some cwd ->
-          if Filename.is_relative cwd
-          then (Filename.concat ownership_root cwd, path)
-          else (cwd, path)
-      in
-      match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
-      | Error rejection ->
-        Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
-      | Ok Fs_compat.Owned_directory_missing ->
-        Error (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs }))
-      | Ok (Fs_compat.Owned_directory _) ->
-        let target =
-          if Filename.is_relative target_rel
-          then Filename.concat cwd_abs target_rel
-          else target_rel
-        in
-        Ok target
-  in
-  match read_line_window_of_args args, resolve_target () with
+  match read_line_window_of_args args, resolve_owned_read_target ~ownership_root ~path ~cwd with
   | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
   | Ok _, Error detail -> Keeper_tool_execution.failure (error_json detail)
   | Ok window, Ok target ->

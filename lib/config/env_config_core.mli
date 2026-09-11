@@ -188,9 +188,6 @@ type persisted_default =
   | Stale of { record : string; recorded_path : string }
   | Unread_under_test of { record : string }
 
-(** Shared user configuration location, derived from XDG_CONFIG_HOME or HOME. *)
-val default_base_path_record_path_opt : unit -> string option
-
 val persisted_default_base_path : unit -> persisted_default
 (** [Stale] is kept apart from [No_record] so the "not set" error can say that
     a recorded default was found and ignored, and why.
@@ -212,13 +209,6 @@ type record_outcome =
   | Record_failed of { record : string; reason : string }
 
 val record_default_base_path : string -> record_outcome
-
-val default_base_path_record_path_opt : unit -> string option
-(** Path of the record file [record_default_base_path] writes, when a
-    user-level config dir can be named: [$XDG_CONFIG_HOME/masc] or
-    [~/.config/masc]. [None] when neither can be resolved. The record
-    cannot live inside the workspace: a caller that does not know the
-    base path yet cannot read a file under it. *)
 (** Record [path] as the default for later commands. Callers do this after the
     workspace has actually served a command, so a path that failed to boot is
     not remembered. Failure is returned, never raised: not recording a default

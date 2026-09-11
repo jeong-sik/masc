@@ -40,7 +40,7 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.
 
-The setup screen inspects sandbox services and explains missing prerequisites. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
+The default sandbox still requires a running Docker engine, and the model connection requires its own CLI sign-in or API credential. Install these before running `masc setup`.
 
 If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
@@ -94,7 +94,7 @@ Existing connections remain available when you add more models.
 
 | Situation | Behaviour |
 |---|---|
-| First install on a terminal | Workspace → model connections → sandbox → first conversation, through the installed setup journey |
+| First install on a terminal | Multiple connection/model selection and real response/tool verification |
 | Piped input/automation, one usable source | Selects that source; reports a connectivity probe separately |
 | Piped input/automation, no usable source or several | Automatic mode leaves selection pending; forced `--wizard` requires `--provider` |
 | `--provider <id>` | Selects that configured provider, including in an existing workspace |
@@ -136,12 +136,7 @@ installed. Detecting which execution environments are available does not
 stand in for installing or authenticating them.
 
 
-AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
-They are outside the 0.35.5 installation and verification scope.
 ## Choosing a model connection
-
-AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
-They are outside the 0.35.5 installation and verification scope.
 
 Select existing API providers, Claude Code, Codex, or local Ollama models.
 Use **Add another server URL** for llama.cpp, vLLM, another OpenAI-compatible
@@ -176,47 +171,32 @@ automatically.
 This is the 0.35.5 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
-Run `masc`. No `MASC_BASE_PATH` export is needed. With no saved workspace,
-select the suggested `~/MASC` directory with Enter, or choose another location.
-The directory is created only after you select it. Explicit `--base-path` and
-existing environment configuration still take precedence over the saved default.
-
-The setup journey then asks for model connections and a sandbox. You can select
-several models and choose their fallback order. For Claude Code or Codex, a failed
-connection check offers official sign-in and retry with the same selections.
-Each selected model must complete an actual response and tool check before saving.
-
-The sandbox screen shows service observations, missing prerequisites and advanced
-choices. A running service still needs image preparation and imp boot. The quick
-path permits internet access for guest commands when choosing a new backend.
-Selecting the currently configured backend preserves its network policy; Advanced
-setup can explicitly change it. Disabling guest networking affects sandbox commands.
-MASC model connections and WebFetch use separate server-side network controls.
+1. Prepare the runtime you own before opening the model wizard. For Claude Code
+   or Codex, install its CLI and complete its login, then confirm it can answer a
+   prompt in this terminal. For an API runtime, export its credential variable
+   here (for example, `ZAI_API_KEY` for Z.AI). For a local model, start its server
+   and load a model that supports tool calls. MASC does not install or log in
+   to these model runtimes.
+2. Run the installer with `--base-path "$HOME/masc-workspace"` and select one or
+   more connections. Choose imp's primary model and fallback order. The wizard
+   checks actual responses and tool use before saving. Helper lanes use your
+   primary model; you do not need a second subscription.
+3. Install and start [Docker Desktop on macOS](https://docs.docker.com/desktop/setup/install/mac-install/),
+   or [Docker Engine on Linux](https://docs.docker.com/engine/install/).
+   `docker info` must succeed as your current user. Then run:
 
 ```bash
-masc setup                     # reopen connection and sandbox selection
-masc doctor                    # read-only preparation report
-masc sandbox-catalog           # inspect host sandbox choices as JSON
+masc setup --base-path "$HOME/masc-workspace"
 ```
 
-Preparation uses the selected backend, validates it before saving the selection,
-and starts or connects to the server for this workspace. It creates a local
-operator credential and starts `imp`. Later, bare `masc` opens the saved imp
-history without repeating model selection; the UI observes its current server
-and execution state separately. A persisted history does not prove that the
-current account or sandbox is usable.
-
-For automation, supply the workspace and selections explicitly. For example:
-
-```bash
-masc setup --base-path "$HOME/masc-workspace" --no-tui \
-  --sandbox-profile docker --network-mode inherit
-```
-
-The prepared server stays running when you leave the setup journey. If another
-workspace occupies the port, choose a free one with `--port 8936`. Model choices
-survive sign-in/retry within the current wizard session. Choosing “Finish later”
-preserves committed configuration; unverified selections have not been saved.
+`setup` seeds missing configuration, checks Docker, builds the default sandbox
+image, starts or connects to the server for this workspace, logs in as
+`local-admin`, starts the existing `imp`, and opens the TUI. It preserves the
+Keeper manifest. The default `imp` has `activation_mode = "manual"`,
+`sandbox_profile = "docker"`, and `network_mode = "inherit"`.
+If another workspace occupies the port, choose a free one with `--port 8936`.
+On exit, setup stops a server it started itself. Use `--no-tui` to leave that
+server running and connect to it separately.
 
 In the TUI, select **Keepers → imp** and send these requests one at a time:
 

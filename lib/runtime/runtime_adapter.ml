@@ -1,15 +1,5 @@
 (** Single-binding → [Provider_config.t] materialization (RFC-0206 §5).
 
-let http_protocol_metadata provider =
-  match provider.Runtime_schema.transport with
-  | Cli _ -> Error "An HTTP connection is required"
-  | Http base_url ->
-    let registry_entry = find_registry_entry provider.id in
-    Result.map (fun kind -> kind,
-      request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url)
-      (provider_kind_for_http_provider ?registry_entry provider)
-;;
-
     Re-homed from the deleted [Runtime_declarative_adapter]. Keeps only the
     binding materialization path:
 
@@ -376,16 +366,6 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
 ;;
 
 (* --- Model capability projection --- *)
-
-let http_protocol_metadata provider =
-  match provider.Runtime_schema.transport with
-  | Cli _ -> Error "An HTTP connection is required"
-  | Http base_url ->
-    let registry_entry = find_registry_entry provider.id in
-    Result.map (fun kind -> kind,
-      request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url)
-      (provider_kind_for_http_provider ?registry_entry provider)
-;;
 
 let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spec) =
   match spec.capabilities with

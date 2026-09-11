@@ -5352,6 +5352,15 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             raise AssertionError(
                 f"the sent line is not marked as a user turn: {plain!r}"
             )
+        # The promoted USER row answers the question its reader actually
+        # has -- did this line go? -- rather than naming the queue internal
+        # it travelled under. A truncated request id in that slot read as a
+        # line stuck in a machine (2026-09-10: "is this ever going?").
+        if b"sent \xc2\xb7 the running turn answers it" not in plain:
+            raise AssertionError(
+                f"the sent line does not say the running turn answers it: "
+                f"{plain!r}"
+            )
         for expected in (
             b"NEXT 1",
             b"queued-one",

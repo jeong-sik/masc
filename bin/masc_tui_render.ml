@@ -9941,6 +9941,17 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
+      (* The block's clock is the span, not the dispatch moment: while the
+         turn runs it opens ("16:38→"), and once the outcome lands both ends
+         show. Committed rows around it carry their own write clocks, and a
+         block stamped only with its opening clock read as a message that
+         happened before rows typed during the turn (2026-09-10 misread:
+         a 16:38 turn under a 16:41 reply). *)
+      let turn_clock =
+        Message_layout.span_clock ~starts_at:(keeper_message_clock started_at)
+          (Option.map keeper_message_clock
+             (Keeper_chat_transcript.settled_at transcript))
+      in
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -9976,7 +9987,7 @@ let render_keeper_message (state : state) =
                      call trims what the first had already fitted. *)
                   Some
                     ({ style;
-                       timestamp = keeper_message_clock started_at;
+                       timestamp = turn_clock;
                        timeline_bucket;
                        role_label =
                          Message_layout.align_role_label
@@ -10320,10 +10331,16 @@ let render_keeper_message (state : state) =
     (match promoted with
      | Some entry ->
          let request = entry.sent_request in
+         (* The status in the row says what the operator can act on: the line
+           left and the running turn is answering it. The compact request id
+           that stood here named a queue internal -- a value no reader could
+           resolve -- and its truncation glyph read like damage; the id stays
+           reachable on the settled rows' metadata. The 2026-09-10 misread
+           ("is this line ever going?") came from a row that said where it
+           came from but not that it had gone. *)
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
-           (Printf.sprintf "  [%s]  ▶  YOU  %s"
-              (keeper_message_clock entry.submitted_at)
-              (Keeper_chat.compact_request_id request.request_id));
+           (Printf.sprintf "  [%s]  ▶  YOU  sent · the running turn answers it"
+              (keeper_message_clock entry.submitted_at));
          box_line_styled chat_buf chat_cols ~style:(Theme.info ())
            ("    " ^ Terminal_text.single_line request.message)
      | None -> ());

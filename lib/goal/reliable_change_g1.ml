@@ -420,34 +420,44 @@ let check_observations ~manifest ~observations =
         | _ -> ()))
     observations;
 
-  (* Check retry-success reported usage fixture totals *)
+  (* Check retry-success reported usage fixture totals in each repetition *)
   let retry_success_obs =
     List.filter (fun (o : run_observation) -> o.case_id = "retry-success") matrix_obs
   in
-  if retry_success_obs <> [] then (
-    let totals = aggregate_run_usages retry_success_obs in
-    if totals.total_input_tokens <> 40
-       || totals.total_output_tokens <> 8
-       || totals.total_cache_read_input_tokens <> 8
-       || totals.total_cost_usd <> Some 0.07 then (
-      incr totals_mismatch;
-      add_finding "retry_success_fixture"
-        "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
-        false
-        (Some
-           (Printf.sprintf
-              "got in=%d out=%d cache=%d cost=%s"
-              totals.total_input_tokens
-              totals.total_output_tokens
-              totals.total_cache_read_input_tokens
-              (Option.value ~default:"null" totals.total_cost_usd_exact)))
-    ) else (
-      add_finding "retry_success_fixture"
-        "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
-        true
-        None
-    )
-  );
+  let repeats =
+    List.sort_uniq Int.compare
+      (List.map (fun (o : run_observation) -> o.repeat_index) retry_success_obs)
+  in
+  List.iter
+    (fun rep ->
+       let rep_obs =
+         List.filter (fun (o : run_observation) -> o.repeat_index = rep) retry_success_obs
+       in
+       let totals = aggregate_run_usages rep_obs in
+       if totals.total_input_tokens <> 40
+          || totals.total_output_tokens <> 8
+          || totals.total_cache_read_input_tokens <> 8
+          || totals.total_cost_usd <> Some 0.07 then (
+         incr totals_mismatch;
+         add_finding (Printf.sprintf "retry_success_fixture_rep_%d" rep)
+           "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
+           false
+           (Some
+              (Printf.sprintf
+                 "got in=%d out=%d cache=%d cost=%s"
+                 totals.total_input_tokens
+                 totals.total_output_tokens
+                 totals.total_cache_read_input_tokens
+                 (match totals.total_cost_usd_exact with
+                  | Some cost -> cost
+                  | None -> "null")))
+       ) else (
+         add_finding (Printf.sprintf "retry_success_fixture_rep_%d" rep)
+           "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
+           true
+           None
+       ))
+    repeats;
 
   let matrix_passed =
     if !false_verified = 0 && !required_join_missing = 0 && !unknown_coerced_to_zero = 0 && !duplicated_usage = 0 && !totals_mismatch = 0
@@ -553,7 +563,11 @@ let manifest_of_json json : (manifest, string) result =
       ; phase_boundaries_by_case
       ; cases
       }
-  with exn -> Error (Printexc.to_string exn)
+  with
+  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Failure msg -> Error msg
+  | Invalid_argument msg -> Error msg
+  | Not_found -> Error "Key or element not found"
 ;;
 
 let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
@@ -628,7 +642,9 @@ let run_observation_of_json json : (run_observation, string) result =
     let verdict_passed = json |> member "verdict_passed" |> to_bool in
     let usage_scope_raw = json |> member "usage_scope" |> to_string in
     let usage_scope =
-      Option.value ~default:Per_request (usage_scope_of_string_opt usage_scope_raw)
+      match usage_scope_of_string_opt usage_scope_raw with
+      | Some scope -> scope
+      | None -> Per_request
     in
     let usage =
       let u = json |> member "usage" in
@@ -637,7 +653,9 @@ let run_observation_of_json json : (run_observation, string) result =
         let input_tokens = u |> member "input_tokens" |> to_int in
         let output_tokens = u |> member "output_tokens" |> to_int in
         let cache_read_input_tokens =
-          u |> member "cache_read_input_tokens" |> to_int_option |> Option.value ~default:0
+          match u |> member "cache_read_input_tokens" |> to_int_option with
+          | Some tokens -> tokens
+          | None -> 0
         in
         let cost_usd = u |> member "cost_usd" |> to_float_option in
         let cost_usd_exact = u |> member "cost_usd_exact" |> to_string_option in
@@ -650,7 +668,9 @@ let run_observation_of_json json : (run_observation, string) result =
           }
       else
         let reason =
-          u |> member "reason" |> to_string_option |> Option.value ~default:"unreported"
+          match u |> member "reason" |> to_string_option with
+          | Some r -> r
+          | None -> "unreported"
         in
         Usage_missing reason
     in
@@ -667,10 +687,14 @@ let run_observation_of_json json : (run_observation, string) result =
       }
     in
     let attempt_sequence =
-      json |> member "attempt_sequence" |> to_int_option |> Option.value ~default:1
+      match json |> member "attempt_sequence" |> to_int_option with
+      | Some seq -> seq
+      | None -> 1
     in
     let total_attempts_in_run =
-      json |> member "total_attempts_in_run" |> to_int_option |> Option.value ~default:1
+      match json |> member "total_attempts_in_run" |> to_int_option with
+      | Some total -> total
+      | None -> 1
     in
     Ok
       { case_id
@@ -692,7 +716,11 @@ let run_observation_of_json json : (run_observation, string) result =
       ; attempt_sequence
       ; total_attempts_in_run
       }
-  with exn -> Error (Printexc.to_string exn)
+  with
+  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Failure msg -> Error msg
+  | Invalid_argument msg -> Error msg
+  | Not_found -> Error "Key or element not found"
 ;;
 
 let checker_summary_to_json (s : checker_summary) : Yojson.Safe.t =
@@ -773,5 +801,9 @@ let checker_summary_of_json json : (checker_summary, string) result =
       ; overall_passed
       ; findings
       }
-  with exn -> Error (Printexc.to_string exn)
+  with
+  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Failure msg -> Error msg
+  | Invalid_argument msg -> Error msg
+  | Not_found -> Error "Key or element not found"
 ;;

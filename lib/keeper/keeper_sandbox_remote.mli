@@ -181,7 +181,11 @@ type execution_observation =
 
 val execution_observation_to_yojson : execution_observation -> Yojson.Safe.t
 
+type stdout_mode = Text_paths | Binary_bytes
+(** Binary_bytes collects raw stdout chunks without text capture limits or path rewriting. *)
+
 val runner :
+  ?stdout_mode:stdout_mode ->
   ?mode:Exec_ssh_protocol.mode ->
   ?on_receipt:(execution_observation -> unit) ->
   timeout_sec:float -> t -> Masc_exec.Sandbox_target.runner

@@ -766,34 +766,30 @@ let image_media_type_of_binary_format = function
   | "webp" -> Some "image/webp"
   | _ -> None
 
+let payload_of_complete_bytes ~path content =
+  let format = binary_format_of_path path in
+  let binary_format = match format with
+    | "pdf" | "wav" | "mp3" | "ogg" | "flac" | "mp4" | "zip" -> true
+    | _ -> Option.is_some (image_media_type_of_binary_format format) in
+  match binary_format, scan_utf8 content with
+  | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid) ->
+    Ok (Binary_payload {data=content; bytes=String.length content; format;
+      sha256=Digestif.SHA256.(digest_string content |> to_hex)})
+  | false, Utf8_valid ->
+    let bytes = String.length content in
+    let truncated = bytes > verification_evidence_max_bytes in
+    let preview = if truncated then String.sub content 0 verification_evidence_max_bytes else content in
+    let preview = match scan_utf8 preview with
+      | Utf8_incomplete_at index -> String.sub preview 0 index
+      | Utf8_valid | Utf8_invalid -> preview in
+    Ok (Text_payload (preview, bytes, truncated))
+  | false, (Utf8_incomplete_at _ | Utf8_invalid) -> Error Evidence_invalid_utf8
+
 let read_regular_file_prefix ~ownership_root path =
-  match
-    Fs_compat.load_owned_regular_file_prefix
-      ~ownership_root
-      ~max_bytes:verification_evidence_max_bytes
-      path
-  with
-  | Error error ->
-    Error (evidence_read_failure_of_owned_read_failure error.failure)
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error -> Error (evidence_read_failure_of_owned_read_failure error.failure)
   | Ok None -> Error Evidence_missing
-  | Ok (Some prefix) ->
-    let format = binary_format_of_path path in
-    match image_media_type_of_binary_format format with
-    | Some _ when prefix.truncated ->
-      Error (Evidence_read_error
-        (Printf.sprintf "image evidence has %d bytes, exceeding capture limit %d; submit a complete smaller rendering"
-           prefix.file_size verification_evidence_max_bytes))
-    | Some _ ->
-      Ok (Binary_payload
-        { data = prefix.content; bytes = prefix.file_size; format
-        ; sha256 = Digestif.SHA256.(digest_string prefix.content |> to_hex) })
-    | None ->
-      (match scan_utf8 prefix.content with
-       | Utf8_valid ->
-         Ok (Text_payload (prefix.content, prefix.file_size, prefix.truncated))
-       | Utf8_incomplete_at index when prefix.truncated ->
-         Ok (Text_payload (String.sub prefix.content 0 index, prefix.file_size, true))
-       | Utf8_incomplete_at _ | Utf8_invalid -> Error Evidence_invalid_utf8)
+  | Ok (Some content) -> payload_of_complete_bytes ~path content
 
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"

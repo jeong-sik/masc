@@ -5988,27 +5988,23 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
    snapshot rather than stored: a cached order and a re-read snapshot drift,
    and the cursor would then point at a different runtime than the one drawn. *)
 let runtime_lane_picker_rows (state : state) =
-  match state.runtime_lane_pick, state.runtime_surface with
-  | Some lane, Some snapshot ->
-      let open Masc.Tui_decode in
-      let already =
-        snapshot.rss_resolved.rrs_lanes
-        |> List.find_opt (fun (l : runtime_resolved_lane) ->
-             String.equal l.rrl_id lane)
-        |> function Some l -> l.rrl_runtime_ids | None -> []
-      in
+  match state.runtime_lane_pick with
+  | None -> [], []
+  | Some lane ->
+      let already = Masc_tui_types.lane_picker_existing_slots state lane in
       let lane_providers =
         already
         |> List.filter_map (fun id ->
              List.find_opt
-               (fun (r : runtime_option) -> String.equal r.ro_id id)
+               (fun (r : Masc.Tui_decode.runtime_option) ->
+                  String.equal r.Masc.Tui_decode.ro_id id)
                state.runtime_catalog
-             |> Option.map (fun (r : runtime_option) -> r.ro_provider))
+             |> Option.map (fun (r : Masc.Tui_decode.runtime_option) ->
+                  r.Masc.Tui_decode.ro_provider))
       in
       ( already
       , Masc_tui_types.runtimes_for_lane_picker ~lane_providers ~already
           state.runtime_catalog )
-  | _ -> [], []
 ;;
 
 let launch_runtime_lane_append state ~mailbox ~lane ~runtime_id ~existing =
@@ -12384,17 +12380,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_async_observation_error <- None
       | Error detail -> state.tools_async_observation_error <- Some detail)
   | Runtime_lane_slots_written result ->
+      (* An "exact/<lane>" write redraws the standalone-lane matrix too; a
+         conversation-lane write leaves it alone. Re-read whichever surface
+         drew the order rather than patching the local snapshot: a
+         hand-applied edit and a rejected write look the same on screen. *)
+      let exact_write =
+        Option.map
+          (fun lane ->
+            String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/")
+          state.runtime_lane_pick
+        |> Option.value ~default:false
+      in
       (match result with
        | Ok () ->
-           (* The lane order now differs from what this surface drew, and the
-              server is the one that just changed it. Re-read rather than
-              patching the local snapshot: a hand-applied edit and a rejected
-              write look the same on screen. *)
            state.runtime_lane_error <- None;
+           state.lanes_action_error <- None;
            state.runtime_lane_pick <- None;
            state.runtime_lane_pick_cursor <- 0;
-           launch_runtime_surface_load state ~mailbox ~force:true
-       | Error detail -> state.runtime_lane_error <- Some detail)
+           launch_runtime_surface_load state ~mailbox ~force:true;
+           if exact_write then launch_lanes_load state ~mailbox
+       | Error detail ->
+           if state.view = Lanes then state.lanes_action_error <- Some detail
+           else state.runtime_lane_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
       | Ok (runtimes, assignments) ->
@@ -16380,8 +16387,11 @@ and is loaded on demand through keeper_skill.
                  set (current ^ s)
                | _ -> ()))
        | Some "j" | Some "k" | Some "e" | Some "E" | Some "\r"
-         when state.view = Runtime && Option.is_some state.runtime_lane_pick ->
-           (* The picker is open: j/k move it, Enter appends, e closes. *)
+         when (state.view = Runtime || state.view = Lanes)
+              && Option.is_some state.runtime_lane_pick ->
+           (* The picker is open: j/k move it, Enter appends, e closes. The
+              Runtime surface opens it for a conversation lane, the Lanes
+              surface for a standalone lane's exact/ walk order. *)
            let already, catalog = runtime_lane_picker_rows state in
            let count = List.length catalog in
            (match key with
@@ -16425,6 +16435,23 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick_cursor <- 0;
                      state.runtime_lane_error <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       | Some "a"
+         when state.view = Lanes
+              && state.lanes_mode = Lanes_overview
+              && Option.is_none state.runtime_lane_pick ->
+           (* Append a failover candidate to the standalone lane under the
+              cursor. The pick names "exact/<lane>" so the routing write
+              resolves the walk-order table rather than the conversation
+              lane of the same-looking id. *)
+           (match Masc_tui_types.selected_standalone_lane state with
+            | None -> ()
+            | Some lane ->
+                state.runtime_lane_pick <-
+                  Some ("exact/" ^ lane.Masc.Tui_decode.sl_lane_id);
+                state.runtime_lane_pick_cursor <- 0;
+                state.runtime_lane_error <- None;
+                state.lanes_action_error <- None;
+                launch_runtime_catalog_load state ~mailbox:async_messages)
         | Some ("T" | "t")
           when state.view = Keepers Keeper_detail
                && state.detail_tab = Detail_identity

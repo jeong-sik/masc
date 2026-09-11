@@ -319,6 +319,7 @@ let with_bundle_tools
        in
        let capability_surface =
          Keeper_capability_surface.create
+           ~tool_deny:[]
            ~skill_names:None
            ~global_skill_catalog:skill_catalog
            ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -838,6 +839,7 @@ let test_bundle_matches_expected_projection () =
         ~official_client_kind:"agent_core"
         ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
         ~native_posture:None
+        ~tool_deny:[]
         ~skill_names:None
         ~current_task_id:(Some "task-001")
         ~task_skill_references:[ task_reference ]

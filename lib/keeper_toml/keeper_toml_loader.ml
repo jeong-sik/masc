@@ -394,31 +394,25 @@ let before_rename_failure ~path detail =
   }
 ;;
 
+let edit_keeper_fields_in_content content fields =
+  List.fold_left
+    (fun result (key, edit) ->
+      Result.bind result (fun current ->
+        match edit with
+        | Set value ->
+          Result.bind (render_toml_value value) (fun rendered_value ->
+            update_rendered_field_in_content ~table:"keeper" ~key ~rendered_value current)
+        | Remove -> remove_field_in_content ~table:"keeper" ~key current))
+    (Ok content) fields
+;;
+
 let edit_keeper_toml_fields_strict_staged ~(path : string) fields =
   match Safe_ops.read_file_safe path with
   | Error error ->
     Error (before_rename_failure ~path (Printf.sprintf "cannot read %s: %s" path error))
   | Ok content ->
-    let updated =
-      List.fold_left
-        (fun result (key, edit) ->
-          Result.bind result (fun current ->
-            match edit with
-            | Set value ->
-              Result.bind (render_toml_value value) (fun rendered_value ->
-                update_rendered_field_in_content
-                  ~table:"keeper"
-                  ~key
-                  ~rendered_value
-                  current)
-            | Remove ->
-              remove_field_in_content ~table:"keeper" ~key current))
-        (Ok content)
-        fields
-    in
-    (match updated with
-     | Error detail ->
-       Error (before_rename_failure ~path detail)
+    (match edit_keeper_fields_in_content content fields with
+     | Error detail -> Error (before_rename_failure ~path detail)
      | Ok content -> Fs_compat.save_file_atomic_strict_staged path content)
 ;;
 

@@ -767,6 +767,7 @@ let start
          Eio.Fiber.fork_daemon ~sw (fun () ->
            (try
               Eio.Time.sleep clock transient_retry_wake_sec;
+              (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
               ignore (request t Wake_operation_drain)
             with
             | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled

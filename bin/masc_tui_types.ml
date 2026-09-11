@@ -3884,6 +3884,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
@@ -5223,6 +5225,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  lane_addons = None;
+  lane_addons_generation = 0;
   browser_lane = None;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
@@ -6831,6 +6835,7 @@ type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
   | Palette_msx
+  | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6936,6 +6941,7 @@ let palette_entries (state : state) =
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

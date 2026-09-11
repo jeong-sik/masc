@@ -63,14 +63,27 @@ jobs:
         run: |
           set -euo pipefail
           opam exec -- dune build --profile release \
-            test/test_lane_addon_worker.exe \
+            test/test_lane_addon.exe test/test_lane_addon_worker.exe \
+            test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe test/test_tui_command.exe \
+            test/test_tui_palette_matching.exe \
+            test/test_lane_addon_sources.exe test/test_browser_lane.exe \
+            test/test_browser_webdriver.exe test/test_msx_tools.exe \
             bin/main_eio.exe bin/masc_tui.exe 2>&1 | tee proof/build.log
-      - name: Run worker behavior tests
+      - name: Run host and worker behavior tests
         env:
           ALCOTEST_VERBOSE: '1'
         run: |
           set -euo pipefail
+          _build/default/test/test_lane_addon.exe 2>&1 | tee proof/host-tests.log
           _build/default/test/test_lane_addon_worker.exe 2>&1 | tee proof/worker-tests.log
+          _build/default/test/test_lane_addon_surface.exe 2>&1 | tee proof/surface-tests.log
+          _build/default/test/test_lane_addon_sources.exe 2>&1 | tee proof/source-tests.log
+          _build/default/test/test_browser_lane.exe 2>&1 | tee proof/browser-lane-tests.log
+          _build/default/test/test_browser_webdriver.exe 2>&1 | tee proof/browser-webdriver-tests.log
+          _build/default/test/test_msx_tools.exe 2>&1 | tee proof/msx-tests.log
+          _build/default/test/test_lane_addon_store_query.exe 2>&1 | tee proof/store-query-tests.log
+          _build/default/test/test_tui_command.exe 2>&1 | tee proof/tui-command-tests.log
+          _build/default/test/test_tui_palette_matching.exe 2>&1 | tee proof/tui-palette-tests.log
       - name: Package exact Linux candidate
         run: |
           set -euo pipefail
@@ -93,7 +106,7 @@ jobs:
               'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
               'platform': platform.platform(), 'architecture': platform.machine(),
               'archive': archive.name, 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
-              'qualification': 'worker hermetic subprocess tests; Lane integration and live Keeper/game qualification remain separate',
+              'qualification': 'host and hermetic subprocess tests; live Keeper/game qualification remains separate',
           }
           Path('proof/candidate-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
@@ -106,9 +119,65 @@ jobs:
           path: proof/
           if-no-files-found: error
 
-  packages:
-    name: Package contracts and Docker images
+  dashboard:
+    name: Dashboard contracts and candidate bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Typecheck and exercise optional UI behavior
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          mkdir -p ../proof
+          pnpm typecheck 2>&1 | tee ../proof/typecheck.log
+          pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 \
+            src/components/lane-addons-panel.test.ts src/components/status.test.ts \
+            src/router.test.ts 2>&1 | tee ../proof/dashboard-tests.log
+      - name: Build Dashboard
+        working-directory: dashboard
+        env:
+          NODE_ENV: production
+        run: pnpm build
+      - name: Package Dashboard including build stamp
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -s assets/dashboard/index.html
+          test -s assets/dashboard/.build-stamp
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+          tar -C assets -czf proof/masc-lane-addon-dashboard.tar.gz dashboard
+          sha256sum proof/masc-lane-addon-dashboard.tar.gz > proof/SHA256SUMS
+      - name: Upload Dashboard proof and bundle
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lane-addon-dashboard-${{ env.CANDIDATE_SHA }}
+          path: proof/
+          if-no-files-found: error
+
+  packages:
+    name: Package contracts and Docker images (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -119,6 +188,8 @@ jobs:
           set -euo pipefail
           mkdir -p proof
           python3 -m unittest discover -s addons/tests -v 2>&1 | tee proof/package-tests.log
+          python3 -m unittest discover -s scripts/lane-addons -p 'test_*.py' -v 2>&1 | tee proof/harness-tests.log
+          node connectors/browser/tests/document_snapshot.cjs 2>&1 | tee proof/document-tests.log
       - name: Build and package manifest-named Docker images
         run: |
           set -euo pipefail
@@ -149,6 +220,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: lane-addon-packages-linux-x64-${{ env.CANDIDATE_SHA }}
+          name: lane-addon-packages-linux-${{ matrix.arch }}-${{ env.CANDIDATE_SHA }}
           path: proof/
           if-no-files-found: error

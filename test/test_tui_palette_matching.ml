@@ -312,6 +312,18 @@ let test_msx_is_reached_by_its_name () =
    | _ -> Alcotest.fail "the label spelled out must lead its own matches")
 ;;
 
+let test_addons_do_not_require_a_keeper () =
+  let state =
+    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  Alcotest.(check int) "no Keeper needs to be created" 0
+    (List.length state.keepers);
+  state.palette_query <- "lane add-ons";
+  (match palette_matches state with
+   | ("go Lane Add-ons", Palette_lane_addons) :: _ -> ()
+   | _ -> Alcotest.fail "an empty workspace must offer the Add-ons inspector")
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -336,6 +348,8 @@ let () =
             test_friendly_runtime_param_editing
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
+        ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
+            test_addons_do_not_require_a_keeper
         ] )
     ]
 ;;

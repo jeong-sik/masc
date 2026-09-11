@@ -1717,6 +1717,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
+  | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot * Yojson.Safe.t option), string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
@@ -4171,6 +4172,46 @@ let launch_connectors_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+
+let launch_lane_addons state ~mailbox request =
+  let module Addons = Masc_tui_lane_addons in
+  let view = Option.value ~default:Addons.initial state.lane_addons in
+  state.lane_addons_generation <- state.lane_addons_generation + 1;
+  let generation = state.lane_addons_generation in
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None };
+  let host = server_peer_host and port = state.port in
+  let perform () =
+    let ( let* ) = Result.bind in
+    let inspect () =
+      let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
+      Addons.decode json in
+    match request with
+    | Addons.Inspect -> let* snapshot = inspect () in Ok (snapshot, None)
+    | Addons.Slice query ->
+        let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
+        let* json = Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/slice?" ^ query) in
+        let instances = match view.snapshot with None -> [] | Some snapshot -> snapshot.instances in
+        let* snapshot = Addons.decode_slice ~instances json in Ok (snapshot, None)
+    | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Evidence _ ->
+        let suffix, body = match request with
+          | Addons.Attach json -> "attach", json
+          | Addons.Observe id -> "observe", `Assoc ["instance_id", `String id]
+          | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
+          | Addons.Evidence json -> "evidence", json
+          | Addons.Inspect | Addons.Slice _ -> assert false in
+        let* receipt = Masc_tui_http.post_json ~host ~port ~path:("/api/v1/lane-addons/" ^ suffix)
+          ~body:(Yojson.Safe.to_string body) in
+        (match inspect () with
+         | Ok snapshot -> Ok (snapshot, Some receipt)
+         | Error detail -> Error ("Action receipt: " ^ Yojson.Safe.to_string receipt ^ "; inspect failed: " ^ detail))
+  in
+  match Eio_context.get_switch_opt () with
+  | None -> state.lane_addons <- Some { view with error = Some "Eio switch unavailable" }
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+      let result = try perform () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon)
 
 let launch_browser_lane state ~mailbox operation =
   let open Browser_lane_view in
@@ -7712,6 +7753,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Buffer.clear state.msg_input;
       notice ~role:Message_error
         (Printf.sprintf "/activity takes fleet or changes, not %s" word)
+  | Masc_tui_command.Lane_addons input ->
+      Buffer.clear state.msg_input;
+      (match Masc_tui_lane_addons.parse_request input with
+       | Ok request -> launch_lane_addons state ~mailbox request
+       | Error detail ->
+           let view = Option.value ~default:Masc_tui_lane_addons.initial state.lane_addons in
+           state.lane_addons <- Some { view with error = Some detail })
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -10301,6 +10349,7 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Lane_addons _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
@@ -10521,6 +10570,14 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Lane_addons_loaded (generation, result) ->
+      (match state.lane_addons with
+       | Some view when view.generation = generation ->
+           state.lane_addons <- Some (match result with
+             | Error detail -> { view with loading = false; error = Some detail }
+             | Ok (snapshot, receipt) -> { view with loading = false; error = None;
+                 snapshot = Some snapshot; receipt = (match receipt with None -> view.receipt | Some _ -> receipt) })
+       | Some _ | None -> ())
   (* Every voice message carries the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
@@ -15000,6 +15057,13 @@ and is loaded on demand through keeper_skill.
          each did. *)
       let text_target = text_input_target state ~compact_viewport in
       (match input with
+       | Some (Pasted paste) when Option.is_some state.lane_addons ->
+           (match state.lane_addons with
+            | Some ({ draft = Some draft; _ } as view) ->
+                state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text) }
+            | Some _ | None -> ())
+       | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
+         when Option.is_some state.lane_addons -> ()
        (* A paste into a one-line field is the text, on one line: no dropped
           file to classify and no spill to disk, both of which are the
           composer's and mean nothing in a field a single row high. A copied
@@ -15259,6 +15323,7 @@ and is loaded on demand through keeper_skill.
          meaning unchanged, so no existing binding moved when the row
          appeared. The chat surface is excluded — it draws its own composer. *)
       let composer_claimed =
+        Option.is_none state.lane_addons &&
         (not compact_viewport)
         && ((not state.help_open && not state.keeper_deletions_open))
         && (not state.agenda_open)
@@ -15281,6 +15346,51 @@ and is loaded on demand through keeper_skill.
       in
       (match key with
        | Some _ when composer_claimed -> ()
+       | Some key when Option.is_some state.lane_addons ->
+           let module Addons = Masc_tui_lane_addons in
+           (match state.lane_addons with
+            | None -> ()
+            | Some view ->
+                let update next = state.lane_addons <- Some next in
+                let selected action = match Addons.selected_instance view with
+                  | None -> update { view with error = Some "Choose an attached instance first" }
+                  | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
+                (match view.draft with
+                 | Some draft ->
+                     (match key with
+                      | "esc" -> update { view with draft = None }
+                      | "\r" | "\n" | "enter" ->
+                          (match Addons.parse_request draft with
+                           | Ok request -> launch_lane_addons state ~mailbox:async_messages request
+                           | Error detail -> update { view with error = Some detail })
+                      | "\127" | "\b" | "backspace" -> update { view with draft = Some (Masc_tui_message_layout.drop_last_utf8_scalar draft) }
+                      | "\021" -> update { view with draft = Some "" }
+                      | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
+                      | _ -> ())
+                 | None ->
+                     match key with
+                     | "esc" | "q" -> state.lane_addons <- None
+                     | ":" -> update { view with draft = Some ""; scroll = 0 }
+                     | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "o" -> selected (fun id -> Addons.Observe id)
+                     | "d" -> selected (fun id -> Addons.Detach id)
+                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Instances) }
+                     | "J" | "K" -> update { view with scroll = max 0 (min (List.length (Addons.lines view) - 1) (view.scroll + (if key = "J" then 1 else -1))) }
+                     | "j" | "down" | "k" | "up" ->
+                         let delta = if key = "j" || key = "down" then 1 else -1 in
+                         (match view.snapshot, view.focus with
+                          | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
+                          | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
+                          | None, _ -> ())
+                     | " " ->
+                         (match Addons.selected_row view with None -> () | Some row ->
+                           update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
+                     | "e" when view.selected <> [] ->
+                         (match Addons.selected_instance view with None -> () | Some instance ->
+                           launch_lane_addons state ~mailbox:async_messages
+                             (Addons.Evidence (`Assoc ["instance_id", `String instance.id;
+                               "row_ids", `List (List.map (fun id -> `String id) view.selected)])))
+                     | _ -> ()))
        (* Inline Runtime_params editing is modal: printable keys, including q,
           belong to the value.  Friendly mode turns the registry's declared
           type into a bool/number/string control; capital E is the explicit
@@ -16102,6 +16212,9 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state
+                 | Some (_, Masc_tui_types.Palette_lane_addons) ->
+                     launch_lane_addons state ~mailbox:async_messages
+                       Masc_tui_lane_addons.Inspect
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_goto destination) ->

@@ -77,8 +77,6 @@
 # backtrace, so the exact equality this asserted is unreachable (#34519
 # measured the same thing for the sibling suite). What remains is the
 # coordination case below, which is a behaviour claim, not a test shape.
-test/test_keeper_fs_directory_durability          # coordination: a waiter retries an ordinary owner Directory_prepare failure instead of sharing it [2026-09-10 alone: fails, run 34434062139]
-
 # The complete root sweep at 95146db3ff (34384710653, 2026-09-09) reported
 # fs_edit_patch as passing: 43 tests run, 1.082s, no failure. #34924 merged
 # six minutes before that run and its race-injection commit is what the row

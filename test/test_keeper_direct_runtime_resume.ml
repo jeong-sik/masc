@@ -4,6 +4,7 @@ module Owner = Keeper_owner
 module Registry = Keeper_owner_registry
 module Continuation = Keeper_direct_runtime_continuation
 module Checkpoint = Keeper_checkpoint_store
+module Store = Keeper_chat_operation_store
 
 let require label = function Ok value -> value | Error _ -> fail (label ^ " failed")
 let write path value =
@@ -169,6 +170,22 @@ is-default = true
   run_phase ~resume:false;
   check int "completed tool ran before rate limit" 1 !effects;
   check int "alternate not invoked before owner restart" 0 (List.length !alternate_bodies);
+  let store_path =
+    Store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_name
+  in
+  let store = Store.open_or_create ~path:store_path |> require "open store after defer" in
+  let now = Time_compat.now () in
+  check bool "cooling retry is not claimable during cooling window" false
+    (Store.has_claimable_queued store ~now |> require "has_claimable_queued");
+  check bool "claim_next returns None during cooling window" true
+    (match Store.claim_next store ~now |> require "claim_next" with
+     | None -> true
+     | Some _ -> false);
+  check bool "cooling retry becomes claimable once not_before passes" true
+    (Store.has_claimable_queued store ~now:(now +. 5.0) |> require "has_claimable_queued after cooling");
+  Store.close store |> require "close store";
   write runtime_path (runtime_config ~with_removed:false);
   Runtime.init_default ~config_path:runtime_path |> require "remove frozen first runtime";
   run_phase ~resume:true;

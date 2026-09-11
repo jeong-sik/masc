@@ -66,4 +66,4 @@ let resume ~base_path ~port ~expected_uid =
     ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
     ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) with
   | Error error -> prerr_endline (Account.error_message error); 1
-  | Ok _ -> Masc_cli_onboarding.run ~base_path:(Some base_path) ~port ~resume:false ~sandbox_step:true
+  | Ok _ -> Masc_cli_onboarding.run ~base_path:(Some base_path) ~port:(Some port) ~resume:false ~sandbox_step:true

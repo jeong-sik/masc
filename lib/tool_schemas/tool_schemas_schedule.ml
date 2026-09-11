@@ -7,6 +7,8 @@ let update_schema = Tool_schemas_schedule_toml.update.input_schema
 let list_schema = Tool_schemas_schedule_toml.list.input_schema
 let get_schema = Tool_schemas_schedule_toml.get.input_schema
 let cancel_schema = Tool_schemas_schedule_toml.cancel.input_schema
+let note_add_schema = Tool_schemas_schedule_toml.note_add.input_schema
+let notes_list_schema = Tool_schemas_schedule_toml.notes_list.input_schema
 
 type action =
   | Create_request
@@ -14,6 +16,8 @@ type action =
   | List_requests
   | Get_request
   | Cancel_request
+  | Add_note
+  | List_notes
 [@@deriving enumerate]
 
 type definition =
@@ -57,6 +61,16 @@ let definition_for = function
       ~name:Tool_schemas_schedule_toml.cancel.name
       ~description:Tool_schemas_schedule_toml.cancel.description
       ~input_schema:cancel_schema ~read_only:false
+  | Add_note ->
+    definition ~action:Add_note ~id:"note_add"
+      ~name:Tool_schemas_schedule_toml.note_add.name
+      ~description:Tool_schemas_schedule_toml.note_add.description
+      ~input_schema:note_add_schema ~read_only:false
+  | List_notes ->
+    definition ~action:List_notes ~id:"notes_list"
+      ~name:Tool_schemas_schedule_toml.notes_list.name
+      ~description:Tool_schemas_schedule_toml.notes_list.description
+      ~input_schema:notes_list_schema ~read_only:true
 ;;
 
 let definitions : definition list = List.map definition_for all_of_action

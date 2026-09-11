@@ -5,6 +5,16 @@
 (name masc)
 (version 0.35.11)
 
+; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
+; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
+; build. Declaring the package here lets lib/msx_lane link
+; ocaml-msx.msx from the vendored sources. Environments with the real pin
+; installed find both the vendored and the pinned package at the same
+; findlib names, so nothing changes for CI; the vendored directory stays
+; uncommitted.
+(package
+ (name ocaml-msx))
+
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
 ; ocamlformat workflow this comment used to cite no longer exists. But

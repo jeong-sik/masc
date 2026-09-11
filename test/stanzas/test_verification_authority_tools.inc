@@ -4,6 +4,7 @@
 (test
  (name test_verification_authority_tools)
  (modules test_verification_authority_tools)
+ (deps fixtures/verifier-image-lookup.png)
  (libraries
   masc_test_deps
   ;; The producer runs on the remote_ssh profile: the fixture endpoint row is

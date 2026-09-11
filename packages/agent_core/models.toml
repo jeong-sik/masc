@@ -3096,6 +3096,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_top_k = false
 supports_min_p = false
 supports_parallel_tool_calls = false
@@ -3114,6 +3115,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_top_k = false
 supports_min_p = false
 supports_parallel_tool_calls = false
@@ -3132,6 +3134,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_top_k = false
 supports_min_p = false
@@ -3151,6 +3154,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_top_k = false
 supports_min_p = false
@@ -3209,6 +3213,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false
 
@@ -3275,6 +3280,7 @@ reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning"
 reasoning_replay = "drop_without_tool"
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false
 
@@ -3292,6 +3298,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false
 # Gateway input modalities are text only for this id.
@@ -3312,6 +3319,7 @@ reasoning_replay = "drop_without_tool"
 # All seven rungs answered 200; "none" billed 0 reasoning tokens,
 # so the disable rung is real and not just accepted (probe7).
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false
 # Gateway input modalities are text only for this id.

@@ -7,6 +7,8 @@ open Alcotest
    see nothing. Same repo-root idiom test_tool_task_coverage uses — that
    executable passes inside the CI sandbox, so the mechanism is CI-proven. *)
 let () =
+  let prompt_dir = Masc_test_deps.source_path "config/prompts" in
+  Prompt_registry.set_markdown_dir prompt_dir;
   Masc.Prompt_defaults.init ()
 ;;
 
@@ -163,6 +165,36 @@ let make_ctx () =
    masc-keeper-sandbox:local while a sandboxed run reached for
    masc-sandbox:general, so a host holding the first one answered "available"
    and the run failed on the second. *)
+let docker_shares_a_temp_workspace =
+  lazy
+    (let dir = temp_dir "mount-premise" in
+     let sentinel = Filename.concat dir "mount-premise" in
+     let shared =
+       try
+         Fun.protect
+           ~finally:(fun () -> cleanup_dir dir)
+           (fun () ->
+              write_file sentinel "visible";
+              Sys.command
+                (Printf.sprintf
+                   "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
+                    /masc-mount-premise/mount-premise >/dev/null 2>&1"
+                   (Filename.quote dir)
+                   (Filename.quote Keeper_sandbox_image.default_tag))
+              = 0)
+       with _ -> false
+     in
+     if not shared
+     then
+       Printf.eprintf
+         "SKIPPING cases requiring live sandbox: this host's docker does not share \
+          %s into a container, so a case's temp workspace arrives empty and \
+          every read answers \"No such file or directory\". A colima context \
+          mounts $HOME only; add this path to its mount list, or run the suite \
+          from a workspace under a shared path.\n%!"
+         (Filename.dirname dir);
+     shared)
+
 let is_sandbox_available =
   lazy (
     match Masc_test_deps.fixture_sandbox_profile () with
@@ -173,6 +205,7 @@ let is_sandbox_available =
               "docker image inspect %s > /dev/null 2>&1"
               (Filename.quote Keeper_sandbox_image.default_tag))
          = 0
+         && Lazy.force docker_shares_a_temp_workspace
        with _ -> false)
     | _ -> false
   )
@@ -7938,6 +7971,64 @@ let test_edit_manifest_through_model_projection () =
 
 ;;
 
+let test_peer_artifact_materializes_exact_binary () =
+  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+    let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
+      sandbox_image = Some "alpine:peer-fixture" } in
+    let peer = { sender with name = "receiving-peer" } in
+    (* The materialize write lands in the peer's own playground bind, which the
+       sandbox creates when the peer registers; this fixture builds the peer
+       inline, so it owns creating that root the same way. *)
+    Fs_compat.mkdir_p (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer);
+    let recovery = { publication_recovery with Publication_availability.keeper_name = peer.name } in
+    let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let chunk = "/masc-work/receiving-peer/image\000\255" in
+    let limit = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
+    let bytes = bytes ^ String.concat "" (List.init (limit / String.length chunk + 1) (fun _ -> chunk)) in
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let source_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config sender in
+    Fs_compat.mkdir_p source_root;
+    let source = Filename.concat source_root "generated.png" in
+    Fs_compat.save_file source bytes;
+    let docker = Filename.concat config.base_path "docker" in
+    let script = Printf.sprintf
+      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+      (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root sender.name) "generated.png"))
+      (Filename.quote source) in
+    Fs_compat.save_file docker script; Unix.chmod docker 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    let previous_fake = Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" in
+    Unix.putenv "PATH" (config.base_path ^ ":" ^ previous_path);
+    Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" docker;
+    Fun.protect ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value ~default:"" previous_fake)) (fun () ->
+    let exported = Masc.Keeper_peer_artifact.handle ~config ~meta:sender
+        ~turn_sandbox_factory:None ~write:(fun _ -> fail "export attempted a write")
+        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"; "purpose", `String "Poster image"]) in
+    check bool "sender export completed" true (exported.disposition = Tool_result.Completed ());
+    let exported_json = Yojson.Safe.Util.member "artifact" (parse_json exported.raw_output) in
+    let request = match Masc.Keeper_invocation_contract.request_of_json
+        (`Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
+                 "prompt", `String "Reuse this PNG"; "artifacts", `List [exported_json]]) with
+      | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
+    let reference = match Masc.Keeper_invocation_contract.artifacts request with
+      | [reference] -> reference | _ -> fail "delegation lost reference" in
+    let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
+    let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
+        ~turn_sandbox_factory:None ~write ~args:(`Assoc ["action", `String "materialize";
+          "path", `String path; "artifact", Masc.Keeper_peer_artifact_ref.to_json reference]) in
+    let result = invoke "received.png" in
+    check bool "write completed" true (result.disposition = Tool_result.Completed ());
+    let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
+    check string "binary exact" bytes (Fs_compat.load_file path);
+    check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
+    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.blob.sha256 0 2)) reference.blob.sha256 in
+    Fs_compat.save_file blob "corrupted";
+    check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
+
+
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
@@ -7989,10 +8080,12 @@ let test_binary_write_reference_survives_replay () =
     Fs_compat.save_file blob "corrupt";
     check bool "replay fails on corrupt content" true ((invoke ()).disposition <> Tool_result.Completed ());
     check string "corrupt replay leaves recipient intact" bytes (Fs_compat.load_file target))
+;;
 
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
+    ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
     ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick

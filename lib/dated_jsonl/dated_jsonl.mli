@@ -224,6 +224,19 @@ val range_day_file_paths : t -> since:string -> until:string -> string list
     path returned here is a file that call would have read. Invalid dates give
     the empty list. *)
 
+val fold_range_appended_raw
+  :  t
+  -> since:string
+  -> until:string
+  -> cursors:(string * int) list
+  -> init:'acc
+  -> f:('acc -> string -> 'acc)
+  -> 'acc * (string * int) list
+(** Fold only the raw lines a range gained since [cursors] said each file was
+    read to, and return the accumulator with the cursors advanced.
+    Unlike {!fold_range_appended}, lines are passed unparsed so callers can
+    pre-filter or decode selectively. *)
+
 val fold_range_appended
   :  t
   -> since:string

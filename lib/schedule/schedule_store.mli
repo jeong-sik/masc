@@ -8,6 +8,7 @@ type state =
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
   ; wakes : Schedule_domain.wake_record list
+  ; notes : Schedule_domain.schedule_note list
   }
 
 type store_error =
@@ -214,3 +215,25 @@ val prune_completed :
   Workspace_utils.config ->
   (state * int, store_error) result
 (** Deletes terminal schedule requests and their wake-delivery records. *)
+
+val append_note :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  author_id:string ->
+  author_kind:Schedule_domain.actor_kind ->
+  body:string ->
+  now:float ->
+  (Schedule_domain.schedule_note * int, store_error) result
+(** Appends a note to one schedule's note history and returns it with the new
+    note count for that schedule_id. Notes are keyed by the stable
+    [schedule_id], not the per-instance id, so a definition replacement
+    (masc_schedule_update) does not orphan the prose that explains it. Notes
+    are append-only: no edit, no removal. *)
+
+val notes_for_schedule :
+  state -> schedule_id:string -> Schedule_domain.schedule_note list
+(** Every retained note of one schedule_id, oldest first. Notes survive
+    terminal state transitions: they are history, not state. *)
+
+val note_count_per_schedule : state -> string -> int
+(** Number of retained notes for one schedule_id. *)

@@ -5605,6 +5605,11 @@
  (libraries alcotest yojson unix masc masc.masc_tool_blob_store))
 
 (test
+ (name test_lane_addon_resource_events)
+ (modules test_lane_addon_resource_events)
+ (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
  (name test_runtime_setup_spec)
  (modules test_runtime_setup_spec)
  (libraries alcotest yojson masc.runtime)
@@ -5624,3 +5629,9 @@
  (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))
 
 (include stanzas/test_prerequisite_terminal.inc)
+(include stanzas/test_workspace_connection.inc)
+
+(test
+ (name test_model_catalog_thinking_control)
+ (modules test_model_catalog_thinking_control)
+ (libraries alcotest masc.agent_core.llm_provider))

@@ -263,8 +263,7 @@ let test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep () 
       ; ("schedules", `List (List.map Schedule_domain.schedule_request_to_yojson legacy_state.schedules))
       ; ("wakes", `List (List.map Schedule_domain.wake_record_to_yojson legacy_state.wakes))
       ]
-  in
-  Workspace_core.write_text config
+  in  Workspace_core.write_text config
     (schedules_path config)
     (Yojson.Safe.to_string legacy_state_json);
   (* A different schedule's cancel forces a store write pass; the sweep in
@@ -1135,7 +1134,8 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
                 (List.map
                    Schedule_domain.wake_record_to_yojson
                    old_state.wakes) )
-          ]));
+          ]
+       ));
   let new_request = make_request ~schedule_id:old_request.schedule_id () in
   check bool "public ID reuse mints a new instance" false
     (String.equal

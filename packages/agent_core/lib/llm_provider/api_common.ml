@@ -201,33 +201,65 @@ let admit_document_blocks ~wire_form ~model_id ~supports_document_input blocks =
    degraded outcome for a conversation whose model cannot read documents. A
    model that CAN carry the document (capability declared, wire has a document
    part) keeps its native block untouched. *)
-let document_omitted_placeholder ~media_type =
-  Text
-    (Printf.sprintf
-       "[document omitted: this model does not accept document input (media_type %s)]"
-       media_type)
+let document_omitted_note ~media_type =
+  Printf.sprintf
+    "[document omitted: this model does not accept document input (media_type %s)]"
+    media_type
 ;;
 
-let degrade_document_block ~wire_form ~supports_document_input block =
-  match block with
-  | Document { media_type; _ } ->
-    let representable =
-      match wire_form with
-      | Document_unrepresentable -> false
-      | Document_source_block
-      | Document_inline_data
-      | Document_input_file_part
-      | Document_chat_file_part -> supports_document_input
+let document_omitted_placeholder ~media_type =
+  Text (document_omitted_note ~media_type)
+;;
+
+(* Shared walker for the document and audio degraders: [rewrite_block]
+   returns [Some (note, placeholder)] for a block whose declared capability
+   is missing and [None] when the block stays. ToolResult [content_blocks]
+   are walked too — [Tool_result_projection.media_parts] projects from there,
+   which is what lets an unrepresentable block ride the follow-up turn — and
+   omissions are named on the canonical tool content, mirroring
+   [degrade_image_messages], so no wire carries the rewrite silently.
+   Returns the rewritten history and the number of blocks degraded. *)
+let degrade_blocks_messages rewrite_block messages =
+  let degraded = ref 0 in
+  let rewrite (message : Types.message) =
+    let content =
+      List.map
+        (fun block ->
+           match rewrite_block block with
+           | Some (_note, placeholder) ->
+             incr degraded;
+             placeholder
+           | None ->
+             (match block with
+              | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+                let notes = ref [] in
+                let blocks =
+                  List.map
+                    (fun inner ->
+                       match rewrite_block inner with
+                       | Some (note, placeholder) ->
+                         incr degraded;
+                         notes := note :: !notes;
+                         placeholder
+                       | None -> inner)
+                    blocks
+                in
+                if !notes = [] then block
+                else begin
+                  let notes = String.concat "\n" (List.rev !notes) in
+                  let content =
+                    if result.content = "" then notes
+                    else result.content ^ "\n" ^ notes
+                  in
+                  ToolResult { result with content; content_blocks = Some blocks }
+                end
+              | block -> block))
+        message.content
     in
-    if representable then block else document_omitted_placeholder ~media_type
-  | Text _
-  | Thinking _
-  | ReasoningDetails _
-  | RedactedThinking _
-  | ToolUse _
-  | ToolResult _
-  | Image _
-  | Audio _ -> block
+    { message with content }
+  in
+  let messages = List.map rewrite messages in
+  messages, !degraded
 ;;
 
 (* Replace every unrepresentable document across the whole history with the
@@ -235,24 +267,25 @@ let degrade_document_block ~wire_form ~supports_document_input block =
    Returns the rewritten messages and the count of documents degraded, so a
    caller may log or surface the degradation without re-walking. *)
 let degrade_document_messages ~wire_form ~supports_document_input messages =
-  let degraded = ref 0 in
-  let rewrite (message : Types.message) =
-    let content =
-      List.map
-        (fun block ->
-           let block' =
-             degrade_document_block ~wire_form ~supports_document_input block
-           in
-           (match block, block' with
-            | Document _, Text _ -> incr degraded
-            | _ -> ());
-           block')
-        message.content
-    in
-    { message with content }
-  in
-  let messages = List.map rewrite messages in
-  messages, !degraded
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Document { media_type; _ } ->
+         let representable =
+           match wire_form with
+           | Document_unrepresentable -> false
+           | Document_source_block
+           | Document_inline_data
+           | Document_input_file_part
+           | Document_chat_file_part -> supports_document_input
+         in
+         if representable then None
+         else
+           Some
+             ( document_omitted_note ~media_type
+             , document_omitted_placeholder ~media_type )
+       | _ -> None)
+    messages
 ;;
 
 (* Same boundary, image side. [Tool_result_projection.with_image_followups]
@@ -276,6 +309,34 @@ let image_omitted_note ~media_type =
 
 let image_omitted_placeholder ~media_type =
   Text (image_omitted_note ~media_type)
+;;
+
+(* Same boundary, audio side. Tool-result audio blocks are projected by
+   [Tool_result_projection.media_parts] the same way images are, so a model
+   without [supports_audio_input] would receive an [input_audio] part it
+   rejects — the B-1 residual behind this repair. Audio nested in ToolResult
+   [content_blocks] is rewritten too, and the omission is named on the
+   canonical tool content. *)
+let audio_omitted_note ~media_type =
+  Printf.sprintf
+    "[audio omitted: this model does not accept audio input (media_type %s)]"
+    media_type
+;;
+
+let audio_omitted_placeholder ~media_type =
+  Text (audio_omitted_note ~media_type)
+;;
+
+let degrade_audio_messages ~supports_audio_input messages =
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Audio { media_type; _ } when not supports_audio_input ->
+         Some
+           ( audio_omitted_note ~media_type
+           , audio_omitted_placeholder ~media_type )
+       | _ -> None)
+    messages
 ;;
 
 let degrade_image_messages ~supports_image_input messages =

@@ -53,3 +53,6 @@ val edit_table_scalar :
 val edit_table_multiline_array :
   string -> path:string -> key:string -> values:string list -> string
 (** Set a multi-line string array key inside [[path]]. *)
+
+val edit_table_int : string -> path:string -> key:string -> value:int -> string
+(** Set a typed integer while retaining unrelated lines and comments. *)

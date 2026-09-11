@@ -2,9 +2,9 @@ import { html } from 'htm/preact'
 import { render, fireEvent, screen, waitFor, cleanup } from '@testing-library/preact'
 import { afterEach, expect, it, vi } from 'vitest'
 import { RuntimeSetupPicker } from './runtime-setup-picker'
-import { post } from '../api/core'
+import { post, postControlPlane } from '../api/core'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
-vi.mock('../api/core', () => ({ post: vi.fn() }))
+vi.mock('../api/core', () => { const post = vi.fn(); return { post, postControlPlane: vi.fn((path, body) => post(path, body)) } })
 afterEach(() => { cleanup(); vi.resetAllMocks(); modelSetupResumeState.value = { kind: 'idle' } })
 const inventory = { source_revision: 'source', setup_revision: 'paired-revision', runtimes: [], integrations: [
   { id: 'openrouter', display_name: 'OpenRouter', protocol: 'openai-compatible-http', setup_support: 'new_connection', endpoint: 'https://openrouter.ai/api/v1' },
@@ -150,4 +150,39 @@ it('imports an explicitly selected server account and keeps only its opaque refe
     selection: [{ connection: 0, model: 0 }] }))
   expect(document.body.textContent).not.toContain(account_ref)
   expect(document.querySelector('input[type="password"]')).toBeNull()
+})
+
+it('owns cancellation of a pending save and never treats cancellation as rollback or starts resume', async () => {
+  vi.mocked(postControlPlane).mockImplementation((_path, _body, _headers, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new DOMException('operator cancelled', 'AbortError')), { once: true })
+  }))
+  const selected = { ...inventory, runtimes: [{ id: 'existing.model', provider_id: 'existing', display_name: 'Existing', model: 'Model', protocol: 'codex-app-server', endpoint: null }] }
+  render(html`<${RuntimeSetupPicker} inventory=${selected} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  fireEvent.click(await screen.findByText('요청 대기 취소'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+  expect(post).not.toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
+})
+it('cancels its pending model discovery when the settings surface unmounts', async () => {
+  let observed: AbortSignal | undefined
+  vi.mocked(postControlPlane).mockImplementation((_path, _body, _headers, options) => new Promise((_resolve, reject) => {
+    observed = options?.signal
+    observed?.addEventListener('abort', () => reject(new DOMException('unmounted', 'AbortError')), { once: true })
+  }))
+  const view = render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } }); fireEvent.click(screen.getByText('모델 목록 확인'))
+  await waitFor(() => expect(observed).toBeDefined())
+  view.unmount(); expect(observed?.aborted).toBe(true)
+})
+
+it('does not mistake cancelled account import for missing authentication', async () => {
+  vi.mocked(postControlPlane).mockImplementation((_path, _body, _headers, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+  }))
+  const accounts = { ...inventory, integrations: [{ id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${accounts} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'antigravity' } })
+  fireEvent.click(screen.getByText('서버의 로그인된 Antigravity 계정 사용')); fireEvent.click(await screen.findByText('요청 대기 취소'))
+  await screen.findByText(/계정 가져오기 응답 대기를 취소했습니다/)
+  expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
 })

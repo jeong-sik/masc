@@ -16,6 +16,13 @@ open Workspace_types
 module AR = Task.Anti_rationalization
 module Agent = Goal_verification_agent.For_testing
 
+let lookup_text result =
+  match result with
+  | Tool_result.Completed _ -> Ok (Tool_result.message result)
+  | Tool_result.Failed _ -> Error (Tool_result.message result)
+  | Tool_result.Deferred _ -> Alcotest.fail "lookup unexpectedly deferred"
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "goal_verification_agent_" "" in
   Sys.remove path;
@@ -344,6 +351,7 @@ let test_goal_proof_reads_the_workspace_playground () =
           dispatch
             ~name:"tool_read_file"
             ~args:(`Assoc [ "file_path", `String path ])
+          |> lookup_text
         in
         (match read with
          | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
@@ -399,6 +407,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
           ~args:
             (`Assoc
               [ "file_path", `String (Filename.concat "some-keeper" "measurement.txt") ])
+        |> lookup_text
       in
       let verdict, reason =
         match read with

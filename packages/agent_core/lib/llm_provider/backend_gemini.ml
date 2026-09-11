@@ -653,15 +653,34 @@ let build_request_artifact
      [supports_image_input]: the projection would emit an inlineData part
      the endpoint rejects or drops. Degrading to a named placeholder keeps
      the turn live, mirroring the OpenAI-compatible request boundary. *)
-  let projected_messages, _images_degraded =
+  let projected_messages =
     let caps =
       match Provider_config.capabilities_for_config_model config with
       | Some caps -> caps
       | None -> Capabilities.gemini_capabilities
     in
-    Api_common.degrade_image_messages
-      ~supports_image_input:caps.supports_image_input
-      projected_messages
+    let projected_messages, _images_degraded =
+      Api_common.degrade_image_messages
+        ~supports_image_input:caps.supports_image_input
+        projected_messages
+    in
+    (* Same boundary for documents and audio: [media_parts] projects
+       tool-result Document/Audio blocks alongside images, so a model lacking
+       declared capability ([supports_document_input] / [supports_audio_input])
+       would reach [contents_of_messages] unrepresentable. Degrading here —
+       before projection — mirrors the image rule above. *)
+    let projected_messages, _documents_degraded =
+      Api_common.degrade_document_messages
+        ~wire_form:Api_common.Document_inline_data
+        ~supports_document_input:caps.supports_document_input
+        projected_messages
+    in
+    let projected_messages, _audio_degraded =
+      Api_common.degrade_audio_messages
+        ~supports_audio_input:caps.supports_audio_input
+        projected_messages
+    in
+    projected_messages
   in
   let contents, system_instruction = contents_of_messages projected_messages in
   (* Prepend system_prompt from config if present *)

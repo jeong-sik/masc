@@ -333,7 +333,7 @@ let to_agent_core_typed_result
       ~metadata:(Tool_result.metadata tr)
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_core.Types.content; content_blocks = None; _meta = output.metadata })
+         Ok { Agent_core.Types.content; content_blocks = output.content_blocks; _meta = output.metadata })
   | Tool_result.Deferred output ->
     let disposition_field =
       "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
@@ -352,7 +352,7 @@ let to_agent_core_typed_result
       ~metadata:(Tool_result.metadata tr)
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_core.Types.content; content_blocks = None; _meta = Some metadata })
+         Ok { Agent_core.Types.content; content_blocks = output.content_blocks; _meta = Some metadata })
   | Tool_result.Failed { effect_disposition; class_; message; data; metadata; _ } ->
     let failure_class = Tool_result.tool_failure_class_to_string class_ in
     let next_move = failure_next_move class_ in

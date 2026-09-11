@@ -79,10 +79,10 @@ masc setup --base-path "$HOME/masc-workspace"
 [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.5)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.35.9 (check tag availability on GitHub Releases).
+> Installation target: v0.35.10 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.9
+TAG=v0.35.10
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"

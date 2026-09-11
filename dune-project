@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.35.9)
+(version 0.35.10)
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
@@ -48,6 +48,12 @@
   (ws-direct-core (>= 0.1.0))
   (ws-direct-gluten (>= 0.1.0))
   (ws-direct-eio (>= 0.1.0))
+  ; lib/msx_lane links ocaml-msx.msx. The generated masc.opam carried this
+  ; dependency by hand while dune-project did not declare it, so every local
+  ; `dune build` regenerated masc.opam without the line and left the worktree
+  ; dirty -- and a run that nobody reverted took the dependency out (#34747).
+  ; Path-pinned: `opam pin add ocaml-msx --kind=path <core repo>`, per bin/dune.
+  ocaml-msx
   ; Native stdout colour capability detection links the system terminfo API.
   (conf-ncurses :build)
   ; Standard dependencies

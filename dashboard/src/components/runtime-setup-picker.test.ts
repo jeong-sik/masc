@@ -1,0 +1,153 @@
+import { html } from 'htm/preact'
+import { render, fireEvent, screen, waitFor, cleanup } from '@testing-library/preact'
+import { afterEach, expect, it, vi } from 'vitest'
+import { RuntimeSetupPicker } from './runtime-setup-picker'
+import { post } from '../api/core'
+import { modelSetupResumeState } from '../lib/model-setup-resume'
+vi.mock('../api/core', () => ({ post: vi.fn() }))
+afterEach(() => { cleanup(); vi.resetAllMocks(); modelSetupResumeState.value = { kind: 'idle' } })
+const inventory = { source_revision: 'source', setup_revision: 'paired-revision', runtimes: [], integrations: [
+  { id: 'openrouter', display_name: 'OpenRouter', protocol: 'openai-compatible-http', setup_support: 'new_connection', endpoint: 'https://openrouter.ai/api/v1' },
+] }
+it('selects multiple models and default by clicking, hides key, resumes only after verified save', async () => {
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/models')) return { models: [
+      { id: 'model-a', label: 'Model A', context: 100000, tools: true },
+      { id: 'model-b', label: 'Model B', context: 200000, tools: true },
+      { id: 'unknown', label: 'Unknown', context: null, tools: null },
+    ] }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'native-b', runtime_ids: ['native-b', 'native-a'] }
+    return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+  })
+  const saved = vi.fn()
+  render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${saved} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  const input = screen.getByLabelText('새 연결 API 키') as HTMLInputElement
+  expect(input.type).toBe('password')
+  fireEvent.input(input, { target: { value: 'fixture-private-key' } })
+  fireEvent.click(screen.getByText('모델 목록 확인'))
+  await screen.findByLabelText('Model A')
+  expect((screen.getByLabelText(/Unknown/) as HTMLInputElement).disabled).toBe(true)
+  fireEvent.click(screen.getByLabelText('Model A')); fireEvent.click(screen.getByLabelText('Model B'))
+  fireEvent.click(screen.getByText('선택한 모델 추가'))
+  expect(input.value).toBe('')
+  fireEvent.click(screen.getByText('기본으로 선택'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce())
+  const call = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))
+  expect(call?.[1]).toEqual({ revision: 'paired-revision', connections: [
+    { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'fixture-private-key' }, models: [{ id: 'model-b', context: 200000, streaming: true }] },
+    { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'fixture-private-key' }, models: [{ id: 'model-a', context: 100000, streaming: true }] },
+  ], selection: [{ connection: 0, model: 0 }, { connection: 1, model: 0 }] })
+  expect(document.body.textContent).not.toContain('fixture-private-key')
+  expect(post).toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
+})
+it('keeps selected revision across inventory changes and hides backend errors', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  const view = render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model'))
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${{ ...initial, setup_revision: 'new-revision' }} onSaved=${vi.fn()} />`)
+  vi.mocked(post).mockRejectedValue(new Error('private-backend-secret'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', { revision: 'paired-revision', connections: [], selection: [{ runtime_id: 'old.id' }] })
+  expect(post).not.toHaveBeenCalledWith('/api/v1/runtime/setup/resume', {})
+  expect(document.body.textContent).not.toContain('private-backend-secret')
+})
+
+it('binds a discovered key and models to their original endpoint and revision before addition', async () => {
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/models')) return { models: [{ id: 'model-a', label: 'Model A', context: 100000, tools: true }] }
+    throw new Error('configuration changed')
+  })
+  const view = render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.input(screen.getByLabelText('새 연결 API 키'), { target: { value: 'endpoint-a-private-key' } })
+  fireEvent.click(screen.getByText('모델 목록 확인'))
+  await screen.findByLabelText('Model A')
+  const changed = { ...inventory, setup_revision: 'revision-b', integrations: inventory.integrations.map(row => ({ ...row, endpoint: 'https://other.invalid/v1' })) }
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${changed} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Model A')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+  const body = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))?.[1]
+  expect(body).toEqual({ revision: 'paired-revision', connections: [{
+    source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1', api_key: 'endpoint-a-private-key' },
+    models: [{ id: 'model-a', context: 100000, streaming: true }],
+  }], selection: [{ connection: 0, model: 0 }] })
+  expect(document.body.textContent).not.toContain('endpoint-a-private-key')
+})
+it('invalidates discovered models when the account key changes', async () => {
+  vi.mocked(post).mockResolvedValue({ models: [{ id: 'model-a', label: 'Model A', context: 100000, tools: true }] })
+  render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByLabelText('Model A')
+  fireEvent.input(screen.getByLabelText('새 연결 API 키'), { target: { value: 'different-account' } })
+  expect(screen.queryByLabelText('Model A')).toBeNull()
+  expect(screen.queryByText('선택한 모델 추가')).toBeNull()
+})
+
+it('keeps saved success distinct when server activation fails', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'old.id', runtime_ids: ['old.id'] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/모델 저장과 응답·도구 검증은 완료했습니다/)
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+  expect(modelSetupResumeState.value.kind).toBe('failed')
+})
+it('prepares only the chosen model without a numeric input', async () => {
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/models')
+    ? { models: [{ id: 'unknown', label: 'Unknown', context: null, tools: null }] }
+    : { model: 'unknown', context: 32768, tools: true, context_source: 'serving_endpoint' })
+  render(html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'openrouter' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByText('이 모델만 준비')
+  fireEvent.click(screen.getByText('이 모델만 준비'))
+  await screen.findByText(/실행 context를 확인했습니다/)
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/context', { source: { integration_id: 'openrouter', endpoint: 'https://openrouter.ai/api/v1' }, model: 'unknown', load: false })
+  expect((screen.getByLabelText('Unknown') as HTMLInputElement).disabled).toBe(false)
+  expect(document.querySelector('input[type=number]')).toBeNull()
+})
+it('uses native Codex discovery without endpoint or credential-path inputs', async () => {
+  vi.mocked(post).mockResolvedValue({ models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null }] })
+  const cli = { ...inventory, integrations: [{ id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
+  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByLabelText('Fresh')
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/models', { integration_id: 'codex' })
+  expect(screen.queryByLabelText('서버 API 주소')).toBeNull()
+  expect(screen.queryByLabelText('새 연결 API 키')).toBeNull()
+})
+
+it('imports an explicitly selected server account and keeps only its opaque reference through context and save', async () => {
+  const account_ref = 'a'.repeat(64)
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/antigravity')) return { schema: 'masc.web_setup_account.v1', account_imported: true, invocation_verified: false, account_ref,
+      catalog: { models: [{ id: 'account-model', label: 'Account model', context: null, tools: null }] } }
+    if (path.endsWith('/context')) return { model: 'account-model', context: 32768, tools: true }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'native-account', runtime_ids: ['native-account'] }
+    return { runtime_ready: true, exact_output_authority_available: false, model_setup: { status: 'available' } }
+  })
+  const initial = { ...inventory, integrations: [{ id: 'antigravity', display_name: 'Antigravity', protocol: 'antigravity-cli', setup_support: 'new_connection' }] }
+  const view = render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'antigravity' } })
+  expect(post).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('서버의 로그인된 Antigravity 계정 사용'))
+  await screen.findByLabelText(/Account model/)
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/accounts/antigravity', { integration_id: 'antigravity' })
+  view.rerender(html`<${RuntimeSetupPicker} inventory=${{ ...initial, setup_revision: 'later-revision' }} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByText('이 모델만 준비'))
+  await waitFor(() => expect((screen.getByLabelText('Account model') as HTMLInputElement).disabled).toBe(false))
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/context', { source: { integration_id: 'antigravity', account_ref }, model: 'account-model', load: false })
+  fireEvent.click(screen.getByLabelText('Account model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', { revision: 'paired-revision',
+    connections: [{ source: { integration_id: 'antigravity', account_ref }, models: [{ id: 'account-model', context: 32768, streaming: true }] }],
+    selection: [{ connection: 0, model: 0 }] }))
+  expect(document.body.textContent).not.toContain(account_ref)
+  expect(document.querySelector('input[type="password"]')).toBeNull()
+})

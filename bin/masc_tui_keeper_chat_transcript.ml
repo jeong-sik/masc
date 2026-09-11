@@ -206,6 +206,14 @@ type t =
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
            in the trail. [drawn] reconciles the two. *)
+  ; mutable settled_at : float option
+        (* The instant the turn's outcome landed: the first of Run_finished,
+           Run_failed or Reply_details. [started_at] is when the request left;
+           without the far end a block drawn from this log reads as one
+           moment when it covered a span, and a turn that ran twenty minutes
+           sits under rows typed during it carrying an opening clock (the
+           2026-09-10 msx-retro-mania misread). *)
+
   ; mutable revision : int
         (* Bumped by every mutation: the memo key for anything drawn from
            this transcript. *)
@@ -233,6 +241,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; current_runtime_id = None
   ; endpoint_streaming = false
   ; reply = None
+  ; settled_at = None
   ; revision = 0
   }
 
@@ -262,6 +271,7 @@ let trail_text t text =
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
+let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
@@ -1333,6 +1343,15 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
+(* The first end-of-turn delta owns the settle instant: Run_finished,
+   Run_failed and Reply_details arrive within moments of each other and the
+   second arrival says nothing the first did not. Journalled replays fold at
+   each line's own ts, so a rebuilt turn keeps the instant it really
+   settled. *)
+let settle t ~now =
+  if t.settled_at = None then t.settled_at <- Some now
+;;
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
@@ -1535,13 +1554,16 @@ let apply_delta ~now t (delta : Live.delta) =
         | _ -> message
       in
       t.phase <- Stream_failed message;
-      t.ended_at <- Some now
+      t.ended_at <- Some now;
+      settle t ~now
   | Live.Run_finished ->
       t.phase <- Stream_ended;
-      t.ended_at <- Some now
+      t.ended_at <- Some now;
+      settle t ~now
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
       t.reply <-
-        Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref }
+        Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref };
+      settle t ~now
   | Live.Undecodable detail ->
       note_unreadable t detail
 

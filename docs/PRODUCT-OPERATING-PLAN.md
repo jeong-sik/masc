@@ -4,9 +4,9 @@ status: live
 
 # Product Operating Plan
 
-> Current package version: v0.35.9
-> Latest changelog entry: v0.35.9 (2026-09-11)
-> Latest published GitHub release: v0.35.9 (2026-09-11)
+> Current package version: v0.35.10
+> Latest changelog entry: v0.35.10 (2026-09-11)
+> Latest published GitHub release: v0.35.10 (2026-09-11)
 > Updated: 2026-09-11
 > Release line: pre-1.0 (`0.y.z`)
 

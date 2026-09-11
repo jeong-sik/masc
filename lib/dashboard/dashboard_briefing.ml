@@ -108,7 +108,7 @@ let build_projection ?actor ~config ~sw ~clock
       mcp_session_id = None;
     }
   in
-  let snapshot_json =
+  let snapshot_compute () =
     Dashboard_projection_cache.get_or_compute_snapshot_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
         Dashboard_projection_cache.operator_snapshot_json
@@ -120,7 +120,7 @@ let build_projection ?actor ~config ~sw ~clock
           ~lightweight_summary:true
           ctx)
   in
-  let digest_json =
+  let digest_compute () =
     Dashboard_projection_cache.get_or_compute_digest_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
         match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
@@ -133,6 +133,9 @@ let build_projection ?actor ~config ~sw ~clock
                 ("recommended_actions", `List []);
                 ("error", `String message);
               ])
+  in
+  let snapshot_json, digest_json =
+    Eio.Fiber.pair snapshot_compute digest_compute
   in
   let namespace_json =
     match member_assoc "workspace" snapshot_json with

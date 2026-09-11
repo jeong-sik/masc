@@ -69,94 +69,19 @@ let dashboard_fixture_name ?fixture () =
         if trimmed <> "" then Some trimmed else Env_config.Dashboard_config.fixture_opt ()
     | None -> Env_config.Dashboard_config.fixture_opt ()
 
-(** Agent profile enriched from the Neo4j cache. *)
+(** Agent profile representation for dashboard views. *)
 type agent_profile = {
   emoji : string;
   korean_name : string;
 }
 
-(** Neo4j agent identity cache.  Loaded lazily on first lookup; once
-    populated the Hashtbl is read-only.
-
-    Invariant: [neo4j_cache_loaded] flips to true only after the
-    populate attempt finishes (success or error), so any fiber that
-    observes it set will never read an empty Hashtbl, and a failed
-    GraphQL load is not retried within the process lifetime.
-
-    Locking via [Eio_guard.with_mutex] so a contending fiber suspends
-    instead of freezing the whole Eio domain during the up to 10 s
-    GraphQL round-trip on first load. *)
-let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
-let neo4j_cache_loaded = ref false
-let neo4j_cache_mu = Eio.Mutex.create ()
-
-let is_neo4j_identity_context_error message =
-  String_util.contains_substring message "Switch accessed from wrong domain"
-
-let populate_neo4j_identity_cache_locked () =
-  let body =
-    {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName } } } }"}|}
-  in
-  match Graphql_client.request body with
-  | Error e when is_neo4j_identity_context_error e ->
-      Log.Dashboard.info "neo4j identity cache skipped: %s" e
-  | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
-  | Ok output -> (
-      try
-        let json = Yojson.Safe.from_string output in
-        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
-        let edges =
-          (match json |> m "data" |> m "agents" |> m "edges" with
-           | `List l -> l | _ -> [])
-        in
-        List.iter
-          (fun edge ->
-            let node = edge |> m "node" in
-            let name = Safe_ops.json_string ~default:"" "name" node in
-            if name <> "" then begin
-              let emoji =
-                Safe_ops.json_string_opt "emoji" node
-                |> Option.value ~default:"🤖"
-              in
-              let korean_name =
-                Safe_ops.json_string_opt "koreanName" node
-                |> Option.value ~default:name
-              in
-              Hashtbl.replace neo4j_identity_cache name
-                {
-                  emoji;
-                  korean_name;
-                }
-            end)
-          edges
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
-
-let lookup_neo4j_profile keeper_name =
-  Eio_guard.with_mutex neo4j_cache_mu (fun () ->
-    if not !neo4j_cache_loaded then begin
-      populate_neo4j_identity_cache_locked ();
-      neo4j_cache_loaded := true
-    end;
-    Hashtbl.find_opt neo4j_identity_cache keeper_name)
-
-(** Get full agent profile from Neo4j, then use an identity-only fallback. *)
+(** Get agent profile for dashboard projection.
+    Returns default identity emoji and agent name without dead Neo4j GraphQL dependency. *)
 let get_agent_profile (name : string) : agent_profile =
-  (* TODO(task-1823): The fallback below is a fake Keeper v2 dashboard field.
-     When no Neo4j data exists, we return hardcoded values
-     (emoji="🤖", korean_name=name) instead of live-backed surfaces.
-     A future change should either:
-       (a) require live-backed surfaces and raise/warn when no data is found, or
-       (b) populate from a guaranteed registry so no agent falls through. *)
-  let keeper_name = name in
-  let neo4j_profile = lookup_neo4j_profile keeper_name in
-  match neo4j_profile with
-  | Some profile -> profile
-  | None ->
-      {
-        emoji = "🤖";
-        korean_name = name;
-      }
+  {
+    emoji = "🤖";
+    korean_name = name;
+  }
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

@@ -1,0 +1,17 @@
+{
+  "port": 18951,
+  "scope": "isolated real-provider collaboration baseline",
+  "binary_commit": "68c7668a976a2ac7db36a80f10deaea3516ec469",
+  "binary_sha256": "beb1324c0ab4341595df6ac69cdee0571df3e16c3a4583f857130a10de817a1a",
+  "provenance": "observed installed file matched live health; copied without rebuilding",
+  "runtime_config_sha256": "b6a5cc8ee70e7bd56b8d72d2bb149340cac8d7a60f0602f2b4f76de9e7805d9a",
+  "keeper_runtimes": [
+    "kimi_coding.kimi-for-coding",
+    "glm-coding.glm-5.3"
+  ],
+  "verifier_runtime": "kimi_coding.kimi-for-coding",
+  "limitations": [
+    "single-runtime candidate lists; no failover claim",
+    "no work admitted yet"
+  ]
+}

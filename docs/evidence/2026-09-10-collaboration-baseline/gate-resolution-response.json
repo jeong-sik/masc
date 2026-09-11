@@ -1,0 +1,4 @@
+{
+  "status": 200,
+  "raw": "{\"ok\":true,\"id\":\"appr_01a08b40-f1fb-7000-87eb-8bd6b04b2fec\",\"decision\":\"approve\",\"rule_id\":null,\"audit_receipts\":[{\"recorded\":true,\"event\":\"resolved\"}]}"
+}

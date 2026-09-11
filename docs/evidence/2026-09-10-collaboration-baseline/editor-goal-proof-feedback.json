@@ -1,0 +1,4 @@
+{
+  "name": "exhibit-editor",
+  "message": "독립 검수 결과: 원래 task-001은 Verifier 승인으로 Done입니다. PDF는 실제 3페이지이며, 내가 PDF에서 별도로 렌더링한 3장과 제출 renders/page1~3.png가 픽셀 단위까지 일치합니다. evidence.json의 5개 파일 바이트·해시도 전부 일치합니다. 다만 evidence.json page_render_size는 [1240,1754]인데 실제 PNG는 모두 [1241,1754]입니다. 실제 파일 치수를 읽어 이 요약 필드만 정확하게 정정하고 변경 사실을 기록하세요. 이미 검증된 PDF와 PNG를 불필요하게 다시 만들지 마세요. 그다음 원래 연결된 Goal exhibition-publication-baseline의 성공 조건 5개에 대한 증거를 연결해 완료 검증을 요청하세요. 사람의 최종 확인은 아직 받지 않았으므로 사람이 확인했다고 주장하거나 대신 확인하지 마세요. designer의 최종 전달도 같은 작업의 협업 기록으로 남겨 주세요."
+}

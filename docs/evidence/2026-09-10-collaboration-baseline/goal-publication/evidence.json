@@ -1,0 +1,66 @@
+{
+  "files": [
+    {
+      "path": "booklet.pdf",
+      "bytes": 102608,
+      "sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb"
+    },
+    {
+      "path": "poster.png",
+      "bytes": 86709,
+      "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386"
+    },
+    {
+      "path": "renders/page1.png",
+      "bytes": 64091,
+      "sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c"
+    },
+    {
+      "path": "renders/page2.png",
+      "bytes": 81051,
+      "sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731"
+    },
+    {
+      "path": "renders/page3.png",
+      "bytes": 80753,
+      "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62"
+    }
+  ],
+  "page_count": 3,
+  "render": {
+    "method": "pdftoppm",
+    "dpi": 150,
+    "source": "booklet.pdf"
+  },
+  "poster_size": [
+    1200,
+    1800
+  ],
+  "page_render_size": [
+    1241,
+    1754
+  ],
+  "poster_final": {
+    "owner": "exhibit-designer",
+    "path": "poster.png (exhibit-designer workspace)",
+    "bytes": 484694,
+    "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16",
+    "verified_via": "board p-c36a80b0af5448a967fcfdae547f263f / c-eb93a3f49fc2b3e262eeb6b523fad257"
+  },
+  "generated_at": "2026-09-10T13:55:59Z",
+  "corrections": [
+    {
+      "field": "page_render_size",
+      "from": [
+        1240,
+        1754
+      ],
+      "to": [
+        1241,
+        1754
+      ],
+      "reason": "summary field recorded planned size; corrected to actual rendered PNG dimensions",
+      "at": "2026-09-10T13:55:59Z"
+    }
+  ]
+}

@@ -1,0 +1,194 @@
+[
+  {
+    "ts": 1789047843.814046,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "path": "renders/page1.png",
+      "query": "이 한국어 전시 책자 표지 이미지에서 1) 모든 한글 텍스트를 그대로 읽어주세요 2) 글자가 깨졌거나 겹치거나 잘린 곳이 있는지 3) 날짜, 장소, 입장료 표기가 무엇으로 보이는지 알려주세요."
+    },
+    "output": "{\"artifact\":\"ef2d89b024d2df6d9f07f57c7f844d6f3a995e0e08d0bf33b09b00d0f50595f5\",\"source_path\":\"renders/page1.png\",\"ok\":true,\"text\":\"표지에 보이는 한글 텍스트는 다음과 같습니다. \\\"오프라인 전시 · 가상의 행사 안내 책자\\\", \\\"기억의 정원\\\", \\\"물건에 담긴 기억과 서로 다른 회상의 공존\\\", \\\"초등학교 고학년과 보호자를 위한 한국어 안내\\\", \\\"일시: 2026년 10월 17일 토요일 14:00 - 17:00\\\", \\\"장소: 은빛정류장 전시실\\\", \\\"입장료: 무료\\\", \\\"※ 이 전시는 가상의 행사입니다.\\\" 2) 글자가 깨지거나 겹치거나 잘린 곳은 보이지 않으며, 모든 텍스트가 선명하고 가독성이 좋습니다. 3) 날짜는 \\\"2026년 10월 17일 토요일 14:00 - 17:00\\\"으로 보이고, 장소는 \\\"은빛정류장 전시실\\\"로 보이며, 입장료는 \\\"무료\\\"로 표기되어 있습니다. 다만 \\\"이 전시는 가상의 행사입니다\\\"라는 안내가 있어 실제 일정/장소가 아니라 가상 이벤트 표기로 해석해야 합니다.\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789047863.281795,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "path": "renders/page2.png",
+      "query": "이 한국어 전시 책자 2페이지 이미지에서 1) 모든 한글 텍스트를 그대로 읽어주세요 2) 글자가 깨졌거나 겹치거나 잘린 곳이 있는지 알려주세요."
+    },
+    "output": "{\"artifact\":\"70f3728b3c37da94a771bd3f20bc2b0020688656603d93ba3657db49580f2a50\",\"source_path\":\"renders/page2.png\",\"ok\":true,\"text\":\"관람 안내\\n\\n《기억의 정원》은 가상의 오프라인 전시입니다.\\n아래 안내를 따라 천천히 둘러보세요.\\n\\n1. 일시: 2026년 10월 17일 토요일 14:00 - 17:00\\n2. 장소: 은빛정류장 전시실\\n3. 대상: 초등학교 고학년과 보호자\\n4. 입장료: 무료\\n\\n관람 에티켓\\n· 조용히 관람하고, 다른 관람객의 감상을 존중합니다.\\n· 작품은 만지지 않고, 살펴보며 바라봅니다.\\n· 궁금한 점은 함께 온 어른이나 안내 도우미에게 물어보세요.\\n\\n이 책자가 안내하는 행사는 실제로 열리지 않는 가상의 행사입니다.\\n\\n문제 확인: 글자가 깨지거나 겹치거나 잘린 곳은 보이지 않습니다. 모든 텍스트가 선명하게 표시되어 있습니다.\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789047881.457439,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "path": "poster.png",
+      "query": "이 포스터의 모든 텍스트를 위에서 아래로 정확히 전사하세요. 특히 맨 아래에 허구 행사임을 알리는 문구가 있는지 확인하세요. 제목, 배지, 일시, 장소, 대상, 입장료, 허구 고지를 구분해 적고, 한글 누락·오타·겹침·잘림 여부도 판단하세요."
+    },
+    "output": "{\"artifact\":\"8f5107fbbc8cc71560d31959511917235448110a5dc0b34ef1d7ef65c21806c3\",\"source_path\":\"poster.png\",\"ok\":true,\"text\":\"위→아래 전사:\\n[배지] 오프라인 전시\\n[제목] 기억의 정원\\n[부제/환영문] 당신의 기억이 머무는 자리에 오신 것을 환영합니다\\n[일시] 2026년 10월 17일 (토) 14:00 - 17:00\\n[장소] 은빛정류장 전시실\\n[대상] 초등 고학년과 보호자\\n[입장료] 무료\\n[맨 아래 허구 행사 고지] 제공된 이미지 범위 내에서 확인되지 않음. 입장료 아래는 빈 여백이고, 읽을 수 없는 글자가 있는 것이 아니라 해당 문구 자체가 보이지 않음.\\n한글 상태 판단: 명확한 오타·글자 겹침·잘림은 보이지 않음. ‘초등 고학년과 보호자’는 ‘학생’이 생략된 약식 표현으로 보이나 포스터 문체상 큰 문제는 아님. 날짜의 요일 표기는 2026-10-17을 토요일로 본 것과 일치함.\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789047898.195749,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "path": "renders/page3.png",
+      "query": "이 한국어 전시 책자 3페이지 이미지에서 1) 모든 한글 텍스트를 그대로 읽어주세요 2) 글자가 깨졌거나 겹치거나 잘린 곳이 있는지 알려주세요."
+    },
+    "output": "{\"artifact\":\"9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62\",\"source_path\":\"renders/page3.png\",\"ok\":true,\"text\":\"전시 이야기\\n\\n정원은 심어둔 것을 기다리고, 가꾸고, 다시 피워내는 곳입니다.\\n《기억의 정원》은 오래된 물건에 담긴 기억을\\n한 그루 한 그루 정원에 옮겨 심은 전시입니다.\\n같은 물건을 보면 사람마다 떠오르는 기억이 조금씩 다릅니다.\\n그 서로 다른 회상이 한 정원 안에 함께 피어나는 것이\\n이 전시가 들려주는 이야기입니다.\\n\\n관람을 마치며\\n\\n천천히 걸어 주셔서 고맙습니다.\\n여러분의 기억도 이 정원의 한 자리입니다.\\n\\n오프라인 전시 · 가상의 행사 안내 책자\\n\\n(검토 결과: 깨지거나 겹치거나 잘린 글자는 보이지 않습니다. 모든 한글 텍스트가 선명하게 읽힙니다.)\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789047917.755879,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "path": "poster.png",
+      "query": "이 한국어 전시 포스터 이미지에서 1) 모든 한글 텍스트를 그대로 읽어주세요 2) 글자가 깨졌거나 겹치거나 잘린 곳이 있는지 3) 입장료·일시·장소 표기가 무엇으로 보이는지 알려주세요."
+    },
+    "output": "{\"artifact\":\"2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386\",\"source_path\":\"poster.png\",\"ok\":true,\"text\":\"1) 읽은 한글 텍스트: 상단 배지 「오프라인 전시 · 가상의 행사」, 제목 「기억의 정원」, 부제 「물건에 담긴 기억과 서로 다른 회상의 공존」, 하단 「2026. 10. 17. 토요일 14:00 - 17:00」, 「은빛정류장 전시실 · 입장료 무료」, 「초등학교 고학년과 보호자를 위한 전시」, 「※ 가상의 행사입니다」. 2) 훼손/가독성: 텍스트는 전반적으로 깨끗하게 렌더링되어 있고 한글 자모가 깨지거나 글자끼리 겹치거나 프레임에 잘리는 현상은 보이지 않음(다만 중앙 일러스트 하단 꽃밭에 있는 짧은 선들은 장식이며 읽을 수 있는 문자는 아님). 3) 입장료·일시·장소 표기: 입장료는 「입장료 무료」, 일시는 「2026. 10. 17. 토요일 14:00 - 17:00」, 장소는 「은빛정류장 전시실」로 표기되어 보이며, 마지막 줄 「※ 가상의 행사입니다」로 실제 공연이 아니라 가상 이벤트임을 명시함.\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789047920.156989,
+    "keeper": "exhibit-designer",
+    "tool": "masc_board_post_update",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "post_id": "p-c36a80b0af5448a967fcfdae547f263f",
+      "title": "task-001 포스터 검수 기록 — 허구 행사 고지 보완 중",
+      "body": "## task-001 《기억의 정원》 포스터 검수 기록\n\n이전 본문의 입장료 표기는 작성 오류였습니다. 실제 `poster.png`를 이미지로 직접 읽은 결과는 다음과 같습니다.\n\n- 배지: `오프라인 전시`\n- 제목: `기억의 정원`\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\n- 장소: `은빛정류장 전시실`\n- 대상: `초등 고학년과 보호자`\n- 입장료: `무료`\n\n현재 이미지 sha256: `8f5107fbbc8cc71560d31959511917235448110a5dc0b34ef1d7ef65c21806c3`\n\n한글 누락·겹침·잘림은 없지만, 성공 조건인 허구 행사 고지가 빠져 있어 이 이미지는 최종본이 아닙니다. `※ 본 행사는 허구로 구성되었습니다.`를 추가한 재생성·시각 검수가 진행 중입니다. 최종 파일과 새 해시는 별도 정정 댓글로 전달하겠습니다."
+    },
+    "output": "{\"id\":\"p-c36a80b0af5448a967fcfdae547f263f\",\"author\":\"exhibit-designer\",\"title\":\"task-001 포스터 검수 기록 — 허구 행사 고지 보완 중\",\"body\":\"## task-001 《기억의 정원》 포스터 검수 기록\\n\\n이전 본문의 입장료 표기는 작성 오류였습니다. 실제 `poster.png`를 이미지로 직접 읽은 결과는 다음과 같습니다.\\n\\n- 배지: `오프라인 전시`\\n- 제목: `기억의 정원`\\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\\n- 장소: `은빛정류장 전시실`\\n- 대상: `초등 고학년과 보호자`\\n- 입장료: `무료`\\n\\n현재 이미지 sha256: `8f5107fbbc8cc71560d31959511917235448110a5dc0b34ef1d7ef65c21806c3`\\n\\n한글 누락·겹침·잘림은 없지만, 성공 조건인 허구 행사 고지가 빠져 있어 이 이미지는 최종본이 아닙니다. `※ 본 행사는 허구로 구성되었습니다.`를 추가한 재생성·시각 검수가 진행 중입니다. 최종 파일과 새 해시는 별도 정정 댓글로 전달하겠습니다.\",\"post_kind\":\"automation\",\"visibility\":\"internal\",\"created_at\":1789047434.36724,\"updated_at\":1789047920.15503,\"expires_at\":0.0,\"votes_up\":0,\"votes_down\":0,\"reply_count\":2,\"pinned\":false,\"hearth\":\"ops\",\"meta\":{\"source\":\"masc_board_post\"}}"
+  },
+  {
+    "ts": 1789047948.833826,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_task_done",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "evidence_refs": [
+        "artifact:booklet.pdf",
+        "artifact:poster.png",
+        "artifact:renders/page1.png",
+        "artifact:renders/page2.png",
+        "artifact:renders/page3.png",
+        "artifact:evidence.json",
+        "note:렌더 검증: renders/page1~3.png는 최종 booklet.pdf를 pdftoppm(-r 150)으로 직접 렌더링한 실제 페이지 이미지(1241x1754, 3장 모두 해시 상이). 파이프라인 자체 검증 31개 체크 전부 OK(폰트 4종, PDF 헤더/3페이지, 렌더 치수·콘텐츠, 포스터 1200x1800, evidence 해시·바이트 일치).",
+        "note:시각 검수(keeper_analyze_image 4회): 표지/관람 안내/전시 이야기/포스터 모두 한글 글리프 깨짐·겹침·잘림 없음. '입장료: 무료'가 책자 1·2페이지와 포스터에 정확히 렌더링됨 확인. 일시 2026년 10월 17일 토요일 14:00-17:00, 장소 은빛정류장 전시실, 대상 초등학교 고학년과 보호자 표기 확인. 배지는 '오프라인 전시'로 통일하고 가상의 행사임을 병기(exhibit-designer 확정 방식 반영)."
+      ],
+      "notes": "입장료 '무료'는 전송 왜곡 방지를 위해 chr(0xBB34)+chr(0xB8CC) 코드포인트 조립으로 삽입했고, 시각 검수로 최종 렌더 픽셀에서 '무료'가 정확히 나오는 것을 확인했습니다. renders/*.png는 별도 재현 그림이 아니라 최종 PDF에서 렌더링된 실제 페이지입니다(pdftoppm, evidence.json render.method 참조).",
+      "result": "가상 전시 《기억의 정원》 한국어 안내 책자와 포스터 완성. booklet.pdf(A4 3페이지: 표지/관람 안내/전시 이야기), poster.png(1200x1800), renders/page1~3.png(최종 PDF에서 pdftoppm 150dpi로 직접 렌더링), evidence.json(파일명·바이트·SHA256·페이지 수·렌더 방법). 운영자 확정 정보 반영: 일시 2026-10-17(토) 14:00-17:00, 장소 은빛정류장 전시실, 대상 초등학교 고학년과 보호자, 입장료 '무료'(chr(0xBB34)+chr(0xB8CC) 조립으로 전송 왜곡 방지), 배지 '오프라인 전시' + 가상의 행사 병기. exhibit-designer 팔레트(#F7F3E8/#2F5233/#8FAE8B/#A8BCC4/#C9A227)와 NanumSquareRound/NanumBarunGothic 폰트 반영. 파이프라인 자체 검증 31개 체크 PASS, vision 검수 4장 모두 글리프·겹침·잘림 없음 확인.",
+      "task_id": "task-001"
+    },
+    "output": "{\"disposition\":\"completed\",\"result\":\"task-001 in_progress → awaiting_verification\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+  },
+  {
+    "ts": 1789047990.809619,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "path": "poster.png",
+      "query": "이 포스터를 실제 이미지 기준으로 검수하세요. 위에서 아래까지 보이는 모든 문구를 정확히 전사하되 다음 항목을 구분하세요: 배지, 제목, 부제, 일시, 장소, 대상, 입장료, 허구 행사 고지. 각 항목의 한글 오타·누락 여부, 서로 겹침 여부, 이미지 경계에서 잘림 여부, 잎/그래픽과 겹쳐 가독성이 떨어지는지도 보고하세요. 특히 맨 아래에 '※ 본 행사는 허구로 구성되었습니다.'가 정확히 보이는지 확인하세요."
+    },
+    "output": "{\"artifact\":\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\",\"source_path\":\"poster.png\",\"ok\":true,\"text\":\"[문항별 전사] 배지: '오프라인 전시' / 제목: '기억의 정원' / 부제: '당신의 기억이 머무는 자리에 오신 것을 환영합니다' / 일시: '2026년 10월 17일 (토) 14:00 - 17:00' / 장소: '은빛정류장 전시실' / 대상: '초등 고학년과 보호자' / 입장료: '무료' / 허구 행사 고지: '※ 본 행사는 허구로 구성되었습니다.' [검수 결과] 한글 오타·누락: 각 항목 모두 이미지상 표기와 대조 시 눈에 띄는 오타나 글자 누락은 보이지 않음. 문항 간 겹침: 배지·제목·부제·일시·장소·대상·입장료·고지는 상하로 분리 배치되어 서로 겹치지 않음. 이미지 경계 잘림: 상단 배지, 하단 고지 문구 모두 프레임 안에 포함되어 잘려 보이지 않음. 잎/그래픽과의 겹침·가독성: 좌우 상단의 올리브·연두 잎과 금색 점 장식은 텍스트 영역과 분리되어 있어 제목·부제·하단 정보의 가독성을 떨어뜨리지 않음. 특히 맨 아래 고지 문구 '※ 본 행사는 허구로 구성되었습니다.'는 확인됨. 다만 본문보다 글씨가 작고 회색이며 명도가 낮아 상대적으로 흐릿하게 보이지만, 문자 자체는 식별 가능하고 끝까지 잘리지 않고 보임.\",\"runtime_id\":\"kimi_coding.kimi-for-coding\",\"requested_model\":\"kimi-for-coding\",\"response_model\":\"kimi-for-coding\"}"
+  },
+  {
+    "ts": 1789048018.814263,
+    "keeper": "exhibit-editor",
+    "tool": "masc_library_add",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "failed",
+    "input": {
+      "content": "# 출판물 제작 시 한글 음절 전송 왜곡 방지 패턴\n\n## 문제\nLLM 편집자가 Write/Edit 호출로 한글 텍스트를 넣을 때 특정 음절(예: '무료', '보면')이 인접 변형 음절(예. '묣가', '볩면')으로 왜곡되어 파일에 반영되는 사례가 반복 관측됨. old_string=new_string인 no-op 편집이 섞이면 실제 파일은 그대로인데 '고쳤다'고 착각하게 됨.\n\n## 해결 패턴 (task-001에서 검증됨)\n1. **코드포인트 조립**: 왜곡되기 쉬운 핵심 토큰은 상수로 조립한다. `FEE = chr(0xBB34) + chr(0xB8CC)`  # 무료\n2. **ASCII-only 출력**: 검증 스크립트의 콘솔 출력은 ASCII로만 구성해 경로가 꼬여도 판독 가능하게 한다. `print('CHECK %-34s %s' % (name, 'OK' if ok else 'FAIL'))`\n3. **맥락 기반 금지 목록**: '깨진 음절'을 단일 코드포인트로 금지하면 정상 음절(예: '바라봅니다'의 U+BD05)을 오탐한다. 반드시 이전에 실제 관측된 **시퀀스**(예. `chr(0xBB35)+chr(0xAC00)`)로 금지한다.\n4. **no-op 편집 방지**: 편집 후에는 반드시 Read/Grep으로 실제 바이트를 재확인한다. old==new인 호출은 아무것도 바꾸지 않는다.\n\n## PDF→PNG 렌더 검증 패턴\n- `renders/pageN.png`는 반드시 **최종 PDF 파일 자체**에서 렌더링해야 한다(별도 재현 그림은 검증 증거가 될 수 없음).\n- 렌더러 자동 탐색 순서(이 환경 기준): pdftoppm → pdftocairo → gs → mutool → pypdfium2. `pdftoppm -png -r 150 in.pdf prefix`가 A4 기준 1241x1754로 잘 동작함.\n- 자동 검증 체크: PDF 헤더 `%PDF-`, `/Type /Page` 수 - `/Type /Pages` 수 == 3, 렌더 치수 허용 범위(±5px), grayscale stddev>2·히스토그램 bins>40(빈 페이지 탐지), 페이지 간 해시 상이(동일 이미지 복제 탐지), evidence.json의 bytes·sha256 재계산 일치.\n- 최종 글리프·겹침·잘림 검증은 vision 검수(kimi_for-coding 런타임)로 렌더 PNG를 직접 읽어 확인. '입장료: 무료'가 픽셀에 정확히 나오는 것까지 확인 완료(2026-09-10, task-001).\n\n## 참고\n- 나눔 폰트 경로: `/usr/share/fonts/truetype/nanum/`. fc-match가 없어도 glob 폴백으로 해결.\n- exhibit-designer 확정 팔레트: #F7F3E8 / #2F5233 / #8FAE8B / #A8BCC4 / #C9A227, 폰트 NanumSquareRound(제목)·NanumBarunGothic(본문).",
+      "source": "direct_experience",
+      "tags": [
+        "korean-text",
+        "pdf-generation",
+        "rendering",
+        "verification",
+        "reportlab",
+        "pillow",
+        "exhibit-editor"
+      ],
+      "title": "한글 출판물 제작 시 전송 왜곡 방지 및 PDF 렌더 검증 패턴"
+    },
+    "output": "Write error: internal_error: /Users/dancer/.masc-integration/collaboration-baseline-68c7668/docs/library/--------pdf----20260910.md: No such file or directory\nfailure_class=runtime_failure — The tool failed inside the runtime, not on your arguments. Identical arguments reproduce it unless the message says the outcome is unknown. Report it as a runtime failure in your answer."
+  },
+  {
+    "ts": 1789048042.470351,
+    "keeper": "exhibit-editor",
+    "tool": "masc_library_add",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "failed",
+    "input": {
+      "content": "# 출판물 제작 시 한글 음절 전송 왜곡 방지 패턴 (korean-text transport corruption)\n\n## 문제\nLLM 편집자가 Write/Edit 호출로 한글 텍스트를 넣을 때 특정 음절(예: '무료', '보면')이 인접 변형 음절(예. '묣가', '볩면')으로 왜곡되어 파일에 반영되는 사례가 반복 관측됨. old_string=new_string인 no-op 편집이 섞이면 실제 파일은 그대로인데 '고쳤다'고 착각하게 됨.\n\n## 해결 패턴 (task-001에서 검증됨)\n1. **코드포인트 조립**: 왜곡되기 쉬운 핵심 토큰은 상수로 조립한다. `FEE = chr(0xBB34) + chr(0xB8CC)`  # 무료\n2. **ASCII-only 출력**: 검증 스크립트의 콘솔 출력은 ASCII로만 구성해 경로가 꼬여도 판독 가능하게 한다. `print('CHECK %-34s %s' % (name, 'OK' if ok else 'FAIL'))`\n3. **맥락 기반 금지 목록**: '깨진 음절'을 단일 코드포인트로 금지하면 정상 음절(예: '바라봅니다'의 U+BD05 '봅')을 오탐한다. 반드시 이전에 실제 관측된 **시퀀스**(예. `chr(0xBB35)+chr(0xAC00)`)로 금지한다.\n4. **no-op 편집 방지**: 편집 후에는 반드시 Read/Grep으로 실제 바이트를 재확인한다. old==new인 호출은 아무것도 바꾸지 않는다.\n\n## PDF→PNG 렌더 검증 패턴\n- `renders/pageN.png`는 반드시 **최종 PDF 파일 자체**에서 렌더링해야 한다(별도 재현 그림은 검증 증거가 될 수 없음).\n- 렌더러 자동 탐색 순서(이 환경 기준): pdftoppm → pdftocairo → gs → mutool → pypdfium2. `pdftoppm -png -r 150 in.pdf prefix`가 A4 기준 1241x1754로 잘 동작함.\n- 자동 검증 체크: PDF 헤더 `%PDF-`, `/Type /Page` 수 - `/Type /Pages` 수 == 3, 렌더 치수 허용 범위(±5px), grayscale stddev>2·히스토그램 bins>40(빈 페이지 탐지), 페이지 간 해시 상이(동일 이미지 복제 탐지), evidence.json의 bytes·sha256 재계산 일치.\n- 최종 글리프·겹침·잘림 검증은 vision 검수(kimi-for-coding 런타임)로 렌더 PNG를 직접 읽어 확인. '입장료: 무료'가 픽셀에 정확히 나오는 것까지 확인 완료(2026-09-10, task-001).\n\n## 참고\n- 나눔 폰트 경로: `/usr/share/fonts/truetype/nanum/`. fc-match가 없어도 glob 폴백으로 해결.\n- exhibit-designer 확정 팔레트: #F7F3E8 / #2F5233 / #8FAE8B / #A8BCC4 / #C9A227, 폰트 NanumSquareRound(제목)·NanumBarunGothic(본문).\n- 라이브러리 문서 제목에 한글을 쓰면 파일명 생성 오류로 저장 실패함(2026-09-10 관측). 제목은 ASCII로.",
+      "source": "direct_experience",
+      "tags": [
+        "korean-text",
+        "pdf-generation",
+        "rendering",
+        "verification",
+        "reportlab",
+        "pillow",
+        "exhibit-editor"
+      ],
+      "title": "Korean text transport corruption prevention and PDF render verification pattern"
+    },
+    "output": "Write error: internal_error: /Users/dancer/.masc-integration/collaboration-baseline-68c7668/docs/library/korean-text-transport-corruption-prevention-and-pdf-render-verification-pattern-20260910.md: No such file or directory\nfailure_class=runtime_failure — The tool failed inside the runtime, not on your arguments. Identical arguments reproduce it unless the message says the outcome is unknown. Report it as a runtime failure in your answer."
+  },
+  {
+    "ts": 1789048066.35458,
+    "keeper": "exhibit-designer",
+    "tool": "masc_board_comment",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "post_id": "p-c36a80b0af5448a967fcfdae547f263f",
+      "content": "최종 정정 및 파일 전달 (실제 이미지 재검수 완료)\n\n이전 댓글의 `묣료` 등 표기는 잘못된 텍스트 전달이었습니다. 해당 표현은 모두 무효입니다. 새로 생성된 실제 `poster.png`를 이미지로 직접 읽은 최종 전사는 아래와 같습니다.\n\n- 배지: `오프라인 전시`\n- 제목: `기억의 정원`\n- 부제: `당신의 기억이 머무는 자리에 오신 것을 환영합니다`\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\n- 장소: `은빛정류장 전시실`\n- 대상: `초등 고학년과 보호자`\n- 입장료: `무료`\n- 허구 고지: `※ 본 행사는 허구로 구성되었습니다.`\n\n검수 결과: 한글 오타·누락·겹침·잘림 없음. 잎 그래픽과 텍스트가 겹치지 않음. 허구 고지는 하단 프레임 안에서 끝까지 판독됨(본문보다 작은 세이지색 보조 문구).\n\n최종 파일:\n- Keeper 상대 경로: `poster.png`\n- Keeper 샌드박스: `/home/keeper/playground/exhibit-designer/poster.png`\n- 호스트 산출물 위치: `/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-designer/poster.png`\n- 크기: 484,694 bytes\n- SHA-256: `1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16`\n\nexhibit-editor님은 책자에서 동일한 행사 정보와 허구 고지를 사용해 주세요. Task 소유권과 PDF 3페이지 렌더 검증·최종 제출은 exhibit-editor에게 그대로 남아 있습니다."
+    },
+    "output": "{\"id\":\"c-eb93a3f49fc2b3e262eeb6b523fad257\",\"post_id\":\"p-c36a80b0af5448a967fcfdae547f263f\",\"parent_id\":null,\"author\":\"exhibit-designer\",\"content\":\"최종 정정 및 파일 전달 (실제 이미지 재검수 완료)\\n\\n이전 댓글의 `묣료` 등 표기는 잘못된 텍스트 전달이었습니다. 해당 표현은 모두 무효입니다. 새로 생성된 실제 `poster.png`를 이미지로 직접 읽은 최종 전사는 아래와 같습니다.\\n\\n- 배지: `오프라인 전시`\\n- 제목: `기억의 정원`\\n- 부제: `당신의 기억이 머무는 자리에 오신 것을 환영합니다`\\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\\n- 장소: `은빛정류장 전시실`\\n- 대상: `초등 고학년과 보호자`\\n- 입장료: `무료`\\n- 허구 고지: `※ 본 행사는 허구로 구성되었습니다.`\\n\\n검수 결과: 한글 오타·누락·겹침·잘림 없음. 잎 그래픽과 텍스트가 겹치지 않음. 허구 고지는 하단 프레임 안에서 끝까지 판독됨(본문보다 작은 세이지색 보조 문구).\\n\\n최종 파일:\\n- Keeper 상대 경로: `poster.png`\\n- Keeper 샌드박스: `/home/keeper/playground/exhibit-designer/poster.png`\\n- 호스트 산출물 위치: `/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-designer/poster.png`\\n- 크기: 484,694 bytes\\n- SHA-256: `1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16`\\n\\nexhibit-editor님은 책자에서 동일한 행사 정보와 허구 고지를 사용해 주세요. Task 소유권과 PDF 3페이지 렌더 검증·최종 제출은 exhibit-editor에게 그대로 남아 있습니다.\",\"created_at\":1789048066.346405,\"expires_at\":0.0,\"votes_up\":0,\"votes_down\":0}"
+  },
+  {
+    "ts": 1789048088.660535,
+    "keeper": "exhibit-designer",
+    "tool": "masc_keeper_delegate",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "target": {
+        "kind": "keeper",
+        "name": "exhibit-editor"
+      },
+      "prompt": "task-001 포스터 최종본 전달입니다. 실제 poster.png 이미지 재검수 완료:\n배지 '오프라인 전시', 제목 '기억의 정원', 부제, 일시 '2026년 10월 17일 (토) 14:00 - 17:00', 장소 '은빛정류장 전시실', 대상 '초등 고학년과 보호자', 입장료 '무료', 허구 고지 '※ 본 행사는 허구로 구성되었습니다.'가 모두 정확히 읽힙니다. 한글 오타·누락·겹침·잘림 없음.\n파일: /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-designer/poster.png\n크기 484,694 bytes\nSHA-256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\nBoard 정정 댓글: p-c36a80b0af5448a967fcfdae547f263f / c-eb93a3f49fc2b3e262eeb6b523fad257\n이전 '묣료' 반복 표기는 모두 잘못된 전달이므로 무효이며 실제 이미지는 '무료'입니다. 책자에도 동일 확정 정보와 허구 고지를 반영해 PDF 원본에서 3페이지 PNG 렌더 검증 및 최종 제출을 이어가 주세요. Task 소유권은 exhibit-editor에게 유지됩니다."
+    },
+    "output": "{\"operation_id\":\"kmsg-0eec8278ed629e077a3c060eaa616841\",\"state\":\"queued\",\"queued_count\":1,\"existing\":false}"
+  },
+  {
+    "ts": 1789048179.802701,
+    "keeper": "exhibit-designer",
+    "tool": "masc_board_post_update",
+    "runtime_profile": "codex_subscription.gpt-5.6-sol",
+    "disposition": "completed",
+    "input": {
+      "post_id": "p-c36a80b0af5448a967fcfdae547f263f",
+      "title": "task-001 포스터 최종본 — 허구 행사 고지 포함·시각 검수 완료",
+      "body": "## task-001 《기억의 정원》 포스터 최종 검수 기록\n\n허구 행사 고지를 추가한 `poster.png` 최종본을 생성하고 실제 이미지로 재검수했습니다.\n\n### 이미지 전사\n\n- 배지: `오프라인 전시`\n- 제목: `기억의 정원`\n- 부제: `당신의 기억이 머무는 자리에 오신 것을 환영합니다`\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\n- 장소: `은빛정류장 전시실`\n- 대상: `초등 고학년과 보호자`\n- 입장료: `무료`\n- 허구 고지: `※ 본 행사는 허구로 구성되었습니다.`\n\n### 검수 결과\n\n한글 오타·누락·겹침·잘림이 없고, 잎 그래픽과 텍스트가 겹치지 않습니다. 하단 허구 고지도 이미지 경계 안에서 끝까지 판독됩니다.\n\n### 최종 파일\n\n- 상대 경로: `poster.png`\n- 호스트 위치: `/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-designer/poster.png`\n- 크기: 484,694 bytes\n- SHA-256: `1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16`\n\n이전 댓글의 `묣료` 등 표기는 잘못된 전달이며 모두 무효입니다. 실제 이미지의 입장료 표기는 `무료`입니다.\n\n책자에는 위 행사 정보와 허구 고지를 동일하게 반영해야 합니다. PDF 원본의 3페이지 PNG 렌더 검증과 task-001 최종 제출은 Task 소유자 exhibit-editor가 진행합니다."
+    },
+    "output": "{\"id\":\"p-c36a80b0af5448a967fcfdae547f263f\",\"author\":\"exhibit-designer\",\"title\":\"task-001 포스터 최종본 — 허구 행사 고지 포함·시각 검수 완료\",\"body\":\"## task-001 《기억의 정원》 포스터 최종 검수 기록\\n\\n허구 행사 고지를 추가한 `poster.png` 최종본을 생성하고 실제 이미지로 재검수했습니다.\\n\\n### 이미지 전사\\n\\n- 배지: `오프라인 전시`\\n- 제목: `기억의 정원`\\n- 부제: `당신의 기억이 머무는 자리에 오신 것을 환영합니다`\\n- 일시: `2026년 10월 17일 (토) 14:00 - 17:00`\\n- 장소: `은빛정류장 전시실`\\n- 대상: `초등 고학년과 보호자`\\n- 입장료: `무료`\\n- 허구 고지: `※ 본 행사는 허구로 구성되었습니다.`\\n\\n### 검수 결과\\n\\n한글 오타·누락·겹침·잘림이 없고, 잎 그래픽과 텍스트가 겹치지 않습니다. 하단 허구 고지도 이미지 경계 안에서 끝까지 판독됩니다.\\n\\n### 최종 파일\\n\\n- 상대 경로: `poster.png`\\n- 호스트 위치: `/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-designer/poster.png`\\n- 크기: 484,694 bytes\\n- SHA-256: `1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16`\\n\\n이전 댓글의 `묣료` 등 표기는 잘못된 전달이며 모두 무효입니다. 실제 이미지의 입장료 표기는 `무료`입니다.\\n\\n책자에는 위 행사 정보와 허구 고지를 동일하게 반영해야 합니다. PDF 원본의 3페이지 PNG 렌더 검증과 task-001 최종 제출은 Task 소유자 exhibit-editor가 진행합니다.\",\"post_kind\":\"automation\",\"visibility\":\"internal\",\"created_at\":1789047434.36724,\"updated_at\":1789048179.800191,\"expires_at\":0.0,\"votes_up\":0,\"votes_down\":0,\"reply_count\":3,\"pinned\":false,\"hearth\":\"ops\",\"meta\":{\"source\":\"masc_board_post\"}}"
+  }
+]

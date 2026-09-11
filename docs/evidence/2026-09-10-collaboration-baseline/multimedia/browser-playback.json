@@ -1,0 +1,26 @@
+{
+  "scope": "Real headless Chromium media decode and playback to ended; no subjective listening claim",
+  "audio": [
+    {
+      "id": "wav",
+      "duration": 12,
+      "currentTime": 12,
+      "ended": true,
+      "readyState": 4,
+      "error": null
+    },
+    {
+      "id": "mp3",
+      "duration": 12,
+      "currentTime": 12,
+      "ended": true,
+      "readyState": 4,
+      "error": null
+    }
+  ],
+  "gif_browser_pixels_changed": true,
+  "gif_screenshot_hashes": [
+    "5f8971d140eee46d5fb8081ef90d9b7ef3bff8e805616d4103665099489d0b2e",
+    "d0b39c20825ef8e118ddb0d9bf1dd6c3d3593cadff35da8bd8263c028f268c73"
+  ]
+}

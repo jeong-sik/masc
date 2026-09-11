@@ -1,0 +1,110 @@
+{
+  "observed_at": "2026-09-10T13:55:39.701639+00:00",
+  "verification_id": "vrf-1d46f3c204a6906a9cdd574e6752575c",
+  "task_id": "task-001",
+  "registry_diagnostic": [
+    {
+      "event": "register",
+      "utf8_valid": true
+    },
+    {
+      "event": "complete",
+      "utf8_valid": false,
+      "outcome": "approved",
+      "evaluator_runtime": "kimi_coding.kimi-for-coding",
+      "tools": [
+        {
+          "tool_name": "tool_read_file",
+          "input": {
+            "file_path": "evidence.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1789047974.722401,
+          "excerpt_bytes": 1024,
+          "excerpt_utf8_valid": true
+        },
+        {
+          "tool_name": "tool_search_files",
+          "input": {
+            "path": "renders",
+            "pattern": "."
+          },
+          "disposition": "completed",
+          "finished_at": 1789047975.545406,
+          "excerpt_bytes": 216,
+          "excerpt_utf8_valid": true
+        },
+        {
+          "tool_name": "tool_search_files",
+          "input": {
+            "path": "booklet.pdf",
+            "pattern": "/Count [0-9]+|/Type ?/Pages"
+          },
+          "disposition": "completed",
+          "finished_at": 1789047976.305121,
+          "excerpt_bytes": 307,
+          "excerpt_utf8_valid": true
+        },
+        {
+          "tool_name": "tool_read_file",
+          "input": {
+            "file_path": "booklet.pdf",
+            "limit": 5
+          },
+          "disposition": "completed",
+          "finished_at": 1789047986.238452,
+          "excerpt_bytes": 400,
+          "excerpt_utf8_valid": false
+        },
+        {
+          "tool_name": "tool_search_files",
+          "input": {
+            "path": "renders",
+            "pattern": "PNG"
+          },
+          "disposition": "completed",
+          "finished_at": 1789047986.741027,
+          "excerpt_bytes": 218,
+          "excerpt_utf8_valid": true
+        },
+        {
+          "tool_name": "tool_read_file",
+          "input": {
+            "file_path": "renders/page1.png",
+            "limit": 3
+          },
+          "disposition": "completed",
+          "finished_at": 1789047993.588715,
+          "excerpt_bytes": 1024,
+          "excerpt_utf8_valid": false
+        },
+        {
+          "tool_name": "report_review_verdict",
+          "input": {
+            "verdict": "APPROVE"
+          },
+          "disposition": "completed",
+          "finished_at": 1789048014.881,
+          "excerpt_bytes": 1024,
+          "excerpt_utf8_valid": true
+        }
+      ]
+    }
+  ],
+  "completion_events": [
+    {
+      "type": "task_completion_verdict",
+      "from_status": "awaiting_verification",
+      "to_status": "done",
+      "ts": "2026-09-10T13:47:07Z",
+      "task_id": "task-001",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "producer": "exhibit-editor",
+      "verification_id": "vrf-1d46f3c204a6906a9cdd574e6752575c",
+      "evaluator_runtime": "kimi_coding.kimi-for-coding",
+      "verdict": "approved"
+    }
+  ],
+  "scope": "Read-only diagnostic. Latin-1 used only to locate byte-preserving invalid excerpts, not to repair the store. No live mutation."
+}

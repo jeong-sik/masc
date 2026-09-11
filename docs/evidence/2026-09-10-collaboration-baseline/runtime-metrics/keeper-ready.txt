@@ -1,0 +1,134 @@
+Skip to main content
+개요
+2 실행 가능
+⚑ 주의
+?
+◷ 예약
+Connected
+Client WS · silent
+Emergency Stop
+Verified @dashboard · admin
+Chat
+⌘J
+v0.35.5 · 9cc33feff4
+Tweaks
+M
+운영 홈
+지금, 전체
+
+fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에
+
+23:50 KST
+실행 중 KEEPER
+2 / 2
+주의 필요
+—
+열린 GATE
+0
+최우선 목표
+P3
+활성 커넥터
+—
+예약 HITL
+—
+진행 심의
+0
+주의 필요 · 지금 손이 필요한 것
+—
+Fleet health 미연결
+Backend composite health verdict has not loaded.
+상태 상세 →
+텔레메트리
+로그 보기 →
+피크 샘플
+66/5m
+평균 샘플
+10/5m
+이벤트
+560+
+최신
+2m
+소스
+8/9
+갭
+0
+런타임 사용 통계
+집계 요청 기간 
+30분
+1시간
+6시간
+24시간
+통계 새로 읽기
+토큰·지연 상세
+
+Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.
+
+서버 집계 창: 60분 · 응답 수신 9/10/2026, 11:50:45 PM
+
+집계 기준 시각과 결정 기록의 보존·읽기 누락은 API가 제공하지 않습니다. 선택한 기간 전체가 관측되었다는 의미는 아닙니다.
+
+비용 원장 읽기 완료 · 형식 오류 0 · 스키마 위반 0 · 식별 충돌 0행
+
+런타임	기록 결과	보고된 토큰	보고된 지연	관측 누락
+runtime_lane_85c67b3487a8	오류 없음 11
+오류 0	입력 1,722,292
+출력 2,620	p50 24,873 ms
+p95 117,719.5 ms	사용량 보고 11 · 누락 0
+텔레메트리 보고 11 · 누락 0
+runtime_lane_c888938c4d08	오류 없음 9
+오류 0	입력 929,681
+출력 6,556	p50 18,098 ms
+p95 51,788 ms	사용량 보고 9 · 누락 0
+텔레메트리 보고 9 · 누락 0
+runtime_lane_be28342d8855	오류 없음 3
+오류 0	입력 312,441
+출력 1,512	p50 15,307 ms
+p95 19,234.6 ms	사용량 보고 3 · 누락 0
+텔레메트리 보고 3 · 누락 0
+도메인 현황
+작업 · 목표
+작업 →
+가상 전시 출판물 완성
+P3 · executing
+GATE · HITL
+0
+Gate →
+Human 판단 대기 없음
+예약 · 자동화
+0
+예약 →
+표시 0 / 전체 0 · 최대 20
+상태: idle
+Due 0 · Running 0 · 예약 0
+payload: unsupported 0 / unknown 0
+runner unavailable
+schedule_runner 미연결
+FUSION 심의
+0
+Fusion →
+진행 중 심의 없음
+보드
+보드 →
+보드 데이터 미연결
+커넥터
+커넥터 →
+커넥터 데이터 미연결
+FLEET 요약
+Monitor →
+2
+실행
+0
+복구
+0
+일시정지
+0
+주의
+0
+압박
+2
+전체
+queue health
+unknown
+전체 keeper
+2
+Chat

@@ -3,6 +3,81 @@
 Scope: all 18 user-reported gaps after 0.35.2, plus the supplied product contract.
 No row is complete. A prompt change is an intervention, not behavioral proof.
 
+## Current evidence at 2026-09-10T15:09Z
+
+- Binary write references #35158 and typed image transport #35159 are merged
+  after their exact-head checks and targeted tests passed. No runtime replacement
+  is claimed; the composite candidate is now e3e1fe9865 with its TUI peer-tool
+  classification repaired after an actual Release build failure.
+- Overview freshness #35183 has 14 passing component tests, TypeScript checks,
+  independent review and browser before/after evidence. The live backend's
+  636-second-old response is explicitly shown as refreshing. This remains a
+  source preview until deployment.
+- Local27B finished the designer group: seven claims and one conflict, with all
+  eleven source references accounted for. Source review found a malformed price
+  already present in the input, so factual promotion is not accepted. The editor
+  group and workspace synthesis remain unfinished.
+- Tool-count writer #35178 is still under CI: the source fix is reviewed, and its
+  new behavioral fixture now initializes/restores the required runtime after the
+  actual preceding run failed on uninitialized attribution.
+
+## Current evidence at 2026-09-10T14:50Z
+
+- The original exhibition Goal remains Executing after actual Kimi proof
+  refutation: its lookup path could not visually inspect the image contents.
+  Task-001 Done and independently correct PDF rasters do not close this Goal.
+- Task-002 produced a 24-frame GIF and 12-second WAV/MP3. Independent full
+  decoding and browser playback passed. Its actual approving verifier received
+  notes and reports, but the media snapshots failed the text-size/UTF-8 capture
+  path. This is a verification gap, not direct media approval evidence.
+- Fresh-library creation (#35149), invalid-UTF-8 lookup rejection (#35153) and
+  visible Goal refutation (#35161) are merged. The current isolated binary is
+  still `9cc33feff4917a1ae91804771a708d4a0e75e152`; these later merges do not
+  establish deployed behavior.
+- Full binary capture, typed visual input and peer file transfer have a combined
+  source candidate in `/tmp/masc-collaboration-multimodal-candidate`. Final review
+  found binary error-output contamination and a peer export that still used the
+  bounded reader. Repairs and CI precede any runtime replacement or Goal retry.
+- A live raw-ledger audit joined 26 decision turns with their exact cost rows.
+  All three API rows matched input/output/cache token totals. All 26 decisions
+  lacked tool-count fields despite 128 separate execution observations in the
+  window; the API therefore reported zero tool calls. #35178 restores writer
+  fields and adds a writer-to-aggregation check. The UI also ignores API cache
+  freshness; one response was 2,228 seconds old. Neither live fix is claimed.
+- Local Qwen 27B is processing the current two-Keeper memory context. Its
+  original process handle is live and the first group is still receiving.
+  There is no completed proposal, publication or Keeper reuse proof. This pass
+  does not replace the earlier full 18-Keeper corpus acceptance requirement.
+
+The next product check remains the same original Goal with genuine visual
+inputs, followed by exact-byte peer delivery and reuse. Statistics and memory
+work advance alongside it; the remaining formats, IDE behavior, proactive
+collaboration, all-runtime continuity and natural failover remain open.
+
+## Current collaboration evidence at 2026-09-10T13:58Z
+
+The original exhibition task-001 reached Done at13:47:07Z through actual Kimi
+verification request vrf-1d46f3c204a6906a9cdd574e6752575c. The preserved PDF has
+three A4 pages; all five file hashes and byte counts match its manifest, and
+three independent PDF renders match the submitted PNGs pixel for pixel.
+The Dashboard shows this same original Done task and the GLM/Codex Keeper
+handoff. These observations advance rows1/3/4/5/7/8/9/13, but none closes the
+whole requirement. See the [actual collaboration record](../evidence/2026-09-10-collaboration-baseline/README.md)
+for files, hashes, interventions and screenshots.
+
+| Requirement group | New direct observation | Remaining acceptance work |
+|---|---|---|
+| Goal/Task and non-code outputs (1/3/4/5) | Real PDF/PNG output and original Task approval; independent pixels and Korean visual inspection | Goal proof and human confirmation, varied creative/research outputs, sustained purposeful work |
+| Operator requests and delegation (6/7/8) | Editor asked for missing facts, delegated design work; both wrote/read Board records; designer returned corrected final details | Repeated answers and manual QA were needed; designer's actual PNG could not be read from the editor sandbox and was not in the approved submission |
+| Standalone verification (9) | Real Kimi vision calls read the actual four submitted PNGs; task approved | Verifier lookup inserts invalid PDF/PNG bytes into UTF-8 JSON; Goal lookup currently has no visual input tool; manifest optional width1240 differs from actual1241 |
+| Configuration (13) | Actual preview/save added Codex; same designer conversation subsequently executed Codex tools; editor used GLM | Manual assignments are not automatic failover or complete configuration coverage |
+| Memory/librarian (17/18) | Editor attempted to publish learned workflow | Both Korean and ASCII library titles failed because fresh-base docs/library did not exist; a directory creation fix is in PR35149, not yet running |
+
+The previous matrix below retains its earlier measurement details. This update
+supersedes its statements that the two-Keeper scenario and original non-code
+Task completion have not yet run. The full18-row scope remains open; no1/2/4/24h
+continuous autonomy or automatic multi-runtime failover result is established.
+
 ## Initial observations (historical snapshot)
 
 - Source inspected: `e361d0f1c00a611c2c01f7aada77dd7e836dcb65`.

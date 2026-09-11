@@ -1,0 +1,149 @@
+{
+  "observed_at": "2026-09-10T14:24:39.525823+00:00",
+  "task_id": "task-002",
+  "verification_id": "vrf-8194c1439706d873d8b8ff8af7696993",
+  "request_created_at": 1789050099.981439,
+  "snapshots": [
+    {
+      "kind": "artifact",
+      "reference": "artifact:multimedia/creative-note.md",
+      "bytes": 2140,
+      "truncated": false
+    },
+    {
+      "kind": "artifact",
+      "reference": "artifact:multimedia/evidence.json",
+      "bytes": 2851,
+      "truncated": false
+    },
+    {
+      "kind": "artifact_unreadable",
+      "reference": "artifact:multimedia/garden.gif",
+      "reason": {
+        "code": "read_error",
+        "detail": "image evidence has 588811 bytes, exceeding capture limit 200000; submit a complete smaller rendering"
+      }
+    },
+    {
+      "kind": "artifact_unreadable",
+      "reference": "artifact:multimedia/garden.mp3",
+      "reason": {
+        "code": "invalid_utf8"
+      }
+    },
+    {
+      "kind": "artifact_unreadable",
+      "reference": "artifact:multimedia/garden.wav",
+      "reason": {
+        "code": "invalid_utf8"
+      }
+    },
+    {
+      "kind": "note"
+    },
+    {
+      "kind": "note"
+    }
+  ],
+  "current_file_verification": [
+    {
+      "filename": "garden.gif",
+      "bytes": 588811,
+      "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307",
+      "matches_submitted_report": true
+    },
+    {
+      "filename": "garden.wav",
+      "bytes": 2116844,
+      "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0",
+      "matches_submitted_report": true
+    },
+    {
+      "filename": "garden.mp3",
+      "bytes": 289689,
+      "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d",
+      "matches_submitted_report": true
+    },
+    {
+      "filename": "creative-note.md",
+      "bytes": 2140,
+      "sha256": "a0e91419cdcf453cc39d3a8febb01566fbcd2797fce3c11488b466a2345b02de",
+      "matches_submitted_report": true
+    }
+  ],
+  "registry": [
+    {
+      "outcome": "approved",
+      "evaluator_runtime": "kimi_coding.kimi-for-coding",
+      "elapsed_s": 69.01711583137512,
+      "tools": [
+        {
+          "tool_name": "tool_read_file",
+          "disposition": "completed",
+          "finished_at": 1789050126.544189,
+          "input": {
+            "file_path": "multimedia/evidence.json"
+          }
+        },
+        {
+          "tool_name": "tool_read_file",
+          "disposition": "completed",
+          "finished_at": 1789050126.82469,
+          "input": {
+            "file_path": "multimedia/creative-note.md"
+          }
+        },
+        {
+          "tool_name": "tool_search_files",
+          "disposition": "completed",
+          "finished_at": 1789050132.055606,
+          "input": {
+            "pattern": "^(RIFF|OggS|\\xef\\xbb\\xbf|\\x1a|\\x00)",
+            "path": "multimedia"
+          }
+        },
+        {
+          "tool_name": "tool_read_file",
+          "disposition": "completed",
+          "finished_at": 1789050132.618628,
+          "input": {
+            "file_path": "multimedia/verify_multimedia.py"
+          }
+        },
+        {
+          "tool_name": "tool_search_files",
+          "disposition": "completed",
+          "finished_at": 1789050138.831803,
+          "input": {
+            "path": "multimedia/create_multimedia.py",
+            "pattern": "(제목|고지|허구|기억의 정원|열쇠|찻잔|사진|책|종이배|text|label|title)"
+          }
+        },
+        {
+          "tool_name": "report_review_verdict",
+          "disposition": "completed",
+          "finished_at": 1789050157.694744,
+          "input": {
+            "verdict": "APPROVE"
+          }
+        }
+      ]
+    }
+  ],
+  "committed_events": [
+    {
+      "type": "task_completion_verdict",
+      "from_status": "awaiting_verification",
+      "to_status": "done",
+      "ts": "2026-09-10T14:22:48Z",
+      "task_id": "task-002",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "producer": "exhibit-designer",
+      "verification_id": "vrf-8194c1439706d873d8b8ff8af7696993",
+      "evaluator_runtime": "kimi_coding.kimi-for-coding",
+      "verdict": "approved"
+    }
+  ],
+  "scope": "Read-only snapshot/registry/task join. No media bytes captured in submitted evidence. Verifier read reports/scripts, not actual decoder execution or audiovisual content. Independent operator playback/decoding is separate evidence."
+}

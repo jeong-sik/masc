@@ -51,20 +51,30 @@ class Journey(unittest.TestCase):
         self.assertEqual(len(pick.call_args.args[1]), 2)
         self.assertTrue(pick.call_args.args[1][0].startswith('Restart'))
 
-    def test_group_session_restarts_reclaims_port_across_transient_busy(self):
+    def test_group_session_restarts_reclaims_port_when_stop_reports_available(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
         same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
-                   receipt('masc.setup_server_stopped.v1', owner_stopped=True),
-                   receipt('masc.setup_server.v1', status='unknown_server', read_only=True),
-                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+                   receipt('masc.setup_server_stopped.v1', owner_stopped=True, port_available=True)]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
-                patch.object(SETUP.time, 'sleep'), \
                 patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
         self.assertEqual([call.args[0][1] for call in run.call_args_list],
-                         ['setup-server', 'setup-stop-previous-owner', 'setup-server', 'setup-server'])
+                         ['setup-server', 'setup-stop-previous-owner'])
+
+    def test_group_session_restarts_rechecks_port_when_stop_reports_busy(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        replies = [receipt('masc.setup_server.v1', **same),
+                   receipt('masc.setup_server_stopped.v1', owner_stopped=True, port_available=False),
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
 
     def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
         with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \

@@ -23,7 +23,6 @@ let port_free port =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
     Fun.protect ~finally:(fun () -> Unix.close socket) (fun () ->
-      Unix.setsockopt socket Unix.SO_REUSEADDR true;
       Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,port)); true)
   with Unix.Unix_error _ -> false
 let inspect ~base_path ~port =
@@ -67,10 +66,11 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
         let rec wait attempts =
           let* state = Upgrade.replacement_readiness ~run_dir ~base_path ~port in
           match state with
-          | Owner_draining -> Eio.Time.sleep clock 0.2; wait attempts
+          | Owner_draining when attempts > 0 ->
+            Eio.Time.sleep clock 0.2; wait (attempts - 1)
           | Port_busy when attempts > 0 ->
             Eio.Time.sleep clock 0.2; wait (attempts - 1)
-          | Port_busy -> Ok false
+          | Owner_draining | Port_busy -> Ok false
           | Replacement_can_start -> Ok true in
         wait 25))
     with Unix.Unix_error _ | Sys_error _ -> Error Upgrade.Owner_unavailable in

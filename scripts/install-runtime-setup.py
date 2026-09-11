@@ -19,7 +19,6 @@ import sys
 import subprocess
 import tempfile
 import termios
-import time
 import tty
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -1470,19 +1469,8 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                     raise ValueError('invalid shutdown receipt')
             except (TypeError, KeyError, ValueError):
                 raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
-            deadline = time.time() + 5.0
-            while True:
-                response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                try:
-                    observed = json.loads(response.stdout)
-                    if observed.get('status') == 'free':
-                        return port
-                except ValueError:
-                    pass
-                if time.time() >= deadline:
-                    break
-                time.sleep(0.2)
+            if receipt.get('port_available') is True:
+                return port
             continue  # server or port might have changed during graceful drain
         if state not in ('other_workspace', 'unknown_server'):
             raise SetupError('MASC returned an unknown server observation')
@@ -1592,8 +1580,7 @@ def journey(binary, base_path, port, timeout, resume=False):
         return 1
     if subprocess.run([str(binary), 'init', '--base-path', base], stdout=sys.stderr).returncode != 0:
         raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
-    if port < 49152:
-        workspace_port(binary, base, port, save=True)
+    workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
     configured = wizard(binary, base, timeout)
     if configured.get('readiness') != 'verified':
